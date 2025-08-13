@@ -954,12 +954,12 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
 
 app.post('/admin/company', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { name, isVip } = req.body;
-  await createCompany(name, undefined, isVip === '1');
+  await createCompany(name, undefined, parseCheckbox(isVip));
   res.redirect('/admin');
 });
 
 app.post('/admin/company/:id/vip', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const isVip = req.body.isVip === '1';
+  const isVip = parseCheckbox(req.body.isVip);
   await updateCompanyVipStatus(parseInt(req.params.id, 10), isVip);
   res.redirect('/admin');
 });
