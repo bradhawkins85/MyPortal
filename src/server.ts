@@ -53,11 +53,14 @@ import {
   getInvoiceById,
   updateInvoice,
   deleteInvoice,
-  getAllForms,
-  createForm,
-  getFormsForUser,
-  getFormPermissions,
-  updateFormPermissions,
+    getAllForms,
+    createForm,
+    updateForm,
+    getFormsForUser,
+    getFormPermissions,
+    updateFormPermissions,
+    getAllFormPermissionEntries,
+    deleteFormPermission,
   getAllCategories,
   getCategoryById,
   createCategory,
@@ -1024,11 +1027,13 @@ app.get('/forms/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
     users = await getUserCompanyAssignments(companyId);
     permissions = await getFormPermissions(formId);
   }
+  const formAccess = await getAllFormPermissionEntries();
   res.render('forms-admin', {
     forms,
     allCompanies,
     companies: companiesForUser,
     users,
+    formAccess,
     selectedFormId: isNaN(formId) ? null : formId,
     selectedCompanyId: isNaN(companyId) ? null : companyId,
     permissions,
@@ -1064,6 +1069,23 @@ app.post('/forms/admin/permissions', ensureAuth, ensureSuperAdmin, async (req, r
   );
   res.redirect(`/forms/admin?formId=${formId}&companyId=${companyId}`);
 });
+
+app.post('/forms/admin/edit', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { id, name, url, description } = req.body;
+  await updateForm(parseInt(id, 10), name, url, description);
+  res.redirect('/forms/admin');
+});
+
+app.post(
+  '/forms/admin/permissions/delete',
+  ensureAuth,
+  ensureSuperAdmin,
+  async (req, res) => {
+    const { formId, userId } = req.body;
+    await deleteFormPermission(parseInt(formId, 10), parseInt(userId, 10));
+    res.redirect('/forms/admin');
+  }
+);
 
 app.get('/apps', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const apps = await getAllApps();

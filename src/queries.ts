@@ -1151,6 +1151,18 @@ export async function createForm(
   return insert.insertId;
 }
 
+export async function updateForm(
+  id: number,
+  name: string,
+  url: string,
+  description: string
+): Promise<void> {
+  await pool.execute(
+    'UPDATE forms SET name = ?, url = ?, description = ? WHERE id = ?',
+    [name, url, description, id]
+  );
+}
+
 export async function getAllForms(): Promise<Form[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
     'SELECT * FROM forms ORDER BY name'
@@ -1194,5 +1206,29 @@ export async function updateFormPermissions(
   await pool.execute(
     `INSERT INTO form_permissions (form_id, user_id) VALUES ${values}`,
     params
+  );
+}
+
+export interface FormPermissionEntry {
+  form_id: number;
+  form_name: string;
+  user_id: number;
+  email: string;
+}
+
+export async function getAllFormPermissionEntries(): Promise<FormPermissionEntry[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT fp.form_id, f.name AS form_name, fp.user_id, u.email FROM form_permissions fp JOIN forms f ON fp.form_id = f.id JOIN users u ON fp.user_id = u.id ORDER BY u.email, f.name'
+  );
+  return rows as FormPermissionEntry[];
+}
+
+export async function deleteFormPermission(
+  formId: number,
+  userId: number
+): Promise<void> {
+  await pool.execute(
+    'DELETE FROM form_permissions WHERE form_id = ? AND user_id = ?',
+    [formId, userId]
   );
 }
