@@ -28,6 +28,7 @@ export interface UserCompany {
   user_id: number;
   company_id: number;
   can_manage_licenses: number;
+  can_manage_staff: number;
   company_name?: string;
   email?: string;
 }
@@ -93,7 +94,7 @@ export async function getAllUsers(): Promise<User[]> {
 
 export async function getCompaniesForUser(userId: number): Promise<UserCompany[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, c.name AS company_name
+    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, c.name AS company_name
      FROM user_companies uc JOIN companies c ON uc.company_id = c.id
      WHERE uc.user_id = ?`,
     [userId]
@@ -103,7 +104,7 @@ export async function getCompaniesForUser(userId: number): Promise<UserCompany[]
 
 export async function getUserCompanyAssignments(): Promise<UserCompany[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, c.name AS company_name, u.email
+    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, c.name AS company_name, u.email
      FROM user_companies uc
      JOIN users u ON uc.user_id = u.id
      JOIN companies c ON uc.company_id = c.id
@@ -115,24 +116,26 @@ export async function getUserCompanyAssignments(): Promise<UserCompany[]> {
 export async function assignUserToCompany(
   userId: number,
   companyId: number,
-  canManageLicenses: boolean
+  canManageLicenses: boolean,
+  canManageStaff: boolean
 ): Promise<void> {
   await pool.execute(
-    `INSERT INTO user_companies (user_id, company_id, can_manage_licenses)
-     VALUES (?, ?, ?)
-     ON DUPLICATE KEY UPDATE can_manage_licenses = VALUES(can_manage_licenses)`,
-    [userId, companyId, canManageLicenses ? 1 : 0]
+    `INSERT INTO user_companies (user_id, company_id, can_manage_licenses, can_manage_staff)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE can_manage_licenses = VALUES(can_manage_licenses), can_manage_staff = VALUES(can_manage_staff)`,
+    [userId, companyId, canManageLicenses ? 1 : 0, canManageStaff ? 1 : 0]
   );
 }
 
 export async function updateUserCompanyPermission(
   userId: number,
   companyId: number,
-  canManageLicenses: boolean
+  field: 'can_manage_licenses' | 'can_manage_staff',
+  value: boolean
 ): Promise<void> {
   await pool.execute(
-    'UPDATE user_companies SET can_manage_licenses = ? WHERE user_id = ? AND company_id = ?',
-    [canManageLicenses ? 1 : 0, userId, companyId]
+    `UPDATE user_companies SET ${field} = ? WHERE user_id = ? AND company_id = ?`,
+    [value ? 1 : 0, userId, companyId]
   );
 }
 

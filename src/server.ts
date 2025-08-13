@@ -87,7 +87,7 @@ app.post('/register', async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
     const companyId = await createCompany(company);
     const userId = await createUser(email, passwordHash, companyId);
-    await assignUserToCompany(userId, companyId, true);
+    await assignUserToCompany(userId, companyId, true, true);
     req.session.userId = userId;
     req.session.companyId = companyId;
     res.redirect('/');
@@ -110,11 +110,14 @@ app.get('/', ensureAuth, async (req, res) => {
   const company = req.session.companyId
     ? await getCompanyById(req.session.companyId)
     : null;
+  const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('business', {
     company,
     companies,
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
   });
 });
 
@@ -130,31 +133,50 @@ async function ensureLicenseAccess(
   }
   return res.redirect('/');
 }
+
+async function ensureStaffAccess(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  if (current && current.can_manage_staff) {
+    return next();
+  }
+  return res.redirect('/');
+}
 app.get('/licenses', ensureAuth, ensureLicenseAccess, async (req, res) => {
   const licenses = await getLicensesByCompany(req.session.companyId!);
   const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('licenses', {
     licenses,
     isAdmin: req.session.userId === 1,
     companies,
     currentCompanyId: req.session.companyId,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
   });
 });
 
-app.get('/staff', ensureAuth, async (req, res) => {
+app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
   const staff = req.session.companyId
     ? await getStaffByCompany(req.session.companyId)
     : [];
+  const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('staff', {
     staff,
     companies,
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
   });
 });
 
-app.post('/staff', ensureAuth, async (req, res) => {
+app.post('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
   const { firstName, lastName, email, dateOnboarded, enabled } = req.body;
   if (req.session.companyId) {
     await addStaff(
@@ -169,7 +191,7 @@ app.post('/staff', ensureAuth, async (req, res) => {
   res.redirect('/staff');
 });
 
-app.post('/staff/enabled', ensureAuth, async (req, res) => {
+app.post('/staff/enabled', ensureAuth, ensureStaffAccess, async (req, res) => {
   const { staffId, enabled } = req.body;
   await updateStaffEnabled(parseInt(staffId, 10), !!enabled);
   res.redirect('/staff');
@@ -189,6 +211,7 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
   const users = await getAllUsers();
   const assignments = await getUserCompanyAssignments();
   const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('admin', {
     allCompanies,
     users,
@@ -196,6 +219,8 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     isAdmin: true,
     companies,
     currentCompanyId: req.session.companyId,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
   });
 });
 
@@ -209,23 +234,41 @@ app.post('/admin/user', ensureAuth, ensureAdmin, async (req, res) => {
   const { email, password, companyId } = req.body;
   const passwordHash = await bcrypt.hash(password, 10);
   const userId = await createUser(email, passwordHash, parseInt(companyId, 10));
-  await assignUserToCompany(userId, parseInt(companyId, 10), false);
+  await assignUserToCompany(userId, parseInt(companyId, 10), false, false);
   res.redirect('/admin');
 });
 
 app.post('/admin/assign', ensureAuth, ensureAdmin, async (req, res) => {
   const { userId, companyId } = req.body;
-  await assignUserToCompany(parseInt(userId, 10), parseInt(companyId, 10), false);
+  await assignUserToCompany(
+    parseInt(userId, 10),
+    parseInt(companyId, 10),
+    false,
+    false
+  );
   res.redirect('/admin');
 });
 
 app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
-  const { userId, companyId, canManageLicenses } = req.body;
-  await updateUserCompanyPermission(
-    parseInt(userId, 10),
-    parseInt(companyId, 10),
-    !!canManageLicenses
-  );
+  const { userId, companyId, canManageLicenses, canManageStaff } = req.body;
+  const uid = parseInt(userId, 10);
+  const cid = parseInt(companyId, 10);
+  if (typeof canManageLicenses !== 'undefined') {
+    await updateUserCompanyPermission(
+      uid,
+      cid,
+      'can_manage_licenses',
+      !!canManageLicenses
+    );
+  }
+  if (typeof canManageStaff !== 'undefined') {
+    await updateUserCompanyPermission(
+      uid,
+      cid,
+      'can_manage_staff',
+      !!canManageStaff
+    );
+  }
   res.redirect('/admin');
 });
 
