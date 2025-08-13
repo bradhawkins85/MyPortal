@@ -11,6 +11,7 @@ import {
   createCompany,
   createUser,
 } from './queries';
+import { runMigrations } from './db';
 
 dotenv.config();
 
@@ -96,6 +97,11 @@ app.get('/licenses', ensureAuth, async (req, res) => {
 const port = parseInt(process.env.PORT || '3000', 10);
 const host = process.env.HOST || '0.0.0.0';
 
-app.listen(port, host, () => {
-  console.log(`Server running at http://${host}:${port}`);
-});
+async function start() {
+  await runMigrations();
+  app.listen(port, host, () => {
+    console.log(`Server running at http://${host}:${port}`);
+  });
+}
+
+start();
