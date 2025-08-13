@@ -61,6 +61,9 @@ import {
   archiveProduct,
   unarchiveProduct,
   deleteProduct,
+  removeProductForCompany,
+  addProductForCompany,
+  getProductCompanyRestrictions,
   createOrder,
   getOrdersByCompany,
   getOrderSummariesByCompany,
@@ -85,6 +88,7 @@ import {
   UserCompany,
   ApiKey,
   App,
+  ProductCompanyRestriction,
 } from './queries';
 import { runMigrations } from './db';
 
@@ -565,7 +569,7 @@ app.get('/invoices', ensureAuth, ensureInvoicesAccess, async (req, res) => {
 });
 
 app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
-  const products = await getAllProducts();
+  const products = await getAllProducts(false, req.session.companyId);
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
   const isVip = current?.is_vip === 1;
@@ -592,7 +596,11 @@ app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
 
 app.post('/cart/add', ensureAuth, ensureShopAccess, async (req, res) => {
   const { productId, quantity } = req.body;
-  const product = await getProductById(parseInt(productId, 10));
+  const product = await getProductById(
+    parseInt(productId, 10),
+    false,
+    req.session.companyId
+  );
   if (product) {
     const companies = await getCompaniesForUser(req.session.userId!);
     const current = companies.find((c) => c.company_id === req.session.companyId);
@@ -762,13 +770,26 @@ app.post(
 
 app.get('/shop/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const includeArchived = req.query.showArchived === '1';
-  const products = await getAllProducts(includeArchived);
-  const companies = await getCompaniesForUser(req.session.userId!);
-  const current = companies.find((c) => c.company_id === req.session.companyId);
+  const [products, navCompanies, allCompanies, restrictions] = await Promise.all([
+    getAllProducts(includeArchived),
+    getCompaniesForUser(req.session.userId!),
+    getAllCompanies(),
+    getProductCompanyRestrictions(),
+  ]);
+  const current = navCompanies.find((c) => c.company_id === req.session.companyId);
+  const restrictionMap: Record<number, ProductCompanyRestriction[]> = {};
+  restrictions.forEach((r) => {
+    if (!restrictionMap[r.product_id]) {
+      restrictionMap[r.product_id] = [];
+    }
+    restrictionMap[r.product_id].push(r);
+  });
   res.render('shop-admin', {
     products,
     showArchived: includeArchived,
-    companies,
+    companies: navCompanies,
+    allCompanies,
+    productRestrictions: restrictionMap,
     currentCompanyId: req.session.companyId,
     isAdmin: true,
     canManageLicenses: current?.can_manage_licenses ?? 0,
@@ -839,6 +860,28 @@ app.post('/shop/admin/product/:id/delete', ensureAuth, ensureSuperAdmin, async (
   await deleteProduct(parseInt(req.params.id, 10));
   res.redirect('/shop/admin');
 });
+
+app.post(
+  '/shop/admin/product/:id/remove-company',
+  ensureAuth,
+  ensureSuperAdmin,
+  async (req, res) => {
+    const companyId = parseInt(req.body.company_id, 10);
+    await removeProductForCompany(parseInt(req.params.id, 10), companyId);
+    res.redirect('/shop/admin');
+  }
+);
+
+app.post(
+  '/shop/admin/product/:id/add-company',
+  ensureAuth,
+  ensureSuperAdmin,
+  async (req, res) => {
+    const companyId = parseInt(req.body.company_id, 10);
+    await addProductForCompany(parseInt(req.params.id, 10), companyId);
+    res.redirect('/shop/admin');
+  }
+);
 
 app.post('/switch-company', ensureAuth, async (req, res) => {
   const { companyId } = req.body;
@@ -1340,7 +1383,10 @@ api.route('/apps/:id')
 api.route('/shop/products')
   .get(async (req, res) => {
     const includeArchived = req.query.includeArchived === '1';
-    const products = await getAllProducts(includeArchived);
+    const companyId = req.query.companyId
+      ? parseInt(req.query.companyId as string, 10)
+      : undefined;
+    const products = await getAllProducts(includeArchived, companyId);
     res.json(products);
   })
   .post(upload.single('image'), async (req, res) => {
@@ -1450,7 +1496,14 @@ api.route('/shop/products')
 api.route('/shop/products/:id')
   .get(async (req, res) => {
     const includeArchived = req.query.includeArchived === '1';
-    const product = await getProductById(parseInt(req.params.id, 10), includeArchived);
+    const companyId = req.query.companyId
+      ? parseInt(req.query.companyId as string, 10)
+      : undefined;
+    const product = await getProductById(
+      parseInt(req.params.id, 10),
+      includeArchived,
+      companyId
+    );
     if (!product) {
       return res.status(404).json({ error: 'Product not found' });
     }
@@ -1519,7 +1572,14 @@ api.route('/shop/products/:id')
  */
 api.get('/shop/products/sku/:sku', async (req, res) => {
   const includeArchived = req.query.includeArchived === '1';
-  const product = await getProductBySku(req.params.sku, includeArchived);
+  const companyId = req.query.companyId
+    ? parseInt(req.query.companyId as string, 10)
+    : undefined;
+  const product = await getProductBySku(
+    req.params.sku,
+    includeArchived,
+    companyId
+  );
   if (!product) {
     return res.status(404).json({ error: 'Product not found' });
   }
