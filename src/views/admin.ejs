@@ -19,11 +19,10 @@
           <input type="email" name="email" placeholder="Email" required>
           <input type="password" name="password" placeholder="Password" required>
           <select name="companyId">
-            <% companies.forEach(function(c) { %>
+            <% allCompanies.forEach(function(c) { %>
               <option value="<%= c.id %>"><%= c.name %></option>
             <% }); %>
           </select>
-          <label><input type="checkbox" name="canManageLicenses">Can manage licenses</label>
           <button type="submit">Add User</button>
         </form>
       </section>
@@ -36,11 +35,10 @@
             <% }); %>
           </select>
           <select name="companyId">
-            <% companies.forEach(function(c) { %>
+            <% allCompanies.forEach(function(c) { %>
               <option value="<%= c.id %>"><%= c.name %></option>
             <% }); %>
           </select>
-          <label><input type="checkbox" name="canManageLicenses">Can manage licenses</label>
           <button type="submit">Assign</button>
         </form>
       </section>
