@@ -4,6 +4,8 @@ import path from 'path';
 import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import swaggerUi from 'swagger-ui-express';
+import swaggerJSDoc from 'swagger-jsdoc';
 import {
   getUserByEmail,
   getCompanyById,
@@ -55,6 +57,29 @@ app.use(
     saveUninitialized: false,
   })
 );
+
+const swaggerSpec = swaggerJSDoc({
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'MyPortal API',
+      version: '1.0.0',
+    },
+    components: {
+      securitySchemes: {
+        ApiKeyAuth: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'x-api-key',
+        },
+      },
+    },
+    security: [{ ApiKeyAuth: [] }],
+  },
+  apis: [path.join(__dirname, '../src/**/*.ts')],
+});
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 function ensureAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (!req.session.userId) {
@@ -326,23 +351,126 @@ api.use(async (req, res, next) => {
   next();
 });
 
+/**
+ * @openapi
+ * /api/companies:
+ *   post:
+ *     summary: Create a company
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *             properties:
+ *               name:
+ *                 type: string
+ *               address:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Company created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ */
 api.post('/companies', async (req, res) => {
   const { name, address } = req.body;
   const id = await createCompany(name, address);
   res.json({ id });
 });
 
+/**
+ * @openapi
+ * /api/companies/{id}:
+ *   put:
+ *     summary: Update a company
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               address:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Update successful
+ */
 api.put('/companies/:id', async (req, res) => {
   const { name, address } = req.body;
   await updateCompany(parseInt(req.params.id, 10), name, address);
   res.json({ success: true });
 });
 
+/**
+ * @openapi
+ * /api/companies/{id}:
+ *   delete:
+ *     summary: Delete a company
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Deletion successful
+ */
 api.delete('/companies/:id', async (req, res) => {
   await deleteCompany(parseInt(req.params.id, 10));
   res.json({ success: true });
 });
 
+/**
+ * @openapi
+ * /api/users:
+ *   post:
+ *     summary: Create a user
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *               - companyId
+ *             properties:
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               companyId:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: User created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ */
 api.post('/users', async (req, res) => {
   const { email, password, companyId } = req.body;
   const passwordHash = await bcrypt.hash(password, 10);
@@ -350,6 +478,34 @@ api.post('/users', async (req, res) => {
   res.json({ id });
 });
 
+/**
+ * @openapi
+ * /api/users/{id}:
+ *   put:
+ *     summary: Update a user
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               companyId:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Update successful
+ */
 api.put('/users/:id', async (req, res) => {
   const { email, password, companyId } = req.body;
   const passwordHash = await bcrypt.hash(password, 10);
@@ -357,11 +513,67 @@ api.put('/users/:id', async (req, res) => {
   res.json({ success: true });
 });
 
+/**
+ * @openapi
+ * /api/users/{id}:
+ *   delete:
+ *     summary: Delete a user
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Deletion successful
+ */
 api.delete('/users/:id', async (req, res) => {
   await deleteUser(parseInt(req.params.id, 10));
   res.json({ success: true });
 });
 
+/**
+ * @openapi
+ * /api/licenses:
+ *   post:
+ *     summary: Create a license
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - companyId
+ *               - name
+ *               - platform
+ *               - count
+ *             properties:
+ *               companyId:
+ *                 type: integer
+ *               name:
+ *                 type: string
+ *               platform:
+ *                 type: string
+ *               count:
+ *                 type: integer
+ *               expiryDate:
+ *                 type: string
+ *                 format: date
+ *               contractTerm:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: License created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ */
 api.post('/licenses', async (req, res) => {
   const { companyId, name, platform, count, expiryDate, contractTerm } = req.body;
   const id = await createLicense(
@@ -375,6 +587,41 @@ api.post('/licenses', async (req, res) => {
   res.json({ id });
 });
 
+/**
+ * @openapi
+ * /api/licenses/{id}:
+ *   put:
+ *     summary: Update a license
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               companyId:
+ *                 type: integer
+ *               name:
+ *                 type: string
+ *               platform:
+ *                 type: string
+ *               count:
+ *                 type: integer
+ *               expiryDate:
+ *                 type: string
+ *                 format: date
+ *               contractTerm:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Update successful
+ */
 api.put('/licenses/:id', async (req, res) => {
   const { companyId, name, platform, count, expiryDate, contractTerm } = req.body;
   await updateLicense(
@@ -389,11 +636,67 @@ api.put('/licenses/:id', async (req, res) => {
   res.json({ success: true });
 });
 
+/**
+ * @openapi
+ * /api/licenses/{id}:
+ *   delete:
+ *     summary: Delete a license
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Deletion successful
+ */
 api.delete('/licenses/:id', async (req, res) => {
   await deleteLicense(parseInt(req.params.id, 10));
   res.json({ success: true });
 });
 
+/**
+ * @openapi
+ * /api/staff:
+ *   post:
+ *     summary: Create a staff member
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - companyId
+ *               - firstName
+ *               - lastName
+ *               - email
+ *             properties:
+ *               companyId:
+ *                 type: integer
+ *               firstName:
+ *                 type: string
+ *               lastName:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               dateOnboarded:
+ *                 type: string
+ *                 format: date
+ *               enabled:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Staff member created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ */
 api.post('/staff', async (req, res) => {
   const { companyId, firstName, lastName, email, dateOnboarded, enabled } = req.body;
   await addStaff(
@@ -407,6 +710,41 @@ api.post('/staff', async (req, res) => {
   res.json({ success: true });
 });
 
+/**
+ * @openapi
+ * /api/staff/{id}:
+ *   put:
+ *     summary: Update a staff member
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               companyId:
+ *                 type: integer
+ *               firstName:
+ *                 type: string
+ *               lastName:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               dateOnboarded:
+ *                 type: string
+ *                 format: date
+ *               enabled:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Update successful
+ */
 api.put('/staff/:id', async (req, res) => {
   const { companyId, firstName, lastName, email, dateOnboarded, enabled } = req.body;
   await updateStaff(
@@ -421,11 +759,57 @@ api.put('/staff/:id', async (req, res) => {
   res.json({ success: true });
 });
 
+/**
+ * @openapi
+ * /api/staff/{id}:
+ *   delete:
+ *     summary: Delete a staff member
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Deletion successful
+ */
 api.delete('/staff/:id', async (req, res) => {
   await deleteStaff(parseInt(req.params.id, 10));
   res.json({ success: true });
 });
 
+/**
+ * @openapi
+ * /api/companies/{companyId}/users/{userId}:
+ *   post:
+ *     summary: Assign a user to a company
+ *     parameters:
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               canManageLicenses:
+ *                 type: boolean
+ *               canManageStaff:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Assignment successful
+ */
 api.post('/companies/:companyId/users/:userId', async (req, res) => {
   const { canManageLicenses, canManageStaff } = req.body;
   await assignUserToCompany(
@@ -437,6 +821,26 @@ api.post('/companies/:companyId/users/:userId', async (req, res) => {
   res.json({ success: true });
 });
 
+/**
+ * @openapi
+ * /api/companies/{companyId}/users/{userId}:
+ *   delete:
+ *     summary: Unassign a user from a company
+ *     parameters:
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Unassignment successful
+ */
 api.delete('/companies/:companyId/users/:userId', async (req, res) => {
   await unassignUserFromCompany(
     parseInt(req.params.userId, 10),
@@ -445,6 +849,26 @@ api.delete('/companies/:companyId/users/:userId', async (req, res) => {
   res.json({ success: true });
 });
 
+/**
+ * @openapi
+ * /api/licenses/{licenseId}/staff/{staffId}:
+ *   post:
+ *     summary: Link a staff member to a license
+ *     parameters:
+ *       - in: path
+ *         name: licenseId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: staffId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Link created
+ */
 api.post('/licenses/:licenseId/staff/:staffId', async (req, res) => {
   await linkStaffToLicense(
     parseInt(req.params.staffId, 10),
@@ -453,6 +877,26 @@ api.post('/licenses/:licenseId/staff/:staffId', async (req, res) => {
   res.json({ success: true });
 });
 
+/**
+ * @openapi
+ * /api/licenses/{licenseId}/staff/{staffId}:
+ *   delete:
+ *     summary: Unlink a staff member from a license
+ *     parameters:
+ *       - in: path
+ *         name: licenseId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: staffId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Link removed
+ */
 api.delete('/licenses/:licenseId/staff/:staffId', async (req, res) => {
   await unlinkStaffFromLicense(
     parseInt(req.params.staffId, 10),
