@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+  <%- include('partials/head', { title: 'External APIs' }) %>
+<body>
+  <div class="app-container">
+    <%- include('partials/sidebar') %>
+    <div class="content">
+      <h1>External API Settings</h1>
+      <form action="/external-apis" method="post">
+        <h2>Xero</h2>
+        <input type="text" name="xeroEndpoint" placeholder="Xero API Endpoint" value="<%= settings ? settings.xero_endpoint : '' %>">
+        <input type="text" name="xeroApiKey" placeholder="Xero API Key" value="<%= settings ? settings.xero_api_key : '' %>">
+        <h2>Syncro RMM</h2>
+        <input type="text" name="syncroEndpoint" placeholder="Syncro API Endpoint" value="<%= settings ? settings.syncro_endpoint : '' %>">
+        <input type="text" name="syncroApiKey" placeholder="Syncro API Key" value="<%= settings ? settings.syncro_api_key : '' %>">
+        <button type="submit">Save</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>
