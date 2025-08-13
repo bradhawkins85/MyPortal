@@ -5,15 +5,6 @@
   <div class="app-container">
     <%- include('partials/sidebar') %>
     <div class="content">
-      <% if (companies && companies.length > 1) { %>
-        <form action="/switch-company" method="post">
-          <select name="companyId" onchange="this.form.submit()">
-            <% companies.forEach(function(c) { %>
-              <option value="<%= c.company_id %>" <%= c.company_id === currentCompanyId ? 'selected' : '' %>><%= c.company_name %></option>
-            <% }); %>
-          </select>
-        </form>
-      <% } %>
       <h1>Business Information</h1>
       <% if (company) { %>
         <p>Name: <%= company.name %></p>
