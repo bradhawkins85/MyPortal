@@ -65,6 +65,7 @@ export interface Product {
   price: number;
   vip_price: number | null;
   stock: number;
+  archived: number;
 }
 
 export interface OrderItem {
@@ -682,9 +683,9 @@ export async function deleteInvoice(id: number): Promise<void> {
   await pool.execute('DELETE FROM invoices WHERE id = ?', [id]);
 }
 
-export async function getAllProducts(): Promise<Product[]> {
+export async function getAllProducts(includeArchived = false): Promise<Product[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM shop_products'
+    includeArchived ? 'SELECT * FROM shop_products' : 'SELECT * FROM shop_products WHERE archived = 0'
   );
   return (rows as RowDataPacket[]).map((row) => ({
     ...(row as any),
@@ -693,9 +694,12 @@ export async function getAllProducts(): Promise<Product[]> {
   })) as Product[];
 }
 
-export async function getProductById(id: number): Promise<Product | null> {
+export async function getProductById(
+  id: number,
+  includeArchived = false
+): Promise<Product | null> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM shop_products WHERE id = ?',
+    'SELECT * FROM shop_products WHERE id = ?' + (includeArchived ? '' : ' AND archived = 0'),
     [id]
   );
   const row = (rows as RowDataPacket[])[0];
@@ -708,9 +712,12 @@ export async function getProductById(id: number): Promise<Product | null> {
     : null;
 }
 
-export async function getProductBySku(sku: string): Promise<Product | null> {
+export async function getProductBySku(
+  sku: string,
+  includeArchived = false
+): Promise<Product | null> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM shop_products WHERE sku = ?',
+    'SELECT * FROM shop_products WHERE sku = ?' + (includeArchived ? '' : ' AND archived = 0'),
     [sku]
   );
   const row = (rows as RowDataPacket[])[0];
@@ -757,8 +764,12 @@ export async function updateProduct(
   );
 }
 
-export async function deleteProduct(id: number): Promise<void> {
-  await pool.execute('DELETE FROM shop_products WHERE id = ?', [id]);
+export async function archiveProduct(id: number): Promise<void> {
+  await pool.execute('UPDATE shop_products SET archived = 1 WHERE id = ?', [id]);
+}
+
+export async function unarchiveProduct(id: number): Promise<void> {
+  await pool.execute('UPDATE shop_products SET archived = 0 WHERE id = ?', [id]);
 }
 
 export async function createOrder(

@@ -1,0 +1,1 @@
+ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS archived TINYINT(1) DEFAULT 0 AFTER stock;

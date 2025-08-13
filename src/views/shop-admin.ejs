@@ -28,6 +28,7 @@
           <option value="in">In Stock</option>
           <option value="out">Out of Stock</option>
         </select>
+        <label><input type="checkbox" id="showArchived" <%= showArchived ? 'checked' : '' %>> Show Archived</label>
         <table id="productsTable">
           <thead>
             <tr>
@@ -61,8 +62,8 @@
                 <td>
                   <input form="form-<%= p.id %>" type="file" name="image">
                   <button form="form-<%= p.id %>" type="submit">Update</button>
-                  <form action="/shop/admin/product/<%= p.id %>/delete" method="post" style="display:inline-block">
-                    <button type="submit">Delete</button>
+                  <form action="/shop/admin/product/<%= p.id %>/<%= p.archived ? 'unarchive' : 'archive' %>" method="post" style="display:inline-block">
+                    <button type="submit"><%= p.archived ? 'Unarchive' : 'Archive' %></button>
                   </form>
                 </td>
               </tr>
@@ -73,6 +74,7 @@
         <script>
           const searchInput = document.getElementById('search');
           const stockFilter = document.getElementById('stockFilter');
+          const showArchivedCheckbox = document.getElementById('showArchived');
           const rows = document.querySelectorAll('#productsTable tbody tr');
           function filterRows() {
             const query = searchInput.value.toLowerCase();
@@ -89,6 +91,15 @@
           }
           searchInput.addEventListener('input', filterRows);
           stockFilter.addEventListener('change', filterRows);
+          showArchivedCheckbox.addEventListener('change', () => {
+            const url = new URL(window.location.href);
+            if (showArchivedCheckbox.checked) {
+              url.searchParams.set('showArchived', '1');
+            } else {
+              url.searchParams.delete('showArchived');
+            }
+            window.location.href = url.toString();
+          });
         </script>
       </section>
     </div>
