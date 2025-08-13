@@ -16,7 +16,7 @@
         <tbody>
           <% products.forEach(function(p){ %>
             <tr>
-              <td><% if (p.image_url) { %><img src="<%= p.image_url %>" width="50" alt=""><% } %></td>
+              <td><% if (p.image_url) { %><img src="<%= p.image_url %>" width="50" alt="" class="product-img"><% } %></td>
               <td><%= p.name %></td>
               <td><%= p.sku %></td>
               <td><%- p.description.replace(/\n/g, '<br>') %></td>
@@ -33,7 +33,31 @@
           <% }) %>
         </tbody>
       </table>
+      <div id="image-modal" class="modal" style="display:none;">
+        <div class="modal-content">
+          <span id="image-close" class="close">&times;</span>
+          <img id="modal-image" src="" alt="">
+        </div>
+      </div>
     </div>
   </div>
+  <script>
+    document.querySelectorAll('.product-img').forEach(function(img) {
+      img.addEventListener('click', function () {
+        document.getElementById('modal-image').src = this.src;
+        document.getElementById('image-modal').style.display = 'flex';
+      });
+    });
+
+    document.getElementById('image-close').addEventListener('click', function () {
+      document.getElementById('image-modal').style.display = 'none';
+    });
+
+    document.getElementById('image-modal').addEventListener('click', function (e) {
+      if (e.target === this) {
+        this.style.display = 'none';
+      }
+    });
+  </script>
 </body>
 </html>
