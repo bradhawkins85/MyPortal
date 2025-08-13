@@ -8,14 +8,15 @@
       <h1>Shop</h1>
       <table>
         <thead>
-          <tr><th>Name</th><th>SKU</th><th>Description</th><th>Price</th><th>Stock</th><th>Order</th></tr>
+          <tr><th>Image</th><th>Name</th><th>SKU</th><th>Description</th><th>Price</th><th>Stock</th><th>Order</th></tr>
         </thead>
         <tbody>
           <% products.forEach(function(p){ %>
             <tr>
+              <td><% if (p.image_url) { %><img src="<%= p.image_url %>" width="50" alt=""><% } %></td>
               <td><%= p.name %></td>
               <td><%= p.sku %></td>
-              <td><%= p.description %></td>
+              <td><%- p.description.replace(/\n/g, '<br>') %></td>
               <td>$<%= p.price %></td>
               <td><%= p.stock %></td>
               <td>

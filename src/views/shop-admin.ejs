@@ -8,34 +8,85 @@
       <h1>Shop Admin</h1>
       <section>
         <h2>Add Product</h2>
-        <form action="/shop/admin/product" method="post">
+        <form action="/shop/admin/product" method="post" enctype="multipart/form-data">
           <input type="text" name="name" placeholder="Name" required>
           <input type="text" name="sku" placeholder="SKU" required>
-          <input type="text" name="description" placeholder="Description">
+          <input type="text" name="vendor_sku" placeholder="Vendor SKU" required>
+          <textarea name="description" placeholder="Description"></textarea>
           <input type="number" step="0.01" name="price" placeholder="Price" required>
           <input type="number" name="stock" placeholder="Stock" required>
+          <input type="file" name="image">
           <button type="submit">Add</button>
         </form>
       </section>
       <section>
         <h2>Products</h2>
-        <ul>
-          <% products.forEach(function(p){ %>
-            <li>
-              <form action="/shop/admin/product/<%= p.id %>" method="post" style="display:inline-block">
-                <input type="text" name="name" value="<%= p.name %>">
-                <input type="text" name="sku" value="<%= p.sku %>">
-                <input type="text" name="description" value="<%= p.description %>">
-                <input type="number" step="0.01" name="price" value="<%= p.price %>">
-                <input type="number" name="stock" value="<%= p.stock %>">
-                <button type="submit">Update</button>
-              </form>
-              <form action="/shop/admin/product/<%= p.id %>/delete" method="post" style="display:inline-block">
-                <button type="submit">Delete</button>
-              </form>
-            </li>
-          <% }) %>
-        </ul>
+        <input type="text" id="search" placeholder="Search products">
+        <select id="stockFilter">
+          <option value="">All</option>
+          <option value="in">In Stock</option>
+          <option value="out">Out of Stock</option>
+        </select>
+        <table id="productsTable">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>SKU</th>
+              <th>Vendor SKU</th>
+              <th>Description</th>
+              <th>Price</th>
+              <th>Stock</th>
+              <th>Image</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% products.forEach(function(p){ %>
+              <tr
+                data-name="<%= p.name.toLowerCase() %>"
+                data-sku="<%= p.sku.toLowerCase() %>"
+                data-vendor="<%= p.vendor_sku.toLowerCase() %>"
+                data-stock="<%= p.stock %>"
+              >
+                <td><input form="form-<%= p.id %>" type="text" name="name" value="<%= p.name %>"></td>
+                <td><input form="form-<%= p.id %>" type="text" name="sku" value="<%= p.sku %>"></td>
+                <td><input form="form-<%= p.id %>" type="text" name="vendor_sku" value="<%= p.vendor_sku %>"></td>
+                <td><textarea form="form-<%= p.id %>" name="description"><%= p.description %></textarea></td>
+                <td><input form="form-<%= p.id %>" type="number" step="0.01" name="price" value="<%= p.price %>"></td>
+                <td><input form="form-<%= p.id %>" type="number" name="stock" value="<%= p.stock %>"></td>
+                <td><% if (p.image_url) { %><img src="<%= p.image_url %>" width="50" alt=""><% } %></td>
+                <td>
+                  <input form="form-<%= p.id %>" type="file" name="image">
+                  <button form="form-<%= p.id %>" type="submit">Update</button>
+                  <form action="/shop/admin/product/<%= p.id %>/delete" method="post" style="display:inline-block">
+                    <button type="submit">Delete</button>
+                  </form>
+                </td>
+              </tr>
+              <form id="form-<%= p.id %>" action="/shop/admin/product/<%= p.id %>" method="post" enctype="multipart/form-data"></form>
+            <% }) %>
+          </tbody>
+        </table>
+        <script>
+          const searchInput = document.getElementById('search');
+          const stockFilter = document.getElementById('stockFilter');
+          const rows = document.querySelectorAll('#productsTable tbody tr');
+          function filterRows() {
+            const query = searchInput.value.toLowerCase();
+            const stock = stockFilter.value;
+            rows.forEach(row => {
+              const name = row.dataset.name;
+              const sku = row.dataset.sku;
+              const vendor = row.dataset.vendor;
+              const rowStock = parseInt(row.dataset.stock, 10);
+              const matchesSearch = !query || name.includes(query) || sku.includes(query) || vendor.includes(query);
+              const matchesStock = !stock || (stock === 'in' && rowStock > 0) || (stock === 'out' && rowStock === 0);
+              row.style.display = matchesSearch && matchesStock ? '' : 'none';
+            });
+          }
+          searchInput.addEventListener('input', filterRows);
+          stockFilter.addEventListener('change', filterRows);
+        </script>
       </section>
     </div>
   </div>
