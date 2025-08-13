@@ -53,6 +53,11 @@ import {
   getInvoiceById,
   updateInvoice,
   deleteInvoice,
+  getAllCategories,
+  getCategoryById,
+  createCategory,
+  updateCategory,
+  deleteCategory,
   getAllProducts,
   createProduct,
   getProductById,
@@ -88,6 +93,7 @@ import {
   ApiKey,
   App,
   ProductCompanyRestriction,
+  Category,
 } from './queries';
 import { runMigrations } from './db';
 
@@ -568,8 +574,14 @@ app.get('/invoices', ensureAuth, ensureInvoicesAccess, async (req, res) => {
 });
 
 app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
-  const products = await getAllProducts(false, req.session.companyId);
-  const companies = await getCompaniesForUser(req.session.userId!);
+  const categoryId = req.query.category
+    ? parseInt(req.query.category as string, 10)
+    : undefined;
+  const [products, companies, categories] = await Promise.all([
+    getAllProducts(false, req.session.companyId, categoryId),
+    getCompaniesForUser(req.session.userId!),
+    getAllCategories(),
+  ]);
   const current = companies.find((c) => c.company_id === req.session.companyId);
   const isVip = current?.is_vip === 1;
   const adjusted = products.map((p) => ({
@@ -580,6 +592,8 @@ app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
   req.session.cartError = undefined;
   res.render('shop', {
     products: adjusted,
+    categories,
+    currentCategory: categoryId,
     cartError: error,
     companies,
     currentCompanyId: req.session.companyId,
@@ -769,12 +783,14 @@ app.post(
 
 app.get('/shop/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const includeArchived = req.query.showArchived === '1';
-  const [products, navCompanies, allCompanies, restrictions] = await Promise.all([
-    getAllProducts(includeArchived),
-    getCompaniesForUser(req.session.userId!),
-    getAllCompanies(),
-    getProductCompanyRestrictions(),
-  ]);
+  const [products, navCompanies, allCompanies, restrictions, categories] =
+    await Promise.all([
+      getAllProducts(includeArchived),
+      getCompaniesForUser(req.session.userId!),
+      getAllCompanies(),
+      getProductCompanyRestrictions(),
+      getAllCategories(),
+    ]);
   const current = navCompanies.find((c) => c.company_id === req.session.companyId);
   const restrictionMap: Record<number, ProductCompanyRestriction[]> = {};
   restrictions.forEach((r) => {
@@ -785,6 +801,7 @@ app.get('/shop/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
   });
   res.render('shop-admin', {
     products,
+    categories,
     showArchived: includeArchived,
     companies: navCompanies,
     allCompanies,
@@ -806,7 +823,8 @@ app.post(
   ensureSuperAdmin,
   upload.single('image'),
   async (req, res) => {
-    const { name, sku, vendor_sku, description, price, vip_price, stock } = req.body;
+    const { name, sku, vendor_sku, description, price, vip_price, stock, category_id } =
+      req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     await createProduct(
       name,
@@ -816,7 +834,8 @@ app.post(
       imageUrl,
       parseFloat(price),
       vip_price ? parseFloat(vip_price) : null,
-      parseInt(stock, 10)
+      parseInt(stock, 10),
+      category_id ? parseInt(category_id, 10) : null
     );
     res.redirect('/shop/admin');
   }
@@ -828,7 +847,8 @@ app.post(
   ensureSuperAdmin,
   upload.single('image'),
   async (req, res) => {
-    const { name, sku, vendor_sku, description, price, vip_price, stock } = req.body;
+    const { name, sku, vendor_sku, description, price, vip_price, stock, category_id } =
+      req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     await updateProduct(
       parseInt(req.params.id, 10),
@@ -839,7 +859,8 @@ app.post(
       imageUrl,
       parseFloat(price),
       vip_price ? parseFloat(vip_price) : null,
-      parseInt(stock, 10)
+      parseInt(stock, 10),
+      category_id ? parseInt(category_id, 10) : null
     );
     res.redirect('/shop/admin');
   }
@@ -872,6 +893,29 @@ app.post(
       parseInt(req.params.id, 10),
       companyIds
     );
+    res.redirect('/shop/admin');
+  }
+);
+
+app.post(
+  '/shop/admin/category',
+  ensureAuth,
+  ensureSuperAdmin,
+  async (req, res) => {
+    const { name } = req.body;
+    if (name) {
+      await createCategory(name);
+    }
+    res.redirect('/shop/admin');
+  }
+);
+
+app.post(
+  '/shop/admin/category/:id/delete',
+  ensureAuth,
+  ensureSuperAdmin,
+  async (req, res) => {
+    await deleteCategory(parseInt(req.params.id, 10));
     res.redirect('/shop/admin');
   }
 );
@@ -1336,6 +1380,10 @@ api.route('/apps/:id')
  *                     type: number
  *                   stock:
  *                     type: integer
+ *                   category_id:
+ *                     type: integer
+ *                   category_name:
+ *                     type: string
  *   post:
  *     tags:
  *       - Shop
@@ -1357,7 +1405,11 @@ api.route('/apps/:id')
  *                 type: string
  *               price:
  *                 type: number
+ *               vip_price:
+ *                 type: number
  *               stock:
+ *                 type: integer
+ *               category_id:
  *                 type: integer
  *               image:
  *                 type: string
@@ -1379,11 +1431,19 @@ api.route('/shop/products')
     const companyId = req.query.companyId
       ? parseInt(req.query.companyId as string, 10)
       : undefined;
-    const products = await getAllProducts(includeArchived, companyId);
+    const categoryId = req.query.categoryId
+      ? parseInt(req.query.categoryId as string, 10)
+      : undefined;
+    const products = await getAllProducts(
+      includeArchived,
+      companyId,
+      categoryId
+    );
     res.json(products);
   })
   .post(upload.single('image'), async (req, res) => {
-    const { name, sku, vendor_sku, description, price, vip_price, stock } = req.body;
+    const { name, sku, vendor_sku, description, price, vip_price, stock, category_id } =
+      req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     const id = await createProduct(
       name,
@@ -1393,7 +1453,8 @@ api.route('/shop/products')
       imageUrl,
       parseFloat(price),
       vip_price ? parseFloat(vip_price) : null,
-      parseInt(stock, 10)
+      parseInt(stock, 10),
+      category_id ? parseInt(category_id, 10) : null
     );
     res.json({ id });
   });
@@ -1435,6 +1496,14 @@ api.route('/shop/products')
  *                   type: number
  *                 stock:
  *                   type: integer
+ *                 category_id:
+ *                   type: integer
+ *                 category_name:
+ *                   type: string
+ *                 category_id:
+ *                   type: integer
+ *                 category_name:
+ *                   type: string
  *       404:
  *         description: Product not found
  *   put:
@@ -1464,7 +1533,11 @@ api.route('/shop/products')
  *                 type: string
  *               price:
  *                 type: number
+ *               vip_price:
+ *                 type: number
  *               stock:
+ *                 type: integer
+ *               category_id:
  *                 type: integer
  *               image:
  *                 type: string
@@ -1503,7 +1576,8 @@ api.route('/shop/products/:id')
     res.json(product);
   })
   .put(upload.single('image'), async (req, res) => {
-    const { name, sku, vendor_sku, description, price, vip_price, stock } = req.body;
+    const { name, sku, vendor_sku, description, price, vip_price, stock, category_id } =
+      req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     await updateProduct(
       parseInt(req.params.id, 10),
@@ -1514,7 +1588,8 @@ api.route('/shop/products/:id')
       imageUrl,
       parseFloat(price),
       vip_price ? parseFloat(vip_price) : null,
-      parseInt(stock, 10)
+      parseInt(stock, 10),
+      category_id ? parseInt(category_id, 10) : null
     );
     res.json({ success: true });
   })
@@ -1578,6 +1653,132 @@ api.get('/shop/products/sku/:sku', async (req, res) => {
   }
   res.json(product);
 });
+
+/**
+ * @openapi
+ * /api/shop/categories:
+ *   get:
+ *     tags:
+ *       - Shop
+ *     summary: List all categories
+ *     responses:
+ *       200:
+ *         description: Array of categories
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: integer
+ *                   name:
+ *                     type: string
+ *   post:
+ *     tags:
+ *       - Shop
+ *     summary: Create a category
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: ID of created category
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ */
+api.route('/shop/categories')
+  .get(async (req, res) => {
+    const categories = await getAllCategories();
+    res.json(categories);
+  })
+  .post(async (req, res) => {
+    const { name } = req.body;
+    const id = await createCategory(name);
+    res.json({ id });
+  });
+
+/**
+ * @openapi
+ * /api/shop/categories/{id}:
+ *   get:
+ *     tags:
+ *       - Shop
+ *     summary: Get a category by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Category details
+ *   put:
+ *     tags:
+ *       - Shop
+ *     summary: Update a category
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Update successful
+ *   delete:
+ *     tags:
+ *       - Shop
+ *     summary: Delete a category
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Deletion successful
+ */
+api.route('/shop/categories/:id')
+  .get(async (req, res) => {
+    const category = await getCategoryById(parseInt(req.params.id, 10));
+    if (!category) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+    res.json(category);
+  })
+  .put(async (req, res) => {
+    const { name } = req.body;
+    await updateCategory(parseInt(req.params.id, 10), name);
+    res.json({ success: true });
+  })
+  .delete(async (req, res) => {
+    await deleteCategory(parseInt(req.params.id, 10));
+    res.json({ success: true });
+  });
 
 api.route('/shop/orders')
   .get(async (req, res) => {
