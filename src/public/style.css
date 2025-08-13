@@ -175,3 +175,17 @@ table th {
   float: right;
   cursor: pointer;
 }
+
+.stats {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.stat-card {
+  flex: 1;
+  background-color: #f3f3f3;
+  padding: 1rem;
+  border-radius: 8px;
+  text-align: center;
+}
