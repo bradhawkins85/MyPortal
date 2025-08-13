@@ -32,6 +32,7 @@ export interface UserCompany {
   can_manage_staff: number;
   can_manage_assets: number;
   can_manage_invoices: number;
+  is_admin: number;
   company_name?: string;
   email?: string;
 }
@@ -183,7 +184,7 @@ export async function getUserById(id: number): Promise<User | null> {
 
 export async function getCompaniesForUser(userId: number): Promise<UserCompany[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, c.name AS company_name
+    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.is_admin, c.name AS company_name
      FROM user_companies uc JOIN companies c ON uc.company_id = c.id
      WHERE uc.user_id = ?`,
     [userId]
@@ -191,14 +192,18 @@ export async function getCompaniesForUser(userId: number): Promise<UserCompany[]
   return rows as UserCompany[];
 }
 
-export async function getUserCompanyAssignments(): Promise<UserCompany[]> {
-  const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, c.name AS company_name, u.email
+export async function getUserCompanyAssignments(companyId?: number): Promise<UserCompany[]> {
+  let sql = `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.is_admin, c.name AS company_name, u.email
      FROM user_companies uc
      JOIN users u ON uc.user_id = u.id
-     JOIN companies c ON uc.company_id = c.id
-     ORDER BY u.email, c.name`
-  );
+     JOIN companies c ON uc.company_id = c.id`;
+  const params: any[] = [];
+  if (companyId) {
+    sql += ' WHERE uc.company_id = ?';
+    params.push(companyId);
+  }
+  sql += ' ORDER BY u.email, c.name';
+  const [rows] = await pool.query<RowDataPacket[]>(sql, params);
   return rows as UserCompany[];
 }
 
@@ -208,12 +213,13 @@ export async function assignUserToCompany(
   canManageLicenses: boolean,
   canManageStaff: boolean,
   canManageAssets: boolean,
-  canManageInvoices: boolean
+  canManageInvoices: boolean,
+  isAdmin: boolean
 ): Promise<void> {
   await pool.execute(
-    `INSERT INTO user_companies (user_id, company_id, can_manage_licenses, can_manage_staff, can_manage_assets, can_manage_invoices)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE can_manage_licenses = VALUES(can_manage_licenses), can_manage_staff = VALUES(can_manage_staff), can_manage_assets = VALUES(can_manage_assets), can_manage_invoices = VALUES(can_manage_invoices)`,
+    `INSERT INTO user_companies (user_id, company_id, can_manage_licenses, can_manage_staff, can_manage_assets, can_manage_invoices, is_admin)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE can_manage_licenses = VALUES(can_manage_licenses), can_manage_staff = VALUES(can_manage_staff), can_manage_assets = VALUES(can_manage_assets), can_manage_invoices = VALUES(can_manage_invoices), is_admin = VALUES(is_admin)`,
     [
       userId,
       companyId,
@@ -221,6 +227,7 @@ export async function assignUserToCompany(
       canManageStaff ? 1 : 0,
       canManageAssets ? 1 : 0,
       canManageInvoices ? 1 : 0,
+      isAdmin ? 1 : 0,
     ]
   );
 }
@@ -232,7 +239,8 @@ export async function updateUserCompanyPermission(
     | 'can_manage_licenses'
     | 'can_manage_staff'
     | 'can_manage_assets'
-    | 'can_manage_invoices',
+    | 'can_manage_invoices'
+    | 'is_admin',
   value: boolean
 ): Promise<void> {
   await pool.execute(

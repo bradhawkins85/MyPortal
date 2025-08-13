@@ -7,6 +7,7 @@
     <div class="content">
       <h1>Admin</h1>
       <p><a href="/api-docs">API Docs</a></p>
+      <% if (isSuperAdmin) { %>
       <section>
         <h2>Add Company</h2>
         <form action="/admin/company" method="post">
@@ -14,19 +15,25 @@
           <button type="submit">Add</button>
         </form>
       </section>
+      <% } %>
       <section>
         <h2>Add User</h2>
         <form action="/admin/user" method="post">
           <input type="email" name="email" placeholder="Email" required>
           <input type="password" name="password" placeholder="Password" required>
-          <select name="companyId">
-            <% allCompanies.forEach(function(c) { %>
-              <option value="<%= c.id %>"><%= c.name %></option>
-            <% }); %>
-          </select>
+          <% if (isSuperAdmin) { %>
+            <select name="companyId">
+              <% allCompanies.forEach(function(c) { %>
+                <option value="<%= c.id %>"><%= c.name %></option>
+              <% }); %>
+            </select>
+          <% } else { %>
+            <input type="hidden" name="companyId" value="<%= currentCompanyId %>">
+          <% } %>
           <button type="submit">Add User</button>
         </form>
       </section>
+      <% if (isSuperAdmin) { %>
       <section>
         <h2>Assign Existing User to Company</h2>
         <form action="/admin/assign" method="post">
@@ -43,14 +50,23 @@
           <button type="submit">Assign</button>
         </form>
       </section>
+      <% } %>
       <section>
         <h2>Current Assignments</h2>
         <table>
-          <tr><th>User</th><th>Company</th><th>Licenses</th><th>Staff</th><th>Assets</th><th>Invoices</th></tr>
+          <tr><th>User</th><th>Company</th><th>Admin</th><th>Licenses</th><th>Staff</th><th>Assets</th><th>Invoices</th></tr>
           <% assignments.forEach(function(a) { %>
             <tr>
               <td><%= a.email %></td>
               <td><%= a.company_name %></td>
+              <td>
+                <form action="/admin/permission" method="post">
+                  <input type="hidden" name="userId" value="<%= a.user_id %>">
+                  <input type="hidden" name="companyId" value="<%= a.company_id %>">
+                  <input type="hidden" name="isAdmin" value="0">
+                  <input type="checkbox" name="isAdmin" value="1" <%= a.is_admin ? 'checked' : '' %> onchange="this.form.submit()">
+                </form>
+              </td>
               <td>
                 <form action="/admin/permission" method="post">
                   <input type="hidden" name="userId" value="<%= a.user_id %>">
@@ -87,6 +103,7 @@
           <% }); %>
         </table>
       </section>
+      <% if (isSuperAdmin) { %>
       <section>
         <h2>API Keys</h2>
         <form action="/admin/api-key" method="post">
@@ -111,6 +128,7 @@
           <% }); %>
         </table>
       </section>
+      <% } %>
     </div>
   </div>
 </body>
