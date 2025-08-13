@@ -56,6 +56,7 @@ export interface UserCompany {
 export interface Product {
   id: number;
   name: string;
+  sku: string;
   description: string;
   price: number;
   stock: number;
@@ -666,15 +667,24 @@ export async function getProductById(id: number): Promise<Product | null> {
   return (rows as Product[])[0] || null;
 }
 
+export async function getProductBySku(sku: string): Promise<Product | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM shop_products WHERE sku = ?',
+    [sku]
+  );
+  return (rows as Product[])[0] || null;
+}
+
 export async function createProduct(
   name: string,
+  sku: string,
   description: string,
   price: number,
   stock: number
 ): Promise<number> {
   const [result] = await pool.execute<ResultSetHeader>(
-    'INSERT INTO shop_products (name, description, price, stock) VALUES (?, ?, ?, ?)',
-    [name, description, price, stock]
+    'INSERT INTO shop_products (name, sku, description, price, stock) VALUES (?, ?, ?, ?, ?)',
+    [name, sku, description, price, stock]
   );
   return (result as ResultSetHeader).insertId;
 }
@@ -682,13 +692,14 @@ export async function createProduct(
 export async function updateProduct(
   id: number,
   name: string,
+  sku: string,
   description: string,
   price: number,
   stock: number
 ): Promise<void> {
   await pool.execute(
-    'UPDATE shop_products SET name = ?, description = ?, price = ?, stock = ? WHERE id = ?',
-    [name, description, price, stock, id]
+    'UPDATE shop_products SET name = ?, sku = ?, description = ?, price = ?, stock = ? WHERE id = ?',
+    [name, sku, description, price, stock, id]
   );
 }
 
