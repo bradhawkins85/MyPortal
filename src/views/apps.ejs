@@ -39,17 +39,18 @@
           <input type="number" step="0.01" name="price" placeholder="Price" required>
           <button type="submit">Set Price</button>
         </form>
-        <h3>Existing Company Prices</h3>
-        <table>
-          <tr><th>Company</th><th>App</th><th>Price</th></tr>
-          <% companyPrices.forEach(function(p){ %>
-            <tr>
-              <td><%= p.company_name %></td>
-              <td><%= p.app_name %></td>
-              <td><%= p.price %></td>
-            </tr>
-          <% }); %>
-        </table>
+          <h3>Existing Company Prices</h3>
+          <table>
+            <tr><th>Company</th><th>SKU</th><th>App</th><th>Price</th></tr>
+            <% companyPrices.forEach(function(p){ %>
+              <tr>
+                <td><%= p.company_name %></td>
+                <td><%= p.sku %></td>
+                <td><%= p.app_name %></td>
+                <td><%= p.price %></td>
+              </tr>
+            <% }); %>
+          </table>
       </div>
     </div>
   </body>
