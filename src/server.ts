@@ -100,6 +100,7 @@ app.use(
 
 app.use((req, res, next) => {
   res.locals.isSuperAdmin = req.session.userId === 1;
+  res.locals.cart = req.session.cart || [];
   next();
 });
 
@@ -556,17 +557,96 @@ app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
   });
 });
 
-app.post('/shop/order', ensureAuth, ensureShopAccess, async (req, res) => {
+app.post('/cart/add', ensureAuth, ensureShopAccess, async (req, res) => {
   const { productId, quantity } = req.body;
-  if (req.session.companyId) {
-    await createOrder(
-      req.session.userId!,
-      req.session.companyId,
-      parseInt(productId, 10),
-      parseInt(quantity, 10)
-    );
+  const product = await getProductById(parseInt(productId, 10));
+  if (product) {
+    if (!req.session.cart) {
+      req.session.cart = [];
+    }
+    const existing = req.session.cart.find((i) => i.productId === product.id);
+    if (existing) {
+      existing.quantity += parseInt(quantity, 10);
+    } else {
+      req.session.cart.push({
+        productId: product.id,
+        name: product.name,
+        quantity: parseInt(quantity, 10),
+      });
+    }
   }
   res.redirect('/shop');
+});
+
+app.get('/cart', ensureAuth, ensureShopAccess, async (req, res) => {
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  const message = req.session.orderMessage;
+  req.session.orderMessage = undefined;
+  res.render('cart', {
+    cart: req.session.cart || [],
+    orderMessage: message,
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+  });
+});
+
+app.post('/cart/place-order', ensureAuth, ensureShopAccess, async (req, res) => {
+  if (req.session.companyId && req.session.cart && req.session.cart.length > 0) {
+    const settings = await getExternalApiSettings(req.session.companyId);
+    if (settings?.webhook_url && settings?.webhook_api_key) {
+      try {
+        await fetch(settings.webhook_url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': settings.webhook_api_key,
+          },
+          body: JSON.stringify({ cart: req.session.cart }),
+        });
+      } catch (err) {
+        console.error('Failed to call webhook', err);
+      }
+    }
+    for (const item of req.session.cart) {
+      await createOrder(
+        req.session.userId!,
+        req.session.companyId,
+        item.productId,
+        item.quantity
+      );
+    }
+    req.session.cart = [];
+    req.session.orderMessage = 'Your order is being processed.';
+  }
+  res.redirect('/cart');
+});
+
+app.get('/orders', ensureAuth, ensureShopAccess, async (req, res) => {
+  const orders = req.session.companyId
+    ? await getOrdersByCompany(req.session.companyId)
+    : [];
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  res.render('orders', {
+    orders,
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+  });
 });
 
 app.get('/shop/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
