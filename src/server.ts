@@ -571,6 +571,9 @@ app.post('/cart/add', ensureAuth, ensureShopAccess, async (req, res) => {
       req.session.cart.push({
         productId: product.id,
         name: product.name,
+        sku: product.sku,
+        description: product.description,
+        price: product.price,
         quantity: parseInt(quantity, 10),
       });
     }
@@ -583,8 +586,14 @@ app.get('/cart', ensureAuth, ensureShopAccess, async (req, res) => {
   const current = companies.find((c) => c.company_id === req.session.companyId);
   const message = req.session.orderMessage;
   req.session.orderMessage = undefined;
+  const cart = req.session.cart || [];
+  const total = cart.reduce(
+    (sum, item) => sum + item.price * item.quantity,
+    0
+  );
   res.render('cart', {
-    cart: req.session.cart || [],
+    cart,
+    total,
     orderMessage: message,
     companies,
     currentCompanyId: req.session.companyId,
