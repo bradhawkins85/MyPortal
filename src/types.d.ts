@@ -15,5 +15,6 @@ declare module 'express-session' {
       quantity: number;
     }[];
     orderMessage?: string;
+    cartError?: string;
   }
 }

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+  <%- include('partials/head', { title: 'Order Details' }) %>
+  <body>
+    <div class="app-container">
+      <%- include('partials/sidebar') %>
+      <div class="content">
+        <h1>Order <%= orderNumber %></h1>
+        <% if (items.length === 0) { %>
+          <p>No items found.</p>
+        <% } else { %>
+          <table>
+            <thead>
+              <tr><th>Product</th><th>Quantity</th><th>Price</th></tr>
+            </thead>
+            <tbody>
+              <% items.forEach(function(item){ %>
+                <tr>
+                  <td><%= item.product_name %></td>
+                  <td><%= item.quantity %></td>
+                  <td>$<%= item.price.toFixed(2) %></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        <% } %>
+      </div>
+    </div>
+  </body>
+</html>
