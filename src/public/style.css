@@ -189,3 +189,14 @@ table th {
   border-radius: 8px;
   text-align: center;
 }
+
+#image-modal .modal-content {
+  max-width: 80%;
+}
+
+#image-modal img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
