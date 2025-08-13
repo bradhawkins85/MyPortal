@@ -11,6 +11,36 @@
         <% if (company.address) { %>
           <p>Address: <%= company.address %></p>
         <% } %>
+        <div class="stats">
+          <div class="stat-card">
+            <h3>Active Users</h3>
+            <p><%= activeUsers %></p>
+          </div>
+          <div class="stat-card">
+            <h3>Assets</h3>
+            <p><%= assetCount %></p>
+          </div>
+          <div class="stat-card">
+            <h3>Invoices</h3>
+            <p>Paid: <%= paidInvoices %> | Unpaid: <%= unpaidInvoices %></p>
+          </div>
+        </div>
+        <h2>Licenses</h2>
+        <table>
+          <thead>
+            <tr><th>SKU</th><th>Purchased</th><th>Used</th><th>Unused</th></tr>
+          </thead>
+          <tbody>
+          <% licenseStats.forEach(function(l) { %>
+            <tr>
+              <td><%= l.name %></td>
+              <td><%= l.count %></td>
+              <td><%= l.used %></td>
+              <td><%= l.unused %></td>
+            </tr>
+          <% }); %>
+          </tbody>
+        </table>
       <% } %>
     </div>
   </div>
