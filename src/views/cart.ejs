@@ -15,6 +15,7 @@
         <table>
           <thead>
             <tr>
+              <th>Image</th>
               <th>Name</th>
               <th>SKU</th>
               <th>Description</th>
@@ -25,9 +26,10 @@
           <tbody>
             <% cart.forEach(function(item){ %>
               <tr>
+                <td><% if (item.imageUrl) { %><img src="<%= item.imageUrl %>" width="50" alt=""><% } %></td>
                 <td><%= item.name %></td>
                 <td><%= item.sku %></td>
-                <td><%= item.description %></td>
+                <td><%- item.description.replace(/\n/g, '<br>') %></td>
                 <td>$<%= item.price.toFixed(2) %></td>
                 <td><%= item.quantity %></td>
               </tr>

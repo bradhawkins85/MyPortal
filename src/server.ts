@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import crypto from 'crypto';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJSDoc from 'swagger-jsdoc';
+import multer from 'multer';
 import {
   getUserByEmail,
   getCompanyById,
@@ -90,6 +91,7 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+const upload = multer({ dest: path.join(__dirname, 'public', 'uploads') });
 app.use(
   session({
     secret: process.env.SESSION_SECRET || 'secret',
@@ -572,7 +574,9 @@ app.post('/cart/add', ensureAuth, ensureShopAccess, async (req, res) => {
         productId: product.id,
         name: product.name,
         sku: product.sku,
+        vendorSku: product.vendor_sku,
         description: product.description,
+        imageUrl: product.image_url,
         // Ensure price is stored as a number since MySQL may return strings
         price: Number(product.price),
         quantity: parseInt(quantity, 10),
@@ -677,24 +681,48 @@ app.get('/shop/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
   });
 });
 
-app.post('/shop/admin/product', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { name, sku, description, price, stock } = req.body;
-  await createProduct(name, sku, description, parseFloat(price), parseInt(stock, 10));
-  res.redirect('/shop/admin');
-});
+app.post(
+  '/shop/admin/product',
+  ensureAuth,
+  ensureSuperAdmin,
+  upload.single('image'),
+  async (req, res) => {
+    const { name, sku, vendor_sku, description, price, stock } = req.body;
+    const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+    await createProduct(
+      name,
+      sku,
+      vendor_sku,
+      description,
+      imageUrl,
+      parseFloat(price),
+      parseInt(stock, 10)
+    );
+    res.redirect('/shop/admin');
+  }
+);
 
-app.post('/shop/admin/product/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { name, sku, description, price, stock } = req.body;
-  await updateProduct(
-    parseInt(req.params.id, 10),
-    name,
-    sku,
-    description,
-    parseFloat(price),
-    parseInt(stock, 10)
-  );
-  res.redirect('/shop/admin');
-});
+app.post(
+  '/shop/admin/product/:id',
+  ensureAuth,
+  ensureSuperAdmin,
+  upload.single('image'),
+  async (req, res) => {
+    const { name, sku, vendor_sku, description, price, stock } = req.body;
+    const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+    await updateProduct(
+      parseInt(req.params.id, 10),
+      name,
+      sku,
+      vendor_sku,
+      description,
+      imageUrl,
+      parseFloat(price),
+      parseInt(stock, 10)
+    );
+    res.redirect('/shop/admin');
+  }
+);
 
 app.post('/shop/admin/product/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
   await deleteProduct(parseInt(req.params.id, 10));
@@ -1145,7 +1173,11 @@ api.route('/apps/:id')
  *                     type: string
  *                   sku:
  *                     type: string
+ *                   vendor_sku:
+ *                     type: string
  *                   description:
+ *                     type: string
+ *                   image_url:
  *                     type: string
  *                   price:
  *                     type: number
@@ -1158,7 +1190,7 @@ api.route('/apps/:id')
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             type: object
  *             properties:
@@ -1166,12 +1198,17 @@ api.route('/apps/:id')
  *                 type: string
  *               sku:
  *                 type: string
+ *               vendor_sku:
+ *                 type: string
  *               description:
  *                 type: string
  *               price:
  *                 type: number
  *               stock:
  *                 type: integer
+ *               image:
+ *                 type: string
+ *                 format: binary
  *     responses:
  *       200:
  *         description: ID of created product
@@ -1188,12 +1225,15 @@ api.route('/shop/products')
     const products = await getAllProducts();
     res.json(products);
   })
-  .post(async (req, res) => {
-    const { name, sku, description, price, stock } = req.body;
+  .post(upload.single('image'), async (req, res) => {
+    const { name, sku, vendor_sku, description, price, stock } = req.body;
+    const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     const id = await createProduct(
       name,
       sku,
+      vendor_sku,
       description,
+      imageUrl,
       parseFloat(price),
       parseInt(stock, 10)
     );
@@ -1227,7 +1267,11 @@ api.route('/shop/products')
  *                   type: string
  *                 sku:
  *                   type: string
+ *                 vendor_sku:
+ *                   type: string
  *                 description:
+ *                   type: string
+ *                 image_url:
  *                   type: string
  *                 price:
  *                   type: number
@@ -1248,7 +1292,7 @@ api.route('/shop/products')
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             type: object
  *             properties:
@@ -1256,12 +1300,17 @@ api.route('/shop/products')
  *                 type: string
  *               sku:
  *                 type: string
+ *               vendor_sku:
+ *                 type: string
  *               description:
  *                 type: string
  *               price:
  *                 type: number
  *               stock:
  *                 type: integer
+ *               image:
+ *                 type: string
+ *                 format: binary
  *     responses:
  *       200:
  *         description: Update successful
@@ -1287,13 +1336,16 @@ api.route('/shop/products/:id')
     }
     res.json(product);
   })
-  .put(async (req, res) => {
-    const { name, sku, description, price, stock } = req.body;
+  .put(upload.single('image'), async (req, res) => {
+    const { name, sku, vendor_sku, description, price, stock } = req.body;
+    const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     await updateProduct(
       parseInt(req.params.id, 10),
       name,
       sku,
+      vendor_sku,
       description,
+      imageUrl,
       parseFloat(price),
       parseInt(stock, 10)
     );
@@ -1331,7 +1383,11 @@ api.route('/shop/products/:id')
  *                   type: string
  *                 sku:
  *                   type: string
+ *                 vendor_sku:
+ *                   type: string
  *                 description:
+ *                   type: string
+ *                 image_url:
  *                   type: string
  *                 price:
  *                   type: number

@@ -8,7 +8,9 @@ declare module 'express-session' {
       productId: number;
       name: string;
       sku: string;
+      vendorSku: string;
       description: string;
+      imageUrl: string | null;
       price: number;
       quantity: number;
     }[];
