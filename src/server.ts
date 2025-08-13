@@ -55,6 +55,7 @@ import {
   getAllProducts,
   createProduct,
   getProductById,
+  getProductBySku,
   updateProduct,
   deleteProduct,
   createOrder,
@@ -117,6 +118,7 @@ const swaggerSpec = swaggerJSDoc({
       { name: 'Staff' },
       { name: 'Assets' },
       { name: 'Invoices' },
+      { name: 'Shop' },
     ],
     components: {
       securitySchemes: {
@@ -557,16 +559,17 @@ app.get('/shop/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
 });
 
 app.post('/shop/admin/product', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { name, description, price, stock } = req.body;
-  await createProduct(name, description, parseFloat(price), parseInt(stock, 10));
+  const { name, sku, description, price, stock } = req.body;
+  await createProduct(name, sku, description, parseFloat(price), parseInt(stock, 10));
   res.redirect('/shop/admin');
 });
 
 app.post('/shop/admin/product/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { name, description, price, stock } = req.body;
+  const { name, sku, description, price, stock } = req.body;
   await updateProduct(
     parseInt(req.params.id, 10),
     name,
+    sku,
     description,
     parseFloat(price),
     parseInt(stock, 10)
@@ -1000,15 +1003,77 @@ api.route('/apps/:id')
     res.json({ success: true });
   });
 
+/**
+ * @openapi
+ * /api/shop/products:
+ *   get:
+ *     tags:
+ *       - Shop
+ *     summary: List all products
+ *     responses:
+ *       200:
+ *         description: Array of products
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: integer
+ *                   name:
+ *                     type: string
+ *                   sku:
+ *                     type: string
+ *                   description:
+ *                     type: string
+ *                   price:
+ *                     type: number
+ *                   stock:
+ *                     type: integer
+ *   post:
+ *     tags:
+ *       - Shop
+ *     summary: Create a product
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               sku:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               price:
+ *                 type: number
+ *               stock:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: ID of created product
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ */
 api.route('/shop/products')
   .get(async (req, res) => {
     const products = await getAllProducts();
     res.json(products);
   })
   .post(async (req, res) => {
-    const { name, description, price, stock } = req.body;
+    const { name, sku, description, price, stock } = req.body;
     const id = await createProduct(
       name,
+      sku,
       description,
       parseFloat(price),
       parseInt(stock, 10)
@@ -1016,6 +1081,85 @@ api.route('/shop/products')
     res.json({ id });
   });
 
+/**
+ * @openapi
+ * /api/shop/products/{id}:
+ *   get:
+ *     tags:
+ *       - Shop
+ *     summary: Get a product by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Product details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ *                 name:
+ *                   type: string
+ *                 sku:
+ *                   type: string
+ *                 description:
+ *                   type: string
+ *                 price:
+ *                   type: number
+ *                 stock:
+ *                   type: integer
+ *       404:
+ *         description: Product not found
+ *   put:
+ *     tags:
+ *       - Shop
+ *     summary: Update a product
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               sku:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               price:
+ *                 type: number
+ *               stock:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Update successful
+ *   delete:
+ *     tags:
+ *       - Shop
+ *     summary: Delete a product
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Deletion successful
+ */
 api.route('/shop/products/:id')
   .get(async (req, res) => {
     const product = await getProductById(parseInt(req.params.id, 10));
@@ -1025,10 +1169,11 @@ api.route('/shop/products/:id')
     res.json(product);
   })
   .put(async (req, res) => {
-    const { name, description, price, stock } = req.body;
+    const { name, sku, description, price, stock } = req.body;
     await updateProduct(
       parseInt(req.params.id, 10),
       name,
+      sku,
       description,
       parseFloat(price),
       parseInt(stock, 10)
@@ -1039,6 +1184,50 @@ api.route('/shop/products/:id')
     await deleteProduct(parseInt(req.params.id, 10));
     res.json({ success: true });
   });
+
+/**
+ * @openapi
+ * /api/shop/products/sku/{sku}:
+ *   get:
+ *     tags:
+ *       - Shop
+ *     summary: Get a product by SKU
+ *     parameters:
+ *       - in: path
+ *         name: sku
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Product details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ *                 name:
+ *                   type: string
+ *                 sku:
+ *                   type: string
+ *                 description:
+ *                   type: string
+ *                 price:
+ *                   type: number
+ *                 stock:
+ *                   type: integer
+ *       404:
+ *         description: Product not found
+ */
+api.get('/shop/products/sku/:sku', async (req, res) => {
+  const product = await getProductBySku(req.params.sku);
+  if (!product) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
+  res.json(product);
+});
 
 api.route('/shop/orders')
   .get(async (req, res) => {
