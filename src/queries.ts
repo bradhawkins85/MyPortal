@@ -156,6 +156,13 @@ export interface ApiKey {
   expiry_date: string | null;
 }
 
+export interface Form {
+  id: number;
+  name: string;
+  url: string;
+  description: string;
+}
+
 export async function getUserByEmail(email: string): Promise<User | null> {
   const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM users WHERE email = ?', [email]);
   return (rows as User[])[0] || null;
@@ -1128,5 +1135,64 @@ export async function upsertExternalApiSettings(
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE xero_endpoint = VALUES(xero_endpoint), xero_api_key = VALUES(xero_api_key), syncro_endpoint = VALUES(syncro_endpoint), syncro_api_key = VALUES(syncro_api_key), webhook_url = VALUES(webhook_url), webhook_api_key = VALUES(webhook_api_key), shop_webhook_url = VALUES(shop_webhook_url), shop_webhook_api_key = VALUES(shop_webhook_api_key)` ,
     [companyId, xeroEndpoint, xeroApiKey, syncroEndpoint, syncroApiKey, webhookUrl, webhookApiKey, shopWebhookUrl, shopWebhookApiKey]
+  );
+}
+
+export async function createForm(
+  name: string,
+  url: string,
+  description: string
+): Promise<number> {
+  const [result] = await pool.execute(
+    'INSERT INTO forms (name, url, description) VALUES (?, ?, ?)',
+    [name, url, description]
+  );
+  const insert = result as ResultSetHeader;
+  return insert.insertId;
+}
+
+export async function getAllForms(): Promise<Form[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM forms ORDER BY name'
+  );
+  return rows as Form[];
+}
+
+export async function getFormsForUser(userId: number): Promise<Form[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT f.* FROM forms f JOIN form_permissions fp ON f.id = fp.form_id WHERE fp.user_id = ? ORDER BY f.name',
+    [userId]
+  );
+  return rows as Form[];
+}
+
+export async function getFormPermissions(formId: number): Promise<number[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT user_id FROM form_permissions WHERE form_id = ?',
+    [formId]
+  );
+  return (rows as RowDataPacket[]).map((r) => r.user_id as number);
+}
+
+export async function updateFormPermissions(
+  formId: number,
+  companyId: number,
+  userIds: number[]
+): Promise<void> {
+  await pool.execute(
+    'DELETE fp FROM form_permissions fp JOIN user_companies uc ON fp.user_id = uc.user_id WHERE fp.form_id = ? AND uc.company_id = ?',
+    [formId, companyId]
+  );
+  if (userIds.length === 0) {
+    return;
+  }
+  const values = userIds.map(() => '(?, ?)').join(', ');
+  const params: (number | string)[] = [];
+  userIds.forEach((id) => {
+    params.push(formId, id);
+  });
+  await pool.execute(
+    `INSERT INTO form_permissions (form_id, user_id) VALUES ${values}`,
+    params
   );
 }
