@@ -45,7 +45,13 @@ import {
   deleteApiKey,
   getApiKeyRecord,
   getAssetsByCompany,
+  getAssetById,
+  updateAsset,
+  deleteAsset,
   getInvoicesByCompany,
+  getInvoiceById,
+  updateInvoice,
+  deleteInvoice,
   upsertAsset,
   upsertInvoice,
   getExternalApiSettings,
@@ -1503,6 +1509,102 @@ api.post('/companies/:companyId/assets', async (req, res) => {
 
 /**
  * @openapi
+ * /api/assets/{id}:
+ *   get:
+ *     tags:
+ *       - Assets
+ *     summary: Get an asset by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Asset details
+ *       404:
+ *         description: Asset not found
+ */
+api.get('/assets/:id', async (req, res) => {
+  const asset = await getAssetById(parseInt(req.params.id, 10));
+  if (!asset) {
+    return res.status(404).json({ error: 'Asset not found' });
+  }
+  res.json(asset);
+});
+
+/**
+ * @openapi
+ * /api/assets/{id}:
+ *   put:
+ *     tags:
+ *       - Assets
+ *     summary: Update an asset
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               companyId:
+ *                 type: integer
+ *               name:
+ *                 type: string
+ *               type:
+ *                 type: string
+ *               serialNumber:
+ *                 type: string
+ *               status:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Update successful
+ */
+api.put('/assets/:id', async (req, res) => {
+  const { companyId, name, type, serialNumber, status } = req.body;
+  await updateAsset(
+    parseInt(req.params.id, 10),
+    companyId,
+    name,
+    type,
+    serialNumber,
+    status
+  );
+  res.json({ success: true });
+});
+
+/**
+ * @openapi
+ * /api/assets/{id}:
+ *   delete:
+ *     tags:
+ *       - Assets
+ *     summary: Delete an asset
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Deletion successful
+ */
+api.delete('/assets/:id', async (req, res) => {
+  await deleteAsset(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
+/**
+ * @openapi
  * /api/companies/{companyId}/invoices:
  *   get:
  *     tags:
@@ -1561,6 +1663,103 @@ api.post('/companies/:companyId/invoices', async (req, res) => {
     dueDate,
     status
   );
+  res.json({ success: true });
+});
+
+/**
+ * @openapi
+ * /api/invoices/{id}:
+ *   get:
+ *     tags:
+ *       - Invoices
+ *     summary: Get an invoice by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Invoice details
+ *       404:
+ *         description: Invoice not found
+ */
+api.get('/invoices/:id', async (req, res) => {
+  const invoice = await getInvoiceById(parseInt(req.params.id, 10));
+  if (!invoice) {
+    return res.status(404).json({ error: 'Invoice not found' });
+  }
+  res.json(invoice);
+});
+
+/**
+ * @openapi
+ * /api/invoices/{id}:
+ *   put:
+ *     tags:
+ *       - Invoices
+ *     summary: Update an invoice
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               companyId:
+ *                 type: integer
+ *               invoiceNumber:
+ *                 type: string
+ *               amount:
+ *                 type: number
+ *               dueDate:
+ *                 type: string
+ *                 format: date
+ *               status:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Update successful
+ */
+api.put('/invoices/:id', async (req, res) => {
+  const { companyId, invoiceNumber, amount, dueDate, status } = req.body;
+  await updateInvoice(
+    parseInt(req.params.id, 10),
+    companyId,
+    invoiceNumber,
+    amount,
+    dueDate,
+    status
+  );
+  res.json({ success: true });
+});
+
+/**
+ * @openapi
+ * /api/invoices/{id}:
+ *   delete:
+ *     tags:
+ *       - Invoices
+ *     summary: Delete an invoice
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Deletion successful
+ */
+api.delete('/invoices/:id', async (req, res) => {
+  await deleteInvoice(parseInt(req.params.id, 10));
   res.json({ success: true });
 });
 
