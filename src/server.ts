@@ -3,6 +3,7 @@ import session from 'express-session';
 import path from 'path';
 import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import {
   getUserByEmail,
   getCompanyById,
@@ -19,6 +20,22 @@ import {
   getStaffByCompany,
   addStaff,
   updateStaffEnabled,
+  updateStaff,
+  deleteStaff,
+  createLicense,
+  updateCompany,
+  deleteCompany,
+  updateUser,
+  deleteUser,
+  updateLicense,
+  deleteLicense,
+  unassignUserFromCompany,
+  linkStaffToLicense,
+  unlinkStaffFromLicense,
+  getApiKeys,
+  createApiKey,
+  deleteApiKey,
+  getApiKeyRecord,
 } from './queries';
 import { runMigrations } from './db';
 
@@ -29,6 +46,7 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
 app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(
   session({
@@ -210,12 +228,14 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
   const allCompanies = await getAllCompanies();
   const users = await getAllUsers();
   const assignments = await getUserCompanyAssignments();
+  const apiKeys = await getApiKeys();
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('admin', {
     allCompanies,
     users,
     assignments,
+    apiKeys,
     isAdmin: true,
     companies,
     currentCompanyId: req.session.companyId,
@@ -235,6 +255,19 @@ app.post('/admin/user', ensureAuth, ensureAdmin, async (req, res) => {
   const passwordHash = await bcrypt.hash(password, 10);
   const userId = await createUser(email, passwordHash, parseInt(companyId, 10));
   await assignUserToCompany(userId, parseInt(companyId, 10), false, false);
+  res.redirect('/admin');
+});
+
+app.post('/admin/api-key', ensureAuth, ensureAdmin, async (req, res) => {
+  const { description, expiryDate } = req.body;
+  const key = crypto.randomBytes(32).toString('hex');
+  await createApiKey(key, description, expiryDate);
+  res.redirect('/admin');
+});
+
+app.post('/admin/api-key/delete', ensureAuth, ensureAdmin, async (req, res) => {
+  const { id } = req.body;
+  await deleteApiKey(parseInt(id, 10));
   res.redirect('/admin');
 });
 
@@ -278,6 +311,157 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
   }
   res.redirect('/admin');
 });
+
+const api = express.Router();
+
+api.use(async (req, res, next) => {
+  const key = req.header('x-api-key');
+  if (!key) {
+    return res.status(401).json({ error: 'API key required' });
+  }
+  const record = await getApiKeyRecord(key);
+  if (!record) {
+    return res.status(403).json({ error: 'Invalid API key' });
+  }
+  next();
+});
+
+api.post('/companies', async (req, res) => {
+  const { name, address } = req.body;
+  const id = await createCompany(name, address);
+  res.json({ id });
+});
+
+api.put('/companies/:id', async (req, res) => {
+  const { name, address } = req.body;
+  await updateCompany(parseInt(req.params.id, 10), name, address);
+  res.json({ success: true });
+});
+
+api.delete('/companies/:id', async (req, res) => {
+  await deleteCompany(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
+api.post('/users', async (req, res) => {
+  const { email, password, companyId } = req.body;
+  const passwordHash = await bcrypt.hash(password, 10);
+  const id = await createUser(email, passwordHash, companyId);
+  res.json({ id });
+});
+
+api.put('/users/:id', async (req, res) => {
+  const { email, password, companyId } = req.body;
+  const passwordHash = await bcrypt.hash(password, 10);
+  await updateUser(parseInt(req.params.id, 10), email, passwordHash, companyId);
+  res.json({ success: true });
+});
+
+api.delete('/users/:id', async (req, res) => {
+  await deleteUser(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
+api.post('/licenses', async (req, res) => {
+  const { companyId, name, platform, count, expiryDate, contractTerm } = req.body;
+  const id = await createLicense(
+    companyId,
+    name,
+    platform,
+    count,
+    expiryDate,
+    contractTerm
+  );
+  res.json({ id });
+});
+
+api.put('/licenses/:id', async (req, res) => {
+  const { companyId, name, platform, count, expiryDate, contractTerm } = req.body;
+  await updateLicense(
+    parseInt(req.params.id, 10),
+    companyId,
+    name,
+    platform,
+    count,
+    expiryDate,
+    contractTerm
+  );
+  res.json({ success: true });
+});
+
+api.delete('/licenses/:id', async (req, res) => {
+  await deleteLicense(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
+api.post('/staff', async (req, res) => {
+  const { companyId, firstName, lastName, email, dateOnboarded, enabled } = req.body;
+  await addStaff(
+    companyId,
+    firstName,
+    lastName,
+    email,
+    dateOnboarded,
+    !!enabled
+  );
+  res.json({ success: true });
+});
+
+api.put('/staff/:id', async (req, res) => {
+  const { companyId, firstName, lastName, email, dateOnboarded, enabled } = req.body;
+  await updateStaff(
+    parseInt(req.params.id, 10),
+    companyId,
+    firstName,
+    lastName,
+    email,
+    dateOnboarded,
+    !!enabled
+  );
+  res.json({ success: true });
+});
+
+api.delete('/staff/:id', async (req, res) => {
+  await deleteStaff(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
+api.post('/companies/:companyId/users/:userId', async (req, res) => {
+  const { canManageLicenses, canManageStaff } = req.body;
+  await assignUserToCompany(
+    parseInt(req.params.userId, 10),
+    parseInt(req.params.companyId, 10),
+    !!canManageLicenses,
+    !!canManageStaff
+  );
+  res.json({ success: true });
+});
+
+api.delete('/companies/:companyId/users/:userId', async (req, res) => {
+  await unassignUserFromCompany(
+    parseInt(req.params.userId, 10),
+    parseInt(req.params.companyId, 10)
+  );
+  res.json({ success: true });
+});
+
+api.post('/licenses/:licenseId/staff/:staffId', async (req, res) => {
+  await linkStaffToLicense(
+    parseInt(req.params.staffId, 10),
+    parseInt(req.params.licenseId, 10)
+  );
+  res.json({ success: true });
+});
+
+api.delete('/licenses/:licenseId/staff/:staffId', async (req, res) => {
+  await unlinkStaffFromLicense(
+    parseInt(req.params.staffId, 10),
+    parseInt(req.params.licenseId, 10)
+  );
+  res.json({ success: true });
+});
+
+app.use('/api', api);
 
 const port = parseInt(process.env.PORT || '3000', 10);
 const host = process.env.HOST || '0.0.0.0';
