@@ -65,6 +65,12 @@ const swaggerSpec = swaggerJSDoc({
       title: 'MyPortal API',
       version: '1.0.0',
     },
+    tags: [
+      { name: 'Companies' },
+      { name: 'Users' },
+      { name: 'Licenses' },
+      { name: 'Staff' },
+    ],
     components: {
       securitySchemes: {
         ApiKeyAuth: {
@@ -79,7 +85,13 @@ const swaggerSpec = swaggerJSDoc({
   apis: [path.join(__dirname, '../src/**/*.ts')],
 });
 
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.use(
+  '/api-docs',
+  ensureAuth,
+  ensureAdmin,
+  swaggerUi.serve,
+  swaggerUi.setup(swaggerSpec)
+);
 
 function ensureAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (!req.session.userId) {
@@ -355,6 +367,8 @@ api.use(async (req, res, next) => {
  * @openapi
  * /api/companies:
  *   post:
+ *     tags:
+ *       - Companies
  *     summary: Create a company
  *     requestBody:
  *       required: true
@@ -390,6 +404,8 @@ api.post('/companies', async (req, res) => {
  * @openapi
  * /api/companies/{id}:
  *   put:
+ *     tags:
+ *       - Companies
  *     summary: Update a company
  *     parameters:
  *       - in: path
@@ -422,6 +438,8 @@ api.put('/companies/:id', async (req, res) => {
  * @openapi
  * /api/companies/{id}:
  *   delete:
+ *     tags:
+ *       - Companies
  *     summary: Delete a company
  *     parameters:
  *       - in: path
@@ -442,6 +460,8 @@ api.delete('/companies/:id', async (req, res) => {
  * @openapi
  * /api/users:
  *   post:
+ *     tags:
+ *       - Users
  *     summary: Create a user
  *     requestBody:
  *       required: true
@@ -482,6 +502,8 @@ api.post('/users', async (req, res) => {
  * @openapi
  * /api/users/{id}:
  *   put:
+ *     tags:
+ *       - Users
  *     summary: Update a user
  *     parameters:
  *       - in: path
@@ -517,6 +539,8 @@ api.put('/users/:id', async (req, res) => {
  * @openapi
  * /api/users/{id}:
  *   delete:
+ *     tags:
+ *       - Users
  *     summary: Delete a user
  *     parameters:
  *       - in: path
@@ -537,6 +561,8 @@ api.delete('/users/:id', async (req, res) => {
  * @openapi
  * /api/licenses:
  *   post:
+ *     tags:
+ *       - Licenses
  *     summary: Create a license
  *     requestBody:
  *       required: true
@@ -591,6 +617,8 @@ api.post('/licenses', async (req, res) => {
  * @openapi
  * /api/licenses/{id}:
  *   put:
+ *     tags:
+ *       - Licenses
  *     summary: Update a license
  *     parameters:
  *       - in: path
@@ -640,6 +668,8 @@ api.put('/licenses/:id', async (req, res) => {
  * @openapi
  * /api/licenses/{id}:
  *   delete:
+ *     tags:
+ *       - Licenses
  *     summary: Delete a license
  *     parameters:
  *       - in: path
@@ -660,6 +690,8 @@ api.delete('/licenses/:id', async (req, res) => {
  * @openapi
  * /api/staff:
  *   post:
+ *     tags:
+ *       - Staff
  *     summary: Create a staff member
  *     requestBody:
  *       required: true
@@ -714,6 +746,8 @@ api.post('/staff', async (req, res) => {
  * @openapi
  * /api/staff/{id}:
  *   put:
+ *     tags:
+ *       - Staff
  *     summary: Update a staff member
  *     parameters:
  *       - in: path
@@ -763,6 +797,8 @@ api.put('/staff/:id', async (req, res) => {
  * @openapi
  * /api/staff/{id}:
  *   delete:
+ *     tags:
+ *       - Staff
  *     summary: Delete a staff member
  *     parameters:
  *       - in: path
@@ -783,6 +819,8 @@ api.delete('/staff/:id', async (req, res) => {
  * @openapi
  * /api/companies/{companyId}/users/{userId}:
  *   post:
+ *     tags:
+ *       - Companies
  *     summary: Assign a user to a company
  *     parameters:
  *       - in: path
@@ -825,6 +863,8 @@ api.post('/companies/:companyId/users/:userId', async (req, res) => {
  * @openapi
  * /api/companies/{companyId}/users/{userId}:
  *   delete:
+ *     tags:
+ *       - Companies
  *     summary: Unassign a user from a company
  *     parameters:
  *       - in: path
@@ -853,6 +893,8 @@ api.delete('/companies/:companyId/users/:userId', async (req, res) => {
  * @openapi
  * /api/licenses/{licenseId}/staff/{staffId}:
  *   post:
+ *     tags:
+ *       - Licenses
  *     summary: Link a staff member to a license
  *     parameters:
  *       - in: path
@@ -881,6 +923,8 @@ api.post('/licenses/:licenseId/staff/:staffId', async (req, res) => {
  * @openapi
  * /api/licenses/{licenseId}/staff/{staffId}:
  *   delete:
+ *     tags:
+ *       - Licenses
  *     summary: Unlink a staff member from a license
  *     parameters:
  *       - in: path
