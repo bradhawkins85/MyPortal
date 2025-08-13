@@ -80,6 +80,11 @@ app.use(
   })
 );
 
+app.use((req, res, next) => {
+  res.locals.isLoggedIn = !!req.session.userId;
+  next();
+});
+
 const swaggerSpec = swaggerJSDoc({
   definition: {
     openapi: '3.0.0',

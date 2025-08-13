@@ -124,6 +124,10 @@ table th {
   background-color: #3700b3;
 }
 
+.menu-link.login {
+  margin-top: auto;
+}
+
 .menu-link.logout {
   margin-top: auto;
   background-color: #e53935;
