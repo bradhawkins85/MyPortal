@@ -36,7 +36,7 @@
                     data-name="<%= lic.name %>"
                     data-sku="<%= lic.platform %>"
                     data-count="<%= lic.count %>"
-                    data-expiry-date="<%= lic.expiry_date %>"
+                    data-expiry-date="<%= lic.expiry_date ? new Date(lic.expiry_date).toISOString().split('T')[0] : '' %>"
                     data-contract-term="<%= lic.contract_term %>"
                   >Edit</button>
                 <% } %>
@@ -170,14 +170,13 @@
     editForm.addEventListener('submit', async function (e) {
       e.preventDefault();
       const payload = {
-        companyId: currentCompanyId,
         name: document.getElementById('edit-name').value,
         platform: document.getElementById('edit-sku').value,
         count: parseInt(document.getElementById('edit-count').value, 10),
-        expiryDate: document.getElementById('edit-expiry').value,
+        expiryDate: document.getElementById('edit-expiry').value || null,
         contractTerm: document.getElementById('edit-contract').value,
       };
-      const res = await fetch(`/api/licenses/${editingId}`, {
+      const res = await fetch(`/licenses/${editingId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
