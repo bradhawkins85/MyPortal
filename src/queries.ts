@@ -47,9 +47,27 @@ export interface UserCompany {
   can_manage_assets: number;
   can_manage_invoices: number;
   can_order_licenses: number;
+  can_access_shop: number;
   is_admin: number;
   company_name?: string;
   email?: string;
+}
+
+export interface Product {
+  id: number;
+  name: string;
+  description: string;
+  price: number;
+  stock: number;
+}
+
+export interface Order {
+  id: number;
+  user_id: number;
+  company_id: number;
+  product_id: number;
+  quantity: number;
+  order_date: Date;
 }
 
 export interface Asset {
@@ -291,7 +309,7 @@ export async function getUserById(id: number): Promise<User | null> {
 
 export async function getCompaniesForUser(userId: number): Promise<UserCompany[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.is_admin, c.name AS company_name
+    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.can_access_shop, uc.is_admin, c.name AS company_name
      FROM user_companies uc JOIN companies c ON uc.company_id = c.id
      WHERE uc.user_id = ?`,
     [userId]
@@ -300,7 +318,7 @@ export async function getCompaniesForUser(userId: number): Promise<UserCompany[]
 }
 
 export async function getUserCompanyAssignments(companyId?: number): Promise<UserCompany[]> {
-  let sql = `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.is_admin, c.name AS company_name, u.email
+  let sql = `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.can_access_shop, uc.is_admin, c.name AS company_name, u.email
      FROM user_companies uc
      JOIN users u ON uc.user_id = u.id
      JOIN companies c ON uc.company_id = c.id`;
@@ -322,12 +340,13 @@ export async function assignUserToCompany(
   canManageAssets: boolean,
   canManageInvoices: boolean,
   isAdmin: boolean,
-  canOrderLicenses: boolean
+  canOrderLicenses: boolean,
+  canAccessShop: boolean
 ): Promise<void> {
   await pool.execute(
-    `INSERT INTO user_companies (user_id, company_id, can_manage_licenses, can_manage_staff, can_manage_assets, can_manage_invoices, is_admin, can_order_licenses)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE can_manage_licenses = VALUES(can_manage_licenses), can_manage_staff = VALUES(can_manage_staff), can_manage_assets = VALUES(can_manage_assets), can_manage_invoices = VALUES(can_manage_invoices), is_admin = VALUES(is_admin), can_order_licenses = VALUES(can_order_licenses)`,
+    `INSERT INTO user_companies (user_id, company_id, can_manage_licenses, can_manage_staff, can_manage_assets, can_manage_invoices, is_admin, can_order_licenses, can_access_shop)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE can_manage_licenses = VALUES(can_manage_licenses), can_manage_staff = VALUES(can_manage_staff), can_manage_assets = VALUES(can_manage_assets), can_manage_invoices = VALUES(can_manage_invoices), is_admin = VALUES(is_admin), can_order_licenses = VALUES(can_order_licenses), can_access_shop = VALUES(can_access_shop)`,
     [
       userId,
       companyId,
@@ -337,6 +356,7 @@ export async function assignUserToCompany(
       canManageInvoices ? 1 : 0,
       isAdmin ? 1 : 0,
       canOrderLicenses ? 1 : 0,
+      canAccessShop ? 1 : 0,
     ]
   );
 }
@@ -350,6 +370,7 @@ export async function updateUserCompanyPermission(
     | 'can_manage_assets'
     | 'can_manage_invoices'
     | 'can_order_licenses'
+    | 'can_access_shop'
     | 'is_admin',
   value: boolean
 ): Promise<void> {
@@ -628,6 +649,85 @@ export async function updateInvoice(
 
 export async function deleteInvoice(id: number): Promise<void> {
   await pool.execute('DELETE FROM invoices WHERE id = ?', [id]);
+}
+
+export async function getAllProducts(): Promise<Product[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM shop_products'
+  );
+  return rows as Product[];
+}
+
+export async function getProductById(id: number): Promise<Product | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM shop_products WHERE id = ?',
+    [id]
+  );
+  return (rows as Product[])[0] || null;
+}
+
+export async function createProduct(
+  name: string,
+  description: string,
+  price: number,
+  stock: number
+): Promise<number> {
+  const [result] = await pool.execute<ResultSetHeader>(
+    'INSERT INTO shop_products (name, description, price, stock) VALUES (?, ?, ?, ?)',
+    [name, description, price, stock]
+  );
+  return (result as ResultSetHeader).insertId;
+}
+
+export async function updateProduct(
+  id: number,
+  name: string,
+  description: string,
+  price: number,
+  stock: number
+): Promise<void> {
+  await pool.execute(
+    'UPDATE shop_products SET name = ?, description = ?, price = ?, stock = ? WHERE id = ?',
+    [name, description, price, stock, id]
+  );
+}
+
+export async function deleteProduct(id: number): Promise<void> {
+  await pool.execute('DELETE FROM shop_products WHERE id = ?', [id]);
+}
+
+export async function createOrder(
+  userId: number,
+  companyId: number,
+  productId: number,
+  quantity: number
+): Promise<void> {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute(
+      'INSERT INTO shop_orders (user_id, company_id, product_id, quantity) VALUES (?, ?, ?, ?)',
+      [userId, companyId, productId, quantity]
+    );
+    await conn.execute(
+      'UPDATE shop_products SET stock = stock - ? WHERE id = ?',
+      [quantity, productId]
+    );
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function getOrdersByCompany(companyId: number): Promise<Order[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM shop_orders WHERE company_id = ?',
+    [companyId]
+  );
+  return rows as Order[];
 }
 
 export async function getExternalApiSettings(
