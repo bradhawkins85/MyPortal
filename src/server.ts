@@ -56,6 +56,10 @@ import {
   upsertInvoice,
   getExternalApiSettings,
   upsertExternalApiSettings,
+  Company,
+  User,
+  UserCompany,
+  ApiKey,
 } from './queries';
 import { runMigrations } from './db';
 
@@ -120,11 +124,20 @@ function ensureAuth(req: express.Request, res: express.Response, next: express.N
   next();
 }
 
-function ensureAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
-  if (req.session.userId !== 1) {
-    return res.redirect('/');
+async function ensureAdmin(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  if (req.session.userId === 1) {
+    return next();
   }
-  next();
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  if (current && current.is_admin) {
+    return next();
+  }
+  return res.redirect('/');
 }
 
 app.get('/api-docs', ensureAuth, ensureAdmin, async (req, res) => {
@@ -182,7 +195,7 @@ app.post('/register', async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
     const companyId = await createCompany(company);
     const userId = await createUser(email, passwordHash, companyId);
-    await assignUserToCompany(userId, companyId, true, true, true, true);
+    await assignUserToCompany(userId, companyId, true, true, true, true, true);
     req.session.userId = userId;
     req.session.companyId = companyId;
     res.redirect('/');
@@ -210,7 +223,7 @@ app.get('/', ensureAuth, async (req, res) => {
     company,
     companies,
     currentCompanyId: req.session.companyId,
-    isAdmin: req.session.userId === 1,
+    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.can_manage_staff ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
@@ -275,7 +288,7 @@ app.get('/licenses', ensureAuth, ensureLicenseAccess, async (req, res) => {
   const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('licenses', {
     licenses,
-    isAdmin: req.session.userId === 1,
+    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     companies,
     currentCompanyId: req.session.companyId,
     canManageLicenses: current?.can_manage_licenses ?? 0,
@@ -310,7 +323,7 @@ app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
     staff,
     companies,
     currentCompanyId: req.session.companyId,
-    isAdmin: req.session.userId === 1,
+    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.can_manage_staff ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
@@ -349,7 +362,7 @@ app.get('/assets', ensureAuth, ensureAssetsAccess, async (req, res) => {
     assets,
     companies,
     currentCompanyId: req.session.companyId,
-    isAdmin: req.session.userId === 1,
+    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.can_manage_staff ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
@@ -367,7 +380,7 @@ app.get('/invoices', ensureAuth, ensureInvoicesAccess, async (req, res) => {
     invoices,
     companies,
     currentCompanyId: req.session.companyId,
-    isAdmin: req.session.userId === 1,
+    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.can_manage_staff ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
@@ -417,10 +430,23 @@ app.post('/external-apis', ensureAuth, ensureAdmin, async (req, res) => {
 });
 
 app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
-  const allCompanies = await getAllCompanies();
-  const users = await getAllUsers();
-  const assignments = await getUserCompanyAssignments();
-  const apiKeys = await getApiKeys();
+  const isSuperAdmin = req.session.userId === 1;
+  let allCompanies: Company[] = [];
+  let users: User[] = [];
+  let assignments: UserCompany[] = [];
+  let apiKeys: ApiKey[] = [];
+  if (isSuperAdmin) {
+    allCompanies = await getAllCompanies();
+    users = await getAllUsers();
+    assignments = await getUserCompanyAssignments();
+    apiKeys = await getApiKeys();
+  } else {
+    const companyId = req.session.companyId!;
+    const company = await getCompanyById(companyId);
+    allCompanies = company ? [company] : [];
+    users = [];
+    assignments = await getUserCompanyAssignments(companyId);
+  }
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('admin', {
@@ -429,6 +455,7 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     assignments,
     apiKeys,
     isAdmin: true,
+    isSuperAdmin,
     companies,
     currentCompanyId: req.session.companyId,
     canManageLicenses: current?.can_manage_licenses ?? 0,
@@ -445,10 +472,14 @@ app.post('/admin/company', ensureAuth, ensureAdmin, async (req, res) => {
 });
 
 app.post('/admin/user', ensureAuth, ensureAdmin, async (req, res) => {
-  const { email, password, companyId } = req.body;
+  const { email, password } = req.body;
+  const isSuperAdmin = req.session.userId === 1;
   const passwordHash = await bcrypt.hash(password, 10);
-  const userId = await createUser(email, passwordHash, parseInt(companyId, 10));
-  await assignUserToCompany(userId, parseInt(companyId, 10), false, false, false, false);
+  const companyId = isSuperAdmin
+    ? parseInt(req.body.companyId, 10)
+    : req.session.companyId!;
+  const userId = await createUser(email, passwordHash, companyId);
+  await assignUserToCompany(userId, companyId, false, false, false, false, false);
   res.redirect('/admin');
 });
 
@@ -466,10 +497,14 @@ app.post('/admin/api-key/delete', ensureAuth, ensureAdmin, async (req, res) => {
 });
 
 app.post('/admin/assign', ensureAuth, ensureAdmin, async (req, res) => {
-  const { userId, companyId } = req.body;
+  const { userId } = req.body;
+  const companyId = req.session.userId === 1
+    ? parseInt(req.body.companyId, 10)
+    : req.session.companyId!;
   await assignUserToCompany(
     parseInt(userId, 10),
-    parseInt(companyId, 10),
+    companyId,
+    false,
     false,
     false,
     false,
@@ -493,9 +528,10 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
     canManageStaff,
     canManageAssets,
     canManageInvoices,
+    isAdmin: isAdminField,
   } = req.body;
   const uid = parseInt(userId, 10);
-  const cid = parseInt(companyId, 10);
+  const cid = req.session.userId === 1 ? parseInt(companyId, 10) : req.session.companyId!;
   if (typeof canManageLicenses !== 'undefined') {
     await updateUserCompanyPermission(
       uid,
@@ -526,6 +562,14 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
       cid,
       'can_manage_invoices',
       parseCheckbox(canManageInvoices)
+    );
+  }
+  if (typeof isAdminField !== 'undefined') {
+    await updateUserCompanyPermission(
+      uid,
+      cid,
+      'is_admin',
+      parseCheckbox(isAdminField)
     );
   }
   res.redirect('/admin');
@@ -1338,19 +1382,22 @@ api.delete('/staff/:id', async (req, res) => {
  *                 type: boolean
  *               canManageInvoices:
  *                 type: boolean
+ *               isAdmin:
+ *                 type: boolean
  *     responses:
  *       200:
  *         description: Assignment successful
  */
 api.post('/companies/:companyId/users/:userId', async (req, res) => {
-  const { canManageLicenses, canManageStaff, canManageAssets, canManageInvoices } = req.body;
+  const { canManageLicenses, canManageStaff, canManageAssets, canManageInvoices, isAdmin } = req.body;
   await assignUserToCompany(
     parseInt(req.params.userId, 10),
     parseInt(req.params.companyId, 10),
     !!canManageLicenses,
     !!canManageStaff,
     !!canManageAssets,
-    !!canManageInvoices
+    !!canManageInvoices,
+    !!isAdmin
   );
   res.json({ success: true });
 });
