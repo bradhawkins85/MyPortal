@@ -68,6 +68,12 @@ export interface Product {
   archived: number;
 }
 
+export interface ProductCompanyRestriction {
+  product_id: number;
+  company_id: number;
+  company_name: string;
+}
+
 export interface OrderItem {
   id: number;
   order_number: string;
@@ -683,10 +689,28 @@ export async function deleteInvoice(id: number): Promise<void> {
   await pool.execute('DELETE FROM invoices WHERE id = ?', [id]);
 }
 
-export async function getAllProducts(includeArchived = false): Promise<Product[]> {
-  const [rows] = await pool.query<RowDataPacket[]>(
-    includeArchived ? 'SELECT * FROM shop_products' : 'SELECT * FROM shop_products WHERE archived = 0'
-  );
+export async function getAllProducts(
+  includeArchived = false,
+  companyId?: number
+): Promise<Product[]> {
+  let sql = 'SELECT p.* FROM shop_products p';
+  const params: any[] = [];
+  if (companyId !== undefined) {
+    sql +=
+      ' LEFT JOIN shop_product_exclusions e ON p.id = e.product_id AND e.company_id = ?';
+    params.push(companyId);
+  }
+  const conditions: string[] = [];
+  if (!includeArchived) {
+    conditions.push('p.archived = 0');
+  }
+  if (companyId !== undefined) {
+    conditions.push('e.product_id IS NULL');
+  }
+  if (conditions.length > 0) {
+    sql += ' WHERE ' + conditions.join(' AND ');
+  }
+  const [rows] = await pool.query<RowDataPacket[]>(sql, params);
   return (rows as RowDataPacket[]).map((row) => ({
     ...(row as any),
     price: Number(row.price),
@@ -696,12 +720,25 @@ export async function getAllProducts(includeArchived = false): Promise<Product[]
 
 export async function getProductById(
   id: number,
-  includeArchived = false
+  includeArchived = false,
+  companyId?: number
 ): Promise<Product | null> {
-  const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM shop_products WHERE id = ?' + (includeArchived ? '' : ' AND archived = 0'),
-    [id]
-  );
+  let sql = 'SELECT p.* FROM shop_products p';
+  const params: any[] = [];
+  if (companyId !== undefined) {
+    sql +=
+      ' LEFT JOIN shop_product_exclusions e ON p.id = e.product_id AND e.company_id = ?';
+    params.push(companyId);
+  }
+  sql += ' WHERE p.id = ?';
+  params.push(id);
+  if (!includeArchived) {
+    sql += ' AND p.archived = 0';
+  }
+  if (companyId !== undefined) {
+    sql += ' AND e.product_id IS NULL';
+  }
+  const [rows] = await pool.query<RowDataPacket[]>(sql, params);
   const row = (rows as RowDataPacket[])[0];
   return row
     ? ({
@@ -714,12 +751,25 @@ export async function getProductById(
 
 export async function getProductBySku(
   sku: string,
-  includeArchived = false
+  includeArchived = false,
+  companyId?: number
 ): Promise<Product | null> {
-  const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM shop_products WHERE sku = ?' + (includeArchived ? '' : ' AND archived = 0'),
-    [sku]
-  );
+  let sql = 'SELECT p.* FROM shop_products p';
+  const params: any[] = [];
+  if (companyId !== undefined) {
+    sql +=
+      ' LEFT JOIN shop_product_exclusions e ON p.id = e.product_id AND e.company_id = ?';
+    params.push(companyId);
+  }
+  sql += ' WHERE p.sku = ?';
+  params.push(sku);
+  if (!includeArchived) {
+    sql += ' AND p.archived = 0';
+  }
+  if (companyId !== undefined) {
+    sql += ' AND e.product_id IS NULL';
+  }
+  const [rows] = await pool.query<RowDataPacket[]>(sql, params);
   const row = (rows as RowDataPacket[])[0];
   return row
     ? ({
@@ -774,6 +824,37 @@ export async function unarchiveProduct(id: number): Promise<void> {
 
 export async function deleteProduct(id: number): Promise<void> {
   await pool.execute('DELETE FROM shop_products WHERE id = ?', [id]);
+}
+
+export async function removeProductForCompany(
+  productId: number,
+  companyId: number
+): Promise<void> {
+  await pool.execute(
+    'INSERT IGNORE INTO shop_product_exclusions (product_id, company_id) VALUES (?, ?)',
+    [productId, companyId]
+  );
+}
+
+export async function addProductForCompany(
+  productId: number,
+  companyId: number
+): Promise<void> {
+  await pool.execute(
+    'DELETE FROM shop_product_exclusions WHERE product_id = ? AND company_id = ?',
+    [productId, companyId]
+  );
+}
+
+export async function getProductCompanyRestrictions(): Promise<
+  ProductCompanyRestriction[]
+> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT spe.product_id, spe.company_id, c.name AS company_name
+     FROM shop_product_exclusions spe
+     JOIN companies c ON spe.company_id = c.id`
+  );
+  return rows as ProductCompanyRestriction[];
 }
 
 export async function createOrder(
