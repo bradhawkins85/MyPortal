@@ -15,7 +15,7 @@
         </form>
         <table>
           <thead>
-            <tr><th>SKU</th><th>Name</th><th>Default Price</th><th>Contract Term</th></tr>
+            <tr><th>SKU</th><th>Name</th><th>Default Price</th><th>Contract Term</th><th>Actions</th></tr>
           </thead>
           <tbody>
           <% apps.forEach(function(a){ %>
@@ -24,6 +24,7 @@
               <td><%= a.name %></td>
               <td><%= a.default_price %></td>
               <td><%= a.contract_term %></td>
+              <td><button class="add-sku-default" data-app-id="<%= a.id %>" data-app-name="<%= a.name %>">Add to Company</button></td>
             </tr>
           <% }); %>
           </tbody>
@@ -46,7 +47,7 @@
           <h3>Existing Company Prices</h3>
           <table>
             <thead>
-              <tr><th>Company</th><th>SKU</th><th>App</th><th>Price</th></tr>
+              <tr><th>Company</th><th>SKU</th><th>App</th><th>Price</th><th>Actions</th></tr>
             </thead>
             <tbody>
             <% companyPrices.forEach(function(p){ %>
@@ -55,11 +56,47 @@
                 <td><%= p.sku %></td>
                 <td><%= p.app_name %></td>
                 <td><%= p.price %></td>
+                <td><button class="add-sku-company" data-app-id="<%= p.app_id %>" data-company-id="<%= p.company_id %>" data-company-name="<%= p.company_name %>">Add to Company</button></td>
               </tr>
             <% }); %>
             </tbody>
           </table>
       </div>
     </div>
+  <script>
+    const allCompanies = <%- JSON.stringify(allCompanies) %>;
+    document.querySelectorAll('.add-sku-default').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        const appId = this.dataset.appId;
+        const appName = this.dataset.appName;
+        const list = allCompanies.map(c => `${c.id}: ${c.name}`).join('\n');
+        const companyId = prompt(`Select company for ${appName}:\n${list}`);
+        if(!companyId) return;
+        const qty = prompt('Number of licenses purchased?');
+        if(!qty) return;
+        await fetch(`/apps/${appId}/add`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ companyId: parseInt(companyId,10), quantity: parseInt(qty,10) })
+        });
+        alert('App added to company');
+      });
+    });
+    document.querySelectorAll('.add-sku-company').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        const appId = this.dataset.appId;
+        const companyId = this.dataset.companyId;
+        const companyName = this.dataset.companyName;
+        const qty = prompt(`Number of licenses for ${companyName}?`);
+        if(!qty) return;
+        await fetch(`/apps/${appId}/add`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ companyId: parseInt(companyId,10), quantity: parseInt(qty,10) })
+        });
+        alert('App added to company');
+      });
+    });
+  </script>
   </body>
 </html>

@@ -263,7 +263,7 @@ export async function createLicense(
   name: string,
   platform: string,
   count: number,
-  expiryDate: string,
+  expiryDate: string | null,
   contractTerm: string
 ): Promise<number> {
   const [result] = await pool.execute(
