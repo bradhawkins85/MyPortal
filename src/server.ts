@@ -464,6 +464,23 @@ app.post('/licenses/:id/remove', ensureAuth, async (req, res) => {
   res.json({ success: true });
 });
 
+app.put('/licenses/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { name, platform, count, expiryDate, contractTerm } = req.body;
+  if (!req.session.companyId) {
+    return res.status(400).json({ error: 'No company selected' });
+  }
+  await updateLicense(
+    parseInt(req.params.id, 10),
+    req.session.companyId!,
+    name,
+    platform,
+    count,
+    expiryDate || null,
+    contractTerm
+  );
+  res.json({ success: true });
+});
+
 app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
   const staff = req.session.companyId
@@ -2155,6 +2172,7 @@ api.get('/licenses/:id', async (req, res) => {
  *               expiryDate:
  *                 type: string
  *                 format: date
+ *                 nullable: true
  *               contractTerm:
  *                 type: string
  *     responses:
@@ -2169,7 +2187,7 @@ api.put('/licenses/:id', async (req, res) => {
     name,
     platform,
     count,
-    expiryDate,
+    expiryDate || null,
     contractTerm
   );
   res.json({ success: true });
