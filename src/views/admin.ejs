@@ -6,7 +6,9 @@
     <%- include('partials/sidebar') %>
     <div class="content">
       <h1>Admin</h1>
-      <p><a href="/api-docs">API Docs</a></p>
+        <% if (isSuperAdmin) { %>
+        <p><a href="/api-docs">API Docs</a></p>
+        <% } %>
       <% if (isSuperAdmin) { %>
       <section>
         <h2>Add Company</h2>

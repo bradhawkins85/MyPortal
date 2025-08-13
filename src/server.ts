@@ -80,6 +80,11 @@ app.use(
   })
 );
 
+app.use((req, res, next) => {
+  res.locals.isSuperAdmin = req.session.userId === 1;
+  next();
+});
+
 const swaggerSpec = swaggerJSDoc({
   definition: {
     openapi: '3.0.0',
@@ -112,7 +117,7 @@ const swaggerSpec = swaggerJSDoc({
 app.use(
   '/swagger',
   ensureAuth,
-  ensureAdmin,
+  ensureSuperAdmin,
   swaggerUi.serve,
   swaggerUi.setup(swaggerSpec)
 );
@@ -140,7 +145,18 @@ async function ensureAdmin(
   return res.redirect('/');
 }
 
-app.get('/api-docs', ensureAuth, ensureAdmin, async (req, res) => {
+function ensureSuperAdmin(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  if (req.session.userId === 1) {
+    return next();
+  }
+  return res.redirect('/');
+}
+
+app.get('/api-docs', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('api-docs', {
@@ -397,7 +413,7 @@ app.post('/switch-company', ensureAuth, async (req, res) => {
   res.redirect('/');
 });
 
-app.get('/external-apis', ensureAuth, ensureAdmin, async (req, res) => {
+app.get('/external-apis', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
   const settings = req.session.companyId
     ? await getExternalApiSettings(req.session.companyId)
@@ -415,7 +431,7 @@ app.get('/external-apis', ensureAuth, ensureAdmin, async (req, res) => {
   });
 });
 
-app.post('/external-apis', ensureAuth, ensureAdmin, async (req, res) => {
+app.post('/external-apis', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { xeroEndpoint, xeroApiKey, syncroEndpoint, syncroApiKey } = req.body;
   if (req.session.companyId) {
     await upsertExternalApiSettings(
