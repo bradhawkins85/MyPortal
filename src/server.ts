@@ -148,7 +148,7 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
   const companies = await getAllCompanies();
   const users = await getAllUsers();
   const assignments = await getUserCompanyAssignments();
-  res.render('admin', { companies, users, assignments });
+  res.render('admin', { companies, users, assignments, isAdmin: true });
 });
 
 app.post('/admin/company', ensureAuth, ensureAdmin, async (req, res) => {
