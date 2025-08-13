@@ -1,0 +1,4 @@
+ALTER TABLE shop_orders
+  ADD COLUMN status VARCHAR(50) NOT NULL DEFAULT 'pending',
+  ADD COLUMN notes TEXT,
+  ADD COLUMN po_number VARCHAR(50);
