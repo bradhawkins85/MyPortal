@@ -571,6 +571,25 @@ app.post('/apps/price', ensureAuth, ensureSuperAdmin, async (req, res) => {
   res.redirect('/apps');
 });
 
+app.post('/apps/:appId/add', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const appId = parseInt(req.params.appId, 10);
+  const { companyId, quantity } = req.body;
+  const appInfo = await getAppById(appId);
+  if (!appInfo) {
+    res.status(404).send('App not found');
+    return;
+  }
+  await createLicense(
+    parseInt(companyId, 10),
+    appInfo.name,
+    appInfo.sku,
+    parseInt(quantity, 10),
+    null,
+    appInfo.contract_term
+  );
+  res.status(204).end();
+});
+
 app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
   const isSuperAdmin = req.session.userId === 1;
   let allCompanies: Company[] = [];
