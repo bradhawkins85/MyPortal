@@ -89,6 +89,9 @@ export interface OrderItem {
   product_id: number;
   quantity: number;
   order_date: Date;
+  status: string;
+  notes: string | null;
+  po_number: string | null;
   product_name: string;
   sku: string;
   description: string;
@@ -99,6 +102,9 @@ export interface OrderItem {
 export interface OrderSummary {
   order_number: string;
   order_date: Date;
+  status: string;
+  notes: string | null;
+  po_number: string | null;
 }
 
 export interface Asset {
@@ -966,14 +972,15 @@ export async function createOrder(
   companyId: number,
   productId: number,
   quantity: number,
-  orderNumber: string
+  orderNumber: string,
+  poNumber: string | null
 ): Promise<void> {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
     await conn.execute(
-      'INSERT INTO shop_orders (user_id, company_id, product_id, quantity, order_number) VALUES (?, ?, ?, ?, ?)',
-      [userId, companyId, productId, quantity, orderNumber]
+      'INSERT INTO shop_orders (user_id, company_id, product_id, quantity, order_number, status, notes, po_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [userId, companyId, productId, quantity, orderNumber, 'pending', null, poNumber]
     );
     await conn.execute(
       'UPDATE shop_products SET stock = stock - ? WHERE id = ?',
@@ -1007,7 +1014,8 @@ export async function getOrderSummariesByCompany(
   companyId: number
 ): Promise<OrderSummary[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT order_number, MAX(order_date) as order_date FROM shop_orders WHERE company_id = ? GROUP BY order_number ORDER BY order_date DESC',
+    `SELECT order_number, MAX(order_date) as order_date, MAX(status) as status, MAX(notes) as notes, MAX(po_number) as po_number
+     FROM shop_orders WHERE company_id = ? GROUP BY order_number ORDER BY order_date DESC`,
     [companyId]
   );
   return rows as OrderSummary[];
@@ -1053,6 +1061,18 @@ export async function deleteOrder(
   } finally {
     conn.release();
   }
+}
+
+export async function updateOrder(
+  orderNumber: string,
+  companyId: number,
+  status: string,
+  notes: string | null
+): Promise<void> {
+  await pool.execute(
+    'UPDATE shop_orders SET status = ?, notes = ? WHERE order_number = ? AND company_id = ?',
+    [status, notes, orderNumber, companyId]
+  );
 }
 
 export async function getExternalApiSettings(
