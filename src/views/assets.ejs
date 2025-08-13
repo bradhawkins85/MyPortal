@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+  <%- include('partials/head', { title: 'Assets' }) %>
+<body>
+  <div class="app-container">
+    <%- include('partials/sidebar') %>
+    <div class="content">
+      <h1>Assets</h1>
+      <section>
+        <h2>Company Assets</h2>
+        <table>
+          <tr><th>Name</th><th>Type</th><th>Serial Number</th><th>Status</th></tr>
+          <% assets.forEach(function(a) { %>
+            <tr>
+              <td><%= a.name %></td>
+              <td><%= a.type %></td>
+              <td><%= a.serial_number %></td>
+              <td><%= a.status %></td>
+            </tr>
+          <% }); %>
+        </table>
+      </section>
+    </div>
+  </div>
+</body>
+</html>
