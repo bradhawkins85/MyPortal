@@ -10,12 +10,12 @@
         <thead>
           <tr>
             <th>Name</th>
-            <th>Platform</th>
+            <th>SKU</th>
             <th>Count</th>
             <th>Allocated</th>
             <th>Expiry</th>
             <th>Contract Term</th>
-            <% if (canOrderLicenses) { %><th>Actions</th><% } %>
+            <% if (canOrderLicenses || isSuperAdmin) { %><th>Actions</th><% } %>
           </tr>
         </thead>
         <tbody>
@@ -27,10 +27,23 @@
             <td><a href="#" class="allocated-link" data-license-id="<%= lic.id %>"><%= lic.allocated %></a></td>
             <td><%= lic.expiry_date %></td>
             <td><%= lic.contract_term %></td>
-            <% if (canOrderLicenses) { %>
+            <% if (canOrderLicenses || isSuperAdmin) { %>
               <td>
-                <button class="order-btn" data-license-id="<%= lic.id %>">Order More</button>
-                <button class="remove-btn" data-license-id="<%= lic.id %>">Request Removal</button>
+                <% if (isSuperAdmin) { %>
+                  <button
+                    class="edit-btn"
+                    data-license-id="<%= lic.id %>"
+                    data-name="<%= lic.name %>"
+                    data-sku="<%= lic.platform %>"
+                    data-count="<%= lic.count %>"
+                    data-expiry-date="<%= lic.expiry_date %>"
+                    data-contract-term="<%= lic.contract_term %>"
+                  >Edit</button>
+                <% } %>
+                <% if (canOrderLicenses) { %>
+                  <button class="order-btn" data-license-id="<%= lic.id %>">Order More</button>
+                  <button class="remove-btn" data-license-id="<%= lic.id %>">Request Removal</button>
+                <% } %>
               </td>
             <% } %>
           </tr>
@@ -48,7 +61,38 @@
     </div>
   </div>
 
+  <div id="edit-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <span id="edit-close" class="close">&times;</span>
+      <h2>Edit License</h2>
+      <form id="edit-form">
+        <label>
+          Name
+          <input type="text" id="edit-name">
+        </label>
+        <label>
+          SKU
+          <input type="text" id="edit-sku">
+        </label>
+        <label>
+          Count
+          <input type="number" id="edit-count">
+        </label>
+        <label>
+          Expiry
+          <input type="date" id="edit-expiry">
+        </label>
+        <label>
+          Contract Term
+          <input type="text" id="edit-contract">
+        </label>
+        <button type="submit">Save</button>
+      </form>
+    </div>
+  </div>
+
   <script>
+    const currentCompanyId = <%= currentCompanyId %>;
     document.querySelectorAll('.allocated-link').forEach(function (link) {
       link.addEventListener('click', async function (e) {
         e.preventDefault();
@@ -101,6 +145,48 @@
         });
         alert('Removal requested');
       });
+    });
+
+    const editModal = document.getElementById('edit-modal');
+    const editForm = document.getElementById('edit-form');
+    let editingId = null;
+
+    document.querySelectorAll('.edit-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        editingId = this.dataset.licenseId;
+        document.getElementById('edit-name').value = this.dataset.name;
+        document.getElementById('edit-sku').value = this.dataset.sku;
+        document.getElementById('edit-count').value = this.dataset.count;
+        document.getElementById('edit-expiry').value = this.dataset.expiryDate;
+        document.getElementById('edit-contract').value = this.dataset.contractTerm;
+        editModal.style.display = 'flex';
+      });
+    });
+
+    document.getElementById('edit-close').addEventListener('click', function () {
+      editModal.style.display = 'none';
+    });
+
+    editForm.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      const payload = {
+        companyId: currentCompanyId,
+        name: document.getElementById('edit-name').value,
+        platform: document.getElementById('edit-sku').value,
+        count: parseInt(document.getElementById('edit-count').value, 10),
+        expiryDate: document.getElementById('edit-expiry').value,
+        contractTerm: document.getElementById('edit-contract').value,
+      };
+      const res = await fetch(`/api/licenses/${editingId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        location.reload();
+      } else {
+        alert('Failed to update license');
+      }
     });
   </script>
 </body>
