@@ -694,13 +694,13 @@ app.post('/cart/place-order', ensureAuth, ensureShopAccess, async (req, res) => 
   const { poNumber } = req.body;
   if (req.session.companyId && req.session.cart && req.session.cart.length > 0) {
     const settings = await getExternalApiSettings(req.session.companyId);
-    if (settings?.webhook_url && settings?.webhook_api_key) {
+    if (settings?.shop_webhook_url && settings?.shop_webhook_api_key) {
       try {
-        await fetch(settings.webhook_url, {
+        await fetch(settings.shop_webhook_url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': settings.webhook_api_key,
+            'x-api-key': settings.shop_webhook_api_key,
           },
           body: JSON.stringify({ cart: req.session.cart }),
         });
@@ -966,6 +966,8 @@ app.post('/external-apis', ensureAuth, ensureSuperAdmin, async (req, res) => {
     syncroApiKey,
     webhookUrl,
     webhookApiKey,
+    shopWebhookUrl,
+    shopWebhookApiKey,
   } = req.body;
   if (req.session.companyId) {
     await upsertExternalApiSettings(
@@ -975,7 +977,9 @@ app.post('/external-apis', ensureAuth, ensureSuperAdmin, async (req, res) => {
       syncroEndpoint,
       syncroApiKey,
       webhookUrl,
-      webhookApiKey
+      webhookApiKey,
+      shopWebhookUrl,
+      shopWebhookApiKey
     );
   }
   res.redirect('/external-apis');
@@ -1857,13 +1861,13 @@ api
     const pId = parseInt(productId, 10);
     const qty = parseInt(quantity, 10);
     const settings = await getExternalApiSettings(cId);
-    if (settings?.webhook_url && settings.webhook_api_key) {
+    if (settings?.shop_webhook_url && settings.shop_webhook_api_key) {
       try {
-        await fetch(settings.webhook_url, {
+        await fetch(settings.shop_webhook_url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': settings.webhook_api_key,
+            'x-api-key': settings.shop_webhook_api_key,
           },
           body: JSON.stringify({
             userId: uId,

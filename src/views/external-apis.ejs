@@ -16,6 +16,9 @@
         <h2>License Orders Webhook</h2>
         <input type="text" name="webhookUrl" placeholder="Webhook URL" value="<%= settings ? settings.webhook_url : '' %>">
         <input type="text" name="webhookApiKey" placeholder="Webhook API Key" value="<%= settings ? settings.webhook_api_key : '' %>">
+        <h2>Shop Orders Webhook</h2>
+        <input type="text" name="shopWebhookUrl" placeholder="Shop Webhook URL" value="<%= settings ? settings.shop_webhook_url : '' %>">
+        <input type="text" name="shopWebhookApiKey" placeholder="Shop Webhook API Key" value="<%= settings ? settings.shop_webhook_api_key : '' %>">
         <button type="submit">Save</button>
       </form>
     </div>
