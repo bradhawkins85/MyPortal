@@ -12,6 +12,7 @@ export interface Company {
   id: number;
   name: string;
   address?: string;
+  is_vip?: number;
 }
 
 export interface License {
@@ -51,6 +52,7 @@ export interface UserCompany {
   is_admin: number;
   company_name?: string;
   email?: string;
+  is_vip?: number;
 }
 
 export interface Product {
@@ -61,6 +63,7 @@ export interface Product {
   description: string;
   image_url: string | null;
   price: number;
+  vip_price: number | null;
   stock: number;
 }
 
@@ -136,7 +139,8 @@ export async function getUserByEmail(email: string): Promise<User | null> {
 
 export async function getCompanyById(id: number): Promise<Company | null> {
   const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM companies WHERE id = ?', [id]);
-  return (rows as Company[])[0] || null;
+  const row = (rows as RowDataPacket[])[0];
+  return row ? ({ ...(row as any), is_vip: Number(row.is_vip) } as Company) : null;
 }
 
 export async function getLicensesByCompany(companyId: number): Promise<License[]> {
@@ -268,13 +272,17 @@ export async function getUserCount(): Promise<number> {
   return (rows[0] as { count: number }).count;
 }
 
-export async function createCompany(name: string, address?: string): Promise<number> {
+export async function createCompany(name: string, address?: string, isVip = false): Promise<number> {
   const [result] = await pool.execute(
-    'INSERT INTO companies (name, address) VALUES (?, ?)',
-    [name, address || null]
+    'INSERT INTO companies (name, address, is_vip) VALUES (?, ?, ?)',
+    [name, address || null, isVip ? 1 : 0]
   );
   const insert = result as ResultSetHeader;
   return insert.insertId;
+}
+
+export async function updateCompanyVipStatus(id: number, isVip: boolean): Promise<void> {
+  await pool.execute('UPDATE companies SET is_vip = ? WHERE id = ?', [isVip ? 1 : 0, id]);
 }
 
 export async function createUser(
@@ -308,7 +316,10 @@ export async function createLicense(
 
 export async function getAllCompanies(): Promise<Company[]> {
   const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM companies');
-  return rows as Company[];
+  return (rows as RowDataPacket[]).map((row) => ({
+    ...(row as any),
+    is_vip: Number(row.is_vip),
+  })) as Company[];
 }
 
 export async function getAllUsers(): Promise<User[]> {
@@ -323,16 +334,19 @@ export async function getUserById(id: number): Promise<User | null> {
 
 export async function getCompaniesForUser(userId: number): Promise<UserCompany[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.can_access_shop, uc.is_admin, c.name AS company_name
+    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.can_access_shop, uc.is_admin, c.name AS company_name, c.is_vip AS is_vip
      FROM user_companies uc JOIN companies c ON uc.company_id = c.id
      WHERE uc.user_id = ?`,
     [userId]
   );
-  return rows as UserCompany[];
+  return (rows as RowDataPacket[]).map((row) => ({
+    ...(row as any),
+    is_vip: Number(row.is_vip),
+  })) as UserCompany[];
 }
 
 export async function getUserCompanyAssignments(companyId?: number): Promise<UserCompany[]> {
-  let sql = `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.can_access_shop, uc.is_admin, c.name AS company_name, u.email
+  let sql = `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.can_access_shop, uc.is_admin, c.name AS company_name, c.is_vip AS is_vip, u.email
      FROM user_companies uc
      JOIN users u ON uc.user_id = u.id
      JOIN companies c ON uc.company_id = c.id`;
@@ -343,7 +357,10 @@ export async function getUserCompanyAssignments(companyId?: number): Promise<Use
   }
   sql += ' ORDER BY u.email, c.name';
   const [rows] = await pool.query<RowDataPacket[]>(sql, params);
-  return rows as UserCompany[];
+  return (rows as RowDataPacket[]).map((row) => ({
+    ...(row as any),
+    is_vip: Number(row.is_vip),
+  })) as UserCompany[];
 }
 
 export async function assignUserToCompany(
@@ -669,7 +686,11 @@ export async function getAllProducts(): Promise<Product[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
     'SELECT * FROM shop_products'
   );
-  return rows as Product[];
+  return (rows as RowDataPacket[]).map((row) => ({
+    ...(row as any),
+    price: Number(row.price),
+    vip_price: row.vip_price !== null ? Number(row.vip_price) : null,
+  })) as Product[];
 }
 
 export async function getProductById(id: number): Promise<Product | null> {
@@ -677,7 +698,14 @@ export async function getProductById(id: number): Promise<Product | null> {
     'SELECT * FROM shop_products WHERE id = ?',
     [id]
   );
-  return (rows as Product[])[0] || null;
+  const row = (rows as RowDataPacket[])[0];
+  return row
+    ? ({
+        ...(row as any),
+        price: Number(row.price),
+        vip_price: row.vip_price !== null ? Number(row.vip_price) : null,
+      } as Product)
+    : null;
 }
 
 export async function getProductBySku(sku: string): Promise<Product | null> {
@@ -685,7 +713,14 @@ export async function getProductBySku(sku: string): Promise<Product | null> {
     'SELECT * FROM shop_products WHERE sku = ?',
     [sku]
   );
-  return (rows as Product[])[0] || null;
+  const row = (rows as RowDataPacket[])[0];
+  return row
+    ? ({
+        ...(row as any),
+        price: Number(row.price),
+        vip_price: row.vip_price !== null ? Number(row.vip_price) : null,
+      } as Product)
+    : null;
 }
 
 export async function createProduct(
@@ -695,11 +730,12 @@ export async function createProduct(
   description: string,
   imageUrl: string | null,
   price: number,
+  vipPrice: number | null,
   stock: number
 ): Promise<number> {
   const [result] = await pool.execute<ResultSetHeader>(
-    'INSERT INTO shop_products (name, sku, vendor_sku, description, image_url, price, stock) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [name, sku, vendorSku, description, imageUrl, price, stock]
+    'INSERT INTO shop_products (name, sku, vendor_sku, description, image_url, price, vip_price, stock) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [name, sku, vendorSku, description, imageUrl, price, vipPrice, stock]
   );
   return (result as ResultSetHeader).insertId;
 }
@@ -712,11 +748,12 @@ export async function updateProduct(
   description: string,
   imageUrl: string | null,
   price: number,
+  vipPrice: number | null,
   stock: number
 ): Promise<void> {
   await pool.execute(
-    'UPDATE shop_products SET name = ?, sku = ?, vendor_sku = ?, description = ?, image_url = IFNULL(?, image_url), price = ?, stock = ? WHERE id = ?',
-    [name, sku, vendorSku, description, imageUrl, price, stock, id]
+    'UPDATE shop_products SET name = ?, sku = ?, vendor_sku = ?, description = ?, image_url = IFNULL(?, image_url), price = ?, vip_price = ?, stock = ? WHERE id = ?',
+    [name, sku, vendorSku, description, imageUrl, price, vipPrice, stock, id]
   );
 }
 
@@ -753,7 +790,11 @@ export async function createOrder(
 
 export async function getOrdersByCompany(companyId: number): Promise<OrderItem[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT o.*, p.name as product_name, p.price, p.sku, p.description, p.image_url FROM shop_orders o JOIN shop_products p ON o.product_id = p.id WHERE o.company_id = ?',
+    `SELECT o.*, p.name as product_name, IF(c.is_vip = 1 AND p.vip_price IS NOT NULL, p.vip_price, p.price) AS price, p.sku, p.description, p.image_url
+     FROM shop_orders o
+     JOIN shop_products p ON o.product_id = p.id
+     JOIN companies c ON o.company_id = c.id
+     WHERE o.company_id = ?`,
     [companyId]
   );
   return (rows as RowDataPacket[]).map((row) => ({
@@ -777,7 +818,11 @@ export async function getOrderItems(
   companyId: number
 ): Promise<OrderItem[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT o.*, p.name as product_name, p.price, p.sku, p.description, p.image_url FROM shop_orders o JOIN shop_products p ON o.product_id = p.id WHERE o.order_number = ? AND o.company_id = ?',
+    `SELECT o.*, p.name as product_name, IF(c.is_vip = 1 AND p.vip_price IS NOT NULL, p.vip_price, p.price) AS price, p.sku, p.description, p.image_url
+     FROM shop_orders o
+     JOIN shop_products p ON o.product_id = p.id
+     JOIN companies c ON o.company_id = c.id
+     WHERE o.order_number = ? AND o.company_id = ?`,
     [orderNumber, companyId]
   );
   return (rows as RowDataPacket[]).map((row) => ({
