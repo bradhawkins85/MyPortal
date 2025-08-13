@@ -58,7 +58,8 @@ import {
   getProductById,
   getProductBySku,
   updateProduct,
-  deleteProduct,
+  archiveProduct,
+  unarchiveProduct,
   createOrder,
   getOrdersByCompany,
   getOrderSummariesByCompany,
@@ -728,11 +729,13 @@ app.get('/orders/:orderNumber', ensureAuth, ensureShopAccess, async (req, res) =
 });
 
 app.get('/shop/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const products = await getAllProducts();
+  const includeArchived = req.query.showArchived === '1';
+  const products = await getAllProducts(includeArchived);
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('shop-admin', {
     products,
+    showArchived: includeArchived,
     companies,
     currentCompanyId: req.session.companyId,
     isAdmin: true,
@@ -790,9 +793,14 @@ app.post(
   }
 );
 
-app.post('/shop/admin/product/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  await deleteProduct(parseInt(req.params.id, 10));
+app.post('/shop/admin/product/:id/archive', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  await archiveProduct(parseInt(req.params.id, 10));
   res.redirect('/shop/admin');
+});
+
+app.post('/shop/admin/product/:id/unarchive', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  await unarchiveProduct(parseInt(req.params.id, 10));
+  res.redirect('/shop/admin?showArchived=1');
 });
 
 app.post('/switch-company', ensureAuth, async (req, res) => {
@@ -1294,7 +1302,8 @@ api.route('/apps/:id')
  */
 api.route('/shop/products')
   .get(async (req, res) => {
-    const products = await getAllProducts();
+    const includeArchived = req.query.includeArchived === '1';
+    const products = await getAllProducts(includeArchived);
     res.json(products);
   })
   .post(upload.single('image'), async (req, res) => {
@@ -1403,7 +1412,8 @@ api.route('/shop/products')
  */
 api.route('/shop/products/:id')
   .get(async (req, res) => {
-    const product = await getProductById(parseInt(req.params.id, 10));
+    const includeArchived = req.query.includeArchived === '1';
+    const product = await getProductById(parseInt(req.params.id, 10), includeArchived);
     if (!product) {
       return res.status(404).json({ error: 'Product not found' });
     }
@@ -1426,7 +1436,7 @@ api.route('/shop/products/:id')
     res.json({ success: true });
   })
   .delete(async (req, res) => {
-    await deleteProduct(parseInt(req.params.id, 10));
+    await archiveProduct(parseInt(req.params.id, 10));
     res.json({ success: true });
   });
 
@@ -1471,7 +1481,8 @@ api.route('/shop/products/:id')
  *         description: Product not found
  */
 api.get('/shop/products/sku/:sku', async (req, res) => {
-  const product = await getProductBySku(req.params.sku);
+  const includeArchived = req.query.includeArchived === '1';
+  const product = await getProductBySku(req.params.sku, includeArchived);
   if (!product) {
     return res.status(404).json({ error: 'Product not found' });
   }
