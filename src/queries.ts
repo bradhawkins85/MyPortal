@@ -342,6 +342,19 @@ export async function unlinkStaffFromLicense(
   ]);
 }
 
+export async function getStaffForLicense(
+  licenseId: number
+): Promise<Staff[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT s.*
+     FROM staff s
+     JOIN staff_licenses sl ON s.id = sl.staff_id
+     WHERE sl.license_id = ?`,
+    [licenseId]
+  );
+  return rows as Staff[];
+}
+
 export async function createApiKey(
   apiKey: string,
   description: string,

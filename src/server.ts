@@ -39,6 +39,7 @@ import {
   unassignUserFromCompany,
   linkStaffToLicense,
   unlinkStaffFromLicense,
+  getStaffForLicense,
   getApiKeys,
   createApiKey,
   deleteApiKey,
@@ -237,6 +238,21 @@ app.get('/licenses', ensureAuth, ensureLicenseAccess, async (req, res) => {
     canManageStaff: current?.can_manage_staff ?? 0,
   });
 });
+
+app.get(
+  '/licenses/:id/allocated',
+  ensureAuth,
+  ensureLicenseAccess,
+  async (req, res) => {
+    const licenseId = parseInt(req.params.id, 10);
+    const license = await getLicenseById(licenseId);
+    if (!license || license.company_id !== req.session.companyId) {
+      return res.status(404).json({ error: 'License not found' });
+    }
+    const staff = await getStaffForLicense(licenseId);
+    res.json(staff);
+  }
+);
 
 app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);

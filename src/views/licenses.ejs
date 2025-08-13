@@ -23,7 +23,7 @@
             <td><%= lic.name %></td>
             <td><%= lic.platform %></td>
             <td><%= lic.count %></td>
-            <td><%= lic.allocated %></td>
+            <td><a href="#" class="allocated-link" data-license-id="<%= lic.id %>"><%= lic.allocated %></a></td>
             <td><%= lic.expiry_date %></td>
             <td><%= lic.contract_term %></td>
           </tr>
@@ -32,5 +32,43 @@
       </table>
     </div>
   </div>
+
+  <div id="allocated-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <span id="allocated-close" class="close">&times;</span>
+      <h2>Allocated Users</h2>
+      <ul id="allocated-users"></ul>
+    </div>
+  </div>
+
+  <script>
+    document.querySelectorAll('.allocated-link').forEach(function (link) {
+      link.addEventListener('click', async function (e) {
+        e.preventDefault();
+        const id = this.dataset.licenseId;
+        const res = await fetch(`/licenses/${id}/allocated`);
+        if (!res.ok) return;
+        const users = await res.json();
+        const list = document.getElementById('allocated-users');
+        list.innerHTML = '';
+        if (users.length === 0) {
+          const li = document.createElement('li');
+          li.textContent = 'No users allocated';
+          list.appendChild(li);
+        } else {
+          users.forEach(function (u) {
+            const li = document.createElement('li');
+            li.textContent = `${u.first_name} ${u.last_name} (${u.email})`;
+            list.appendChild(li);
+          });
+        }
+        document.getElementById('allocated-modal').style.display = 'flex';
+      });
+    });
+
+    document.getElementById('allocated-close').addEventListener('click', function () {
+      document.getElementById('allocated-modal').style.display = 'none';
+    });
+  </script>
 </body>
 </html>
