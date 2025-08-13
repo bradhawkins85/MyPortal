@@ -772,6 +772,10 @@ export async function unarchiveProduct(id: number): Promise<void> {
   await pool.execute('UPDATE shop_products SET archived = 0 WHERE id = ?', [id]);
 }
 
+export async function deleteProduct(id: number): Promise<void> {
+  await pool.execute('DELETE FROM shop_products WHERE id = ?', [id]);
+}
+
 export async function createOrder(
   userId: number,
   companyId: number,
