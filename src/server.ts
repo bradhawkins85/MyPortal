@@ -475,7 +475,7 @@ app.put('/licenses/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
     name,
     platform,
     count,
-    expiryDate,
+    expiryDate || null,
     contractTerm
   );
   res.json({ success: true });
@@ -2172,6 +2172,7 @@ api.get('/licenses/:id', async (req, res) => {
  *               expiryDate:
  *                 type: string
  *                 format: date
+ *                 nullable: true
  *               contractTerm:
  *                 type: string
  *     responses:
@@ -2186,7 +2187,7 @@ api.put('/licenses/:id', async (req, res) => {
     name,
     platform,
     count,
-    expiryDate,
+    expiryDate || null,
     contractTerm
   );
   res.json({ success: true });
