@@ -30,8 +30,36 @@ export interface UserCompany {
   company_id: number;
   can_manage_licenses: number;
   can_manage_staff: number;
+  can_manage_assets: number;
+  can_manage_invoices: number;
   company_name?: string;
   email?: string;
+}
+
+export interface Asset {
+  id: number;
+  company_id: number;
+  name: string;
+  type: string;
+  serial_number: string;
+  status: string;
+}
+
+export interface Invoice {
+  id: number;
+  company_id: number;
+  invoice_number: string;
+  amount: number;
+  due_date: string;
+  status: string;
+}
+
+export interface ExternalApiSettings {
+  company_id: number;
+  xero_endpoint: string | null;
+  xero_api_key: string | null;
+  syncro_endpoint: string | null;
+  syncro_api_key: string | null;
 }
 
 export interface Staff {
@@ -155,7 +183,7 @@ export async function getUserById(id: number): Promise<User | null> {
 
 export async function getCompaniesForUser(userId: number): Promise<UserCompany[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, c.name AS company_name
+    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, c.name AS company_name
      FROM user_companies uc JOIN companies c ON uc.company_id = c.id
      WHERE uc.user_id = ?`,
     [userId]
@@ -165,7 +193,7 @@ export async function getCompaniesForUser(userId: number): Promise<UserCompany[]
 
 export async function getUserCompanyAssignments(): Promise<UserCompany[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, c.name AS company_name, u.email
+    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, c.name AS company_name, u.email
      FROM user_companies uc
      JOIN users u ON uc.user_id = u.id
      JOIN companies c ON uc.company_id = c.id
@@ -178,20 +206,33 @@ export async function assignUserToCompany(
   userId: number,
   companyId: number,
   canManageLicenses: boolean,
-  canManageStaff: boolean
+  canManageStaff: boolean,
+  canManageAssets: boolean,
+  canManageInvoices: boolean
 ): Promise<void> {
   await pool.execute(
-    `INSERT INTO user_companies (user_id, company_id, can_manage_licenses, can_manage_staff)
-     VALUES (?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE can_manage_licenses = VALUES(can_manage_licenses), can_manage_staff = VALUES(can_manage_staff)`,
-    [userId, companyId, canManageLicenses ? 1 : 0, canManageStaff ? 1 : 0]
+    `INSERT INTO user_companies (user_id, company_id, can_manage_licenses, can_manage_staff, can_manage_assets, can_manage_invoices)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE can_manage_licenses = VALUES(can_manage_licenses), can_manage_staff = VALUES(can_manage_staff), can_manage_assets = VALUES(can_manage_assets), can_manage_invoices = VALUES(can_manage_invoices)`,
+    [
+      userId,
+      companyId,
+      canManageLicenses ? 1 : 0,
+      canManageStaff ? 1 : 0,
+      canManageAssets ? 1 : 0,
+      canManageInvoices ? 1 : 0,
+    ]
   );
 }
 
 export async function updateUserCompanyPermission(
   userId: number,
   companyId: number,
-  field: 'can_manage_licenses' | 'can_manage_staff',
+  field:
+    | 'can_manage_licenses'
+    | 'can_manage_staff'
+    | 'can_manage_assets'
+    | 'can_manage_invoices',
   value: boolean
 ): Promise<void> {
   await pool.execute(
@@ -381,4 +422,71 @@ export async function getApiKeyRecord(apiKey: string): Promise<ApiKey | null> {
     [apiKey]
   );
   return (rows as ApiKey[])[0] || null;
+}
+
+export async function getAssetsByCompany(companyId: number): Promise<Asset[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM assets WHERE company_id = ?',
+    [companyId]
+  );
+  return rows as Asset[];
+}
+
+export async function upsertAsset(
+  companyId: number,
+  name: string,
+  type: string,
+  serialNumber: string,
+  status: string
+): Promise<void> {
+  await pool.execute(
+    'INSERT INTO assets (company_id, name, type, serial_number, status) VALUES (?, ?, ?, ?, ?)',
+    [companyId, name, type, serialNumber, status]
+  );
+}
+
+export async function getInvoicesByCompany(companyId: number): Promise<Invoice[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM invoices WHERE company_id = ?',
+    [companyId]
+  );
+  return rows as Invoice[];
+}
+
+export async function upsertInvoice(
+  companyId: number,
+  invoiceNumber: string,
+  amount: number,
+  dueDate: string,
+  status: string
+): Promise<void> {
+  await pool.execute(
+    'INSERT INTO invoices (company_id, invoice_number, amount, due_date, status) VALUES (?, ?, ?, ?, ?)',
+    [companyId, invoiceNumber, amount, dueDate, status]
+  );
+}
+
+export async function getExternalApiSettings(
+  companyId: number
+): Promise<ExternalApiSettings | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM external_api_settings WHERE company_id = ?',
+    [companyId]
+  );
+  return (rows as ExternalApiSettings[])[0] || null;
+}
+
+export async function upsertExternalApiSettings(
+  companyId: number,
+  xeroEndpoint: string,
+  xeroApiKey: string,
+  syncroEndpoint: string,
+  syncroApiKey: string
+): Promise<void> {
+  await pool.execute(
+    `INSERT INTO external_api_settings (company_id, xero_endpoint, xero_api_key, syncro_endpoint, syncro_api_key)
+     VALUES (?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE xero_endpoint = VALUES(xero_endpoint), xero_api_key = VALUES(xero_api_key), syncro_endpoint = VALUES(syncro_endpoint), syncro_api_key = VALUES(syncro_api_key)`,
+    [companyId, xeroEndpoint, xeroApiKey, syncroEndpoint, syncroApiKey]
+  );
 }

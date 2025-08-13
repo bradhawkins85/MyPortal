@@ -44,6 +44,12 @@ import {
   createApiKey,
   deleteApiKey,
   getApiKeyRecord,
+  getAssetsByCompany,
+  getInvoicesByCompany,
+  upsertAsset,
+  upsertInvoice,
+  getExternalApiSettings,
+  upsertExternalApiSettings,
 } from './queries';
 import { runMigrations } from './db';
 
@@ -76,6 +82,8 @@ const swaggerSpec = swaggerJSDoc({
       { name: 'Users' },
       { name: 'Licenses' },
       { name: 'Staff' },
+      { name: 'Assets' },
+      { name: 'Invoices' },
     ],
     components: {
       securitySchemes: {
@@ -122,6 +130,8 @@ app.get('/api-docs', ensureAuth, ensureAdmin, async (req, res) => {
     isAdmin: true,
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
   });
 });
 
@@ -166,7 +176,7 @@ app.post('/register', async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
     const companyId = await createCompany(company);
     const userId = await createUser(email, passwordHash, companyId);
-    await assignUserToCompany(userId, companyId, true, true);
+    await assignUserToCompany(userId, companyId, true, true, true, true);
     req.session.userId = userId;
     req.session.companyId = companyId;
     res.redirect('/');
@@ -197,6 +207,8 @@ app.get('/', ensureAuth, async (req, res) => {
     isAdmin: req.session.userId === 1,
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
   });
 });
 
@@ -225,6 +237,32 @@ async function ensureStaffAccess(
   }
   return res.redirect('/');
 }
+
+async function ensureAssetsAccess(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  if (current && current.can_manage_assets) {
+    return next();
+  }
+  return res.redirect('/');
+}
+
+async function ensureInvoicesAccess(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  if (current && current.can_manage_invoices) {
+    return next();
+  }
+  return res.redirect('/');
+}
 app.get('/licenses', ensureAuth, ensureLicenseAccess, async (req, res) => {
   const licenses = await getLicensesByCompany(req.session.companyId!);
   const companies = await getCompaniesForUser(req.session.userId!);
@@ -236,6 +274,8 @@ app.get('/licenses', ensureAuth, ensureLicenseAccess, async (req, res) => {
     currentCompanyId: req.session.companyId,
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
   });
 });
 
@@ -267,6 +307,8 @@ app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
     isAdmin: req.session.userId === 1,
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
   });
 });
 
@@ -291,6 +333,42 @@ app.post('/staff/enabled', ensureAuth, ensureStaffAccess, async (req, res) => {
   res.redirect('/staff');
 });
 
+app.get('/assets', ensureAuth, ensureAssetsAccess, async (req, res) => {
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const assets = req.session.companyId
+    ? await getAssetsByCompany(req.session.companyId)
+    : [];
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  res.render('assets', {
+    assets,
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: req.session.userId === 1,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+  });
+});
+
+app.get('/invoices', ensureAuth, ensureInvoicesAccess, async (req, res) => {
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const invoices = req.session.companyId
+    ? await getInvoicesByCompany(req.session.companyId)
+    : [];
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  res.render('invoices', {
+    invoices,
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: req.session.userId === 1,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+  });
+});
+
 app.post('/switch-company', ensureAuth, async (req, res) => {
   const { companyId } = req.body;
   const companies = await getCompaniesForUser(req.session.userId!);
@@ -298,6 +376,38 @@ app.post('/switch-company', ensureAuth, async (req, res) => {
     req.session.companyId = parseInt(companyId, 10);
   }
   res.redirect('/');
+});
+
+app.get('/external-apis', ensureAuth, ensureAdmin, async (req, res) => {
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const settings = req.session.companyId
+    ? await getExternalApiSettings(req.session.companyId)
+    : null;
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  res.render('external-apis', {
+    settings,
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: true,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+  });
+});
+
+app.post('/external-apis', ensureAuth, ensureAdmin, async (req, res) => {
+  const { xeroEndpoint, xeroApiKey, syncroEndpoint, syncroApiKey } = req.body;
+  if (req.session.companyId) {
+    await upsertExternalApiSettings(
+      req.session.companyId,
+      xeroEndpoint,
+      xeroApiKey,
+      syncroEndpoint,
+      syncroApiKey
+    );
+  }
+  res.redirect('/external-apis');
 });
 
 app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
@@ -317,6 +427,8 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     currentCompanyId: req.session.companyId,
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
   });
 });
 
@@ -330,7 +442,7 @@ app.post('/admin/user', ensureAuth, ensureAdmin, async (req, res) => {
   const { email, password, companyId } = req.body;
   const passwordHash = await bcrypt.hash(password, 10);
   const userId = await createUser(email, passwordHash, parseInt(companyId, 10));
-  await assignUserToCompany(userId, parseInt(companyId, 10), false, false);
+  await assignUserToCompany(userId, parseInt(companyId, 10), false, false, false, false);
   res.redirect('/admin');
 });
 
@@ -353,6 +465,8 @@ app.post('/admin/assign', ensureAuth, ensureAdmin, async (req, res) => {
     parseInt(userId, 10),
     parseInt(companyId, 10),
     false,
+    false,
+    false,
     false
   );
   res.redirect('/admin');
@@ -366,7 +480,14 @@ function parseCheckbox(value: unknown): boolean {
 }
 
 app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
-  const { userId, companyId, canManageLicenses, canManageStaff } = req.body;
+  const {
+    userId,
+    companyId,
+    canManageLicenses,
+    canManageStaff,
+    canManageAssets,
+    canManageInvoices,
+  } = req.body;
   const uid = parseInt(userId, 10);
   const cid = parseInt(companyId, 10);
   if (typeof canManageLicenses !== 'undefined') {
@@ -383,6 +504,22 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
       cid,
       'can_manage_staff',
       parseCheckbox(canManageStaff)
+    );
+  }
+  if (typeof canManageAssets !== 'undefined') {
+    await updateUserCompanyPermission(
+      uid,
+      cid,
+      'can_manage_assets',
+      parseCheckbox(canManageAssets)
+    );
+  }
+  if (typeof canManageInvoices !== 'undefined') {
+    await updateUserCompanyPermission(
+      uid,
+      cid,
+      'can_manage_invoices',
+      parseCheckbox(canManageInvoices)
     );
   }
   res.redirect('/admin');
@@ -1191,17 +1328,23 @@ api.delete('/staff/:id', async (req, res) => {
  *                 type: boolean
  *               canManageStaff:
  *                 type: boolean
+ *               canManageAssets:
+ *                 type: boolean
+ *               canManageInvoices:
+ *                 type: boolean
  *     responses:
  *       200:
  *         description: Assignment successful
  */
 api.post('/companies/:companyId/users/:userId', async (req, res) => {
-  const { canManageLicenses, canManageStaff } = req.body;
+  const { canManageLicenses, canManageStaff, canManageAssets, canManageInvoices } = req.body;
   await assignUserToCompany(
     parseInt(req.params.userId, 10),
     parseInt(req.params.companyId, 10),
     !!canManageLicenses,
-    !!canManageStaff
+    !!canManageStaff,
+    !!canManageAssets,
+    !!canManageInvoices
   );
   res.json({ success: true });
 });
@@ -1292,6 +1435,131 @@ api.delete('/licenses/:licenseId/staff/:staffId', async (req, res) => {
   await unlinkStaffFromLicense(
     parseInt(req.params.staffId, 10),
     parseInt(req.params.licenseId, 10)
+  );
+  res.json({ success: true });
+});
+
+/**
+ * @openapi
+ * /api/companies/{companyId}/assets:
+ *   get:
+ *     tags:
+ *       - Assets
+ *     summary: List assets for a company
+ *     parameters:
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: List of assets
+ *   post:
+ *     tags:
+ *       - Assets
+ *     summary: Add an asset to a company
+ *     parameters:
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               type:
+ *                 type: string
+ *               serialNumber:
+ *                 type: string
+ *               status:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Asset saved
+ */
+api.get('/companies/:companyId/assets', async (req, res) => {
+  const assets = await getAssetsByCompany(parseInt(req.params.companyId, 10));
+  res.json(assets);
+});
+
+api.post('/companies/:companyId/assets', async (req, res) => {
+  const { name, type, serialNumber, status } = req.body;
+  await upsertAsset(
+    parseInt(req.params.companyId, 10),
+    name,
+    type,
+    serialNumber,
+    status
+  );
+  res.json({ success: true });
+});
+
+/**
+ * @openapi
+ * /api/companies/{companyId}/invoices:
+ *   get:
+ *     tags:
+ *       - Invoices
+ *     summary: List invoices for a company
+ *     parameters:
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: List of invoices
+ *   post:
+ *     tags:
+ *       - Invoices
+ *     summary: Add an invoice to a company
+ *     parameters:
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               invoiceNumber:
+ *                 type: string
+ *               amount:
+ *                 type: number
+ *               dueDate:
+ *                 type: string
+ *                 format: date
+ *               status:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Invoice saved
+ */
+api.get('/companies/:companyId/invoices', async (req, res) => {
+  const invoices = await getInvoicesByCompany(parseInt(req.params.companyId, 10));
+  res.json(invoices);
+});
+
+api.post('/companies/:companyId/invoices', async (req, res) => {
+  const { invoiceNumber, amount, dueDate, status } = req.body;
+  await upsertInvoice(
+    parseInt(req.params.companyId, 10),
+    invoiceNumber,
+    amount,
+    dueDate,
+    status
   );
   res.json({ success: true });
 });
