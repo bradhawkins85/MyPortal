@@ -14,6 +14,8 @@
         <h2>Add Company</h2>
         <form action="/admin/company" method="post">
           <input type="text" name="name" placeholder="Company Name" required>
+          <input type="text" name="syncroCompanyId" placeholder="Syncro Company ID">
+          <input type="text" name="xeroId" placeholder="Xero ID">
           <label><input type="checkbox" name="isVip" value="1"> VIP</label>
           <button type="submit">Add</button>
         </form>
@@ -21,15 +23,19 @@
       <section>
         <h2>Companies</h2>
         <table>
-          <thead><tr><th>Name</th><th>VIP</th></tr></thead>
+          <thead>
+            <tr><th>Name</th><th>Syncro Company ID</th><th>Xero ID</th><th>VIP</th><th></th></tr>
+          </thead>
           <tbody>
             <% allCompanies.forEach(function(c) { %>
               <tr>
                 <td><%= c.name %></td>
+                <td><input type="text" name="syncroCompanyId" value="<%= c.syncro_company_id || '' %>" form="c<%= c.id %>"></td>
+                <td><input type="text" name="xeroId" value="<%= c.xero_id || '' %>" form="c<%= c.id %>"></td>
+                <td><input type="checkbox" name="isVip" value="1" <%= c.is_vip ? 'checked' : '' %> form="c<%= c.id %>"></td>
                 <td>
-                  <form action="/admin/company/<%= c.id %>/vip" method="post">
-                    <input type="hidden" name="isVip" value="0">
-                    <input type="checkbox" name="isVip" value="1" <%= c.is_vip ? 'checked' : '' %> onchange="this.form.submit()">
+                  <form id="c<%= c.id %>" action="/admin/company/<%= c.id %>" method="post">
+                    <button type="submit">Save</button>
                   </form>
                 </td>
               </tr>
