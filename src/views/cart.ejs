@@ -43,6 +43,7 @@
         </form>
         <form action="/cart/place-order" method="post">
           <p>Total: $<%= total.toFixed(2) %></p>
+          <label>PO Number: <input type="text" name="poNumber" /></label>
           <button type="submit">Place Order</button>
         </form>
       <% } %>
