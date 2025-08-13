@@ -73,6 +73,9 @@ export interface OrderItem {
   quantity: number;
   order_date: Date;
   product_name: string;
+  sku: string;
+  description: string;
+  image_url: string | null;
   price: number;
 }
 
@@ -750,7 +753,7 @@ export async function createOrder(
 
 export async function getOrdersByCompany(companyId: number): Promise<OrderItem[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT o.*, p.name as product_name, p.price FROM shop_orders o JOIN shop_products p ON o.product_id = p.id WHERE o.company_id = ?',
+    'SELECT o.*, p.name as product_name, p.price, p.sku, p.description, p.image_url FROM shop_orders o JOIN shop_products p ON o.product_id = p.id WHERE o.company_id = ?',
     [companyId]
   );
   return (rows as RowDataPacket[]).map((row) => ({
@@ -774,7 +777,7 @@ export async function getOrderItems(
   companyId: number
 ): Promise<OrderItem[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT o.*, p.name as product_name, p.price FROM shop_orders o JOIN shop_products p ON o.product_id = p.id WHERE o.order_number = ? AND o.company_id = ?',
+    'SELECT o.*, p.name as product_name, p.price, p.sku, p.description, p.image_url FROM shop_orders o JOIN shop_products p ON o.product_id = p.id WHERE o.order_number = ? AND o.company_id = ?',
     [orderNumber, companyId]
   );
   return (rows as RowDataPacket[]).map((row) => ({
