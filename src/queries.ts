@@ -151,11 +151,38 @@ export async function createApp(
   name: string,
   defaultPrice: number,
   contractTerm: string
-): Promise<void> {
-  await pool.execute(
+): Promise<number> {
+  const [result] = await pool.execute(
     'INSERT INTO apps (sku, name, default_price, contract_term) VALUES (?, ?, ?, ?)',
     [sku, name, defaultPrice, contractTerm]
   );
+  const insert = result as ResultSetHeader;
+  return insert.insertId;
+}
+
+export async function getAppById(id: number): Promise<App | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM apps WHERE id = ?',
+    [id]
+  );
+  return (rows as App[])[0] || null;
+}
+
+export async function updateApp(
+  id: number,
+  sku: string,
+  name: string,
+  defaultPrice: number,
+  contractTerm: string
+): Promise<void> {
+  await pool.execute(
+    'UPDATE apps SET sku = ?, name = ?, default_price = ?, contract_term = ? WHERE id = ?',
+    [sku, name, defaultPrice, contractTerm, id]
+  );
+}
+
+export async function deleteApp(id: number): Promise<void> {
+  await pool.execute('DELETE FROM apps WHERE id = ?', [id]);
 }
 
 export async function upsertCompanyAppPrice(
@@ -180,6 +207,28 @@ export async function getAppPrice(
     [companyId, appId]
   );
   return rows[0] ? (rows[0] as any).price : null;
+}
+
+export async function getCompanyAppPrices(): Promise<
+  (CompanyAppPrice & { company_name: string; app_name: string })[]
+> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT cap.company_id, cap.app_id, cap.price, c.name AS company_name, a.name AS app_name
+     FROM company_app_prices cap
+     JOIN companies c ON cap.company_id = c.id
+     JOIN apps a ON cap.app_id = a.id`
+  );
+  return rows as any;
+}
+
+export async function deleteCompanyAppPrice(
+  companyId: number,
+  appId: number
+): Promise<void> {
+  await pool.execute(
+    'DELETE FROM company_app_prices WHERE company_id = ? AND app_id = ?',
+    [companyId, appId]
+  );
 }
 
 export async function getUserCount(): Promise<number> {
