@@ -7,6 +7,23 @@
     <div class="content">
       <h1>Shop Admin</h1>
       <section>
+        <h2>Categories</h2>
+        <form action="/shop/admin/category" method="post">
+          <input type="text" name="name" placeholder="Name" required>
+          <button type="submit">Add</button>
+        </form>
+        <ul>
+          <% categories.forEach(function(c){ %>
+            <li>
+              <%= c.name %>
+              <form action="/shop/admin/category/<%= c.id %>/delete" method="post" style="display:inline" onsubmit="return confirm('Delete category?');">
+                <button type="submit">Delete</button>
+              </form>
+            </li>
+          <% }) %>
+        </ul>
+      </section>
+      <section>
         <h2>Add Product</h2>
         <form action="/shop/admin/product" method="post" enctype="multipart/form-data">
           <input type="text" name="name" placeholder="Name" required>
@@ -16,6 +33,12 @@
           <input type="number" step="0.01" name="price" placeholder="Price" required>
           <input type="number" step="0.01" name="vip_price" placeholder="VIP Price">
           <input type="number" name="stock" placeholder="Stock" required>
+          <select name="category_id">
+            <option value="">No Category</option>
+            <% categories.forEach(function(c){ %>
+              <option value="<%= c.id %>"><%= c.name %></option>
+            <% }) %>
+          </select>
           <input type="file" name="image">
           <button type="submit">Add</button>
         </form>
@@ -38,6 +61,7 @@
               <th>Vendor SKU</th>
               <th>Price</th>
               <th>VIP Price</th>
+              <th>Category</th>
               <th>Stock</th>
               <th>Actions</th>
             </tr>
@@ -56,6 +80,7 @@
                 <td><%= p.vendor_sku %></td>
                 <td><%= p.price %></td>
                 <td><%= p.vip_price !== null ? p.vip_price : '' %></td>
+                <td><%= p.category_name || '' %></td>
                 <td><%= p.stock %></td>
                 <td>
                   <button type="button" onclick="openEditModal(<%= p.id %>)">Edit</button>
@@ -114,6 +139,7 @@
             form.price.value = product.price;
             form.vip_price.value = product.vip_price !== null ? product.vip_price : '';
             form.stock.value = product.stock;
+            form.category_id.value = product.category_id || '';
             const img = document.getElementById('editImagePreview');
             if (product.image_url) {
               img.src = product.image_url;
@@ -148,13 +174,19 @@
               <input type="text" name="sku" placeholder="SKU" required>
               <input type="text" name="vendor_sku" placeholder="Vendor SKU" required>
               <textarea name="description" placeholder="Description"></textarea>
-              <input type="number" step="0.01" name="price" placeholder="Price" required>
-              <input type="number" step="0.01" name="vip_price" placeholder="VIP Price">
-              <input type="number" name="stock" placeholder="Stock" required>
-              <img id="editImagePreview" src="" width="100" alt="" style="display:none;"><br>
-              <input type="file" name="image">
-              <button type="submit">Save</button>
-              <button type="button" onclick="closeEditModal()">Close</button>
+            <input type="number" step="0.01" name="price" placeholder="Price" required>
+            <input type="number" step="0.01" name="vip_price" placeholder="VIP Price">
+            <input type="number" name="stock" placeholder="Stock" required>
+            <select name="category_id">
+              <option value="">No Category</option>
+              <% categories.forEach(function(c){ %>
+                <option value="<%= c.id %>"><%= c.name %></option>
+              <% }) %>
+            </select>
+            <img id="editImagePreview" src="" width="100" alt="" style="display:none;"><br>
+            <input type="file" name="image">
+            <button type="submit">Save</button>
+            <button type="button" onclick="closeEditModal()">Close</button>
             </form>
           </div>
         </div>

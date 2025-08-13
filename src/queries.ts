@@ -66,6 +66,13 @@ export interface Product {
   vip_price: number | null;
   stock: number;
   archived: number;
+  category_id: number | null;
+  category_name?: string;
+}
+
+export interface Category {
+  id: number;
+  name: string;
 }
 
 export interface ProductCompanyRestriction {
@@ -689,11 +696,50 @@ export async function deleteInvoice(id: number): Promise<void> {
   await pool.execute('DELETE FROM invoices WHERE id = ?', [id]);
 }
 
+export async function getAllCategories(): Promise<Category[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM shop_categories ORDER BY name'
+  );
+  return rows as Category[];
+}
+
+export async function getCategoryById(id: number): Promise<Category | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM shop_categories WHERE id = ?',
+    [id]
+  );
+  return (rows as Category[])[0] || null;
+}
+
+export async function createCategory(name: string): Promise<number> {
+  const [result] = await pool.execute<ResultSetHeader>(
+    'INSERT INTO shop_categories (name) VALUES (?)',
+    [name]
+  );
+  return (result as ResultSetHeader).insertId;
+}
+
+export async function updateCategory(
+  id: number,
+  name: string
+): Promise<void> {
+  await pool.execute('UPDATE shop_categories SET name = ? WHERE id = ?', [
+    name,
+    id,
+  ]);
+}
+
+export async function deleteCategory(id: number): Promise<void> {
+  await pool.execute('DELETE FROM shop_categories WHERE id = ?', [id]);
+}
+
 export async function getAllProducts(
   includeArchived = false,
-  companyId?: number
+  companyId?: number,
+  categoryId?: number
 ): Promise<Product[]> {
-  let sql = 'SELECT p.* FROM shop_products p';
+  let sql =
+    'SELECT p.*, c.name AS category_name FROM shop_products p LEFT JOIN shop_categories c ON p.category_id = c.id';
   const params: any[] = [];
   if (companyId !== undefined) {
     sql +=
@@ -707,6 +753,10 @@ export async function getAllProducts(
   if (companyId !== undefined) {
     conditions.push('e.product_id IS NULL');
   }
+  if (categoryId !== undefined) {
+    conditions.push('p.category_id = ?');
+    params.push(categoryId);
+  }
   if (conditions.length > 0) {
     sql += ' WHERE ' + conditions.join(' AND ');
   }
@@ -715,6 +765,8 @@ export async function getAllProducts(
     ...(row as any),
     price: Number(row.price),
     vip_price: row.vip_price !== null ? Number(row.vip_price) : null,
+    category_id:
+      row.category_id !== null ? Number(row.category_id) : null,
   })) as Product[];
 }
 
@@ -723,7 +775,8 @@ export async function getProductById(
   includeArchived = false,
   companyId?: number
 ): Promise<Product | null> {
-  let sql = 'SELECT p.* FROM shop_products p';
+  let sql =
+    'SELECT p.*, c.name AS category_name FROM shop_products p LEFT JOIN shop_categories c ON p.category_id = c.id';
   const params: any[] = [];
   if (companyId !== undefined) {
     sql +=
@@ -745,6 +798,8 @@ export async function getProductById(
         ...(row as any),
         price: Number(row.price),
         vip_price: row.vip_price !== null ? Number(row.vip_price) : null,
+        category_id:
+          row.category_id !== null ? Number(row.category_id) : null,
       } as Product)
     : null;
 }
@@ -754,7 +809,8 @@ export async function getProductBySku(
   includeArchived = false,
   companyId?: number
 ): Promise<Product | null> {
-  let sql = 'SELECT p.* FROM shop_products p';
+  let sql =
+    'SELECT p.*, c.name AS category_name FROM shop_products p LEFT JOIN shop_categories c ON p.category_id = c.id';
   const params: any[] = [];
   if (companyId !== undefined) {
     sql +=
@@ -776,6 +832,8 @@ export async function getProductBySku(
         ...(row as any),
         price: Number(row.price),
         vip_price: row.vip_price !== null ? Number(row.vip_price) : null,
+        category_id:
+          row.category_id !== null ? Number(row.category_id) : null,
       } as Product)
     : null;
 }
@@ -788,11 +846,22 @@ export async function createProduct(
   imageUrl: string | null,
   price: number,
   vipPrice: number | null,
-  stock: number
+  stock: number,
+  categoryId: number | null
 ): Promise<number> {
   const [result] = await pool.execute<ResultSetHeader>(
-    'INSERT INTO shop_products (name, sku, vendor_sku, description, image_url, price, vip_price, stock) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [name, sku, vendorSku, description, imageUrl, price, vipPrice, stock]
+    'INSERT INTO shop_products (name, sku, vendor_sku, description, image_url, price, vip_price, stock, category_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [
+      name,
+      sku,
+      vendorSku,
+      description,
+      imageUrl,
+      price,
+      vipPrice,
+      stock,
+      categoryId,
+    ]
   );
   return (result as ResultSetHeader).insertId;
 }
@@ -806,11 +875,23 @@ export async function updateProduct(
   imageUrl: string | null,
   price: number,
   vipPrice: number | null,
-  stock: number
+  stock: number,
+  categoryId: number | null
 ): Promise<void> {
   await pool.execute(
-    'UPDATE shop_products SET name = ?, sku = ?, vendor_sku = ?, description = ?, image_url = IFNULL(?, image_url), price = ?, vip_price = ?, stock = ? WHERE id = ?',
-    [name, sku, vendorSku, description, imageUrl, price, vipPrice, stock, id]
+    'UPDATE shop_products SET name = ?, sku = ?, vendor_sku = ?, description = ?, image_url = IFNULL(?, image_url), price = ?, vip_price = ?, stock = ?, category_id = ? WHERE id = ?',
+    [
+      name,
+      sku,
+      vendorSku,
+      description,
+      imageUrl,
+      price,
+      vipPrice,
+      stock,
+      categoryId,
+      id,
+    ]
   );
 }
 
