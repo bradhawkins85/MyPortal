@@ -61,6 +61,8 @@ import {
   deleteProduct,
   createOrder,
   getOrdersByCompany,
+  getOrderSummariesByCompany,
+  getOrderItems,
   upsertAsset,
   upsertInvoice,
   getExternalApiSettings,
@@ -545,8 +547,11 @@ app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
   const products = await getAllProducts();
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
+  const error = req.session.cartError;
+  req.session.cartError = undefined;
   res.render('shop', {
     products,
+    cartError: error,
     companies,
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
@@ -566,21 +571,29 @@ app.post('/cart/add', ensureAuth, ensureShopAccess, async (req, res) => {
     if (!req.session.cart) {
       req.session.cart = [];
     }
+    const qty = parseInt(quantity, 10);
     const existing = req.session.cart.find((i) => i.productId === product.id);
-    if (existing) {
-      existing.quantity += parseInt(quantity, 10);
+    const existingQty = existing ? existing.quantity : 0;
+    if (existingQty + qty > product.stock) {
+      req.session.cartError = `Cannot add item. Only ${
+        product.stock - existingQty
+      } left in stock.`;
     } else {
-      req.session.cart.push({
-        productId: product.id,
-        name: product.name,
-        sku: product.sku,
-        vendorSku: product.vendor_sku,
-        description: product.description,
-        imageUrl: product.image_url,
-        // Ensure price is stored as a number since MySQL may return strings
-        price: Number(product.price),
-        quantity: parseInt(quantity, 10),
-      });
+      if (existing) {
+        existing.quantity += qty;
+      } else {
+        req.session.cart.push({
+          productId: product.id,
+          name: product.name,
+          sku: product.sku,
+          vendorSku: product.vendor_sku,
+          description: product.description,
+          imageUrl: product.image_url,
+          // Ensure price is stored as a number since MySQL may return strings
+          price: Number(product.price),
+          quantity: qty,
+        });
+      }
     }
   }
   res.redirect('/shop');
@@ -612,6 +625,19 @@ app.get('/cart', ensureAuth, ensureShopAccess, async (req, res) => {
   });
 });
 
+app.post('/cart/remove', ensureAuth, ensureShopAccess, (req, res) => {
+  const { remove } = req.body;
+  if (req.session.cart && remove) {
+    const toRemove = Array.isArray(remove)
+      ? remove.map((id: string) => parseInt(id, 10))
+      : [parseInt(remove, 10)];
+    req.session.cart = req.session.cart.filter(
+      (item) => !toRemove.includes(item.productId)
+    );
+  }
+  res.redirect('/cart');
+});
+
 app.post('/cart/place-order', ensureAuth, ensureShopAccess, async (req, res) => {
   if (req.session.companyId && req.session.cart && req.session.cart.length > 0) {
     const settings = await getExternalApiSettings(req.session.companyId);
@@ -629,12 +655,17 @@ app.post('/cart/place-order', ensureAuth, ensureShopAccess, async (req, res) => 
         console.error('Failed to call webhook', err);
       }
     }
+    let orderNumber = 'TBC';
+    for (let i = 0; i < 12; i++) {
+      orderNumber += Math.floor(Math.random() * 10).toString();
+    }
     for (const item of req.session.cart) {
       await createOrder(
         req.session.userId!,
         req.session.companyId,
         item.productId,
-        item.quantity
+        item.quantity,
+        orderNumber
       );
     }
     req.session.cart = [];
@@ -645,12 +676,35 @@ app.post('/cart/place-order', ensureAuth, ensureShopAccess, async (req, res) => 
 
 app.get('/orders', ensureAuth, ensureShopAccess, async (req, res) => {
   const orders = req.session.companyId
-    ? await getOrdersByCompany(req.session.companyId)
+    ? await getOrderSummariesByCompany(req.session.companyId)
     : [];
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('orders', {
     orders,
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+  });
+});
+
+app.get('/orders/:orderNumber', ensureAuth, ensureShopAccess, async (req, res) => {
+  const orderNumber = req.params.orderNumber;
+  const items =
+    req.session.companyId
+      ? await getOrderItems(orderNumber, req.session.companyId)
+      : [];
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  res.render('order-details', {
+    orderNumber,
+    items,
     companies,
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
@@ -1414,14 +1468,22 @@ api.route('/shop/orders')
     res.json(orders);
   })
   .post(async (req, res) => {
-    const { userId, companyId, productId, quantity } = req.body;
+    const { userId, companyId, productId, quantity, orderNumber } = req.body;
+    let num = orderNumber as string | undefined;
+    if (!num) {
+      num = 'TBC';
+      for (let i = 0; i < 12; i++) {
+        num += Math.floor(Math.random() * 10).toString();
+      }
+    }
     await createOrder(
       parseInt(userId, 10),
       parseInt(companyId, 10),
       parseInt(productId, 10),
-      parseInt(quantity, 10)
+      parseInt(quantity, 10),
+      num
     );
-    res.json({ success: true });
+    res.json({ success: true, orderNumber: num });
   });
 
 /**
