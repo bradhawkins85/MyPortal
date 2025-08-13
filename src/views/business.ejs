@@ -2,29 +2,26 @@
 <html>
   <%- include('partials/head', { title: 'Business Info' }) %>
 <body>
-  <div class="container">
-    <nav>
-      <a href="/">Business Info</a>
-      <a href="/licenses">Licenses</a>
-      <% if (isAdmin) { %><a href="/admin">Admin</a><% } %>
-      <a href="/logout">Logout</a>
-    </nav>
-    <% if (companies && companies.length > 1) { %>
-      <form action="/switch-company" method="post">
-        <select name="companyId" onchange="this.form.submit()">
-          <% companies.forEach(function(c) { %>
-            <option value="<%= c.company_id %>" <%= c.company_id === currentCompanyId ? 'selected' : '' %>><%= c.company_name %></option>
-          <% }); %>
-        </select>
-      </form>
-    <% } %>
-    <h1>Business Information</h1>
-    <% if (company) { %>
-      <p>Name: <%= company.name %></p>
-      <% if (company.address) { %>
-        <p>Address: <%= company.address %></p>
+  <div class="app-container">
+    <%- include('partials/sidebar') %>
+    <div class="content">
+      <% if (companies && companies.length > 1) { %>
+        <form action="/switch-company" method="post">
+          <select name="companyId" onchange="this.form.submit()">
+            <% companies.forEach(function(c) { %>
+              <option value="<%= c.company_id %>" <%= c.company_id === currentCompanyId ? 'selected' : '' %>><%= c.company_name %></option>
+            <% }); %>
+          </select>
+        </form>
       <% } %>
-    <% } %>
+      <h1>Business Information</h1>
+      <% if (company) { %>
+        <p>Name: <%= company.name %></p>
+        <% if (company.address) { %>
+          <p>Address: <%= company.address %></p>
+        <% } %>
+      <% } %>
+    </div>
   </div>
-  </body>
+</body>
 </html>
