@@ -10,12 +10,12 @@
         <thead>
           <tr>
             <th>Name</th>
-            <th>SKU</th>
+            <th>Platform</th>
             <th>Count</th>
             <th>Allocated</th>
             <th>Expiry</th>
             <th>Contract Term</th>
-            <% if (canOrderLicenses || isGlobalAdmin) { %><th>Actions</th><% } %>
+            <% if (canOrderLicenses) { %><th>Actions</th><% } %>
           </tr>
         </thead>
         <tbody>
@@ -27,15 +27,10 @@
             <td><a href="#" class="allocated-link" data-license-id="<%= lic.id %>"><%= lic.allocated %></a></td>
             <td><%= lic.expiry_date %></td>
             <td><%= lic.contract_term %></td>
-            <% if (canOrderLicenses || isGlobalAdmin) { %>
+            <% if (canOrderLicenses) { %>
               <td>
-                <% if (canOrderLicenses) { %>
-                  <button class="order-btn" data-license-id="<%= lic.id %>">Order More</button>
-                  <button class="remove-btn" data-license-id="<%= lic.id %>">Request Removal</button>
-                <% } %>
-                <% if (isGlobalAdmin) { %>
-                  <button class="edit-btn" data-license-id="<%= lic.id %>">Edit</button>
-                <% } %>
+                <button class="order-btn" data-license-id="<%= lic.id %>">Order More</button>
+                <button class="remove-btn" data-license-id="<%= lic.id %>">Request Removal</button>
               </td>
             <% } %>
           </tr>
@@ -50,21 +45,6 @@
       <span id="allocated-close" class="close">&times;</span>
       <h2>Allocated Users</h2>
       <ul id="allocated-users"></ul>
-    </div>
-  </div>
-
-  <div id="edit-license-modal" class="modal" style="display:none;">
-    <div class="modal-content">
-      <span id="edit-license-close" class="close">&times;</span>
-      <h2>Edit License</h2>
-      <form id="edit-license-form">
-        <label>Name: <input type="text" id="edit-name" required></label><br>
-        <label>SKU: <input type="text" id="edit-sku" required></label><br>
-        <label>Count: <input type="number" id="edit-count" required></label><br>
-        <label>Expiry: <input type="date" id="edit-expiry"></label><br>
-        <label>Contract Term: <input type="text" id="edit-contract-term"></label><br>
-        <button type="submit">Save</button>
-      </form>
     </div>
   </div>
 
@@ -95,44 +75,6 @@
 
     document.getElementById('allocated-close').addEventListener('click', function () {
       document.getElementById('allocated-modal').style.display = 'none';
-    });
-
-    document.querySelectorAll('.edit-btn').forEach(function (btn) {
-      btn.addEventListener('click', async function () {
-        const id = this.dataset.licenseId;
-        const res = await fetch(`/licenses/${id}`);
-        if (!res.ok) return;
-        const lic = await res.json();
-        document.getElementById('edit-name').value = lic.name;
-        document.getElementById('edit-sku').value = lic.platform;
-        document.getElementById('edit-count').value = lic.count;
-        document.getElementById('edit-expiry').value = lic.expiry_date ? lic.expiry_date.substring(0, 10) : '';
-        document.getElementById('edit-contract-term').value = lic.contract_term || '';
-        document.getElementById('edit-license-form').dataset.licenseId = id;
-        document.getElementById('edit-license-modal').style.display = 'flex';
-      });
-    });
-
-    document.getElementById('edit-license-close').addEventListener('click', function () {
-      document.getElementById('edit-license-modal').style.display = 'none';
-    });
-
-    document.getElementById('edit-license-form').addEventListener('submit', async function (e) {
-      e.preventDefault();
-      const id = this.dataset.licenseId;
-      const body = {
-        name: document.getElementById('edit-name').value,
-        platform: document.getElementById('edit-sku').value,
-        count: parseInt(document.getElementById('edit-count').value, 10),
-        expiryDate: document.getElementById('edit-expiry').value,
-        contractTerm: document.getElementById('edit-contract-term').value,
-      };
-      await fetch(`/licenses/${id}/edit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      location.reload();
     });
 
     document.querySelectorAll('.order-btn').forEach(function (btn) {
