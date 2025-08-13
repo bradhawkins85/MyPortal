@@ -152,6 +152,24 @@ table th {
   border: none;
 }
 
+.forms-menu {
+  margin-bottom: 1rem;
+}
+
+.forms-menu button {
+  margin-right: 0.5rem;
+}
+
+.forms-menu button.active {
+  background-color: #3700b3;
+}
+
+.form-frame {
+  width: 100%;
+  height: calc(100vh - 200px);
+  border: none;
+}
+
 .modal {
   position: fixed;
   top: 0;

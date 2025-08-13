@@ -1,0 +1,14 @@
+CREATE TABLE IF NOT EXISTS forms (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  url VARCHAR(1024) NOT NULL,
+  description TEXT
+);
+
+CREATE TABLE IF NOT EXISTS form_permissions (
+  form_id INT NOT NULL,
+  user_id INT NOT NULL,
+  PRIMARY KEY (form_id, user_id),
+  FOREIGN KEY (form_id) REFERENCES forms(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);

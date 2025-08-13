@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+  <%- include('partials/head', { title: 'Forms Admin' }) %>
+<body>
+  <div class="app-container">
+    <%- include('partials/sidebar') %>
+    <div class="content">
+      <h1>Forms Admin</h1>
+      <section>
+        <h2>Add Form</h2>
+        <form action="/forms/admin" method="post">
+          <input type="text" name="name" placeholder="Name" required>
+          <input type="url" name="url" placeholder="URL" required>
+          <input type="text" name="description" placeholder="Description">
+          <button type="submit">Add</button>
+        </form>
+      </section>
+      <section>
+        <h2>Manage Permissions</h2>
+        <form action="/forms/admin" method="get">
+          <select name="formId" onchange="this.form.submit()">
+            <option value="">Select Form</option>
+            <% forms.forEach(function(f){ %>
+              <option value="<%= f.id %>" <%= selectedFormId === f.id ? 'selected' : '' %>><%= f.name %></option>
+            <% }); %>
+          </select>
+          <select name="companyId" onchange="this.form.submit()">
+            <option value="">Select Company</option>
+            <% allCompanies.forEach(function(c){ %>
+              <option value="<%= c.id %>" <%= selectedCompanyId === c.id ? 'selected' : '' %>><%= c.name %></option>
+            <% }); %>
+          </select>
+        </form>
+        <% if (selectedFormId && selectedCompanyId) { %>
+          <form action="/forms/admin/permissions" method="post">
+            <input type="hidden" name="formId" value="<%= selectedFormId %>">
+            <input type="hidden" name="companyId" value="<%= selectedCompanyId %>">
+            <% users.forEach(function(u){ %>
+              <label><input type="checkbox" name="userIds" value="<%= u.user_id %>" <%= permissions.includes(u.user_id) ? 'checked' : '' %>> <%= u.email %></label><br>
+            <% }); %>
+            <button type="submit">Save</button>
+          </form>
+        <% } %>
+      </section>
+    </div>
+  </div>
+</body>
+</html>
