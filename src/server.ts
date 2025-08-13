@@ -1798,13 +1798,32 @@ api.route('/shop/orders')
         num += Math.floor(Math.random() * 10).toString();
       }
     }
-    await createOrder(
-      parseInt(userId, 10),
-      parseInt(companyId, 10),
-      parseInt(productId, 10),
-      parseInt(quantity, 10),
-      num
-    );
+    const uId = parseInt(userId, 10);
+    const cId = parseInt(companyId, 10);
+    const pId = parseInt(productId, 10);
+    const qty = parseInt(quantity, 10);
+    const settings = await getExternalApiSettings(cId);
+    if (settings?.webhook_url && settings.webhook_api_key) {
+      try {
+        await fetch(settings.webhook_url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': settings.webhook_api_key,
+          },
+          body: JSON.stringify({
+            userId: uId,
+            companyId: cId,
+            productId: pId,
+            quantity: qty,
+            orderNumber: num,
+          }),
+        });
+      } catch (err) {
+        console.error('Webhook error', err);
+      }
+    }
+    await createOrder(uId, cId, pId, qty, num);
     res.json({ success: true, orderNumber: num });
   });
 
