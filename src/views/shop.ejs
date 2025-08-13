@@ -9,6 +9,16 @@
       <% if (cartError) { %>
         <p><%= cartError %></p>
       <% } %>
+      <form method="get">
+        <label>Category:
+          <select name="category" onchange="this.form.submit()">
+            <option value="" <%= typeof currentCategory === 'undefined' ? 'selected' : '' %>>All</option>
+            <% categories.forEach(function(c){ %>
+              <option value="<%= c.id %>" <%= currentCategory === c.id ? 'selected' : '' %>><%= c.name %></option>
+            <% }) %>
+          </select>
+        </label>
+      </form>
       <table>
         <thead>
           <tr><th>Image</th><th>Name</th><th>SKU</th><th>Description</th><th>Price</th><th>Stock</th><th>Order</th></tr>
