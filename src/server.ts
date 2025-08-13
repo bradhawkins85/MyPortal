@@ -87,7 +87,7 @@ import {
   getCompanyAppPrices,
   deleteCompanyAppPrice,
   upsertCompanyAppPrice,
-  updateCompanyVipStatus,
+  updateCompanyIds,
   Company,
   User,
   UserCompany,
@@ -719,6 +719,7 @@ app.post('/cart/place-order', ensureAuth, ensureShopAccess, async (req, res) => 
         item.productId,
         item.quantity,
         orderNumber,
+        'pending',
         poNumber || null
       );
     }
@@ -1083,14 +1084,25 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
 });
 
 app.post('/admin/company', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { name, isVip } = req.body;
-  await createCompany(name, undefined, parseCheckbox(isVip));
+  const { name, isVip, syncroCompanyId, xeroId } = req.body;
+  await createCompany(
+    name,
+    undefined,
+    parseCheckbox(isVip),
+    syncroCompanyId,
+    xeroId
+  );
   res.redirect('/admin');
 });
 
-app.post('/admin/company/:id/vip', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const isVip = parseCheckbox(req.body.isVip);
-  await updateCompanyVipStatus(parseInt(req.params.id, 10), isVip);
+app.post('/admin/company/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { syncroCompanyId, xeroId, isVip } = req.body;
+  await updateCompanyIds(
+    parseInt(req.params.id, 10),
+    syncroCompanyId || null,
+    xeroId || null,
+    parseCheckbox(isVip)
+  );
   res.redirect('/admin');
 });
 
@@ -1832,6 +1844,8 @@ api.route('/shop/categories/:id')
  *                 type: string
  *               poNumber:
  *                 type: string
+ *               status:
+ *                 type: string
  *     responses:
  *       200:
  *         description: Order item created
@@ -1847,8 +1861,15 @@ api
     res.json(orders);
   })
   .post(async (req, res) => {
-    const { userId, companyId, productId, quantity, orderNumber, poNumber } =
-      req.body;
+    const {
+      userId,
+      companyId,
+      productId,
+      quantity,
+      orderNumber,
+      poNumber,
+      status,
+    } = req.body;
     let num = orderNumber as string | undefined;
     if (!num) {
       num = 'TBC';
@@ -1881,7 +1902,15 @@ api
         console.error('Webhook error', err);
       }
     }
-    await createOrder(uId, cId, pId, qty, num, poNumber || null);
+    await createOrder(
+      uId,
+      cId,
+      pId,
+      qty,
+      num,
+      status || 'pending',
+      poNumber || null
+    );
     res.json({ success: true, orderNumber: num });
   });
 
@@ -2143,6 +2172,12 @@ api.get('/companies', async (_req, res) => {
  *                 type: string
  *               address:
  *                 type: string
+ *               syncroCompanyId:
+ *                 type: string
+ *               xeroId:
+ *                 type: string
+ *               isVip:
+ *                 type: boolean
  *     responses:
  *       200:
  *         description: Company created
@@ -2155,8 +2190,14 @@ api.get('/companies', async (_req, res) => {
  *                   type: integer
  */
 api.post('/companies', async (req, res) => {
-  const { name, address } = req.body;
-  const id = await createCompany(name, address);
+  const { name, address, syncroCompanyId, xeroId, isVip } = req.body;
+  const id = await createCompany(
+    name,
+    address,
+    parseCheckbox(isVip),
+    syncroCompanyId,
+    xeroId
+  );
   res.json({ id });
 });
 
@@ -2222,13 +2263,33 @@ api.get('/companies/:id', async (req, res) => {
  *                 type: string
  *               address:
  *                 type: string
+ *               syncroCompanyId:
+ *                 type: string
+ *               xeroId:
+ *                 type: string
+ *               isVip:
+ *                 type: boolean
  *     responses:
  *       200:
  *         description: Update successful
  */
 api.put('/companies/:id', async (req, res) => {
-  const { name, address } = req.body;
-  await updateCompany(parseInt(req.params.id, 10), name, address);
+  const { name, address, syncroCompanyId, xeroId, isVip } = req.body;
+  if (name !== undefined || address !== undefined) {
+    await updateCompany(parseInt(req.params.id, 10), name, address);
+  }
+  if (
+    syncroCompanyId !== undefined ||
+    xeroId !== undefined ||
+    isVip !== undefined
+  ) {
+    await updateCompanyIds(
+      parseInt(req.params.id, 10),
+      syncroCompanyId || null,
+      xeroId || null,
+      parseCheckbox(isVip)
+    );
+  }
   res.json({ success: true });
 });
 
