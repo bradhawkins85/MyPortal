@@ -44,11 +44,14 @@ import {
   createApiKey,
   deleteApiKey,
   getApiKeyRecord,
+  getActiveStaffCount,
   getAssetsByCompany,
+  getAssetCount,
   getAssetById,
   updateAsset,
   deleteAsset,
   getInvoicesByCompany,
+  getInvoiceStatusCounts,
   getInvoiceById,
   updateInvoice,
   deleteInvoice,
@@ -70,6 +73,7 @@ import {
   UserCompany,
   ApiKey,
   App,
+  License,
 } from './queries';
 import { runMigrations } from './db';
 
@@ -247,6 +251,18 @@ app.get('/', ensureAuth, async (req, res) => {
     ? await getCompanyById(req.session.companyId)
     : null;
   const current = companies.find((c) => c.company_id === req.session.companyId);
+  let licenses: License[] = [];
+  let activeUsers = 0;
+  let assetCount = 0;
+  let invoiceCounts = { paid: 0, unpaid: 0 };
+  if (req.session.companyId) {
+    [licenses, activeUsers, assetCount, invoiceCounts] = await Promise.all([
+      getLicensesByCompany(req.session.companyId),
+      getActiveStaffCount(req.session.companyId),
+      getAssetCount(req.session.companyId),
+      getInvoiceStatusCounts(req.session.companyId),
+    ]);
+  }
   res.render('business', {
     company,
     companies,
@@ -257,6 +273,10 @@ app.get('/', ensureAuth, async (req, res) => {
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
+    licenses,
+    activeUsers,
+    assetCount,
+    invoiceCounts,
   });
 });
 

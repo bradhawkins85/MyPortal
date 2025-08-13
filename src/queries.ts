@@ -656,3 +656,38 @@ export async function upsertExternalApiSettings(
     [companyId, xeroEndpoint, xeroApiKey, syncroEndpoint, syncroApiKey, webhookUrl, webhookApiKey]
   );
 }
+
+export async function getActiveStaffCount(companyId: number): Promise<number> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT COUNT(*) as count FROM staff WHERE company_id = ? AND enabled = 1',
+    [companyId]
+  );
+  return (rows[0] as { count: number }).count;
+}
+
+export async function getAssetCount(companyId: number): Promise<number> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT COUNT(*) as count FROM assets WHERE company_id = ?',
+    [companyId]
+  );
+  return (rows[0] as { count: number }).count;
+}
+
+export async function getInvoiceStatusCounts(
+  companyId: number
+): Promise<{ paid: number; unpaid: number }> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT status, COUNT(*) as count FROM invoices WHERE company_id = ? GROUP BY status',
+    [companyId]
+  );
+  let paid = 0;
+  let unpaid = 0;
+  for (const row of rows as { status: string; count: number }[]) {
+    if ((row.status || '').toLowerCase() === 'paid') {
+      paid = row.count;
+    } else {
+      unpaid += row.count;
+    }
+  }
+  return { paid, unpaid };
+}
