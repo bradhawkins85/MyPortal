@@ -857,6 +857,27 @@ export async function getProductCompanyRestrictions(): Promise<
   return rows as ProductCompanyRestriction[];
 }
 
+export async function setProductCompanyExclusions(
+  productId: number,
+  companyIds: number[]
+): Promise<void> {
+  await pool.execute('DELETE FROM shop_product_exclusions WHERE product_id = ?', [
+    productId,
+  ]);
+  if (companyIds.length === 0) {
+    return;
+  }
+  const values = companyIds.map(() => '(?, ?)').join(', ');
+  const params: (number | string)[] = [];
+  companyIds.forEach((id) => {
+    params.push(productId, id);
+  });
+  await pool.execute(
+    `INSERT INTO shop_product_exclusions (product_id, company_id) VALUES ${values}`,
+    params
+  );
+}
+
 export async function createOrder(
   userId: number,
   companyId: number,
