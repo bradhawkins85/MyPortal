@@ -753,7 +753,10 @@ export async function getOrdersByCompany(companyId: number): Promise<OrderItem[]
     'SELECT o.*, p.name as product_name, p.price FROM shop_orders o JOIN shop_products p ON o.product_id = p.id WHERE o.company_id = ?',
     [companyId]
   );
-  return rows as OrderItem[];
+  return (rows as RowDataPacket[]).map((row) => ({
+    ...(row as any),
+    price: Number(row.price),
+  })) as OrderItem[];
 }
 
 export async function getOrderSummariesByCompany(
@@ -774,7 +777,10 @@ export async function getOrderItems(
     'SELECT o.*, p.name as product_name, p.price FROM shop_orders o JOIN shop_products p ON o.product_id = p.id WHERE o.order_number = ? AND o.company_id = ?',
     [orderNumber, companyId]
   );
-  return rows as OrderItem[];
+  return (rows as RowDataPacket[]).map((row) => ({
+    ...(row as any),
+    price: Number(row.price),
+  })) as OrderItem[];
 }
 
 export async function getExternalApiSettings(
