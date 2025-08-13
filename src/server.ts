@@ -76,6 +76,7 @@ import {
   getCompanyAppPrices,
   deleteCompanyAppPrice,
   upsertCompanyAppPrice,
+  updateCompanyVipStatus,
   Company,
   User,
   UserCompany,
@@ -547,10 +548,15 @@ app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
   const products = await getAllProducts();
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
+  const isVip = current?.is_vip === 1;
+  const adjusted = products.map((p) => ({
+    ...p,
+    price: isVip && p.vip_price !== null ? p.vip_price : p.price,
+  }));
   const error = req.session.cartError;
   req.session.cartError = undefined;
   res.render('shop', {
-    products,
+    products: adjusted,
     cartError: error,
     companies,
     currentCompanyId: req.session.companyId,
@@ -568,6 +574,10 @@ app.post('/cart/add', ensureAuth, ensureShopAccess, async (req, res) => {
   const { productId, quantity } = req.body;
   const product = await getProductById(parseInt(productId, 10));
   if (product) {
+    const companies = await getCompaniesForUser(req.session.userId!);
+    const current = companies.find((c) => c.company_id === req.session.companyId);
+    const isVip = current?.is_vip === 1;
+    const price = isVip && product.vip_price !== null ? product.vip_price : product.price;
     if (!req.session.cart) {
       req.session.cart = [];
     }
@@ -590,7 +600,7 @@ app.post('/cart/add', ensureAuth, ensureShopAccess, async (req, res) => {
           description: product.description,
           imageUrl: product.image_url,
           // Ensure price is stored as a number since MySQL may return strings
-          price: Number(product.price),
+          price: Number(price),
           quantity: qty,
         });
       }
@@ -741,7 +751,7 @@ app.post(
   ensureSuperAdmin,
   upload.single('image'),
   async (req, res) => {
-    const { name, sku, vendor_sku, description, price, stock } = req.body;
+    const { name, sku, vendor_sku, description, price, vip_price, stock } = req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     await createProduct(
       name,
@@ -750,6 +760,7 @@ app.post(
       description,
       imageUrl,
       parseFloat(price),
+      vip_price ? parseFloat(vip_price) : null,
       parseInt(stock, 10)
     );
     res.redirect('/shop/admin');
@@ -762,7 +773,7 @@ app.post(
   ensureSuperAdmin,
   upload.single('image'),
   async (req, res) => {
-    const { name, sku, vendor_sku, description, price, stock } = req.body;
+    const { name, sku, vendor_sku, description, price, vip_price, stock } = req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     await updateProduct(
       parseInt(req.params.id, 10),
@@ -772,6 +783,7 @@ app.post(
       description,
       imageUrl,
       parseFloat(price),
+      vip_price ? parseFloat(vip_price) : null,
       parseInt(stock, 10)
     );
     res.redirect('/shop/admin');
@@ -932,9 +944,15 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
   });
 });
 
-app.post('/admin/company', ensureAuth, ensureAdmin, async (req, res) => {
-  const { name } = req.body;
-  await createCompany(name);
+app.post('/admin/company', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { name, isVip } = req.body;
+  await createCompany(name, undefined, parseCheckbox(isVip));
+  res.redirect('/admin');
+});
+
+app.post('/admin/company/:id/vip', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const isVip = parseCheckbox(req.body.isVip);
+  await updateCompanyVipStatus(parseInt(req.params.id, 10), isVip);
   res.redirect('/admin');
 });
 
@@ -1280,7 +1298,7 @@ api.route('/shop/products')
     res.json(products);
   })
   .post(upload.single('image'), async (req, res) => {
-    const { name, sku, vendor_sku, description, price, stock } = req.body;
+    const { name, sku, vendor_sku, description, price, vip_price, stock } = req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     const id = await createProduct(
       name,
@@ -1289,6 +1307,7 @@ api.route('/shop/products')
       description,
       imageUrl,
       parseFloat(price),
+      vip_price ? parseFloat(vip_price) : null,
       parseInt(stock, 10)
     );
     res.json({ id });
@@ -1391,7 +1410,7 @@ api.route('/shop/products/:id')
     res.json(product);
   })
   .put(upload.single('image'), async (req, res) => {
-    const { name, sku, vendor_sku, description, price, stock } = req.body;
+    const { name, sku, vendor_sku, description, price, vip_price, stock } = req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     await updateProduct(
       parseInt(req.params.id, 10),
@@ -1401,6 +1420,7 @@ api.route('/shop/products/:id')
       description,
       imageUrl,
       parseFloat(price),
+      vip_price ? parseFloat(vip_price) : null,
       parseInt(stock, 10)
     );
     res.json({ success: true });

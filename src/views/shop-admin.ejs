@@ -14,6 +14,7 @@
           <input type="text" name="vendor_sku" placeholder="Vendor SKU" required>
           <textarea name="description" placeholder="Description"></textarea>
           <input type="number" step="0.01" name="price" placeholder="Price" required>
+          <input type="number" step="0.01" name="vip_price" placeholder="VIP Price">
           <input type="number" name="stock" placeholder="Stock" required>
           <input type="file" name="image">
           <button type="submit">Add</button>
@@ -35,6 +36,7 @@
               <th>Vendor SKU</th>
               <th>Description</th>
               <th>Price</th>
+              <th>VIP Price</th>
               <th>Stock</th>
               <th>Image</th>
               <th>Actions</th>
@@ -53,6 +55,7 @@
                 <td><input form="form-<%= p.id %>" type="text" name="vendor_sku" value="<%= p.vendor_sku %>"></td>
                 <td><textarea form="form-<%= p.id %>" name="description"><%= p.description %></textarea></td>
                 <td><input form="form-<%= p.id %>" type="number" step="0.01" name="price" value="<%= p.price %>"></td>
+                <td><input form="form-<%= p.id %>" type="number" step="0.01" name="vip_price" value="<%= p.vip_price !== null ? p.vip_price : '' %>"></td>
                 <td><input form="form-<%= p.id %>" type="number" name="stock" value="<%= p.stock %>"></td>
                 <td><% if (p.image_url) { %><img src="<%= p.image_url %>" width="50" alt=""><% } %></td>
                 <td>
