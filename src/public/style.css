@@ -18,7 +18,11 @@ body.login-page {
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   max-width: 800px;
-  margin: 2rem auto;
+  margin: 0 auto;
+  height: 90vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .login-container {
@@ -28,6 +32,10 @@ body.login-page {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   width: 100%;
   max-width: 400px;
+  height: 90vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 h1 {
