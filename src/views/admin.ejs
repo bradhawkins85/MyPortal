@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Admin</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="container">
+    <nav>
+      <a href="/">Business Info</a>
+      <a href="/licenses">Licenses</a>
+      <a href="/admin">Admin</a>
+      <a href="/logout">Logout</a>
+    </nav>
+    <h1>Admin</h1>
+    <section>
+      <h2>Add Company</h2>
+      <form action="/admin/company" method="post">
+        <input type="text" name="name" placeholder="Company Name" required>
+        <button type="submit">Add</button>
+      </form>
+    </section>
+    <section>
+      <h2>Add User</h2>
+      <form action="/admin/user" method="post">
+        <input type="email" name="email" placeholder="Email" required>
+        <input type="password" name="password" placeholder="Password" required>
+        <select name="companyId">
+          <% companies.forEach(function(c) { %>
+            <option value="<%= c.id %>"><%= c.name %></option>
+          <% }); %>
+        </select>
+        <label><input type="checkbox" name="canManageLicenses">Can manage licenses</label>
+        <button type="submit">Add User</button>
+      </form>
+    </section>
+    <section>
+      <h2>Assign Existing User to Company</h2>
+      <form action="/admin/assign" method="post">
+        <select name="userId">
+          <% users.forEach(function(u) { %>
+            <option value="<%= u.id %>"><%= u.email %></option>
+          <% }); %>
+        </select>
+        <select name="companyId">
+          <% companies.forEach(function(c) { %>
+            <option value="<%= c.id %>"><%= c.name %></option>
+          <% }); %>
+        </select>
+        <label><input type="checkbox" name="canManageLicenses">Can manage licenses</label>
+        <button type="submit">Assign</button>
+      </form>
+    </section>
+    <section>
+      <h2>Current Assignments</h2>
+      <table>
+        <tr><th>User</th><th>Company</th><th>Licenses</th></tr>
+        <% assignments.forEach(function(a) { %>
+          <tr>
+            <td><%= a.email %></td>
+            <td><%= a.company_name %></td>
+            <td>
+              <form action="/admin/permission" method="post">
+                <input type="hidden" name="userId" value="<%= a.user_id %>">
+                <input type="hidden" name="companyId" value="<%= a.company_id %>">
+                <input type="checkbox" name="canManageLicenses" value="1" <%= a.can_manage_licenses ? 'checked' : '' %> onchange="this.form.submit()">
+              </form>
+            </td>
+          </tr>
+        <% }); %>
+      </table>
+    </section>
+  </div>
+</body>
+</html>
