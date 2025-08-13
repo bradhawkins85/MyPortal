@@ -14,8 +14,28 @@
         <h2>Add Company</h2>
         <form action="/admin/company" method="post">
           <input type="text" name="name" placeholder="Company Name" required>
+          <label><input type="checkbox" name="isVip" value="1"> VIP</label>
           <button type="submit">Add</button>
         </form>
+      </section>
+      <section>
+        <h2>Companies</h2>
+        <table>
+          <thead><tr><th>Name</th><th>VIP</th></tr></thead>
+          <tbody>
+            <% allCompanies.forEach(function(c) { %>
+              <tr>
+                <td><%= c.name %></td>
+                <td>
+                  <form action="/admin/company/<%= c.id %>/vip" method="post">
+                    <input type="hidden" name="isVip" value="0">
+                    <input type="checkbox" name="isVip" value="1" <%= c.is_vip ? 'checked' : '' %> onchange="this.form.submit()">
+                  </form>
+                </td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
       </section>
       <% } %>
       <section>
