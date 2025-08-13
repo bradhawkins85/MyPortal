@@ -73,6 +73,7 @@ import {
   getOrderSummariesByCompany,
   getOrderItems,
   deleteOrder,
+  updateOrder,
   upsertAsset,
   upsertInvoice,
   getExternalApiSettings,
@@ -690,6 +691,7 @@ app.post('/cart/remove', ensureAuth, ensureShopAccess, (req, res) => {
 });
 
 app.post('/cart/place-order', ensureAuth, ensureShopAccess, async (req, res) => {
+  const { poNumber } = req.body;
   if (req.session.companyId && req.session.cart && req.session.cart.length > 0) {
     const settings = await getExternalApiSettings(req.session.companyId);
     if (settings?.webhook_url && settings?.webhook_api_key) {
@@ -716,7 +718,8 @@ app.post('/cart/place-order', ensureAuth, ensureShopAccess, async (req, res) => 
         req.session.companyId,
         item.productId,
         item.quantity,
-        orderNumber
+        orderNumber,
+        poNumber || null
       );
     }
     req.session.cart = [];
@@ -753,9 +756,15 @@ app.get('/orders/:orderNumber', ensureAuth, ensureShopAccess, async (req, res) =
       : [];
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
+  const status = items[0]?.status || '';
+  const notes = items[0]?.notes || '';
+  const poNumber = items[0]?.po_number || '';
   res.render('order-details', {
     orderNumber,
     items,
+    status,
+    notes,
+    poNumber,
     companies,
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
@@ -1780,7 +1789,51 @@ api.route('/shop/categories/:id')
     res.json({ success: true });
   });
 
-api.route('/shop/orders')
+/**
+ * @openapi
+ * /api/shop/orders:
+ *   get:
+ *     tags:
+ *       - Shop
+ *     summary: List order items for a company
+ *     parameters:
+ *       - in: query
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Array of order items
+ *   post:
+ *     tags:
+ *       - Shop
+ *     summary: Create an order item
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               userId:
+ *                 type: integer
+ *               companyId:
+ *                 type: integer
+ *               productId:
+ *                 type: integer
+ *               quantity:
+ *                 type: integer
+ *               orderNumber:
+ *                 type: string
+ *               poNumber:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Order item created
+ */
+api
+  .route('/shop/orders')
   .get(async (req, res) => {
     const companyId = req.query.companyId;
     if (!companyId) {
@@ -1790,7 +1843,8 @@ api.route('/shop/orders')
     res.json(orders);
   })
   .post(async (req, res) => {
-    const { userId, companyId, productId, quantity, orderNumber } = req.body;
+    const { userId, companyId, productId, quantity, orderNumber, poNumber } =
+      req.body;
     let num = orderNumber as string | undefined;
     if (!num) {
       num = 'TBC';
@@ -1823,18 +1877,84 @@ api.route('/shop/orders')
         console.error('Webhook error', err);
       }
     }
-    await createOrder(uId, cId, pId, qty, num);
+    await createOrder(uId, cId, pId, qty, num, poNumber || null);
     res.json({ success: true, orderNumber: num });
   });
 
-api.delete('/shop/orders/:orderNumber', async (req, res) => {
-  const companyId = req.query.companyId;
-  if (!companyId) {
-    return res.status(400).json({ error: 'companyId required' });
-  }
-  await deleteOrder(req.params.orderNumber, parseInt(companyId as string, 10));
-  res.json({ success: true });
-});
+/**
+ * @openapi
+ * /api/shop/orders/{orderNumber}:
+ *   put:
+ *     tags:
+ *       - Shop
+ *     summary: Update an order
+ *     parameters:
+ *       - in: path
+ *         name: orderNumber
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               companyId:
+ *                 type: integer
+ *               status:
+ *                 type: string
+ *               notes:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Update successful
+ *   delete:
+ *     tags:
+ *       - Shop
+ *     summary: Delete an order
+ *     parameters:
+ *       - in: path
+ *         name: orderNumber
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Deletion successful
+ */
+api
+  .route('/shop/orders/:orderNumber')
+  .put(async (req, res) => {
+    const { status, notes, companyId } = req.body;
+    if (!companyId) {
+      return res.status(400).json({ error: 'companyId required' });
+    }
+    await updateOrder(
+      req.params.orderNumber,
+      parseInt(companyId, 10),
+      status,
+      notes || null
+    );
+    res.json({ success: true });
+  })
+  .delete(async (req, res) => {
+    const companyId = req.query.companyId;
+    if (!companyId) {
+      return res.status(400).json({ error: 'companyId required' });
+    }
+    await deleteOrder(
+      req.params.orderNumber,
+      parseInt(companyId as string, 10)
+    );
+    res.json({ success: true });
+  });
 
 /**
  * @openapi
