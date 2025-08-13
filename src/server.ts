@@ -692,13 +692,13 @@ app.post('/cart/remove', ensureAuth, ensureShopAccess, (req, res) => {
 app.post('/cart/place-order', ensureAuth, ensureShopAccess, async (req, res) => {
   if (req.session.companyId && req.session.cart && req.session.cart.length > 0) {
     const settings = await getExternalApiSettings(req.session.companyId);
-    if (settings?.webhook_url && settings?.webhook_api_key) {
+    if (settings?.shop_webhook_url && settings?.shop_webhook_api_key) {
       try {
-        await fetch(settings.webhook_url, {
+        await fetch(settings.shop_webhook_url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': settings.webhook_api_key,
+            'x-api-key': settings.shop_webhook_api_key,
           },
           body: JSON.stringify({ cart: req.session.cart }),
         });
@@ -957,6 +957,8 @@ app.post('/external-apis', ensureAuth, ensureSuperAdmin, async (req, res) => {
     syncroApiKey,
     webhookUrl,
     webhookApiKey,
+    shopWebhookUrl,
+    shopWebhookApiKey,
   } = req.body;
   if (req.session.companyId) {
     await upsertExternalApiSettings(
@@ -966,7 +968,9 @@ app.post('/external-apis', ensureAuth, ensureSuperAdmin, async (req, res) => {
       syncroEndpoint,
       syncroApiKey,
       webhookUrl,
-      webhookApiKey
+      webhookApiKey,
+      shopWebhookUrl,
+      shopWebhookApiKey
     );
   }
   res.redirect('/external-apis');
@@ -1798,13 +1802,32 @@ api.route('/shop/orders')
         num += Math.floor(Math.random() * 10).toString();
       }
     }
-    await createOrder(
-      parseInt(userId, 10),
-      parseInt(companyId, 10),
-      parseInt(productId, 10),
-      parseInt(quantity, 10),
-      num
-    );
+    const uId = parseInt(userId, 10);
+    const cId = parseInt(companyId, 10);
+    const pId = parseInt(productId, 10);
+    const qty = parseInt(quantity, 10);
+    const settings = await getExternalApiSettings(cId);
+    if (settings?.shop_webhook_url && settings.shop_webhook_api_key) {
+      try {
+        await fetch(settings.shop_webhook_url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': settings.shop_webhook_api_key,
+          },
+          body: JSON.stringify({
+            userId: uId,
+            companyId: cId,
+            productId: pId,
+            quantity: qty,
+            orderNumber: num,
+          }),
+        });
+      } catch (err) {
+        console.error('Webhook error', err);
+      }
+    }
+    await createOrder(uId, cId, pId, qty, num);
     res.json({ success: true, orderNumber: num });
   });
 

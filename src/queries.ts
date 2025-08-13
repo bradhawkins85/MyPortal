@@ -127,6 +127,8 @@ export interface ExternalApiSettings {
   syncro_api_key: string | null;
   webhook_url: string | null;
   webhook_api_key: string | null;
+  shop_webhook_url: string | null;
+  shop_webhook_api_key: string | null;
 }
 
 export interface Staff {
@@ -1070,12 +1072,14 @@ export async function upsertExternalApiSettings(
   syncroEndpoint: string,
   syncroApiKey: string,
   webhookUrl: string,
-  webhookApiKey: string
+  webhookApiKey: string,
+  shopWebhookUrl: string,
+  shopWebhookApiKey: string
 ): Promise<void> {
   await pool.execute(
-    `INSERT INTO external_api_settings (company_id, xero_endpoint, xero_api_key, syncro_endpoint, syncro_api_key, webhook_url, webhook_api_key)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE xero_endpoint = VALUES(xero_endpoint), xero_api_key = VALUES(xero_api_key), syncro_endpoint = VALUES(syncro_endpoint), syncro_api_key = VALUES(syncro_api_key), webhook_url = VALUES(webhook_url), webhook_api_key = VALUES(webhook_api_key)` ,
-    [companyId, xeroEndpoint, xeroApiKey, syncroEndpoint, syncroApiKey, webhookUrl, webhookApiKey]
+    `INSERT INTO external_api_settings (company_id, xero_endpoint, xero_api_key, syncro_endpoint, syncro_api_key, webhook_url, webhook_api_key, shop_webhook_url, shop_webhook_api_key)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE xero_endpoint = VALUES(xero_endpoint), xero_api_key = VALUES(xero_api_key), syncro_endpoint = VALUES(syncro_endpoint), syncro_api_key = VALUES(syncro_api_key), webhook_url = VALUES(webhook_url), webhook_api_key = VALUES(webhook_api_key), shop_webhook_url = VALUES(shop_webhook_url), shop_webhook_api_key = VALUES(shop_webhook_api_key)` ,
+    [companyId, xeroEndpoint, xeroApiKey, syncroEndpoint, syncroApiKey, webhookUrl, webhookApiKey, shopWebhookUrl, shopWebhookApiKey]
   );
 }
