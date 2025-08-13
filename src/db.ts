@@ -15,6 +15,22 @@ export const pool = mysql.createPool({
 });
 
 export async function runMigrations(): Promise<void> {
+  const dbName = process.env.DB_NAME;
+  if (!dbName) {
+    throw new Error('DB_NAME not set');
+  }
+
+  // Ensure that the target database exists before running migrations.
+  // When the application is launched for the first time the database may
+  // not have been created yet which causes the initial queries to fail.
+  const connection = await mysql.createConnection({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+  });
+  await connection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
+  await connection.end();
+
   await pool.query(
     'CREATE TABLE IF NOT EXISTS migrations (name VARCHAR(255) PRIMARY KEY)'
   );
