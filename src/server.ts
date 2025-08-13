@@ -53,6 +53,14 @@ import {
   getInvoiceById,
   updateInvoice,
   deleteInvoice,
+  getAllForms,
+  createForm,
+  getFormsForUser,
+  getFormPermissions,
+  updateFormPermissions,
+  updateForm,
+  getFormPermissionDetails,
+  deleteFormPermission,
   getAllCategories,
   getCategoryById,
   createCategory,
@@ -574,6 +582,24 @@ app.get('/invoices', ensureAuth, ensureInvoicesAccess, async (req, res) => {
   });
 });
 
+app.get('/forms', ensureAuth, async (req, res) => {
+  const forms = await getFormsForUser(req.session.userId!);
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  res.render('forms', {
+    forms,
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+  });
+});
+
 app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
   const categoryId = req.query.category
     ? parseInt(req.query.category as string, 10)
@@ -985,6 +1011,105 @@ app.post('/external-apis', ensureAuth, ensureSuperAdmin, async (req, res) => {
   }
   res.redirect('/external-apis');
 });
+
+app.get('/forms/admin', ensureAuth, ensureAdmin, async (req, res) => {
+  const isSuperAdmin = req.session.userId === 1;
+  const formId = req.query.formId ? parseInt(req.query.formId as string, 10) : NaN;
+  const queryCompanyId = req.query.companyId
+    ? parseInt(req.query.companyId as string, 10)
+    : NaN;
+  const selectedCompanyId = isSuperAdmin
+    ? isNaN(queryCompanyId)
+      ? null
+      : queryCompanyId
+    : req.session.companyId!;
+  const forms = await getAllForms();
+  const companiesForUser = await getCompaniesForUser(req.session.userId!);
+  const current = companiesForUser.find(
+    (c) => c.company_id === req.session.companyId
+  );
+  const allCompanies = isSuperAdmin ? await getAllCompanies() : [];
+  let users: UserCompany[] = [];
+  let permissions: number[] = [];
+  if (!isNaN(formId) && selectedCompanyId) {
+    users = await getUserCompanyAssignments(selectedCompanyId);
+    permissions = await getFormPermissions(formId);
+  }
+  const permissionDetails = await getFormPermissionDetails(
+    isSuperAdmin ? undefined : req.session.companyId!
+  );
+  res.render('forms-admin', {
+    forms,
+    allCompanies,
+    companies: companiesForUser,
+    users,
+    selectedFormId: isNaN(formId) ? null : formId,
+    selectedCompanyId,
+    permissions,
+    permissionDetails,
+    currentCompanyId: req.session.companyId,
+    isAdmin: true,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+  });
+});
+
+app.post('/forms/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { name, url, description } = req.body;
+  await createForm(name, url, description);
+  res.redirect('/forms/admin');
+});
+
+app.post('/forms/admin/form/:formId', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const formId = parseInt(req.params.formId, 10);
+  const { name, url, description } = req.body;
+  await updateForm(formId, name, url, description);
+  res.redirect('/forms/admin');
+});
+
+app.post('/forms/admin/permissions', ensureAuth, ensureAdmin, async (req, res) => {
+  const { formId, companyId } = req.body;
+  const targetCompanyId = parseInt(companyId, 10);
+  if (req.session.userId !== 1 && targetCompanyId !== req.session.companyId) {
+    return res.redirect('/forms/admin');
+  }
+  let { userIds } = req.body as { userIds?: string | string[] };
+  const ids = Array.isArray(userIds)
+    ? userIds.map((id) => parseInt(id, 10))
+    : userIds
+    ? [parseInt(userIds, 10)]
+    : [];
+  await updateFormPermissions(
+    parseInt(formId, 10),
+    targetCompanyId,
+    ids
+  );
+  res.redirect(`/forms/admin?formId=${formId}&companyId=${targetCompanyId}`);
+});
+
+app.post(
+  '/forms/admin/permissions/remove',
+  ensureAuth,
+  ensureAdmin,
+  async (req, res) => {
+    const formId = parseInt(req.body.formId, 10);
+    const userId = parseInt(req.body.userId, 10);
+    if (req.session.userId !== 1) {
+      const assignments = await getUserCompanyAssignments(
+        req.session.companyId!
+      );
+      if (!assignments.some((u) => u.user_id === userId)) {
+        return res.redirect('/forms/admin');
+      }
+    }
+    await deleteFormPermission(formId, userId);
+    res.redirect('/forms/admin');
+  }
+);
 
 app.get('/apps', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const apps = await getAllApps();
