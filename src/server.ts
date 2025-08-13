@@ -60,6 +60,7 @@ import {
   updateProduct,
   archiveProduct,
   unarchiveProduct,
+  deleteProduct,
   createOrder,
   getOrdersByCompany,
   getOrderSummariesByCompany,
@@ -834,6 +835,11 @@ app.post('/shop/admin/product/:id/unarchive', ensureAuth, ensureSuperAdmin, asyn
   res.redirect('/shop/admin?showArchived=1');
 });
 
+app.post('/shop/admin/product/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  await deleteProduct(parseInt(req.params.id, 10));
+  res.redirect('/shop/admin');
+});
+
 app.post('/switch-company', ensureAuth, async (req, res) => {
   const { companyId } = req.body;
   const companies = await getCompaniesForUser(req.session.userId!);
@@ -1467,7 +1473,7 @@ api.route('/shop/products/:id')
     res.json({ success: true });
   })
   .delete(async (req, res) => {
-    await archiveProduct(parseInt(req.params.id, 10));
+    await deleteProduct(parseInt(req.params.id, 10));
     res.json({ success: true });
   });
 
