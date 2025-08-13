@@ -19,10 +19,10 @@
               <td>$<%= p.price %></td>
               <td><%= p.stock %></td>
               <td>
-                <form action="/shop/order" method="post">
+                <form action="/cart/add" method="post">
                   <input type="hidden" name="productId" value="<%= p.id %>">
                   <input type="number" name="quantity" min="1" max="<%= p.stock %>" value="1">
-                  <button type="submit">Order</button>
+                  <button type="submit">Add to Cart</button>
                 </form>
               </td>
             </tr>

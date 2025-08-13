@@ -69,6 +69,7 @@ export interface Order {
   product_id: number;
   quantity: number;
   order_date: Date;
+  product_name: string;
 }
 
 export interface Asset {
@@ -735,7 +736,7 @@ export async function createOrder(
 
 export async function getOrdersByCompany(companyId: number): Promise<Order[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM shop_orders WHERE company_id = ?',
+    'SELECT o.*, p.name as product_name FROM shop_orders o JOIN shop_products p ON o.product_id = p.id WHERE o.company_id = ?',
     [companyId]
   );
   return rows as Order[];
