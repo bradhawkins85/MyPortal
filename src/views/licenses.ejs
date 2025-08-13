@@ -15,6 +15,7 @@
             <th>Allocated</th>
             <th>Expiry</th>
             <th>Contract Term</th>
+            <% if (canOrderLicenses) { %><th>Actions</th><% } %>
           </tr>
         </thead>
         <tbody>
@@ -26,6 +27,12 @@
             <td><a href="#" class="allocated-link" data-license-id="<%= lic.id %>"><%= lic.allocated %></a></td>
             <td><%= lic.expiry_date %></td>
             <td><%= lic.contract_term %></td>
+            <% if (canOrderLicenses) { %>
+              <td>
+                <button class="order-btn" data-license-id="<%= lic.id %>">Order More</button>
+                <button class="remove-btn" data-license-id="<%= lic.id %>">Request Removal</button>
+              </td>
+            <% } %>
           </tr>
         <% }); %>
         </tbody>
@@ -68,6 +75,32 @@
 
     document.getElementById('allocated-close').addEventListener('click', function () {
       document.getElementById('allocated-modal').style.display = 'none';
+    });
+
+    document.querySelectorAll('.order-btn').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        const qty = prompt('How many licenses to order?');
+        if (!qty) return;
+        await fetch(`/licenses/${this.dataset.licenseId}/order`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quantity: parseInt(qty, 10) }),
+        });
+        alert('Order submitted');
+      });
+    });
+
+    document.querySelectorAll('.remove-btn').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        const qty = prompt('How many licenses to remove?');
+        if (!qty) return;
+        await fetch(`/licenses/${this.dataset.licenseId}/remove`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quantity: parseInt(qty, 10) }),
+        });
+        alert('Removal requested');
+      });
     });
   </script>
 </body>

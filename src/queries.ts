@@ -25,6 +25,20 @@ export interface License {
   allocated?: number;
 }
 
+export interface App {
+  id: number;
+  sku: string;
+  name: string;
+  default_price: number;
+  contract_term: string;
+}
+
+export interface CompanyAppPrice {
+  company_id: number;
+  app_id: number;
+  price: number;
+}
+
 export interface UserCompany {
   user_id: number;
   company_id: number;
@@ -32,6 +46,7 @@ export interface UserCompany {
   can_manage_staff: number;
   can_manage_assets: number;
   can_manage_invoices: number;
+  can_order_licenses: number;
   is_admin: number;
   company_name?: string;
   email?: string;
@@ -61,6 +76,8 @@ export interface ExternalApiSettings {
   xero_api_key: string | null;
   syncro_endpoint: string | null;
   syncro_api_key: string | null;
+  webhook_url: string | null;
+  webhook_api_key: string | null;
 }
 
 export interface Staff {
@@ -124,6 +141,47 @@ export async function getLicenseById(id: number): Promise<License | null> {
   return (rows as License[])[0] || null;
 }
 
+export async function getAllApps(): Promise<App[]> {
+  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM apps');
+  return rows as App[];
+}
+
+export async function createApp(
+  sku: string,
+  name: string,
+  defaultPrice: number,
+  contractTerm: string
+): Promise<void> {
+  await pool.execute(
+    'INSERT INTO apps (sku, name, default_price, contract_term) VALUES (?, ?, ?, ?)',
+    [sku, name, defaultPrice, contractTerm]
+  );
+}
+
+export async function upsertCompanyAppPrice(
+  companyId: number,
+  appId: number,
+  price: number
+): Promise<void> {
+  await pool.execute(
+    `INSERT INTO company_app_prices (company_id, app_id, price)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE price = VALUES(price)` ,
+    [companyId, appId, price]
+  );
+}
+
+export async function getAppPrice(
+  companyId: number,
+  appId: number
+): Promise<number | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT price FROM company_app_prices WHERE company_id = ? AND app_id = ?',
+    [companyId, appId]
+  );
+  return rows[0] ? (rows[0] as any).price : null;
+}
+
 export async function getUserCount(): Promise<number> {
   const [rows] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) as count FROM users');
   return (rows[0] as { count: number }).count;
@@ -184,7 +242,7 @@ export async function getUserById(id: number): Promise<User | null> {
 
 export async function getCompaniesForUser(userId: number): Promise<UserCompany[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.is_admin, c.name AS company_name
+    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.is_admin, c.name AS company_name
      FROM user_companies uc JOIN companies c ON uc.company_id = c.id
      WHERE uc.user_id = ?`,
     [userId]
@@ -193,7 +251,7 @@ export async function getCompaniesForUser(userId: number): Promise<UserCompany[]
 }
 
 export async function getUserCompanyAssignments(companyId?: number): Promise<UserCompany[]> {
-  let sql = `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.is_admin, c.name AS company_name, u.email
+  let sql = `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.is_admin, c.name AS company_name, u.email
      FROM user_companies uc
      JOIN users u ON uc.user_id = u.id
      JOIN companies c ON uc.company_id = c.id`;
@@ -214,12 +272,13 @@ export async function assignUserToCompany(
   canManageStaff: boolean,
   canManageAssets: boolean,
   canManageInvoices: boolean,
-  isAdmin: boolean
+  isAdmin: boolean,
+  canOrderLicenses: boolean
 ): Promise<void> {
   await pool.execute(
-    `INSERT INTO user_companies (user_id, company_id, can_manage_licenses, can_manage_staff, can_manage_assets, can_manage_invoices, is_admin)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE can_manage_licenses = VALUES(can_manage_licenses), can_manage_staff = VALUES(can_manage_staff), can_manage_assets = VALUES(can_manage_assets), can_manage_invoices = VALUES(can_manage_invoices), is_admin = VALUES(is_admin)`,
+    `INSERT INTO user_companies (user_id, company_id, can_manage_licenses, can_manage_staff, can_manage_assets, can_manage_invoices, is_admin, can_order_licenses)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE can_manage_licenses = VALUES(can_manage_licenses), can_manage_staff = VALUES(can_manage_staff), can_manage_assets = VALUES(can_manage_assets), can_manage_invoices = VALUES(can_manage_invoices), is_admin = VALUES(is_admin), can_order_licenses = VALUES(can_order_licenses)`,
     [
       userId,
       companyId,
@@ -228,6 +287,7 @@ export async function assignUserToCompany(
       canManageAssets ? 1 : 0,
       canManageInvoices ? 1 : 0,
       isAdmin ? 1 : 0,
+      canOrderLicenses ? 1 : 0,
     ]
   );
 }
@@ -240,6 +300,7 @@ export async function updateUserCompanyPermission(
     | 'can_manage_staff'
     | 'can_manage_assets'
     | 'can_manage_invoices'
+    | 'can_order_licenses'
     | 'is_admin',
   value: boolean
 ): Promise<void> {
@@ -535,12 +596,14 @@ export async function upsertExternalApiSettings(
   xeroEndpoint: string,
   xeroApiKey: string,
   syncroEndpoint: string,
-  syncroApiKey: string
+  syncroApiKey: string,
+  webhookUrl: string,
+  webhookApiKey: string
 ): Promise<void> {
   await pool.execute(
-    `INSERT INTO external_api_settings (company_id, xero_endpoint, xero_api_key, syncro_endpoint, syncro_api_key)
-     VALUES (?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE xero_endpoint = VALUES(xero_endpoint), xero_api_key = VALUES(xero_api_key), syncro_endpoint = VALUES(syncro_endpoint), syncro_api_key = VALUES(syncro_api_key)`,
-    [companyId, xeroEndpoint, xeroApiKey, syncroEndpoint, syncroApiKey]
+    `INSERT INTO external_api_settings (company_id, xero_endpoint, xero_api_key, syncro_endpoint, syncro_api_key, webhook_url, webhook_api_key)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE xero_endpoint = VALUES(xero_endpoint), xero_api_key = VALUES(xero_api_key), syncro_endpoint = VALUES(syncro_endpoint), syncro_api_key = VALUES(syncro_api_key), webhook_url = VALUES(webhook_url), webhook_api_key = VALUES(webhook_api_key)` ,
+    [companyId, xeroEndpoint, xeroApiKey, syncroEndpoint, syncroApiKey, webhookUrl, webhookApiKey]
   );
 }

@@ -13,6 +13,9 @@
         <h2>Syncro RMM</h2>
         <input type="text" name="syncroEndpoint" placeholder="Syncro API Endpoint" value="<%= settings ? settings.syncro_endpoint : '' %>">
         <input type="text" name="syncroApiKey" placeholder="Syncro API Key" value="<%= settings ? settings.syncro_api_key : '' %>">
+        <h2>License Orders Webhook</h2>
+        <input type="text" name="webhookUrl" placeholder="Webhook URL" value="<%= settings ? settings.webhook_url : '' %>">
+        <input type="text" name="webhookApiKey" placeholder="Webhook API Key" value="<%= settings ? settings.webhook_api_key : '' %>">
         <button type="submit">Save</button>
       </form>
     </div>
