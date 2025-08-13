@@ -53,7 +53,13 @@ pm2 restart myportal
 
 ## Updating from GitHub
 
-To update an existing deployment from the latest code on GitHub:
+Run the included update script to fetch the latest changes and rebuild the project:
+
+```bash
+./update.sh
+```
+
+Alternatively, to run the steps manually:
 
 ```bash
 git pull origin main
