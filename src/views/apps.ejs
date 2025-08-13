@@ -14,7 +14,10 @@
           <button type="submit">Add App</button>
         </form>
         <table>
-          <tr><th>SKU</th><th>Name</th><th>Default Price</th><th>Contract Term</th></tr>
+          <thead>
+            <tr><th>SKU</th><th>Name</th><th>Default Price</th><th>Contract Term</th></tr>
+          </thead>
+          <tbody>
           <% apps.forEach(function(a){ %>
             <tr>
               <td><%= a.sku %></td>
@@ -23,6 +26,7 @@
               <td><%= a.contract_term %></td>
             </tr>
           <% }); %>
+          </tbody>
         </table>
         <h2>Company Pricing</h2>
         <form action="/apps/price" method="post">
@@ -41,7 +45,10 @@
         </form>
           <h3>Existing Company Prices</h3>
           <table>
-            <tr><th>Company</th><th>SKU</th><th>App</th><th>Price</th></tr>
+            <thead>
+              <tr><th>Company</th><th>SKU</th><th>App</th><th>Price</th></tr>
+            </thead>
+            <tbody>
             <% companyPrices.forEach(function(p){ %>
               <tr>
                 <td><%= p.company_name %></td>
@@ -50,6 +57,7 @@
                 <td><%= p.price %></td>
               </tr>
             <% }); %>
+            </tbody>
           </table>
       </div>
     </div>

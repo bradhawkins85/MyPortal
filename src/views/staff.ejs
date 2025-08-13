@@ -9,7 +9,10 @@
       <section>
         <h2>Current Staff</h2>
         <table>
-          <tr><th>First Name</th><th>Last Name</th><th>Email</th><th>Date Onboarded</th><th>Enabled</th></tr>
+          <thead>
+            <tr><th>First Name</th><th>Last Name</th><th>Email</th><th>Date Onboarded</th><th>Enabled</th></tr>
+          </thead>
+          <tbody>
           <% staff.forEach(function(s) { %>
             <tr>
               <td><%= s.first_name %></td>
@@ -24,6 +27,7 @@
               </td>
             </tr>
           <% }); %>
+          </tbody>
         </table>
       </section>
     </div>

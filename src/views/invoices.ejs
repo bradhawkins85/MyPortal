@@ -9,7 +9,10 @@
       <section>
         <h2>Company Invoices</h2>
         <table>
-          <tr><th>Number</th><th>Amount</th><th>Due Date</th><th>Status</th></tr>
+          <thead>
+            <tr><th>Number</th><th>Amount</th><th>Due Date</th><th>Status</th></tr>
+          </thead>
+          <tbody>
           <% invoices.forEach(function(i) { %>
             <tr>
               <td><%= i.invoice_number %></td>
@@ -18,6 +21,7 @@
               <td><%= i.status %></td>
             </tr>
           <% }); %>
+          </tbody>
         </table>
       </section>
     </div>
