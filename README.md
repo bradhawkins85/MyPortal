@@ -33,3 +33,31 @@ There are no default login credentials; the first visit will prompt you to regis
    ```bash
    npm test
    ```
+
+## Running with PM2
+
+PM2 can be used to manage the application in production. After building the
+project, start the compiled server with PM2:
+
+```bash
+npm run build
+pm2 start dist/server.js --name myportal
+```
+
+To view logs or restart the process later:
+
+```bash
+pm2 logs myportal
+pm2 restart myportal
+```
+
+## Updating from GitHub
+
+To update an existing deployment from the latest code on GitHub:
+
+```bash
+git pull origin main
+npm install
+npm run build
+pm2 restart myportal
+```
