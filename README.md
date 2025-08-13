@@ -10,6 +10,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - Business information summary tab to confirm the logged-in company
 - Licenses tab showing license name, platform, count, allocated staff, expiry date and contract term
 - First-time visit redirects to a registration page when no users exist
+- Basic shop with product SKUs and admin management API
 
 ## Setup
 

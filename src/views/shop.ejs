@@ -8,12 +8,13 @@
       <h1>Shop</h1>
       <table>
         <thead>
-          <tr><th>Name</th><th>Description</th><th>Price</th><th>Stock</th><th>Order</th></tr>
+          <tr><th>Name</th><th>SKU</th><th>Description</th><th>Price</th><th>Stock</th><th>Order</th></tr>
         </thead>
         <tbody>
           <% products.forEach(function(p){ %>
             <tr>
               <td><%= p.name %></td>
+              <td><%= p.sku %></td>
               <td><%= p.description %></td>
               <td>$<%= p.price %></td>
               <td><%= p.stock %></td>
