@@ -32,6 +32,16 @@ export interface UserCompany {
   email?: string;
 }
 
+export interface Staff {
+  id: number;
+  company_id: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+  date_onboarded: string;
+  enabled: number;
+}
+
 export async function getUserByEmail(email: string): Promise<User | null> {
   const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM users WHERE email = ?', [email]);
   return (rows as User[])[0] || null;
@@ -124,4 +134,36 @@ export async function updateUserCompanyPermission(
     'UPDATE user_companies SET can_manage_licenses = ? WHERE user_id = ? AND company_id = ?',
     [canManageLicenses ? 1 : 0, userId, companyId]
   );
+}
+
+export async function getStaffByCompany(companyId: number): Promise<Staff[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM staff WHERE company_id = ?',
+    [companyId]
+  );
+  return rows as Staff[];
+}
+
+export async function addStaff(
+  companyId: number,
+  firstName: string,
+  lastName: string,
+  email: string,
+  dateOnboarded: string,
+  enabled: boolean
+): Promise<void> {
+  await pool.execute(
+    'INSERT INTO staff (company_id, first_name, last_name, email, date_onboarded, enabled) VALUES (?, ?, ?, ?, ?, ?)',
+    [companyId, firstName, lastName, email, dateOnboarded, enabled ? 1 : 0]
+  );
+}
+
+export async function updateStaffEnabled(
+  staffId: number,
+  enabled: boolean
+): Promise<void> {
+  await pool.execute('UPDATE staff SET enabled = ? WHERE id = ?', [
+    enabled ? 1 : 0,
+    staffId,
+  ]);
 }
