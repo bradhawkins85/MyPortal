@@ -13,6 +13,8 @@ export interface Company {
   name: string;
   address?: string;
   is_vip?: number;
+  syncro_company_id?: string | null;
+  xero_id?: string | null;
 }
 
 export interface License {
@@ -294,10 +296,22 @@ export async function getUserCount(): Promise<number> {
   return (rows[0] as { count: number }).count;
 }
 
-export async function createCompany(name: string, address?: string, isVip = false): Promise<number> {
+export async function createCompany(
+  name: string,
+  address?: string,
+  isVip = false,
+  syncroCompanyId?: string,
+  xeroId?: string
+): Promise<number> {
   const [result] = await pool.execute(
-    'INSERT INTO companies (name, address, is_vip) VALUES (?, ?, ?)',
-    [name, address || null, isVip ? 1 : 0]
+    'INSERT INTO companies (name, address, is_vip, syncro_company_id, xero_id) VALUES (?, ?, ?, ?, ?)',
+    [
+      name,
+      address || null,
+      isVip ? 1 : 0,
+      syncroCompanyId || null,
+      xeroId || null,
+    ]
   );
   const insert = result as ResultSetHeader;
   return insert.insertId;
@@ -305,6 +319,18 @@ export async function createCompany(name: string, address?: string, isVip = fals
 
 export async function updateCompanyVipStatus(id: number, isVip: boolean): Promise<void> {
   await pool.execute('UPDATE companies SET is_vip = ? WHERE id = ?', [isVip ? 1 : 0, id]);
+}
+
+export async function updateCompanyIds(
+  id: number,
+  syncroCompanyId: string | null,
+  xeroId: string | null,
+  isVip: boolean
+): Promise<void> {
+  await pool.execute(
+    'UPDATE companies SET syncro_company_id = ?, xero_id = ?, is_vip = ? WHERE id = ?',
+    [syncroCompanyId, xeroId, isVip ? 1 : 0, id]
+  );
 }
 
 export async function createUser(
@@ -973,6 +999,7 @@ export async function createOrder(
   productId: number,
   quantity: number,
   orderNumber: string,
+  status: string,
   poNumber: string | null
 ): Promise<void> {
   const conn = await pool.getConnection();
@@ -980,7 +1007,7 @@ export async function createOrder(
     await conn.beginTransaction();
     await conn.execute(
       'INSERT INTO shop_orders (user_id, company_id, product_id, quantity, order_number, status, notes, po_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [userId, companyId, productId, quantity, orderNumber, 'pending', null, poNumber]
+      [userId, companyId, productId, quantity, orderNumber, status, null, poNumber]
     );
     await conn.execute(
       'UPDATE shop_products SET stock = stock - ? WHERE id = ?',
