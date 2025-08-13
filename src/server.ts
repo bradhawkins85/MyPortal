@@ -3,7 +3,14 @@ import session from 'express-session';
 import path from 'path';
 import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
-import { getUserByEmail, getCompanyById, getLicensesByCompany } from './queries';
+import {
+  getUserByEmail,
+  getCompanyById,
+  getLicensesByCompany,
+  getUserCount,
+  createCompany,
+  createUser,
+} from './queries';
 
 dotenv.config();
 
@@ -27,7 +34,11 @@ function ensureAuth(req: express.Request, res: express.Response, next: express.N
   next();
 }
 
-app.get('/login', (req, res) => {
+app.get('/login', async (req, res) => {
+  const count = await getUserCount();
+  if (count === 0) {
+    return res.redirect('/register');
+  }
   res.render('login', { error: '' });
 });
 
@@ -40,6 +51,28 @@ app.post('/login', async (req, res) => {
     res.redirect('/');
   } else {
     res.render('login', { error: 'Invalid credentials' });
+  }
+});
+
+app.get('/register', async (req, res) => {
+  const count = await getUserCount();
+  if (count > 0) {
+    return res.redirect('/login');
+  }
+  res.render('register', { error: '' });
+});
+
+app.post('/register', async (req, res) => {
+  const { company, email, password } = req.body;
+  try {
+    const passwordHash = await bcrypt.hash(password, 10);
+    const companyId = await createCompany(company);
+    const userId = await createUser(email, passwordHash, companyId);
+    req.session.userId = userId;
+    req.session.companyId = companyId;
+    res.redirect('/');
+  } catch (err) {
+    res.render('register', { error: 'Registration failed' });
   }
 });
 
