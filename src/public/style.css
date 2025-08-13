@@ -90,8 +90,8 @@ table th {
 .app-container {
   display: flex;
   width: 90%;
-  margin: 0 auto;
-  min-height: 100vh;
+  margin: 40px auto;
+  min-height: calc(100vh - 80px);
 }
 
 .sidebar {
