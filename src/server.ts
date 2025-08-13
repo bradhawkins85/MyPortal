@@ -573,7 +573,8 @@ app.post('/cart/add', ensureAuth, ensureShopAccess, async (req, res) => {
         name: product.name,
         sku: product.sku,
         description: product.description,
-        price: product.price,
+        // Ensure price is stored as a number since MySQL may return strings
+        price: Number(product.price),
         quantity: parseInt(quantity, 10),
       });
     }
