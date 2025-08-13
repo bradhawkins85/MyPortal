@@ -116,12 +116,18 @@ app.get('/login', async (req, res) => {
 });
 
 app.post('/login', async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, remember } = req.body;
   const user = await getUserByEmail(email);
   if (user && (await bcrypt.compare(password, user.password_hash))) {
     req.session.userId = user.id;
     const companies = await getCompaniesForUser(user.id);
     req.session.companyId = companies[0]?.company_id;
+    if (remember === 'on') {
+      req.session.cookie.maxAge = 8 * 60 * 60 * 1000; // 8 hours
+    } else {
+      req.session.cookie.expires = undefined;
+      req.session.cookie.maxAge = undefined;
+    }
     res.redirect('/');
   } else {
     res.render('login', { error: 'Invalid credentials' });
