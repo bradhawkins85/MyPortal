@@ -57,7 +57,9 @@ export interface Product {
   id: number;
   name: string;
   sku: string;
+  vendor_sku: string;
   description: string;
+  image_url: string | null;
   price: number;
   stock: number;
 }
@@ -679,13 +681,15 @@ export async function getProductBySku(sku: string): Promise<Product | null> {
 export async function createProduct(
   name: string,
   sku: string,
+  vendorSku: string,
   description: string,
+  imageUrl: string | null,
   price: number,
   stock: number
 ): Promise<number> {
   const [result] = await pool.execute<ResultSetHeader>(
-    'INSERT INTO shop_products (name, sku, description, price, stock) VALUES (?, ?, ?, ?, ?)',
-    [name, sku, description, price, stock]
+    'INSERT INTO shop_products (name, sku, vendor_sku, description, image_url, price, stock) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [name, sku, vendorSku, description, imageUrl, price, stock]
   );
   return (result as ResultSetHeader).insertId;
 }
@@ -694,13 +698,15 @@ export async function updateProduct(
   id: number,
   name: string,
   sku: string,
+  vendorSku: string,
   description: string,
+  imageUrl: string | null,
   price: number,
   stock: number
 ): Promise<void> {
   await pool.execute(
-    'UPDATE shop_products SET name = ?, sku = ?, description = ?, price = ?, stock = ? WHERE id = ?',
-    [name, sku, description, price, stock, id]
+    'UPDATE shop_products SET name = ?, sku = ?, vendor_sku = ?, description = ?, image_url = IFNULL(?, image_url), price = ?, stock = ? WHERE id = ?',
+    [name, sku, vendorSku, description, imageUrl, price, stock, id]
   );
 }
 
