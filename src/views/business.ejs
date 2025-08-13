@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Business Info</title>
+</head>
+<body>
+  <nav>
+    <a href="/">Business Info</a> |
+    <a href="/licenses">Licenses</a> |
+    <a href="/logout">Logout</a>
+  </nav>
+  <h1>Business Information</h1>
+  <% if (company) { %>
+    <p>Name: <%= company.name %></p>
+    <% if (company.address) { %>
+      <p>Address: <%= company.address %></p>
+    <% } %>
+  <% } %>
+</body>
+</html>
