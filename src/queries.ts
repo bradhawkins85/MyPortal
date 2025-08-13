@@ -64,14 +64,21 @@ export interface Product {
   stock: number;
 }
 
-export interface Order {
+export interface OrderItem {
   id: number;
+  order_number: string;
   user_id: number;
   company_id: number;
   product_id: number;
   quantity: number;
   order_date: Date;
   product_name: string;
+  price: number;
+}
+
+export interface OrderSummary {
+  order_number: string;
+  order_date: Date;
 }
 
 export interface Asset {
@@ -718,14 +725,15 @@ export async function createOrder(
   userId: number,
   companyId: number,
   productId: number,
-  quantity: number
+  quantity: number,
+  orderNumber: string
 ): Promise<void> {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
     await conn.execute(
-      'INSERT INTO shop_orders (user_id, company_id, product_id, quantity) VALUES (?, ?, ?, ?)',
-      [userId, companyId, productId, quantity]
+      'INSERT INTO shop_orders (user_id, company_id, product_id, quantity, order_number) VALUES (?, ?, ?, ?, ?)',
+      [userId, companyId, productId, quantity, orderNumber]
     );
     await conn.execute(
       'UPDATE shop_products SET stock = stock - ? WHERE id = ?',
@@ -740,12 +748,33 @@ export async function createOrder(
   }
 }
 
-export async function getOrdersByCompany(companyId: number): Promise<Order[]> {
+export async function getOrdersByCompany(companyId: number): Promise<OrderItem[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT o.*, p.name as product_name FROM shop_orders o JOIN shop_products p ON o.product_id = p.id WHERE o.company_id = ?',
+    'SELECT o.*, p.name as product_name, p.price FROM shop_orders o JOIN shop_products p ON o.product_id = p.id WHERE o.company_id = ?',
     [companyId]
   );
-  return rows as Order[];
+  return rows as OrderItem[];
+}
+
+export async function getOrderSummariesByCompany(
+  companyId: number
+): Promise<OrderSummary[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT order_number, MAX(order_date) as order_date FROM shop_orders WHERE company_id = ? GROUP BY order_number ORDER BY order_date DESC',
+    [companyId]
+  );
+  return rows as OrderSummary[];
+}
+
+export async function getOrderItems(
+  orderNumber: string,
+  companyId: number
+): Promise<OrderItem[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT o.*, p.name as product_name, p.price FROM shop_orders o JOIN shop_products p ON o.product_id = p.id WHERE o.order_number = ? AND o.company_id = ?',
+    [orderNumber, companyId]
+  );
+  return rows as OrderItem[];
 }
 
 export async function getExternalApiSettings(

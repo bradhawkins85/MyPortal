@@ -11,13 +11,12 @@
       <% } else { %>
         <table>
           <thead>
-            <tr><th>Product</th><th>Quantity</th><th>Date</th></tr>
+            <tr><th>Order Number</th><th>Date</th></tr>
           </thead>
           <tbody>
             <% orders.forEach(function(o){ %>
               <tr>
-                <td><%= o.product_name %></td>
-                <td><%= o.quantity %></td>
+                <td><a href="/orders/<%= o.order_number %>"><%= o.order_number %></a></td>
                 <td><%= o.order_date.toISOString().slice(0,10) %></td>
               </tr>
             <% }) %>
