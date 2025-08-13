@@ -28,6 +28,15 @@
     <% } %>
     <% if (canAccessShop) { %>
       <a href="/shop" class="menu-link"><i class="fas fa-shopping-cart"></i> Shop</a>
+      <a href="/cart" class="menu-link"><i class="fas fa-shopping-basket"></i> Cart</a>
+      <% if (cart && cart.length > 0) { %>
+        <ul class="cart-items">
+          <% cart.forEach(function(item){ %>
+            <li><%= item.name %> x<%= item.quantity %></li>
+          <% }) %>
+        </ul>
+      <% } %>
+      <a href="/orders" class="menu-link"><i class="fas fa-list"></i> Orders</a>
     <% } %>
   </div>
   <div class="sidebar-bottom">
