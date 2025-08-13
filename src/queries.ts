@@ -65,6 +65,16 @@ export async function getLicensesByCompany(companyId: number): Promise<License[]
   return rows as License[];
 }
 
+export async function getAllLicenses(): Promise<License[]> {
+  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM licenses');
+  return rows as License[];
+}
+
+export async function getLicenseById(id: number): Promise<License | null> {
+  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM licenses WHERE id = ?', [id]);
+  return (rows as License[])[0] || null;
+}
+
 export async function getUserCount(): Promise<number> {
   const [rows] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) as count FROM users');
   return (rows[0] as { count: number }).count;
@@ -116,6 +126,11 @@ export async function getAllCompanies(): Promise<Company[]> {
 export async function getAllUsers(): Promise<User[]> {
   const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM users');
   return rows as User[];
+}
+
+export async function getUserById(id: number): Promise<User | null> {
+  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM users WHERE id = ?', [id]);
+  return (rows as User[])[0] || null;
 }
 
 export async function getCompaniesForUser(userId: number): Promise<UserCompany[]> {
@@ -171,6 +186,16 @@ export async function getStaffByCompany(companyId: number): Promise<Staff[]> {
     [companyId]
   );
   return rows as Staff[];
+}
+
+export async function getAllStaff(): Promise<Staff[]> {
+  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM staff');
+  return rows as Staff[];
+}
+
+export async function getStaffById(id: number): Promise<Staff | null> {
+  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM staff WHERE id = ?', [id]);
+  return (rows as Staff[])[0] || null;
 }
 
 export async function addStaff(

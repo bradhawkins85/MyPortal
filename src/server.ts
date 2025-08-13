@@ -10,16 +10,21 @@ import {
   getUserByEmail,
   getCompanyById,
   getLicensesByCompany,
+  getAllLicenses,
+  getLicenseById,
   getUserCount,
   createCompany,
   createUser,
   getCompaniesForUser,
   getAllCompanies,
   getAllUsers,
+  getUserById,
   assignUserToCompany,
   getUserCompanyAssignments,
   updateUserCompanyPermission,
   getStaffByCompany,
+  getAllStaff,
+  getStaffById,
   addStaff,
   updateStaffEnabled,
   updateStaff,
@@ -372,6 +377,35 @@ api.use(async (req, res, next) => {
 /**
  * @openapi
  * /api/companies:
+ *   get:
+ *     tags:
+ *       - Companies
+ *     summary: List all companies
+ *     responses:
+ *       200:
+ *         description: Array of companies
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: integer
+ *                   name:
+ *                     type: string
+ *                   address:
+ *                     type: string
+ */
+api.get('/companies', async (_req, res) => {
+  const companies = await getAllCompanies();
+  res.json(companies);
+});
+
+/**
+ * @openapi
+ * /api/companies:
  *   post:
  *     tags:
  *       - Companies
@@ -404,6 +438,44 @@ api.post('/companies', async (req, res) => {
   const { name, address } = req.body;
   const id = await createCompany(name, address);
   res.json({ id });
+});
+
+/**
+ * @openapi
+ * /api/companies/{id}:
+ *   get:
+ *     tags:
+ *       - Companies
+ *     summary: Get a company by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Company details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ *                 name:
+ *                   type: string
+ *                 address:
+ *                   type: string
+ *       404:
+ *         description: Company not found
+ */
+api.get('/companies/:id', async (req, res) => {
+  const company = await getCompanyById(parseInt(req.params.id, 10));
+  if (!company) {
+    return res.status(404).json({ error: 'Company not found' });
+  }
+  res.json(company);
 });
 
 /**
@@ -465,6 +537,35 @@ api.delete('/companies/:id', async (req, res) => {
 /**
  * @openapi
  * /api/users:
+ *   get:
+ *     tags:
+ *       - Users
+ *     summary: List all users
+ *     responses:
+ *       200:
+ *         description: Array of users
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: integer
+ *                   email:
+ *                     type: string
+ *                   company_id:
+ *                     type: integer
+ */
+api.get('/users', async (_req, res) => {
+  const users = await getAllUsers();
+  res.json(users);
+});
+
+/**
+ * @openapi
+ * /api/users:
  *   post:
  *     tags:
  *       - Users
@@ -502,6 +603,44 @@ api.post('/users', async (req, res) => {
   const passwordHash = await bcrypt.hash(password, 10);
   const id = await createUser(email, passwordHash, companyId);
   res.json({ id });
+});
+
+/**
+ * @openapi
+ * /api/users/{id}:
+ *   get:
+ *     tags:
+ *       - Users
+ *     summary: Get a user by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: User details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ *                 email:
+ *                   type: string
+ *                 company_id:
+ *                   type: integer
+ *       404:
+ *         description: User not found
+ */
+api.get('/users/:id', async (req, res) => {
+  const user = await getUserById(parseInt(req.params.id, 10));
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  res.json(user);
 });
 
 /**
@@ -566,6 +705,44 @@ api.delete('/users/:id', async (req, res) => {
 /**
  * @openapi
  * /api/licenses:
+ *   get:
+ *     tags:
+ *       - Licenses
+ *     summary: List all licenses
+ *     responses:
+ *       200:
+ *         description: Array of licenses
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: integer
+ *                   company_id:
+ *                     type: integer
+ *                   name:
+ *                     type: string
+ *                   platform:
+ *                     type: string
+ *                   count:
+ *                     type: integer
+ *                   expiry_date:
+ *                     type: string
+ *                     format: date
+ *                   contract_term:
+ *                     type: string
+ */
+api.get('/licenses', async (_req, res) => {
+  const licenses = await getAllLicenses();
+  res.json(licenses);
+});
+
+/**
+ * @openapi
+ * /api/licenses:
  *   post:
  *     tags:
  *       - Licenses
@@ -617,6 +794,53 @@ api.post('/licenses', async (req, res) => {
     contractTerm
   );
   res.json({ id });
+});
+
+/**
+ * @openapi
+ * /api/licenses/{id}:
+ *   get:
+ *     tags:
+ *       - Licenses
+ *     summary: Get a license by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: License details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ *                 company_id:
+ *                   type: integer
+ *                 name:
+ *                   type: string
+ *                 platform:
+ *                   type: string
+ *                 count:
+ *                   type: integer
+ *                 expiry_date:
+ *                   type: string
+ *                   format: date
+ *                 contract_term:
+ *                   type: string
+ *       404:
+ *         description: License not found
+ */
+api.get('/licenses/:id', async (req, res) => {
+  const license = await getLicenseById(parseInt(req.params.id, 10));
+  if (!license) {
+    return res.status(404).json({ error: 'License not found' });
+  }
+  res.json(license);
 });
 
 /**
@@ -695,6 +919,44 @@ api.delete('/licenses/:id', async (req, res) => {
 /**
  * @openapi
  * /api/staff:
+ *   get:
+ *     tags:
+ *       - Staff
+ *     summary: List all staff members
+ *     responses:
+ *       200:
+ *         description: Array of staff
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: integer
+ *                   company_id:
+ *                     type: integer
+ *                   first_name:
+ *                     type: string
+ *                   last_name:
+ *                     type: string
+ *                   email:
+ *                     type: string
+ *                   date_onboarded:
+ *                     type: string
+ *                     format: date
+ *                   enabled:
+ *                     type: integer
+ */
+api.get('/staff', async (_req, res) => {
+  const staff = await getAllStaff();
+  res.json(staff);
+});
+
+/**
+ * @openapi
+ * /api/staff:
  *   post:
  *     tags:
  *       - Staff
@@ -746,6 +1008,53 @@ api.post('/staff', async (req, res) => {
     !!enabled
   );
   res.json({ success: true });
+});
+
+/**
+ * @openapi
+ * /api/staff/{id}:
+ *   get:
+ *     tags:
+ *       - Staff
+ *     summary: Get a staff member by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Staff details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ *                 company_id:
+ *                   type: integer
+ *                 first_name:
+ *                   type: string
+ *                 last_name:
+ *                   type: string
+ *                 email:
+ *                   type: string
+ *                 date_onboarded:
+ *                   type: string
+ *                   format: date
+ *                 enabled:
+ *                   type: integer
+ *       404:
+ *         description: Staff not found
+ */
+api.get('/staff/:id', async (req, res) => {
+  const staff = await getStaffById(parseInt(req.params.id, 10));
+  if (!staff) {
+    return res.status(404).json({ error: 'Staff not found' });
+  }
+  res.json(staff);
 });
 
 /**
