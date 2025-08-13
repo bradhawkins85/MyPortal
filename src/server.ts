@@ -61,9 +61,8 @@ import {
   archiveProduct,
   unarchiveProduct,
   deleteProduct,
-  removeProductForCompany,
-  addProductForCompany,
   getProductCompanyRestrictions,
+  setProductCompanyExclusions,
   createOrder,
   getOrdersByCompany,
   getOrderSummariesByCompany,
@@ -862,23 +861,17 @@ app.post('/shop/admin/product/:id/delete', ensureAuth, ensureSuperAdmin, async (
 });
 
 app.post(
-  '/shop/admin/product/:id/remove-company',
+  '/shop/admin/product/:id/visibility',
   ensureAuth,
   ensureSuperAdmin,
   async (req, res) => {
-    const companyId = parseInt(req.body.company_id, 10);
-    await removeProductForCompany(parseInt(req.params.id, 10), companyId);
-    res.redirect('/shop/admin');
-  }
-);
-
-app.post(
-  '/shop/admin/product/:id/add-company',
-  ensureAuth,
-  ensureSuperAdmin,
-  async (req, res) => {
-    const companyId = parseInt(req.body.company_id, 10);
-    await addProductForCompany(parseInt(req.params.id, 10), companyId);
+    const body = req.body.excluded;
+    const ids = Array.isArray(body) ? body : body ? [body] : [];
+    const companyIds = ids.map((id: string) => parseInt(id, 10)).filter((n) => !isNaN(n));
+    await setProductCompanyExclusions(
+      parseInt(req.params.id, 10),
+      companyIds
+    );
     res.redirect('/shop/admin');
   }
 );
