@@ -70,10 +70,12 @@
                   </form>
                 </td>
               </tr>
-              <form id="form-<%= p.id %>" action="/shop/admin/product/<%= p.id %>" method="post" enctype="multipart/form-data"></form>
             <% }) %>
           </tbody>
         </table>
+        <% products.forEach(function(p){ %>
+          <form id="form-<%= p.id %>" action="/shop/admin/product/<%= p.id %>" method="post" enctype="multipart/form-data"></form>
+        <% }) %>
         <script>
           const searchInput = document.getElementById('search');
           const stockFilter = document.getElementById('stockFilter');
