@@ -23,6 +23,32 @@ body.login-page {
   margin: 0 auto;
 }
 
+.login-container form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.login-container form label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 1rem;
+  width: 100%;
+  text-align: center;
+}
+
+.login-container form input[type="email"],
+.login-container form input[type="password"] {
+  width: 100%;
+  padding: 0.5rem;
+  box-sizing: border-box;
+}
+
+.login-container form button {
+  align-self: center;
+}
+
 h1 {
   color: #4a00e0;
   text-align: center;
