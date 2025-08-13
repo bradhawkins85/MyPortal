@@ -445,6 +445,29 @@ export async function upsertAsset(
   );
 }
 
+export async function getAssetById(id: number): Promise<Asset | null> {
+  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM assets WHERE id = ?', [id]);
+  return (rows as Asset[])[0] || null;
+}
+
+export async function updateAsset(
+  id: number,
+  companyId: number,
+  name: string,
+  type: string,
+  serialNumber: string,
+  status: string
+): Promise<void> {
+  await pool.execute(
+    'UPDATE assets SET company_id = ?, name = ?, type = ?, serial_number = ?, status = ? WHERE id = ?',
+    [companyId, name, type, serialNumber, status, id]
+  );
+}
+
+export async function deleteAsset(id: number): Promise<void> {
+  await pool.execute('DELETE FROM assets WHERE id = ?', [id]);
+}
+
 export async function getInvoicesByCompany(companyId: number): Promise<Invoice[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
     'SELECT * FROM invoices WHERE company_id = ?',
@@ -464,6 +487,29 @@ export async function upsertInvoice(
     'INSERT INTO invoices (company_id, invoice_number, amount, due_date, status) VALUES (?, ?, ?, ?, ?)',
     [companyId, invoiceNumber, amount, dueDate, status]
   );
+}
+
+export async function getInvoiceById(id: number): Promise<Invoice | null> {
+  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM invoices WHERE id = ?', [id]);
+  return (rows as Invoice[])[0] || null;
+}
+
+export async function updateInvoice(
+  id: number,
+  companyId: number,
+  invoiceNumber: string,
+  amount: number,
+  dueDate: string,
+  status: string
+): Promise<void> {
+  await pool.execute(
+    'UPDATE invoices SET company_id = ?, invoice_number = ?, amount = ?, due_date = ?, status = ? WHERE id = ?',
+    [companyId, invoiceNumber, amount, dueDate, status, id]
+  );
+}
+
+export async function deleteInvoice(id: number): Promise<void> {
+  await pool.execute('DELETE FROM invoices WHERE id = ?', [id]);
 }
 
 export async function getExternalApiSettings(
