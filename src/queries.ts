@@ -511,7 +511,7 @@ export async function updateLicense(
   name: string,
   platform: string,
   count: number,
-  expiryDate: string,
+  expiryDate: string | null,
   contractTerm: string
 ): Promise<void> {
   await pool.execute(

@@ -173,7 +173,7 @@
         name: document.getElementById('edit-name').value,
         platform: document.getElementById('edit-sku').value,
         count: parseInt(document.getElementById('edit-count').value, 10),
-        expiryDate: document.getElementById('edit-expiry').value,
+        expiryDate: document.getElementById('edit-expiry').value || null,
         contractTerm: document.getElementById('edit-contract').value,
       };
       const res = await fetch(`/licenses/${editingId}`, {
