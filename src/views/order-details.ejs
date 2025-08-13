@@ -11,12 +11,22 @@
         <% } else { %>
           <table>
             <thead>
-              <tr><th>Product</th><th>Quantity</th><th>Price</th></tr>
+              <tr>
+                <th>Image</th>
+                <th>Product</th>
+                <th>SKU</th>
+                <th>Description</th>
+                <th>Quantity</th>
+                <th>Price</th>
+              </tr>
             </thead>
             <tbody>
               <% items.forEach(function(item){ %>
                 <tr>
+                  <td><% if (item.image_url) { %><img src="<%= item.image_url %>" width="50" alt=""><% } %></td>
                   <td><%= item.product_name %></td>
+                  <td><%= item.sku %></td>
+                  <td><%- item.description.replace(/\n/g, '<br>') %></td>
                   <td><%= item.quantity %></td>
                   <td>$<%= item.price.toFixed(2) %></td>
                 </tr>
