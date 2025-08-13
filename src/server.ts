@@ -98,7 +98,7 @@ app.use(
 );
 
 app.use((req, res, next) => {
-  res.locals.isSuperAdmin = req.session.userId === 1;
+  res.locals.isGlobalAdmin = req.session.userId === 1;
   next();
 });
 
@@ -135,7 +135,7 @@ const swaggerSpec = swaggerJSDoc({
 app.use(
   '/swagger',
   ensureAuth,
-  ensureSuperAdmin,
+  ensureGlobalAdmin,
   swaggerUi.serve,
   swaggerUi.setup(swaggerSpec)
 );
@@ -163,7 +163,7 @@ async function ensureAdmin(
   return res.redirect('/');
 }
 
-function ensureSuperAdmin(
+function ensureGlobalAdmin(
   req: express.Request,
   res: express.Response,
   next: express.NextFunction
@@ -174,7 +174,7 @@ function ensureSuperAdmin(
   return res.redirect('/');
 }
 
-app.get('/api-docs', ensureAuth, ensureSuperAdmin, async (req, res) => {
+app.get('/api-docs', ensureAuth, ensureGlobalAdmin, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('api-docs', {
@@ -365,6 +365,33 @@ app.get(
     res.json(staff);
   }
 );
+
+app.get('/licenses/:id', ensureAuth, ensureGlobalAdmin, async (req, res) => {
+  const license = await getLicenseById(parseInt(req.params.id, 10));
+  if (!license) {
+    return res.status(404).json({ error: 'License not found' });
+  }
+  res.json(license);
+});
+
+app.post('/licenses/:id/edit', ensureAuth, ensureGlobalAdmin, async (req, res) => {
+  const licenseId = parseInt(req.params.id, 10);
+  const license = await getLicenseById(licenseId);
+  if (!license) {
+    return res.status(404).json({ error: 'License not found' });
+  }
+  const { name, platform, count, expiryDate, contractTerm } = req.body;
+  await updateLicense(
+    licenseId,
+    license.company_id,
+    name,
+    platform,
+    parseInt(count, 10),
+    expiryDate,
+    contractTerm
+  );
+  res.json({ success: true });
+});
 
 app.post('/licenses/:id/order', ensureAuth, async (req, res) => {
   const { quantity } = req.body;
@@ -588,7 +615,7 @@ app.post('/switch-company', ensureAuth, async (req, res) => {
   res.redirect('/');
 });
 
-app.get('/external-apis', ensureAuth, ensureSuperAdmin, async (req, res) => {
+app.get('/external-apis', ensureAuth, ensureGlobalAdmin, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
   const settings = req.session.companyId
     ? await getExternalApiSettings(req.session.companyId)
@@ -608,7 +635,7 @@ app.get('/external-apis', ensureAuth, ensureSuperAdmin, async (req, res) => {
   });
 });
 
-app.post('/external-apis', ensureAuth, ensureSuperAdmin, async (req, res) => {
+app.post('/external-apis', ensureAuth, ensureGlobalAdmin, async (req, res) => {
   const {
     xeroEndpoint,
     xeroApiKey,
@@ -631,7 +658,7 @@ app.post('/external-apis', ensureAuth, ensureSuperAdmin, async (req, res) => {
   res.redirect('/external-apis');
 });
 
-app.get('/apps', ensureAuth, ensureSuperAdmin, async (req, res) => {
+app.get('/apps', ensureAuth, ensureGlobalAdmin, async (req, res) => {
   const apps = await getAllApps();
   const companiesForUser = await getCompaniesForUser(req.session.userId!);
   const current = companiesForUser.find(
@@ -655,13 +682,13 @@ app.get('/apps', ensureAuth, ensureSuperAdmin, async (req, res) => {
   });
 });
 
-app.post('/apps', ensureAuth, ensureSuperAdmin, async (req, res) => {
+app.post('/apps', ensureAuth, ensureGlobalAdmin, async (req, res) => {
   const { sku, name, price, contractTerm } = req.body;
   await createApp(sku, name, parseFloat(price), contractTerm);
   res.redirect('/apps');
 });
 
-app.post('/apps/price', ensureAuth, ensureSuperAdmin, async (req, res) => {
+app.post('/apps/price', ensureAuth, ensureGlobalAdmin, async (req, res) => {
   const { companyId, appId, price } = req.body;
   await upsertCompanyAppPrice(
     parseInt(companyId, 10),
@@ -671,7 +698,7 @@ app.post('/apps/price', ensureAuth, ensureSuperAdmin, async (req, res) => {
   res.redirect('/apps');
 });
 
-app.post('/apps/:appId/add', ensureAuth, ensureSuperAdmin, async (req, res) => {
+app.post('/apps/:appId/add', ensureAuth, ensureGlobalAdmin, async (req, res) => {
   const appId = parseInt(req.params.appId, 10);
   const { companyId, quantity } = req.body;
   const appInfo = await getAppById(appId);
@@ -691,12 +718,12 @@ app.post('/apps/:appId/add', ensureAuth, ensureSuperAdmin, async (req, res) => {
 });
 
 app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
-  const isSuperAdmin = req.session.userId === 1;
+  const isGlobalAdmin = req.session.userId === 1;
   let allCompanies: Company[] = [];
   let users: User[] = [];
   let assignments: UserCompany[] = [];
   let apiKeys: ApiKey[] = [];
-  if (isSuperAdmin) {
+  if (isGlobalAdmin) {
     allCompanies = await getAllCompanies();
     users = await getAllUsers();
     assignments = await getUserCompanyAssignments();
@@ -716,7 +743,7 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     assignments,
     apiKeys,
     isAdmin: true,
-    isSuperAdmin,
+    isGlobalAdmin,
     companies,
     currentCompanyId: req.session.companyId,
     canManageLicenses: current?.can_manage_licenses ?? 0,
@@ -736,9 +763,9 @@ app.post('/admin/company', ensureAuth, ensureAdmin, async (req, res) => {
 
 app.post('/admin/user', ensureAuth, ensureAdmin, async (req, res) => {
   const { email, password } = req.body;
-  const isSuperAdmin = req.session.userId === 1;
+  const isGlobalAdmin = req.session.userId === 1;
   const passwordHash = await bcrypt.hash(password, 10);
-  const companyId = isSuperAdmin
+  const companyId = isGlobalAdmin
     ? parseInt(req.body.companyId, 10)
     : req.session.companyId!;
   const userId = await createUser(email, passwordHash, companyId);
