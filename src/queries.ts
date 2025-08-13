@@ -43,6 +43,13 @@ export interface Staff {
   enabled: number;
 }
 
+export interface ApiKey {
+  id: number;
+  api_key: string;
+  description: string;
+  expiry_date: string | null;
+}
+
 export async function getUserByEmail(email: string): Promise<User | null> {
   const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM users WHERE email = ?', [email]);
   return (rows as User[])[0] || null;
@@ -63,8 +70,11 @@ export async function getUserCount(): Promise<number> {
   return (rows[0] as { count: number }).count;
 }
 
-export async function createCompany(name: string): Promise<number> {
-  const [result] = await pool.execute('INSERT INTO companies (name) VALUES (?)', [name]);
+export async function createCompany(name: string, address?: string): Promise<number> {
+  const [result] = await pool.execute(
+    'INSERT INTO companies (name, address) VALUES (?, ?)',
+    [name, address || null]
+  );
   const insert = result as ResultSetHeader;
   return insert.insertId;
 }
@@ -77,6 +87,22 @@ export async function createUser(
   const [result] = await pool.execute(
     'INSERT INTO users (email, password_hash, company_id) VALUES (?, ?, ?)',
     [email, passwordHash, companyId]
+  );
+  const insert = result as ResultSetHeader;
+  return insert.insertId;
+}
+
+export async function createLicense(
+  companyId: number,
+  name: string,
+  platform: string,
+  count: number,
+  expiryDate: string,
+  contractTerm: string
+): Promise<number> {
+  const [result] = await pool.execute(
+    'INSERT INTO licenses (company_id, name, platform, count, expiry_date, contract_term) VALUES (?, ?, ?, ?, ?, ?)',
+    [companyId, name, platform, count, expiryDate, contractTerm]
   );
   const insert = result as ResultSetHeader;
   return insert.insertId;
@@ -169,4 +195,132 @@ export async function updateStaffEnabled(
     enabled ? 1 : 0,
     staffId,
   ]);
+}
+
+export async function updateStaff(
+  id: number,
+  companyId: number,
+  firstName: string,
+  lastName: string,
+  email: string,
+  dateOnboarded: string,
+  enabled: boolean
+): Promise<void> {
+  await pool.execute(
+    'UPDATE staff SET company_id = ?, first_name = ?, last_name = ?, email = ?, date_onboarded = ?, enabled = ? WHERE id = ?',
+    [companyId, firstName, lastName, email, dateOnboarded, enabled ? 1 : 0, id]
+  );
+}
+
+export async function deleteStaff(id: number): Promise<void> {
+  await pool.execute('DELETE FROM staff WHERE id = ?', [id]);
+}
+
+export async function updateCompany(
+  id: number,
+  name: string,
+  address: string | null
+): Promise<void> {
+  await pool.execute('UPDATE companies SET name = ?, address = ? WHERE id = ?', [
+    name,
+    address,
+    id,
+  ]);
+}
+
+export async function deleteCompany(id: number): Promise<void> {
+  await pool.execute('DELETE FROM companies WHERE id = ?', [id]);
+}
+
+export async function updateUser(
+  id: number,
+  email: string,
+  passwordHash: string,
+  companyId: number
+): Promise<void> {
+  await pool.execute(
+    'UPDATE users SET email = ?, password_hash = ?, company_id = ? WHERE id = ?',
+    [email, passwordHash, companyId, id]
+  );
+}
+
+export async function deleteUser(id: number): Promise<void> {
+  await pool.execute('DELETE FROM users WHERE id = ?', [id]);
+}
+
+export async function updateLicense(
+  id: number,
+  companyId: number,
+  name: string,
+  platform: string,
+  count: number,
+  expiryDate: string,
+  contractTerm: string
+): Promise<void> {
+  await pool.execute(
+    'UPDATE licenses SET company_id = ?, name = ?, platform = ?, count = ?, expiry_date = ?, contract_term = ? WHERE id = ?',
+    [companyId, name, platform, count, expiryDate, contractTerm, id]
+  );
+}
+
+export async function deleteLicense(id: number): Promise<void> {
+  await pool.execute('DELETE FROM licenses WHERE id = ?', [id]);
+}
+
+export async function unassignUserFromCompany(
+  userId: number,
+  companyId: number
+): Promise<void> {
+  await pool.execute('DELETE FROM user_companies WHERE user_id = ? AND company_id = ?', [
+    userId,
+    companyId,
+  ]);
+}
+
+export async function linkStaffToLicense(
+  staffId: number,
+  licenseId: number
+): Promise<void> {
+  await pool.execute(
+    'INSERT INTO staff_licenses (staff_id, license_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE staff_id = staff_id',
+    [staffId, licenseId]
+  );
+}
+
+export async function unlinkStaffFromLicense(
+  staffId: number,
+  licenseId: number
+): Promise<void> {
+  await pool.execute('DELETE FROM staff_licenses WHERE staff_id = ? AND license_id = ?', [
+    staffId,
+    licenseId,
+  ]);
+}
+
+export async function createApiKey(
+  apiKey: string,
+  description: string,
+  expiryDate?: string
+): Promise<void> {
+  await pool.execute(
+    'INSERT INTO api_keys (api_key, description, expiry_date) VALUES (?, ?, ?)',
+    [apiKey, description, expiryDate || null]
+  );
+}
+
+export async function getApiKeys(): Promise<ApiKey[]> {
+  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM api_keys');
+  return rows as ApiKey[];
+}
+
+export async function deleteApiKey(id: number): Promise<void> {
+  await pool.execute('DELETE FROM api_keys WHERE id = ?', [id]);
+}
+
+export async function getApiKeyRecord(apiKey: string): Promise<ApiKey | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM api_keys WHERE api_key = ? AND (expiry_date IS NULL OR expiry_date >= CURRENT_DATE())',
+    [apiKey]
+  );
+  return (rows as ApiKey[])[0] || null;
 }

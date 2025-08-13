@@ -70,6 +70,30 @@
           <% }); %>
         </table>
       </section>
+      <section>
+        <h2>API Keys</h2>
+        <form action="/admin/api-key" method="post">
+          <input type="text" name="description" placeholder="Description">
+          <input type="date" name="expiryDate">
+          <button type="submit">Add API Key</button>
+        </form>
+        <table>
+          <tr><th>Key</th><th>Description</th><th>Expiry</th><th></th></tr>
+          <% apiKeys.forEach(function(k) { %>
+            <tr>
+              <td><%= k.api_key %></td>
+              <td><%= k.description %></td>
+              <td><%= k.expiry_date || '' %></td>
+              <td>
+                <form action="/admin/api-key/delete" method="post">
+                  <input type="hidden" name="id" value="<%= k.id %>">
+                  <button type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          <% }); %>
+        </table>
+      </section>
     </div>
   </div>
 </body>
