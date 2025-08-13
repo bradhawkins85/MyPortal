@@ -11,13 +11,24 @@
       <% } else { %>
         <table>
           <thead>
-            <tr><th>Order Number</th><th>Date</th></tr>
+            <tr>
+              <th>Order Number</th>
+              <th>Date</th>
+              <% if (isSuperAdmin) { %><th>Actions</th><% } %>
+            </tr>
           </thead>
           <tbody>
             <% orders.forEach(function(o){ %>
               <tr>
                 <td><a href="/orders/<%= o.order_number %>"><%= o.order_number %></a></td>
                 <td><%= o.order_date.toISOString().slice(0,10) %></td>
+                <% if (isSuperAdmin) { %>
+                  <td>
+                    <form action="/orders/<%= o.order_number %>/delete" method="post" onsubmit="return confirm('Delete order?');">
+                      <button type="submit">Delete</button>
+                    </form>
+                  </td>
+                <% } %>
               </tr>
             <% }) %>
           </tbody>

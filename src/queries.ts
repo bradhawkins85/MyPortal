@@ -842,6 +842,30 @@ export async function getOrderItems(
   })) as OrderItem[];
 }
 
+export async function deleteOrder(
+  orderNumber: string,
+  companyId: number
+): Promise<void> {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.query<RowDataPacket[]>(
+      'SELECT product_id, quantity FROM shop_orders WHERE order_number = ? AND company_id = ?',
+      [orderNumber, companyId]
+    );
+    for (const row of rows as any[]) {
+      await conn.execute('UPDATE shop_products SET stock = stock + ? WHERE id = ?', [row.quantity, row.product_id]);
+    }
+    await conn.execute('DELETE FROM shop_orders WHERE order_number = ? AND company_id = ?', [orderNumber, companyId]);
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 export async function getExternalApiSettings(
   companyId: number
 ): Promise<ExternalApiSettings | null> {
