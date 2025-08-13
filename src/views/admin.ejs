@@ -54,6 +54,7 @@
                 <form action="/admin/permission" method="post">
                   <input type="hidden" name="userId" value="<%= a.user_id %>">
                   <input type="hidden" name="companyId" value="<%= a.company_id %>">
+                  <input type="hidden" name="canManageLicenses" value="0">
                   <input type="checkbox" name="canManageLicenses" value="1" <%= a.can_manage_licenses ? 'checked' : '' %> onchange="this.form.submit()">
                 </form>
               </td>
@@ -61,6 +62,7 @@
                 <form action="/admin/permission" method="post">
                   <input type="hidden" name="userId" value="<%= a.user_id %>">
                   <input type="hidden" name="companyId" value="<%= a.company_id %>">
+                  <input type="hidden" name="canManageStaff" value="0">
                   <input type="checkbox" name="canManageStaff" value="1" <%= a.can_manage_staff ? 'checked' : '' %> onchange="this.form.submit()">
                 </form>
               </td>

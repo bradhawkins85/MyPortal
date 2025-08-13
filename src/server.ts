@@ -249,6 +249,13 @@ app.post('/admin/assign', ensureAuth, ensureAdmin, async (req, res) => {
   res.redirect('/admin');
 });
 
+function parseCheckbox(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    value = value[value.length - 1];
+  }
+  return value === '1' || value === 'on' || value === true;
+}
+
 app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
   const { userId, companyId, canManageLicenses, canManageStaff } = req.body;
   const uid = parseInt(userId, 10);
@@ -258,7 +265,7 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
       uid,
       cid,
       'can_manage_licenses',
-      !!canManageLicenses
+      parseCheckbox(canManageLicenses)
     );
   }
   if (typeof canManageStaff !== 'undefined') {
@@ -266,7 +273,7 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
       uid,
       cid,
       'can_manage_staff',
-      !!canManageStaff
+      parseCheckbox(canManageStaff)
     );
   }
   res.redirect('/admin');
