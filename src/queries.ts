@@ -22,6 +22,7 @@ export interface License {
   count: number;
   expiry_date: string;
   contract_term: string;
+  allocated?: number;
 }
 
 export interface UserCompany {
@@ -61,17 +62,36 @@ export async function getCompanyById(id: number): Promise<Company | null> {
 }
 
 export async function getLicensesByCompany(companyId: number): Promise<License[]> {
-  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM licenses WHERE company_id = ?', [companyId]);
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT l.*, COUNT(sl.staff_id) AS allocated
+     FROM licenses l
+     LEFT JOIN staff_licenses sl ON l.id = sl.license_id
+     WHERE l.company_id = ?
+     GROUP BY l.id`,
+    [companyId]
+  );
   return rows as License[];
 }
 
 export async function getAllLicenses(): Promise<License[]> {
-  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM licenses');
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT l.*, COUNT(sl.staff_id) AS allocated
+     FROM licenses l
+     LEFT JOIN staff_licenses sl ON l.id = sl.license_id
+     GROUP BY l.id`
+  );
   return rows as License[];
 }
 
 export async function getLicenseById(id: number): Promise<License | null> {
-  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM licenses WHERE id = ?', [id]);
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT l.*, COUNT(sl.staff_id) AS allocated
+     FROM licenses l
+     LEFT JOIN staff_licenses sl ON l.id = sl.license_id
+     WHERE l.id = ?
+     GROUP BY l.id`,
+    [id]
+  );
   return (rows as License[])[0] || null;
 }
 

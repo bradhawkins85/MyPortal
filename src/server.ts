@@ -741,6 +741,8 @@ api.delete('/users/:id', async (req, res) => {
  *                     type: string
  *                   count:
  *                     type: integer
+ *                   allocated:
+ *                     type: integer
  *                   expiry_date:
  *                     type: string
  *                     format: date
@@ -838,6 +840,8 @@ api.post('/licenses', async (req, res) => {
  *                 platform:
  *                   type: string
  *                 count:
+ *                   type: integer
+ *                 allocated:
  *                   type: integer
  *                 expiry_date:
  *                   type: string
