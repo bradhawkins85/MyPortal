@@ -36,7 +36,7 @@
                     data-name="<%= lic.name %>"
                     data-sku="<%= lic.platform %>"
                     data-count="<%= lic.count %>"
-                    data-expiry-date="<%= lic.expiry_date %>"
+                    data-expiry-date="<%= lic.expiry_date ? new Date(lic.expiry_date).toISOString().split('T')[0] : '' %>"
                     data-contract-term="<%= lic.contract_term %>"
                   >Edit</button>
                 <% } %>
