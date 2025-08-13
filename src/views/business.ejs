@@ -1,9 +1,6 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <title>Business Info</title>
-  <link rel="stylesheet" href="/style.css">
-</head>
+  <%- include('partials/head', { title: 'Business Info' }) %>
 <body>
   <div class="container">
     <nav>
@@ -27,7 +24,7 @@
       <% if (company.address) { %>
         <p>Address: <%= company.address %></p>
       <% } %>
-    <% } %>
+    </div>
   </div>
 </body>
 </html>
