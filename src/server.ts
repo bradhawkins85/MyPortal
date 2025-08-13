@@ -91,7 +91,7 @@ const swaggerSpec = swaggerJSDoc({
 });
 
 app.use(
-  '/api-docs',
+  '/swagger',
   ensureAuth,
   ensureAdmin,
   swaggerUi.serve,
@@ -111,6 +111,18 @@ function ensureAdmin(req: express.Request, res: express.Response, next: express.
   }
   next();
 }
+
+app.get('/api-docs', ensureAuth, ensureAdmin, async (req, res) => {
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  res.render('api-docs', {
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: true,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+  });
+});
 
 app.get('/login', async (req, res) => {
   const count = await getUserCount();
