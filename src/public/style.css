@@ -104,6 +104,11 @@ table th {
   flex-direction: column;
 }
 
+.sidebar-bottom {
+  margin-top: auto;
+}
+
+
 .menu-link {
   display: flex;
   align-items: center;
@@ -125,7 +130,6 @@ table th {
 }
 
 .menu-link.logout {
-  margin-top: auto;
   background-color: #e53935;
 }
 
