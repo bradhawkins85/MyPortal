@@ -58,6 +58,12 @@ import {
   upsertExternalApiSettings,
   getAllApps,
   createApp,
+  getAppById,
+  updateApp,
+  deleteApp,
+  getAppPrice,
+  getCompanyAppPrices,
+  deleteCompanyAppPrice,
   upsertCompanyAppPrice,
   Company,
   User,
@@ -97,6 +103,7 @@ const swaggerSpec = swaggerJSDoc({
       version: '1.0.0',
     },
     tags: [
+      { name: 'Apps' },
       { name: 'Companies' },
       { name: 'Users' },
       { name: 'Licenses' },
@@ -532,10 +539,12 @@ app.get('/apps', ensureAuth, ensureSuperAdmin, async (req, res) => {
     (c) => c.company_id === req.session.companyId
   );
   const allCompanies = await getAllCompanies();
+  const companyPrices = await getCompanyAppPrices();
   res.render('apps', {
     apps,
     companies: companiesForUser,
     allCompanies,
+     companyPrices,
     currentCompanyId: req.session.companyId,
     isAdmin: true,
     canManageLicenses: current?.can_manage_licenses ?? 0,
@@ -732,6 +741,268 @@ api.use(async (req, res, next) => {
   }
   next();
 });
+
+/**
+ * @openapi
+ * /api/apps:
+ *   get:
+ *     tags:
+ *       - Apps
+ *     summary: List all apps
+ *     responses:
+ *       200:
+ *         description: Array of apps
+ *   post:
+ *     tags:
+ *       - Apps
+ *     summary: Create a new app
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               sku:
+ *                 type: string
+ *               name:
+ *                 type: string
+ *               defaultPrice:
+ *                 type: number
+ *               contractTerm:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: App created
+ */
+api.route('/apps')
+  .get(async (req, res) => {
+    const apps = await getAllApps();
+    res.json(apps);
+  })
+  .post(async (req, res) => {
+    const { sku, name, defaultPrice, contractTerm } = req.body;
+    const id = await createApp(sku, name, defaultPrice, contractTerm);
+    res.json({ id });
+  });
+
+/**
+ * @openapi
+ * /api/apps/{id}:
+ *   get:
+ *     tags:
+ *       - Apps
+ *     summary: Get an app by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: App details
+ *       404:
+ *         description: App not found
+ *   put:
+ *     tags:
+ *       - Apps
+ *     summary: Update an app
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               sku:
+ *                 type: string
+ *               name:
+ *                 type: string
+ *               defaultPrice:
+ *                 type: number
+ *               contractTerm:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Update successful
+ *   delete:
+ *     tags:
+ *       - Apps
+ *     summary: Delete an app
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Deletion successful
+ */
+api.route('/apps/:id')
+  .get(async (req, res) => {
+    const app = await getAppById(parseInt(req.params.id, 10));
+    if (!app) {
+      return res.status(404).json({ error: 'App not found' });
+    }
+    res.json(app);
+  })
+  .put(async (req, res) => {
+    const { sku, name, defaultPrice, contractTerm } = req.body;
+    await updateApp(
+      parseInt(req.params.id, 10),
+      sku,
+      name,
+      defaultPrice,
+      contractTerm
+    );
+    res.json({ success: true });
+  })
+  .delete(async (req, res) => {
+    await deleteApp(parseInt(req.params.id, 10));
+    res.json({ success: true });
+  });
+
+/**
+ * @openapi
+ * /api/apps/{appId}/companies/{companyId}/price:
+ *   get:
+ *     tags:
+ *       - Apps
+ *     summary: Get company-specific price for an app
+ *     parameters:
+ *       - in: path
+ *         name: appId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Price details
+ *       404:
+ *         description: Price not found
+ *   post:
+ *     tags:
+ *       - Apps
+ *     summary: Set company-specific price for an app
+ *     parameters:
+ *       - in: path
+ *         name: appId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               price:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Price set
+ *   put:
+ *     tags:
+ *       - Apps
+ *     summary: Update company-specific price for an app
+ *     parameters:
+ *       - in: path
+ *         name: appId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               price:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Update successful
+ *   delete:
+ *     tags:
+ *       - Apps
+ *     summary: Delete company-specific price for an app
+ *     parameters:
+ *       - in: path
+ *         name: appId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Deletion successful
+ */
+api
+  .route('/apps/:appId/companies/:companyId/price')
+  .get(async (req, res) => {
+    const price = await getAppPrice(
+      parseInt(req.params.companyId, 10),
+      parseInt(req.params.appId, 10)
+    );
+    if (price === null) {
+      return res.status(404).json({ error: 'Price not found' });
+    }
+    res.json({ price });
+  })
+  .post(async (req, res) => {
+    const { price } = req.body;
+    await upsertCompanyAppPrice(
+      parseInt(req.params.companyId, 10),
+      parseInt(req.params.appId, 10),
+      price
+    );
+    res.json({ success: true });
+  })
+  .put(async (req, res) => {
+    const { price } = req.body;
+    await upsertCompanyAppPrice(
+      parseInt(req.params.companyId, 10),
+      parseInt(req.params.appId, 10),
+      price
+    );
+    res.json({ success: true });
+  })
+  .delete(async (req, res) => {
+    await deleteCompanyAppPrice(
+      parseInt(req.params.companyId, 10),
+      parseInt(req.params.appId, 10)
+    );
+    res.json({ success: true });
+  });
 
 /**
  * @openapi
