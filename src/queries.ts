@@ -210,10 +210,10 @@ export async function getAppPrice(
 }
 
 export async function getCompanyAppPrices(): Promise<
-  (CompanyAppPrice & { company_name: string; app_name: string })[]
+  (CompanyAppPrice & { company_name: string; app_name: string; sku: string })[]
 > {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT cap.company_id, cap.app_id, cap.price, c.name AS company_name, a.name AS app_name
+    `SELECT cap.company_id, cap.app_id, cap.price, c.name AS company_name, a.name AS app_name, a.sku AS sku
      FROM company_app_prices cap
      JOIN companies c ON cap.company_id = c.id
      JOIN apps a ON cap.app_id = a.id`
