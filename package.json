@@ -4,7 +4,7 @@
   "description": "Customer portal built with Node.js, TypeScript and MySQL",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r src/views dist",
     "start": "node dist/server.js",
     "dev": "nodemon src/server.ts",
     "test": "tsc --noEmit"
