@@ -52,6 +52,13 @@ import {
   getInvoiceById,
   updateInvoice,
   deleteInvoice,
+  getAllProducts,
+  createProduct,
+  getProductById,
+  updateProduct,
+  deleteProduct,
+  createOrder,
+  getOrdersByCompany,
   upsertAsset,
   upsertInvoice,
   getExternalApiSettings,
@@ -179,6 +186,7 @@ app.get('/api-docs', ensureAuth, ensureSuperAdmin, async (req, res) => {
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
   });
 });
 
@@ -223,7 +231,7 @@ app.post('/register', async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
     const companyId = await createCompany(company);
     const userId = await createUser(email, passwordHash, companyId);
-    await assignUserToCompany(userId, companyId, true, true, true, true, true, true);
+    await assignUserToCompany(userId, companyId, true, true, true, true, true, true, true);
     req.session.userId = userId;
     req.session.companyId = companyId;
     res.redirect('/');
@@ -257,6 +265,7 @@ app.get('/', ensureAuth, async (req, res) => {
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
   });
 });
 
@@ -311,6 +320,19 @@ async function ensureInvoicesAccess(
   }
   return res.redirect('/');
 }
+
+async function ensureShopAccess(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  if (current && current.can_access_shop) {
+    return next();
+  }
+  return res.redirect('/');
+}
 app.get('/licenses', ensureAuth, ensureLicenseAccess, async (req, res) => {
   const licenses = await getLicensesByCompany(req.session.companyId!);
   const companies = await getCompaniesForUser(req.session.userId!);
@@ -325,6 +347,7 @@ app.get('/licenses', ensureAuth, ensureLicenseAccess, async (req, res) => {
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
   });
 });
 
@@ -419,6 +442,7 @@ app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
   });
 });
 
@@ -459,6 +483,7 @@ app.get('/assets', ensureAuth, ensureAssetsAccess, async (req, res) => {
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
   });
 });
 
@@ -478,7 +503,80 @@ app.get('/invoices', ensureAuth, ensureInvoicesAccess, async (req, res) => {
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
   });
+});
+
+app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
+  const products = await getAllProducts();
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  res.render('shop', {
+    products,
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+  });
+});
+
+app.post('/shop/order', ensureAuth, ensureShopAccess, async (req, res) => {
+  const { productId, quantity } = req.body;
+  if (req.session.companyId) {
+    await createOrder(
+      req.session.userId!,
+      req.session.companyId,
+      parseInt(productId, 10),
+      parseInt(quantity, 10)
+    );
+  }
+  res.redirect('/shop');
+});
+
+app.get('/shop/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const products = await getAllProducts();
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  res.render('shop-admin', {
+    products,
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: true,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+  });
+});
+
+app.post('/shop/admin/product', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { name, description, price, stock } = req.body;
+  await createProduct(name, description, parseFloat(price), parseInt(stock, 10));
+  res.redirect('/shop/admin');
+});
+
+app.post('/shop/admin/product/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { name, description, price, stock } = req.body;
+  await updateProduct(
+    parseInt(req.params.id, 10),
+    name,
+    description,
+    parseFloat(price),
+    parseInt(stock, 10)
+  );
+  res.redirect('/shop/admin');
+});
+
+app.post('/shop/admin/product/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  await deleteProduct(parseInt(req.params.id, 10));
+  res.redirect('/shop/admin');
 });
 
 app.post('/switch-company', ensureAuth, async (req, res) => {
@@ -506,6 +604,7 @@ app.get('/external-apis', ensureAuth, ensureSuperAdmin, async (req, res) => {
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
   });
 });
 
@@ -552,6 +651,7 @@ app.get('/apps', ensureAuth, ensureSuperAdmin, async (req, res) => {
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
   });
 });
 
@@ -624,6 +724,7 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
   });
 });
 
@@ -641,7 +742,7 @@ app.post('/admin/user', ensureAuth, ensureAdmin, async (req, res) => {
     ? parseInt(req.body.companyId, 10)
     : req.session.companyId!;
   const userId = await createUser(email, passwordHash, companyId);
-  await assignUserToCompany(userId, companyId, false, false, false, false, false, false);
+  await assignUserToCompany(userId, companyId, false, false, false, false, false, false, false);
   res.redirect('/admin');
 });
 
@@ -671,6 +772,7 @@ app.post('/admin/assign', ensureAuth, ensureAdmin, async (req, res) => {
     false,
     false,
     false,
+    false,
     false
   );
   res.redirect('/admin');
@@ -692,6 +794,7 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
     canManageAssets,
     canManageInvoices,
     canOrderLicenses,
+    canAccessShop,
     isAdmin: isAdminField,
   } = req.body;
   const uid = parseInt(userId, 10);
@@ -734,6 +837,14 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
       cid,
       'can_order_licenses',
       parseCheckbox(canOrderLicenses)
+    );
+  }
+  if (typeof canAccessShop !== 'undefined') {
+    await updateUserCompanyPermission(
+      uid,
+      cid,
+      'can_access_shop',
+      parseCheckbox(canAccessShop)
     );
   }
   if (typeof isAdminField !== 'undefined') {
@@ -886,6 +997,66 @@ api.route('/apps/:id')
   })
   .delete(async (req, res) => {
     await deleteApp(parseInt(req.params.id, 10));
+    res.json({ success: true });
+  });
+
+api.route('/shop/products')
+  .get(async (req, res) => {
+    const products = await getAllProducts();
+    res.json(products);
+  })
+  .post(async (req, res) => {
+    const { name, description, price, stock } = req.body;
+    const id = await createProduct(
+      name,
+      description,
+      parseFloat(price),
+      parseInt(stock, 10)
+    );
+    res.json({ id });
+  });
+
+api.route('/shop/products/:id')
+  .get(async (req, res) => {
+    const product = await getProductById(parseInt(req.params.id, 10));
+    if (!product) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+    res.json(product);
+  })
+  .put(async (req, res) => {
+    const { name, description, price, stock } = req.body;
+    await updateProduct(
+      parseInt(req.params.id, 10),
+      name,
+      description,
+      parseFloat(price),
+      parseInt(stock, 10)
+    );
+    res.json({ success: true });
+  })
+  .delete(async (req, res) => {
+    await deleteProduct(parseInt(req.params.id, 10));
+    res.json({ success: true });
+  });
+
+api.route('/shop/orders')
+  .get(async (req, res) => {
+    const companyId = req.query.companyId;
+    if (!companyId) {
+      return res.status(400).json({ error: 'companyId required' });
+    }
+    const orders = await getOrdersByCompany(parseInt(companyId as string, 10));
+    res.json(orders);
+  })
+  .post(async (req, res) => {
+    const { userId, companyId, productId, quantity } = req.body;
+    await createOrder(
+      parseInt(userId, 10),
+      parseInt(companyId, 10),
+      parseInt(productId, 10),
+      parseInt(quantity, 10)
+    );
     res.json({ success: true });
   });
 
@@ -1818,6 +1989,8 @@ api.delete('/staff/:id', async (req, res) => {
  *                 type: boolean
  *               canOrderLicenses:
  *                 type: boolean
+ *               canAccessShop:
+ *                 type: boolean
  *               isAdmin:
  *                 type: boolean
  *     responses:
@@ -1832,6 +2005,7 @@ api.post('/companies/:companyId/users/:userId', async (req, res) => {
     canManageInvoices,
     isAdmin,
     canOrderLicenses,
+    canAccessShop,
   } = req.body;
   await assignUserToCompany(
     parseInt(req.params.userId, 10),
@@ -1841,7 +2015,8 @@ api.post('/companies/:companyId/users/:userId', async (req, res) => {
     !!canManageAssets,
     !!canManageInvoices,
     !!isAdmin,
-    !!canOrderLicenses
+    !!canOrderLicenses,
+    !!canAccessShop
   );
   res.json({ success: true });
 });
