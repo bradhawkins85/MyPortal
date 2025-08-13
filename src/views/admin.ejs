@@ -45,7 +45,7 @@
       <section>
         <h2>Current Assignments</h2>
         <table>
-          <tr><th>User</th><th>Company</th><th>Licenses</th></tr>
+          <tr><th>User</th><th>Company</th><th>Licenses</th><th>Staff</th></tr>
           <% assignments.forEach(function(a) { %>
             <tr>
               <td><%= a.email %></td>
@@ -55,6 +55,13 @@
                   <input type="hidden" name="userId" value="<%= a.user_id %>">
                   <input type="hidden" name="companyId" value="<%= a.company_id %>">
                   <input type="checkbox" name="canManageLicenses" value="1" <%= a.can_manage_licenses ? 'checked' : '' %> onchange="this.form.submit()">
+                </form>
+              </td>
+              <td>
+                <form action="/admin/permission" method="post">
+                  <input type="hidden" name="userId" value="<%= a.user_id %>">
+                  <input type="hidden" name="companyId" value="<%= a.company_id %>">
+                  <input type="checkbox" name="canManageStaff" value="1" <%= a.can_manage_staff ? 'checked' : '' %> onchange="this.form.submit()">
                 </form>
               </td>
             </tr>
