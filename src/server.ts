@@ -257,6 +257,30 @@ app.get('/', ensureAuth, async (req, res) => {
     ? await getCompanyById(req.session.companyId)
     : null;
   const current = companies.find((c) => c.company_id === req.session.companyId);
+  let activeUsers = 0;
+  let licenseStats: { name: string; count: number; used: number; unused: number }[] = [];
+  let assetCount = 0;
+  let paidInvoices = 0;
+  let unpaidInvoices = 0;
+
+  if (company) {
+    const staff = await getStaffByCompany(company.id);
+    activeUsers = staff.filter((s) => s.enabled === 1).length;
+
+    const licenses = await getLicensesByCompany(company.id);
+    licenseStats = licenses.map((l) => {
+      const used = l.allocated || 0;
+      return { name: l.name, count: l.count, used, unused: l.count - used };
+    });
+
+    const assets = await getAssetsByCompany(company.id);
+    assetCount = assets.length;
+
+    const invoices = await getInvoicesByCompany(company.id);
+    paidInvoices = invoices.filter((i) => i.status.toLowerCase() === 'paid').length;
+    unpaidInvoices = invoices.length - paidInvoices;
+  }
+
   res.render('business', {
     company,
     companies,
@@ -268,6 +292,11 @@ app.get('/', ensureAuth, async (req, res) => {
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
     canAccessShop: current?.can_access_shop ?? 0,
+    activeUsers,
+    licenseStats,
+    assetCount,
+    paidInvoices,
+    unpaidInvoices,
   });
 });
 
