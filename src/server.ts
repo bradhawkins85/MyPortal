@@ -64,6 +64,7 @@ import {
   getOrdersByCompany,
   getOrderSummariesByCompany,
   getOrderItems,
+  deleteOrder,
   upsertAsset,
   upsertInvoice,
   getExternalApiSettings,
@@ -744,6 +745,19 @@ app.get('/orders/:orderNumber', ensureAuth, ensureShopAccess, async (req, res) =
     canAccessShop: current?.can_access_shop ?? 0,
   });
 });
+
+app.post(
+  '/orders/:orderNumber/delete',
+  ensureAuth,
+  ensureSuperAdmin,
+  async (req, res) => {
+    const orderNumber = req.params.orderNumber;
+    if (req.session.companyId) {
+      await deleteOrder(orderNumber, req.session.companyId);
+    }
+    res.redirect('/orders');
+  }
+);
 
 app.get('/shop/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const includeArchived = req.query.showArchived === '1';
@@ -1533,6 +1547,15 @@ api.route('/shop/orders')
     );
     res.json({ success: true, orderNumber: num });
   });
+
+api.delete('/shop/orders/:orderNumber', async (req, res) => {
+  const companyId = req.query.companyId;
+  if (!companyId) {
+    return res.status(400).json({ error: 'companyId required' });
+  }
+  await deleteOrder(req.params.orderNumber, parseInt(companyId as string, 10));
+  res.json({ success: true });
+});
 
 /**
  * @openapi
