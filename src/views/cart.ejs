@@ -14,18 +14,28 @@
       <% } else { %>
         <table>
           <thead>
-            <tr><th>Product</th><th>Quantity</th></tr>
+            <tr>
+              <th>Name</th>
+              <th>SKU</th>
+              <th>Description</th>
+              <th>Price</th>
+              <th>Quantity</th>
+            </tr>
           </thead>
           <tbody>
             <% cart.forEach(function(item){ %>
               <tr>
                 <td><%= item.name %></td>
+                <td><%= item.sku %></td>
+                <td><%= item.description %></td>
+                <td>$<%= item.price.toFixed(2) %></td>
                 <td><%= item.quantity %></td>
               </tr>
             <% }) %>
           </tbody>
         </table>
         <form action="/cart/place-order" method="post">
+          <p>Total: $<%= total.toFixed(2) %></p>
           <button type="submit">Place Order</button>
         </form>
       <% } %>
