@@ -8,9 +8,13 @@
       <p class="error"><%= error %></p>
     <% } %>
     <form method="post" action="/login">
-      <label>Email:<br><input type="email" name="email" required></label><br><br>
-      <label>Password:<br><input type="password" name="password" required></label><br><br>
-      <label><input type="checkbox" name="remember"> Remember Me</label><br><br>
+      <label>Email:
+        <input type="email" name="email" required>
+      </label>
+      <label>Password:
+        <input type="password" name="password" required>
+      </label>
+      <label><input type="checkbox" name="remember"> Remember Me</label>
       <button type="submit">Login</button>
     </form>
   </div>
