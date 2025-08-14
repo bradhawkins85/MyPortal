@@ -20,29 +20,20 @@
         <% if (officeGroups.length > 0) { %>
         <table>
           <thead>
-            <tr><th>Name</th><th>Members</th><% if (isSuperAdmin) { %><th></th><% } %></tr>
+            <tr><th>Name</th><th>Actions</th></tr>
           </thead>
           <tbody>
             <% officeGroups.forEach(function(g){ %>
               <tr>
                 <td><%= g.name %></td>
                 <td>
-                  <% if (g.members.length > 0) { %>
-                    <% g.members.forEach(function(m){ %>
-                      <div><%= m.first_name %> <%= m.last_name %></div>
-                    <% }); %>
-                  <% } else { %>
-                    <em>No members</em>
-                  <% } %>
                   <button type="button" onclick="openGroupModal(<%= g.id %>)">Edit</button>
+                  <% if (isSuperAdmin) { %>
+                    <form action="/office-groups/<%= g.id %>/delete" method="post" style="display:inline;">
+                      <button type="submit">Delete</button>
+                    </form>
+                  <% } %>
                 </td>
-                <% if (isSuperAdmin) { %>
-                <td>
-                  <form action="/office-groups/<%= g.id %>/delete" method="post">
-                    <button type="submit">Delete</button>
-                  </form>
-                </td>
-                <% } %>
               </tr>
             <% }); %>
           </tbody>
