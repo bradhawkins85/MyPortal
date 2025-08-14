@@ -241,7 +241,9 @@
             </form>
             <table>
               <thead>
-                <tr><th>Key</th><th>Description</th><th>Expiry</th><th></th></tr>
+                <tr>
+                  <th>Key</th><th>Description</th><th>Expiry</th><th>Usage</th><th>Last Used</th><th>IPs</th><th></th>
+                </tr>
               </thead>
               <tbody>
               <% apiKeys.forEach(function(k) { %>
@@ -249,6 +251,9 @@
                   <td><%= k.api_key %></td>
                   <td><%= k.description %></td>
                   <td><%= k.expiry_date || '' %></td>
+                  <td><%= k.usage_count %></td>
+                  <td><%= k.last_used_at || '' %></td>
+                  <td><a href="#" class="show-ips" data-ips='<%- JSON.stringify(k.ips) %>'>View</a></td>
                   <td>
                     <form action="/admin/api-key/delete" method="post">
                       <input type="hidden" name="id" value="<%= k.id %>">
@@ -259,6 +264,12 @@
               <% }); %>
               </tbody>
             </table>
+            <div id="ip-modal" style="display:none;">
+              <div>
+                <button id="ip-modal-close">Close</button>
+                <ul id="ip-list"></ul>
+              </div>
+            </div>
           </section>
         </div>
         <div id="forms-admin" class="tab-content">
@@ -620,6 +631,23 @@
           });
           alert('App added to company');
         });
+      });
+      document.querySelectorAll('.show-ips').forEach(function(link){
+        link.addEventListener('click', function(e){
+          e.preventDefault();
+          const ips = JSON.parse(this.dataset.ips || '[]');
+          const list = document.getElementById('ip-list');
+          list.innerHTML = '';
+          ips.forEach(function(ip){
+            const li = document.createElement('li');
+            li.textContent = ip.ip_address + ' (' + ip.usage_count + ')';
+            list.appendChild(li);
+          });
+          document.getElementById('ip-modal').style.display = 'block';
+        });
+      });
+      document.getElementById('ip-modal-close')?.addEventListener('click', function(){
+        document.getElementById('ip-modal').style.display = 'none';
       });
     });
   </script>

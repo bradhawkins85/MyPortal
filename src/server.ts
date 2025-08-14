@@ -41,10 +41,13 @@ import {
   linkStaffToLicense,
   unlinkStaffFromLicense,
   getStaffForLicense,
-  getApiKeys,
+  getApiKeysWithUsage,
   createApiKey,
   deleteApiKey,
   getApiKeyRecord,
+  recordApiKeyUsage,
+  logAudit,
+  getAuditLogs,
   getAssetsByCompany,
   getAssetById,
   updateAsset,
@@ -104,6 +107,8 @@ import {
   User,
   UserCompany,
   ApiKey,
+  ApiKeyWithUsage,
+  AuditLog,
   App,
   ProductCompanyRestriction,
   Category,
@@ -136,6 +141,26 @@ app.use((req, res, next) => {
   res.locals.hasForms = req.session.hasForms ?? false;
   next();
 });
+
+function auditLogger(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  res.on('finish', () => {
+    logAudit({
+      userId: req.session.userId || null,
+      action: `${req.method} ${req.originalUrl}`,
+      previousValue: null,
+      newValue: JSON.stringify(req.body || {}),
+      apiKey: req.apiKey,
+      ipAddress: req.ip,
+    }).catch(() => {});
+  });
+  next();
+}
+
+app.use(auditLogger);
 
 const swaggerSpec = swaggerJSDoc({
   definition: {
@@ -1157,7 +1182,7 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
   let allCompanies: Company[] = [];
   let users: User[] = [];
   let assignments: UserCompany[] = [];
-  let apiKeys: ApiKey[] = [];
+  let apiKeys: ApiKeyWithUsage[] = [];
   let apps: App[] = [];
   let companyPrices: any[] = [];
   let forms: any[] = [];
@@ -1171,7 +1196,7 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     allCompanies = await getAllCompanies();
     users = await getAllUsers();
     assignments = await getUserCompanyAssignments();
-    apiKeys = await getApiKeys();
+    apiKeys = await getApiKeysWithUsage();
     apps = await getAllApps();
     companyPrices = await getCompanyAppPrices();
     forms = await getAllForms();
@@ -1229,6 +1254,40 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     isSuperAdmin,
     companies,
     currentCompanyId: req.session.companyId,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+  });
+});
+
+app.get('/audit-logs', ensureAuth, ensureAdmin, async (req, res) => {
+  const isSuperAdmin = req.session.userId === 1;
+  const companiesForSidebar = await getCompaniesForUser(req.session.userId!);
+  const current = companiesForSidebar.find((c) => c.company_id === req.session.companyId);
+  let selectedCompanyId: number | null = null;
+  let logs: AuditLog[] = [];
+  let allCompanies: Company[] = [];
+  if (isSuperAdmin) {
+    allCompanies = await getAllCompanies();
+    selectedCompanyId = req.query.companyId ? parseInt(req.query.companyId as string, 10) : null;
+    logs = await getAuditLogs(selectedCompanyId || undefined);
+  } else {
+    selectedCompanyId = req.session.companyId || null;
+    if (selectedCompanyId) {
+      logs = await getAuditLogs(selectedCompanyId);
+    }
+  }
+  res.render('audit-logs', {
+    logs,
+    isSuperAdmin,
+    companies: companiesForSidebar,
+    filterCompanies: allCompanies,
+    selectedCompanyId,
+    currentCompanyId: req.session.companyId,
+    isAdmin: true,
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.can_manage_staff ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
@@ -1446,6 +1505,8 @@ api.use(async (req, res, next) => {
   if (!record) {
     return res.status(403).json({ error: 'Invalid API key' });
   }
+  req.apiKey = key;
+  await recordApiKeyUsage(record.id, req.ip || '');
   next();
 });
 

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+  <%- include('partials/head', { title: 'Audit Logs' }) %>
+  <body>
+    <div class="app-container">
+      <%- include('partials/sidebar') %>
+      <div class="content">
+        <h1>Audit Logs</h1>
+        <% if (isSuperAdmin) { %>
+          <form method="get">
+            <label>Company:
+              <select name="companyId">
+                <option value="">All</option>
+                <% filterCompanies.forEach(function(c){ %>
+                  <option value="<%= c.id %>" <%= selectedCompanyId == c.id ? 'selected' : '' %>><%= c.name %></option>
+                <% }); %>
+              </select>
+            </label>
+            <button type="submit">Filter</button>
+          </form>
+        <% } %>
+        <table>
+          <thead>
+            <tr>
+              <% if (isSuperAdmin) { %><th>Company</th><% } %>
+              <th>User</th>
+              <th>Action</th>
+              <th>Previous</th>
+              <th>New</th>
+              <th>API Key</th>
+              <th>IP Address</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% logs.forEach(function(l){ %>
+              <tr>
+                <% if (isSuperAdmin) { %><td><%= l.company_name || '' %></td><% } %>
+                <td><%= l.email || '' %></td>
+                <td><%= l.action %></td>
+                <td><%= l.previous_value || '' %></td>
+                <td><%= l.new_value || '' %></td>
+                <td><%= l.api_key || '' %></td>
+                <td><%= l.ip_address || '' %></td>
+                <td><%= l.created_at %></td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>
