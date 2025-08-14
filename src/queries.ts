@@ -1163,6 +1163,10 @@ export async function updateForm(
   );
 }
 
+export async function deleteForm(id: number): Promise<void> {
+  await pool.execute('DELETE FROM forms WHERE id = ?', [id]);
+}
+
 export async function getAllForms(): Promise<Form[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
     'SELECT * FROM forms ORDER BY name'
