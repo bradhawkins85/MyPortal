@@ -86,8 +86,6 @@ import {
   updateOrder,
   upsertAsset,
   upsertInvoice,
-  getExternalApiSettings,
-  upsertExternalApiSettings,
   getAllApps,
   createApp,
   getAppById,
@@ -439,14 +437,14 @@ app.post('/licenses/:id/order', ensureAuth, async (req, res) => {
   if (!current || !current.can_order_licenses) {
     return res.status(403).json({ error: 'Not allowed' });
   }
-  const settings = await getExternalApiSettings(req.session.companyId!);
-  if (settings?.webhook_url && settings.webhook_api_key) {
+  const { LICENSES_WEBHOOK_URL, LICENSES_WEBHOOK_API_KEY } = process.env;
+  if (LICENSES_WEBHOOK_URL && LICENSES_WEBHOOK_API_KEY) {
     try {
-      await fetch(settings.webhook_url, {
+      await fetch(LICENSES_WEBHOOK_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': settings.webhook_api_key,
+          'x-api-key': LICENSES_WEBHOOK_API_KEY,
         },
         body: JSON.stringify({
           companyId: req.session.companyId,
@@ -469,14 +467,14 @@ app.post('/licenses/:id/remove', ensureAuth, async (req, res) => {
   if (!current || !current.can_order_licenses) {
     return res.status(403).json({ error: 'Not allowed' });
   }
-  const settings = await getExternalApiSettings(req.session.companyId!);
-  if (settings?.webhook_url && settings.webhook_api_key) {
+  const { LICENSES_WEBHOOK_URL, LICENSES_WEBHOOK_API_KEY } = process.env;
+  if (LICENSES_WEBHOOK_URL && LICENSES_WEBHOOK_API_KEY) {
     try {
-      await fetch(settings.webhook_url, {
+      await fetch(LICENSES_WEBHOOK_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': settings.webhook_api_key,
+          'x-api-key': LICENSES_WEBHOOK_API_KEY,
         },
         body: JSON.stringify({
           companyId: req.session.companyId,
@@ -771,14 +769,14 @@ app.post('/cart/remove', ensureAuth, ensureShopAccess, (req, res) => {
 app.post('/cart/place-order', ensureAuth, ensureShopAccess, async (req, res) => {
   const { poNumber } = req.body;
   if (req.session.companyId && req.session.cart && req.session.cart.length > 0) {
-    const settings = await getExternalApiSettings(req.session.companyId);
-    if (settings?.shop_webhook_url && settings?.shop_webhook_api_key) {
+    const { SHOP_WEBHOOK_URL, SHOP_WEBHOOK_API_KEY } = process.env;
+    if (SHOP_WEBHOOK_URL && SHOP_WEBHOOK_API_KEY) {
       try {
-        await fetch(settings.shop_webhook_url, {
+        await fetch(SHOP_WEBHOOK_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': settings.shop_webhook_api_key,
+            'x-api-key': SHOP_WEBHOOK_API_KEY,
           },
           body: JSON.stringify({ cart: req.session.cart }),
         });
@@ -1015,53 +1013,6 @@ app.post('/switch-company', ensureAuth, async (req, res) => {
     req.session.companyId = parseInt(companyId, 10);
   }
   res.redirect('/');
-});
-
-app.get('/external-apis', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const companies = await getCompaniesForUser(req.session.userId!);
-  const settings = req.session.companyId
-    ? await getExternalApiSettings(req.session.companyId)
-    : null;
-  const current = companies.find((c) => c.company_id === req.session.companyId);
-  res.render('external-apis', {
-    settings,
-    companies,
-    currentCompanyId: req.session.companyId,
-    isAdmin: true,
-    canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
-    canManageAssets: current?.can_manage_assets ?? 0,
-    canManageInvoices: current?.can_manage_invoices ?? 0,
-    canOrderLicenses: current?.can_order_licenses ?? 0,
-    canAccessShop: current?.can_access_shop ?? 0,
-  });
-});
-
-app.post('/external-apis', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const {
-    xeroEndpoint,
-    xeroApiKey,
-    syncroEndpoint,
-    syncroApiKey,
-    webhookUrl,
-    webhookApiKey,
-    shopWebhookUrl,
-    shopWebhookApiKey,
-  } = req.body;
-  if (req.session.companyId) {
-    await upsertExternalApiSettings(
-      req.session.companyId,
-      xeroEndpoint,
-      xeroApiKey,
-      syncroEndpoint,
-      syncroApiKey,
-      webhookUrl,
-      webhookApiKey,
-      shopWebhookUrl,
-      shopWebhookApiKey
-    );
-  }
-  res.redirect('/external-apis');
 });
 
 app.get('/forms/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
@@ -2022,14 +1973,14 @@ api
     const cId = parseInt(companyId, 10);
     const pId = parseInt(productId, 10);
     const qty = parseInt(quantity, 10);
-    const settings = await getExternalApiSettings(cId);
-    if (settings?.shop_webhook_url && settings.shop_webhook_api_key) {
+    const { SHOP_WEBHOOK_URL, SHOP_WEBHOOK_API_KEY } = process.env;
+    if (SHOP_WEBHOOK_URL && SHOP_WEBHOOK_API_KEY) {
       try {
-        await fetch(settings.shop_webhook_url, {
+        await fetch(SHOP_WEBHOOK_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': settings.shop_webhook_api_key,
+            'x-api-key': SHOP_WEBHOOK_API_KEY,
           },
           body: JSON.stringify({
             userId: uId,
