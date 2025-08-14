@@ -154,6 +154,32 @@ export interface ApiKey {
   expiry_date: string | null;
 }
 
+export interface ApiKeyUsage {
+  ip_address: string;
+  usage_count: number;
+  last_used_at: string;
+}
+
+export interface ApiKeyWithUsage extends ApiKey {
+  usage_count: number;
+  last_used_at: string | null;
+  ips: ApiKeyUsage[];
+}
+
+export interface AuditLog {
+  id: number;
+  user_id: number | null;
+  action: string;
+  previous_value: string | null;
+  new_value: string | null;
+  api_key: string | null;
+  ip_address: string | null;
+  created_at: string;
+  email: string | null;
+  company_id: number | null;
+  company_name: string | null;
+}
+
 export interface Form {
   id: number;
   name: string;
@@ -696,6 +722,76 @@ export async function getApiKeyRecord(apiKey: string): Promise<ApiKey | null> {
     [apiKey]
   );
   return (rows as ApiKey[])[0] || null;
+}
+
+export async function getApiKeysWithUsage(): Promise<ApiKeyWithUsage[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT ak.*, COALESCE(SUM(aku.usage_count),0) AS usage_count,
+            MAX(aku.last_used_at) AS last_used_at
+     FROM api_keys ak
+     LEFT JOIN api_key_usage aku ON ak.id = aku.api_key_id
+     GROUP BY ak.id`
+  );
+  const keys = rows as any[];
+  for (const key of keys) {
+    const [ips] = await pool.query<RowDataPacket[]>(
+      'SELECT ip_address, usage_count, last_used_at FROM api_key_usage WHERE api_key_id = ?',
+      [key.id]
+    );
+    key.ips = ips;
+  }
+  return keys as ApiKeyWithUsage[];
+}
+
+export async function recordApiKeyUsage(
+  apiKeyId: number,
+  ipAddress: string
+): Promise<void> {
+  await pool.execute(
+    `INSERT INTO api_key_usage (api_key_id, ip_address, usage_count, last_used_at)
+     VALUES (?, ?, 1, NOW())
+     ON DUPLICATE KEY UPDATE usage_count = usage_count + 1, last_used_at = NOW()`,
+    [apiKeyId, ipAddress]
+  );
+}
+
+export async function logAudit(options: {
+  userId?: number | null;
+  action: string;
+  previousValue?: string | null;
+  newValue?: string | null;
+  apiKey?: string | null;
+  ipAddress?: string | null;
+}): Promise<void> {
+  const snippet = options.apiKey
+    ? `${options.apiKey.slice(0, 3)}.........${options.apiKey.slice(-3)}`
+    : null;
+  await pool.execute(
+    'INSERT INTO audit_logs (user_id, action, previous_value, new_value, api_key, ip_address) VALUES (?, ?, ?, ?, ?, ?)',
+    [
+      options.userId || null,
+      options.action,
+      options.previousValue || null,
+      options.newValue || null,
+      snippet,
+      options.ipAddress || null,
+    ]
+  );
+}
+
+export async function getAuditLogs(companyId?: number): Promise<AuditLog[]> {
+  let sql = `SELECT al.*, u.email, u.company_id, c.name AS company_name
+             FROM audit_logs al
+             LEFT JOIN users u ON al.user_id = u.id
+             LEFT JOIN companies c ON u.company_id = c.id`;
+  const params: any[] = [];
+  if (companyId) {
+    sql += ' WHERE u.company_id = ?';
+    params.push(companyId);
+  }
+  sql += ' ORDER BY al.created_at DESC';
+  const [rows] = await pool.query<RowDataPacket[]>(sql, params);
+  return rows as AuditLog[];
 }
 
 export async function getAssetsByCompany(companyId: number): Promise<Asset[]> {
