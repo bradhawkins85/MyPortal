@@ -1219,3 +1219,70 @@ export async function deleteFormPermission(
     [formId, userId, companyId]
   );
 }
+export interface OfficeGroup {
+  id: number;
+  company_id: number;
+  name: string;
+}
+
+export interface OfficeGroupWithMembers extends OfficeGroup {
+  members: Staff[];
+}
+
+export async function getOfficeGroupsByCompany(companyId: number): Promise<OfficeGroupWithMembers[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT og.id, og.company_id, og.name,
+            s.id as staff_id, s.first_name, s.last_name, s.email, s.date_onboarded, s.enabled
+     FROM office_groups og
+     LEFT JOIN office_group_members ogm ON og.id = ogm.group_id
+     LEFT JOIN staff s ON ogm.staff_id = s.id
+     WHERE og.company_id = ?
+     ORDER BY og.name, s.last_name, s.first_name`,
+    [companyId]
+  );
+  const groupMap: Record<number, OfficeGroupWithMembers> = {};
+  (rows as any[]).forEach(r => {
+    if (!groupMap[r.id]) {
+      groupMap[r.id] = { id: r.id, company_id: r.company_id, name: r.name, members: [] };
+    }
+    if (r.staff_id) {
+      groupMap[r.id].members.push({
+        id: r.staff_id,
+        company_id: r.company_id,
+        first_name: r.first_name,
+        last_name: r.last_name,
+        email: r.email,
+        date_onboarded: r.date_onboarded,
+        enabled: r.enabled,
+      });
+    }
+  });
+  return Object.values(groupMap);
+}
+
+export async function createOfficeGroup(companyId: number, name: string): Promise<number> {
+  const [result] = await pool.execute(
+    'INSERT INTO office_groups (company_id, name) VALUES (?, ?)',
+    [companyId, name]
+  );
+  const insert = result as ResultSetHeader;
+  return insert.insertId;
+}
+
+export async function deleteOfficeGroup(id: number): Promise<void> {
+  await pool.execute('DELETE FROM office_groups WHERE id = ?', [id]);
+}
+
+export async function updateOfficeGroupMembers(groupId: number, staffIds: number[]): Promise<void> {
+  await pool.execute('DELETE FROM office_group_members WHERE group_id = ?', [groupId]);
+  if (staffIds.length === 0) {
+    return;
+  }
+  const values = staffIds.map(() => '(?, ?)').join(', ');
+  const params: number[] = [];
+  staffIds.forEach(id => { params.push(groupId, id); });
+  await pool.execute(
+    `INSERT INTO office_group_members (group_id, staff_id) VALUES ${values}`,
+    params
+  );
+}
