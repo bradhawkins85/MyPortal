@@ -2466,25 +2466,55 @@ api.get('/companies/:id', async (req, res) => {
  *       200:
  *         description: Update successful
  */
-api.put('/companies/:id', async (req, res) => {
+export async function updateCompanyHandler(
+  req: express.Request,
+  res: express.Response,
+  deps: {
+    getCompanyById: typeof getCompanyById;
+    updateCompany: typeof updateCompany;
+    updateCompanyIds: typeof updateCompanyIds;
+  } = {
+    getCompanyById,
+    updateCompany,
+    updateCompanyIds,
+  }
+): Promise<void> {
   const { name, address, syncroCompanyId, xeroId, isVip } = req.body;
+  const id = parseInt(req.params.id, 10);
   if (name !== undefined || address !== undefined) {
-    await updateCompany(parseInt(req.params.id, 10), name, address);
+    let newName = name;
+    let newAddress = address;
+    if (name === undefined || address === undefined) {
+      const current = await deps.getCompanyById(id);
+      if (!current) {
+        res.status(404).json({ error: 'Company not found' });
+        return;
+      }
+      if (newName === undefined) {
+        newName = current.name;
+      }
+      if (newAddress === undefined) {
+        newAddress = current.address || null;
+      }
+    }
+    await deps.updateCompany(id, newName, newAddress || null);
   }
   if (
     syncroCompanyId !== undefined ||
     xeroId !== undefined ||
     isVip !== undefined
   ) {
-    await updateCompanyIds(
-      parseInt(req.params.id, 10),
+    await deps.updateCompanyIds(
+      id,
       syncroCompanyId || null,
       xeroId || null,
       parseCheckbox(isVip)
     );
   }
   res.json({ success: true });
-});
+}
+
+api.put('/companies/:id', (req, res) => updateCompanyHandler(req, res));
 
 /**
  * @openapi
@@ -3736,4 +3766,8 @@ async function start() {
   });
 }
 
-start();
+if (require.main === module) {
+  start();
+}
+
+export { app, api, start };
