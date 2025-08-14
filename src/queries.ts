@@ -170,7 +170,7 @@ export interface AuditLog {
   id: number;
   user_id: number | null;
   action: string;
-  new_value: string | null;
+  value: string | null;
   api_key: string | null;
   ip_address: string | null;
   created_at: string;
@@ -765,13 +765,29 @@ export async function logAudit(options: {
   const snippet = options.apiKey
     ? `${options.apiKey.slice(0, 3)}.........${options.apiKey.slice(-3)}`
     : null;
+  let valueToLog = options.newValue || null;
+  if (options.previousValue && options.newValue) {
+    try {
+      const prev = JSON.parse(options.previousValue);
+      const next = JSON.parse(options.newValue);
+      const diff: any = {};
+      for (const key of Object.keys(next)) {
+        if (JSON.stringify(next[key]) !== JSON.stringify(prev[key])) {
+          diff[key] = next[key];
+        }
+      }
+      valueToLog = JSON.stringify(diff);
+    } catch {
+      valueToLog = options.newValue;
+    }
+  }
   await pool.execute(
     'INSERT INTO audit_logs (user_id, action, previous_value, new_value, api_key, ip_address) VALUES (?, ?, ?, ?, ?, ?)',
     [
       options.userId || null,
       options.action,
       options.previousValue || null,
-      options.newValue || null,
+      valueToLog,
       snippet,
       options.ipAddress || null,
     ]
@@ -779,7 +795,7 @@ export async function logAudit(options: {
 }
 
 export async function getAuditLogs(companyId?: number): Promise<AuditLog[]> {
-  let sql = `SELECT al.id, al.user_id, al.action, al.new_value, al.api_key, al.ip_address, al.created_at,
+  let sql = `SELECT al.id, al.user_id, al.action, al.new_value AS value, al.api_key, al.ip_address, al.created_at,
              u.email, u.company_id, c.name AS company_name
              FROM audit_logs al
              LEFT JOIN users u ON al.user_id = u.id
