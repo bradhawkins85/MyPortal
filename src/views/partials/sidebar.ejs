@@ -36,9 +36,6 @@
     <% } %>
   </div>
   <div class="sidebar-bottom">
-    <% if (isSuperAdmin) { %>
-      <a href="/forms/admin" class="menu-link"><i class="fas fa-wpforms"></i> Forms Admin</a>
-    <% } %>
     <% if (typeof isAdmin !== 'undefined' && isAdmin) { %>
       <a href="/admin" class="menu-link"><i class="fas fa-user-shield"></i> Admin</a>
       <% if (!isSuperAdmin) { %>
@@ -47,7 +44,6 @@
     <% } %>
     <% if (isSuperAdmin) { %>
       <a href="/api-docs" class="menu-link"><i class="fas fa-book"></i> API Docs</a>
-      <a href="/shop/admin" class="menu-link"><i class="fas fa-cogs"></i> Shop Admin</a>
     <% } %>
     <a href="/logout" class="menu-link logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
   </div>
