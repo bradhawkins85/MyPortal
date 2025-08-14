@@ -986,7 +986,9 @@ app.post('/switch-company', ensureAuth, async (req, res) => {
 });
 
 app.get('/forms/admin', ensureAuth, ensureSuperAdmin, (req, res) => {
-  res.redirect('/admin');
+  const params = new URLSearchParams(req.query as Record<string, string>);
+  const query = params.toString();
+  res.redirect(`/admin${query ? '?' + query : ''}`);
 });
 
 app.post('/forms/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
