@@ -10,7 +10,6 @@
         <div class="tabs">
           <button data-tab="companies" class="active">Companies</button>
           <button data-tab="assignments">Current Assignments</button>
-          <button data-tab="office-groups">Office Groups</button>
           <% if (isSuperAdmin) { %>
             <button data-tab="apps">Apps</button>
             <button data-tab="api-keys">API Keys</button>
@@ -164,91 +163,6 @@
               <% }); %>
               </tbody>
             </table>
-          </section>
-        </div>
-        <div id="office-groups" class="tab-content">
-          <% if (isSuperAdmin) { %>
-          <section>
-            <h2>Add Group</h2>
-            <form action="/admin/office-groups" method="post">
-              <input type="text" name="name" placeholder="Group Name" required>
-              <button type="submit">Add</button>
-            </form>
-          </section>
-          <% } %>
-          <section>
-            <h2>Groups</h2>
-            <% if (officeGroups.length > 0) { %>
-            <table>
-              <thead>
-                <tr><th>Name</th><th>Members</th><% if (isSuperAdmin) { %><th></th><% } %></tr>
-              </thead>
-              <tbody>
-                <% officeGroups.forEach(function(g){ %>
-                  <tr>
-                    <td><%= g.name %></td>
-                    <td>
-                      <% if (g.members.length > 0) { %>
-                        <% g.members.forEach(function(m){ %>
-                          <div><%= m.first_name %> <%= m.last_name %></div>
-                        <% }); %>
-                      <% } else { %>
-                        <em>No members</em>
-                      <% } %>
-                      <button type="button" onclick="openGroupModal(<%= g.id %>)">Edit</button>
-                    </td>
-                    <% if (isSuperAdmin) { %>
-                    <td>
-                      <form action="/admin/office-groups/<%= g.id %>/delete" method="post">
-                        <button type="submit">Delete</button>
-                      </form>
-                    </td>
-                    <% } %>
-                  </tr>
-                <% }); %>
-              </tbody>
-            </table>
-            <% } else { %>
-              <p>No groups.</p>
-            <% } %>
-            <div id="groupModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5);">
-              <div style="background:#fff; margin:10% auto; padding:20px; width:400px;">
-                <h3>Edit Group Members</h3>
-                <form id="groupMembersForm" method="post">
-                  <table>
-                    <thead>
-                      <tr><th>Name</th><th>Email</th><th>Add</th></tr>
-                    </thead>
-                    <tbody>
-                      <% staff.forEach(function(s){ %>
-                        <tr>
-                          <td><%= s.first_name %> <%= s.last_name %></td>
-                          <td><%= s.email %></td>
-                          <td><input type="checkbox" name="staffIds" value="<%= s.id %>"></td>
-                        </tr>
-                      <% }); %>
-                    </tbody>
-                  </table>
-                  <button type="submit">Save</button>
-                  <button type="button" onclick="closeGroupModal()">Close</button>
-                </form>
-              </div>
-            </div>
-            <script>
-              const officeGroupsData = <%- JSON.stringify(officeGroups) %>;
-              function openGroupModal(id) {
-                const group = officeGroupsData.find(g => g.id === id);
-                const form = document.getElementById('groupMembersForm');
-                form.action = '/admin/office-groups/' + id + '/members';
-                form.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-                  cb.checked = group.members.some(m => m.id === parseInt(cb.value, 10));
-                });
-                document.getElementById('groupModal').style.display = 'block';
-              }
-              function closeGroupModal() {
-                document.getElementById('groupModal').style.display = 'none';
-              }
-            </script>
           </section>
         </div>
         <% if (isSuperAdmin) { %>
