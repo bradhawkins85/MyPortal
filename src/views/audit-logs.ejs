@@ -25,7 +25,7 @@
               <% if (isSuperAdmin) { %><th>Company</th><% } %>
               <th>User</th>
               <th>Action</th>
-              <th>New</th>
+              <th>Value</th>
               <th>API Key</th>
               <th>IP Address</th>
               <th>Date</th>
@@ -37,7 +37,13 @@
                 <% if (isSuperAdmin) { %><td><%= l.company_name || '' %></td><% } %>
                 <td><%= l.email || '' %></td>
                 <td><%= l.action %></td>
-                <td><%= l.new_value || '' %></td>
+                <td class="audit-value">
+                  <% if (l.value && l.value.length > 100) { %>
+                    <span class="truncate" data-full="<%- l.value %>"><%= l.value.slice(0, 100) %>...</span>
+                  <% } else { %>
+                    <span><%- l.value || '' %></span>
+                  <% } %>
+                </td>
                 <td><%= l.api_key || '' %></td>
                 <td><%= l.ip_address || '' %></td>
                 <td class="created-at" data-created-at="<%= l.created_at %>"></td>
@@ -53,6 +59,19 @@
         if (!isNaN(date.getTime())) {
           td.textContent = date.toLocaleString();
         }
+      });
+      document.querySelectorAll('.audit-value .truncate').forEach(function(span){
+        span.addEventListener('click', function(){
+          var modal = document.createElement('div');
+          modal.className = 'modal';
+          modal.innerHTML = '<div class="modal-content"><span class="close">&times;</span><pre>' +
+            span.dataset.full.replace(/</g, '&lt;') + '</pre></div>';
+          document.body.appendChild(modal);
+          modal.style.display = 'flex';
+          modal.querySelector('.close').addEventListener('click', function(){
+            modal.remove();
+          });
+        });
       });
     </script>
   </body>
