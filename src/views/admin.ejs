@@ -14,6 +14,7 @@
             <button data-tab="apps">Apps</button>
             <button data-tab="api-keys">API Keys</button>
             <button data-tab="forms-admin">Forms</button>
+            <button data-tab="form-permissions">Form Permissions</button>
             <button data-tab="shop-settings">Shop Settings</button>
             <button data-tab="products">Products</button>
           <% } %>
@@ -261,120 +262,96 @@
           </section>
         </div>
         <div id="forms-admin" class="tab-content">
-          <style>
-            .forms-subtab-content { display: none; }
-            .forms-subtab-content.active { display: block; }
-            .forms-subtab-buttons { margin-bottom: 1rem; }
-            .forms-subtab-buttons button { margin-right: 0.5rem; }
-            .forms-subtab-buttons button.active { font-weight: bold; }
-          </style>
-          <div class="forms-subtab-buttons">
-            <button type="button" data-tab="forms-tab" class="active">Manage Forms</button>
-            <button type="button" data-tab="permissions-tab">Manage Permissions</button>
-          </div>
-          <div id="forms-tab" class="forms-subtab-content active">
-            <section>
-              <h2>Add Form</h2>
-              <form action="/forms/admin" method="post">
-                <input type="text" name="name" placeholder="Name" required>
-                <input type="url" name="url" placeholder="URL" required>
-                <input type="text" name="description" placeholder="Description">
-                <button type="submit">Add</button>
+          <section>
+            <h2>Add Form</h2>
+            <form action="/forms/admin" method="post">
+              <input type="text" name="name" placeholder="Name" required>
+              <input type="url" name="url" placeholder="URL" required>
+              <input type="text" name="description" placeholder="Description">
+              <button type="submit">Add</button>
+            </form>
+          </section>
+          <section>
+            <h2>Edit Forms</h2>
+            <table>
+              <thead>
+                <tr><th>Name</th><th>URL</th><th>Description</th><th>Actions</th></tr>
+              </thead>
+              <tbody>
+                <% forms.forEach(function(f){ %>
+                  <tr>
+                    <td><input form="form-<%= f.id %>" type="text" name="name" value="<%= f.name %>" required></td>
+                    <td><input form="form-<%= f.id %>" type="url" name="url" value="<%= f.url %>" required></td>
+                    <td><input form="form-<%= f.id %>" type="text" name="description" value="<%= f.description %>"></td>
+                    <td>
+                      <form id="form-<%= f.id %>" action="/forms/admin/edit" method="post">
+                        <input type="hidden" name="id" value="<%= f.id %>">
+                        <button type="submit">Save</button>
+                      </form>
+                      <form action="/forms/admin/delete" method="post">
+                        <input type="hidden" name="id" value="<%= f.id %>">
+                        <button type="submit">Delete</button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }); %>
+              </tbody>
+            </table>
+          </section>
+        </div>
+        <div id="form-permissions" class="tab-content">
+          <section>
+            <h2>Manage Permissions</h2>
+            <form action="/forms/admin" method="get">
+              <select name="formId" onchange="this.form.submit()">
+                <option value="">Select Form</option>
+                <% forms.forEach(function(f){ %>
+                  <option value="<%= f.id %>" <%= selectedFormId === f.id ? 'selected' : '' %>><%= f.name %></option>
+                <% }); %>
+              </select>
+              <select name="companyId" onchange="this.form.submit()">
+                <option value="">Select Company</option>
+                <% allCompanies.forEach(function(c){ %>
+                  <option value="<%= c.id %>" <%= selectedCompanyId === c.id ? 'selected' : '' %>><%= c.name %></option>
+                <% }); %>
+              </select>
+            </form>
+            <% if (selectedFormId && selectedCompanyId) { %>
+              <form action="/forms/admin/permissions" method="post">
+                <input type="hidden" name="formId" value="<%= selectedFormId %>">
+                <input type="hidden" name="companyId" value="<%= selectedCompanyId %>">
+                <% formUsers.forEach(function(u){ %>
+                  <label><input type="checkbox" name="userIds" value="<%= u.user_id %>" <%= permissions.includes(u.user_id) ? 'checked' : '' %>> <%= u.email %></label><br>
+                <% }); %>
+                <button type="submit">Save</button>
               </form>
-            </section>
-            <section>
-              <h2>Edit Forms</h2>
-              <table>
-                <thead>
-                  <tr><th>Name</th><th>URL</th><th>Description</th><th>Actions</th></tr>
-                </thead>
-                <tbody>
-                  <% forms.forEach(function(f){ %>
-                    <tr>
-                      <td><input form="form-<%= f.id %>" type="text" name="name" value="<%= f.name %>" required></td>
-                      <td><input form="form-<%= f.id %>" type="url" name="url" value="<%= f.url %>" required></td>
-                      <td><input form="form-<%= f.id %>" type="text" name="description" value="<%= f.description %>"></td>
-                      <td>
-                        <form id="form-<%= f.id %>" action="/forms/admin/edit" method="post">
-                          <input type="hidden" name="id" value="<%= f.id %>">
-                          <button type="submit">Save</button>
-                        </form>
-                        <form action="/forms/admin/delete" method="post">
-                          <input type="hidden" name="id" value="<%= f.id %>">
-                          <button type="submit">Delete</button>
-                        </form>
-                      </td>
-                    </tr>
-                  <% }); %>
-                </tbody>
-              </table>
-            </section>
-          </div>
-          <div id="permissions-tab" class="forms-subtab-content">
-            <section>
-              <h2>Manage Permissions</h2>
-              <form action="/forms/admin" method="get">
-                <select name="formId" onchange="this.form.submit()">
-                  <option value="">Select Form</option>
-                  <% forms.forEach(function(f){ %>
-                    <option value="<%= f.id %>" <%= selectedFormId === f.id ? 'selected' : '' %>><%= f.name %></option>
-                  <% }); %>
-                </select>
-                <select name="companyId" onchange="this.form.submit()">
-                  <option value="">Select Company</option>
-                  <% allCompanies.forEach(function(c){ %>
-                    <option value="<%= c.id %>" <%= selectedCompanyId === c.id ? 'selected' : '' %>><%= c.name %></option>
-                  <% }); %>
-                </select>
-              </form>
-              <% if (selectedFormId && selectedCompanyId) { %>
-                <form action="/forms/admin/permissions" method="post">
-                  <input type="hidden" name="formId" value="<%= selectedFormId %>">
-                  <input type="hidden" name="companyId" value="<%= selectedCompanyId %>">
-                  <% formUsers.forEach(function(u){ %>
-                    <label><input type="checkbox" name="userIds" value="<%= u.user_id %>" <%= permissions.includes(u.user_id) ? 'checked' : '' %>> <%= u.email %></label><br>
-                  <% }); %>
-                  <button type="submit">Save</button>
-                </form>
-              <% } %>
-            </section>
-            <section>
-              <h2>User Form Access</h2>
-              <table>
-                <thead>
-                  <tr><th>User</th><th>Company</th><th>Form</th><th>Actions</th></tr>
-                </thead>
-                <tbody>
-                  <% formAccess.forEach(function(p){ %>
-                    <tr>
-                      <td><%= p.email %></td>
-                      <td><%= p.company_name %></td>
-                      <td><%= p.form_name %></td>
-                      <td>
-                        <form action="/forms/admin/permissions/delete" method="post">
-                          <input type="hidden" name="formId" value="<%= p.form_id %>">
-                          <input type="hidden" name="userId" value="<%= p.user_id %>">
-                          <input type="hidden" name="companyId" value="<%= p.company_id %>">
-                          <button type="submit">Remove</button>
-                        </form>
-                      </td>
-                    </tr>
-                  <% }); %>
-                </tbody>
-              </table>
-            </section>
-          </div>
-          <script>
-            document.querySelectorAll('.forms-subtab-buttons button').forEach(function(btn) {
-              btn.addEventListener('click', function() {
-                var tab = btn.getAttribute('data-tab');
-                document.querySelectorAll('.forms-subtab-content').forEach(function(c) { c.classList.remove('active'); });
-                document.querySelectorAll('.forms-subtab-buttons button').forEach(function(b) { b.classList.remove('active'); });
-                document.getElementById(tab).classList.add('active');
-                btn.classList.add('active');
-              });
-            });
-          </script>
+            <% } %>
+          </section>
+          <section>
+            <h2>User Form Access</h2>
+            <table>
+              <thead>
+                <tr><th>User</th><th>Company</th><th>Form</th><th>Actions</th></tr>
+              </thead>
+              <tbody>
+                <% formAccess.forEach(function(p){ %>
+                  <tr>
+                    <td><%= p.email %></td>
+                    <td><%= p.company_name %></td>
+                    <td><%= p.form_name %></td>
+                    <td>
+                      <form action="/forms/admin/permissions/delete" method="post">
+                        <input type="hidden" name="formId" value="<%= p.form_id %>">
+                        <input type="hidden" name="userId" value="<%= p.user_id %>">
+                        <input type="hidden" name="companyId" value="<%= p.company_id %>">
+                        <button type="submit">Remove</button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }); %>
+              </tbody>
+            </table>
+          </section>
         </div>
         <div id="shop-settings" class="tab-content">
           <section>
@@ -593,6 +570,9 @@
           document.getElementById(tab.dataset.tab).classList.add('active');
         });
       });
+      <% if (isSuperAdmin && selectedFormId && selectedCompanyId) { %>
+      document.querySelector('.tabs button[data-tab="form-permissions"]').click();
+      <% } %>
       const allCompanies = <%- JSON.stringify(allCompanies) %>;
       document.querySelectorAll('.add-sku-default').forEach(function(btn){
         btn.addEventListener('click', async function(){
