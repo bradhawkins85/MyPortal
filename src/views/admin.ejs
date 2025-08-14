@@ -562,17 +562,28 @@
     document.addEventListener('DOMContentLoaded', function () {
       const tabs = document.querySelectorAll('.tabs button');
       const contents = document.querySelectorAll('.tab-content');
+      const ACTIVE_TAB_KEY = 'admin-active-tab';
+
+      function activate(tabName) {
+        tabs.forEach((t) => t.classList.toggle('active', t.dataset.tab === tabName));
+        contents.forEach((c) => c.classList.toggle('active', c.id === tabName));
+        localStorage.setItem(ACTIVE_TAB_KEY, tabName);
+      }
+
       tabs.forEach(function (tab) {
         tab.addEventListener('click', function () {
-          tabs.forEach(function (t) { t.classList.remove('active'); });
-          contents.forEach(function (c) { c.classList.remove('active'); });
-          tab.classList.add('active');
-          document.getElementById(tab.dataset.tab).classList.add('active');
+          activate(tab.dataset.tab);
         });
       });
+
+      let initialTab = localStorage.getItem(ACTIVE_TAB_KEY) || 'companies';
       <% if (isSuperAdmin && selectedFormId && selectedCompanyId) { %>
-      document.querySelector('.tabs button[data-tab="form-permissions"]').click();
+      initialTab = 'form-permissions';
       <% } %>
+      if (!document.querySelector(`.tabs button[data-tab="${initialTab}"]`)) {
+        initialTab = tabs[0].dataset.tab;
+      }
+      activate(initialTab);
       const allCompanies = <%- JSON.stringify(allCompanies) %>;
       document.querySelectorAll('.add-sku-default').forEach(function(btn){
         btn.addEventListener('click', async function(){
