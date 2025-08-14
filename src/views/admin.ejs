@@ -188,12 +188,14 @@
                   <tr>
                     <td><%= g.name %></td>
                     <td>
-                      <form action="/admin/office-groups/<%= g.id %>/members" method="post">
-                        <% staff.forEach(function(s){ %>
-                          <label><input type="checkbox" name="staffIds" value="<%= s.id %>" <%= g.members.some(m => m.id === s.id) ? 'checked' : '' %>> <%= s.first_name %> <%= s.last_name %></label><br>
+                      <% if (g.members.length > 0) { %>
+                        <% g.members.forEach(function(m){ %>
+                          <div><%= m.first_name %> <%= m.last_name %></div>
                         <% }); %>
-                        <button type="submit">Save</button>
-                      </form>
+                      <% } else { %>
+                        <em>No members</em>
+                      <% } %>
+                      <button type="button" onclick="openGroupModal(<%= g.id %>)">Edit</button>
                     </td>
                     <% if (isSuperAdmin) { %>
                     <td>
@@ -209,6 +211,44 @@
             <% } else { %>
               <p>No groups.</p>
             <% } %>
+            <div id="groupModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5);">
+              <div style="background:#fff; margin:10% auto; padding:20px; width:400px;">
+                <h3>Edit Group Members</h3>
+                <form id="groupMembersForm" method="post">
+                  <table>
+                    <thead>
+                      <tr><th>Name</th><th>Email</th><th>Add</th></tr>
+                    </thead>
+                    <tbody>
+                      <% staff.forEach(function(s){ %>
+                        <tr>
+                          <td><%= s.first_name %> <%= s.last_name %></td>
+                          <td><%= s.email %></td>
+                          <td><input type="checkbox" name="staffIds" value="<%= s.id %>"></td>
+                        </tr>
+                      <% }); %>
+                    </tbody>
+                  </table>
+                  <button type="submit">Save</button>
+                  <button type="button" onclick="closeGroupModal()">Close</button>
+                </form>
+              </div>
+            </div>
+            <script>
+              const officeGroupsData = <%- JSON.stringify(officeGroups) %>;
+              function openGroupModal(id) {
+                const group = officeGroupsData.find(g => g.id === id);
+                const form = document.getElementById('groupMembersForm');
+                form.action = '/admin/office-groups/' + id + '/members';
+                form.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                  cb.checked = group.members.some(m => m.id === parseInt(cb.value, 10));
+                });
+                document.getElementById('groupModal').style.display = 'block';
+              }
+              function closeGroupModal() {
+                document.getElementById('groupModal').style.display = 'none';
+              }
+            </script>
           </section>
         </div>
         <% if (isSuperAdmin) { %>
