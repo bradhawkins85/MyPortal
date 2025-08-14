@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+  <%- include('partials/head', { title: 'Manage Forms' }) %>
+<body>
+  <div class="app-container">
+    <%- include('partials/sidebar') %>
+    <div class="content">
+      <h1>Manage Form Access</h1>
+      <% if (forms.length > 0) { %>
+        <form action="/forms/company" method="get">
+          <select name="formId" onchange="this.form.submit()">
+            <option value="">Select Form</option>
+            <% forms.forEach(function(f){ %>
+              <option value="<%= f.id %>" <%= selectedFormId === f.id ? 'selected' : '' %>><%= f.name %></option>
+            <% }); %>
+          </select>
+        </form>
+        <% if (selectedFormId) { %>
+          <form action="/forms/company" method="post">
+            <input type="hidden" name="formId" value="<%= selectedFormId %>">
+            <% users.forEach(function(u){ %>
+              <label><input type="checkbox" name="userIds" value="<%= u.user_id %>" <%= permissions.includes(u.user_id) ? 'checked' : '' %>> <%= u.email %></label><br>
+            <% }); %>
+            <button type="submit">Save</button>
+          </form>
+        <% } %>
+      <% } else { %>
+        <p>No forms available.</p>
+      <% } %>
+    </div>
+  </div>
+</body>
+</html>
