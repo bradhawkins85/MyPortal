@@ -26,7 +26,9 @@
     <% if (canManageInvoices) { %>
       <a href="/invoices" class="menu-link"><i class="fas fa-file-invoice"></i> Invoices</a>
     <% } %>
-    <a href="/forms" class="menu-link"><i class="fas fa-wpforms"></i> Forms</a>
+    <% if (hasForms) { %>
+      <a href="/forms" class="menu-link"><i class="fas fa-wpforms"></i> Forms</a>
+    <% } %>
     <% if (canAccessShop) { %>
       <a href="/shop" class="menu-link"><i class="fas fa-shopping-cart"></i> Shop</a>
       <a href="/cart" class="menu-link"><i class="fas fa-shopping-basket"></i> Cart (<%= cart.reduce((sum, i) => sum + i.quantity, 0) %>)</a>
