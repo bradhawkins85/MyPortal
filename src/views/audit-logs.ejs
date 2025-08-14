@@ -39,7 +39,7 @@
                 <td><%= l.action %></td>
                 <td class="audit-value">
                   <% if (l.value && l.value.length > 100) { %>
-                    <span class="truncate" data-full="<%- l.value %>"><%= l.value.slice(0, 100) %>...</span>
+                    <span class="truncate" data-full="<%= encodeURIComponent(l.value) %>"><%= l.value.slice(0, 100) %>...</span>
                   <% } else { %>
                     <span><%- l.value || '' %></span>
                   <% } %>
@@ -64,8 +64,9 @@
         span.addEventListener('click', function(){
           var modal = document.createElement('div');
           modal.className = 'modal';
+          var full = decodeURIComponent(span.dataset.full);
           modal.innerHTML = '<div class="modal-content"><span class="close">&times;</span><pre>' +
-            span.dataset.full.replace(/</g, '&lt;') + '</pre></div>';
+            full.replace(/</g, '&lt;') + '</pre></div>';
           document.body.appendChild(modal);
           modal.style.display = 'flex';
           modal.querySelector('.close').addEventListener('click', function(){
