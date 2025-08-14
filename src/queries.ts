@@ -127,17 +127,6 @@ export interface Invoice {
   status: string;
 }
 
-export interface ExternalApiSettings {
-  company_id: number;
-  xero_endpoint: string | null;
-  xero_api_key: string | null;
-  syncro_endpoint: string | null;
-  syncro_api_key: string | null;
-  webhook_url: string | null;
-  webhook_api_key: string | null;
-  shop_webhook_url: string | null;
-  shop_webhook_api_key: string | null;
-}
 
 export interface Staff {
   id: number;
@@ -1106,35 +1095,6 @@ export async function updateOrder(
   await pool.execute(
     'UPDATE shop_orders SET status = ?, notes = ? WHERE order_number = ? AND company_id = ?',
     [status, notes, orderNumber, companyId]
-  );
-}
-
-export async function getExternalApiSettings(
-  companyId: number
-): Promise<ExternalApiSettings | null> {
-  const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM external_api_settings WHERE company_id = ?',
-    [companyId]
-  );
-  return (rows as ExternalApiSettings[])[0] || null;
-}
-
-export async function upsertExternalApiSettings(
-  companyId: number,
-  xeroEndpoint: string,
-  xeroApiKey: string,
-  syncroEndpoint: string,
-  syncroApiKey: string,
-  webhookUrl: string,
-  webhookApiKey: string,
-  shopWebhookUrl: string,
-  shopWebhookApiKey: string
-): Promise<void> {
-  await pool.execute(
-    `INSERT INTO external_api_settings (company_id, xero_endpoint, xero_api_key, syncro_endpoint, syncro_api_key, webhook_url, webhook_api_key, shop_webhook_url, shop_webhook_api_key)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE xero_endpoint = VALUES(xero_endpoint), xero_api_key = VALUES(xero_api_key), syncro_endpoint = VALUES(syncro_endpoint), syncro_api_key = VALUES(syncro_api_key), webhook_url = VALUES(webhook_url), webhook_api_key = VALUES(webhook_api_key), shop_webhook_url = VALUES(shop_webhook_url), shop_webhook_api_key = VALUES(shop_webhook_api_key)` ,
-    [companyId, xeroEndpoint, xeroApiKey, syncroEndpoint, syncroApiKey, webhookUrl, webhookApiKey, shopWebhookUrl, shopWebhookApiKey]
   );
 }
 
