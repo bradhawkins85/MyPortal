@@ -56,6 +56,7 @@ import {
     getAllForms,
     createForm,
     updateForm,
+    deleteForm,
     getFormsForUser,
     getFormPermissions,
     updateFormPermissions,
@@ -1073,6 +1074,12 @@ app.post('/forms/admin/permissions', ensureAuth, ensureSuperAdmin, async (req, r
 app.post('/forms/admin/edit', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { id, name, url, description } = req.body;
   await updateForm(parseInt(id, 10), name, url, description);
+  res.redirect('/forms/admin');
+});
+
+app.post('/forms/admin/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { id } = req.body;
+  await deleteForm(parseInt(id, 10));
   res.redirect('/forms/admin');
 });
 
