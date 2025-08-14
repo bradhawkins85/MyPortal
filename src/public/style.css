@@ -92,6 +92,8 @@ table th {
   width: 90%;
   margin: 40px auto;
   min-height: calc(100vh - 80px);
+  max-width: 100vw;
+  overflow-x: auto;
 }
 
 .sidebar {
@@ -144,6 +146,7 @@ table th {
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   margin-left: 1rem;
+  overflow-x: auto;
 }
 
 .swagger-frame {
@@ -246,4 +249,13 @@ table th {
 
 .tab-content.active {
   display: block;
+}
+
+.audit-value span.truncate {
+  display: inline-block;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
 }
