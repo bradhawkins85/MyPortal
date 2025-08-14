@@ -531,7 +531,22 @@ app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
 });
 
 app.post('/staff', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { firstName, lastName, email, dateOnboarded, enabled } = req.body;
+  const {
+    firstName,
+    lastName,
+    email,
+    dateOnboarded,
+    enabled,
+    street,
+    city,
+    state,
+    postcode,
+    country,
+    department,
+    jobTitle,
+    company,
+    managerName,
+  } = req.body;
   if (req.session.companyId) {
     await addStaff(
       req.session.companyId,
@@ -539,10 +554,60 @@ app.post('/staff', ensureAuth, ensureSuperAdmin, async (req, res) => {
       lastName,
       email,
       dateOnboarded,
-      !!enabled
+      !!enabled,
+      street,
+      city,
+      state,
+      postcode,
+      country,
+      department,
+      jobTitle,
+      company,
+      managerName
     );
   }
   res.redirect('/staff');
+});
+
+app.put('/staff/:id', ensureAuth, ensureStaffAccess, async (req, res) => {
+  const {
+    firstName,
+    lastName,
+    email,
+    dateOnboarded,
+    enabled,
+    street,
+    city,
+    state,
+    postcode,
+    country,
+    department,
+    jobTitle,
+    company,
+    managerName,
+  } = req.body;
+  if (!req.session.companyId) {
+    return res.status(400).json({ error: 'No company selected' });
+  }
+  await updateStaff(
+    parseInt(req.params.id, 10),
+    req.session.companyId,
+    firstName,
+    lastName,
+    email,
+    dateOnboarded,
+    !!enabled,
+    street,
+    city,
+    state,
+    postcode,
+    country,
+    department,
+    jobTitle,
+    company,
+    managerName
+  );
+  res.json({ success: true });
 });
 
 app.post('/staff/enabled', ensureAuth, ensureStaffAccess, async (req, res) => {
@@ -2818,6 +2883,33 @@ api.delete('/licenses/:id', async (req, res) => {
  *                     format: date
  *                   enabled:
  *                     type: integer
+ *                   street:
+ *                     type: string
+ *                     nullable: true
+ *                   city:
+ *                     type: string
+ *                     nullable: true
+ *                   state:
+ *                     type: string
+ *                     nullable: true
+ *                   postcode:
+ *                     type: string
+ *                     nullable: true
+ *                   country:
+ *                     type: string
+ *                     nullable: true
+ *                   department:
+ *                     type: string
+ *                     nullable: true
+ *                   job_title:
+ *                     type: string
+ *                     nullable: true
+ *                   org_company:
+ *                     type: string
+ *                     nullable: true
+ *                   manager_name:
+ *                     type: string
+ *                     nullable: true
  */
 api.get('/staff', async (_req, res) => {
   const staff = await getAllStaff();
@@ -2856,6 +2948,24 @@ api.get('/staff', async (_req, res) => {
  *                 format: date
  *               enabled:
  *                 type: boolean
+ *               street:
+ *                 type: string
+ *               city:
+ *                 type: string
+ *               state:
+ *                 type: string
+ *               postcode:
+ *                 type: string
+ *               country:
+ *                 type: string
+ *               department:
+ *                 type: string
+ *               jobTitle:
+ *                 type: string
+ *               company:
+ *                 type: string
+ *               managerName:
+ *                 type: string
  *     responses:
  *       200:
  *         description: Staff member created
@@ -2868,14 +2978,39 @@ api.get('/staff', async (_req, res) => {
  *                   type: boolean
  */
 api.post('/staff', async (req, res) => {
-  const { companyId, firstName, lastName, email, dateOnboarded, enabled } = req.body;
+  const {
+    companyId,
+    firstName,
+    lastName,
+    email,
+    dateOnboarded,
+    enabled,
+    street,
+    city,
+    state,
+    postcode,
+    country,
+    department,
+    jobTitle,
+    company,
+    managerName,
+  } = req.body;
   await addStaff(
     companyId,
     firstName,
     lastName,
     email,
     dateOnboarded,
-    !!enabled
+    !!enabled,
+    street,
+    city,
+    state,
+    postcode,
+    country,
+    department,
+    jobTitle,
+    company,
+    managerName
   );
   res.json({ success: true });
 });
@@ -2916,6 +3051,33 @@ api.post('/staff', async (req, res) => {
  *                   format: date
  *                 enabled:
  *                   type: integer
+ *                 street:
+ *                   type: string
+ *                   nullable: true
+ *                 city:
+ *                   type: string
+ *                   nullable: true
+ *                 state:
+ *                   type: string
+ *                   nullable: true
+ *                 postcode:
+ *                   type: string
+ *                   nullable: true
+ *                 country:
+ *                   type: string
+ *                   nullable: true
+ *                 department:
+ *                   type: string
+ *                   nullable: true
+ *                 job_title:
+ *                   type: string
+ *                   nullable: true
+ *                 org_company:
+ *                   type: string
+ *                   nullable: true
+ *                 manager_name:
+ *                   type: string
+ *                   nullable: true
  *       404:
  *         description: Staff not found
  */
@@ -2960,12 +3122,46 @@ api.get('/staff/:id', async (req, res) => {
  *                 format: date
  *               enabled:
  *                 type: boolean
+ *               street:
+ *                 type: string
+ *               city:
+ *                 type: string
+ *               state:
+ *                 type: string
+ *               postcode:
+ *                 type: string
+ *               country:
+ *                 type: string
+ *               department:
+ *                 type: string
+ *               jobTitle:
+ *                 type: string
+ *               company:
+ *                 type: string
+ *               managerName:
+ *                 type: string
  *     responses:
  *       200:
  *         description: Update successful
  */
 api.put('/staff/:id', async (req, res) => {
-  const { companyId, firstName, lastName, email, dateOnboarded, enabled } = req.body;
+  const {
+    companyId,
+    firstName,
+    lastName,
+    email,
+    dateOnboarded,
+    enabled,
+    street,
+    city,
+    state,
+    postcode,
+    country,
+    department,
+    jobTitle,
+    company,
+    managerName,
+  } = req.body;
   await updateStaff(
     parseInt(req.params.id, 10),
     companyId,
@@ -2973,7 +3169,16 @@ api.put('/staff/:id', async (req, res) => {
     lastName,
     email,
     dateOnboarded,
-    !!enabled
+    !!enabled,
+    street,
+    city,
+    state,
+    postcode,
+    country,
+    department,
+    jobTitle,
+    company,
+    managerName
   );
   res.json({ success: true });
 });
