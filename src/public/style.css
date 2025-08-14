@@ -218,3 +218,32 @@ table th {
   display: block;
   margin: 0 auto;
 }
+
+/* Admin tabs */
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.tabs button {
+  background-color: #f3f3f3;
+  color: #333;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+}
+
+.tabs button.active {
+  background-color: #4a00e0;
+  color: #fff;
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
