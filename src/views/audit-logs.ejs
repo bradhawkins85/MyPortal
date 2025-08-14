@@ -25,9 +25,7 @@
               <% if (isSuperAdmin) { %><th>Company</th><% } %>
               <th>User</th>
               <th>Action</th>
-              <th>Previous</th>
               <th>New</th>
-              <th>API Key</th>
               <th>IP Address</th>
               <th>Date</th>
             </tr>
@@ -38,9 +36,7 @@
                 <% if (isSuperAdmin) { %><td><%= l.company_name || '' %></td><% } %>
                 <td><%= l.email || '' %></td>
                 <td><%= l.action %></td>
-                <td><%= l.previous_value || '' %></td>
                 <td><%= l.new_value || '' %></td>
-                <td><%= l.api_key || '' %></td>
                 <td><%= l.ip_address || '' %></td>
                 <td><%= l.created_at %></td>
               </tr>

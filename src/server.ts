@@ -142,17 +142,36 @@ app.use((req, res, next) => {
   next();
 });
 
+function sanitizeSensitiveData(obj: any): any {
+  if (!obj || typeof obj !== 'object') return obj;
+  const result: any = Array.isArray(obj) ? [] : {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value && typeof value === 'object') {
+      result[key] = sanitizeSensitiveData(value);
+    } else {
+      const lower = key.toLowerCase();
+      if (lower.includes('password') || (lower.includes('api') && lower.includes('key'))) {
+        result[key] = '***';
+      } else {
+        result[key] = value;
+      }
+    }
+  }
+  return result;
+}
+
 function auditLogger(
   req: express.Request,
   res: express.Response,
   next: express.NextFunction
 ) {
   res.on('finish', () => {
+    const sanitizedBody = sanitizeSensitiveData(req.body || {});
     logAudit({
       userId: req.session.userId || null,
       action: `${req.method} ${req.originalUrl}`,
       previousValue: null,
-      newValue: JSON.stringify(req.body || {}),
+      newValue: JSON.stringify(sanitizedBody),
       apiKey: req.apiKey,
       ipAddress: req.ip,
     }).catch(() => {});
