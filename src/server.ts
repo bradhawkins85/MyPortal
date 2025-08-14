@@ -129,6 +129,7 @@ app.use(
 app.use((req, res, next) => {
   res.locals.isSuperAdmin = req.session.userId === 1;
   res.locals.cart = req.session.cart || [];
+  res.locals.hasForms = req.session.hasForms ?? false;
   next();
 });
 
@@ -234,8 +235,12 @@ app.post('/login', async (req, res) => {
   const user = await getUserByEmail(email);
   if (user && (await bcrypt.compare(password, user.password_hash))) {
     req.session.userId = user.id;
-    const companies = await getCompaniesForUser(user.id);
+    const [companies, forms] = await Promise.all([
+      getCompaniesForUser(user.id),
+      getFormsForUser(user.id),
+    ]);
     req.session.companyId = companies[0]?.company_id;
+    req.session.hasForms = forms.length > 0;
     if (remember === 'on') {
       req.session.cookie.maxAge = 8 * 60 * 60 * 1000; // 8 hours
     } else {
@@ -265,6 +270,7 @@ app.post('/register', async (req, res) => {
     await assignUserToCompany(userId, companyId, true, true, true, true, true, true, true);
     req.session.userId = userId;
     req.session.companyId = companyId;
+    req.session.hasForms = false;
     res.redirect('/');
   } catch (err) {
     res.render('register', { error: 'Registration failed' });
@@ -586,6 +592,7 @@ app.get('/invoices', ensureAuth, ensureInvoicesAccess, async (req, res) => {
 
 app.get('/forms', ensureAuth, async (req, res) => {
   const forms = await getFormsForUser(req.session.userId!);
+  req.session.hasForms = forms.length > 0;
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('forms', {
