@@ -19,3 +19,11 @@ declare module 'express-session' {
     hasForms?: boolean;
   }
 }
+
+declare global {
+  namespace Express {
+    interface Request {
+      apiKey?: string;
+    }
+  }
+}
