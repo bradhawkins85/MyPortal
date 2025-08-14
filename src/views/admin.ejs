@@ -264,8 +264,8 @@
               <% }); %>
               </tbody>
             </table>
-            <div id="ip-modal" style="display:none;">
-              <div>
+            <div id="ip-modal" class="modal" style="display:none;">
+              <div class="modal-content">
                 <button id="ip-modal-close">Close</button>
                 <ul id="ip-list"></ul>
               </div>
@@ -508,7 +508,7 @@
                 } else {
                   img.style.display = 'none';
                 }
-                modal.style.display = 'block';
+                modal.style.display = 'flex';
               }
               function closeEditModal() {
                 document.getElementById('editModal').style.display = 'none';
@@ -521,14 +521,14 @@
                 form.querySelectorAll('input[type="checkbox"]').forEach(cb => {
                   cb.checked = selected.includes(parseInt(cb.value, 10));
                 });
-                modal.style.display = 'block';
+                modal.style.display = 'flex';
               }
               function closeVisibilityModal() {
                 document.getElementById('visibilityModal').style.display = 'none';
               }
             </script>
-            <div id="editModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5);">
-              <div style="background:#fff; margin:10% auto; padding:20px; width:300px;">
+            <div id="editModal" class="modal" style="display:none;">
+              <div class="modal-content" style="width:300px;">
                 <h3>Edit Product</h3>
                 <form id="editForm" method="post" enctype="multipart/form-data">
                   <input type="text" name="name" placeholder="Name" required>
@@ -551,8 +551,8 @@
                 </form>
               </div>
             </div>
-            <div id="visibilityModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5);">
-              <div style="background:#fff; margin:10% auto; padding:20px; width:300px;">
+            <div id="visibilityModal" class="modal" style="display:none;">
+              <div class="modal-content" style="width:300px;">
                 <h3>Product Visibility</h3>
                 <form id="visibilityForm" method="post">
                   <% allCompanies.forEach(function(c){ %>
@@ -641,7 +641,7 @@
             li.textContent = ip.ip_address + ' (' + ip.usage_count + ')';
             list.appendChild(li);
           });
-          document.getElementById('ip-modal').style.display = 'block';
+          document.getElementById('ip-modal').style.display = 'flex';
         });
       });
       document.getElementById('ip-modal-close')?.addEventListener('click', function(){

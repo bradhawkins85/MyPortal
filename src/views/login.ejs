@@ -14,9 +14,28 @@
       <label>Password:
         <input type="password" name="password" required>
       </label>
+      <label><input type="checkbox" id="remember-username"> Remember Username</label>
       <label><input type="checkbox" name="remember"> Remember Me</label>
       <button type="submit">Login</button>
     </form>
   </div>
+  <script>
+    (function(){
+      var emailInput = document.querySelector('input[name="email"]');
+      var rememberCb = document.getElementById('remember-username');
+      var saved = localStorage.getItem('savedUsername');
+      if (saved) {
+        emailInput.value = saved;
+        rememberCb.checked = true;
+      }
+      document.querySelector('form').addEventListener('submit', function(){
+        if (rememberCb.checked) {
+          localStorage.setItem('savedUsername', emailInput.value);
+        } else {
+          localStorage.removeItem('savedUsername');
+        }
+      });
+    })();
+  </script>
 </body>
 </html>
