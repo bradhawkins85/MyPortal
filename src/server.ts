@@ -1167,8 +1167,6 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
   let categories: Category[] = [];
   let products: any[] = [];
   let productRestrictions: Record<number, ProductCompanyRestriction[]> = {};
-  let officeGroups: OfficeGroupWithMembers[] = [];
-  let staff: Staff[] = [];
   if (isSuperAdmin) {
     allCompanies = await getAllCompanies();
     users = await getAllUsers();
@@ -1208,8 +1206,6 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
       permissions = await getFormPermissions(formId, companyIdParam);
     }
   }
-  staff = await getStaffByCompany(req.session.companyId!);
-  officeGroups = await getOfficeGroupsByCompany(req.session.companyId!);
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('admin', {
@@ -1229,6 +1225,28 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     showArchived: includeArchived,
     selectedFormId: isNaN(formId) ? null : formId,
     selectedCompanyId: isNaN(companyIdParam) ? null : companyIdParam,
+    isAdmin: true,
+    isSuperAdmin,
+    companies,
+    currentCompanyId: req.session.companyId,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+  });
+});
+
+app.get('/office-groups', ensureAuth, ensureAdmin, async (req, res) => {
+  const isSuperAdmin = req.session.userId === 1;
+  const [officeGroups, staff] = await Promise.all([
+    getOfficeGroupsByCompany(req.session.companyId!),
+    getStaffByCompany(req.session.companyId!),
+  ]);
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  res.render('office-groups', {
     isAdmin: true,
     isSuperAdmin,
     companies,
@@ -1391,13 +1409,13 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
   res.redirect('/admin');
 });
 
-app.post('/admin/office-groups', ensureAuth, ensureSuperAdmin, async (req, res) => {
+app.post('/office-groups', ensureAuth, ensureSuperAdmin, async (req, res) => {
   await createOfficeGroup(req.session.companyId!, req.body.name);
-  res.redirect('/admin#office-groups');
+  res.redirect('/office-groups');
 });
 
 app.post(
-  '/admin/office-groups/:id/members',
+  '/office-groups/:id/members',
   ensureAuth,
   ensureAdmin,
   async (req, res) => {
@@ -1408,13 +1426,13 @@ app.post(
       ? [parseInt(raw, 10)]
       : [];
     await updateOfficeGroupMembers(parseInt(req.params.id, 10), ids);
-    res.redirect('/admin#office-groups');
+    res.redirect('/office-groups');
   }
 );
 
-app.post('/admin/office-groups/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
+app.post('/office-groups/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
   await deleteOfficeGroup(parseInt(req.params.id, 10));
-  res.redirect('/admin#office-groups');
+  res.redirect('/office-groups');
 });
 
 const api = express.Router();
