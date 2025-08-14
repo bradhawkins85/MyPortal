@@ -14,8 +14,11 @@
       <br>
     <% } %>
     <a href="/" class="menu-link"><i class="fas fa-briefcase"></i> Business Info</a>
-    <% if (canManageStaff) { %>
+    <% if (canManageStaff || (typeof isAdmin !== 'undefined' && isAdmin)) { %>
       <a href="/staff" class="menu-link"><i class="fas fa-users"></i> Staff</a>
+    <% } %>
+    <% if (typeof isAdmin !== 'undefined' && isAdmin) { %>
+      <a href="/admin#office-groups" class="menu-link"><i class="fas fa-layer-group"></i> Office Groups</a>
     <% } %>
     <% if (canManageLicenses) { %>
       <a href="/licenses" class="menu-link"><i class="fas fa-file-contract"></i> Licenses</a>
@@ -38,7 +41,6 @@
   <div class="sidebar-bottom">
     <% if (typeof isAdmin !== 'undefined' && isAdmin) { %>
       <a href="/admin" class="menu-link"><i class="fas fa-user-shield"></i> Admin</a>
-      <a href="/admin#office-groups" class="menu-link"><i class="fas fa-layer-group"></i> Office Groups</a>
       <% if (!isSuperAdmin) { %>
         <a href="/forms/company" class="menu-link"><i class="fas fa-wpforms"></i> Manage Forms</a>
       <% } %>
