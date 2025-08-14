@@ -170,7 +170,6 @@ export interface AuditLog {
   id: number;
   user_id: number | null;
   action: string;
-  previous_value: string | null;
   new_value: string | null;
   api_key: string | null;
   ip_address: string | null;
@@ -780,7 +779,8 @@ export async function logAudit(options: {
 }
 
 export async function getAuditLogs(companyId?: number): Promise<AuditLog[]> {
-  let sql = `SELECT al.*, u.email, u.company_id, c.name AS company_name
+  let sql = `SELECT al.id, al.user_id, al.action, al.new_value, al.api_key, al.ip_address, al.created_at,
+             u.email, u.company_id, c.name AS company_name
              FROM audit_logs al
              LEFT JOIN users u ON al.user_id = u.id
              LEFT JOIN companies c ON u.company_id = c.id`;
@@ -791,7 +791,10 @@ export async function getAuditLogs(companyId?: number): Promise<AuditLog[]> {
   }
   sql += ' ORDER BY al.created_at DESC';
   const [rows] = await pool.query<RowDataPacket[]>(sql, params);
-  return rows as AuditLog[];
+  return (rows as any[]).map((r) => ({
+    ...r,
+    api_key: r.api_key ? `${r.api_key.slice(0, 3)}.........${r.api_key.slice(-3)}` : null,
+  })) as AuditLog[];
 }
 
 export async function getAssetsByCompany(companyId: number): Promise<Asset[]> {

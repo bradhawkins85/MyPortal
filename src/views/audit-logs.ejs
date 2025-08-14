@@ -25,7 +25,6 @@
               <% if (isSuperAdmin) { %><th>Company</th><% } %>
               <th>User</th>
               <th>Action</th>
-              <th>Previous</th>
               <th>New</th>
               <th>API Key</th>
               <th>IP Address</th>
@@ -38,16 +37,23 @@
                 <% if (isSuperAdmin) { %><td><%= l.company_name || '' %></td><% } %>
                 <td><%= l.email || '' %></td>
                 <td><%= l.action %></td>
-                <td><%= l.previous_value || '' %></td>
                 <td><%= l.new_value || '' %></td>
                 <td><%= l.api_key || '' %></td>
                 <td><%= l.ip_address || '' %></td>
-                <td><%= l.created_at %></td>
+                <td class="created-at" data-created-at="<%= l.created_at %>"></td>
               </tr>
             <% }); %>
           </tbody>
         </table>
       </div>
     </div>
+    <script>
+      document.querySelectorAll('.created-at').forEach(function(td){
+        var date = new Date(td.dataset.createdAt);
+        if (!isNaN(date.getTime())) {
+          td.textContent = date.toLocaleString();
+        }
+      });
+    </script>
   </body>
 </html>
