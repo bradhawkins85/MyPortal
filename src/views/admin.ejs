@@ -167,6 +167,7 @@
           </section>
         </div>
         <div id="office-groups" class="tab-content">
+          <% if (isSuperAdmin) { %>
           <section>
             <h2>Add Group</h2>
             <form action="/admin/office-groups" method="post">
@@ -174,12 +175,13 @@
               <button type="submit">Add</button>
             </form>
           </section>
+          <% } %>
           <section>
             <h2>Groups</h2>
             <% if (officeGroups.length > 0) { %>
             <table>
               <thead>
-                <tr><th>Name</th><th>Members</th><th></th></tr>
+                <tr><th>Name</th><th>Members</th><% if (isSuperAdmin) { %><th></th><% } %></tr>
               </thead>
               <tbody>
                 <% officeGroups.forEach(function(g){ %>
@@ -193,11 +195,13 @@
                         <button type="submit">Save</button>
                       </form>
                     </td>
+                    <% if (isSuperAdmin) { %>
                     <td>
                       <form action="/admin/office-groups/<%= g.id %>/delete" method="post">
                         <button type="submit">Delete</button>
                       </form>
                     </td>
+                    <% } %>
                   </tr>
                 <% }); %>
               </tbody>
