@@ -10,6 +10,7 @@
         <div class="tabs">
           <button data-tab="companies" class="active">Companies</button>
           <button data-tab="assignments">Current Assignments</button>
+          <button data-tab="office-groups">Office Groups</button>
           <% if (isSuperAdmin) { %>
             <button data-tab="apps">Apps</button>
             <button data-tab="api-keys">API Keys</button>
@@ -163,6 +164,47 @@
               <% }); %>
               </tbody>
             </table>
+          </section>
+        </div>
+        <div id="office-groups" class="tab-content">
+          <section>
+            <h2>Add Group</h2>
+            <form action="/admin/office-groups" method="post">
+              <input type="text" name="name" placeholder="Group Name" required>
+              <button type="submit">Add</button>
+            </form>
+          </section>
+          <section>
+            <h2>Groups</h2>
+            <% if (officeGroups.length > 0) { %>
+            <table>
+              <thead>
+                <tr><th>Name</th><th>Members</th><th></th></tr>
+              </thead>
+              <tbody>
+                <% officeGroups.forEach(function(g){ %>
+                  <tr>
+                    <td><%= g.name %></td>
+                    <td>
+                      <form action="/admin/office-groups/<%= g.id %>/members" method="post">
+                        <% staff.forEach(function(s){ %>
+                          <label><input type="checkbox" name="staffIds" value="<%= s.id %>" <%= g.members.some(m => m.id === s.id) ? 'checked' : '' %>> <%= s.first_name %> <%= s.last_name %></label><br>
+                        <% }); %>
+                        <button type="submit">Save</button>
+                      </form>
+                    </td>
+                    <td>
+                      <form action="/admin/office-groups/<%= g.id %>/delete" method="post">
+                        <button type="submit">Delete</button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }); %>
+              </tbody>
+            </table>
+            <% } else { %>
+              <p>No groups.</p>
+            <% } %>
           </section>
         </div>
         <% if (isSuperAdmin) { %>
@@ -576,7 +618,9 @@
         });
       });
 
-      let initialTab = localStorage.getItem(ACTIVE_TAB_KEY) || 'companies';
+      let initialTab = window.location.hash
+        ? window.location.hash.substring(1)
+        : localStorage.getItem(ACTIVE_TAB_KEY) || 'companies';
       <% if (isSuperAdmin && selectedFormId && selectedCompanyId) { %>
       initialTab = 'form-permissions';
       <% } %>
