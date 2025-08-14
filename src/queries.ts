@@ -1138,8 +1138,7 @@ export async function getFormsByCompany(companyId: number): Promise<Form[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT DISTINCT f.* FROM forms f
      JOIN form_permissions fp ON f.id = fp.form_id
-     JOIN user_companies uc ON fp.user_id = uc.user_id
-     WHERE uc.company_id = ?
+     WHERE fp.company_id = ?
      ORDER BY f.name`,
     [companyId]
   );
@@ -1148,16 +1147,19 @@ export async function getFormsByCompany(companyId: number): Promise<Form[]> {
 
 export async function getFormsForUser(userId: number): Promise<Form[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT f.* FROM forms f JOIN form_permissions fp ON f.id = fp.form_id WHERE fp.user_id = ? ORDER BY f.name',
+    'SELECT DISTINCT f.* FROM forms f JOIN form_permissions fp ON f.id = fp.form_id WHERE fp.user_id = ? ORDER BY f.name',
     [userId]
   );
   return rows as Form[];
 }
 
-export async function getFormPermissions(formId: number): Promise<number[]> {
+export async function getFormPermissions(
+  formId: number,
+  companyId: number
+): Promise<number[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT user_id FROM form_permissions WHERE form_id = ?',
-    [formId]
+    'SELECT user_id FROM form_permissions WHERE form_id = ? AND company_id = ?',
+    [formId, companyId]
   );
   return (rows as RowDataPacket[]).map((r) => r.user_id as number);
 }
@@ -1168,19 +1170,19 @@ export async function updateFormPermissions(
   userIds: number[]
 ): Promise<void> {
   await pool.execute(
-    'DELETE fp FROM form_permissions fp JOIN user_companies uc ON fp.user_id = uc.user_id WHERE fp.form_id = ? AND uc.company_id = ?',
+    'DELETE FROM form_permissions WHERE form_id = ? AND company_id = ?',
     [formId, companyId]
   );
   if (userIds.length === 0) {
     return;
   }
-  const values = userIds.map(() => '(?, ?)').join(', ');
+  const values = userIds.map(() => '(?, ?, ?)').join(', ');
   const params: (number | string)[] = [];
   userIds.forEach((id) => {
-    params.push(formId, id);
+    params.push(formId, id, companyId);
   });
   await pool.execute(
-    `INSERT INTO form_permissions (form_id, user_id) VALUES ${values}`,
+    `INSERT INTO form_permissions (form_id, user_id, company_id) VALUES ${values}`,
     params
   );
 }
@@ -1190,30 +1192,30 @@ export interface FormPermissionEntry {
   form_name: string;
   user_id: number;
   email: string;
-  company_names: string;
+  company_id: number;
+  company_name: string;
 }
 
 export async function getAllFormPermissionEntries(): Promise<FormPermissionEntry[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT fp.form_id, f.name AS form_name, fp.user_id, u.email,
-            GROUP_CONCAT(c.name ORDER BY c.name SEPARATOR ', ') AS company_names
+            fp.company_id, c.name AS company_name
      FROM form_permissions fp
      JOIN forms f ON fp.form_id = f.id
      JOIN users u ON fp.user_id = u.id
-     JOIN user_companies uc ON fp.user_id = uc.user_id
-     JOIN companies c ON uc.company_id = c.id
-     GROUP BY fp.form_id, f.name, fp.user_id, u.email
-     ORDER BY u.email, f.name`
+     JOIN companies c ON fp.company_id = c.id
+     ORDER BY u.email, c.name, f.name`
   );
   return rows as FormPermissionEntry[];
 }
 
 export async function deleteFormPermission(
   formId: number,
-  userId: number
+  userId: number,
+  companyId: number
 ): Promise<void> {
   await pool.execute(
-    'DELETE FROM form_permissions WHERE form_id = ? AND user_id = ?',
-    [formId, userId]
+    'DELETE FROM form_permissions WHERE form_id = ? AND user_id = ? AND company_id = ?',
+    [formId, userId, companyId]
   );
 }

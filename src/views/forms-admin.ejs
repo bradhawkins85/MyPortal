@@ -93,12 +93,13 @@
               <% formAccess.forEach(function(p){ %>
                 <tr>
                   <td><%= p.email %></td>
-                  <td><%= p.company_names %></td>
+                  <td><%= p.company_name %></td>
                   <td><%= p.form_name %></td>
                   <td>
                     <form action="/forms/admin/permissions/delete" method="post">
                       <input type="hidden" name="formId" value="<%= p.form_id %>">
                       <input type="hidden" name="userId" value="<%= p.user_id %>">
+                      <input type="hidden" name="companyId" value="<%= p.company_id %>">
                       <button type="submit">Remove</button>
                     </form>
                   </td>
