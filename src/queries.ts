@@ -136,6 +136,15 @@ export interface Staff {
   email: string;
   date_onboarded: string;
   enabled: number;
+  street?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postcode?: string | null;
+  country?: string | null;
+  department?: string | null;
+  job_title?: string | null;
+  org_company?: string | null;
+  manager_name?: string | null;
 }
 
 export interface ApiKey {
@@ -479,11 +488,36 @@ export async function addStaff(
   lastName: string,
   email: string,
   dateOnboarded: string,
-  enabled: boolean
+  enabled: boolean,
+  street?: string | null,
+  city?: string | null,
+  state?: string | null,
+  postcode?: string | null,
+  country?: string | null,
+  department?: string | null,
+  jobTitle?: string | null,
+  orgCompany?: string | null,
+  managerName?: string | null
 ): Promise<void> {
   await pool.execute(
-    'INSERT INTO staff (company_id, first_name, last_name, email, date_onboarded, enabled) VALUES (?, ?, ?, ?, ?, ?)',
-    [companyId, firstName, lastName, email, dateOnboarded, enabled ? 1 : 0]
+    'INSERT INTO staff (company_id, first_name, last_name, email, date_onboarded, enabled, street, city, state, postcode, country, department, job_title, org_company, manager_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [
+      companyId,
+      firstName,
+      lastName,
+      email,
+      dateOnboarded,
+      enabled ? 1 : 0,
+      street || null,
+      city || null,
+      state || null,
+      postcode || null,
+      country || null,
+      department || null,
+      jobTitle || null,
+      orgCompany || null,
+      managerName || null,
+    ]
   );
 }
 
@@ -504,11 +538,37 @@ export async function updateStaff(
   lastName: string,
   email: string,
   dateOnboarded: string,
-  enabled: boolean
+  enabled: boolean,
+  street?: string | null,
+  city?: string | null,
+  state?: string | null,
+  postcode?: string | null,
+  country?: string | null,
+  department?: string | null,
+  jobTitle?: string | null,
+  orgCompany?: string | null,
+  managerName?: string | null
 ): Promise<void> {
   await pool.execute(
-    'UPDATE staff SET company_id = ?, first_name = ?, last_name = ?, email = ?, date_onboarded = ?, enabled = ? WHERE id = ?',
-    [companyId, firstName, lastName, email, dateOnboarded, enabled ? 1 : 0, id]
+    'UPDATE staff SET company_id = ?, first_name = ?, last_name = ?, email = ?, date_onboarded = ?, enabled = ?, street = ?, city = ?, state = ?, postcode = ?, country = ?, department = ?, job_title = ?, org_company = ?, manager_name = ? WHERE id = ?',
+    [
+      companyId,
+      firstName,
+      lastName,
+      email,
+      dateOnboarded,
+      enabled ? 1 : 0,
+      street || null,
+      city || null,
+      state || null,
+      postcode || null,
+      country || null,
+      department || null,
+      jobTitle || null,
+      orgCompany || null,
+      managerName || null,
+      id,
+    ]
   );
 }
 
