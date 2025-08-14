@@ -615,7 +615,9 @@ app.get('/forms/company', ensureAuth, ensureAdmin, async (req, res) => {
     getUserCompanyAssignments(req.session.companyId!),
   ]);
   const current = companies.find((c) => c.company_id === req.session.companyId);
-  const permissions = !isNaN(formId) ? await getFormPermissions(formId) : [];
+  const permissions = !isNaN(formId)
+    ? await getFormPermissions(formId, req.session.companyId!)
+    : [];
   res.render('forms-company', {
     forms,
     users,
@@ -1026,8 +1028,12 @@ app.post(
   ensureAuth,
   ensureSuperAdmin,
   async (req, res) => {
-    const { formId, userId } = req.body;
-    await deleteFormPermission(parseInt(formId, 10), parseInt(userId, 10));
+    const { formId, userId, companyId } = req.body;
+    await deleteFormPermission(
+      parseInt(formId, 10),
+      parseInt(userId, 10),
+      parseInt(companyId, 10)
+    );
     res.redirect('/admin');
   }
 );
@@ -1096,7 +1102,7 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     formAccess = await getAllFormPermissionEntries();
     if (!isNaN(formId) && !isNaN(companyIdParam)) {
       formUsers = await getUserCompanyAssignments(companyIdParam);
-      permissions = await getFormPermissions(formId);
+      permissions = await getFormPermissions(formId, companyIdParam);
     }
     const [prodList, restrictionsList, catList] = await Promise.all([
       getAllProducts(includeArchived),
@@ -1121,7 +1127,7 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     formAccess = await getAllFormPermissionEntries();
     if (!isNaN(formId) && !isNaN(companyIdParam)) {
       formUsers = await getUserCompanyAssignments(companyIdParam);
-      permissions = await getFormPermissions(formId);
+      permissions = await getFormPermissions(formId, companyIdParam);
     }
   }
   const companies = await getCompaniesForUser(req.session.userId!);
