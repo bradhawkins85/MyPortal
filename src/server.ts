@@ -54,6 +54,7 @@ import {
   updateInvoice,
   deleteInvoice,
     getAllForms,
+    getFormsByCompany,
     createForm,
     updateForm,
     deleteForm,
@@ -599,6 +600,49 @@ app.get('/forms', ensureAuth, async (req, res) => {
     canOrderLicenses: current?.can_order_licenses ?? 0,
     canAccessShop: current?.can_access_shop ?? 0,
   });
+});
+
+app.get('/forms/company', ensureAuth, ensureAdmin, async (req, res) => {
+  const formId = req.query.formId ? parseInt(req.query.formId as string, 10) : NaN;
+  const [forms, companies, users] = await Promise.all([
+    getFormsByCompany(req.session.companyId!),
+    getCompaniesForUser(req.session.userId!),
+    getUserCompanyAssignments(req.session.companyId!),
+  ]);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  const permissions = !isNaN(formId) ? await getFormPermissions(formId) : [];
+  res.render('forms-company', {
+    forms,
+    users,
+    companies,
+    selectedFormId: isNaN(formId) ? null : formId,
+    permissions,
+    currentCompanyId: req.session.companyId,
+    isAdmin: true,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+  });
+});
+
+app.post('/forms/company', ensureAuth, ensureAdmin, async (req, res) => {
+  const { formId } = req.body;
+  let { userIds } = req.body as { userIds?: string | string[] };
+  const ids = Array.isArray(userIds)
+    ? userIds.map((id) => parseInt(id, 10))
+    : userIds
+    ? [parseInt(userIds, 10)]
+    : [];
+  const allowedForms = await getFormsByCompany(req.session.companyId!);
+  const idNum = parseInt(formId, 10);
+  if (!allowedForms.some((f) => f.id === idNum)) {
+    return res.redirect('/forms/company');
+  }
+  await updateFormPermissions(idNum, req.session.companyId!, ids);
+  res.redirect(`/forms/company?formId=${formId}`);
 });
 
 app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
