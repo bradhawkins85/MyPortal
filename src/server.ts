@@ -1145,30 +1145,6 @@ app.post(
   }
 );
 
-app.get('/apps', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const apps = await getAllApps();
-  const companiesForUser = await getCompaniesForUser(req.session.userId!);
-  const current = companiesForUser.find(
-    (c) => c.company_id === req.session.companyId
-  );
-  const allCompanies = await getAllCompanies();
-  const companyPrices = await getCompanyAppPrices();
-  res.render('apps', {
-    apps,
-    companies: companiesForUser,
-    allCompanies,
-     companyPrices,
-    currentCompanyId: req.session.companyId,
-    isAdmin: true,
-    canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
-    canManageAssets: current?.can_manage_assets ?? 0,
-    canManageInvoices: current?.can_manage_invoices ?? 0,
-    canOrderLicenses: current?.can_order_licenses ?? 0,
-    canAccessShop: current?.can_access_shop ?? 0,
-  });
-});
-
 app.post('/apps', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { sku, name, price, contractTerm } = req.body;
   await createApp(sku, name, parseFloat(price), contractTerm);
@@ -1210,11 +1186,15 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
   let users: User[] = [];
   let assignments: UserCompany[] = [];
   let apiKeys: ApiKey[] = [];
+  let apps: App[] = [];
+  let companyPrices: any[] = [];
   if (isSuperAdmin) {
     allCompanies = await getAllCompanies();
     users = await getAllUsers();
     assignments = await getUserCompanyAssignments();
     apiKeys = await getApiKeys();
+    apps = await getAllApps();
+    companyPrices = await getCompanyAppPrices();
   } else {
     const companyId = req.session.companyId!;
     const company = await getCompanyById(companyId);
@@ -1229,6 +1209,8 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     users,
     assignments,
     apiKeys,
+    apps,
+    companyPrices,
     isAdmin: true,
     isSuperAdmin,
     companies,
