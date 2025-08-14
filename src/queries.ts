@@ -1230,11 +1230,20 @@ export interface FormPermissionEntry {
   form_name: string;
   user_id: number;
   email: string;
+  company_names: string;
 }
 
 export async function getAllFormPermissionEntries(): Promise<FormPermissionEntry[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT fp.form_id, f.name AS form_name, fp.user_id, u.email FROM form_permissions fp JOIN forms f ON fp.form_id = f.id JOIN users u ON fp.user_id = u.id ORDER BY u.email, f.name'
+    `SELECT fp.form_id, f.name AS form_name, fp.user_id, u.email,
+            GROUP_CONCAT(c.name ORDER BY c.name SEPARATOR ', ') AS company_names
+     FROM form_permissions fp
+     JOIN forms f ON fp.form_id = f.id
+     JOIN users u ON fp.user_id = u.id
+     JOIN user_companies uc ON fp.user_id = uc.user_id
+     JOIN companies c ON uc.company_id = c.id
+     GROUP BY fp.form_id, f.name, fp.user_id, u.email
+     ORDER BY u.email, f.name`
   );
   return rows as FormPermissionEntry[];
 }
