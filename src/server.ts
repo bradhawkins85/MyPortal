@@ -2415,6 +2415,12 @@ api.post('/companies', async (req, res) => {
  *                   type: string
  *                 address:
  *                   type: string
+ *                 syncroCompanyId:
+ *                   type: string
+ *                 xeroId:
+ *                   type: string
+ *                 isVip:
+ *                   type: boolean
  *       404:
  *         description: Company not found
  */
