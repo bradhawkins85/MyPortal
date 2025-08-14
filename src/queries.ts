@@ -1174,6 +1174,18 @@ export async function getAllForms(): Promise<Form[]> {
   return rows as Form[];
 }
 
+export async function getFormsByCompany(companyId: number): Promise<Form[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT DISTINCT f.* FROM forms f
+     JOIN form_permissions fp ON f.id = fp.form_id
+     JOIN user_companies uc ON fp.user_id = uc.user_id
+     WHERE uc.company_id = ?
+     ORDER BY f.name`,
+    [companyId]
+  );
+  return rows as Form[];
+}
+
 export async function getFormsForUser(userId: number): Promise<Form[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
     'SELECT f.* FROM forms f JOIN form_permissions fp ON f.id = fp.form_id WHERE fp.user_id = ? ORDER BY f.name',
