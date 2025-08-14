@@ -351,6 +351,9 @@ async function ensureStaffAccess(
   res: express.Response,
   next: express.NextFunction
 ) {
+  if (req.session.userId === 1) {
+    return next();
+  }
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
   if (current && current.can_manage_staff) {
@@ -527,7 +530,7 @@ app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
   });
 });
 
-app.post('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
+app.post('/staff', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { firstName, lastName, email, dateOnboarded, enabled } = req.body;
   if (req.session.companyId) {
     await addStaff(
