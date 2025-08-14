@@ -6,6 +6,19 @@
     <%- include('partials/sidebar') %>
     <div class="content">
       <h1>Staff</h1>
+      <% if (isSuperAdmin) { %>
+      <section>
+        <h2>Add Staff</h2>
+        <form action="/staff" method="post">
+          <input type="text" name="firstName" placeholder="First Name" required>
+          <input type="text" name="lastName" placeholder="Last Name" required>
+          <input type="email" name="email" placeholder="Email" required>
+          <input type="date" name="dateOnboarded">
+          <label><input type="checkbox" name="enabled" value="1" checked> Enabled</label>
+          <button type="submit">Add</button>
+        </form>
+      </section>
+      <% } %>
       <section>
         <h2>Current Staff</h2>
         <table>
