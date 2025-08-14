@@ -23,7 +23,7 @@
         <h2>Current Staff</h2>
         <table>
           <thead>
-            <tr><th>First Name</th><th>Last Name</th><th>Email</th><th>Date Onboarded</th><th>Enabled</th></tr>
+            <tr><th>First Name</th><th>Last Name</th><th>Email</th><th>Date Onboarded</th><th>Enabled</th><th>Actions</th></tr>
           </thead>
           <tbody>
           <% staff.forEach(function(s) { %>
@@ -38,6 +38,26 @@
                   <input type="checkbox" name="enabled" value="1" <%= s.enabled ? 'checked' : '' %> onchange="this.form.submit()">
                 </form>
               </td>
+              <td>
+                <button
+                  class="edit-btn"
+                  data-id="<%= s.id %>"
+                  data-first-name="<%= s.first_name %>"
+                  data-last-name="<%= s.last_name %>"
+                  data-email="<%= s.email %>"
+                  data-date-onboarded="<%= s.date_onboarded ? new Date(s.date_onboarded).toISOString().split('T')[0] : '' %>"
+                  data-enabled="<%= s.enabled %>"
+                  data-street="<%= s.street || '' %>"
+                  data-city="<%= s.city || '' %>"
+                  data-state="<%= s.state || '' %>"
+                  data-postcode="<%= s.postcode || '' %>"
+                  data-country="<%= s.country || '' %>"
+                  data-department="<%= s.department || '' %>"
+                  data-job-title="<%= s.job_title || '' %>"
+                  data-company="<%= s.org_company || '' %>"
+                  data-manager-name="<%= s.manager_name || '' %>"
+                >Edit</button>
+              </td>
             </tr>
           <% }); %>
           </tbody>
@@ -45,5 +65,95 @@
       </section>
     </div>
   </div>
+  <div id="edit-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <span id="edit-close" class="close">&times;</span>
+      <h2>Edit Staff</h2>
+      <form id="edit-form">
+        <label>First Name<input type="text" id="edit-first-name"></label>
+        <label>Last Name<input type="text" id="edit-last-name"></label>
+        <label>Email<input type="email" id="edit-email"></label>
+        <label>Date Onboarded<input type="date" id="edit-date-onboarded"></label>
+        <label><input type="checkbox" id="edit-enabled"> Enabled</label>
+        <fieldset>
+          <legend>Address</legend>
+          <label>Street<input type="text" id="edit-street"></label>
+          <label>City<input type="text" id="edit-city"></label>
+          <label>State<input type="text" id="edit-state"></label>
+          <label>Postcode<input type="text" id="edit-postcode"></label>
+          <label>Country<input type="text" id="edit-country"></label>
+        </fieldset>
+        <fieldset>
+          <legend>Organisation</legend>
+          <label>Department<input type="text" id="edit-department"></label>
+          <label>Job Title<input type="text" id="edit-job-title"></label>
+          <label>Company<input type="text" id="edit-company"></label>
+          <label>Manager's Name<input type="text" id="edit-manager-name"></label>
+        </fieldset>
+        <button type="submit">Save</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const editModal = document.getElementById('edit-modal');
+    const editForm = document.getElementById('edit-form');
+    let editingId = null;
+
+    document.querySelectorAll('.edit-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        editingId = this.dataset.id;
+        document.getElementById('edit-first-name').value = this.dataset.firstName;
+        document.getElementById('edit-last-name').value = this.dataset.lastName;
+        document.getElementById('edit-email').value = this.dataset.email;
+        document.getElementById('edit-date-onboarded').value = this.dataset.dateOnboarded;
+        document.getElementById('edit-enabled').checked = this.dataset.enabled === '1';
+        document.getElementById('edit-street').value = this.dataset.street || '';
+        document.getElementById('edit-city').value = this.dataset.city || '';
+        document.getElementById('edit-state').value = this.dataset.state || '';
+        document.getElementById('edit-postcode').value = this.dataset.postcode || '';
+        document.getElementById('edit-country').value = this.dataset.country || '';
+        document.getElementById('edit-department').value = this.dataset.department || '';
+        document.getElementById('edit-job-title').value = this.dataset.jobTitle || '';
+        document.getElementById('edit-company').value = this.dataset.company || '';
+        document.getElementById('edit-manager-name').value = this.dataset.managerName || '';
+        editModal.style.display = 'flex';
+      });
+    });
+
+    document.getElementById('edit-close').addEventListener('click', function() {
+      editModal.style.display = 'none';
+    });
+
+    editForm.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const payload = {
+        firstName: document.getElementById('edit-first-name').value,
+        lastName: document.getElementById('edit-last-name').value,
+        email: document.getElementById('edit-email').value,
+        dateOnboarded: document.getElementById('edit-date-onboarded').value,
+        enabled: document.getElementById('edit-enabled').checked,
+        street: document.getElementById('edit-street').value,
+        city: document.getElementById('edit-city').value,
+        state: document.getElementById('edit-state').value,
+        postcode: document.getElementById('edit-postcode').value,
+        country: document.getElementById('edit-country').value,
+        department: document.getElementById('edit-department').value,
+        jobTitle: document.getElementById('edit-job-title').value,
+        company: document.getElementById('edit-company').value,
+        managerName: document.getElementById('edit-manager-name').value,
+      };
+      const res = await fetch(`/staff/${editingId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        location.reload();
+      } else {
+        alert('Failed to update staff');
+      }
+    });
+  </script>
 </body>
 </html>
