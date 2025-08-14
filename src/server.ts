@@ -362,7 +362,7 @@ async function ensureStaffAccess(
   }
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
-  if (current && current.can_manage_staff) {
+  if (current && (current.can_manage_staff || current.is_admin)) {
     return next();
   }
   return res.redirect('/');
@@ -536,7 +536,7 @@ app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
   });
 });
 
-app.post('/staff', ensureAuth, ensureSuperAdmin, async (req, res) => {
+app.post('/staff', ensureAuth, ensureAdmin, async (req, res) => {
   const {
     firstName,
     lastName,
@@ -1391,7 +1391,7 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
   res.redirect('/admin');
 });
 
-app.post('/admin/office-groups', ensureAuth, ensureAdmin, async (req, res) => {
+app.post('/admin/office-groups', ensureAuth, ensureSuperAdmin, async (req, res) => {
   await createOfficeGroup(req.session.companyId!, req.body.name);
   res.redirect('/admin#office-groups');
 });
@@ -1412,7 +1412,7 @@ app.post(
   }
 );
 
-app.post('/admin/office-groups/:id/delete', ensureAuth, ensureAdmin, async (req, res) => {
+app.post('/admin/office-groups/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
   await deleteOfficeGroup(parseInt(req.params.id, 10));
   res.redirect('/admin#office-groups');
 });
