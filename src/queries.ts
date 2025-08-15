@@ -491,16 +491,30 @@ export async function updateUserCompanyPermission(
   );
 }
 
-export async function getStaffByCompany(companyId: number): Promise<Staff[]> {
-  const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM staff WHERE company_id = ?',
-    [companyId]
-  );
+export async function getStaffByCompany(
+  companyId: number,
+  enabled?: boolean
+): Promise<Staff[]> {
+  let sql = 'SELECT * FROM staff WHERE company_id = ?';
+  const params: any[] = [companyId];
+  if (enabled !== undefined) {
+    sql += ' AND enabled = ?';
+    params.push(enabled ? 1 : 0);
+  }
+  const [rows] = await pool.query<RowDataPacket[]>(sql, params);
   return rows as Staff[];
 }
 
-export async function getAllStaff(): Promise<Staff[]> {
-  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM staff');
+export async function getAllStaff(
+  accountAction?: string
+): Promise<Staff[]> {
+  let sql = 'SELECT * FROM staff';
+  const params: any[] = [];
+  if (accountAction) {
+    sql += ' WHERE account_action = ?';
+    params.push(accountAction);
+  }
+  const [rows] = await pool.query<RowDataPacket[]>(sql, params);
   return rows as Staff[];
 }
 

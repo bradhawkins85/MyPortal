@@ -123,6 +123,10 @@ function toDateTime(value?: string): string | null {
   return value ? value.replace('T', ' ') : null;
 }
 
+function toDate(value?: string): string | null {
+  return value ? value.split('T')[0] : null;
+}
+
 const app = express();
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
@@ -283,7 +287,7 @@ app.get('/login', async (req, res) => {
 });
 
 app.post('/login', async (req, res) => {
-  const { email, password, remember } = req.body;
+  const { email, password } = req.body;
   const user = await getUserByEmail(email);
   if (user && (await bcrypt.compare(password, user.password_hash))) {
     req.session.userId = user.id;
@@ -293,12 +297,8 @@ app.post('/login', async (req, res) => {
     ]);
     req.session.companyId = companies[0]?.company_id;
     req.session.hasForms = forms.length > 0;
-    if (remember === 'on') {
-      req.session.cookie.maxAge = 8 * 60 * 60 * 1000; // 8 hours
-    } else {
-      req.session.cookie.expires = undefined;
-      req.session.cookie.maxAge = undefined;
-    }
+    req.session.cookie.expires = undefined;
+    req.session.cookie.maxAge = undefined;
     res.redirect('/');
   } else {
     res.render('login', { error: 'Invalid credentials' });
@@ -566,8 +566,11 @@ app.put('/licenses/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
 
 app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
+  const enabledFilter = req.query.enabled as string | undefined;
+  const enabledParam =
+    enabledFilter === '1' ? true : enabledFilter === '0' ? false : undefined;
   const staff = req.session.companyId
-    ? await getStaffByCompany(req.session.companyId)
+    ? await getStaffByCompany(req.session.companyId, enabledParam)
     : [];
   const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('staff', {
@@ -582,6 +585,7 @@ app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
     canAccessShop: current?.can_access_shop ?? 0,
+    enabledFilter: enabledFilter ?? '',
   });
 });
 
@@ -609,7 +613,7 @@ app.post('/staff', ensureAuth, ensureAdmin, async (req, res) => {
       firstName,
       lastName,
       email,
-      toDateTime(dateOnboarded),
+      toDate(dateOnboarded),
       toDateTime(dateOffboarded),
       !!enabled,
       street,
@@ -660,7 +664,7 @@ app.put('/staff/:id', ensureAuth, ensureStaffAccess, async (req, res) => {
     firstName,
     lastName,
     email,
-    toDateTime(dateOnboarded),
+    toDate(dateOnboarded),
     toDateTime(dateOffboarded),
     !!enabled,
     street,
@@ -3047,6 +3051,13 @@ api.delete('/licenses/:id', async (req, res) => {
  *     tags:
  *       - Staff
  *     summary: List all staff members
+ *     parameters:
+ *       - in: query
+ *         name: accountAction
+ *         schema:
+ *           type: string
+ *         required: false
+ *         description: Filter by account action
  *     responses:
  *       200:
  *         description: Array of staff
@@ -3069,7 +3080,7 @@ api.delete('/licenses/:id', async (req, res) => {
  *                     type: string
  *                   date_onboarded:
  *                     type: string
- *                     format: date-time
+ *                     format: date
  *                   date_offboarded:
  *                     type: string
  *                     format: date-time
@@ -3107,8 +3118,9 @@ api.delete('/licenses/:id', async (req, res) => {
  *                     type: string
  *                     nullable: true
  */
-api.get('/staff', async (_req, res) => {
-  const staff = await getAllStaff();
+api.get('/staff', async (req, res) => {
+  const accountAction = req.query.accountAction as string | undefined;
+  const staff = await getAllStaff(accountAction);
   res.json(staff);
 });
 
@@ -3141,7 +3153,7 @@ api.get('/staff', async (_req, res) => {
  *                 type: string
  *               dateOnboarded:
  *                 type: string
- *                 format: date-time
+ *                 format: date
  *               dateOffboarded:
  *                 type: string
  *                 format: date-time
@@ -3203,7 +3215,7 @@ api.post('/staff', async (req, res) => {
     firstName,
     lastName,
     email,
-    toDateTime(dateOnboarded),
+    toDate(dateOnboarded),
     toDateTime(dateOffboarded),
     !!enabled,
     street,
@@ -3253,7 +3265,7 @@ api.post('/staff', async (req, res) => {
  *                   type: string
  *                 date_onboarded:
  *                   type: string
- *                   format: date-time
+ *                   format: date
  *                 date_offboarded:
  *                   type: string
  *                   format: date-time
@@ -3331,7 +3343,7 @@ api.get('/staff/:id', async (req, res) => {
  *                 type: string
  *               dateOnboarded:
  *                 type: string
- *                 format: date-time
+ *                 format: date
  *               dateOffboarded:
  *                 type: string
  *                 format: date-time
@@ -3387,7 +3399,7 @@ api.put('/staff/:id', async (req, res) => {
     firstName,
     lastName,
     email,
-    toDateTime(dateOnboarded),
+    toDate(dateOnboarded),
     toDateTime(dateOffboarded),
     !!enabled,
     street,
