@@ -6,7 +6,13 @@ export interface User {
   email: string;
   password_hash: string;
   company_id: number;
-  totp_secret?: string | null;
+}
+
+export interface UserTotpAuthenticator {
+  id: number;
+  user_id: number;
+  name: string;
+  secret: string;
 }
 
 export interface Company {
@@ -661,11 +667,29 @@ export async function updateUserPassword(
   await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, id]);
 }
 
-export async function updateUserTotpSecret(
-  id: number,
-  secret: string | null
+export async function getUserTotpAuthenticators(
+  userId: number
+): Promise<UserTotpAuthenticator[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT id, user_id, name, secret FROM user_totp_authenticators WHERE user_id = ?',
+    [userId]
+  );
+  return rows as UserTotpAuthenticator[];
+}
+
+export async function addUserTotpAuthenticator(
+  userId: number,
+  name: string,
+  secret: string
 ): Promise<void> {
-  await pool.execute('UPDATE users SET totp_secret = ? WHERE id = ?', [secret, id]);
+  await pool.execute(
+    'INSERT INTO user_totp_authenticators (user_id, name, secret) VALUES (?, ?, ?)',
+    [userId, name, secret]
+  );
+}
+
+export async function deleteUserTotpAuthenticator(id: number): Promise<void> {
+  await pool.execute('DELETE FROM user_totp_authenticators WHERE id = ?', [id]);
 }
 
 export async function deleteUser(id: number): Promise<void> {

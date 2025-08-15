@@ -10,6 +10,7 @@
         <div class="tabs">
           <button data-tab="companies" class="active">Companies</button>
           <button data-tab="assignments">Current Assignments</button>
+          <button data-tab="account">Account</button>
           <% if (isSuperAdmin) { %>
             <button data-tab="apps">Apps</button>
             <button data-tab="api-keys">API Keys</button>
@@ -163,6 +164,53 @@
               <% }); %>
               </tbody>
             </table>
+          </section>
+        </div>
+        <div id="account" class="tab-content">
+          <section>
+            <h2>Change Password</h2>
+            <% if (passwordError) { %><p class="error"><%= passwordError %></p><% } %>
+            <% if (passwordSuccess) { %><p class="success"><%= passwordSuccess %></p><% } %>
+            <form method="post" action="/change-password">
+              <label>Current Password:
+                <input type="password" name="currentPassword" required>
+              </label>
+              <label>New Password:
+                <input type="password" name="newPassword" required>
+              </label>
+              <button type="submit">Update Password</button>
+            </form>
+          </section>
+          <section>
+            <h2>TOTP Authenticators</h2>
+            <ul>
+              <% totpAuthenticators.forEach(function(t){ %>
+                <li>
+                  <%= t.name %>
+                  <form method="post" action="/admin/totp/<%= t.id %>/delete" style="display:inline">
+                    <button type="submit">Remove</button>
+                  </form>
+                </li>
+              <% }); %>
+            </ul>
+            <% if (newTotpQr) { %>
+              <p>Scan this QR code or enter the code manually.</p>
+              <img src="<%= newTotpQr %>" alt="QR Code">
+              <p>Manual code: <code><%= newTotpSecret %></code></p>
+              <% if (totpError) { %><p class="error"><%= totpError %></p><% } %>
+              <form method="post" action="/admin/totp/verify">
+                <label>Authentication Code:
+                  <input type="text" name="token" required>
+                </label>
+                <button type="submit">Verify</button>
+              </form>
+              <form method="post" action="/admin/totp/cancel"><button type="submit">Cancel</button></form>
+            <% } else { %>
+              <form method="post" action="/admin/totp/start">
+                <input type="text" name="name" placeholder="Authenticator Name" required>
+                <button type="submit">Add Authenticator</button>
+              </form>
+            <% } %>
           </section>
         </div>
         <% if (isSuperAdmin) { %>
