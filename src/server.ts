@@ -274,6 +274,7 @@ function auditLogger(
       }
     }
 
+    const ip = (req.headers['cf-connecting-ip'] as string) || req.ip;
     logAudit({
       userId: req.session.userId || null,
       companyId,
@@ -281,7 +282,7 @@ function auditLogger(
       previousValue: null,
       newValue: JSON.stringify(sanitizedBody),
       apiKey: req.apiKey,
-      ipAddress: req.ip,
+      ipAddress: ip,
     }).catch(() => {});
   });
   next();
@@ -1867,7 +1868,8 @@ api.use(async (req, res, next) => {
     return res.status(403).json({ error: 'Invalid API key' });
   }
   req.apiKey = key;
-  await recordApiKeyUsage(record.id, req.ip || '');
+  const ip = (req.headers['cf-connecting-ip'] as string) || req.ip || '';
+  await recordApiKeyUsage(record.id, ip);
   next();
 });
 
