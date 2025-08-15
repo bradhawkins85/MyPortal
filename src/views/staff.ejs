@@ -57,6 +57,7 @@
                   data-job-title="<%= s.job_title || '' %>"
                   data-company="<%= s.org_company || '' %>"
                   data-manager-name="<%= s.manager_name || '' %>"
+                  data-account-action="<%= s.account_action || '' %>"
                 >Edit</button>
               </td>
             </tr>
@@ -76,6 +77,18 @@
         <label>Email<input type="email" id="edit-email"></label>
         <label>Date Onboarded<input type="datetime-local" id="edit-date-onboarded"></label>
         <label>Offboard Date<input type="datetime-local" id="edit-date-offboarded"></label>
+        <label>Account Action
+          <select id="edit-account-action" <%= isSuperAdmin ? '' : 'disabled' %>>
+            <option value="Onboard Requested">Onboard Requested</option>
+            <option value="Onboard Approved">Onboard Approved</option>
+            <option value="Onboarding In Progress">Onboarding In Progress</option>
+            <option value="Onboarded">Onboarded</option>
+            <option value="Offboard Requested">Offboard Requested</option>
+            <option value="Offboard Approved">Offboard Approved</option>
+            <option value="Offboard Scheduled">Offboard Scheduled</option>
+            <option value="Offboarded">Offboarded</option>
+          </select>
+        </label>
         <label><input type="checkbox" id="edit-enabled"> Enabled</label>
         <fieldset>
           <legend>Address</legend>
@@ -127,6 +140,7 @@
         document.getElementById('edit-job-title').value = this.dataset.jobTitle || '';
         document.getElementById('edit-company').value = this.dataset.company || '';
         document.getElementById('edit-manager-name').value = this.dataset.managerName || '';
+        document.getElementById('edit-account-action').value = this.dataset.accountAction || '';
         editModal.style.display = 'flex';
       });
     });
@@ -153,6 +167,7 @@
         jobTitle: document.getElementById('edit-job-title').value,
         company: document.getElementById('edit-company').value,
         managerName: document.getElementById('edit-manager-name').value,
+        accountAction: document.getElementById('edit-account-action').value,
       };
       const res = await fetch(`/staff/${editingId}`, {
         method: 'PUT',

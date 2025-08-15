@@ -146,6 +146,7 @@ export interface Staff {
   job_title?: string | null;
   org_company?: string | null;
   manager_name?: string | null;
+  account_action?: string | null;
 }
 
 export interface ApiKey {
@@ -524,10 +525,11 @@ export async function addStaff(
   department?: string | null,
   jobTitle?: string | null,
   orgCompany?: string | null,
-  managerName?: string | null
+  managerName?: string | null,
+  accountAction?: string | null
 ): Promise<void> {
   await pool.execute(
-    'INSERT INTO staff (company_id, first_name, last_name, email, date_onboarded, date_offboarded, enabled, street, city, state, postcode, country, department, job_title, org_company, manager_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO staff (company_id, first_name, last_name, email, date_onboarded, date_offboarded, enabled, street, city, state, postcode, country, department, job_title, org_company, manager_name, account_action) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       companyId,
       firstName,
@@ -545,6 +547,7 @@ export async function addStaff(
       jobTitle || null,
       orgCompany || null,
       managerName || null,
+      accountAction || null,
     ]
   );
 }
@@ -576,10 +579,11 @@ export async function updateStaff(
   department?: string | null,
   jobTitle?: string | null,
   orgCompany?: string | null,
-  managerName?: string | null
+  managerName?: string | null,
+  accountAction?: string | null
 ): Promise<void> {
   await pool.execute(
-    'UPDATE staff SET company_id = ?, first_name = ?, last_name = ?, email = ?, date_onboarded = ?, date_offboarded = ?, enabled = ?, street = ?, city = ?, state = ?, postcode = ?, country = ?, department = ?, job_title = ?, org_company = ?, manager_name = ? WHERE id = ?',
+    'UPDATE staff SET company_id = ?, first_name = ?, last_name = ?, email = ?, date_onboarded = ?, date_offboarded = ?, enabled = ?, street = ?, city = ?, state = ?, postcode = ?, country = ?, department = ?, job_title = ?, org_company = ?, manager_name = ?, account_action = ? WHERE id = ?',
     [
       companyId,
       firstName,
@@ -597,6 +601,7 @@ export async function updateStaff(
       jobTitle || null,
       orgCompany || null,
       managerName || null,
+      accountAction || null,
       id,
     ]
   );
