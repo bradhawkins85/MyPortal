@@ -68,6 +68,9 @@
                   data-manager-name="<%= s.manager_name || '' %>"
                   data-account-action="<%= s.account_action || '' %>"
                 >Edit</button>
+                <% if (isSuperAdmin) { %>
+                  <button class="delete-btn" data-id="<%= s.id %>">Delete</button>
+                <% } %>
               </td>
             </tr>
           <% }); %>
@@ -161,6 +164,18 @@
         document.getElementById('edit-manager-name').value = this.dataset.managerName || '';
         document.getElementById('edit-account-action').value = this.dataset.accountAction || '';
         editModal.style.display = 'flex';
+      });
+    });
+
+    document.querySelectorAll('.delete-btn').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        if (!confirm('Delete staff member?')) return;
+        const res = await fetch(`/staff/${this.dataset.id}`, { method: 'DELETE' });
+        if (res.ok) {
+          location.reload();
+        } else {
+          alert('Failed to delete staff');
+        }
       });
     });
 

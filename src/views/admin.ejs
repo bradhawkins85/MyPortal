@@ -97,7 +97,7 @@
             <h2>Current Assignments</h2>
             <table>
               <thead>
-                <tr><th>User</th><th>Company</th><th>Admin</th><th>Licenses</th><th>Order</th><th>Staff</th><th>Assets</th><th>Invoices</th><th>Shop</th></tr>
+                <tr><th>User</th><th>Company</th><th>Admin</th><th>Licenses</th><th>Order</th><th>Staff</th><th>Assets</th><th>Invoices</th><th>Shop</th><% if (isSuperAdmin) { %><th>Remove</th><% } %></tr>
               </thead>
               <tbody>
               <% assignments.forEach(function(a) { %>
@@ -160,6 +160,9 @@
                       <input type="checkbox" name="canAccessShop" value="1" <%= a.can_access_shop ? 'checked' : '' %> onchange="this.form.submit()">
                     </form>
                   </td>
+                  <% if (isSuperAdmin) { %>
+                  <td><button class="unassign-btn" data-user-id="<%= a.user_id %>" data-company-id="<%= a.company_id %>">Remove</button></td>
+                  <% } %>
                 </tr>
               <% }); %>
               </tbody>
@@ -676,6 +679,14 @@
             body: JSON.stringify({ companyId: parseInt(companyId,10), quantity: parseInt(qty,10) })
           });
           alert('App added to company');
+        });
+      });
+
+      document.querySelectorAll('.unassign-btn').forEach(function(btn){
+        btn.addEventListener('click', async function(){
+          if(!confirm('Remove assignment?')) return;
+          await fetch(`/admin/assign/${this.dataset.companyId}/${this.dataset.userId}`, { method: 'DELETE' });
+          location.reload();
         });
       });
       document.querySelectorAll('.show-ips').forEach(function(link){

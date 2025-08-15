@@ -703,6 +703,11 @@ app.put('/licenses/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
   res.json({ success: true });
 });
 
+app.delete('/licenses/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  await deleteLicense(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
 app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
   const enabledFilter = req.query.enabled as string | undefined;
@@ -825,6 +830,11 @@ app.put('/staff/:id', ensureAuth, ensureStaffAccess, async (req, res) => {
   res.json({ success: true });
 });
 
+app.delete('/staff/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  await deleteStaff(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
 app.post('/staff/enabled', ensureAuth, ensureStaffAccess, async (req, res) => {
   const { staffId, enabled } = req.body;
   await updateStaffEnabled(parseInt(staffId, 10), !!enabled);
@@ -851,6 +861,11 @@ app.get('/assets', ensureAuth, ensureAssetsAccess, async (req, res) => {
   });
 });
 
+app.delete('/assets/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  await deleteAsset(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
 app.get('/invoices', ensureAuth, ensureInvoicesAccess, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
   const invoices = req.session.companyId
@@ -869,6 +884,11 @@ app.get('/invoices', ensureAuth, ensureInvoicesAccess, async (req, res) => {
     canOrderLicenses: current?.can_order_licenses ?? 0,
     canAccessShop: current?.can_access_shop ?? 0,
   });
+});
+
+app.delete('/invoices/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  await deleteInvoice(parseInt(req.params.id, 10));
+  res.json({ success: true });
 });
 
 app.get('/forms', ensureAuth, async (req, res) => {
@@ -1638,6 +1658,17 @@ app.post('/admin/assign', ensureAuth, ensureAdmin, async (req, res) => {
     false
   );
   res.redirect('/admin');
+});
+
+app.delete('/admin/assign/:companyId/:userId', ensureAuth, ensureSuperAdmin, async (
+  req,
+  res
+) => {
+  await unassignUserFromCompany(
+    parseInt(req.params.userId, 10),
+    parseInt(req.params.companyId, 10)
+  );
+  res.json({ success: true });
 });
 
 function parseCheckbox(value: unknown): boolean {
