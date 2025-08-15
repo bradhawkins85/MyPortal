@@ -136,6 +136,29 @@ function toDate(value?: string): string | null {
   return value ? value.split('T')[0] : null;
 }
 
+function mapStaff(s: Staff) {
+  return {
+    id: s.id,
+    companyId: s.company_id,
+    firstName: s.first_name,
+    lastName: s.last_name,
+    email: s.email,
+    dateOnboarded: s.date_onboarded,
+    dateOffboarded: s.date_offboarded ?? null,
+    enabled: !!s.enabled,
+    street: s.street ?? null,
+    city: s.city ?? null,
+    state: s.state ?? null,
+    postcode: s.postcode ?? null,
+    country: s.country ?? null,
+    department: s.department ?? null,
+    jobTitle: s.job_title ?? null,
+    company: s.org_company ?? null,
+    managerName: s.manager_name ?? null,
+    accountAction: s.account_action ?? null,
+  };
+}
+
 const app = express();
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
@@ -3454,23 +3477,23 @@ api.delete('/licenses/:id', async (req, res) => {
  *                 properties:
  *                   id:
  *                     type: integer
- *                   company_id:
+ *                   companyId:
  *                     type: integer
- *                   first_name:
+ *                   firstName:
  *                     type: string
- *                   last_name:
+ *                   lastName:
  *                     type: string
  *                   email:
  *                     type: string
- *                   date_onboarded:
+ *                   dateOnboarded:
  *                     type: string
  *                     format: date
- *                   date_offboarded:
+ *                   dateOffboarded:
  *                     type: string
  *                     format: date-time
  *                     nullable: true
  *                   enabled:
- *                     type: integer
+ *                     type: boolean
  *                   street:
  *                     type: string
  *                     nullable: true
@@ -3489,16 +3512,16 @@ api.delete('/licenses/:id', async (req, res) => {
  *                   department:
  *                     type: string
  *                     nullable: true
- *                   job_title:
+ *                   jobTitle:
  *                     type: string
  *                     nullable: true
- *                   org_company:
+ *                   company:
  *                     type: string
  *                     nullable: true
- *                   manager_name:
+ *                   managerName:
  *                     type: string
  *                     nullable: true
- *                   account_action:
+ *                   accountAction:
  *                     type: string
  *                     nullable: true
  */
@@ -3506,7 +3529,7 @@ api.get('/staff', async (req, res) => {
   const accountAction = req.query.accountAction as string | undefined;
   const email = req.query.email as string | undefined;
   const staff = await getAllStaff(accountAction, email);
-  res.json(staff);
+  res.json(staff.map(mapStaff));
 });
 
 /**
@@ -3640,23 +3663,23 @@ api.post('/staff', async (req, res) => {
  *               properties:
  *                 id:
  *                   type: integer
- *                 company_id:
+ *                 companyId:
  *                   type: integer
- *                 first_name:
+ *                 firstName:
  *                   type: string
- *                 last_name:
+ *                 lastName:
  *                   type: string
  *                 email:
  *                   type: string
- *                 date_onboarded:
+ *                 dateOnboarded:
  *                   type: string
  *                   format: date
- *                 date_offboarded:
+ *                 dateOffboarded:
  *                   type: string
  *                   format: date-time
  *                   nullable: true
  *                 enabled:
- *                   type: integer
+ *                   type: boolean
  *                 street:
  *                   type: string
  *                   nullable: true
@@ -3675,16 +3698,16 @@ api.post('/staff', async (req, res) => {
  *                 department:
  *                   type: string
  *                   nullable: true
- *                 job_title:
+ *                 jobTitle:
  *                   type: string
  *                   nullable: true
- *                 org_company:
+ *                 company:
  *                   type: string
  *                   nullable: true
- *                 manager_name:
+ *                 managerName:
  *                   type: string
  *                   nullable: true
- *                 account_action:
+ *                 accountAction:
  *                   type: string
  *                   nullable: true
  *       404:
@@ -3695,7 +3718,7 @@ api.get('/staff/:id', async (req, res) => {
   if (!staff) {
     return res.status(404).json({ error: 'Staff not found' });
   }
-  res.json(staff);
+  res.json(mapStaff(staff));
 });
 
 /**
