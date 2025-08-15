@@ -1321,7 +1321,7 @@ app.post(
 app.post('/apps', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { sku, name, price, contractTerm } = req.body;
   await createApp(sku, name, parseFloat(price), contractTerm);
-  res.redirect('/apps');
+  res.redirect('/admin#apps');
 });
 
 app.post('/apps/price', ensureAuth, ensureSuperAdmin, async (req, res) => {
@@ -1331,7 +1331,7 @@ app.post('/apps/price', ensureAuth, ensureSuperAdmin, async (req, res) => {
     parseInt(appId, 10),
     parseFloat(price)
   );
-  res.redirect('/apps');
+  res.redirect('/admin#apps');
 });
 
 app.post('/apps/:appId/add', ensureAuth, ensureSuperAdmin, async (req, res) => {
