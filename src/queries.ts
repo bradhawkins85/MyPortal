@@ -819,6 +819,7 @@ export async function recordApiKeyUsage(
 
 export async function logAudit(options: {
   userId?: number | null;
+  companyId?: number | null;
   action: string;
   previousValue?: string | null;
   newValue?: string | null;
@@ -845,9 +846,10 @@ export async function logAudit(options: {
     }
   }
   await pool.execute(
-    'INSERT INTO audit_logs (user_id, action, previous_value, new_value, api_key, ip_address) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO audit_logs (user_id, company_id, action, previous_value, new_value, api_key, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [
       options.userId || null,
+      options.companyId || null,
       options.action,
       options.previousValue || null,
       valueToLog,
@@ -858,14 +860,14 @@ export async function logAudit(options: {
 }
 
 export async function getAuditLogs(companyId?: number): Promise<AuditLog[]> {
-  let sql = `SELECT al.id, al.user_id, al.action, al.new_value AS value, al.api_key, al.ip_address, al.created_at,
-             u.email, u.company_id, c.name AS company_name
+  let sql = `SELECT al.id, al.user_id, al.company_id, al.action, al.new_value AS value, al.api_key, al.ip_address, al.created_at,
+             u.email, c.name AS company_name
              FROM audit_logs al
              LEFT JOIN users u ON al.user_id = u.id
-             LEFT JOIN companies c ON u.company_id = c.id`;
+             LEFT JOIN companies c ON al.company_id = c.id`;
   const params: any[] = [];
   if (companyId) {
-    sql += ' WHERE u.company_id = ?';
+    sql += ' WHERE al.company_id = ?';
     params.push(companyId);
   }
   sql += ' ORDER BY al.created_at DESC';
