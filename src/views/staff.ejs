@@ -13,7 +13,7 @@
           <input type="text" name="firstName" placeholder="First Name" required>
           <input type="text" name="lastName" placeholder="Last Name" required>
           <input type="email" name="email" placeholder="Email" required>
-          <input type="datetime-local" name="dateOnboarded">
+          <input type="date" name="dateOnboarded">
           <label><input type="checkbox" name="enabled" value="1" checked> Enabled</label>
           <button type="submit">Add</button>
         </form>
@@ -21,6 +21,15 @@
       <% } %>
       <section>
         <h2>Current Staff</h2>
+        <form id="filter-form" method="get" action="/staff">
+          <label>Show
+            <select name="enabled" onchange="document.getElementById('filter-form').submit()">
+              <option value="" <%= enabledFilter === '' ? 'selected' : '' %>>All</option>
+              <option value="1" <%= enabledFilter === '1' ? 'selected' : '' %>>Enabled</option>
+              <option value="0" <%= enabledFilter === '0' ? 'selected' : '' %>>Disabled</option>
+            </select>
+          </label>
+        </form>
         <table>
           <thead>
             <tr><th>First Name</th><th>Last Name</th><th>Email</th><th>Date Onboarded</th><th>Enabled</th><th>Actions</th></tr>
@@ -45,7 +54,7 @@
                   data-first-name="<%= s.first_name %>"
                   data-last-name="<%= s.last_name %>"
                   data-email="<%= s.email %>"
-                  data-date-onboarded="<%= s.date_onboarded ? new Date(s.date_onboarded).toISOString().slice(0,16) : '' %>"
+                  data-date-onboarded="<%= s.date_onboarded ? new Date(s.date_onboarded).toISOString().slice(0,10) : '' %>"
                   data-date-offboarded="<%= s.date_offboarded ? new Date(s.date_offboarded).toISOString().slice(0,16) : '' %>"
                   data-enabled="<%= s.enabled %>"
                   data-street="<%= s.street || '' %>"
@@ -75,7 +84,7 @@
         <label>First Name<input type="text" id="edit-first-name"></label>
         <label>Last Name<input type="text" id="edit-last-name"></label>
         <label>Email<input type="email" id="edit-email"></label>
-        <label>Date Onboarded<input type="datetime-local" id="edit-date-onboarded"></label>
+        <label>Date Onboarded<input type="date" id="edit-date-onboarded"></label>
         <label>Offboard Date<input type="datetime-local" id="edit-date-offboarded"></label>
         <label>Account Action
           <select id="edit-account-action" <%= isSuperAdmin ? '' : 'disabled' %>>
@@ -118,7 +127,7 @@
     document.querySelectorAll('.date-onboarded').forEach(function(cell) {
       const value = cell.dataset.date;
       if (value) {
-        cell.textContent = new Date(value).toLocaleString();
+        cell.textContent = new Date(value).toLocaleDateString();
       }
     });
 
