@@ -84,38 +84,51 @@
       <span id="edit-close" class="close">&times;</span>
       <h2>Edit Staff</h2>
       <form id="edit-form">
-        <label>First Name<input type="text" id="edit-first-name" <%= isSuperAdmin ? '' : 'readonly' %>></label>
-        <label>Last Name<input type="text" id="edit-last-name" <%= isSuperAdmin ? '' : 'readonly' %>></label>
-        <label>Email<input type="email" id="edit-email" <%= isSuperAdmin ? '' : 'readonly' %>></label>
-        <label>Date Onboarded<input type="date" id="edit-date-onboarded" <%= isSuperAdmin ? '' : 'readonly' %>></label>
-        <label>Offboard Date<input type="datetime-local" id="edit-date-offboarded" <%= isAdmin ? '' : 'readonly' %>></label>
-        <label>Account Action
-          <select id="edit-account-action" <%= isSuperAdmin ? '' : 'disabled' %>>
-            <option value="Onboard Requested">Onboard Requested</option>
-            <option value="Onboard Approved">Onboard Approved</option>
-            <option value="Onboarding In Progress">Onboarding In Progress</option>
-            <option value="Onboarded">Onboarded</option>
-            <option value="Offboard Requested">Offboard Requested</option>
-            <option value="Offboard Approved">Offboard Approved</option>
-            <option value="Offboard Scheduled">Offboard Scheduled</option>
-            <option value="Offboarded">Offboarded</option>
-          </select>
-        </label>
+        <label for="edit-first-name">First Name</label>
+        <input type="text" id="edit-first-name" <%= isSuperAdmin ? '' : 'readonly' %>>
+        <label for="edit-last-name">Last Name</label>
+        <input type="text" id="edit-last-name" <%= isSuperAdmin ? '' : 'readonly' %>>
+        <label for="edit-email">Email</label>
+        <input type="email" id="edit-email" <%= isSuperAdmin ? '' : 'readonly' %>>
+        <label for="edit-date-onboarded">Date Onboarded</label>
+        <input type="date" id="edit-date-onboarded" <%= isSuperAdmin ? '' : 'readonly' %>>
+        <label for="edit-date-offboarded">Offboard Date</label>
+        <input type="datetime-local" id="edit-date-offboarded" <%= isAdmin ? '' : 'readonly' %>>
+        <label for="edit-account-action">Account Action</label>
+        <select id="edit-account-action" <%= isSuperAdmin ? '' : 'disabled' %>>
+          <option value="Onboard Requested">Onboard Requested</option>
+          <option value="Onboard Approved">Onboard Approved</option>
+          <option value="Onboarding In Progress">Onboarding In Progress</option>
+          <option value="Onboarded">Onboarded</option>
+          <option value="Offboard Requested">Offboard Requested</option>
+          <option value="Offboard Approved">Offboard Approved</option>
+          <option value="Offboard Scheduled">Offboard Scheduled</option>
+          <option value="Offboarded">Offboarded</option>
+        </select>
         <label><input type="checkbox" id="edit-enabled" <%= isSuperAdmin ? '' : 'disabled' %>> Enabled</label>
         <fieldset>
           <legend>Address</legend>
-          <label>Street<input type="text" id="edit-street" <%= isSuperAdmin ? '' : 'readonly' %>></label>
-          <label>City<input type="text" id="edit-city" <%= isSuperAdmin ? '' : 'readonly' %>></label>
-          <label>State<input type="text" id="edit-state" <%= isSuperAdmin ? '' : 'readonly' %>></label>
-          <label>Postcode<input type="text" id="edit-postcode" <%= isSuperAdmin ? '' : 'readonly' %>></label>
-          <label>Country<input type="text" id="edit-country" <%= isSuperAdmin ? '' : 'readonly' %>></label>
+          <label for="edit-street">Street</label>
+          <input type="text" id="edit-street" <%= isSuperAdmin ? '' : 'readonly' %>>
+          <label for="edit-city">City</label>
+          <input type="text" id="edit-city" <%= isSuperAdmin ? '' : 'readonly' %>>
+          <label for="edit-state">State</label>
+          <input type="text" id="edit-state" <%= isSuperAdmin ? '' : 'readonly' %>>
+          <label for="edit-postcode">Postcode</label>
+          <input type="text" id="edit-postcode" <%= isSuperAdmin ? '' : 'readonly' %>>
+          <label for="edit-country">Country</label>
+          <input type="text" id="edit-country" <%= isSuperAdmin ? '' : 'readonly' %>>
         </fieldset>
         <fieldset>
           <legend>Organisation</legend>
-          <label>Department<input type="text" id="edit-department" <%= isSuperAdmin ? '' : 'readonly' %>></label>
-          <label>Job Title<input type="text" id="edit-job-title" <%= isSuperAdmin ? '' : 'readonly' %>></label>
-          <label>Company<input type="text" id="edit-company" <%= isSuperAdmin ? '' : 'readonly' %>></label>
-          <label>Manager's Name<input type="text" id="edit-manager-name" <%= isSuperAdmin ? '' : 'readonly' %>></label>
+          <label for="edit-department">Department</label>
+          <input type="text" id="edit-department" <%= isSuperAdmin ? '' : 'readonly' %>>
+          <label for="edit-job-title">Job Title</label>
+          <input type="text" id="edit-job-title" <%= isSuperAdmin ? '' : 'readonly' %>>
+          <label for="edit-company">Company</label>
+          <input type="text" id="edit-company" <%= isSuperAdmin ? '' : 'readonly' %>>
+          <label for="edit-manager-name">Manager's Name</label>
+          <input type="text" id="edit-manager-name" <%= isSuperAdmin ? '' : 'readonly' %>>
         </fieldset>
         <button type="submit">Save</button>
       </form>
