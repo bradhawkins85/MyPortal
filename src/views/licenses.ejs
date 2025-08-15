@@ -39,6 +39,7 @@
                     data-expiry-date="<%= lic.expiry_date ? new Date(lic.expiry_date).toISOString().split('T')[0] : '' %>"
                     data-contract-term="<%= lic.contract_term %>"
                   >Edit</button>
+                  <button class="delete-btn" data-license-id="<%= lic.id %>">Delete</button>
                 <% } %>
                 <% if (canOrderLicenses) { %>
                   <button class="order-btn" data-license-id="<%= lic.id %>">Order More</button>
@@ -186,6 +187,18 @@
       } else {
         alert('Failed to update license');
       }
+    });
+
+    document.querySelectorAll('.delete-btn').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        if (!confirm('Delete license?')) return;
+        const res = await fetch(`/licenses/${this.dataset.licenseId}`, { method: 'DELETE' });
+        if (res.ok) {
+          location.reload();
+        } else {
+          alert('Failed to delete license');
+        }
+      });
     });
   </script>
 </body>
