@@ -792,29 +792,34 @@ app.put('/staff/:id', ensureAuth, ensureStaffAccess, async (req, res) => {
   if (!req.session.companyId) {
     return res.status(400).json({ error: 'No company selected' });
   }
-  let accountActionValue = accountAction;
-  if (req.session.userId !== 1) {
-    const existing = await getStaffById(parseInt(req.params.id, 10));
-    accountActionValue = existing?.account_action || null;
+  const id = parseInt(req.params.id, 10);
+  const isSuperAdmin = req.session.userId === 1;
+  let existing: any;
+  if (!isSuperAdmin) {
+    existing = await getStaffById(id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Staff not found' });
+    }
   }
+  const accountActionValue = isSuperAdmin ? accountAction : existing!.account_action;
   await updateStaff(
-    parseInt(req.params.id, 10),
+    id,
     req.session.companyId,
-    firstName,
-    lastName,
-    email,
-    toDate(dateOnboarded),
+    isSuperAdmin ? firstName : existing!.first_name,
+    isSuperAdmin ? lastName : existing!.last_name,
+    isSuperAdmin ? email : existing!.email,
+    isSuperAdmin ? toDate(dateOnboarded) : existing!.date_onboarded,
     toDateTime(dateOffboarded),
-    !!enabled,
-    street,
-    city,
-    state,
-    postcode,
-    country,
-    department,
-    jobTitle,
-    company,
-    managerName,
+    isSuperAdmin ? !!enabled : !!existing!.enabled,
+    isSuperAdmin ? street : existing!.street,
+    isSuperAdmin ? city : existing!.city,
+    isSuperAdmin ? state : existing!.state,
+    isSuperAdmin ? postcode : existing!.postcode,
+    isSuperAdmin ? country : existing!.country,
+    isSuperAdmin ? department : existing!.department,
+    isSuperAdmin ? jobTitle : existing!.job_title,
+    isSuperAdmin ? company : existing!.org_company,
+    isSuperAdmin ? managerName : existing!.manager_name,
     accountActionValue
   );
   res.json({ success: true });
