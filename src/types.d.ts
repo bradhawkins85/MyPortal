@@ -20,6 +20,11 @@ declare module 'express-session' {
     tempUserId?: number;
     pendingTotpSecret?: string;
     requireTotpSetup?: boolean;
+    newTotpSecret?: string;
+    newTotpName?: string;
+    newTotpError?: string;
+    passwordError?: string;
+    passwordSuccess?: string;
   }
 }
 

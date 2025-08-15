@@ -39,7 +39,9 @@ import {
   updateUser,
   deleteUser,
   updateUserPassword,
-  updateUserTotpSecret,
+  getUserTotpAuthenticators,
+  addUserTotpAuthenticator,
+  deleteUserTotpAuthenticator,
   updateLicense,
   deleteLicense,
   unassignUserFromCompany,
@@ -341,11 +343,11 @@ app.post('/login', async (req, res) => {
         return res.redirect('/');
       }
       req.session.tempUserId = user.id;
-      if (!user.totp_secret) {
+      const totpAuths = await getUserTotpAuthenticators(user.id);
+      if (totpAuths.length === 0) {
         req.session.pendingTotpSecret = authenticator.generateSecret();
         req.session.requireTotpSetup = true;
       } else {
-        req.session.pendingTotpSecret = user.totp_secret;
         req.session.requireTotpSetup = false;
       }
       return res.redirect('/totp');
@@ -362,16 +364,18 @@ app.get('/totp', async (req, res) => {
     return res.redirect('/login');
   }
   let qrCode: string | null = null;
+  let secret: string | null = null;
   if (req.session.requireTotpSetup && req.session.pendingTotpSecret) {
     const user = await getUserById(req.session.tempUserId);
+    secret = req.session.pendingTotpSecret;
     const otpauth = authenticator.keyuri(
       user!.email,
       'MyPortal',
-      req.session.pendingTotpSecret
+      secret
     );
     qrCode = await QRCode.toDataURL(otpauth);
   }
-  res.render('totp', { qrCode, error: '' });
+  res.render('totp', { qrCode, secret, requireSetup: req.session.requireTotpSetup, error: '' });
 });
 
 app.post('/totp', async (req, res) => {
@@ -379,18 +383,21 @@ app.post('/totp', async (req, res) => {
     return res.redirect('/login');
   }
   const userId = req.session.tempUserId;
-  let secret = req.session.pendingTotpSecret;
-  if (!secret) {
-    const user = await getUserById(userId);
-    secret = user?.totp_secret || undefined;
-  }
-  const valid = secret
-    ? authenticator.verify({ token: req.body.token, secret })
-    : false;
-  if (valid) {
-    if (req.session.requireTotpSetup && secret) {
-      await updateUserTotpSecret(userId, secret);
+  let valid = false;
+  if (req.session.requireTotpSetup && req.session.pendingTotpSecret) {
+    const secret = req.session.pendingTotpSecret;
+    valid = authenticator.verify({ token: req.body.token, secret });
+    if (valid) {
+      const name = req.body.deviceName || 'Authenticator';
+      await addUserTotpAuthenticator(userId, name, secret);
     }
+  } else {
+    const auths = await getUserTotpAuthenticators(userId);
+    valid = auths.some((a) =>
+      authenticator.verify({ token: req.body.token, secret: a.secret })
+    );
+  }
+  if (valid) {
     if (req.body.trust) {
       const token = generateTrustedDeviceToken(userId);
       res.cookie(`trusted_${userId}`, token, {
@@ -405,16 +412,23 @@ app.post('/totp', async (req, res) => {
     return res.redirect('/');
   }
   let qrCode: string | null = null;
+  let secret: string | null = null;
   if (req.session.requireTotpSetup && req.session.pendingTotpSecret) {
     const user = await getUserById(userId);
+    secret = req.session.pendingTotpSecret;
     const otpauth = authenticator.keyuri(
       user!.email,
       'MyPortal',
-      req.session.pendingTotpSecret
+      secret
     );
     qrCode = await QRCode.toDataURL(otpauth);
   }
-  res.render('totp', { qrCode, error: 'Invalid code' });
+  res.render('totp', {
+    qrCode,
+    secret,
+    requireSetup: req.session.requireTotpSetup,
+    error: 'Invalid code',
+  });
 });
 
 app.get('/register', async (req, res) => {
@@ -447,59 +461,17 @@ app.get('/logout', (req, res) => {
   });
 });
 
-app.get('/change-password', ensureAuth, ensureAdmin, async (req, res) => {
-  const companies = await getCompaniesForUser(req.session.userId!);
-  const current = companies.find((c) => c.company_id === req.session.companyId);
-  res.render('change-password', {
-    companies,
-    currentCompanyId: req.session.companyId,
-    isAdmin: true,
-    canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
-    canManageAssets: current?.can_manage_assets ?? 0,
-    canManageInvoices: current?.can_manage_invoices ?? 0,
-    canOrderLicenses: current?.can_order_licenses ?? 0,
-    canAccessShop: current?.can_access_shop ?? 0,
-    error: '',
-    success: '',
-  });
-});
-
 app.post('/change-password', ensureAuth, ensureAdmin, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   const user = await getUserById(req.session.userId!);
-  const companies = await getCompaniesForUser(req.session.userId!);
-  const current = companies.find((c) => c.company_id === req.session.companyId);
   if (!user || !(await bcrypt.compare(currentPassword, user.password_hash))) {
-    return res.render('change-password', {
-      companies,
-      currentCompanyId: req.session.companyId,
-      isAdmin: true,
-      canManageLicenses: current?.can_manage_licenses ?? 0,
-      canManageStaff: current?.can_manage_staff ?? 0,
-      canManageAssets: current?.can_manage_assets ?? 0,
-      canManageInvoices: current?.can_manage_invoices ?? 0,
-      canOrderLicenses: current?.can_order_licenses ?? 0,
-      canAccessShop: current?.can_access_shop ?? 0,
-      error: 'Invalid current password',
-      success: '',
-    });
+    req.session.passwordError = 'Invalid current password';
+    return res.redirect('/admin#account');
   }
   const hash = await bcrypt.hash(newPassword, 10);
   await updateUserPassword(user.id, hash);
-  res.render('change-password', {
-    companies,
-    currentCompanyId: req.session.companyId,
-    isAdmin: true,
-    canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
-    canManageAssets: current?.can_manage_assets ?? 0,
-    canManageInvoices: current?.can_manage_invoices ?? 0,
-    canOrderLicenses: current?.can_order_licenses ?? 0,
-    canAccessShop: current?.can_access_shop ?? 0,
-    error: '',
-    success: 'Password updated',
-  });
+  req.session.passwordSuccess = 'Password updated';
+  res.redirect('/admin#account');
 });
 
 app.get('/', ensureAuth, async (req, res) => {
@@ -1440,6 +1412,25 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
   }
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
+  const totpAuthenticators = await getUserTotpAuthenticators(req.session.userId!);
+  let newTotpQr: string | null = null;
+  let newTotpSecret = req.session.newTotpSecret || null;
+  let newTotpName = req.session.newTotpName || '';
+  const totpError = req.session.newTotpError || '';
+  if (newTotpSecret) {
+    const user = await getUserById(req.session.userId!);
+    const otpauth = authenticator.keyuri(
+      user!.email,
+      'MyPortal',
+      newTotpSecret
+    );
+    newTotpQr = await QRCode.toDataURL(otpauth);
+  }
+  const passwordError = req.session.passwordError || '';
+  const passwordSuccess = req.session.passwordSuccess || '';
+  req.session.passwordError = undefined;
+  req.session.passwordSuccess = undefined;
+  req.session.newTotpError = undefined;
   res.render('admin', {
     allCompanies,
     users,
@@ -1467,7 +1458,56 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
     canAccessShop: current?.can_access_shop ?? 0,
+    totpAuthenticators,
+    newTotpQr,
+    newTotpSecret,
+    newTotpName,
+  totpError,
+  passwordError,
+  passwordSuccess,
   });
+});
+
+app.post('/admin/totp/start', ensureAuth, ensureAdmin, (req, res) => {
+  const { name } = req.body;
+  req.session.newTotpName = name;
+  req.session.newTotpSecret = authenticator.generateSecret();
+  res.redirect('/admin#account');
+});
+
+app.post('/admin/totp/verify', ensureAuth, ensureAdmin, async (req, res) => {
+  if (!req.session.newTotpSecret || !req.session.newTotpName) {
+    return res.redirect('/admin#account');
+  }
+  const valid = authenticator.verify({
+    token: req.body.token,
+    secret: req.session.newTotpSecret,
+  });
+  if (valid) {
+    await addUserTotpAuthenticator(
+      req.session.userId!,
+      req.session.newTotpName,
+      req.session.newTotpSecret
+    );
+    req.session.newTotpSecret = undefined;
+    req.session.newTotpName = undefined;
+    return res.redirect('/admin#account');
+  }
+  req.session.newTotpError = 'Invalid code';
+  res.redirect('/admin#account');
+});
+
+app.post('/admin/totp/cancel', ensureAuth, ensureAdmin, (req, res) => {
+  req.session.newTotpSecret = undefined;
+  req.session.newTotpName = undefined;
+  req.session.newTotpError = undefined;
+  res.redirect('/admin#account');
+});
+
+app.post('/admin/totp/:id/delete', ensureAuth, ensureAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  await deleteUserTotpAuthenticator(id);
+  res.redirect('/admin#account');
 });
 
 app.get('/audit-logs', ensureAuth, ensureAdmin, async (req, res) => {
