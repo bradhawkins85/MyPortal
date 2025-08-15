@@ -6,10 +6,16 @@
       <h1>Two-Factor Authentication</h1>
       <% if (error) { %><p class="error"><%= error %></p><% } %>
       <% if (qrCode) { %>
-        <p>Scan this QR code with your authenticator app and enter the code below.</p>
+        <p>Scan this QR code with your authenticator app or enter the code manually.</p>
         <img src="<%= qrCode %>" alt="QR Code">
+        <p>Manual code: <code><%= secret %></code></p>
       <% } %>
       <form method="post" action="/totp">
+        <% if (requireSetup) { %>
+        <label>Device Name:
+          <input type="text" name="deviceName" required>
+        </label>
+        <% } %>
         <label>Authentication Code:
           <input type="text" name="token" required>
         </label>
