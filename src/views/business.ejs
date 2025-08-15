@@ -12,19 +12,26 @@
           <p>Address: <%= company.address %></p>
         <% } %>
         <div class="stats">
+          <% if (canManageStaff || isSuperAdmin) { %>
           <div class="stat-card">
             <h3>Active Users</h3>
             <p><%= activeUsers %></p>
           </div>
+          <% } %>
+          <% if (canManageAssets || isSuperAdmin) { %>
           <div class="stat-card">
             <h3>Assets</h3>
             <p><%= assetCount %></p>
           </div>
+          <% } %>
+          <% if (canManageInvoices || isSuperAdmin) { %>
           <div class="stat-card">
             <h3>Invoices</h3>
             <p>Paid: <%= paidInvoices %> | Unpaid: <%= unpaidInvoices %></p>
           </div>
+          <% } %>
         </div>
+        <% if (canManageLicenses || isSuperAdmin) { %>
         <h2>Licenses</h2>
         <table>
           <thead>
@@ -41,6 +48,7 @@
           <% }); %>
           </tbody>
         </table>
+        <% } %>
       <% } %>
     </div>
   </div>
