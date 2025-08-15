@@ -119,6 +119,10 @@ import { runMigrations } from './db';
 
 dotenv.config();
 
+function toDateTime(value?: string): string | null {
+  return value ? value.replace('T', ' ') : null;
+}
+
 const app = express();
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
@@ -586,6 +590,7 @@ app.post('/staff', ensureAuth, ensureAdmin, async (req, res) => {
     lastName,
     email,
     dateOnboarded,
+    dateOffboarded,
     enabled,
     street,
     city,
@@ -603,7 +608,8 @@ app.post('/staff', ensureAuth, ensureAdmin, async (req, res) => {
       firstName,
       lastName,
       email,
-      dateOnboarded,
+      toDateTime(dateOnboarded),
+      toDateTime(dateOffboarded),
       !!enabled,
       street,
       city,
@@ -625,6 +631,7 @@ app.put('/staff/:id', ensureAuth, ensureStaffAccess, async (req, res) => {
     lastName,
     email,
     dateOnboarded,
+    dateOffboarded,
     enabled,
     street,
     city,
@@ -645,7 +652,8 @@ app.put('/staff/:id', ensureAuth, ensureStaffAccess, async (req, res) => {
     firstName,
     lastName,
     email,
-    dateOnboarded,
+    toDateTime(dateOnboarded),
+    toDateTime(dateOffboarded),
     !!enabled,
     street,
     city,
@@ -3052,7 +3060,11 @@ api.delete('/licenses/:id', async (req, res) => {
  *                     type: string
  *                   date_onboarded:
  *                     type: string
- *                     format: date
+ *                     format: date-time
+ *                   date_offboarded:
+ *                     type: string
+ *                     format: date-time
+ *                     nullable: true
  *                   enabled:
  *                     type: integer
  *                   street:
@@ -3117,7 +3129,10 @@ api.get('/staff', async (_req, res) => {
  *                 type: string
  *               dateOnboarded:
  *                 type: string
- *                 format: date
+ *                 format: date-time
+ *               dateOffboarded:
+ *                 type: string
+ *                 format: date-time
  *               enabled:
  *                 type: boolean
  *               street:
@@ -3156,6 +3171,7 @@ api.post('/staff', async (req, res) => {
     lastName,
     email,
     dateOnboarded,
+    dateOffboarded,
     enabled,
     street,
     city,
@@ -3172,7 +3188,8 @@ api.post('/staff', async (req, res) => {
     firstName,
     lastName,
     email,
-    dateOnboarded,
+    toDateTime(dateOnboarded),
+    toDateTime(dateOffboarded),
     !!enabled,
     street,
     city,
@@ -3220,7 +3237,11 @@ api.post('/staff', async (req, res) => {
  *                   type: string
  *                 date_onboarded:
  *                   type: string
- *                   format: date
+ *                   format: date-time
+ *                 date_offboarded:
+ *                   type: string
+ *                   format: date-time
+ *                   nullable: true
  *                 enabled:
  *                   type: integer
  *                 street:
@@ -3291,7 +3312,10 @@ api.get('/staff/:id', async (req, res) => {
  *                 type: string
  *               dateOnboarded:
  *                 type: string
- *                 format: date
+ *                 format: date-time
+ *               dateOffboarded:
+ *                 type: string
+ *                 format: date-time
  *               enabled:
  *                 type: boolean
  *               street:
@@ -3323,6 +3347,7 @@ api.put('/staff/:id', async (req, res) => {
     lastName,
     email,
     dateOnboarded,
+    dateOffboarded,
     enabled,
     street,
     city,
@@ -3340,7 +3365,8 @@ api.put('/staff/:id', async (req, res) => {
     firstName,
     lastName,
     email,
-    dateOnboarded,
+    toDateTime(dateOnboarded),
+    toDateTime(dateOffboarded),
     !!enabled,
     street,
     city,
