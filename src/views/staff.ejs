@@ -81,11 +81,11 @@
       <span id="edit-close" class="close">&times;</span>
       <h2>Edit Staff</h2>
       <form id="edit-form">
-        <label>First Name<input type="text" id="edit-first-name"></label>
-        <label>Last Name<input type="text" id="edit-last-name"></label>
-        <label>Email<input type="email" id="edit-email"></label>
-        <label>Date Onboarded<input type="date" id="edit-date-onboarded"></label>
-        <label>Offboard Date<input type="datetime-local" id="edit-date-offboarded"></label>
+        <label>First Name<input type="text" id="edit-first-name" <%= isSuperAdmin ? '' : 'readonly' %>></label>
+        <label>Last Name<input type="text" id="edit-last-name" <%= isSuperAdmin ? '' : 'readonly' %>></label>
+        <label>Email<input type="email" id="edit-email" <%= isSuperAdmin ? '' : 'readonly' %>></label>
+        <label>Date Onboarded<input type="date" id="edit-date-onboarded" <%= isSuperAdmin ? '' : 'readonly' %>></label>
+        <label>Offboard Date<input type="datetime-local" id="edit-date-offboarded" <%= isAdmin ? '' : 'readonly' %>></label>
         <label>Account Action
           <select id="edit-account-action" <%= isSuperAdmin ? '' : 'disabled' %>>
             <option value="Onboard Requested">Onboard Requested</option>
@@ -98,21 +98,21 @@
             <option value="Offboarded">Offboarded</option>
           </select>
         </label>
-        <label><input type="checkbox" id="edit-enabled"> Enabled</label>
+        <label><input type="checkbox" id="edit-enabled" <%= isSuperAdmin ? '' : 'disabled' %>> Enabled</label>
         <fieldset>
           <legend>Address</legend>
-          <label>Street<input type="text" id="edit-street"></label>
-          <label>City<input type="text" id="edit-city"></label>
-          <label>State<input type="text" id="edit-state"></label>
-          <label>Postcode<input type="text" id="edit-postcode"></label>
-          <label>Country<input type="text" id="edit-country"></label>
+          <label>Street<input type="text" id="edit-street" <%= isSuperAdmin ? '' : 'readonly' %>></label>
+          <label>City<input type="text" id="edit-city" <%= isSuperAdmin ? '' : 'readonly' %>></label>
+          <label>State<input type="text" id="edit-state" <%= isSuperAdmin ? '' : 'readonly' %>></label>
+          <label>Postcode<input type="text" id="edit-postcode" <%= isSuperAdmin ? '' : 'readonly' %>></label>
+          <label>Country<input type="text" id="edit-country" <%= isSuperAdmin ? '' : 'readonly' %>></label>
         </fieldset>
         <fieldset>
           <legend>Organisation</legend>
-          <label>Department<input type="text" id="edit-department"></label>
-          <label>Job Title<input type="text" id="edit-job-title"></label>
-          <label>Company<input type="text" id="edit-company"></label>
-          <label>Manager's Name<input type="text" id="edit-manager-name"></label>
+          <label>Department<input type="text" id="edit-department" <%= isSuperAdmin ? '' : 'readonly' %>></label>
+          <label>Job Title<input type="text" id="edit-job-title" <%= isSuperAdmin ? '' : 'readonly' %>></label>
+          <label>Company<input type="text" id="edit-company" <%= isSuperAdmin ? '' : 'readonly' %>></label>
+          <label>Manager's Name<input type="text" id="edit-manager-name" <%= isSuperAdmin ? '' : 'readonly' %>></label>
         </fieldset>
         <button type="submit">Save</button>
       </form>
@@ -120,9 +120,19 @@
   </div>
 
   <script>
+    const isSuperAdmin = <%= isSuperAdmin ? 'true' : 'false' %>;
+    const isAdmin = <%= isAdmin ? 'true' : 'false' %>;
     const editModal = document.getElementById('edit-modal');
     const editForm = document.getElementById('edit-form');
     let editingId = null;
+
+    if (isAdmin && !isSuperAdmin) {
+      document.getElementById('edit-date-offboarded').addEventListener('change', function() {
+        if (this.value) {
+          alert('Warning: The offboard will be scheduled immediately for the requested date and time, any changes require contacting IT after saving changes.');
+        }
+      });
+    }
 
     document.querySelectorAll('.date-onboarded').forEach(function(cell) {
       const value = cell.dataset.date;
