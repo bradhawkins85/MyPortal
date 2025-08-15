@@ -10,7 +10,7 @@
         <h2>Company Assets</h2>
         <table>
           <thead>
-            <tr><th>Name</th><th>Type</th><th>Serial Number</th><th>Status</th></tr>
+            <tr><th>Name</th><th>Type</th><th>Serial Number</th><th>Status</th><% if (isSuperAdmin) { %><th>Actions</th><% } %></tr>
           </thead>
           <tbody>
           <% assets.forEach(function(a) { %>
@@ -19,6 +19,9 @@
               <td><%= a.type %></td>
               <td><%= a.serial_number %></td>
               <td><%= a.status %></td>
+              <% if (isSuperAdmin) { %>
+              <td><button class="delete-btn" data-asset-id="<%= a.id %>">Delete</button></td>
+              <% } %>
             </tr>
           <% }); %>
           </tbody>
@@ -26,5 +29,20 @@
       </section>
     </div>
   </div>
+<% if (isSuperAdmin) { %>
+<script>
+  document.querySelectorAll('.delete-btn').forEach(function(btn) {
+    btn.addEventListener('click', async function() {
+      if (!confirm('Delete asset?')) return;
+      const res = await fetch(`/assets/${this.dataset.assetId}`, { method: 'DELETE' });
+      if (res.ok) {
+        location.reload();
+      } else {
+        alert('Failed to delete asset');
+      }
+    });
+  });
+</script>
+<% } %>
 </body>
 </html>

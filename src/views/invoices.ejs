@@ -10,7 +10,7 @@
         <h2>Company Invoices</h2>
         <table>
           <thead>
-            <tr><th>Number</th><th>Amount</th><th>Due Date</th><th>Status</th></tr>
+            <tr><th>Number</th><th>Amount</th><th>Due Date</th><th>Status</th><% if (isSuperAdmin) { %><th>Actions</th><% } %></tr>
           </thead>
           <tbody>
           <% invoices.forEach(function(i) { %>
@@ -19,6 +19,9 @@
               <td><%= i.amount %></td>
               <td><%= i.due_date %></td>
               <td><%= i.status %></td>
+              <% if (isSuperAdmin) { %>
+              <td><button class="delete-btn" data-invoice-id="<%= i.id %>">Delete</button></td>
+              <% } %>
             </tr>
           <% }); %>
           </tbody>
@@ -26,5 +29,20 @@
       </section>
     </div>
   </div>
+<% if (isSuperAdmin) { %>
+<script>
+  document.querySelectorAll('.delete-btn').forEach(function(btn) {
+    btn.addEventListener('click', async function() {
+      if (!confirm('Delete invoice?')) return;
+      const res = await fetch(`/invoices/${this.dataset.invoiceId}`, { method: 'DELETE' });
+      if (res.ok) {
+        location.reload();
+      } else {
+        alert('Failed to delete invoice');
+      }
+    });
+  });
+</script>
+<% } %>
 </body>
 </html>
