@@ -205,10 +205,76 @@ function auditLogger(
   res: express.Response,
   next: express.NextFunction
 ) {
-  res.on('finish', () => {
+  res.on('finish', async () => {
     const sanitizedBody = sanitizeSensitiveData(req.body || {});
+    let companyId: number | null = null;
+
+    const sources: any[] = [
+      req.body?.companyId,
+      req.body?.organisationId,
+      req.query.companyId,
+      req.query.organisationId,
+      (req.params as any).companyId,
+      (req.params as any).organisationId,
+    ];
+    for (const s of sources) {
+      const n = parseInt(s as string, 10);
+      if (!isNaN(n)) {
+        companyId = n;
+        break;
+      }
+    }
+
+    if (!companyId) {
+      const lookupMappings: Array<[
+        string,
+        (id: number) => Promise<{ company_id: number } | null>
+      ]> = [
+        ['userId', getUserById],
+        ['staffId', getStaffById],
+        ['assetId', getAssetById],
+        ['invoiceId', getInvoiceById],
+      ];
+      for (const [param, getter] of lookupMappings) {
+        const raw = (req.params as any)[param] || (req.body as any)?.[param];
+        if (raw) {
+          const idNum = parseInt(raw as string, 10);
+          if (!isNaN(idNum)) {
+            try {
+              const record = await getter(idNum);
+              if (record && 'company_id' in record && record.company_id) {
+                companyId = record.company_id;
+                break;
+              }
+            } catch {}
+          }
+        }
+      }
+      if (!companyId && req.params.id) {
+        const idNum = parseInt(req.params.id, 10);
+        if (!isNaN(idNum)) {
+          try {
+            if (req.originalUrl.includes('/users/')) {
+              const r = await getUserById(idNum);
+              companyId = r?.company_id || null;
+            } else if (req.originalUrl.includes('/staff/')) {
+              const r = await getStaffById(idNum);
+              companyId = r?.company_id || null;
+            } else if (req.originalUrl.includes('/assets/')) {
+              const r = await getAssetById(idNum);
+              companyId = r?.company_id || null;
+            } else if (req.originalUrl.includes('/invoices/')) {
+              const r = await getInvoiceById(idNum);
+              companyId = r?.company_id || null;
+            }
+          } catch {}
+        }
+      }
+    }
+
     logAudit({
       userId: req.session.userId || null,
+      companyId,
       action: `${req.method} ${req.originalUrl}`,
       previousValue: null,
       newValue: JSON.stringify(sanitizedBody),
