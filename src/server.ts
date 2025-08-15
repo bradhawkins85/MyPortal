@@ -4,6 +4,9 @@ import path from 'path';
 import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import cookieParser from 'cookie-parser';
+import { authenticator } from 'otplib';
+import QRCode from 'qrcode';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJSDoc from 'swagger-jsdoc';
 import multer from 'multer';
@@ -35,6 +38,8 @@ import {
   deleteCompany,
   updateUser,
   deleteUser,
+  updateUserPassword,
+  updateUserTotpSecret,
   updateLicense,
   deleteLicense,
   unassignUserFromCompany,
@@ -134,6 +139,7 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(cookieParser());
 const upload = multer({ dest: path.join(__dirname, 'public', 'uploads') });
 app.use(
   session({
@@ -149,6 +155,30 @@ app.use((req, res, next) => {
   res.locals.hasForms = req.session.hasForms ?? false;
   next();
 });
+
+function generateTrustedDeviceToken(userId: number): string {
+  const expires = Date.now() + 24 * 60 * 60 * 1000;
+  const data = `${userId}.${expires}`;
+  const hmac = crypto
+    .createHmac('sha256', process.env.SESSION_SECRET || 'secret')
+    .update(data)
+    .digest('hex');
+  return `${data}.${hmac}`;
+}
+
+function verifyTrustedDeviceToken(token: string, userId: number): boolean {
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
+  const [id, expires, signature] = parts;
+  if (Number(id) !== userId) return false;
+  if (Number(expires) < Date.now()) return false;
+  const data = `${id}.${expires}`;
+  const hmac = crypto
+    .createHmac('sha256', process.env.SESSION_SECRET || 'secret')
+    .update(data)
+    .digest('hex');
+  return hmac === signature;
+}
 
 function sanitizeSensitiveData(obj: any): any {
   if (!obj || typeof obj !== 'object') return obj;
@@ -262,6 +292,18 @@ function ensureSuperAdmin(
   return res.redirect('/');
 }
 
+async function completeLogin(req: express.Request, userId: number) {
+  const [companies, forms] = await Promise.all([
+    getCompaniesForUser(userId),
+    getFormsForUser(userId),
+  ]);
+  req.session.userId = userId;
+  req.session.companyId = companies[0]?.company_id;
+  req.session.hasForms = forms.length > 0;
+  req.session.cookie.expires = undefined;
+  req.session.cookie.maxAge = undefined;
+}
+
 app.get('/api-docs', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
@@ -290,19 +332,89 @@ app.post('/login', async (req, res) => {
   const { email, password } = req.body;
   const user = await getUserByEmail(email);
   if (user && (await bcrypt.compare(password, user.password_hash))) {
-    req.session.userId = user.id;
-    const [companies, forms] = await Promise.all([
-      getCompaniesForUser(user.id),
-      getFormsForUser(user.id),
-    ]);
-    req.session.companyId = companies[0]?.company_id;
-    req.session.hasForms = forms.length > 0;
-    req.session.cookie.expires = undefined;
-    req.session.cookie.maxAge = undefined;
-    res.redirect('/');
-  } else {
-    res.render('login', { error: 'Invalid credentials' });
+    const companies = await getCompaniesForUser(user.id);
+    const isAdmin = user.id === 1 || companies.some((c) => c.is_admin);
+    if (isAdmin) {
+      const trusted = req.cookies[`trusted_${user.id}`];
+      if (trusted && verifyTrustedDeviceToken(trusted, user.id)) {
+        await completeLogin(req, user.id);
+        return res.redirect('/');
+      }
+      req.session.tempUserId = user.id;
+      if (!user.totp_secret) {
+        req.session.pendingTotpSecret = authenticator.generateSecret();
+        req.session.requireTotpSetup = true;
+      } else {
+        req.session.pendingTotpSecret = user.totp_secret;
+        req.session.requireTotpSetup = false;
+      }
+      return res.redirect('/totp');
+    } else {
+      await completeLogin(req, user.id);
+      return res.redirect('/');
+    }
   }
+  res.render('login', { error: 'Invalid credentials' });
+});
+
+app.get('/totp', async (req, res) => {
+  if (!req.session.tempUserId) {
+    return res.redirect('/login');
+  }
+  let qrCode: string | null = null;
+  if (req.session.requireTotpSetup && req.session.pendingTotpSecret) {
+    const user = await getUserById(req.session.tempUserId);
+    const otpauth = authenticator.keyuri(
+      user!.email,
+      'MyPortal',
+      req.session.pendingTotpSecret
+    );
+    qrCode = await QRCode.toDataURL(otpauth);
+  }
+  res.render('totp', { qrCode, error: '' });
+});
+
+app.post('/totp', async (req, res) => {
+  if (!req.session.tempUserId) {
+    return res.redirect('/login');
+  }
+  const userId = req.session.tempUserId;
+  let secret = req.session.pendingTotpSecret;
+  if (!secret) {
+    const user = await getUserById(userId);
+    secret = user?.totp_secret || undefined;
+  }
+  const valid = secret
+    ? authenticator.verify({ token: req.body.token, secret })
+    : false;
+  if (valid) {
+    if (req.session.requireTotpSetup && secret) {
+      await updateUserTotpSecret(userId, secret);
+    }
+    if (req.body.trust) {
+      const token = generateTrustedDeviceToken(userId);
+      res.cookie(`trusted_${userId}`, token, {
+        maxAge: 24 * 60 * 60 * 1000,
+        httpOnly: true,
+      });
+    }
+    await completeLogin(req, userId);
+    req.session.tempUserId = undefined;
+    req.session.pendingTotpSecret = undefined;
+    req.session.requireTotpSetup = undefined;
+    return res.redirect('/');
+  }
+  let qrCode: string | null = null;
+  if (req.session.requireTotpSetup && req.session.pendingTotpSecret) {
+    const user = await getUserById(userId);
+    const otpauth = authenticator.keyuri(
+      user!.email,
+      'MyPortal',
+      req.session.pendingTotpSecret
+    );
+    qrCode = await QRCode.toDataURL(otpauth);
+  }
+  res.render('totp', { qrCode, error: 'Invalid code' });
 });
 
 app.get('/register', async (req, res) => {
@@ -332,6 +444,61 @@ app.post('/register', async (req, res) => {
 app.get('/logout', (req, res) => {
   req.session.destroy(() => {
     res.redirect('/login');
+  });
+});
+
+app.get('/change-password', ensureAuth, ensureAdmin, async (req, res) => {
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  res.render('change-password', {
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: true,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+    error: '',
+    success: '',
+  });
+});
+
+app.post('/change-password', ensureAuth, ensureAdmin, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const user = await getUserById(req.session.userId!);
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  if (!user || !(await bcrypt.compare(currentPassword, user.password_hash))) {
+    return res.render('change-password', {
+      companies,
+      currentCompanyId: req.session.companyId,
+      isAdmin: true,
+      canManageLicenses: current?.can_manage_licenses ?? 0,
+      canManageStaff: current?.can_manage_staff ?? 0,
+      canManageAssets: current?.can_manage_assets ?? 0,
+      canManageInvoices: current?.can_manage_invoices ?? 0,
+      canOrderLicenses: current?.can_order_licenses ?? 0,
+      canAccessShop: current?.can_access_shop ?? 0,
+      error: 'Invalid current password',
+      success: '',
+    });
+  }
+  const hash = await bcrypt.hash(newPassword, 10);
+  await updateUserPassword(user.id, hash);
+  res.render('change-password', {
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: true,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+    error: '',
+    success: 'Password updated',
   });
 });
 

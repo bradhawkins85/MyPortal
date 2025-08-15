@@ -17,6 +17,9 @@ declare module 'express-session' {
     orderMessage?: string;
     cartError?: string;
     hasForms?: boolean;
+    tempUserId?: number;
+    pendingTotpSecret?: string;
+    requireTotpSetup?: boolean;
   }
 }
 

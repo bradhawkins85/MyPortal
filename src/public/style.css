@@ -58,6 +58,10 @@ h1 {
   color: #e53935;
 }
 
+.success {
+  color: #2e7d32;
+}
+
 button {
   background-color: #4a00e0;
   color: #fff;
