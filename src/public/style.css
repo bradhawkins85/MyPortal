@@ -196,6 +196,19 @@ table th {
   width: 90%;
 }
 
+.modal-content form label {
+  display: block;
+  margin-top: 0.5rem;
+}
+
+.modal-content form input,
+.modal-content form textarea,
+.modal-content form select {
+  display: block;
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
 .modal .close {
   float: right;
   cursor: pointer;
