@@ -490,21 +490,31 @@ app.get('/', ensureAuth, async (req, res) => {
   let unpaidInvoices = 0;
 
   if (company) {
-    const staff = await getStaffByCompany(company.id);
-    activeUsers = staff.filter((s) => s.enabled === 1).length;
+    if (current?.can_manage_staff || req.session.userId === 1) {
+      const staff = await getStaffByCompany(company.id);
+      activeUsers = staff.filter((s) => s.enabled === 1).length;
+    }
 
-    const licenses = await getLicensesByCompany(company.id);
-    licenseStats = licenses.map((l) => {
-      const used = l.allocated || 0;
-      return { name: l.name, count: l.count, used, unused: l.count - used };
-    });
+    if (current?.can_manage_licenses || req.session.userId === 1) {
+      const licenses = await getLicensesByCompany(company.id);
+      licenseStats = licenses.map((l) => {
+        const used = l.allocated || 0;
+        return { name: l.name, count: l.count, used, unused: l.count - used };
+      });
+    }
 
-    const assets = await getAssetsByCompany(company.id);
-    assetCount = assets.length;
+    if (current?.can_manage_assets || req.session.userId === 1) {
+      const assets = await getAssetsByCompany(company.id);
+      assetCount = assets.length;
+    }
 
-    const invoices = await getInvoicesByCompany(company.id);
-    paidInvoices = invoices.filter((i) => i.status.toLowerCase() === 'paid').length;
-    unpaidInvoices = invoices.length - paidInvoices;
+    if (current?.can_manage_invoices || req.session.userId === 1) {
+      const invoices = await getInvoicesByCompany(company.id);
+      paidInvoices = invoices.filter(
+        (i) => i.status.toLowerCase() === 'paid'
+      ).length;
+      unpaidInvoices = invoices.length - paidInvoices;
+    }
   }
 
   res.render('business', {
@@ -549,7 +559,7 @@ async function ensureStaffAccess(
   }
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
-  if (current && (current.can_manage_staff || current.is_admin)) {
+  if (current && current.can_manage_staff) {
     return next();
   }
   return res.redirect('/');
@@ -1569,7 +1579,7 @@ app.get('/audit-logs', ensureAuth, ensureAdmin, async (req, res) => {
   });
 });
 
-app.get('/office-groups', ensureAuth, ensureAdmin, async (req, res) => {
+app.get('/office-groups', ensureAuth, ensureStaffAccess, async (req, res) => {
   const isSuperAdmin = req.session.userId === 1;
   const [officeGroups, staff] = await Promise.all([
     getOfficeGroupsByCompany(req.session.companyId!),
@@ -1759,7 +1769,7 @@ app.post('/office-groups', ensureAuth, ensureSuperAdmin, async (req, res) => {
 app.post(
   '/office-groups/:id/members',
   ensureAuth,
-  ensureAdmin,
+  ensureStaffAccess,
   async (req, res) => {
     const raw = req.body.staffIds;
     const ids = Array.isArray(raw)
