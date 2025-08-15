@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+  <%- include('partials/head', { title: 'Two-Factor Authentication' }) %>
+  <body class="login-page">
+    <div class="login-container">
+      <h1>Two-Factor Authentication</h1>
+      <% if (error) { %><p class="error"><%= error %></p><% } %>
+      <% if (qrCode) { %>
+        <p>Scan this QR code with your authenticator app and enter the code below.</p>
+        <img src="<%= qrCode %>" alt="QR Code">
+      <% } %>
+      <form method="post" action="/totp">
+        <label>Authentication Code:
+          <input type="text" name="token" required>
+        </label>
+        <label><input type="checkbox" name="trust" value="1"> Trust this device for 24 hours</label>
+        <button type="submit">Verify</button>
+      </form>
+    </div>
+  </body>
+</html>
