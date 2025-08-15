@@ -6,6 +6,7 @@ export interface User {
   email: string;
   password_hash: string;
   company_id: number;
+  totp_secret?: string | null;
 }
 
 export interface Company {
@@ -651,6 +652,20 @@ export async function updateUser(
     'UPDATE users SET email = ?, password_hash = ?, company_id = ? WHERE id = ?',
     [email, passwordHash, companyId, id]
   );
+}
+
+export async function updateUserPassword(
+  id: number,
+  passwordHash: string
+): Promise<void> {
+  await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, id]);
+}
+
+export async function updateUserTotpSecret(
+  id: number,
+  secret: string | null
+): Promise<void> {
+  await pool.execute('UPDATE users SET totp_secret = ? WHERE id = ?', [secret, id]);
 }
 
 export async function deleteUser(id: number): Promise<void> {
