@@ -119,6 +119,8 @@ import {
   App,
   ProductCompanyRestriction,
   Category,
+  Asset,
+  Invoice,
   Staff,
   OfficeGroupWithMembers,
 } from './queries';
@@ -2877,6 +2879,7 @@ api.get('/companies/:id', async (req, res) => {
  *     tags:
  *       - Companies
  *     summary: Update a company
+ *     description: Partial update; include only fields to change
  *     parameters:
  *       - in: path
  *         name: id
@@ -3092,6 +3095,7 @@ api.get('/users/:id', async (req, res) => {
  *     tags:
  *       - Users
  *     summary: Update a user
+ *     description: Partial update; include only fields to change
  *     parameters:
  *       - in: path
  *         name: id
@@ -3117,8 +3121,33 @@ api.get('/users/:id', async (req, res) => {
  */
 api.put('/users/:id', async (req, res) => {
   const { email, password, companyId } = req.body;
-  const passwordHash = await bcrypt.hash(password, 10);
-  await updateUser(parseInt(req.params.id, 10), email, passwordHash, companyId);
+  const id = parseInt(req.params.id, 10);
+  let newEmail = email;
+  let newCompanyId = companyId;
+  let newPasswordHash: string | undefined;
+  if (
+    email === undefined ||
+    password === undefined ||
+    companyId === undefined
+  ) {
+    const current = await getUserById(id);
+    if (!current) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (newEmail === undefined) {
+      newEmail = current.email;
+    }
+    if (newCompanyId === undefined) {
+      newCompanyId = current.company_id;
+    }
+    if (password === undefined) {
+      newPasswordHash = current.password_hash;
+    }
+  }
+  if (password !== undefined) {
+    newPasswordHash = await bcrypt.hash(password, 10);
+  }
+  await updateUser(id, newEmail, newPasswordHash!, newCompanyId);
   res.json({ success: true });
 });
 
@@ -3296,6 +3325,7 @@ api.get('/licenses/:id', async (req, res) => {
  *     tags:
  *       - Licenses
  *     summary: Update a license
+ *     description: Partial update; include only fields to change
  *     parameters:
  *       - in: path
  *         name: id
@@ -3329,14 +3359,41 @@ api.get('/licenses/:id', async (req, res) => {
  */
 api.put('/licenses/:id', async (req, res) => {
   const { companyId, name, platform, count, expiryDate, contractTerm } = req.body;
+  const id = parseInt(req.params.id, 10);
+  let newCompanyId = companyId;
+  let newName = name;
+  let newPlatform = platform;
+  let newCount = count;
+  let newExpiryDate = expiryDate;
+  let newContractTerm = contractTerm;
+  if (
+    companyId === undefined ||
+    name === undefined ||
+    platform === undefined ||
+    count === undefined ||
+    expiryDate === undefined ||
+    contractTerm === undefined
+  ) {
+    const current = await getLicenseById(id);
+    if (!current) {
+      return res.status(404).json({ error: 'License not found' });
+    }
+    if (newCompanyId === undefined) newCompanyId = current.company_id;
+    if (newName === undefined) newName = current.name;
+    if (newPlatform === undefined) newPlatform = current.platform;
+    if (newCount === undefined) newCount = current.count;
+    if (newExpiryDate === undefined) newExpiryDate = current.expiry_date;
+    if (newContractTerm === undefined)
+      newContractTerm = current.contract_term;
+  }
   await updateLicense(
-    parseInt(req.params.id, 10),
-    companyId,
-    name,
-    platform,
-    count,
-    expiryDate || null,
-    contractTerm
+    id,
+    newCompanyId!,
+    newName!,
+    newPlatform!,
+    newCount!,
+    newExpiryDate || null,
+    newContractTerm!
   );
   res.json({ success: true });
 });
@@ -3646,6 +3703,7 @@ api.get('/staff/:id', async (req, res) => {
  *     tags:
  *       - Staff
  *     summary: Update a staff member
+ *     description: Partial update; include only fields to change
  *     parameters:
  *       - in: path
  *         name: id
@@ -3719,25 +3777,59 @@ api.put('/staff/:id', async (req, res) => {
     managerName,
     accountAction,
   } = req.body;
+  const id = parseInt(req.params.id, 10);
+  let current: Staff | null = null;
+  if (
+    [
+      companyId,
+      firstName,
+      lastName,
+      email,
+      dateOnboarded,
+      dateOffboarded,
+      enabled,
+      street,
+      city,
+      state,
+      postcode,
+      country,
+      department,
+      jobTitle,
+      company,
+      managerName,
+      accountAction,
+    ].some((v) => v === undefined)
+  ) {
+    current = await getStaffById(id);
+    if (!current) {
+      return res.status(404).json({ error: 'Staff not found' });
+    }
+  }
   await updateStaff(
-    parseInt(req.params.id, 10),
-    companyId,
-    firstName,
-    lastName,
-    email,
-    toDate(dateOnboarded),
-    toDateTime(dateOffboarded),
-    !!enabled,
-    street,
-    city,
-    state,
-    postcode,
-    country,
-    department,
-    jobTitle,
-    company,
-    managerName,
-    accountAction || null
+    id,
+    companyId !== undefined ? companyId : current!.company_id,
+    firstName !== undefined ? firstName : current!.first_name,
+    lastName !== undefined ? lastName : current!.last_name,
+    email !== undefined ? email : current!.email,
+    dateOnboarded !== undefined
+      ? toDate(dateOnboarded)
+      : current!.date_onboarded,
+    dateOffboarded !== undefined
+      ? toDateTime(dateOffboarded)
+      : current!.date_offboarded ?? null,
+    enabled !== undefined ? !!enabled : !!current!.enabled,
+    street !== undefined ? street : current!.street ?? null,
+    city !== undefined ? city : current!.city ?? null,
+    state !== undefined ? state : current!.state ?? null,
+    postcode !== undefined ? postcode : current!.postcode ?? null,
+    country !== undefined ? country : current!.country ?? null,
+    department !== undefined ? department : current!.department ?? null,
+    jobTitle !== undefined ? jobTitle : current!.job_title ?? null,
+    company !== undefined ? company : current!.org_company ?? null,
+    managerName !== undefined ? managerName : current!.manager_name ?? null,
+    accountAction !== undefined
+      ? accountAction
+      : current!.account_action ?? null
   );
   res.json({ success: true });
 });
@@ -4017,6 +4109,7 @@ api.get('/assets/:id', async (req, res) => {
  *     tags:
  *       - Assets
  *     summary: Update an asset
+ *     description: Partial update; include only fields to change
  *     parameters:
  *       - in: path
  *         name: id
@@ -4046,13 +4139,25 @@ api.get('/assets/:id', async (req, res) => {
  */
 api.put('/assets/:id', async (req, res) => {
   const { companyId, name, type, serialNumber, status } = req.body;
+  const id = parseInt(req.params.id, 10);
+  let current: Asset | null = null;
+  if (
+    [companyId, name, type, serialNumber, status].some(
+      (v) => v === undefined
+    )
+  ) {
+    current = await getAssetById(id);
+    if (!current) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
+  }
   await updateAsset(
-    parseInt(req.params.id, 10),
-    companyId,
-    name,
-    type,
-    serialNumber,
-    status
+    id,
+    companyId !== undefined ? companyId : current!.company_id,
+    name !== undefined ? name : current!.name,
+    type !== undefined ? type : current!.type,
+    serialNumber !== undefined ? serialNumber : current!.serial_number,
+    status !== undefined ? status : current!.status
   );
   res.json({ success: true });
 });
@@ -4176,6 +4281,7 @@ api.get('/invoices/:id', async (req, res) => {
  *     tags:
  *       - Invoices
  *     summary: Update an invoice
+ *     description: Partial update; include only fields to change
  *     parameters:
  *       - in: path
  *         name: id
@@ -4206,13 +4312,25 @@ api.get('/invoices/:id', async (req, res) => {
  */
 api.put('/invoices/:id', async (req, res) => {
   const { companyId, invoiceNumber, amount, dueDate, status } = req.body;
+  const id = parseInt(req.params.id, 10);
+  let current: Invoice | null = null;
+  if (
+    [companyId, invoiceNumber, amount, dueDate, status].some(
+      (v) => v === undefined
+    )
+  ) {
+    current = await getInvoiceById(id);
+    if (!current) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+  }
   await updateInvoice(
-    parseInt(req.params.id, 10),
-    companyId,
-    invoiceNumber,
-    amount,
-    dueDate,
-    status
+    id,
+    companyId !== undefined ? companyId : current!.company_id,
+    invoiceNumber !== undefined ? invoiceNumber : current!.invoice_number,
+    amount !== undefined ? amount : current!.amount,
+    dueDate !== undefined ? dueDate : current!.due_date,
+    status !== undefined ? status : current!.status
   );
   res.json({ success: true });
 });
