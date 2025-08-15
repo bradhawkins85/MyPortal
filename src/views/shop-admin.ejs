@@ -170,23 +170,32 @@
           <div class="modal-content" style="width:300px;">
             <h3>Edit Product</h3>
             <form id="editForm" method="post" enctype="multipart/form-data">
-              <input type="text" name="name" placeholder="Name" required>
-              <input type="text" name="sku" placeholder="SKU" required>
-              <input type="text" name="vendor_sku" placeholder="Vendor SKU" required>
-              <textarea name="description" placeholder="Description"></textarea>
-            <input type="number" step="0.01" name="price" placeholder="Price" required>
-            <input type="number" step="0.01" name="vip_price" placeholder="VIP Price">
-            <input type="number" name="stock" placeholder="Stock" required>
-            <select name="category_id">
-              <option value="">No Category</option>
-              <% categories.forEach(function(c){ %>
-                <option value="<%= c.id %>"><%= c.name %></option>
-              <% }) %>
-            </select>
-            <img id="editImagePreview" src="" width="100" alt="" style="display:none;"><br>
-            <input type="file" name="image">
-            <button type="submit">Save</button>
-            <button type="button" onclick="closeEditModal()">Close</button>
+              <label for="edit-name">Name</label>
+              <input type="text" id="edit-name" name="name" required>
+              <label for="edit-sku">SKU</label>
+              <input type="text" id="edit-sku" name="sku" required>
+              <label for="edit-vendor-sku">Vendor SKU</label>
+              <input type="text" id="edit-vendor-sku" name="vendor_sku" required>
+              <label for="edit-description">Description</label>
+              <textarea id="edit-description" name="description"></textarea>
+              <label for="edit-price">Price</label>
+              <input type="number" step="0.01" id="edit-price" name="price" required>
+              <label for="edit-vip-price">VIP Price</label>
+              <input type="number" step="0.01" id="edit-vip-price" name="vip_price">
+              <label for="edit-stock">Stock</label>
+              <input type="number" id="edit-stock" name="stock" required>
+              <label for="edit-category">Category</label>
+              <select id="edit-category" name="category_id">
+                <option value="">No Category</option>
+                <% categories.forEach(function(c){ %>
+                  <option value="<%= c.id %>"><%= c.name %></option>
+                <% }) %>
+              </select>
+              <label for="edit-image">Image</label>
+              <img id="editImagePreview" src="" width="100" alt="" style="display:none;">
+              <input type="file" id="edit-image" name="image">
+              <button type="submit">Save</button>
+              <button type="button" onclick="closeEditModal()">Close</button>
             </form>
           </div>
         </div>
