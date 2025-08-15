@@ -513,13 +513,22 @@ export async function getStaffByCompany(
 }
 
 export async function getAllStaff(
-  accountAction?: string
+  accountAction?: string,
+  email?: string
 ): Promise<Staff[]> {
   let sql = 'SELECT * FROM staff';
   const params: any[] = [];
+  const conditions: string[] = [];
   if (accountAction) {
-    sql += ' WHERE account_action = ?';
+    conditions.push('account_action = ?');
     params.push(accountAction);
+  }
+  if (email) {
+    conditions.push('email LIKE ?');
+    params.push(`%${email}%`);
+  }
+  if (conditions.length) {
+    sql += ' WHERE ' + conditions.join(' AND ');
   }
   const [rows] = await pool.query<RowDataPacket[]>(sql, params);
   return rows as Staff[];

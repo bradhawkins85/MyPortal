@@ -3377,6 +3377,12 @@ api.delete('/licenses/:id', async (req, res) => {
  *           type: string
  *         required: false
  *         description: Filter by account action
+ *       - in: query
+ *         name: email
+ *         schema:
+ *           type: string
+ *         required: false
+ *         description: Filter by email address
  *     responses:
  *       200:
  *         description: Array of staff
@@ -3439,7 +3445,8 @@ api.delete('/licenses/:id', async (req, res) => {
  */
 api.get('/staff', async (req, res) => {
   const accountAction = req.query.accountAction as string | undefined;
-  const staff = await getAllStaff(accountAction);
+  const email = req.query.email as string | undefined;
+  const staff = await getAllStaff(accountAction, email);
   res.json(staff);
 });
 
