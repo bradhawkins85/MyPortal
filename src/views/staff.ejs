@@ -13,7 +13,7 @@
           <input type="text" name="firstName" placeholder="First Name" required>
           <input type="text" name="lastName" placeholder="Last Name" required>
           <input type="email" name="email" placeholder="Email" required>
-          <input type="date" name="dateOnboarded">
+          <input type="datetime-local" name="dateOnboarded">
           <label><input type="checkbox" name="enabled" value="1" checked> Enabled</label>
           <button type="submit">Add</button>
         </form>
@@ -31,7 +31,7 @@
               <td><%= s.first_name %></td>
               <td><%= s.last_name %></td>
               <td><%= s.email %></td>
-              <td><%= s.date_onboarded %></td>
+              <td class="date-onboarded" data-date="<%= s.date_onboarded %>"><%= s.date_onboarded %></td>
               <td>
                 <form action="/staff/enabled" method="post">
                   <input type="hidden" name="staffId" value="<%= s.id %>">
@@ -45,7 +45,8 @@
                   data-first-name="<%= s.first_name %>"
                   data-last-name="<%= s.last_name %>"
                   data-email="<%= s.email %>"
-                  data-date-onboarded="<%= s.date_onboarded ? new Date(s.date_onboarded).toISOString().split('T')[0] : '' %>"
+                  data-date-onboarded="<%= s.date_onboarded ? new Date(s.date_onboarded).toISOString().slice(0,16) : '' %>"
+                  data-date-offboarded="<%= s.date_offboarded ? new Date(s.date_offboarded).toISOString().slice(0,16) : '' %>"
                   data-enabled="<%= s.enabled %>"
                   data-street="<%= s.street || '' %>"
                   data-city="<%= s.city || '' %>"
@@ -73,7 +74,8 @@
         <label>First Name<input type="text" id="edit-first-name"></label>
         <label>Last Name<input type="text" id="edit-last-name"></label>
         <label>Email<input type="email" id="edit-email"></label>
-        <label>Date Onboarded<input type="date" id="edit-date-onboarded"></label>
+        <label>Date Onboarded<input type="datetime-local" id="edit-date-onboarded"></label>
+        <label>Offboard Date<input type="datetime-local" id="edit-date-offboarded"></label>
         <label><input type="checkbox" id="edit-enabled"> Enabled</label>
         <fieldset>
           <legend>Address</legend>
@@ -100,6 +102,13 @@
     const editForm = document.getElementById('edit-form');
     let editingId = null;
 
+    document.querySelectorAll('.date-onboarded').forEach(function(cell) {
+      const value = cell.dataset.date;
+      if (value) {
+        cell.textContent = new Date(value).toLocaleString();
+      }
+    });
+
     document.querySelectorAll('.edit-btn').forEach(function(btn) {
       btn.addEventListener('click', function() {
         editingId = this.dataset.id;
@@ -107,6 +116,7 @@
         document.getElementById('edit-last-name').value = this.dataset.lastName;
         document.getElementById('edit-email').value = this.dataset.email;
         document.getElementById('edit-date-onboarded').value = this.dataset.dateOnboarded;
+        document.getElementById('edit-date-offboarded').value = this.dataset.dateOffboarded || '';
         document.getElementById('edit-enabled').checked = this.dataset.enabled === '1';
         document.getElementById('edit-street').value = this.dataset.street || '';
         document.getElementById('edit-city').value = this.dataset.city || '';
@@ -132,6 +142,7 @@
         lastName: document.getElementById('edit-last-name').value,
         email: document.getElementById('edit-email').value,
         dateOnboarded: document.getElementById('edit-date-onboarded').value,
+        dateOffboarded: document.getElementById('edit-date-offboarded').value,
         enabled: document.getElementById('edit-enabled').checked,
         street: document.getElementById('edit-street').value,
         city: document.getElementById('edit-city').value,

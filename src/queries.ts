@@ -134,7 +134,8 @@ export interface Staff {
   first_name: string;
   last_name: string;
   email: string;
-  date_onboarded: string;
+  date_onboarded: string | null;
+  date_offboarded?: string | null;
   enabled: number;
   street?: string | null;
   city?: string | null;
@@ -512,7 +513,8 @@ export async function addStaff(
   firstName: string,
   lastName: string,
   email: string,
-  dateOnboarded: string,
+  dateOnboarded: string | null,
+  dateOffboarded: string | null,
   enabled: boolean,
   street?: string | null,
   city?: string | null,
@@ -525,13 +527,14 @@ export async function addStaff(
   managerName?: string | null
 ): Promise<void> {
   await pool.execute(
-    'INSERT INTO staff (company_id, first_name, last_name, email, date_onboarded, enabled, street, city, state, postcode, country, department, job_title, org_company, manager_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO staff (company_id, first_name, last_name, email, date_onboarded, date_offboarded, enabled, street, city, state, postcode, country, department, job_title, org_company, manager_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       companyId,
       firstName,
       lastName,
       email,
       dateOnboarded,
+      dateOffboarded,
       enabled ? 1 : 0,
       street || null,
       city || null,
@@ -562,7 +565,8 @@ export async function updateStaff(
   firstName: string,
   lastName: string,
   email: string,
-  dateOnboarded: string,
+  dateOnboarded: string | null,
+  dateOffboarded: string | null,
   enabled: boolean,
   street?: string | null,
   city?: string | null,
@@ -575,13 +579,14 @@ export async function updateStaff(
   managerName?: string | null
 ): Promise<void> {
   await pool.execute(
-    'UPDATE staff SET company_id = ?, first_name = ?, last_name = ?, email = ?, date_onboarded = ?, enabled = ?, street = ?, city = ?, state = ?, postcode = ?, country = ?, department = ?, job_title = ?, org_company = ?, manager_name = ? WHERE id = ?',
+    'UPDATE staff SET company_id = ?, first_name = ?, last_name = ?, email = ?, date_onboarded = ?, date_offboarded = ?, enabled = ?, street = ?, city = ?, state = ?, postcode = ?, country = ?, department = ?, job_title = ?, org_company = ?, manager_name = ? WHERE id = ?',
     [
       companyId,
       firstName,
       lastName,
       email,
       dateOnboarded,
+      dateOffboarded,
       enabled ? 1 : 0,
       street || null,
       city || null,
