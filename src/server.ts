@@ -163,11 +163,8 @@ const app = express();
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+// Register core middleware needed for all requests first
 app.use(cookieParser());
-const upload = multer({ dest: path.join(__dirname, 'public', 'uploads') });
 app.use(
   session({
     secret: process.env.SESSION_SECRET || 'secret',
@@ -176,6 +173,18 @@ app.use(
   })
 );
 
+// Attach the audit logger before body parsing so that even requests that
+// fail in the parsers (e.g. malformed JSON) are still recorded
+app.use(auditLogger);
+
+// Body parsing and static serving come after the audit logger
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+const upload = multer({ dest: path.join(__dirname, 'public', 'uploads') });
+
+// Populate common template variables
 app.use((req, res, next) => {
   res.locals.isSuperAdmin = req.session.userId === 1;
   res.locals.cart = req.session.cart || [];
