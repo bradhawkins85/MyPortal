@@ -575,6 +575,7 @@ app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
     companies,
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    isSuperAdmin: req.session.userId === 1,
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.can_manage_staff ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
@@ -619,7 +620,8 @@ app.post('/staff', ensureAuth, ensureAdmin, async (req, res) => {
       department,
       jobTitle,
       company,
-      managerName
+      managerName,
+      null
     );
   }
   res.redirect('/staff');
@@ -642,9 +644,15 @@ app.put('/staff/:id', ensureAuth, ensureStaffAccess, async (req, res) => {
     jobTitle,
     company,
     managerName,
+    accountAction,
   } = req.body;
   if (!req.session.companyId) {
     return res.status(400).json({ error: 'No company selected' });
+  }
+  let accountActionValue = accountAction;
+  if (req.session.userId !== 1) {
+    const existing = await getStaffById(parseInt(req.params.id, 10));
+    accountActionValue = existing?.account_action || null;
   }
   await updateStaff(
     parseInt(req.params.id, 10),
@@ -663,7 +671,8 @@ app.put('/staff/:id', ensureAuth, ensureStaffAccess, async (req, res) => {
     department,
     jobTitle,
     company,
-    managerName
+    managerName,
+    accountActionValue
   );
   res.json({ success: true });
 });
@@ -3094,6 +3103,9 @@ api.delete('/licenses/:id', async (req, res) => {
  *                   manager_name:
  *                     type: string
  *                     nullable: true
+ *                   account_action:
+ *                     type: string
+ *                     nullable: true
  */
 api.get('/staff', async (_req, res) => {
   const staff = await getAllStaff();
@@ -3153,6 +3165,8 @@ api.get('/staff', async (_req, res) => {
  *                 type: string
  *               managerName:
  *                 type: string
+ *               accountAction:
+ *                 type: string
  *     responses:
  *       200:
  *         description: Staff member created
@@ -3182,6 +3196,7 @@ api.post('/staff', async (req, res) => {
     jobTitle,
     company,
     managerName,
+    accountAction,
   } = req.body;
   await addStaff(
     companyId,
@@ -3199,7 +3214,8 @@ api.post('/staff', async (req, res) => {
     department,
     jobTitle,
     company,
-    managerName
+    managerName,
+    accountAction || null
   );
   res.json({ success: true });
 });
@@ -3271,6 +3287,9 @@ api.post('/staff', async (req, res) => {
  *                 manager_name:
  *                   type: string
  *                   nullable: true
+ *                 account_action:
+ *                   type: string
+ *                   nullable: true
  *       404:
  *         description: Staff not found
  */
@@ -3336,6 +3355,8 @@ api.get('/staff/:id', async (req, res) => {
  *                 type: string
  *               managerName:
  *                 type: string
+ *               accountAction:
+ *                 type: string
  *     responses:
  *       200:
  *         description: Update successful
@@ -3358,6 +3379,7 @@ api.put('/staff/:id', async (req, res) => {
     jobTitle,
     company,
     managerName,
+    accountAction,
   } = req.body;
   await updateStaff(
     parseInt(req.params.id, 10),
@@ -3376,7 +3398,8 @@ api.put('/staff/:id', async (req, res) => {
     department,
     jobTitle,
     company,
-    managerName
+    managerName,
+    accountAction || null
   );
   res.json({ success: true });
 });
