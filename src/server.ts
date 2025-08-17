@@ -35,6 +35,7 @@ import {
   deleteStaff,
   setStaffVerificationCode,
   purgeExpiredVerificationCodes,
+  getVerificationByCode,
   createLicense,
   updateCompany,
   deleteCompany,
@@ -194,6 +195,8 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 const upload = multer({ dest: path.join(__dirname, 'public', 'uploads') });
+
+const verifyAttempts: Record<string, { count: number; reset: number }> = {};
 
 // Populate common template variables
 app.use((req, res, next) => {
@@ -564,6 +567,32 @@ app.post('/register', async (req, res) => {
     res.redirect('/');
   } catch (err) {
     res.render('register', { error: 'Registration failed' });
+  }
+});
+
+app.get('/verify', (req, res) => {
+  res.render('verify', { result: null, adminName: null });
+});
+
+app.post('/verify', async (req, res) => {
+  const ip = req.ip || 'unknown';
+  const now = Date.now();
+  const record = verifyAttempts[ip];
+  if (!record || now > record.reset) {
+    verifyAttempts[ip] = { count: 1, reset: now + 60 * 1000 };
+  } else {
+    if (record.count >= 3) {
+      return res.status(429).render('verify', { result: 'rate', adminName: null });
+    }
+    record.count++;
+  }
+
+  const code = (req.body.code || '').trim();
+  const verification = await getVerificationByCode(code);
+  if (verification) {
+    res.render('verify', { result: 'valid', adminName: verification.admin_name });
+  } else {
+    res.render('verify', { result: 'invalid', adminName: null });
   }
 });
 

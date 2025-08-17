@@ -276,3 +276,9 @@ table th {
   text-overflow: ellipsis;
   cursor: pointer;
 }
+
+.verify-icon {
+  font-size: 4rem;
+  text-align: center;
+  margin: 1rem 0;
+}
