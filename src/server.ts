@@ -976,14 +976,17 @@ app.post('/staff/:id/verify', ensureAuth, ensureStaffAccess, async (req, res) =>
   await setStaffVerificationCode(id, code);
   const url = process.env.VERIFY_WEBHOOK_URL;
   const apiKey = process.env.VERIFY_API_KEY;
-  if (url && apiKey) {
+  if (url) {
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (apiKey) {
+        headers.Authorization = apiKey;
+      }
       await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: apiKey,
-        },
+        headers,
         body: JSON.stringify({ mobilePhone: staff.mobile_phone, code }),
       });
     } catch (err) {
