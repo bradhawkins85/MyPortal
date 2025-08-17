@@ -25,6 +25,8 @@ declare module 'express-session' {
     newTotpError?: string;
     passwordError?: string;
     passwordSuccess?: string;
+    nameError?: string;
+    nameSuccess?: string;
   }
 }
 

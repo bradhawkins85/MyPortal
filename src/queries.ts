@@ -6,6 +6,8 @@ export interface User {
   email: string;
   password_hash: string;
   company_id: number;
+  first_name?: string | null;
+  last_name?: string | null;
 }
 
 export interface UserTotpAuthenticator {
@@ -156,6 +158,7 @@ export interface Staff {
   manager_name?: string | null;
   account_action?: string | null;
   verification_code?: string | null;
+  verification_admin_name?: string | null;
 }
 
 export interface ApiKey {
@@ -505,7 +508,7 @@ export async function getStaffByCompany(
   enabled?: boolean
 ): Promise<Staff[]> {
   let sql =
-    'SELECT s.*, svc.code AS verification_code FROM staff s LEFT JOIN staff_verification_codes svc ON s.id = svc.staff_id WHERE s.company_id = ?';
+    'SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name FROM staff s LEFT JOIN staff_verification_codes svc ON s.id = svc.staff_id WHERE s.company_id = ?';
   const params: any[] = [companyId];
   if (enabled !== undefined) {
     sql += ' AND s.enabled = ?';
@@ -520,7 +523,7 @@ export async function getAllStaff(
   email?: string
 ): Promise<Staff[]> {
   let sql =
-    'SELECT s.*, svc.code AS verification_code FROM staff s LEFT JOIN staff_verification_codes svc ON s.id = svc.staff_id';
+    'SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name FROM staff s LEFT JOIN staff_verification_codes svc ON s.id = svc.staff_id';
   const params: any[] = [];
   const conditions: string[] = [];
   if (accountAction) {
@@ -540,7 +543,7 @@ export async function getAllStaff(
 
 export async function getStaffById(id: number): Promise<Staff | null> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT s.*, svc.code AS verification_code FROM staff s LEFT JOIN staff_verification_codes svc ON s.id = svc.staff_id WHERE s.id = ?',
+    'SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name FROM staff s LEFT JOIN staff_verification_codes svc ON s.id = svc.staff_id WHERE s.id = ?',
     [id]
   );
   return (rows as Staff[])[0] || null;
@@ -654,14 +657,27 @@ export async function deleteStaff(id: number): Promise<void> {
 
 export async function setStaffVerificationCode(
   staffId: number,
-  code: string
+  code: string,
+  adminName: string
 ): Promise<void> {
   await pool.execute(
-    `INSERT INTO staff_verification_codes (staff_id, code, created_at)
-     VALUES (?, ?, NOW())
-     ON DUPLICATE KEY UPDATE code = VALUES(code), created_at = VALUES(created_at)`,
-    [staffId, code]
+    `INSERT INTO staff_verification_codes (staff_id, code, admin_name, created_at)
+     VALUES (?, ?, ?, NOW())
+     ON DUPLICATE KEY UPDATE code = VALUES(code), admin_name = VALUES(admin_name), created_at = VALUES(created_at)` ,
+    [staffId, code, adminName]
   );
+}
+
+export async function updateUserName(
+  id: number,
+  firstName: string,
+  lastName: string
+): Promise<void> {
+  await pool.execute('UPDATE users SET first_name = ?, last_name = ? WHERE id = ?', [
+    firstName,
+    lastName,
+    id,
+  ]);
 }
 
 export async function purgeExpiredVerificationCodes(): Promise<void> {
