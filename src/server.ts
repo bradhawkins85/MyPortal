@@ -41,6 +41,7 @@ import {
   updateUser,
   deleteUser,
   updateUserPassword,
+  updateUserName,
   getUserTotpAuthenticators,
   addUserTotpAuthenticator,
   deleteUserTotpAuthenticator,
@@ -585,6 +586,17 @@ app.post('/change-password', ensureAuth, ensureAdmin, async (req, res) => {
   res.redirect('/admin#account');
 });
 
+app.post('/change-name', ensureAuth, ensureAdmin, async (req, res) => {
+  const { firstName, lastName } = req.body;
+  if (!firstName || !lastName) {
+    req.session.nameError = 'First name and last name are required';
+    return res.redirect('/admin#account');
+  }
+  await updateUserName(req.session.userId!, firstName, lastName);
+  req.session.nameSuccess = 'Name updated successfully';
+  res.redirect('/admin#account');
+});
+
 app.get('/', ensureAuth, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
   if (!req.session.companyId && companies.length > 0) {
@@ -973,7 +985,11 @@ app.post('/staff/:id/verify', ensureAuth, ensureStaffAccess, async (req, res) =>
     return res.status(400).json({ error: 'No mobile phone for staff member' });
   }
   const code = Math.floor(100000 + Math.random() * 900000).toString();
-  await setStaffVerificationCode(id, code);
+  const admin = await getUserById(req.session.userId!);
+  const adminName = admin
+    ? [admin.first_name, admin.last_name].filter(Boolean).join(' ').trim()
+    : '';
+  await setStaffVerificationCode(id, code, adminName);
   const url = process.env.VERIFY_WEBHOOK_URL;
   const apiKey = process.env.VERIFY_API_KEY;
   if (url) {
@@ -987,7 +1003,7 @@ app.post('/staff/:id/verify', ensureAuth, ensureStaffAccess, async (req, res) =>
       await fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ mobilePhone: staff.mobile_phone, code }),
+        body: JSON.stringify({ mobilePhone: staff.mobile_phone, code, adminName }),
       });
     } catch (err) {
       console.error('Verify webhook failed', err);
@@ -1592,15 +1608,15 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
   }
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
+  const currentUser = await getUserById(req.session.userId!);
   const totpAuthenticators = await getUserTotpAuthenticators(req.session.userId!);
   let newTotpQr: string | null = null;
   let newTotpSecret = req.session.newTotpSecret || null;
   let newTotpName = req.session.newTotpName || '';
   const totpError = req.session.newTotpError || '';
-  if (newTotpSecret) {
-    const user = await getUserById(req.session.userId!);
+  if (newTotpSecret && currentUser) {
     const otpauth = authenticator.keyuri(
-      user!.email,
+      currentUser.email,
       'MyPortal',
       newTotpSecret
     );
@@ -1608,9 +1624,13 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
   }
   const passwordError = req.session.passwordError || '';
   const passwordSuccess = req.session.passwordSuccess || '';
+  const nameError = req.session.nameError || '';
+  const nameSuccess = req.session.nameSuccess || '';
   req.session.passwordError = undefined;
   req.session.passwordSuccess = undefined;
   req.session.newTotpError = undefined;
+  req.session.nameError = undefined;
+  req.session.nameSuccess = undefined;
   res.render('admin', {
     allCompanies,
     users,
@@ -1642,9 +1662,13 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     newTotpQr,
     newTotpSecret,
     newTotpName,
-  totpError,
-  passwordError,
-  passwordSuccess,
+    totpError,
+    passwordError,
+    passwordSuccess,
+    nameError,
+    nameSuccess,
+    currentUserFirstName: currentUser?.first_name || '',
+    currentUserLastName: currentUser?.last_name || '',
   });
 });
 

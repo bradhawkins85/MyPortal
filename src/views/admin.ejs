@@ -171,6 +171,20 @@
         </div>
         <div id="account" class="tab-content">
           <section>
+            <h2>Profile</h2>
+            <% if (nameError) { %><p class="error"><%= nameError %></p><% } %>
+            <% if (nameSuccess) { %><p class="success"><%= nameSuccess %></p><% } %>
+            <form method="post" action="/change-name">
+              <label>First Name:
+                <input type="text" name="firstName" value="<%= currentUserFirstName %>" required>
+              </label>
+              <label>Last Name:
+                <input type="text" name="lastName" value="<%= currentUserLastName %>" required>
+              </label>
+              <button type="submit">Update Name</button>
+            </form>
+          </section>
+          <section>
             <h2>Change Password</h2>
             <% if (passwordError) { %><p class="error"><%= passwordError %></p><% } %>
             <% if (passwordSuccess) { %><p class="success"><%= passwordSuccess %></p><% } %>
