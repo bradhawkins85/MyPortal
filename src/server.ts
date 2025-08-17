@@ -1030,6 +1030,7 @@ app.post('/staff/:id/verify', ensureAuth, ensureStaffAccess, async (req, res) =>
   await setStaffVerificationCode(id, code, adminName);
   const url = process.env.VERIFY_WEBHOOK_URL;
   const apiKey = process.env.VERIFY_API_KEY;
+  let status: number | null = null;
   if (url) {
     try {
       const headers: Record<string, string> = {
@@ -1038,16 +1039,23 @@ app.post('/staff/:id/verify', ensureAuth, ensureStaffAccess, async (req, res) =>
       if (apiKey) {
         headers.Authorization = apiKey;
       }
-      await fetch(url, {
+      const companyName = res.locals.siteSettings?.company_name || '';
+      const response = await fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ mobilePhone: staff.mobile_phone, code, adminName }),
+        body: JSON.stringify({
+          mobilePhone: staff.mobile_phone,
+          code,
+          adminName,
+          companyName,
+        }),
       });
+      status = response.status;
     } catch (err) {
       console.error('Verify webhook failed', err);
     }
   }
-  res.json({ success: true });
+  res.json({ success: status === 202, status, code });
 });
 
 app.get('/assets', ensureAuth, ensureAssetsAccess, async (req, res) => {
