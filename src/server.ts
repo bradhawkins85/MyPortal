@@ -33,6 +33,8 @@ import {
   updateStaffEnabled,
   updateStaff,
   deleteStaff,
+  setStaffVerificationCode,
+  purgeExpiredVerificationCodes,
   createLicense,
   updateCompany,
   deleteCompany,
@@ -128,6 +130,12 @@ import { runMigrations } from './db';
 
 dotenv.config();
 
+setInterval(() => {
+  purgeExpiredVerificationCodes().catch((err) =>
+    console.error('Failed to purge verification codes', err)
+  );
+}, 60 * 1000).unref();
+
 function toDateTime(value?: string): string | null {
   return value ? value.replace('T', ' ') : null;
 }
@@ -143,6 +151,7 @@ function mapStaff(s: Staff) {
     firstName: s.first_name,
     lastName: s.last_name,
     email: s.email,
+    mobilePhone: s.mobile_phone ?? null,
     dateOnboarded: s.date_onboarded,
     dateOffboarded: s.date_offboarded ?? null,
     enabled: !!s.enabled,
@@ -156,6 +165,7 @@ function mapStaff(s: Staff) {
     company: s.org_company ?? null,
     managerName: s.manager_name ?? null,
     accountAction: s.account_action ?? null,
+    verificationCode: s.verification_code ?? null,
   };
 }
 
@@ -849,6 +859,7 @@ app.post('/staff', ensureAuth, ensureAdmin, async (req, res) => {
     firstName,
     lastName,
     email,
+    mobilePhone,
     dateOnboarded,
     dateOffboarded,
     enabled,
@@ -868,6 +879,7 @@ app.post('/staff', ensureAuth, ensureAdmin, async (req, res) => {
       firstName,
       lastName,
       email,
+      mobilePhone || null,
       toDate(dateOnboarded),
       toDateTime(dateOffboarded),
       !!enabled,
@@ -891,6 +903,7 @@ app.put('/staff/:id', ensureAuth, ensureStaffAccess, async (req, res) => {
     firstName,
     lastName,
     email,
+    mobilePhone,
     dateOnboarded,
     dateOffboarded,
     enabled,
@@ -924,6 +937,7 @@ app.put('/staff/:id', ensureAuth, ensureStaffAccess, async (req, res) => {
     isSuperAdmin ? firstName : existing!.first_name,
     isSuperAdmin ? lastName : existing!.last_name,
     isSuperAdmin ? email : existing!.email,
+    isSuperAdmin ? mobilePhone : existing!.mobile_phone || null,
     isSuperAdmin ? toDate(dateOnboarded) : existing!.date_onboarded,
     toDateTime(dateOffboarded),
     isSuperAdmin ? !!enabled : !!existing!.enabled,
@@ -950,6 +964,33 @@ app.post('/staff/enabled', ensureAuth, ensureStaffAccess, async (req, res) => {
   const { staffId, enabled } = req.body;
   await updateStaffEnabled(parseInt(staffId, 10), !!enabled);
   res.redirect('/staff');
+});
+
+app.post('/staff/:id/verify', ensureAuth, ensureStaffAccess, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const staff = await getStaffById(id);
+  if (!staff || !staff.mobile_phone) {
+    return res.status(400).json({ error: 'No mobile phone for staff member' });
+  }
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  await setStaffVerificationCode(id, code);
+  const url = process.env.VERIFY_WEBHOOK_URL;
+  const apiKey = process.env.VERIFY_API_KEY;
+  if (url && apiKey) {
+    try {
+      await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: apiKey,
+        },
+        body: JSON.stringify({ mobilePhone: staff.mobile_phone, code }),
+      });
+    } catch (err) {
+      console.error('Verify webhook failed', err);
+    }
+  }
+  res.json({ success: true });
 });
 
 app.get('/assets', ensureAuth, ensureAssetsAccess, async (req, res) => {
@@ -3568,6 +3609,8 @@ api.get('/staff', async (req, res) => {
  *                 type: string
  *               email:
  *                 type: string
+ *               mobilePhone:
+ *                 type: string
  *               dateOnboarded:
  *                 type: string
  *                 format: date
@@ -3613,6 +3656,7 @@ api.post('/staff', async (req, res) => {
     firstName,
     lastName,
     email,
+    mobilePhone,
     dateOnboarded,
     dateOffboarded,
     enabled,
@@ -3632,6 +3676,7 @@ api.post('/staff', async (req, res) => {
     firstName,
     lastName,
     email,
+    mobilePhone || null,
     toDate(dateOnboarded),
     toDateTime(dateOffboarded),
     !!enabled,
@@ -3680,6 +3725,9 @@ api.post('/staff', async (req, res) => {
  *                   type: string
  *                 email:
  *                   type: string
+ *                 mobilePhone:
+ *                   type: string
+ *                   nullable: true
  *                 dateOnboarded:
  *                   type: string
  *                   format: date
@@ -3717,6 +3765,9 @@ api.post('/staff', async (req, res) => {
  *                   type: string
  *                   nullable: true
  *                 accountAction:
+ *                   type: string
+ *                   nullable: true
+ *                 verificationCode:
  *                   type: string
  *                   nullable: true
  *       404:
@@ -3759,6 +3810,8 @@ api.get('/staff/:id', async (req, res) => {
  *                 type: string
  *               email:
  *                 type: string
+ *               mobilePhone:
+ *                 type: string
  *               dateOnboarded:
  *                 type: string
  *                 format: date
@@ -3797,6 +3850,7 @@ api.put('/staff/:id', async (req, res) => {
     firstName,
     lastName,
     email,
+    mobilePhone,
     dateOnboarded,
     dateOffboarded,
     enabled,
@@ -3845,6 +3899,7 @@ api.put('/staff/:id', async (req, res) => {
     firstName !== undefined ? firstName : current!.first_name,
     lastName !== undefined ? lastName : current!.last_name,
     email !== undefined ? email : current!.email,
+    mobilePhone !== undefined ? mobilePhone : current!.mobile_phone || null,
     dateOnboarded !== undefined
       ? toDate(dateOnboarded)
       : current!.date_onboarded,
