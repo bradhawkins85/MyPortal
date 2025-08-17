@@ -13,6 +13,7 @@
           <input type="text" name="firstName" placeholder="First Name" required>
           <input type="text" name="lastName" placeholder="Last Name" required>
           <input type="email" name="email" placeholder="Email" required>
+          <input type="tel" name="mobilePhone" placeholder="Mobile">
           <input type="date" name="dateOnboarded">
           <label><input type="checkbox" name="enabled" value="1" checked> Enabled</label>
           <button type="submit">Add</button>
@@ -32,7 +33,7 @@
         </form>
         <table>
           <thead>
-            <tr><th>First Name</th><th>Last Name</th><th>Email</th><th>Date Onboarded</th><th>Enabled</th><th>Actions</th></tr>
+            <tr><th>First Name</th><th>Last Name</th><th>Email</th><th>Mobile</th><th>Code</th><th>Date Onboarded</th><th>Enabled</th><th>Actions</th></tr>
           </thead>
           <tbody>
           <% staff.forEach(function(s) { %>
@@ -40,6 +41,8 @@
               <td><%= s.first_name %></td>
               <td><%= s.last_name %></td>
               <td><%= s.email %></td>
+              <td><%= s.mobile_phone || '' %></td>
+              <td><%= s.verification_code || '' %></td>
               <td class="date-onboarded" data-date="<%= s.date_onboarded %>"><%= s.date_onboarded %></td>
               <td>
                 <form action="/staff/enabled" method="post">
@@ -48,12 +51,14 @@
                 </form>
               </td>
               <td>
+                <button class="verify-btn" data-id="<%= s.id %>" <%= s.mobile_phone ? '' : 'disabled' %>>Verify</button>
                 <button
                   class="edit-btn"
                   data-id="<%= s.id %>"
                   data-first-name="<%= s.first_name %>"
                   data-last-name="<%= s.last_name %>"
                   data-email="<%= s.email %>"
+                  data-mobile-phone="<%= s.mobile_phone || '' %>"
                   data-date-onboarded="<%= s.date_onboarded ? new Date(s.date_onboarded).toISOString().slice(0,10) : '' %>"
                   data-date-offboarded="<%= s.date_offboarded ? new Date(s.date_offboarded).toISOString().slice(0,16) : '' %>"
                   data-enabled="<%= s.enabled %>"
@@ -92,6 +97,9 @@
         </label>
         <label for="edit-email">Email
           <input type="email" id="edit-email" <%= isSuperAdmin ? '' : 'readonly' %>>
+        </label>
+        <label for="edit-mobile-phone">Mobile Phone
+          <input type="tel" id="edit-mobile-phone" <%= isSuperAdmin ? '' : 'readonly' %>>
         </label>
         <label for="edit-date-onboarded">Date Onboarded
           <input type="date" id="edit-date-onboarded" <%= isSuperAdmin ? '' : 'readonly' %>>
@@ -178,6 +186,7 @@
         document.getElementById('edit-first-name').value = this.dataset.firstName;
         document.getElementById('edit-last-name').value = this.dataset.lastName;
         document.getElementById('edit-email').value = this.dataset.email;
+        document.getElementById('edit-mobile-phone').value = this.dataset.mobilePhone || '';
         document.getElementById('edit-date-onboarded').value = this.dataset.dateOnboarded;
         document.getElementById('edit-date-offboarded').value = this.dataset.dateOffboarded || '';
         document.getElementById('edit-enabled').checked = this.dataset.enabled === '1';
@@ -192,6 +201,17 @@
         document.getElementById('edit-manager-name').value = this.dataset.managerName || '';
         document.getElementById('edit-account-action').value = this.dataset.accountAction || '';
         editModal.style.display = 'flex';
+      });
+    });
+
+    document.querySelectorAll('.verify-btn').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        const res = await fetch(`/staff/${this.dataset.id}/verify`, { method: 'POST' });
+        if (res.ok) {
+          location.reload();
+        } else {
+          alert('Failed to send code');
+        }
       });
     });
 
@@ -217,6 +237,7 @@
         firstName: document.getElementById('edit-first-name').value,
         lastName: document.getElementById('edit-last-name').value,
         email: document.getElementById('edit-email').value,
+        mobilePhone: document.getElementById('edit-mobile-phone').value,
         dateOnboarded: document.getElementById('edit-date-onboarded').value,
         dateOffboarded: document.getElementById('edit-date-offboarded').value,
         enabled: document.getElementById('edit-enabled').checked,
