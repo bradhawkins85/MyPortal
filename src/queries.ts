@@ -198,6 +198,12 @@ export interface AuditLog {
   company_name: string | null;
 }
 
+export interface SiteSettings {
+  company_name: string | null;
+  login_logo: string | null;
+  sidebar_logo: string | null;
+}
+
 export interface Form {
   id: number;
   name: string;
@@ -1594,5 +1600,28 @@ export async function updateOfficeGroupMembers(groupId: number, staffIds: number
   await pool.execute(
     `INSERT INTO office_group_members (group_id, staff_id) VALUES ${values}`,
     params
+  );
+}
+
+export async function getSiteSettings(): Promise<SiteSettings> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT company_name, login_logo, sidebar_logo FROM site_settings WHERE id = 1'
+  );
+  const row = (rows as SiteSettings[])[0];
+  return {
+    company_name: row?.company_name || null,
+    login_logo: row?.login_logo || null,
+    sidebar_logo: row?.sidebar_logo || null,
+  };
+}
+
+export async function updateSiteSettings(
+  companyName: string,
+  loginLogo?: string | null,
+  sidebarLogo?: string | null
+): Promise<void> {
+  await pool.query(
+    'UPDATE site_settings SET company_name = ?, login_logo = COALESCE(?, login_logo), sidebar_logo = COALESCE(?, sidebar_logo) WHERE id = 1',
+    [companyName, loginLogo ?? null, sidebarLogo ?? null]
   );
 }

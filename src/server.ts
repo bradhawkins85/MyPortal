@@ -114,6 +114,8 @@ import {
   deleteCompanyAppPrice,
   upsertCompanyAppPrice,
   updateCompanyIds,
+  getSiteSettings,
+  updateSiteSettings,
   Company,
   User,
   UserCompany,
@@ -195,14 +197,21 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 const upload = multer({ dest: path.join(__dirname, 'public', 'uploads') });
+const memoryUpload = multer();
 
 const verifyAttempts: Record<string, { count: number; reset: number }> = {};
 
 // Populate common template variables
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   res.locals.isSuperAdmin = req.session.userId === 1;
   res.locals.cart = req.session.cart || [];
   res.locals.hasForms = req.session.hasForms ?? false;
+  try {
+    res.locals.siteSettings = await getSiteSettings();
+  } catch (err) {
+    console.error('Failed to load site settings', err);
+    res.locals.siteSettings = { company_name: null, login_logo: null, sidebar_logo: null };
+  }
   next();
 });
 
@@ -1698,6 +1707,7 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     nameSuccess,
     currentUserFirstName: currentUser?.first_name || '',
     currentUserLastName: currentUser?.last_name || '',
+    siteSettings: res.locals.siteSettings,
   });
 });
 
@@ -1848,6 +1858,34 @@ app.post('/admin/api-key/delete', ensureAuth, ensureAdmin, async (req, res) => {
   await deleteApiKey(parseInt(id, 10));
   res.redirect('/admin');
 });
+
+app.post(
+  '/admin/site-settings',
+  ensureAuth,
+  ensureSuperAdmin,
+  memoryUpload.fields([
+    { name: 'loginLogo', maxCount: 1 },
+    { name: 'sidebarLogo', maxCount: 1 },
+  ]),
+  async (req, res) => {
+    const { companyName } = req.body;
+    const files = req.files as {
+      [fieldname: string]: Express.Multer.File[];
+    };
+    let loginLogo: string | undefined;
+    let sidebarLogo: string | undefined;
+    if (files && files.loginLogo && files.loginLogo[0]) {
+      const file = files.loginLogo[0];
+      loginLogo = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    }
+    if (files && files.sidebarLogo && files.sidebarLogo[0]) {
+      const file = files.sidebarLogo[0];
+      sidebarLogo = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    }
+    await updateSiteSettings(companyName, loginLogo, sidebarLogo);
+    res.redirect('/admin#site-settings');
+  }
+);
 
 app.post('/admin/assign', ensureAuth, ensureAdmin, async (req, res) => {
   const { userId } = req.body;
