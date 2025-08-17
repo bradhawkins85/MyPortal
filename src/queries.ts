@@ -161,6 +161,11 @@ export interface Staff {
   verification_admin_name?: string | null;
 }
 
+export interface StaffVerificationCode {
+  staff_id: number;
+  admin_name: string | null;
+}
+
 export interface ApiKey {
   id: number;
   api_key: string;
@@ -684,6 +689,16 @@ export async function purgeExpiredVerificationCodes(): Promise<void> {
   await pool.execute(
     'DELETE FROM staff_verification_codes WHERE created_at < (NOW() - INTERVAL 5 MINUTE)'
   );
+}
+
+export async function getVerificationByCode(
+  code: string
+): Promise<StaffVerificationCode | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT staff_id, admin_name FROM staff_verification_codes WHERE code = ?',
+    [code]
+  );
+  return rows.length ? (rows[0] as StaffVerificationCode) : null;
 }
 
 export async function updateCompany(
