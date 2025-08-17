@@ -42,7 +42,7 @@
               <td><%= s.last_name %></td>
               <td><%= s.email %></td>
               <td><%= s.mobile_phone || '' %></td>
-              <td><%= s.verification_code || '' %></td>
+              <td class="verification-code"><%= s.verification_code || '' %></td>
               <td class="date-onboarded" data-date="<%= s.date_onboarded %>"><%= s.date_onboarded %></td>
               <td>
                 <form action="/staff/enabled" method="post">
@@ -207,10 +207,19 @@
     document.querySelectorAll('.verify-btn').forEach(function(btn) {
       btn.addEventListener('click', async function() {
         const res = await fetch(`/staff/${this.dataset.id}/verify`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
         if (res.ok) {
-          location.reload();
+          const row = this.closest('tr');
+          const codeCell = row.querySelector('.verification-code');
+          if (codeCell) {
+            codeCell.textContent = data.code || '';
+            codeCell.style.color = data.status === 202 ? 'green' : 'black';
+          }
+          if (data.status !== 202) {
+            alert('Failed to send code');
+          }
         } else {
-          alert('Failed to send code');
+          alert(data.error || 'Failed to send code');
         }
       });
     });
