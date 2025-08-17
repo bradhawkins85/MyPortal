@@ -12,6 +12,7 @@
           <button data-tab="assignments">Current Assignments</button>
           <button data-tab="account">Account</button>
           <% if (isSuperAdmin) { %>
+            <button data-tab="site-settings">Site Settings</button>
             <button data-tab="apps">Apps</button>
             <button data-tab="api-keys">API Keys</button>
             <button data-tab="forms-admin">Forms</button>
@@ -231,6 +232,33 @@
           </section>
         </div>
         <% if (isSuperAdmin) { %>
+        <div id="site-settings" class="tab-content">
+          <section>
+            <h2>Site Settings</h2>
+            <form action="/admin/site-settings" method="post" enctype="multipart/form-data">
+              <label>Company Name:
+                <input type="text" name="companyName" value="<%= siteSettings?.company_name || '' %>">
+              </label>
+              <div>
+                <label>Login/Verify Logo:
+                  <input type="file" name="loginLogo" accept="image/*">
+                </label>
+                <% if (siteSettings && siteSettings.login_logo) { %>
+                  <img src="<%= siteSettings.login_logo %>" alt="Login Logo" style="max-width:200px;display:block;margin-top:10px;"/>
+                <% } %>
+              </div>
+              <div>
+                <label>Sidebar Logo:
+                  <input type="file" name="sidebarLogo" accept="image/*">
+                </label>
+                <% if (siteSettings && siteSettings.sidebar_logo) { %>
+                  <img src="<%= siteSettings.sidebar_logo %>" alt="Sidebar Logo" style="max-width:200px;display:block;margin-top:10px;"/>
+                <% } %>
+              </div>
+              <button type="submit">Save</button>
+            </form>
+          </section>
+        </div>
         <div id="apps" class="tab-content">
           <section>
             <h2>Add App</h2>

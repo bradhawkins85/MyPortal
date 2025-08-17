@@ -1,5 +1,8 @@
 <nav class="sidebar">
   <div class="sidebar-top">
+    <% if (siteSettings && siteSettings.sidebar_logo) { %>
+      <img src="<%= siteSettings.sidebar_logo %>" alt="Logo" style="max-width:200px;display:block;margin:10px auto;">
+    <% } %>
     <% if (companies && companies.length > 1) { %>
       <div class="company-switcher">
         <h3>Select Company</h3>
