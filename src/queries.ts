@@ -141,6 +141,7 @@ export interface Staff {
   first_name: string;
   last_name: string;
   email: string;
+  mobile_phone?: string | null;
   date_onboarded: string | null;
   date_offboarded?: string | null;
   enabled: number;
@@ -154,6 +155,7 @@ export interface Staff {
   org_company?: string | null;
   manager_name?: string | null;
   account_action?: string | null;
+  verification_code?: string | null;
 }
 
 export interface ApiKey {
@@ -502,10 +504,11 @@ export async function getStaffByCompany(
   companyId: number,
   enabled?: boolean
 ): Promise<Staff[]> {
-  let sql = 'SELECT * FROM staff WHERE company_id = ?';
+  let sql =
+    'SELECT s.*, svc.code AS verification_code FROM staff s LEFT JOIN staff_verification_codes svc ON s.id = svc.staff_id WHERE s.company_id = ?';
   const params: any[] = [companyId];
   if (enabled !== undefined) {
-    sql += ' AND enabled = ?';
+    sql += ' AND s.enabled = ?';
     params.push(enabled ? 1 : 0);
   }
   const [rows] = await pool.query<RowDataPacket[]>(sql, params);
@@ -516,15 +519,16 @@ export async function getAllStaff(
   accountAction?: string,
   email?: string
 ): Promise<Staff[]> {
-  let sql = 'SELECT * FROM staff';
+  let sql =
+    'SELECT s.*, svc.code AS verification_code FROM staff s LEFT JOIN staff_verification_codes svc ON s.id = svc.staff_id';
   const params: any[] = [];
   const conditions: string[] = [];
   if (accountAction) {
-    conditions.push('account_action = ?');
+    conditions.push('s.account_action = ?');
     params.push(accountAction);
   }
   if (email) {
-    conditions.push('email LIKE ?');
+    conditions.push('s.email LIKE ?');
     params.push(`%${email}%`);
   }
   if (conditions.length) {
@@ -535,7 +539,10 @@ export async function getAllStaff(
 }
 
 export async function getStaffById(id: number): Promise<Staff | null> {
-  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM staff WHERE id = ?', [id]);
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT s.*, svc.code AS verification_code FROM staff s LEFT JOIN staff_verification_codes svc ON s.id = svc.staff_id WHERE s.id = ?',
+    [id]
+  );
   return (rows as Staff[])[0] || null;
 }
 
@@ -544,6 +551,7 @@ export async function addStaff(
   firstName: string,
   lastName: string,
   email: string,
+  mobilePhone: string | null,
   dateOnboarded: string | null,
   dateOffboarded: string | null,
   enabled: boolean,
@@ -559,12 +567,13 @@ export async function addStaff(
   accountAction?: string | null
 ): Promise<void> {
   await pool.execute(
-    'INSERT INTO staff (company_id, first_name, last_name, email, date_onboarded, date_offboarded, enabled, street, city, state, postcode, country, department, job_title, org_company, manager_name, account_action) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO staff (company_id, first_name, last_name, email, mobile_phone, date_onboarded, date_offboarded, enabled, street, city, state, postcode, country, department, job_title, org_company, manager_name, account_action) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       companyId,
       firstName,
       lastName,
       email,
+      mobilePhone,
       dateOnboarded,
       dateOffboarded,
       enabled ? 1 : 0,
@@ -598,6 +607,7 @@ export async function updateStaff(
   firstName: string,
   lastName: string,
   email: string,
+  mobilePhone: string | null,
   dateOnboarded: string | null,
   dateOffboarded: string | null,
   enabled: boolean,
@@ -613,12 +623,13 @@ export async function updateStaff(
   accountAction?: string | null
 ): Promise<void> {
   await pool.execute(
-    'UPDATE staff SET company_id = ?, first_name = ?, last_name = ?, email = ?, date_onboarded = ?, date_offboarded = ?, enabled = ?, street = ?, city = ?, state = ?, postcode = ?, country = ?, department = ?, job_title = ?, org_company = ?, manager_name = ?, account_action = ? WHERE id = ?',
+    'UPDATE staff SET company_id = ?, first_name = ?, last_name = ?, email = ?, mobile_phone = ?, date_onboarded = ?, date_offboarded = ?, enabled = ?, street = ?, city = ?, state = ?, postcode = ?, country = ?, department = ?, job_title = ?, org_company = ?, manager_name = ?, account_action = ? WHERE id = ?',
     [
       companyId,
       firstName,
       lastName,
       email,
+      mobilePhone,
       dateOnboarded,
       dateOffboarded,
       enabled ? 1 : 0,
@@ -639,6 +650,24 @@ export async function updateStaff(
 
 export async function deleteStaff(id: number): Promise<void> {
   await pool.execute('DELETE FROM staff WHERE id = ?', [id]);
+}
+
+export async function setStaffVerificationCode(
+  staffId: number,
+  code: string
+): Promise<void> {
+  await pool.execute(
+    `INSERT INTO staff_verification_codes (staff_id, code, created_at)
+     VALUES (?, ?, NOW())
+     ON DUPLICATE KEY UPDATE code = VALUES(code), created_at = VALUES(created_at)`,
+    [staffId, code]
+  );
+}
+
+export async function purgeExpiredVerificationCodes(): Promise<void> {
+  await pool.execute(
+    'DELETE FROM staff_verification_codes WHERE created_at < (NOW() - INTERVAL 5 MINUTE)'
+  );
 }
 
 export async function updateCompany(
@@ -758,8 +787,9 @@ export async function getStaffForLicense(
   licenseId: number
 ): Promise<Staff[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT s.*
+    `SELECT s.*, svc.code AS verification_code
      FROM staff s
+     LEFT JOIN staff_verification_codes svc ON s.id = svc.staff_id
      JOIN staff_licenses sl ON s.id = sl.staff_id
      WHERE sl.license_id = ?`,
     [licenseId]
