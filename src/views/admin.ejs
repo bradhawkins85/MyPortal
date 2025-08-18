@@ -28,6 +28,10 @@
         <div id="companies" class="tab-content">
           <% if (isSuperAdmin) { %>
           <section>
+            <h2>Syncro Import</h2>
+            <a href="/admin/syncro/customers">Import from Syncro</a>
+          </section>
+          <section>
             <h2>Add Company</h2>
             <form action="/admin/company" method="post">
               <input type="text" name="name" placeholder="Company Name" required>
