@@ -241,6 +241,27 @@ export async function getCompanyBySyncroId(
   return row ? ({ ...(row as any), is_vip: Number(row.is_vip) } as Company) : null;
 }
 
+export async function getHiddenSyncroCustomerIds(): Promise<string[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT syncro_customer_id FROM hidden_syncro_customers'
+  );
+  return (rows as RowDataPacket[]).map((r) => String(r.syncro_customer_id));
+}
+
+export async function hideSyncroCustomer(id: string): Promise<void> {
+  await pool.query(
+    'INSERT IGNORE INTO hidden_syncro_customers (syncro_customer_id) VALUES (?)',
+    [id]
+  );
+}
+
+export async function unhideSyncroCustomer(id: string): Promise<void> {
+  await pool.query(
+    'DELETE FROM hidden_syncro_customers WHERE syncro_customer_id = ?',
+    [id]
+  );
+}
+
 export async function getLicensesByCompany(companyId: number): Promise<License[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT l.*, COUNT(sl.staff_id) AS allocated
