@@ -222,6 +222,17 @@ export async function getCompanyById(id: number): Promise<Company | null> {
   return row ? ({ ...(row as any), is_vip: Number(row.is_vip) } as Company) : null;
 }
 
+export async function getCompanyBySyncroId(
+  syncroId: string
+): Promise<Company | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM companies WHERE syncro_company_id = ?',
+    [syncroId]
+  );
+  const row = (rows as RowDataPacket[])[0];
+  return row ? ({ ...(row as any), is_vip: Number(row.is_vip) } as Company) : null;
+}
+
 export async function getLicensesByCompany(companyId: number): Promise<License[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT l.*, COUNT(sl.staff_id) AS allocated

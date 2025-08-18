@@ -10,9 +10,11 @@ import QRCode from 'qrcode';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJSDoc from 'swagger-jsdoc';
 import multer from 'multer';
+import { getSyncroCustomers, getSyncroCustomer } from './syncro';
 import {
   getUserByEmail,
   getCompanyById,
+  getCompanyBySyncroId,
   getLicensesByCompany,
   getAllLicenses,
   getLicenseById,
@@ -1840,6 +1842,53 @@ app.post('/admin/company/:id', ensureAuth, ensureSuperAdmin, async (req, res) =>
     parseCheckbox(isVip)
   );
   res.redirect('/admin');
+});
+
+app.get('/admin/syncro/customers', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  try {
+    const customers = await getSyncroCustomers();
+    const companies = await getAllCompanies();
+    const importedIds = companies
+      .filter((c) => c.syncro_company_id)
+      .map((c) => c.syncro_company_id!);
+    res.render('syncro-customers', { customers, importedIds });
+  } catch (err) {
+    console.error('Failed to fetch Syncro customers', err);
+    res.status(500).send('Failed to fetch Syncro customers');
+  }
+});
+
+app.post('/admin/syncro/import', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { customerId } = req.body;
+  if (!customerId) {
+    return res.redirect('/admin/syncro/customers');
+  }
+  try {
+    const customer = await getSyncroCustomer(customerId);
+    if (customer) {
+      const name =
+        customer.business_name ||
+        [customer.first_name, customer.last_name].filter(Boolean).join(' ') ||
+        `Customer ${customer.id}`;
+      const parts = [
+        customer.address1,
+        customer.address2,
+        customer.city,
+        customer.state,
+        customer.zip,
+      ].filter((p) => p);
+      const address = parts.length ? parts.join(', ') : null;
+      const existing = await getCompanyBySyncroId(String(customer.id));
+      if (existing) {
+        await updateCompany(existing.id, name, address);
+      } else {
+        await createCompany(name, address || undefined, false, String(customer.id));
+      }
+    }
+  } catch (err) {
+    console.error('Syncro import failed', err);
+  }
+  res.redirect('/admin/syncro/customers');
 });
 
 app.post('/admin/user', ensureAuth, ensureAdmin, async (req, res) => {

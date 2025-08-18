@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+  <%- include('partials/head', { title: 'Syncro Customers' }) %>
+  <body>
+    <div class="app-container">
+      <%- include('partials/sidebar') %>
+      <div class="content">
+        <h1>Syncro Customers</h1>
+        <table>
+          <thead>
+            <tr><th>Name</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            <% customers.forEach(function(c){
+                 var imported = importedIds.includes(String(c.id));
+                 var name = c.business_name || [c.first_name, c.last_name].filter(Boolean).join(' ');
+            %>
+            <tr>
+              <td><%= name || ('Customer ' + c.id) %></td>
+              <td><%= imported ? 'Imported' : 'Not Imported' %></td>
+              <td>
+                <form method="post" action="/admin/syncro/import">
+                  <input type="hidden" name="customerId" value="<%= c.id %>">
+                  <button type="submit"><%= imported ? 'Update' : 'Import' %></button>
+                </form>
+              </td>
+            </tr>
+            <% }); %>
+          </tbody>
+        </table>
+        <p><a href="/admin">Back</a></p>
+      </div>
+    </div>
+  </body>
+</html>
