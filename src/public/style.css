@@ -282,3 +282,7 @@ table th {
   text-align: center;
   margin: 1rem 0;
 }
+
+.verify-container p {
+  text-align: center;
+}

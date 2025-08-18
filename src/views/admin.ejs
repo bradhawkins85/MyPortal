@@ -8,20 +8,24 @@
       <h1>Admin</h1>
       <div class="admin-tabs">
         <div class="tabs">
-          <button data-tab="companies" class="active">Companies</button>
-          <button data-tab="assignments">Current Assignments</button>
-          <button data-tab="account">Account</button>
           <% if (isSuperAdmin) { %>
-            <button data-tab="site-settings">Site Settings</button>
-            <button data-tab="apps">Apps</button>
+            <button data-tab="site-settings" class="active">Site Settings</button>
+            <button data-tab="account">Account</button>
             <button data-tab="api-keys">API Keys</button>
-            <button data-tab="forms-admin">Forms</button>
-            <button data-tab="form-permissions">Form Permissions</button>
+            <button data-tab="companies">Companies</button>
+            <button data-tab="assignments">Current Assignments</button>
+            <button data-tab="apps">Apps</button>
             <button data-tab="shop-settings">Shop Settings</button>
             <button data-tab="products">Products</button>
+            <button data-tab="forms-admin">Forms</button>
+            <button data-tab="form-permissions">Form Permissions</button>
+          <% } else { %>
+            <button data-tab="account" class="active">Account</button>
+            <button data-tab="companies">Companies</button>
+            <button data-tab="assignments">Current Assignments</button>
           <% } %>
         </div>
-        <div id="companies" class="tab-content active">
+        <div id="companies" class="tab-content">
           <% if (isSuperAdmin) { %>
           <section>
             <h2>Add Company</h2>
@@ -170,7 +174,7 @@
             </table>
           </section>
         </div>
-        <div id="account" class="tab-content">
+        <div id="account" class="tab-content<% if (!isSuperAdmin) { %> active<% } %>">
           <section>
             <h2>Profile</h2>
             <% if (nameError) { %><p class="error"><%= nameError %></p><% } %>
@@ -232,7 +236,7 @@
           </section>
         </div>
         <% if (isSuperAdmin) { %>
-        <div id="site-settings" class="tab-content">
+        <div id="site-settings" class="tab-content active">
           <section>
             <h2>Site Settings</h2>
             <form action="/admin/site-settings" method="post" enctype="multipart/form-data">
@@ -706,7 +710,7 @@
 
       let initialTab = window.location.hash
         ? window.location.hash.substring(1)
-        : localStorage.getItem(ACTIVE_TAB_KEY) || 'companies';
+        : localStorage.getItem(ACTIVE_TAB_KEY) || '<%= isSuperAdmin ? "site-settings" : "account" %>';
       <% if (isSuperAdmin && selectedFormId && selectedCompanyId) { %>
       initialTab = 'form-permissions';
       <% } %>
