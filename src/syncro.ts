@@ -75,7 +75,7 @@ export async function getSyncroCustomer(id: string | number): Promise<SyncroCust
 export async function getSyncroContacts(
   customerId: string | number
 ): Promise<SyncroContact[]> {
-  const data = await syncroRequest(`/contact?customer_id=${customerId}`);
+  const data = await syncroRequest(`/contacts?customer_id=${customerId}`);
   if (Array.isArray(data)) {
     return data as SyncroContact[];
   }
