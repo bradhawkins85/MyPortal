@@ -172,6 +172,7 @@ export interface Staff {
   org_company?: string | null;
   manager_name?: string | null;
   account_action?: string | null;
+  syncro_contact_id?: string | null;
   verification_code?: string | null;
   verification_admin_name?: string | null;
 }
@@ -644,10 +645,11 @@ export async function addStaff(
   jobTitle?: string | null,
   orgCompany?: string | null,
   managerName?: string | null,
-  accountAction?: string | null
+  accountAction?: string | null,
+  syncroContactId?: string | null
 ): Promise<void> {
   await pool.execute(
-    'INSERT INTO staff (company_id, first_name, last_name, email, mobile_phone, date_onboarded, date_offboarded, enabled, street, city, state, postcode, country, department, job_title, org_company, manager_name, account_action) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO staff (company_id, first_name, last_name, email, mobile_phone, date_onboarded, date_offboarded, enabled, street, city, state, postcode, country, department, job_title, org_company, manager_name, account_action, syncro_contact_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       companyId,
       firstName,
@@ -667,6 +669,7 @@ export async function addStaff(
       orgCompany || null,
       managerName || null,
       accountAction || null,
+      syncroContactId || null,
     ]
   );
 }
@@ -700,10 +703,11 @@ export async function updateStaff(
   jobTitle?: string | null,
   orgCompany?: string | null,
   managerName?: string | null,
-  accountAction?: string | null
+  accountAction?: string | null,
+  syncroContactId?: string | null
 ): Promise<void> {
   await pool.execute(
-    'UPDATE staff SET company_id = ?, first_name = ?, last_name = ?, email = ?, mobile_phone = ?, date_onboarded = ?, date_offboarded = ?, enabled = ?, street = ?, city = ?, state = ?, postcode = ?, country = ?, department = ?, job_title = ?, org_company = ?, manager_name = ?, account_action = ? WHERE id = ?',
+    'UPDATE staff SET company_id = ?, first_name = ?, last_name = ?, email = ?, mobile_phone = ?, date_onboarded = ?, date_offboarded = ?, enabled = ?, street = ?, city = ?, state = ?, postcode = ?, country = ?, department = ?, job_title = ?, org_company = ?, manager_name = ?, account_action = ?, syncro_contact_id = ? WHERE id = ?',
     [
       companyId,
       firstName,
@@ -723,6 +727,7 @@ export async function updateStaff(
       orgCompany || null,
       managerName || null,
       accountAction || null,
+      syncroContactId || null,
       id,
     ]
   );
