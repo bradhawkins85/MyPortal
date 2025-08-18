@@ -1700,6 +1700,7 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     isSuperAdmin,
     companies,
     currentCompanyId: req.session.companyId,
+    currentUserId: req.session.userId,
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.can_manage_staff ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
@@ -2061,12 +2062,15 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
     );
   }
   if (typeof isAdminField !== 'undefined') {
-    await updateUserCompanyPermission(
-      uid,
-      cid,
-      'is_admin',
-      parseCheckbox(isAdminField)
-    );
+    const isAdminValue = parseCheckbox(isAdminField);
+    if (uid !== req.session.userId || req.session.userId === 1 || isAdminValue) {
+      await updateUserCompanyPermission(
+        uid,
+        cid,
+        'is_admin',
+        isAdminValue
+      );
+    }
   }
   res.redirect('/admin');
 });
