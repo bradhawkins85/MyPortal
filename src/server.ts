@@ -10,6 +10,7 @@ import QRCode from 'qrcode';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJSDoc from 'swagger-jsdoc';
 import multer from 'multer';
+import nodemailer from 'nodemailer';
 import { getSyncroCustomers, getSyncroCustomer } from './syncro';
 import {
   getUserByEmail,
@@ -45,6 +46,7 @@ import {
   deleteUser,
   updateUserPassword,
   updateUserName,
+  setUserForcePasswordChange,
   getUserTotpAuthenticators,
   addUserTotpAuthenticator,
   deleteUserTotpAuthenticator,
@@ -118,6 +120,8 @@ import {
   updateCompanyIds,
   getSiteSettings,
   updateSiteSettings,
+  getEmailTemplate,
+  upsertEmailTemplate,
   Company,
   User,
   UserCompany,
@@ -135,6 +139,24 @@ import {
 import { runMigrations } from './db';
 
 dotenv.config();
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT || '587', 10),
+  secure: false,
+  auth: process.env.SMTP_USER
+    ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS || '' }
+    : undefined,
+});
+
+async function sendEmail(to: string, subject: string, html: string) {
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to,
+    subject,
+    html,
+  });
+}
 
 setInterval(() => {
   purgeExpiredVerificationCodes().catch((err) =>
@@ -390,6 +412,13 @@ function ensureAuth(req: express.Request, res: express.Response, next: express.N
   if (!req.session.userId) {
     return res.redirect('/login');
   }
+  if (
+    req.session.mustChangePassword &&
+    req.path !== '/force-password-change' &&
+    req.path !== '/logout'
+  ) {
+    return res.redirect('/force-password-change');
+  }
   next();
 }
 
@@ -466,9 +495,14 @@ app.post('/login', async (req, res) => {
       const trusted = req.cookies[`trusted_${user.id}`];
       if (trusted && verifyTrustedDeviceToken(trusted, user.id)) {
         await completeLogin(req, user.id);
+        if (user.force_password_change) {
+          req.session.mustChangePassword = true;
+          return res.redirect('/force-password-change');
+        }
         return res.redirect('/');
       }
       req.session.tempUserId = user.id;
+      req.session.pendingForcePassword = !!user.force_password_change;
       const totpAuths = await getUserTotpAuthenticators(user.id);
       if (totpAuths.length === 0) {
         req.session.pendingTotpSecret = authenticator.generateSecret();
@@ -479,6 +513,10 @@ app.post('/login', async (req, res) => {
       return res.redirect('/totp');
     } else {
       await completeLogin(req, user.id);
+      if (user.force_password_change) {
+        req.session.mustChangePassword = true;
+        return res.redirect('/force-password-change');
+      }
       return res.redirect('/');
     }
   }
@@ -535,6 +573,11 @@ app.post('/totp', async (req, res) => {
     req.session.tempUserId = undefined;
     req.session.pendingTotpSecret = undefined;
     req.session.requireTotpSetup = undefined;
+    if (req.session.pendingForcePassword) {
+      req.session.mustChangePassword = true;
+      req.session.pendingForcePassword = undefined;
+      return res.redirect('/force-password-change');
+    }
     return res.redirect('/');
   }
   let qrCode: string | null = null;
@@ -611,6 +654,20 @@ app.get('/logout', (req, res) => {
   req.session.destroy(() => {
     res.redirect('/login');
   });
+});
+
+app.get('/force-password-change', ensureAuth, (req, res) => {
+  res.render('force-password-change', { error: '' });
+});
+
+app.post('/force-password-change', ensureAuth, async (req, res) => {
+  const { newPassword } = req.body;
+  const userId = req.session.userId!;
+  const hash = await bcrypt.hash(newPassword, 10);
+  await updateUserPassword(userId, hash);
+  await setUserForcePasswordChange(userId, false);
+  req.session.mustChangePassword = false;
+  res.redirect('/');
 });
 
 app.post('/change-password', ensureAuth, ensureAdmin, async (req, res) => {
@@ -1921,6 +1978,54 @@ app.post('/admin/user', ensureAuth, ensureAdmin, async (req, res) => {
   res.redirect('/admin');
 });
 
+app.post('/admin/invite', ensureAuth, ensureAdmin, async (req, res) => {
+  const { email, firstName, lastName } = req.body;
+  const isSuperAdmin = req.session.userId === 1;
+  const companyId = isSuperAdmin
+    ? parseInt(req.body.companyId, 10)
+    : req.session.companyId!;
+  const tempPassword = crypto.randomBytes(12).toString('base64url');
+  const passwordHash = await bcrypt.hash(tempPassword, 10);
+  const userId = await createUser(email, passwordHash, companyId, true);
+  await assignUserToCompany(
+    userId,
+    companyId,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+  );
+  if (firstName || lastName) {
+    await updateUserName(userId, firstName || '', lastName || '');
+  }
+  const [template, siteSettings] = await Promise.all([
+    getEmailTemplate('staff_invitation'),
+    getSiteSettings(),
+  ]);
+  if (template) {
+    const portalUrl =
+      process.env.PORTAL_URL || `${req.protocol}://${req.get('host')}/login`;
+    const html = template.body
+      .replace(/\{\{companyName\}\}/g, siteSettings?.company_name || '')
+      .replace(/\{\{tempPassword\}\}/g, tempPassword)
+      .replace(/\{\{portalUrl\}\}/g, portalUrl)
+      .replace(/\{\{loginLogo\}\}/g, siteSettings?.login_logo || '');
+    const subject = template.subject.replace(
+      /\{\{companyName\}\}/g,
+      siteSettings?.company_name || ''
+    );
+    try {
+      await sendEmail(email, subject, html);
+    } catch (err) {
+      console.error('Failed to send invitation email', err);
+    }
+  }
+  res.redirect('/admin');
+});
+
 app.post('/admin/api-key', ensureAuth, ensureAdmin, async (req, res) => {
   const { description, expiryDate } = req.body;
   const key = crypto.randomBytes(32).toString('hex');
@@ -1961,6 +2066,32 @@ app.post(
     res.redirect('/admin#site-settings');
   }
 );
+
+app.get('/admin/email-templates', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const [template, companies] = await Promise.all([
+    getEmailTemplate('staff_invitation'),
+    getCompaniesForUser(req.session.userId!),
+  ]);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  res.render('email-templates', {
+    template,
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: true,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+  });
+});
+
+app.post('/admin/email-templates', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { subject, body } = req.body;
+  await upsertEmailTemplate('staff_invitation', subject, body);
+  res.redirect('/admin/email-templates');
+});
 
 app.post('/admin/assign', ensureAuth, ensureAdmin, async (req, res) => {
   const { userId } = req.body;
