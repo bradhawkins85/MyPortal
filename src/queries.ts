@@ -484,6 +484,24 @@ export async function getUserById(id: number): Promise<User | null> {
 }
 
 export async function getCompaniesForUser(userId: number): Promise<UserCompany[]> {
+  if (userId === 1) {
+    const [rows] = await pool.query<RowDataPacket[]>(
+      'SELECT id AS company_id, name AS company_name, is_vip FROM companies'
+    );
+    return (rows as RowDataPacket[]).map((row) => ({
+      user_id: userId,
+      company_id: row.company_id as number,
+      company_name: row.company_name as string,
+      is_vip: Number(row.is_vip),
+      can_manage_licenses: 1,
+      can_manage_staff: 1,
+      can_manage_assets: 1,
+      can_manage_invoices: 1,
+      can_order_licenses: 1,
+      can_access_shop: 1,
+      is_admin: 1,
+    })) as UserCompany[];
+  }
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.can_access_shop, uc.is_admin, c.name AS company_name, c.is_vip AS is_vip
      FROM user_companies uc JOIN companies c ON uc.company_id = c.id
@@ -1543,6 +1561,31 @@ export async function updateShippingStatusByConsignmentId(
     'UPDATE shop_orders SET shipping_status = ?, eta = ? WHERE consignment_id = ?',
     [shippingStatus, eta, consignmentId]
   );
+}
+
+export async function getOrderPoNumber(
+  orderNumber: string
+): Promise<string | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT po_number FROM shop_orders WHERE order_number = ? LIMIT 1',
+    [orderNumber]
+  );
+  return (rows as RowDataPacket[])[0]?.po_number || null;
+}
+
+export async function getUsersMobilePhones(
+  userIds: number[]
+): Promise<string[]> {
+  if (userIds.length === 0) {
+    return [];
+  }
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT mobile_phone FROM users WHERE id IN (?)`,
+    [userIds]
+  );
+  return (rows as RowDataPacket[])
+    .map((r) => r.mobile_phone as string | null)
+    .filter((p): p is string => !!p);
 }
 
 export async function getSmsSubscriptionsForUser(
