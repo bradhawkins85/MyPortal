@@ -7,7 +7,7 @@
     "build": "tsc && cp -r src/views dist && cp -r src/public dist",
     "start": "node dist/server.js",
     "dev": "nodemon src/server.ts",
-    "test": "tsc --noEmit && node --test --require ts-node/register/transpile-only tests/updateCompany.test.ts"
+    "test": "tsc --noEmit && node --test --require ts-node/register/transpile-only tests/*.test.ts"
   },
   "keywords": [],
   "author": "",
