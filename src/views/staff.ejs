@@ -54,6 +54,9 @@
                 <% if (isSuperAdmin) { %>
                 <button class="verify-btn" data-id="<%= s.id %>" <%= s.mobile_phone ? '' : 'disabled' %>>Verify</button>
                 <% } %>
+                <% if (isAdmin || isSuperAdmin) { %>
+                <button class="invite-btn" data-id="<%= s.id %>">Invite</button>
+                <% } %>
                 <button
                   class="edit-btn"
                   data-id="<%= s.id %>"
@@ -227,6 +230,19 @@
       });
     });
     <% } %>
+
+    document.querySelectorAll('.invite-btn').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        if (!confirm('Send invitation to this staff member?')) return;
+        const res = await fetch(`/staff/${this.dataset.id}/invite`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          alert('Invitation sent');
+        } else {
+          alert(data.error || 'Failed to send invitation');
+        }
+      });
+    });
 
     document.querySelectorAll('.delete-btn').forEach(function(btn) {
       btn.addEventListener('click', async function() {
