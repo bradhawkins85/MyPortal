@@ -168,7 +168,11 @@ async function sendEmail(to: string, subject: string, html: string) {
   });
 }
 
-async function sendSmsUpdate(shippingStatus: string, eta: string | null) {
+async function sendSmsUpdate(
+  orderNumber: string,
+  shippingStatus: string,
+  eta: string | null
+) {
   const { SMS_WEBHOOK_URL, SMS_WEBHOOK_API_KEY } = process.env;
   if (SMS_WEBHOOK_URL && SMS_WEBHOOK_API_KEY) {
     try {
@@ -180,6 +184,7 @@ async function sendSmsUpdate(shippingStatus: string, eta: string | null) {
         },
         body: JSON.stringify({
           type: 'Shipping Update',
+          orderNumber,
           shippingStatus,
           eta,
         }),
@@ -1563,9 +1568,11 @@ app.post(
     );
     const subs = await getSmsSubscribersByOrder(req.params.orderNumber);
     if (subs.length) {
-      for (const _ of subs) {
-        await sendSmsUpdate(shippingStatus, eta || null);
-      }
+      await sendSmsUpdate(
+        req.params.orderNumber,
+        shippingStatus,
+        eta || null
+      );
     }
     res.redirect(`/orders/${req.params.orderNumber}`);
   }
@@ -1585,6 +1592,7 @@ app.post('/orders/:orderNumber/sms', ensureAuth, async (req, res) => {
     const shippingStatus = items[0]?.shipping_status || '';
     const eta = items[0]?.eta || null;
     await sendSmsUpdate(
+      req.params.orderNumber,
       shippingStatus,
       eta ? eta.toISOString() : null
     );
@@ -3237,9 +3245,11 @@ api
     for (const order of orders) {
       const subs = await getSmsSubscribersByOrder(order.order_number);
       if (subs.length) {
-        for (const _ of subs) {
-          await sendSmsUpdate(shippingStatus, eta || null);
-        }
+        await sendSmsUpdate(
+          order.order_number,
+          shippingStatus,
+          eta || null
+        );
       }
     }
     res.json({ success: true });
