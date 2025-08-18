@@ -109,6 +109,10 @@ import {
   updateOrderShipping,
   getOrdersByConsignmentId,
   updateShippingStatusByConsignmentId,
+  getSmsSubscriptionsForUser,
+  setSmsSubscription,
+  getSmsSubscribersByOrder,
+  isUserSubscribedToOrder,
   upsertAsset,
   upsertInvoice,
   getAllApps,
@@ -162,6 +166,28 @@ async function sendEmail(to: string, subject: string, html: string) {
     subject,
     html,
   });
+}
+
+async function sendSmsUpdate(shippingStatus: string, eta: string | null) {
+  const { SMS_WEBHOOK_URL, SMS_WEBHOOK_API_KEY } = process.env;
+  if (SMS_WEBHOOK_URL && SMS_WEBHOOK_API_KEY) {
+    try {
+      await fetch(SMS_WEBHOOK_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': SMS_WEBHOOK_API_KEY,
+        },
+        body: JSON.stringify({
+          type: 'Shipping Update',
+          shippingStatus,
+          eta,
+        }),
+      });
+    } catch (err) {
+      console.error('Failed to call SMS webhook', err);
+    }
+  }
 }
 
 setInterval(() => {
@@ -1452,9 +1478,21 @@ app.get('/orders', ensureAuth, ensureShopAccess, async (req, res) => {
     acc[o.status] = (acc[o.status] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
+  const shippingStatusCounts = orders.reduce(
+    (acc: Record<string, number>, o) => {
+      acc[o.shipping_status] = (acc[o.shipping_status] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+  const smsSubscriptions = await getSmsSubscriptionsForUser(
+    req.session.userId!
+  );
   res.render('orders', {
     orders,
     statusCounts,
+    shippingStatusCounts,
+    smsSubscriptions,
     companies,
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
@@ -1480,6 +1518,11 @@ app.get('/orders/:orderNumber', ensureAuth, ensureShopAccess, async (req, res) =
   const poNumber = items[0]?.po_number || '';
   const shippingStatus = items[0]?.shipping_status || '';
   const consignmentId = items[0]?.consignment_id || '';
+  const eta = items[0]?.eta || null;
+  const smsSubscribed = await isUserSubscribedToOrder(
+    orderNumber,
+    req.session.userId!
+  );
   res.render('order-details', {
     orderNumber,
     items,
@@ -1488,6 +1531,8 @@ app.get('/orders/:orderNumber', ensureAuth, ensureShopAccess, async (req, res) =
     poNumber,
     shippingStatus,
     consignmentId,
+    eta,
+    smsSubscribed,
     companies,
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
@@ -1508,16 +1553,44 @@ app.post(
     if (!req.session.companyId) {
       return res.redirect('/orders');
     }
-    const { shippingStatus, consignmentId } = req.body;
+    const { shippingStatus, consignmentId, eta } = req.body;
     await updateOrderShipping(
       req.params.orderNumber,
       req.session.companyId,
       shippingStatus,
-      consignmentId || null
+      consignmentId || null,
+      eta || null
     );
+    const subs = await getSmsSubscribersByOrder(req.params.orderNumber);
+    if (subs.length) {
+      for (const _ of subs) {
+        await sendSmsUpdate(shippingStatus, eta || null);
+      }
+    }
     res.redirect(`/orders/${req.params.orderNumber}`);
   }
 );
+
+app.post('/orders/:orderNumber/sms', ensureAuth, async (req, res) => {
+  const subscribe = !!req.body.subscribe;
+  await setSmsSubscription(
+    req.params.orderNumber,
+    req.session.userId!,
+    subscribe
+  );
+  if (subscribe) {
+    const items = req.session.companyId
+      ? await getOrderItems(req.params.orderNumber, req.session.companyId)
+      : [];
+    const shippingStatus = items[0]?.shipping_status || '';
+    const eta = items[0]?.eta || null;
+    await sendSmsUpdate(
+      shippingStatus,
+      eta ? eta.toISOString() : null
+    );
+  }
+  res.json({ success: true });
+});
 
 app.post(
   '/orders/:orderNumber/delete',
@@ -3139,6 +3212,8 @@ api
  *             properties:
  *               shippingStatus:
  *                 type: string
+ *               eta:
+ *                 type: string
  *     responses:
  *       200:
  *         description: Update successful
@@ -3152,11 +3227,21 @@ api
     res.json(orders);
   })
   .put(async (req, res) => {
-    const { shippingStatus } = req.body;
+    const { shippingStatus, eta } = req.body;
     await updateShippingStatusByConsignmentId(
       req.params.consignmentId,
-      shippingStatus
+      shippingStatus,
+      eta || null
     );
+    const orders = await getOrdersByConsignmentId(req.params.consignmentId);
+    for (const order of orders) {
+      const subs = await getSmsSubscribersByOrder(order.order_number);
+      if (subs.length) {
+        for (const _ of subs) {
+          await sendSmsUpdate(shippingStatus, eta || null);
+        }
+      }
+    }
     res.json({ success: true });
   });
 

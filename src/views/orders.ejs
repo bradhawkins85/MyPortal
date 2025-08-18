@@ -6,8 +6,13 @@
     <%- include('partials/sidebar') %>
     <div class="content">
       <h1>Orders</h1>
-      <div class="chart-container" style="width: 400px; height: 200px;">
-        <canvas id="statusChart"></canvas>
+      <div style="display: flex; gap: 20px;">
+        <div class="chart-container" style="width: 400px; height: 200px;">
+          <canvas id="statusChart"></canvas>
+        </div>
+        <div class="chart-container" style="width: 400px; height: 200px;">
+          <canvas id="shippingChart"></canvas>
+        </div>
       </div>
       <% if (orders.length === 0) { %>
         <p>No orders have been placed.</p>
@@ -19,8 +24,10 @@
               <th>PO Number</th>
               <th>Status</th>
               <th>Shipping Status</th>
+              <th>ETA</th>
               <th>Notes</th>
               <th>Date</th>
+              <th>SMS Updates</th>
               <% if (isSuperAdmin) { %><th>Consignment ID</th><% } %>
               <% if (isSuperAdmin) { %><th>Actions</th><% } %>
             </tr>
@@ -32,8 +39,10 @@
                 <td><%= o.po_number %></td>
                 <td><%= o.status %></td>
                 <td><%= o.shipping_status %></td>
+                <td><%= o.eta ? o.eta.toISOString().slice(0,10) : '' %></td>
                 <td><%= o.notes || '' %></td>
                 <td><%= o.order_date.toISOString().slice(0,10) %></td>
+                <td><input type="checkbox" class="sms-subscribe" data-order="<%= o.order_number %>" <%= smsSubscriptions.includes(o.order_number) ? 'checked' : '' %>></td>
                 <% if (isSuperAdmin) { %><td><%= o.consignment_id || '' %></td><% } %>
                 <% if (isSuperAdmin) { %>
                   <td>
@@ -50,6 +59,7 @@
       <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
       <script>
         const statusCounts = <%- JSON.stringify(statusCounts) %>;
+        const shippingStatusCounts = <%- JSON.stringify(shippingStatusCounts) %>;
         const ctx = document.getElementById('statusChart').getContext('2d');
         new Chart(ctx, {
           type: 'bar',
@@ -70,6 +80,36 @@
               }
             }
           }
+        });
+        const sctx = document.getElementById('shippingChart').getContext('2d');
+        new Chart(sctx, {
+          type: 'bar',
+          data: {
+            labels: Object.keys(shippingStatusCounts),
+            datasets: [{
+              label: 'Shipping',
+              data: Object.values(shippingStatusCounts),
+              backgroundColor: 'rgba(192, 75, 192, 0.5)',
+              borderColor: 'rgba(192, 75, 192, 1)',
+              borderWidth: 1
+            }]
+          },
+          options: {
+            scales: {
+              y: {
+                beginAtZero: true
+              }
+            }
+          }
+        });
+        document.querySelectorAll('.sms-subscribe').forEach((cb) => {
+          cb.addEventListener('change', async function () {
+            await fetch(`/orders/${this.dataset.order}/sms`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ subscribe: this.checked })
+            });
+          });
         });
       </script>
     </div>
