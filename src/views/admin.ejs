@@ -118,7 +118,7 @@
                       <input type="hidden" name="userId" value="<%= a.user_id %>">
                       <input type="hidden" name="companyId" value="<%= a.company_id %>">
                       <input type="hidden" name="isAdmin" value="0">
-                      <input type="checkbox" name="isAdmin" value="1" <%= a.is_admin ? 'checked' : '' %> onchange="this.form.submit()">
+                      <input type="checkbox" name="isAdmin" value="1" <%= a.is_admin ? 'checked' : '' %> <%= (!isSuperAdmin && a.user_id === currentUserId) ? 'disabled' : '' %> onchange="this.form.submit()">
                     </form>
                   </td>
                   <td>
