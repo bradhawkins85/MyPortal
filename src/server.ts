@@ -113,6 +113,8 @@ import {
   getSmsSubscriptionsForUser,
   setSmsSubscription,
   getSmsSubscribersByOrder,
+  getOrderPoNumber,
+  getUsersMobilePhones,
   isUserSubscribedToOrder,
   upsertAsset,
   upsertInvoice,
@@ -177,6 +179,17 @@ async function sendSmsUpdate(
   const { SMS_WEBHOOK_URL, SMS_WEBHOOK_API_KEY } = process.env;
   if (SMS_WEBHOOK_URL && SMS_WEBHOOK_API_KEY) {
     try {
+      const [poNumber, subscriberIds] = await Promise.all([
+        getOrderPoNumber(orderNumber),
+        getSmsSubscribersByOrder(orderNumber),
+      ]);
+      if (!subscriberIds.length) {
+        return;
+      }
+      const recipients = await getUsersMobilePhones(subscriberIds);
+      if (!recipients.length) {
+        return;
+      }
       await fetch(SMS_WEBHOOK_URL, {
         method: 'POST',
         headers: {
@@ -186,8 +199,10 @@ async function sendSmsUpdate(
         body: JSON.stringify({
           type: 'Shipping Update',
           orderNumber,
+          poNumber,
           shippingStatus,
           eta,
+          recipients,
         }),
       });
     } catch (err) {
@@ -1578,14 +1593,11 @@ app.post(
       consignmentId || null,
       eta || null
     );
-    const subs = await getSmsSubscribersByOrder(req.params.orderNumber);
-    if (subs.length) {
-      await sendSmsUpdate(
-        req.params.orderNumber,
-        shippingStatus,
-        eta || null
-      );
-    }
+    await sendSmsUpdate(
+      req.params.orderNumber,
+      shippingStatus,
+      eta || null
+    );
     res.redirect(`/orders/${req.params.orderNumber}`);
   }
 );
@@ -3262,14 +3274,11 @@ api
     );
     const orders = await getOrdersByConsignmentId(req.params.consignmentId);
     for (const order of orders) {
-      const subs = await getSmsSubscribersByOrder(order.order_number);
-      if (subs.length) {
-        await sendSmsUpdate(
-          order.order_number,
-          shippingStatus,
-          eta || null
-        );
-      }
+      await sendSmsUpdate(
+        order.order_number,
+        shippingStatus,
+        eta || null
+      );
     }
     res.json({ success: true });
   });
