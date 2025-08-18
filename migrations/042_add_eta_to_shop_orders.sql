@@ -1,0 +1,2 @@
+ALTER TABLE shop_orders
+  ADD COLUMN eta DATETIME NULL;
