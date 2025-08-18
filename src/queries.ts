@@ -118,6 +118,7 @@ export interface OrderItem {
   description: string;
   image_url: string | null;
   price: number;
+  eta: Date | null;
 }
 
 export interface OrderSummary {
@@ -128,6 +129,7 @@ export interface OrderSummary {
   notes: string | null;
   po_number: string | null;
   consignment_id: string | null;
+  eta: Date | null;
 }
 
 export interface Asset {
@@ -1430,7 +1432,7 @@ export async function getOrderSummariesByCompany(
   companyId: number
 ): Promise<OrderSummary[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT order_number, MAX(order_date) as order_date, MAX(status) as status, MAX(shipping_status) as shipping_status, MAX(notes) as notes, MAX(po_number) as po_number, MAX(consignment_id) as consignment_id
+    `SELECT order_number, MAX(order_date) as order_date, MAX(status) as status, MAX(shipping_status) as shipping_status, MAX(notes) as notes, MAX(po_number) as po_number, MAX(consignment_id) as consignment_id, MAX(eta) as eta
      FROM shop_orders WHERE company_id = ? GROUP BY order_number ORDER BY order_date DESC`,
     [companyId]
   );
@@ -1512,22 +1514,73 @@ export async function updateOrderShipping(
   orderNumber: string,
   companyId: number,
   shippingStatus: string,
-  consignmentId: string | null
+  consignmentId: string | null,
+  eta: string | null
 ): Promise<void> {
   await pool.execute(
-    'UPDATE shop_orders SET shipping_status = ?, consignment_id = ? WHERE order_number = ? AND company_id = ?',
-    [shippingStatus, consignmentId, orderNumber, companyId]
+    'UPDATE shop_orders SET shipping_status = ?, consignment_id = ?, eta = ? WHERE order_number = ? AND company_id = ?',
+    [shippingStatus, consignmentId, eta, orderNumber, companyId]
   );
 }
 
 export async function updateShippingStatusByConsignmentId(
   consignmentId: string,
-  shippingStatus: string
+  shippingStatus: string,
+  eta: string | null
 ): Promise<void> {
   await pool.execute(
-    'UPDATE shop_orders SET shipping_status = ? WHERE consignment_id = ?',
-    [shippingStatus, consignmentId]
+    'UPDATE shop_orders SET shipping_status = ?, eta = ? WHERE consignment_id = ?',
+    [shippingStatus, eta, consignmentId]
   );
+}
+
+export async function getSmsSubscriptionsForUser(
+  userId: number
+): Promise<string[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT order_number FROM order_sms_subscriptions WHERE user_id = ?',
+    [userId]
+  );
+  return rows.map((r) => r.order_number as string);
+}
+
+export async function setSmsSubscription(
+  orderNumber: string,
+  userId: number,
+  subscribe: boolean
+): Promise<void> {
+  if (subscribe) {
+    await pool.execute(
+      'REPLACE INTO order_sms_subscriptions (order_number, user_id) VALUES (?, ?)',
+      [orderNumber, userId]
+    );
+  } else {
+    await pool.execute(
+      'DELETE FROM order_sms_subscriptions WHERE order_number = ? AND user_id = ?',
+      [orderNumber, userId]
+    );
+  }
+}
+
+export async function getSmsSubscribersByOrder(
+  orderNumber: string
+): Promise<number[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT user_id FROM order_sms_subscriptions WHERE order_number = ?',
+    [orderNumber]
+  );
+  return rows.map((r) => r.user_id as number);
+}
+
+export async function isUserSubscribedToOrder(
+  orderNumber: string,
+  userId: number
+): Promise<boolean> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT 1 FROM order_sms_subscriptions WHERE order_number = ? AND user_id = ?',
+    [orderNumber, userId]
+  );
+  return rows.length > 0;
 }
 
 export async function createForm(

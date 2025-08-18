@@ -9,6 +9,7 @@
         <p>PO Number: <%= poNumber %></p>
         <p>Status: <%= status %></p>
         <p>Shipping Status: <%= shippingStatus %></p>
+        <p>ETA: <%= eta ? eta.toISOString().slice(0,10) : '' %></p>
         <% if (isSuperAdmin) { %><p>Consignment ID: <%= consignmentId || '' %></p><% } %>
         <% if (notes) { %><p>Notes: <%= notes %></p><% } %>
         <% if (isSuperAdmin) { %>
@@ -19,9 +20,15 @@
             <label>Consignment ID:
               <input type="text" name="consignmentId" value="<%= consignmentId || '' %>">
             </label>
+            <label>ETA:
+              <input type="date" name="eta" value="<%= eta ? eta.toISOString().slice(0,10) : '' %>">
+            </label>
             <button type="submit">Update Shipping</button>
           </form>
         <% } %>
+        <label>
+          <input type="checkbox" id="smsSubscribe" <%= smsSubscribed ? 'checked' : '' %>> SMS Updates
+        </label>
         <% if (items.length === 0) { %>
           <p>No items found.</p>
         <% } else { %>
@@ -50,6 +57,15 @@
             </tbody>
           </table>
         <% } %>
+        <script>
+          document.getElementById('smsSubscribe').addEventListener('change', async function() {
+            await fetch(`/orders/<%= orderNumber %>/sms`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ subscribe: this.checked })
+            });
+          });
+        </script>
       </div>
     </div>
   </body>
