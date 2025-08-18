@@ -1011,14 +1011,16 @@ app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
   const enabledFilter = req.query.enabled as string | undefined;
   const enabledParam =
     enabledFilter === '1' ? true : enabledFilter === '0' ? false : undefined;
-  const staff = req.session.companyId
-    ? await getStaffByCompany(req.session.companyId, enabledParam)
+  const companyId = req.session.companyId;
+  const staff = companyId
+    ? await getStaffByCompany(companyId, enabledParam)
     : [];
-  const current = companies.find((c) => c.company_id === req.session.companyId);
+  const current = companies.find((c) => c.company_id === companyId);
+  const company = companyId ? await getCompanyById(companyId) : null;
   res.render('staff', {
     staff,
     companies,
-    currentCompanyId: req.session.companyId,
+    currentCompanyId: companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     isSuperAdmin: req.session.userId === 1,
     canManageLicenses: current?.can_manage_licenses ?? 0,
@@ -1028,6 +1030,7 @@ app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
     canOrderLicenses: current?.can_order_licenses ?? 0,
     canAccessShop: current?.can_access_shop ?? 0,
     enabledFilter: enabledFilter ?? '',
+    syncroCompanyId: company?.syncro_company_id ?? null,
   });
 });
 
