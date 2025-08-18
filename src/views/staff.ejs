@@ -170,9 +170,9 @@
   </div>
 
   <script>
-    const isSuperAdmin = <%= isSuperAdmin ? 'true' : 'false' %>;
-    const isAdmin = <%= isAdmin ? 'true' : 'false' %>;
-    const syncroCompanyId = <%= syncroCompanyId ? `'${syncroCompanyId}'` : 'null' %>;
+    const isSuperAdmin = <%- JSON.stringify(isSuperAdmin) %>;
+    const isAdmin = <%- JSON.stringify(isAdmin) %>;
+    const syncroCompanyId = <%- JSON.stringify(syncroCompanyId) %>;
     const editModal = document.getElementById('edit-modal');
     const editForm = document.getElementById('edit-form');
     let editingId = null;
