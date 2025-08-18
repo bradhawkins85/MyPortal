@@ -8,7 +8,20 @@
         <h1>Order <%= orderNumber %></h1>
         <p>PO Number: <%= poNumber %></p>
         <p>Status: <%= status %></p>
+        <p>Shipping Status: <%= shippingStatus %></p>
+        <% if (isSuperAdmin) { %><p>Consignment ID: <%= consignmentId || '' %></p><% } %>
         <% if (notes) { %><p>Notes: <%= notes %></p><% } %>
+        <% if (isSuperAdmin) { %>
+          <form action="/orders/<%= orderNumber %>/shipping" method="post">
+            <label>Shipping Status:
+              <input type="text" name="shippingStatus" value="<%= shippingStatus %>">
+            </label>
+            <label>Consignment ID:
+              <input type="text" name="consignmentId" value="<%= consignmentId || '' %>">
+            </label>
+            <button type="submit">Update Shipping</button>
+          </form>
+        <% } %>
         <% if (items.length === 0) { %>
           <p>No items found.</p>
         <% } else { %>
