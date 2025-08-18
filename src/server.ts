@@ -118,6 +118,9 @@ import {
   deleteCompanyAppPrice,
   upsertCompanyAppPrice,
   updateCompanyIds,
+  getHiddenSyncroCustomerIds,
+  hideSyncroCustomer,
+  unhideSyncroCustomer,
   getSiteSettings,
   updateSiteSettings,
   getEmailTemplate,
@@ -1904,8 +1907,10 @@ app.post('/admin/company/:id', ensureAuth, ensureSuperAdmin, async (req, res) =>
 
 app.get('/admin/syncro/customers', ensureAuth, ensureSuperAdmin, async (req, res) => {
   try {
-    const [customers, allCompanies, companies] = await Promise.all([
+    const showHidden = req.query.showHidden === '1';
+    const [customers, hiddenIds, allCompanies, companies] = await Promise.all([
       getSyncroCustomers(),
+      getHiddenSyncroCustomerIds(),
       getAllCompanies(),
       getCompaniesForUser(req.session.userId!),
     ]);
@@ -1915,9 +1920,14 @@ app.get('/admin/syncro/customers', ensureAuth, ensureSuperAdmin, async (req, res
     const importedIds = allCompanies
       .filter((c) => c.syncro_company_id)
       .map((c) => c.syncro_company_id!);
+    const visibleCustomers = showHidden
+      ? customers
+      : customers.filter((c) => !hiddenIds.includes(String(c.id)));
     res.render('syncro-customers', {
-      customers,
+      customers: visibleCustomers,
       importedIds,
+      hiddenIds,
+      showHidden,
       companies,
       currentCompanyId: req.session.companyId,
       isAdmin: true,
@@ -1934,9 +1944,12 @@ app.get('/admin/syncro/customers', ensureAuth, ensureSuperAdmin, async (req, res
 });
 
 app.post('/admin/syncro/import', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { customerId } = req.body;
+  const { customerId, showHidden } = req.body;
+  const redirectUrl = `/admin/syncro/customers${
+    showHidden === '1' ? '?showHidden=1' : ''
+  }`;
   if (!customerId) {
-    return res.redirect('/admin/syncro/customers');
+    return res.redirect(redirectUrl);
   }
   try {
     const customer = await getSyncroCustomer(customerId);
@@ -1963,7 +1976,23 @@ app.post('/admin/syncro/import', ensureAuth, ensureSuperAdmin, async (req, res) 
   } catch (err) {
     console.error('Syncro import failed', err);
   }
-  res.redirect('/admin/syncro/customers');
+  res.redirect(redirectUrl);
+});
+
+app.post('/admin/syncro/hide', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { customerId, showHidden } = req.body;
+  if (customerId) {
+    await hideSyncroCustomer(customerId);
+  }
+  res.redirect(`/admin/syncro/customers${showHidden === '1' ? '?showHidden=1' : ''}`);
+});
+
+app.post('/admin/syncro/unhide', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { customerId, showHidden } = req.body;
+  if (customerId) {
+    await unhideSyncroCustomer(customerId);
+  }
+  res.redirect(`/admin/syncro/customers${showHidden === '1' ? '?showHidden=1' : ''}`);
 });
 
 app.post('/admin/user', ensureAuth, ensureAdmin, async (req, res) => {
