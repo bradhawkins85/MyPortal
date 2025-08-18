@@ -1479,7 +1479,7 @@ app.post('/cart/place-order', ensureAuth, ensureShopAccess, async (req, res) => 
         console.error('Failed to call webhook', err);
       }
     }
-    let orderNumber = 'TBC';
+    let orderNumber = 'ORD';
     for (let i = 0; i < 12; i++) {
       orderNumber += Math.floor(Math.random() * 10).toString();
     }
@@ -3099,7 +3099,7 @@ api
     } = req.body;
     let num = orderNumber as string | undefined;
     if (!num) {
-      num = 'TBC';
+      num = 'ORD';
       for (let i = 0; i < 12; i++) {
         num += Math.floor(Math.random() * 10).toString();
       }
