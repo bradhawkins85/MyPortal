@@ -1120,6 +1120,56 @@ app.post('/staff/:id/verify', ensureAuth, ensureSuperAdmin, async (req, res) => 
   res.json({ success: status === 202, status, code });
 });
 
+app.post('/staff/:id/invite', ensureAuth, ensureStaffAccess, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const staff = await getStaffById(id);
+  if (!staff || !staff.email) {
+    return res.status(400).json({ error: 'No email for staff member' });
+  }
+  const existing = await getUserByEmail(staff.email);
+  if (existing) {
+    return res.status(400).json({ error: 'User already exists' });
+  }
+  const tempPassword = crypto.randomBytes(12).toString('base64url');
+  const passwordHash = await bcrypt.hash(tempPassword, 10);
+  const userId = await createUser(staff.email, passwordHash, staff.company_id, true);
+  await assignUserToCompany(
+    userId,
+    staff.company_id,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+  );
+  await updateUserName(userId, staff.first_name || '', staff.last_name || '');
+  const [template, siteSettings] = await Promise.all([
+    getEmailTemplate('staff_invitation'),
+    getSiteSettings(),
+  ]);
+  if (template) {
+    const portalUrl =
+      process.env.PORTAL_URL || `${req.protocol}://${req.get('host')}/login`;
+    const html = template.body
+      .replace(/\{\{companyName\}\}/g, siteSettings?.company_name || '')
+      .replace(/\{\{tempPassword\}\}/g, tempPassword)
+      .replace(/\{\{portalUrl\}\}/g, portalUrl)
+      .replace(/\{\{loginLogo\}\}/g, siteSettings?.login_logo || '');
+    const subject = template.subject.replace(
+      /\{\{companyName\}\}/g,
+      siteSettings?.company_name || ''
+    );
+    try {
+      await sendEmail(staff.email, subject, html);
+    } catch (err) {
+      console.error('Failed to send invitation email', err);
+    }
+  }
+  res.json({ success: true });
+});
+
 app.get('/assets', ensureAuth, ensureAssetsAccess, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
   const assets = req.session.companyId
