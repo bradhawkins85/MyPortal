@@ -280,9 +280,15 @@ table th {
 .verify-icon {
   font-size: 4rem;
   text-align: center;
-  margin: 1rem 0;
+  width: fit-content;
+  margin: 1rem auto;
 }
 
 .verify-container p {
+  text-align: center;
+}
+
+.verify-container .error,
+.verify-container .success {
   text-align: center;
 }
