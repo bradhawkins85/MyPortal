@@ -16,6 +16,7 @@ import {
   getSyncroCustomer,
   getSyncroContacts,
 } from './syncro';
+import { findExistingStaff } from './staff-import';
 import {
   getUserByEmail,
   getCompanyById,
@@ -2221,11 +2222,11 @@ app.post(
             .join(' ');
         const email = (contact as any).email || (contact as any).email_address || null;
         const phone = (contact as any).mobile || (contact as any).phone || null;
-        let existing = existingStaff.find(
-          (s) =>
-            (email && s.email.toLowerCase() === email.toLowerCase()) ||
-            (s.first_name.toLowerCase() === firstName.toLowerCase() &&
-              s.last_name.toLowerCase() === lastName.toLowerCase())
+        const existing = findExistingStaff(
+          existingStaff,
+          firstName,
+          lastName,
+          email
         );
         if (existing) {
           await updateStaff(
