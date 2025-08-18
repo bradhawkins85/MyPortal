@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+  <%- include('partials/head', { title: 'Email Templates' }) %>
+  <body>
+    <div class="app-container">
+      <%- include('partials/sidebar') %>
+      <div class="content">
+        <h1>Email Templates</h1>
+        <form action="/admin/email-templates" method="post">
+          <label>Subject:
+            <input type="text" name="subject" value="<%= template ? template.subject : '' %>" required>
+          </label>
+          <label>Body:
+            <textarea name="body" rows="10" cols="80"><%= template ? template.body : '' %></textarea>
+          </label>
+          <p>Available placeholders: {{companyName}}, {{portalUrl}}, {{tempPassword}}, {{loginLogo}}</p>
+          <button type="submit">Save</button>
+        </form>
+      </div>
+    </div>
+  </body>
+</html>
