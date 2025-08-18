@@ -224,6 +224,17 @@
             </form>
           </section>
           <section>
+            <h2>SMS Alerts</h2>
+            <% if (mobileError) { %><p class="error"><%= mobileError %></p><% } %>
+            <% if (mobileSuccess) { %><p class="success"><%= mobileSuccess %></p><% } %>
+            <form method="post" action="/change-mobile">
+              <label>Mobile Phone:
+                <input type="tel" name="mobilePhone" value="<%= currentUserMobilePhone %>">
+              </label>
+              <button type="submit">Update Mobile</button>
+            </form>
+          </section>
+          <section>
             <h2>Change Password</h2>
             <% if (passwordError) { %><p class="error"><%= passwordError %></p><% } %>
             <% if (passwordSuccess) { %><p class="success"><%= passwordSuccess %></p><% } %>
