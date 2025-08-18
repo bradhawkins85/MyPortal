@@ -1018,7 +1018,7 @@ app.post('/staff/enabled', ensureAuth, ensureStaffAccess, async (req, res) => {
   res.redirect('/staff');
 });
 
-app.post('/staff/:id/verify', ensureAuth, ensureStaffAccess, async (req, res) => {
+app.post('/staff/:id/verify', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const staff = await getStaffById(id);
   if (!staff || !staff.mobile_phone) {

@@ -51,7 +51,9 @@
                 </form>
               </td>
               <td>
+                <% if (isSuperAdmin) { %>
                 <button class="verify-btn" data-id="<%= s.id %>" <%= s.mobile_phone ? '' : 'disabled' %>>Verify</button>
+                <% } %>
                 <button
                   class="edit-btn"
                   data-id="<%= s.id %>"
@@ -204,6 +206,7 @@
       });
     });
 
+    <% if (isSuperAdmin) { %>
     document.querySelectorAll('.verify-btn').forEach(function(btn) {
       btn.addEventListener('click', async function() {
         const res = await fetch(`/staff/${this.dataset.id}/verify`, { method: 'POST' });
@@ -223,6 +226,7 @@
         }
       });
     });
+    <% } %>
 
     document.querySelectorAll('.delete-btn').forEach(function(btn) {
       btn.addEventListener('click', async function() {
