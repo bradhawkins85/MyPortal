@@ -46,6 +46,7 @@ import {
   deleteUser,
   updateUserPassword,
   updateUserName,
+  updateUserMobile,
   setUserForcePasswordChange,
   getUserTotpAuthenticators,
   addUserTotpAuthenticator,
@@ -728,6 +729,17 @@ app.post('/change-name', ensureAuth, ensureAdmin, async (req, res) => {
   }
   await updateUserName(req.session.userId!, firstName, lastName);
   req.session.nameSuccess = 'Name updated successfully';
+  res.redirect('/admin#account');
+});
+
+app.post('/change-mobile', ensureAuth, ensureAdmin, async (req, res) => {
+  const mobilePhone = (req.body.mobilePhone || '').trim();
+  if (!mobilePhone) {
+    req.session.mobileError = 'Mobile phone is required';
+    return res.redirect('/admin#account');
+  }
+  await updateUserMobile(req.session.userId!, mobilePhone);
+  req.session.mobileSuccess = 'Mobile phone updated';
   res.redirect('/admin#account');
 });
 
@@ -1896,11 +1908,15 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
   const passwordSuccess = req.session.passwordSuccess || '';
   const nameError = req.session.nameError || '';
   const nameSuccess = req.session.nameSuccess || '';
+  const mobileError = req.session.mobileError || '';
+  const mobileSuccess = req.session.mobileSuccess || '';
   req.session.passwordError = undefined;
   req.session.passwordSuccess = undefined;
   req.session.newTotpError = undefined;
   req.session.nameError = undefined;
   req.session.nameSuccess = undefined;
+  req.session.mobileError = undefined;
+  req.session.mobileSuccess = undefined;
   res.render('admin', {
     allCompanies,
     users,
@@ -1938,8 +1954,11 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     passwordSuccess,
     nameError,
     nameSuccess,
+    mobileError,
+    mobileSuccess,
     currentUserFirstName: currentUser?.first_name || '',
     currentUserLastName: currentUser?.last_name || '',
+    currentUserMobilePhone: currentUser?.mobile_phone || '',
     siteSettings: res.locals.siteSettings,
   });
 });
