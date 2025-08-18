@@ -8,6 +8,7 @@ export interface User {
   company_id: number;
   first_name?: string | null;
   last_name?: string | null;
+  force_password_change?: number;
 }
 
 export interface UserTotpAuthenticator {
@@ -64,6 +65,13 @@ export interface UserCompany {
   company_name?: string;
   email?: string;
   is_vip?: number;
+}
+
+export interface EmailTemplate {
+  id: number;
+  name: string;
+  subject: string;
+  body: string;
 }
 
 export interface Product {
@@ -402,11 +410,12 @@ export async function updateCompanyIds(
 export async function createUser(
   email: string,
   passwordHash: string,
-  companyId: number
+  companyId: number,
+  forcePasswordChange = false
 ): Promise<number> {
   const [result] = await pool.execute(
-    'INSERT INTO users (email, password_hash, company_id) VALUES (?, ?, ?)',
-    [email, passwordHash, companyId]
+    'INSERT INTO users (email, password_hash, company_id, force_password_change) VALUES (?, ?, ?, ?)',
+    [email, passwordHash, companyId, forcePasswordChange ? 1 : 0]
   );
   const insert = result as ResultSetHeader;
   return insert.insertId;
@@ -746,11 +755,43 @@ export async function updateUser(
   );
 }
 
+export async function setUserForcePasswordChange(
+  id: number,
+  force: boolean
+): Promise<void> {
+  await pool.execute('UPDATE users SET force_password_change = ? WHERE id = ?', [
+    force ? 1 : 0,
+    id,
+  ]);
+}
+
 export async function updateUserPassword(
   id: number,
   passwordHash: string
 ): Promise<void> {
   await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, id]);
+}
+
+export async function getEmailTemplate(
+  name: string
+): Promise<EmailTemplate | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM email_templates WHERE name = ?',
+    [name]
+  );
+  return (rows as EmailTemplate[])[0] || null;
+}
+
+export async function upsertEmailTemplate(
+  name: string,
+  subject: string,
+  body: string
+): Promise<void> {
+  await pool.execute(
+    `INSERT INTO email_templates (name, subject, body) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE subject = VALUES(subject), body = VALUES(body)`,
+    [name, subject, body]
+  );
 }
 
 export async function getUserTotpAuthenticators(

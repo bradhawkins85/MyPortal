@@ -27,6 +27,8 @@ declare module 'express-session' {
     passwordSuccess?: string;
     nameError?: string;
     nameSuccess?: string;
+    mustChangePassword?: boolean;
+    pendingForcePassword?: boolean;
   }
 }
 
