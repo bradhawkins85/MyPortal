@@ -106,6 +106,9 @@ import {
   getOrderItems,
   deleteOrder,
   updateOrder,
+  updateOrderShipping,
+  getOrdersByConsignmentId,
+  updateShippingStatusByConsignmentId,
   upsertAsset,
   upsertInvoice,
   getAllApps,
@@ -1445,8 +1448,13 @@ app.get('/orders', ensureAuth, ensureShopAccess, async (req, res) => {
     : [];
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
+  const statusCounts = orders.reduce((acc: Record<string, number>, o) => {
+    acc[o.status] = (acc[o.status] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
   res.render('orders', {
     orders,
+    statusCounts,
     companies,
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
@@ -1470,12 +1478,16 @@ app.get('/orders/:orderNumber', ensureAuth, ensureShopAccess, async (req, res) =
   const status = items[0]?.status || '';
   const notes = items[0]?.notes || '';
   const poNumber = items[0]?.po_number || '';
+  const shippingStatus = items[0]?.shipping_status || '';
+  const consignmentId = items[0]?.consignment_id || '';
   res.render('order-details', {
     orderNumber,
     items,
     status,
     notes,
     poNumber,
+    shippingStatus,
+    consignmentId,
     companies,
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
@@ -1487,6 +1499,25 @@ app.get('/orders/:orderNumber', ensureAuth, ensureShopAccess, async (req, res) =
     canAccessShop: current?.can_access_shop ?? 0,
   });
 });
+
+app.post(
+  '/orders/:orderNumber/shipping',
+  ensureAuth,
+  ensureSuperAdmin,
+  async (req, res) => {
+    if (!req.session.companyId) {
+      return res.redirect('/orders');
+    }
+    const { shippingStatus, consignmentId } = req.body;
+    await updateOrderShipping(
+      req.params.orderNumber,
+      req.session.companyId,
+      shippingStatus,
+      consignmentId || null
+    );
+    res.redirect(`/orders/${req.params.orderNumber}`);
+  }
+);
 
 app.post(
   '/orders/:orderNumber/delete',
@@ -3069,6 +3100,62 @@ api
     await deleteOrder(
       req.params.orderNumber,
       parseInt(companyId as string, 10)
+    );
+    res.json({ success: true });
+  });
+
+/**
+ * @openapi
+ * /api/shop/orders/consignment/{consignmentId}:
+ *   get:
+ *     tags:
+ *       - Shop
+ *     summary: Get orders by consignment ID
+ *     parameters:
+ *       - in: path
+ *         name: consignmentId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Orders retrieved
+ *   put:
+ *     tags:
+ *       - Shop
+ *     summary: Update shipping status by consignment ID
+ *     parameters:
+ *       - in: path
+ *         name: consignmentId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               shippingStatus:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Update successful
+ */
+api
+  .route('/shop/orders/consignment/:consignmentId')
+  .get(async (req, res) => {
+    const orders = await getOrdersByConsignmentId(
+      req.params.consignmentId
+    );
+    res.json(orders);
+  })
+  .put(async (req, res) => {
+    const { shippingStatus } = req.body;
+    await updateShippingStatusByConsignmentId(
+      req.params.consignmentId,
+      shippingStatus
     );
     res.json({ success: true });
   });

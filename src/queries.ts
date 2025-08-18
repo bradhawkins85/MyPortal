@@ -109,8 +109,10 @@ export interface OrderItem {
   quantity: number;
   order_date: Date;
   status: string;
+  shipping_status: string;
   notes: string | null;
   po_number: string | null;
+  consignment_id: string | null;
   product_name: string;
   sku: string;
   description: string;
@@ -122,8 +124,10 @@ export interface OrderSummary {
   order_number: string;
   order_date: Date;
   status: string;
+  shipping_status: string;
   notes: string | null;
   po_number: string | null;
+  consignment_id: string | null;
 }
 
 export interface Asset {
@@ -1426,7 +1430,7 @@ export async function getOrderSummariesByCompany(
   companyId: number
 ): Promise<OrderSummary[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT order_number, MAX(order_date) as order_date, MAX(status) as status, MAX(notes) as notes, MAX(po_number) as po_number
+    `SELECT order_number, MAX(order_date) as order_date, MAX(status) as status, MAX(shipping_status) as shipping_status, MAX(notes) as notes, MAX(po_number) as po_number, MAX(consignment_id) as consignment_id
      FROM shop_orders WHERE company_id = ? GROUP BY order_number ORDER BY order_date DESC`,
     [companyId]
   );
@@ -1444,6 +1448,23 @@ export async function getOrderItems(
      JOIN companies c ON o.company_id = c.id
      WHERE o.order_number = ? AND o.company_id = ?`,
     [orderNumber, companyId]
+  );
+  return (rows as RowDataPacket[]).map((row) => ({
+    ...(row as any),
+    price: Number(row.price),
+  })) as OrderItem[];
+}
+
+export async function getOrdersByConsignmentId(
+  consignmentId: string
+): Promise<OrderItem[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT o.*, p.name as product_name, IF(c.is_vip = 1 AND p.vip_price IS NOT NULL, p.vip_price, p.price) AS price, p.sku, p.description, p.image_url
+     FROM shop_orders o
+     JOIN shop_products p ON o.product_id = p.id
+     JOIN companies c ON o.company_id = c.id
+     WHERE o.consignment_id = ?`,
+    [consignmentId]
   );
   return (rows as RowDataPacket[]).map((row) => ({
     ...(row as any),
@@ -1484,6 +1505,28 @@ export async function updateOrder(
   await pool.execute(
     'UPDATE shop_orders SET status = ?, notes = ? WHERE order_number = ? AND company_id = ?',
     [status, notes, orderNumber, companyId]
+  );
+}
+
+export async function updateOrderShipping(
+  orderNumber: string,
+  companyId: number,
+  shippingStatus: string,
+  consignmentId: string | null
+): Promise<void> {
+  await pool.execute(
+    'UPDATE shop_orders SET shipping_status = ?, consignment_id = ? WHERE order_number = ? AND company_id = ?',
+    [shippingStatus, consignmentId, orderNumber, companyId]
+  );
+}
+
+export async function updateShippingStatusByConsignmentId(
+  consignmentId: string,
+  shippingStatus: string
+): Promise<void> {
+  await pool.execute(
+    'UPDATE shop_orders SET shipping_status = ? WHERE consignment_id = ?',
+    [shippingStatus, consignmentId]
   );
 }
 

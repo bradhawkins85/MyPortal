@@ -6,6 +6,9 @@
     <%- include('partials/sidebar') %>
     <div class="content">
       <h1>Orders</h1>
+      <div class="chart-container" style="width: 400px; height: 200px;">
+        <canvas id="statusChart"></canvas>
+      </div>
       <% if (orders.length === 0) { %>
         <p>No orders have been placed.</p>
       <% } else { %>
@@ -15,8 +18,10 @@
               <th>Order Number</th>
               <th>PO Number</th>
               <th>Status</th>
+              <th>Shipping Status</th>
               <th>Notes</th>
               <th>Date</th>
+              <% if (isSuperAdmin) { %><th>Consignment ID</th><% } %>
               <% if (isSuperAdmin) { %><th>Actions</th><% } %>
             </tr>
           </thead>
@@ -26,8 +31,10 @@
                 <td><a href="/orders/<%= o.order_number %>"><%= o.order_number %></a></td>
                 <td><%= o.po_number %></td>
                 <td><%= o.status %></td>
+                <td><%= o.shipping_status %></td>
                 <td><%= o.notes || '' %></td>
                 <td><%= o.order_date.toISOString().slice(0,10) %></td>
+                <% if (isSuperAdmin) { %><td><%= o.consignment_id || '' %></td><% } %>
                 <% if (isSuperAdmin) { %>
                   <td>
                     <form action="/orders/<%= o.order_number %>/delete" method="post" onsubmit="return confirm('Delete order?');">
@@ -40,6 +47,31 @@
           </tbody>
         </table>
       <% } %>
+      <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+      <script>
+        const statusCounts = <%- JSON.stringify(statusCounts) %>;
+        const ctx = document.getElementById('statusChart').getContext('2d');
+        new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: Object.keys(statusCounts),
+            datasets: [{
+              label: 'Orders',
+              data: Object.values(statusCounts),
+              backgroundColor: 'rgba(75, 192, 192, 0.5)',
+              borderColor: 'rgba(75, 192, 192, 1)',
+              borderWidth: 1
+            }]
+          },
+          options: {
+            scales: {
+              y: {
+                beginAtZero: true
+              }
+            }
+          }
+        });
+      </script>
     </div>
   </div>
 </body>
