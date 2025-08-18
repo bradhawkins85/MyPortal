@@ -11,7 +11,11 @@ import swaggerUi from 'swagger-ui-express';
 import swaggerJSDoc from 'swagger-jsdoc';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
-import { getSyncroCustomers, getSyncroCustomer } from './syncro';
+import {
+  getSyncroCustomers,
+  getSyncroCustomer,
+  getSyncroContacts,
+} from './syncro';
 import {
   getUserByEmail,
   getCompanyById,
@@ -1056,17 +1060,18 @@ app.post('/staff', ensureAuth, ensureAdmin, async (req, res) => {
       toDate(dateOnboarded),
       toDateTime(dateOffboarded),
       !!enabled,
-      street,
-      city,
-      state,
-      postcode,
-      country,
-      department,
-      jobTitle,
-      company,
-      managerName,
-      null
-    );
+    street,
+    city,
+    state,
+    postcode,
+    country,
+    department,
+    jobTitle,
+    company,
+    managerName,
+    null,
+    null
+  );
   }
   res.redirect('/staff');
 });
@@ -1123,7 +1128,8 @@ app.put('/staff/:id', ensureAuth, ensureStaffAccess, async (req, res) => {
     isSuperAdmin ? jobTitle : existing!.job_title,
     isSuperAdmin ? company : existing!.org_company,
     isSuperAdmin ? managerName : existing!.manager_name,
-    accountActionValue
+    accountActionValue,
+    existing?.syncro_contact_id || null
   );
   res.json({ success: true });
 });
@@ -2171,6 +2177,128 @@ app.post('/admin/syncro/import', ensureAuth, ensureSuperAdmin, async (req, res) 
   }
   res.redirect(redirectUrl);
 });
+
+app.post(
+  '/admin/syncro/import-contacts',
+  ensureAuth,
+  ensureSuperAdmin,
+  async (req, res) => {
+    const { syncroCompanyId } = req.body;
+    if (!syncroCompanyId) {
+      return res.status(400).send('syncroCompanyId required');
+    }
+    try {
+      const company = await getCompanyBySyncroId(syncroCompanyId);
+      if (!company) {
+        return res.status(404).send('Company not found');
+      }
+      const [contacts, existingStaff] = await Promise.all([
+        getSyncroContacts(syncroCompanyId),
+        getStaffByCompany(company.id),
+      ]);
+      for (const contact of contacts) {
+        const fullName = [
+          contact.first_name,
+          contact.last_name,
+          contact.name,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+        if (/ex staff/i.test(fullName)) {
+          continue;
+        }
+        const firstName =
+          contact.first_name || fullName.split(' ')[0] || '';
+        const lastName =
+          contact.last_name ||
+          fullName
+            .split(' ')
+            .slice(1)
+            .join(' ');
+        const email = (contact as any).email || (contact as any).email_address || null;
+        const phone = (contact as any).mobile || (contact as any).phone || null;
+        let existing = existingStaff.find(
+          (s) =>
+            (email && s.email.toLowerCase() === email.toLowerCase()) ||
+            (s.first_name.toLowerCase() === firstName.toLowerCase() &&
+              s.last_name.toLowerCase() === lastName.toLowerCase())
+        );
+        if (existing) {
+          await updateStaff(
+            existing.id,
+            company.id,
+            firstName,
+            lastName,
+            email || existing.email,
+            phone || existing.mobile_phone || null,
+            existing.date_onboarded,
+            existing.date_offboarded || null,
+            existing.enabled === 1,
+            existing.street || null,
+            existing.city || null,
+            existing.state || null,
+            existing.postcode || null,
+            existing.country || null,
+            existing.department || null,
+            existing.job_title || null,
+            existing.org_company || null,
+            existing.manager_name || null,
+            existing.account_action || null,
+            String(contact.id)
+          );
+        } else {
+          await addStaff(
+            company.id,
+            firstName,
+            lastName,
+            email || '',
+            phone || null,
+            null,
+            null,
+            true,
+            (contact as any).address1 || (contact as any).address || null,
+            (contact as any).city || null,
+            (contact as any).state || null,
+            (contact as any).zip || null,
+            (contact as any).country || null,
+            null,
+            (contact as any).title || null,
+            null,
+            null,
+            String(contact.id)
+          );
+          existingStaff.push({
+            id: 0,
+            company_id: company.id,
+            first_name: firstName,
+            last_name: lastName,
+            email: email || '',
+            mobile_phone: phone || null,
+            date_onboarded: null,
+            date_offboarded: null,
+            enabled: 1,
+            street: (contact as any).address1 || (contact as any).address || null,
+            city: (contact as any).city || null,
+            state: (contact as any).state || null,
+            postcode: (contact as any).zip || null,
+            country: (contact as any).country || null,
+            department: null,
+            job_title: (contact as any).title || null,
+            org_company: null,
+            manager_name: null,
+            account_action: null,
+            syncro_contact_id: String(contact.id),
+          } as any);
+        }
+      }
+      res.sendStatus(200);
+    } catch (err) {
+      console.error('Syncro contacts import failed', err);
+      res.status(500).send('Failed to import Syncro contacts');
+    }
+  }
+);
 
 app.post('/admin/syncro/hide', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { customerId, showHidden } = req.body;
@@ -4281,7 +4409,8 @@ api.post('/staff', async (req, res) => {
     jobTitle,
     company,
     managerName,
-    accountAction || null
+    accountAction || null,
+    null
   );
   res.json({ success: true });
 });
@@ -4510,7 +4639,8 @@ api.put('/staff/:id', async (req, res) => {
     managerName !== undefined ? managerName : current!.manager_name ?? null,
     accountAction !== undefined
       ? accountAction
-      : current!.account_action ?? null
+      : current!.account_action ?? null,
+    current?.syncro_contact_id || null
   );
   res.json({ success: true });
 });

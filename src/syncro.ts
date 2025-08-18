@@ -15,6 +15,22 @@ export interface SyncroCustomer {
   [key: string]: any;
 }
 
+export interface SyncroContact {
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  mobile?: string;
+  address1?: string;
+  address2?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  [key: string]: any;
+}
+
 async function syncroRequest(path: string, init: RequestInit = {}): Promise<any> {
   const base = process.env.SYNCRO_WEBHOOK_URL;
   if (!base) {
@@ -54,6 +70,22 @@ export async function getSyncroCustomer(id: string | number): Promise<SyncroCust
     return data.customer as SyncroCustomer;
   }
   return (data ?? null) as SyncroCustomer | null;
+}
+
+export async function getSyncroContacts(
+  customerId: string | number
+): Promise<SyncroContact[]> {
+  const data = await syncroRequest(`/contact?customer_id=${customerId}`);
+  if (Array.isArray(data)) {
+    return data as SyncroContact[];
+  }
+  if (Array.isArray((data as any)?.contacts)) {
+    return (data as any).contacts as SyncroContact[];
+  }
+  if (Array.isArray((data as any)?.data)) {
+    return (data as any).data as SyncroContact[];
+  }
+  return [];
 }
 
 export { syncroRequest };
