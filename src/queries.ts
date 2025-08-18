@@ -9,6 +9,7 @@ export interface User {
   first_name?: string | null;
   last_name?: string | null;
   force_password_change?: number;
+  mobile_phone?: string | null;
 }
 
 export interface UserTotpAuthenticator {
@@ -734,6 +735,16 @@ export async function updateUserName(
   await pool.execute('UPDATE users SET first_name = ?, last_name = ? WHERE id = ?', [
     firstName,
     lastName,
+    id,
+  ]);
+}
+
+export async function updateUserMobile(
+  id: number,
+  mobilePhone: string | null
+): Promise<void> {
+  await pool.execute('UPDATE users SET mobile_phone = ? WHERE id = ?', [
+    mobilePhone,
     id,
   ]);
 }
