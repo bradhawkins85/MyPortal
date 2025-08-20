@@ -158,18 +158,22 @@ import { runMigrations } from './db';
 
 dotenv.config();
 
+const smtpUser = process.env.SMTP_USER || process.env.SMTP_USERNAME;
+const smtpPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
+
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: parseInt(process.env.SMTP_PORT || '587', 10),
-  secure: false,
-  auth: process.env.SMTP_USER
-    ? {
-        user: process.env.SMTP_USER,
-        // Support both SMTP_PASS and SMTP_PASSWORD for backwards compatibility
-        pass:
-          process.env.SMTP_PASS || process.env.SMTP_PASSWORD || '',
-      }
-    : undefined,
+  secure:
+    process.env.SMTP_SECURE === 'true' ||
+    parseInt(process.env.SMTP_PORT || '587', 10) === 465,
+  auth:
+    smtpUser && smtpPass
+      ? {
+          user: smtpUser,
+          pass: smtpPass,
+        }
+      : undefined,
 });
 
 async function sendEmail(to: string, subject: string, html: string) {
