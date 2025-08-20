@@ -22,6 +22,7 @@ There are no default login credentials; the first visit will prompt you to regis
    npm install
    ```
 2. Copy `.env.example` to `.env` and update the MySQL credentials and session secret.
+   Optionally set `CRON_TIMEZONE` to control the timezone for scheduled tasks (defaults to UTC).
 3. On first run, the application will automatically apply the database schema.
 4. On first run, visiting `/login` will redirect to a registration page to create the initial user and company.
 5. Run in development mode:
