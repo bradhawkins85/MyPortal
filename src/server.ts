@@ -12,6 +12,7 @@ import swaggerJSDoc from 'swagger-jsdoc';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
 import cron from 'node-cron';
+import { getRandomDailyCron } from './cron';
 import { execFile } from 'child_process';
 import util from 'util';
 import {
@@ -382,8 +383,7 @@ async function scheduleAllTasks() {
 }
 
 async function createDefaultSchedulesForCompany(companyId: number) {
-  const hour = Math.floor(Math.random() * 24);
-  const cronExpr = `0 ${hour} * * *`;
+  const cronExpr = getRandomDailyCron();
   await createScheduledTask(
     companyId,
     'Sync Staff From Syncro',
