@@ -11,6 +11,9 @@ import swaggerUi from 'swagger-ui-express';
 import swaggerJSDoc from 'swagger-jsdoc';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
+import cron from 'node-cron';
+import { execFile } from 'child_process';
+import util from 'util';
 import {
   getSyncroCustomers,
   getSyncroCustomer,
@@ -140,6 +143,12 @@ import {
   updateSiteSettings,
   getEmailTemplate,
   upsertEmailTemplate,
+  getScheduledTasks,
+  getScheduledTask,
+  createScheduledTask,
+  updateScheduledTask,
+  deleteScheduledTask,
+  markScheduledTaskRun,
   Company,
   User,
   UserCompany,
@@ -175,6 +184,8 @@ const transporter = nodemailer.createTransport({
         }
       : undefined,
 });
+
+const execFileAsync = util.promisify(execFile);
 
 async function sendEmail(to: string, subject: string, html: string) {
   await transporter.sendMail({
@@ -223,6 +234,180 @@ async function sendSmsUpdate(
       console.error('Failed to call SMS webhook', err);
     }
   }
+}
+
+const scheduledJobs = new Map<number, cron.ScheduledTask>();
+
+async function importSyncroContactsForCompany(companyId: number) {
+  const company = await getCompanyById(companyId);
+  if (!company || !company.syncro_company_id) {
+    return;
+  }
+  try {
+    const [contacts, existingStaff] = await Promise.all([
+      getSyncroContacts(company.syncro_company_id),
+      getStaffByCompany(company.id),
+    ]);
+    for (const contact of contacts) {
+      const fullName = [
+        contact.first_name,
+        contact.last_name,
+        (contact as any).name,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      if (/ex staff/i.test(fullName)) {
+        continue;
+      }
+      const firstName = contact.first_name || fullName.split(' ')[0] || '';
+      const lastName =
+        contact.last_name ||
+        fullName
+          .split(' ')
+          .slice(1)
+          .join(' ');
+      const email = (contact as any).email || (contact as any).email_address || null;
+      const phone = (contact as any).mobile || (contact as any).phone || null;
+      const existing = findExistingStaff(
+        existingStaff,
+        firstName,
+        lastName,
+        email
+      );
+      if (existing) {
+        await updateStaff(
+          existing.id,
+          company.id,
+          firstName,
+          lastName,
+          email || existing.email,
+          phone || existing.mobile_phone || null,
+          existing.date_onboarded,
+          existing.date_offboarded || null,
+          existing.enabled === 1,
+          existing.street || null,
+          existing.city || null,
+          existing.state || null,
+          existing.postcode || null,
+          existing.country || null,
+          existing.department || null,
+          existing.job_title || null,
+          existing.org_company || null,
+          existing.manager_name || null,
+          existing.account_action || null,
+          String((contact as any).id)
+        );
+      } else {
+        await addStaff(
+          company.id,
+          firstName,
+          lastName,
+          email || '',
+          phone || null,
+          null,
+          null,
+          true,
+          (contact as any).address1 || (contact as any).address || null,
+          (contact as any).city || null,
+          (contact as any).state || null,
+          (contact as any).zip || null,
+          (contact as any).country || null,
+          null,
+          (contact as any).title || null,
+          null,
+          null,
+          String((contact as any).id)
+        );
+        existingStaff.push({
+          id: 0,
+          company_id: company.id,
+          first_name: firstName,
+          last_name: lastName,
+          email: email || '',
+          mobile_phone: phone || null,
+          date_onboarded: null,
+          date_offboarded: null,
+          enabled: 1,
+          street: (contact as any).address1 || (contact as any).address || null,
+          city: (contact as any).city || null,
+          state: (contact as any).state || null,
+          postcode: (contact as any).zip || null,
+          country: (contact as any).country || null,
+          department: null,
+          job_title: (contact as any).title || null,
+          org_company: null,
+          manager_name: null,
+          account_action: null,
+          syncro_contact_id: String((contact as any).id),
+        } as any);
+      }
+    }
+  } catch (err) {
+    console.error('Syncro contacts import failed', err);
+  }
+}
+
+async function runScheduledTask(id: number) {
+  const task = await getScheduledTask(id);
+  if (!task) return;
+  try {
+    switch (task.command) {
+      case 'sync_staff':
+        if (task.company_id) await importSyncroContactsForCompany(task.company_id);
+        break;
+      case 'system_update':
+        await execFileAsync(path.join(__dirname, '..', 'update.sh'));
+        break;
+      default:
+        console.log(`Task ${task.command} not implemented`);
+    }
+    await markScheduledTaskRun(id);
+  } catch (err) {
+    console.error('Scheduled task failed', err);
+  }
+}
+
+async function scheduleAllTasks() {
+  scheduledJobs.forEach((job) => job.stop());
+  scheduledJobs.clear();
+  const tasks = await getScheduledTasks();
+  tasks.forEach((t) => {
+    if (t.active) {
+      const job = cron.schedule(t.cron, () => runScheduledTask(t.id));
+      scheduledJobs.set(t.id, job);
+    }
+  });
+}
+
+async function createDefaultSchedulesForCompany(companyId: number) {
+  const hour = Math.floor(Math.random() * 24);
+  const cronExpr = `0 ${hour} * * *`;
+  await createScheduledTask(
+    companyId,
+    'Sync Staff From Syncro',
+    'sync_staff',
+    cronExpr
+  );
+  await createScheduledTask(
+    companyId,
+    'Sync Office 365 License Counts',
+    'sync_o365',
+    cronExpr
+  );
+  await createScheduledTask(
+    companyId,
+    'Sync Xero Invoices',
+    'sync_xero',
+    cronExpr
+  );
+  await createScheduledTask(
+    companyId,
+    'Sync Assets From Syncro',
+    'sync_assets',
+    cronExpr
+  );
+  await scheduleAllTasks();
 }
 
 setInterval(() => {
@@ -669,6 +854,7 @@ app.post('/register', async (req, res) => {
   try {
     const passwordHash = await bcrypt.hash(password, 10);
     const companyId = await createCompany(company);
+    await createDefaultSchedulesForCompany(companyId);
     const userId = await createUser(email, passwordHash, companyId);
     await assignUserToCompany(userId, companyId, true, true, true, true, true, true, true);
     req.session.userId = userId;
@@ -2087,13 +2273,14 @@ app.get('/office-groups', ensureAuth, ensureStaffAccess, async (req, res) => {
 
 app.post('/admin/company', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { name, isVip, syncroCompanyId, xeroId } = req.body;
-  await createCompany(
+  const companyId = await createCompany(
     name,
     undefined,
     parseCheckbox(isVip),
     syncroCompanyId,
     xeroId
   );
+  await createDefaultSchedulesForCompany(companyId);
   res.redirect('/admin');
 });
 
@@ -2106,6 +2293,66 @@ app.post('/admin/company/:id', ensureAuth, ensureSuperAdmin, async (req, res) =>
     parseCheckbox(isVip)
   );
   res.redirect('/admin');
+});
+
+app.get('/admin/schedules', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const [tasks, allCompanies, companies] = await Promise.all([
+    getScheduledTasks(),
+    getAllCompanies(),
+    getCompaniesForUser(req.session.userId!),
+  ]);
+  const tasksWithCompany = tasks.map((t) => ({
+    ...t,
+    company_name: allCompanies.find((c) => c.id === t.company_id)?.name || null,
+  }));
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  res.render('schedules', {
+    tasks: tasksWithCompany,
+    allCompanies,
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: true,
+    isSuperAdmin: true,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+    hasForms: false,
+    cart: [],
+  });
+});
+
+app.post('/admin/schedules', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { name, command, cron: cronExpr, companyId } = req.body;
+  const company = companyId ? parseInt(companyId, 10) : null;
+  await createScheduledTask(company, name, command, cronExpr);
+  await scheduleAllTasks();
+  res.redirect('/admin/schedules');
+});
+
+app.post('/admin/schedules/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { name, cron: cronExpr } = req.body;
+  const task = await getScheduledTask(id);
+  if (task) {
+    await updateScheduledTask(id, task.company_id, name, task.command, cronExpr);
+  }
+  await scheduleAllTasks();
+  res.redirect('/admin/schedules');
+});
+
+app.post('/admin/schedules/:id/run', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  await runScheduledTask(id);
+  res.redirect('/admin/schedules');
+});
+
+app.post('/admin/schedules/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  await deleteScheduledTask(id);
+  await scheduleAllTasks();
+  res.redirect('/admin/schedules');
 });
 
 app.get('/admin/syncro/customers', ensureAuth, ensureSuperAdmin, async (req, res) => {
@@ -2173,7 +2420,13 @@ app.post('/admin/syncro/import', ensureAuth, ensureSuperAdmin, async (req, res) 
       if (existing) {
         await updateCompany(existing.id, name, address);
       } else {
-        await createCompany(name, address || undefined, false, String(customer.id));
+        const newId = await createCompany(
+          name,
+          address || undefined,
+          false,
+          String(customer.id)
+        );
+        await createDefaultSchedulesForCompany(newId);
       }
     }
   } catch (err) {
@@ -3629,6 +3882,7 @@ api.post('/companies', async (req, res) => {
     syncroCompanyId,
     xeroId
   );
+  await createDefaultSchedulesForCompany(id);
   res.json({ id });
 });
 
@@ -5184,6 +5438,7 @@ const host = process.env.HOST || '0.0.0.0';
 
 async function start() {
   await runMigrations();
+  await scheduleAllTasks();
   app.listen(port, host, () => {
     console.log(`Server running at http://${host}:${port}`);
   });
