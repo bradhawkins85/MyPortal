@@ -244,47 +244,168 @@
                   <% }); %>
                 </select>
                 <input type="text" name="cron" id="cron-input" placeholder="Cron Expression" required>
-                <div id="cron-generator">
-                  <label>Minute
-                    <select id="cron-minute">
-                      <option value="*">*</option>
-                      <% for (let i = 0; i < 60; i++) { %>
-                        <option value="<%= i %>"><%= i %></option>
-                      <% } %>
-                    </select>
-                  </label>
-                  <label>Hour
-                    <select id="cron-hour">
-                      <option value="*">*</option>
-                      <% for (let i = 0; i < 24; i++) { %>
-                        <option value="<%= i %>"><%= i %></option>
-                      <% } %>
-                    </select>
-                  </label>
-                  <label>Day of Month
-                    <select id="cron-dom">
-                      <option value="*">*</option>
-                      <% for (let i = 1; i <= 31; i++) { %>
-                        <option value="<%= i %>"><%= i %></option>
-                      <% } %>
-                    </select>
-                  </label>
-                  <label>Month
-                    <select id="cron-month">
-                      <option value="*">*</option>
-                      <% for (let i = 1; i <= 12; i++) { %>
-                        <option value="<%= i %>"><%= i %></option>
-                      <% } %>
-                    </select>
-                  </label>
-                  <label>Day of Week
-                    <select id="cron-dow">
-                      <option value="*">*</option>
-                      <% for (let i = 0; i <= 6; i++) { %>
-                        <option value="<%= i %>"><%= i %></option>
-                      <% } %>
-                    </select>
-                  </label>
+                <div id="cron-generator-container">
+                  <table class="generator">
+                    <tr>
+                      <td>
+                        <table class="generatorBlock">
+                          <tr>
+                            <th colspan="2">Minutes</th>
+                          </tr>
+                          <tr>
+                            <td>
+                              <label class="radio" for="everyMinute"><input id="everyMinute" type="radio" checked value="*" name="minutes"> Every Minute</label>
+                              <label class="radio" for="everyEvenMinute"><input id="everyEvenMinute" type="radio" value="*/2" name="minutes"> Even Minutes</label>
+                              <label class="radio" for="everyOddMinute"><input id="everyOddMinute" type="radio" value="1-59/2" name="minutes"> Odd Minutes</label>
+                              <label class="radio" for="every5Minute"><input id="every5Minute" type="radio" value="*/5" name="minutes"> Every 5 Minutes</label>
+                              <label class="radio" for="every15Minute"><input id="every15Minute" type="radio" value="*/15" name="minutes"> Every 15 Minutes</label>
+                              <label class="radio" for="every30Minute"><input id="every30Minute" type="radio" value="*/30" name="minutes"> Every 30 Minutes</label>
+                            </td>
+                            <td>
+                              <table class="multipleEntries">
+                                <tr>
+                                  <td><input type="radio" value="select" name="minutes"></td>
+                                  <td>
+                                    <select id="minutes-select" multiple size="10">
+                                      <% for (let i = 0; i < 60; i++) { %>
+                                        <option value="<%= i %>"><%= i %></option>
+                                      <% } %>
+                                    </select>
+                                  </td>
+                                </tr>
+                              </table>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                      <td>
+                        <table class="generatorBlock">
+                          <tr>
+                            <th colspan="2">Hours</th>
+                          </tr>
+                          <tr>
+                            <td>
+                              <label class="radio" for="everyHour"><input id="everyHour" type="radio" checked value="*" name="hours"> Every Hour</label>
+                              <label class="radio" for="everyEvenHour"><input id="everyEvenHour" type="radio" value="*/2" name="hours"> Even Hours</label>
+                              <label class="radio" for="everyOddHour"><input id="everyOddHour" type="radio" value="1-23/2" name="hours"> Odd Hours</label>
+                              <label class="radio" for="every6Hours"><input id="every6Hours" type="radio" value="*/6" name="hours"> Every 6 Hours</label>
+                              <label class="radio" for="every12Hours"><input id="every12Hours" type="radio" value="*/12" name="hours"> Every 12 Hours</label>
+                            </td>
+                            <td>
+                              <table class="multipleEntries">
+                                <tr>
+                                  <td><input type="radio" value="select" name="hours"></td>
+                                  <td>
+                                    <select id="hours-select" multiple size="10">
+                                      <% for (let i = 0; i < 24; i++) { %>
+                                        <option value="<%= i %>">
+                                          <% if (i === 0) { %>Midnight<% } %>
+                                          <% if (i > 0 && i < 12) { %><%= i %>am<% } %>
+                                          <% if (i === 12) { %>Noon<% } %>
+                                          <% if (i > 12) { %><%= i - 12 %>pm<% } %>
+                                        </option>
+                                      <% } %>
+                                    </select>
+                                  </td>
+                                </tr>
+                              </table>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                      <td>
+                        <table class="generatorBlock">
+                          <tr>
+                            <th colspan="2">Days of Month</th>
+                          </tr>
+                          <tr>
+                            <td>
+                              <label class="radio" for="everyday"><input id="everyday" type="radio" checked value="*" name="days"> Every Day</label>
+                              <label class="radio" for="everyEvenDay"><input id="everyEvenDay" type="radio" value="2-30/2" name="days"> Even Days</label>
+                              <label class="radio" for="everyOddDay"><input id="everyOddDay" type="radio" value="1-31/2" name="days"> Odd Days</label>
+                              <label class="radio" for="every5Days"><input id="every5Days" type="radio" value="*/5" name="days"> Every 5 Days</label>
+                              <label class="radio" for="every10Days"><input id="every10Days" type="radio" value="*/10" name="days"> Every 10 Days</label>
+                              <label class="radio" for="every15Days"><input id="every15Days" type="radio" value="*/15" name="days"> Every Half Month</label>
+                            </td>
+                            <td>
+                              <table class="multipleEntries">
+                                <tr>
+                                  <td><input type="radio" value="select" name="days"></td>
+                                  <td>
+                                    <select id="days-select" multiple size="10">
+                                      <% for (let i = 1; i <= 31; i++) { %>
+                                        <option value="<%= i %>"><%= i %></option>
+                                      <% } %>
+                                    </select>
+                                  </td>
+                                </tr>
+                              </table>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                      <td>
+                        <table class="generatorBlock">
+                          <tr>
+                            <th colspan="2">Months</th>
+                          </tr>
+                          <tr>
+                            <td>
+                              <label class="radio" for="everyMonth"><input id="everyMonth" type="radio" checked value="*" name="months"> Every Month</label>
+                              <label class="radio" for="everyEvenMonths"><input id="everyEvenMonths" type="radio" value="*/2" name="months"> Even Months</label>
+                              <label class="radio" for="everyOddMonths"><input id="everyOddMonths" type="radio" value="1-11/2" name="months"> Odd Months</label>
+                              <label class="radio" for="every4Months"><input id="every4Months" type="radio" value="*/4" name="months"> Every 4 Months</label>
+                              <label class="radio" for="every6Months"><input id="every6Months" type="radio" value="*/6" name="months"> Every Half Year</label>
+                            </td>
+                            <td>
+                              <table class="multipleEntries">
+                                <tr>
+                                  <td><input type="radio" value="select" name="months"></td>
+                                  <td>
+                                    <select id="months-select" multiple size="10" class="cron">
+                                      <% const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; %>
+                                      <% for (let i = 1; i <= 12; i++) { %>
+                                        <option value="<%= i %>"><%= monthNames[i-1] %></option>
+                                      <% } %>
+                                    </select>
+                                  </td>
+                                </tr>
+                              </table>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                      <td>
+                        <table class="generatorBlock">
+                          <tr>
+                            <th colspan="2">Days of Week</th>
+                          </tr>
+                          <tr>
+                            <td>
+                              <label class="radio" for="everyWeekday"><input id="everyWeekday" type="radio" checked value="*" name="weekdays"> Every Day</label>
+                              <label class="radio" for="everyNonWeekenDays"><input id="everyNonWeekenDays" type="radio" value="1-5" name="weekdays"> Monday - Friday</label>
+                              <label class="radio" for="everyWeekenDays"><input id="everyWeekenDays" type="radio" value="0,6" name="weekdays"> Saturday - Sunday</label>
+                            </td>
+                            <td>
+                              <table class="multipleEntries">
+                                <tr>
+                                  <td><input type="radio" value="select" name="weekdays"></td>
+                                  <td>
+                                    <select id="weekdays-select" multiple size="10">
+                                      <% const weekdayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; %>
+                                      <% for (let i = 0; i <= 6; i++) { %>
+                                        <option value="<%= i %>"><%= weekdayNames[i] %></option>
+                                      <% } %>
+                                    </select>
+                                  </td>
+                                </tr>
+                              </table>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
+                  </table>
                 </div>
                 <button type="submit">Add</button>
               </form>
@@ -322,16 +443,25 @@
             </section>
             <script>
               (function(){
+                function getField(name, selectId){
+                  const chosen = document.querySelector(`input[name="${name}"]:checked`);
+                  if (chosen && chosen.value === 'select') {
+                    const sel = document.getElementById(selectId);
+                    const vals = Array.from(sel.selectedOptions).map(o => o.value);
+                    return vals.length ? vals.join(',') : '*';
+                  }
+                  return chosen ? chosen.value : '*';
+                }
                 function updateCron(){
-                  const m=document.getElementById('cron-minute').value;
-                  const h=document.getElementById('cron-hour').value;
-                  const d=document.getElementById('cron-dom').value;
-                  const mo=document.getElementById('cron-month').value;
-                  const w=document.getElementById('cron-dow').value;
+                  const m = getField('minutes','minutes-select');
+                  const h = getField('hours','hours-select');
+                  const d = getField('days','days-select');
+                  const mo = getField('months','months-select');
+                  const w = getField('weekdays','weekdays-select');
                   document.getElementById('cron-input').value = `${m} ${h} ${d} ${mo} ${w}`;
                 }
-                document.querySelectorAll('#cron-generator select').forEach(function(sel){
-                  sel.addEventListener('change', updateCron);
+                document.querySelectorAll('#cron-generator-container input, #cron-generator-container select').forEach(function(el){
+                  el.addEventListener('change', updateCron);
                 });
                 updateCron();
               })();
