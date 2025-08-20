@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html>
-  <%- include('partials/head', { title: 'Admin' }) %>
+  <%- include('partials/head', { title: isAdmin ? 'Admin' : 'Account' }) %>
 <body>
   <div class="app-container">
     <%- include('partials/sidebar') %>
     <div class="content">
-      <h1>Admin</h1>
+      <h1><%= isAdmin ? 'Admin' : 'Account' %></h1>
       <div class="admin-tabs">
         <div class="tabs">
           <% if (isSuperAdmin) { %>
@@ -20,12 +20,15 @@
             <button data-tab="forms-admin">Forms</button>
             <button data-tab="form-permissions">Form Permissions</button>
             <button type="button" onclick="window.location.href='/admin/email-templates'">Email Templates</button>
-          <% } else { %>
+          <% } else if (isAdmin) { %>
             <button data-tab="account" class="active">Account</button>
             <button data-tab="companies">Companies</button>
             <button data-tab="assignments">Current Assignments</button>
+          <% } else { %>
+            <button data-tab="account" class="active">Account</button>
           <% } %>
         </div>
+        <% if (isAdmin) { %>
         <div id="companies" class="tab-content">
           <% if (isSuperAdmin) { %>
           <section>
@@ -132,8 +135,8 @@
             </table>
           </section>
           <% } %>
-        </div>
-        <div id="assignments" class="tab-content">
+          </div>
+          <div id="assignments" class="tab-content">
           <section>
             <h2>Current Assignments</h2>
             <table>
@@ -220,7 +223,8 @@
             </ul>
             <p><em>Note: Not all functionality is currently available and will be added in future MyPortal releases.</em></p>
           </section>
-        </div>
+          </div>
+        <% } %>
         <div id="account" class="tab-content<% if (!isSuperAdmin) { %> active<% } %>">
           <section>
             <h2>Profile</h2>
