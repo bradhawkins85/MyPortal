@@ -1853,3 +1853,59 @@ export async function updateSiteSettings(
     [companyName, loginLogo ?? null, sidebarLogo ?? null]
   );
 }
+
+export interface ScheduledTask {
+  id: number;
+  company_id: number | null;
+  name: string;
+  command: string;
+  cron: string;
+  last_run_at: Date | null;
+  active: number;
+}
+
+export async function getScheduledTasks(): Promise<ScheduledTask[]> {
+  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM scheduled_tasks');
+  return rows as ScheduledTask[];
+}
+
+export async function getScheduledTask(id: number): Promise<ScheduledTask | null> {
+  const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM scheduled_tasks WHERE id = ?', [id]);
+  if ((rows as ScheduledTask[]).length === 0) return null;
+  return (rows as ScheduledTask[])[0];
+}
+
+export async function createScheduledTask(
+  companyId: number | null,
+  name: string,
+  command: string,
+  cron: string
+): Promise<number> {
+  const [result] = await pool.execute(
+    'INSERT INTO scheduled_tasks (company_id, name, command, cron) VALUES (?, ?, ?, ?)',
+    [companyId, name, command, cron]
+  );
+  const insert = result as ResultSetHeader;
+  return insert.insertId;
+}
+
+export async function updateScheduledTask(
+  id: number,
+  companyId: number | null,
+  name: string,
+  command: string,
+  cron: string
+): Promise<void> {
+  await pool.execute(
+    'UPDATE scheduled_tasks SET company_id = ?, name = ?, command = ?, cron = ? WHERE id = ?',
+    [companyId, name, command, cron, id]
+  );
+}
+
+export async function deleteScheduledTask(id: number): Promise<void> {
+  await pool.execute('DELETE FROM scheduled_tasks WHERE id = ?', [id]);
+}
+
+export async function markScheduledTaskRun(id: number): Promise<void> {
+  await pool.execute('UPDATE scheduled_tasks SET last_run_at = NOW() WHERE id = ?', [id]);
+}
