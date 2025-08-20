@@ -20,6 +20,7 @@
           <input type="text" name="lastName" placeholder="Last Name" required>
           <input type="email" name="email" placeholder="Email" required>
           <input type="tel" name="mobilePhone" placeholder="Mobile">
+          <input type="text" name="department" placeholder="Department">
           <input type="date" name="dateOnboarded">
           <label><input type="checkbox" name="enabled" value="1" checked> Enabled</label>
           <button type="submit">Add</button>
@@ -36,6 +37,16 @@
               <option value="0" <%= enabledFilter === '0' ? 'selected' : '' %>>Disabled</option>
             </select>
           </label>
+          <% if (staffPermission === 3 && departments && departments.length) { %>
+          <label>Department
+            <select name="department" onchange="document.getElementById('filter-form').submit()">
+              <option value="" <%= departmentFilter === '' ? 'selected' : '' %>>All</option>
+              <% departments.forEach(function(d) { %>
+                <option value="<%= d %>" <%= departmentFilter === d ? 'selected' : '' %>><%= d %></option>
+              <% }) %>
+            </select>
+          </label>
+          <% } %>
         </form>
         <table>
           <thead>

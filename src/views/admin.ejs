@@ -142,7 +142,7 @@
             <h2>Current Assignments</h2>
             <table>
               <thead>
-                <tr><th>User</th><th>Company</th><th>Admin</th><th>Licenses</th><th>Order</th><th>Staff</th><th>Assets</th><th>Invoices</th><th>Shop</th><% if (isSuperAdmin) { %><th>Remove</th><% } %></tr>
+                <tr><th>User</th><th>Company</th><th>Admin</th><th>Licenses</th><th>Order</th><th>Staff</th><th>Office Groups</th><th>Assets</th><th>Invoices</th><th>Shop</th><% if (isSuperAdmin) { %><th>Remove</th><% } %></tr>
               </thead>
               <tbody>
               <% assignments.forEach(function(a) { %>
@@ -177,8 +177,20 @@
                     <form action="/admin/permission" method="post">
                       <input type="hidden" name="userId" value="<%= a.user_id %>">
                       <input type="hidden" name="companyId" value="<%= a.company_id %>">
-                      <input type="hidden" name="canManageStaff" value="0">
-                      <input type="checkbox" name="canManageStaff" value="1" <%= a.can_manage_staff ? 'checked' : '' %> onchange="this.form.submit()">
+                      <select name="staffPermission" onchange="this.form.submit()">
+                        <option value="0" <%= a.staff_permission === 0 ? 'selected' : '' %>>None</option>
+                        <option value="1" <%= a.staff_permission === 1 ? 'selected' : '' %>>Department</option>
+                        <option value="2" <%= a.staff_permission === 2 ? 'selected' : '' %>>Department + Unassigned</option>
+                        <option value="3" <%= a.staff_permission === 3 ? 'selected' : '' %>>Company</option>
+                      </select>
+                    </form>
+                  </td>
+                  <td>
+                    <form action="/admin/permission" method="post">
+                      <input type="hidden" name="userId" value="<%= a.user_id %>">
+                      <input type="hidden" name="companyId" value="<%= a.company_id %>">
+                      <input type="hidden" name="canManageOfficeGroups" value="0">
+                      <input type="checkbox" name="canManageOfficeGroups" value="1" <%= a.can_manage_office_groups ? 'checked' : '' %> onchange="this.form.submit()">
                     </form>
                   </td>
                   <td>

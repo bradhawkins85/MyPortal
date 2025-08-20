@@ -37,6 +37,7 @@ import {
   assignUserToCompany,
   getUserCompanyAssignments,
   updateUserCompanyPermission,
+  updateUserCompanyStaffPermission,
   getStaffByCompany,
   getAllStaff,
   getStaffById,
@@ -291,7 +292,7 @@ async function importSyncroContactsForCompany(companyId: number) {
           existing.state || null,
           existing.postcode || null,
           existing.country || null,
-          existing.department || null,
+          (contact as any).department || existing.department || null,
           existing.job_title || null,
           existing.org_company || null,
           existing.manager_name || null,
@@ -334,7 +335,7 @@ async function importSyncroContactsForCompany(companyId: number) {
           state: (contact as any).state || null,
           postcode: (contact as any).zip || null,
           country: (contact as any).country || null,
-          department: null,
+          department: (contact as any).department || null,
           job_title: (contact as any).title || null,
           org_company: null,
           manager_name: null,
@@ -721,7 +722,9 @@ app.get('/api-docs', ensureAuth, ensureSuperAdmin, async (req, res) => {
     currentCompanyId: req.session.companyId,
     isAdmin: true,
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -856,7 +859,7 @@ app.post('/register', async (req, res) => {
     const companyId = await createCompany(company);
     await createDefaultSchedulesForCompany(companyId);
     const userId = await createUser(email, passwordHash, companyId);
-    await assignUserToCompany(userId, companyId, true, true, true, true, true, true, true);
+    await assignUserToCompany(userId, companyId, true, 3, true, true, true, true, true, true);
     req.session.userId = userId;
     req.session.companyId = companyId;
     req.session.hasForms = false;
@@ -963,7 +966,7 @@ app.get('/', ensureAuth, async (req, res) => {
   let unpaidInvoices = 0;
 
   if (company) {
-    if (current?.can_manage_staff || req.session.userId === 1) {
+    if ((current?.staff_permission ?? 0) > 0 || req.session.userId === 1) {
       const staff = await getStaffByCompany(company.id);
       activeUsers = staff.filter((s) => s.enabled === 1).length;
     }
@@ -996,7 +999,9 @@ app.get('/', ensureAuth, async (req, res) => {
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -1032,7 +1037,23 @@ async function ensureStaffAccess(
   }
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
-  if (current && current.can_manage_staff) {
+  if ((current?.staff_permission ?? 0) > 0) {
+    return next();
+  }
+  return res.redirect('/');
+}
+
+async function ensureOfficeGroupAccess(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  if (req.session.userId === 1) {
+    return next();
+  }
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  if (current && current.can_manage_office_groups) {
     return next();
   }
   return res.redirect('/');
@@ -1086,7 +1107,9 @@ app.get('/licenses', ensureAuth, ensureLicenseAccess, async (req, res) => {
     companies,
     currentCompanyId: req.session.companyId,
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -1194,14 +1217,40 @@ app.delete('/licenses/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
 app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
   const enabledFilter = req.query.enabled as string | undefined;
+  const departmentFilter = (req.query.department as string | undefined) || '';
   const enabledParam =
     enabledFilter === '1' ? true : enabledFilter === '0' ? false : undefined;
   const companyId = req.session.companyId;
-  const staff = companyId
-    ? await getStaffByCompany(companyId, enabledParam)
-    : [];
+  let staff = companyId ? await getStaffByCompany(companyId, enabledParam) : [];
   const current = companies.find((c) => c.company_id === companyId);
   const company = companyId ? await getCompanyById(companyId) : null;
+  const staffPermission = current?.staff_permission ?? 0;
+  let departments: string[] = [];
+  if (staffPermission === 1 || staffPermission === 2) {
+    const user = await getUserById(req.session.userId!);
+    const currentStaff = staff.find(
+      (s) => s.email && s.email.toLowerCase() === (user?.email || '').toLowerCase()
+    );
+    const userDept = currentStaff?.department || '';
+    staff = staff.filter((s) => {
+      if (staffPermission === 1) {
+        return (
+          !!userDept && !!s.department && s.department.toLowerCase() === userDept.toLowerCase()
+        );
+      }
+      return (
+        (!!userDept && !!s.department && s.department.toLowerCase() === userDept.toLowerCase()) ||
+        !s.department
+      );
+    });
+  } else if (staffPermission === 3) {
+    if (departmentFilter) {
+      staff = staff.filter((s) => s.department === departmentFilter);
+    }
+    departments = Array.from(
+      new Set(staff.filter((s) => s.department).map((s) => s.department as string))
+    ).sort();
+  }
   res.render('staff', {
     staff,
     companies,
@@ -1209,12 +1258,16 @@ app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     isSuperAdmin: req.session.userId === 1,
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: staffPermission > 0 ? 1 : 0,
+    staffPermission,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
     canAccessShop: current?.can_access_shop ?? 0,
     enabledFilter: enabledFilter ?? '',
+    departmentFilter,
+    departments,
     syncroCompanyId: company?.syncro_company_id ?? null,
   });
 });
@@ -1392,6 +1445,7 @@ app.post('/staff/:id/invite', ensureAuth, ensureStaffAccess, async (req, res) =>
     userId,
     staff.company_id,
     false,
+    0,
     false,
     false,
     false,
@@ -1437,7 +1491,9 @@ app.get('/assets', ensureAuth, ensureAssetsAccess, async (req, res) => {
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -1462,7 +1518,9 @@ app.get('/invoices', ensureAuth, ensureInvoicesAccess, async (req, res) => {
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -1486,7 +1544,9 @@ app.get('/forms', ensureAuth, async (req, res) => {
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -1514,7 +1574,9 @@ app.get('/forms/company', ensureAuth, ensureAdmin, async (req, res) => {
     currentCompanyId: req.session.companyId,
     isAdmin: true,
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -1565,7 +1627,9 @@ app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -1634,7 +1698,9 @@ app.get('/cart', ensureAuth, ensureShopAccess, async (req, res) => {
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -1723,7 +1789,9 @@ app.get('/orders', ensureAuth, ensureShopAccess, async (req, res) => {
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -1763,7 +1831,9 @@ app.get('/orders/:orderNumber', ensureAuth, ensureShopAccess, async (req, res) =
     currentCompanyId: req.session.companyId,
     isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -2155,7 +2225,9 @@ app.get('/admin', ensureAuth, async (req, res) => {
     currentCompanyId: req.session.companyId,
     currentUserId: req.session.userId,
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -2246,7 +2318,9 @@ app.get('/audit-logs', ensureAuth, ensureAdmin, async (req, res) => {
     currentCompanyId: req.session.companyId,
     isAdmin: true,
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -2254,7 +2328,7 @@ app.get('/audit-logs', ensureAuth, ensureAdmin, async (req, res) => {
   });
 });
 
-app.get('/office-groups', ensureAuth, ensureStaffAccess, async (req, res) => {
+app.get('/office-groups', ensureAuth, ensureOfficeGroupAccess, async (req, res) => {
   const isSuperAdmin = req.session.userId === 1;
   const [officeGroups, staff] = await Promise.all([
     getOfficeGroupsByCompany(req.session.companyId!),
@@ -2269,7 +2343,9 @@ app.get('/office-groups', ensureAuth, ensureStaffAccess, async (req, res) => {
     companies,
     currentCompanyId: req.session.companyId,
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -2380,7 +2456,9 @@ app.get('/admin/syncro/customers', ensureAuth, ensureSuperAdmin, async (req, res
       currentCompanyId: req.session.companyId,
       isAdmin: true,
       canManageLicenses: current?.can_manage_licenses ?? 0,
-      canManageStaff: current?.can_manage_staff ?? 0,
+      canManageStaff: current?.staff_permission ? 1 : 0,
+      staffPermission: current?.staff_permission ?? 0,
+      canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
       canManageAssets: current?.can_manage_assets ?? 0,
       canManageInvoices: current?.can_manage_invoices ?? 0,
       canAccessShop: current?.can_access_shop ?? 0,
@@ -2495,7 +2573,7 @@ app.post(
             existing.state || null,
             existing.postcode || null,
             existing.country || null,
-            existing.department || null,
+            (contact as any).department || existing.department || null,
             existing.job_title || null,
             existing.org_company || null,
             existing.manager_name || null,
@@ -2517,7 +2595,7 @@ app.post(
             (contact as any).state || null,
             (contact as any).zip || null,
             (contact as any).country || null,
-            null,
+            (contact as any).department || null,
             (contact as any).title || null,
             null,
             null,
@@ -2538,7 +2616,7 @@ app.post(
             state: (contact as any).state || null,
             postcode: (contact as any).zip || null,
             country: (contact as any).country || null,
-            department: null,
+            department: (contact as any).department || null,
             job_title: (contact as any).title || null,
             org_company: null,
             manager_name: null,
@@ -2579,7 +2657,7 @@ app.post('/admin/user', ensureAuth, ensureAdmin, async (req, res) => {
     ? parseInt(req.body.companyId, 10)
     : req.session.companyId!;
   const userId = await createUser(email, passwordHash, companyId);
-  await assignUserToCompany(userId, companyId, false, false, false, false, false, false, false);
+  await assignUserToCompany(userId, companyId, false, 0, false, false, false, false, false, false);
   res.redirect('/admin');
 });
 
@@ -2601,6 +2679,7 @@ app.post('/admin/invite', ensureAuth, ensureAdmin, async (req, res) => {
     userId,
     companyId,
     false,
+    0,
     false,
     false,
     false,
@@ -2689,7 +2768,9 @@ app.get('/admin/email-templates', ensureAuth, ensureSuperAdmin, async (req, res)
     currentCompanyId: req.session.companyId,
     isAdmin: true,
     canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
     canManageAssets: current?.can_manage_assets ?? 0,
     canManageInvoices: current?.can_manage_invoices ?? 0,
     canOrderLicenses: current?.can_order_licenses ?? 0,
@@ -2712,6 +2793,7 @@ app.post('/admin/assign', ensureAuth, ensureAdmin, async (req, res) => {
     parseInt(userId, 10),
     companyId,
     false,
+    0,
     false,
     false,
     false,
@@ -2745,7 +2827,8 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
     userId,
     companyId,
     canManageLicenses,
-    canManageStaff,
+    staffPermission,
+    canManageOfficeGroups,
     canManageAssets,
     canManageInvoices,
     canOrderLicenses,
@@ -2762,12 +2845,19 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
       parseCheckbox(canManageLicenses)
     );
   }
-  if (typeof canManageStaff !== 'undefined') {
+  if (typeof staffPermission !== 'undefined') {
+    await updateUserCompanyStaffPermission(
+      uid,
+      cid,
+      parseInt(staffPermission, 10)
+    );
+  }
+  if (typeof canManageOfficeGroups !== 'undefined') {
     await updateUserCompanyPermission(
       uid,
       cid,
-      'can_manage_staff',
-      parseCheckbox(canManageStaff)
+      'can_manage_office_groups',
+      parseCheckbox(canManageOfficeGroups)
     );
   }
   if (typeof canManageAssets !== 'undefined') {
@@ -2824,7 +2914,7 @@ app.post('/office-groups', ensureAuth, ensureSuperAdmin, async (req, res) => {
 app.post(
   '/office-groups/:id/members',
   ensureAuth,
-  ensureStaffAccess,
+  ensureOfficeGroupAccess,
   async (req, res) => {
     const raw = req.body.staffIds;
     const ids = Array.isArray(raw)
@@ -4955,8 +5045,10 @@ api.delete('/staff/:id', async (req, res) => {
  *             properties:
  *               canManageLicenses:
  *                 type: boolean
- *               canManageStaff:
- *                 type: boolean
+ *               staffPermission:
+ *                 type: integer
+*               canManageOfficeGroups:
+*                 type: boolean
  *               canManageAssets:
  *                 type: boolean
  *               canManageInvoices:
@@ -4974,7 +5066,8 @@ api.delete('/staff/:id', async (req, res) => {
 api.post('/companies/:companyId/users/:userId', async (req, res) => {
   const {
     canManageLicenses,
-    canManageStaff,
+    staffPermission,
+    canManageOfficeGroups,
     canManageAssets,
     canManageInvoices,
     isAdmin,
@@ -4985,7 +5078,8 @@ api.post('/companies/:companyId/users/:userId', async (req, res) => {
     parseInt(req.params.userId, 10),
     parseInt(req.params.companyId, 10),
     !!canManageLicenses,
-    !!canManageStaff,
+    parseInt(staffPermission, 10) || 0,
+    !!canManageOfficeGroups,
     !!canManageAssets,
     !!canManageInvoices,
     !!isAdmin,
