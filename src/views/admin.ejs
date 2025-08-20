@@ -20,15 +20,12 @@
             <button data-tab="forms-admin">Forms</button>
             <button data-tab="form-permissions">Form Permissions</button>
             <button type="button" onclick="window.location.href='/admin/email-templates'">Email Templates</button>
-          <% } else if (isAdmin) { %>
+          <% } else { %>
             <button data-tab="account" class="active">Account</button>
             <button data-tab="companies">Companies</button>
             <button data-tab="assignments">Current Assignments</button>
-          <% } else { %>
-            <button data-tab="account" class="active">Account</button>
           <% } %>
         </div>
-        <% if (isAdmin) { %>
         <div id="companies" class="tab-content">
           <% if (isSuperAdmin) { %>
           <section>
@@ -136,7 +133,6 @@
           </section>
           <% } %>
         </div>
-        <% if (isAdmin) { %>
         <div id="assignments" class="tab-content">
           <section>
             <h2>Current Assignments</h2>
@@ -225,7 +221,6 @@
             <p><em>Note: Not all functionality is currently available and will be added in future MyPortal releases.</em></p>
           </section>
         </div>
-        <% } %>
         <div id="account" class="tab-content<% if (!isSuperAdmin) { %> active<% } %>">
           <section>
             <h2>Profile</h2>
