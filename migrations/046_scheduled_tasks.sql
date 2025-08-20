@@ -1,0 +1,11 @@
+CREATE TABLE scheduled_tasks (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  company_id INT NULL,
+  name VARCHAR(255) NOT NULL,
+  command VARCHAR(100) NOT NULL,
+  cron VARCHAR(100) NOT NULL,
+  last_run_at DATETIME NULL,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+);
