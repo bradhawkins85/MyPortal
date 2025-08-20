@@ -57,7 +57,8 @@ export interface UserCompany {
   user_id: number;
   company_id: number;
   can_manage_licenses: number;
-  can_manage_staff: number;
+  staff_permission: number;
+  can_manage_office_groups: number;
   can_manage_assets: number;
   can_manage_invoices: number;
   can_order_licenses: number;
@@ -495,7 +496,8 @@ export async function getCompaniesForUser(userId: number): Promise<UserCompany[]
       company_name: row.company_name as string,
       is_vip: Number(row.is_vip),
       can_manage_licenses: 1,
-      can_manage_staff: 1,
+      staff_permission: 3,
+      can_manage_office_groups: 1,
       can_manage_assets: 1,
       can_manage_invoices: 1,
       can_order_licenses: 1,
@@ -504,7 +506,7 @@ export async function getCompaniesForUser(userId: number): Promise<UserCompany[]
     })) as UserCompany[];
   }
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.can_access_shop, uc.is_admin, c.name AS company_name, c.is_vip AS is_vip
+    `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.staff_permission, uc.can_manage_office_groups, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.can_access_shop, uc.is_admin, c.name AS company_name, c.is_vip AS is_vip
      FROM user_companies uc JOIN companies c ON uc.company_id = c.id
      WHERE uc.user_id = ?`,
     [userId]
@@ -516,7 +518,7 @@ export async function getCompaniesForUser(userId: number): Promise<UserCompany[]
 }
 
 export async function getUserCompanyAssignments(companyId?: number): Promise<UserCompany[]> {
-  let sql = `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.can_manage_staff, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.can_access_shop, uc.is_admin, c.name AS company_name, c.is_vip AS is_vip, u.email
+  let sql = `SELECT uc.user_id, uc.company_id, uc.can_manage_licenses, uc.staff_permission, uc.can_manage_office_groups, uc.can_manage_assets, uc.can_manage_invoices, uc.can_order_licenses, uc.can_access_shop, uc.is_admin, c.name AS company_name, c.is_vip AS is_vip, u.email
      FROM user_companies uc
      JOIN users u ON uc.user_id = u.id
      JOIN companies c ON uc.company_id = c.id`;
@@ -537,7 +539,8 @@ export async function assignUserToCompany(
   userId: number,
   companyId: number,
   canManageLicenses: boolean,
-  canManageStaff: boolean,
+  staffPermission: number,
+  canManageOfficeGroups: boolean,
   canManageAssets: boolean,
   canManageInvoices: boolean,
   isAdmin: boolean,
@@ -545,14 +548,15 @@ export async function assignUserToCompany(
   canAccessShop: boolean
 ): Promise<void> {
   await pool.execute(
-    `INSERT INTO user_companies (user_id, company_id, can_manage_licenses, can_manage_staff, can_manage_assets, can_manage_invoices, is_admin, can_order_licenses, can_access_shop)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE can_manage_licenses = VALUES(can_manage_licenses), can_manage_staff = VALUES(can_manage_staff), can_manage_assets = VALUES(can_manage_assets), can_manage_invoices = VALUES(can_manage_invoices), is_admin = VALUES(is_admin), can_order_licenses = VALUES(can_order_licenses), can_access_shop = VALUES(can_access_shop)`,
+    `INSERT INTO user_companies (user_id, company_id, can_manage_licenses, staff_permission, can_manage_office_groups, can_manage_assets, can_manage_invoices, is_admin, can_order_licenses, can_access_shop)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE can_manage_licenses = VALUES(can_manage_licenses), staff_permission = VALUES(staff_permission), can_manage_office_groups = VALUES(can_manage_office_groups), can_manage_assets = VALUES(can_manage_assets), can_manage_invoices = VALUES(can_manage_invoices), is_admin = VALUES(is_admin), can_order_licenses = VALUES(can_order_licenses), can_access_shop = VALUES(can_access_shop)`,
     [
       userId,
       companyId,
       canManageLicenses ? 1 : 0,
-      canManageStaff ? 1 : 0,
+      staffPermission,
+      canManageOfficeGroups ? 1 : 0,
       canManageAssets ? 1 : 0,
       canManageInvoices ? 1 : 0,
       isAdmin ? 1 : 0,
@@ -567,7 +571,7 @@ export async function updateUserCompanyPermission(
   companyId: number,
   field:
     | 'can_manage_licenses'
-    | 'can_manage_staff'
+    | 'can_manage_office_groups'
     | 'can_manage_assets'
     | 'can_manage_invoices'
     | 'can_order_licenses'
@@ -578,6 +582,17 @@ export async function updateUserCompanyPermission(
   await pool.execute(
     `UPDATE user_companies SET ${field} = ? WHERE user_id = ? AND company_id = ?`,
     [value ? 1 : 0, userId, companyId]
+  );
+}
+
+export async function updateUserCompanyStaffPermission(
+  userId: number,
+  companyId: number,
+  permission: number
+): Promise<void> {
+  await pool.execute(
+    `UPDATE user_companies SET staff_permission = ? WHERE user_id = ? AND company_id = ?`,
+    [permission, userId, companyId]
   );
 }
 
