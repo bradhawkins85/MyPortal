@@ -117,6 +117,19 @@
               </select>
               <button type="submit">Assign</button>
             </form>
+            <table>
+              <thead>
+                <tr><th>User</th><th>Delete</th></tr>
+              </thead>
+              <tbody>
+                <% users.forEach(function(u){ %>
+                  <tr>
+                    <td><%= u.email %></td>
+                    <td><button class="delete-user-btn" data-user-id="<%= u.id %>">Delete</button></td>
+                  </tr>
+                <% }); %>
+              </tbody>
+            </table>
           </section>
           <% } %>
         </div>
@@ -801,6 +814,13 @@
         btn.addEventListener('click', async function(){
           if(!confirm('Remove assignment?')) return;
           await fetch(`/admin/assign/${this.dataset.companyId}/${this.dataset.userId}`, { method: 'DELETE' });
+          location.reload();
+        });
+      });
+      document.querySelectorAll('.delete-user-btn').forEach(function(btn){
+        btn.addEventListener('click', async function(){
+          if(!confirm('Delete user?')) return;
+          await fetch(`/admin/user/${this.dataset.userId}`, { method: 'DELETE' });
           location.reload();
         });
       });
