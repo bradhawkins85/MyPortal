@@ -244,7 +244,9 @@
                   <% }); %>
                 </select>
                 <input type="text" name="cron" id="cron-input" placeholder="Cron Expression" required>
-                <div id="cron-generator-container">
+                <details id="cron-generator">
+                  <summary>Cron Generator</summary>
+                  <div id="cron-generator-container">
                   <table class="generator">
                     <tr>
                       <td>
@@ -406,7 +408,8 @@
                       </td>
                     </tr>
                   </table>
-                </div>
+                  </div>
+                </details>
                 <button type="submit">Add</button>
               </form>
             </section>
