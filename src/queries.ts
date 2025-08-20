@@ -876,8 +876,11 @@ export async function addUserTotpAuthenticator(
   );
 }
 
-export async function deleteUserTotpAuthenticator(id: number): Promise<void> {
-  await pool.execute('DELETE FROM user_totp_authenticators WHERE id = ?', [id]);
+export async function deleteUserTotpAuthenticator(
+  userId: number,
+  id: number
+): Promise<void> {
+  await pool.execute('DELETE FROM user_totp_authenticators WHERE id = ? AND user_id = ?', [id, userId]);
 }
 
 export async function deleteUser(id: number): Promise<void> {
