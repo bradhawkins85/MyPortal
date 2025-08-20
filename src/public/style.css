@@ -292,3 +292,11 @@ table th {
 .verify-container .success {
   text-align: center;
 }
+
+#cron-generator-container {
+  font-size: 0.5em;
+}
+
+#cron-input {
+  width: 200%;
+}
