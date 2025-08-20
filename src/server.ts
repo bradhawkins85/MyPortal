@@ -2332,6 +2332,11 @@ app.post('/admin/user', ensureAuth, ensureAdmin, async (req, res) => {
   res.redirect('/admin');
 });
 
+app.delete('/admin/user/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  await deleteUser(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
 app.post('/admin/invite', ensureAuth, ensureAdmin, async (req, res) => {
   const { email, firstName, lastName } = req.body;
   const isSuperAdmin = req.session.userId === 1;
