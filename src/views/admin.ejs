@@ -458,7 +458,11 @@
                       <td><%= t.company_name || '' %></td>
                       <td><%= t.command %></td>
                       <td><%= t.cron %></td>
-                      <td><%= t.last_run_at ? new Date(t.last_run_at).toLocaleString() : '' %></td>
+                      <td>
+                        <% if (t.last_run_at) { %>
+                          <span class="local-time" data-time="<%= t.last_run_at %>"></span>
+                        <% } %>
+                      </td>
                       <td>
                         <form action="/admin/schedules/<%= t.id %>/run" method="post" style="display:inline">
                           <button type="submit">Run Now</button>
@@ -476,6 +480,14 @@
                 </tbody>
               </table>
             </section>
+            <script>
+              document.querySelectorAll('.local-time').forEach(function(el){
+                const date = new Date(el.dataset.time);
+                if (!isNaN(date)) {
+                  el.textContent = date.toLocaleString();
+                }
+              });
+            </script>
             <script>
               (function(){
                 function getField(name, selectId){
