@@ -294,9 +294,17 @@ table th {
 }
 
 #cron-generator-container {
-  font-size: 3rem;
+  font-size: 4.5rem;
 }
 
 #cron-input {
   width: 200%;
+}
+
+.multipleEntries {
+  width: 30%;
+}
+
+.multipleEntries select {
+  width: 100%;
 }

@@ -266,13 +266,17 @@
                             <td>
                               <table class="multipleEntries">
                                 <tr>
-                                  <td><input type="radio" value="select" name="minutes"></td>
                                   <td>
                                     <select id="minutes-select" multiple size="10">
                                       <% for (let i = 0; i < 60; i++) { %>
                                         <option value="<%= i %>"><%= i %></option>
                                       <% } %>
                                     </select>
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td>
+                                    <label class="radio" for="minutes-custom"><input id="minutes-custom" type="radio" value="select" name="minutes"> Custom</label>
                                   </td>
                                 </tr>
                               </table>
@@ -296,7 +300,6 @@
                             <td>
                               <table class="multipleEntries">
                                 <tr>
-                                  <td><input type="radio" value="select" name="hours"></td>
                                   <td>
                                     <select id="hours-select" multiple size="10">
                                       <% for (let i = 0; i < 24; i++) { %>
@@ -308,6 +311,11 @@
                                         </option>
                                       <% } %>
                                     </select>
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td>
+                                    <label class="radio" for="hours-custom"><input id="hours-custom" type="radio" value="select" name="hours"> Custom</label>
                                   </td>
                                 </tr>
                               </table>
@@ -332,13 +340,17 @@
                             <td>
                               <table class="multipleEntries">
                                 <tr>
-                                  <td><input type="radio" value="select" name="days"></td>
                                   <td>
                                     <select id="days-select" multiple size="10">
                                       <% for (let i = 1; i <= 31; i++) { %>
                                         <option value="<%= i %>"><%= i %></option>
                                       <% } %>
                                     </select>
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td>
+                                    <label class="radio" for="days-custom"><input id="days-custom" type="radio" value="select" name="days"> Custom</label>
                                   </td>
                                 </tr>
                               </table>
@@ -362,7 +374,6 @@
                             <td>
                               <table class="multipleEntries">
                                 <tr>
-                                  <td><input type="radio" value="select" name="months"></td>
                                   <td>
                                     <select id="months-select" multiple size="10" class="cron">
                                       <% const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; %>
@@ -370,6 +381,11 @@
                                         <option value="<%= i %>"><%= monthNames[i-1] %></option>
                                       <% } %>
                                     </select>
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td>
+                                    <label class="radio" for="months-custom"><input id="months-custom" type="radio" value="select" name="months"> Custom</label>
                                   </td>
                                 </tr>
                               </table>
@@ -391,7 +407,6 @@
                             <td>
                               <table class="multipleEntries">
                                 <tr>
-                                  <td><input type="radio" value="select" name="weekdays"></td>
                                   <td>
                                     <select id="weekdays-select" multiple size="10">
                                       <% const weekdayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; %>
@@ -399,6 +414,11 @@
                                         <option value="<%= i %>"><%= weekdayNames[i] %></option>
                                       <% } %>
                                     </select>
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td>
+                                    <label class="radio" for="weekdays-custom"><input id="weekdays-custom" type="radio" value="select" name="weekdays"> Custom</label>
                                   </td>
                                 </tr>
                               </table>
