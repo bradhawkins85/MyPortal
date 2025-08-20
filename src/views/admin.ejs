@@ -304,7 +304,7 @@
             <h2>Site Settings</h2>
             <form action="/admin/site-settings" method="post" enctype="multipart/form-data">
               <label>Company Name:
-                <input type="text" name="companyName" value="<%= siteSettings && siteSettings.company_name ? siteSettings.company_name : '' %>">
+                <input type="text" name="companyName" value="<%= siteSettings?.company_name || '' %>">
               </label>
               <div>
                 <label>Login/Verify Logo:
