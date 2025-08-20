@@ -49,9 +49,6 @@
       <% } %>
       <a href="/audit-logs" class="menu-link"><i class="fas fa-clipboard-list"></i> Audit Logs</a>
     <% } %>
-    <% if (typeof isAdmin !== 'undefined' && !isAdmin) { %>
-      <a href="/admin#account" class="menu-link"><i class="fas fa-user"></i> Account</a>
-    <% } %>
     <% if (isSuperAdmin) { %>
       <a href="/api-docs" class="menu-link"><i class="fas fa-book"></i> API Docs</a>
     <% } %>
