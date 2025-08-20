@@ -495,6 +495,14 @@
                   const w = getField('weekdays','weekdays-select');
                   document.getElementById('cron-input').value = `${m} ${h} ${d} ${mo} ${w}`;
                 }
+                const randomMinute = Math.floor(Math.random() * 60);
+                const randomHour = Math.floor(Math.random() * 24);
+                const minuteSelect = document.getElementById('minutes-select');
+                const hourSelect = document.getElementById('hours-select');
+                minuteSelect.value = String(randomMinute);
+                hourSelect.value = String(randomHour);
+                document.getElementById('minutes-custom').checked = true;
+                document.getElementById('hours-custom').checked = true;
                 document.querySelectorAll('#cron-generator-container input, #cron-generator-container select').forEach(function(el){
                   el.addEventListener('change', updateCron);
                 });
