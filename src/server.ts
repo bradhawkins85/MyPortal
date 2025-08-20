@@ -376,7 +376,11 @@ async function scheduleAllTasks() {
   const tasks = await getScheduledTasks();
   tasks.forEach((t) => {
     if (t.active) {
-      const job = cron.schedule(t.cron, () => runScheduledTask(t.id));
+      const job = cron.schedule(
+        t.cron,
+        () => runScheduledTask(t.id),
+        { timezone: process.env.CRON_TIMEZONE || 'Etc/UTC' }
+      );
       scheduledJobs.set(t.id, job);
     }
   });
