@@ -556,29 +556,8 @@ app.post('/login', async (req, res) => {
   const { email, password } = req.body;
   const user = await getUserByEmail(email);
   if (user && (await bcrypt.compare(password, user.password_hash))) {
-    const companies = await getCompaniesForUser(user.id);
-    const isAdmin = user.id === 1 || companies.some((c) => c.is_admin);
-    if (isAdmin) {
-      const trusted = req.cookies[`trusted_${user.id}`];
-      if (trusted && verifyTrustedDeviceToken(trusted, user.id)) {
-        await completeLogin(req, user.id);
-        if (user.force_password_change) {
-          req.session.mustChangePassword = true;
-          return res.redirect('/force-password-change');
-        }
-        return res.redirect('/');
-      }
-      req.session.tempUserId = user.id;
-      req.session.pendingForcePassword = !!user.force_password_change;
-      const totpAuths = await getUserTotpAuthenticators(user.id);
-      if (totpAuths.length === 0) {
-        req.session.pendingTotpSecret = authenticator.generateSecret();
-        req.session.requireTotpSetup = true;
-      } else {
-        req.session.requireTotpSetup = false;
-      }
-      return res.redirect('/totp');
-    } else {
+    const trusted = req.cookies[`trusted_${user.id}`];
+    if (trusted && verifyTrustedDeviceToken(trusted, user.id)) {
       await completeLogin(req, user.id);
       if (user.force_password_change) {
         req.session.mustChangePassword = true;
@@ -586,6 +565,16 @@ app.post('/login', async (req, res) => {
       }
       return res.redirect('/');
     }
+    req.session.tempUserId = user.id;
+    req.session.pendingForcePassword = !!user.force_password_change;
+    const totpAuths = await getUserTotpAuthenticators(user.id);
+    if (totpAuths.length === 0) {
+      req.session.pendingTotpSecret = authenticator.generateSecret();
+      req.session.requireTotpSetup = true;
+    } else {
+      req.session.requireTotpSetup = false;
+    }
+    return res.redirect('/totp');
   }
   res.render('login', { error: 'Invalid credentials' });
 });
@@ -737,7 +726,7 @@ app.post('/force-password-change', ensureAuth, async (req, res) => {
   res.redirect('/');
 });
 
-app.post('/change-password', ensureAuth, ensureAdmin, async (req, res) => {
+app.post('/change-password', ensureAuth, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   const user = await getUserById(req.session.userId!);
   if (!user || !(await bcrypt.compare(currentPassword, user.password_hash))) {
@@ -750,7 +739,7 @@ app.post('/change-password', ensureAuth, ensureAdmin, async (req, res) => {
   res.redirect('/admin#account');
 });
 
-app.post('/change-name', ensureAuth, ensureAdmin, async (req, res) => {
+app.post('/change-name', ensureAuth, async (req, res) => {
   const { firstName, lastName } = req.body;
   if (!firstName || !lastName) {
     req.session.nameError = 'First name and last name are required';
@@ -761,7 +750,7 @@ app.post('/change-name', ensureAuth, ensureAdmin, async (req, res) => {
   res.redirect('/admin#account');
 });
 
-app.post('/change-mobile', ensureAuth, ensureAdmin, async (req, res) => {
+app.post('/change-mobile', ensureAuth, async (req, res) => {
   const mobilePhone = (req.body.mobilePhone || '').trim();
   if (!mobilePhone) {
     req.session.mobileError = 'Mobile phone is required';
@@ -1862,8 +1851,11 @@ app.post('/apps/:appId/add', ensureAuth, ensureSuperAdmin, async (req, res) => {
   res.status(204).end();
 });
 
-app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
+app.get('/admin', ensureAuth, async (req, res) => {
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
   const isSuperAdmin = req.session.userId === 1;
+  const isAdmin = isSuperAdmin || (current?.is_admin ?? 0);
   const formId = req.query.formId ? parseInt(req.query.formId as string, 10) : NaN;
   const companyIdParam = req.query.companyId ? parseInt(req.query.companyId as string, 10) : NaN;
   const includeArchived = req.query.showArchived === '1';
@@ -1906,7 +1898,7 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
       }
       productRestrictions[r.product_id].push(r);
     });
-  } else {
+  } else if (isAdmin) {
     const companyId = req.session.companyId!;
     const company = await getCompanyById(companyId);
     allCompanies = company ? [company] : [];
@@ -1918,9 +1910,9 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
       formUsers = await getUserCompanyAssignments(companyIdParam);
       permissions = await getFormPermissions(formId, companyIdParam);
     }
+  } else {
+    allCompanies = [];
   }
-  const companies = await getCompaniesForUser(req.session.userId!);
-  const current = companies.find((c) => c.company_id === req.session.companyId);
   const currentUser = await getUserById(req.session.userId!);
   const totpAuthenticators = await getUserTotpAuthenticators(req.session.userId!);
   let newTotpQr: string | null = null;
@@ -1965,7 +1957,7 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
     showArchived: includeArchived,
     selectedFormId: isNaN(formId) ? null : formId,
     selectedCompanyId: isNaN(companyIdParam) ? null : companyIdParam,
-    isAdmin: true,
+    isAdmin,
     isSuperAdmin,
     companies,
     currentCompanyId: req.session.companyId,
@@ -1994,14 +1986,14 @@ app.get('/admin', ensureAuth, ensureAdmin, async (req, res) => {
   });
 });
 
-app.post('/admin/totp/start', ensureAuth, ensureAdmin, (req, res) => {
+app.post('/admin/totp/start', ensureAuth, (req, res) => {
   const { name } = req.body;
   req.session.newTotpName = name;
   req.session.newTotpSecret = authenticator.generateSecret();
   res.redirect('/admin#account');
 });
 
-app.post('/admin/totp/verify', ensureAuth, ensureAdmin, async (req, res) => {
+app.post('/admin/totp/verify', ensureAuth, async (req, res) => {
   if (!req.session.newTotpSecret || !req.session.newTotpName) {
     return res.redirect('/admin#account');
   }
@@ -2023,16 +2015,16 @@ app.post('/admin/totp/verify', ensureAuth, ensureAdmin, async (req, res) => {
   res.redirect('/admin#account');
 });
 
-app.post('/admin/totp/cancel', ensureAuth, ensureAdmin, (req, res) => {
+app.post('/admin/totp/cancel', ensureAuth, (req, res) => {
   req.session.newTotpSecret = undefined;
   req.session.newTotpName = undefined;
   req.session.newTotpError = undefined;
   res.redirect('/admin#account');
 });
 
-app.post('/admin/totp/:id/delete', ensureAuth, ensureAdmin, async (req, res) => {
+app.post('/admin/totp/:id/delete', ensureAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  await deleteUserTotpAuthenticator(id);
+  await deleteUserTotpAuthenticator(req.session.userId!, id);
   res.redirect('/admin#account');
 });
 
