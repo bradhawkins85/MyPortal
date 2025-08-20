@@ -2055,6 +2055,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
   let categories: Category[] = [];
   let products: any[] = [];
   let productRestrictions: Record<number, ProductCompanyRestriction[]> = {};
+  let tasks: any[] = [];
   if (isSuperAdmin) {
     allCompanies = await getAllCompanies();
     users = await getAllUsers();
@@ -2076,11 +2077,17 @@ app.get('/admin', ensureAuth, async (req, res) => {
     products = prodList;
     categories = catList;
     restrictionsList.forEach((r) => {
-      if (!productRestrictions[r.product_id]) {
-        productRestrictions[r.product_id] = [];
-      }
-      productRestrictions[r.product_id].push(r);
+    if (!productRestrictions[r.product_id]) {
+      productRestrictions[r.product_id] = [];
+    }
+    productRestrictions[r.product_id].push(r);
     });
+    const rawTasks = await getScheduledTasks();
+    tasks = rawTasks.map((t) => ({
+      ...t,
+      company_name:
+        allCompanies.find((c) => c.id === t.company_id)?.name || null,
+    }));
   } else {
     const companyId = req.session.companyId!;
     const company = await getCompanyById(companyId);
@@ -2138,6 +2145,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
     categories,
     products,
     productRestrictions,
+    tasks,
     showArchived: includeArchived,
     selectedFormId: isNaN(formId) ? null : formId,
     selectedCompanyId: isNaN(companyIdParam) ? null : companyIdParam,
@@ -2295,64 +2303,54 @@ app.post('/admin/company/:id', ensureAuth, ensureSuperAdmin, async (req, res) =>
   res.redirect('/admin');
 });
 
-app.get('/admin/schedules', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const [tasks, allCompanies, companies] = await Promise.all([
-    getScheduledTasks(),
-    getAllCompanies(),
-    getCompaniesForUser(req.session.userId!),
-  ]);
-  const tasksWithCompany = tasks.map((t) => ({
-    ...t,
-    company_name: allCompanies.find((c) => c.id === t.company_id)?.name || null,
-  }));
-  const current = companies.find((c) => c.company_id === req.session.companyId);
-  res.render('schedules', {
-    tasks: tasksWithCompany,
-    allCompanies,
-    companies,
-    currentCompanyId: req.session.companyId,
-    isAdmin: true,
-    isSuperAdmin: true,
-    canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.can_manage_staff ?? 0,
-    canManageAssets: current?.can_manage_assets ?? 0,
-    canManageInvoices: current?.can_manage_invoices ?? 0,
-    canAccessShop: current?.can_access_shop ?? 0,
-    hasForms: false,
-    cart: [],
-  });
+app.get('/admin/schedules', ensureAuth, ensureSuperAdmin, (req, res) => {
+  res.redirect('/admin#schedules');
 });
 
 app.post('/admin/schedules', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { name, command, cron: cronExpr, companyId } = req.body;
+  const { command, cron: cronExpr, companyId } = req.body;
   const company = companyId ? parseInt(companyId, 10) : null;
+  let name = command;
+  if (company) {
+    const c = await getCompanyById(company);
+    if (c) {
+      name = `${c.name} ${command}`;
+    }
+  }
   await createScheduledTask(company, name, command, cronExpr);
   await scheduleAllTasks();
-  res.redirect('/admin/schedules');
+  res.redirect('/admin#schedules');
 });
 
 app.post('/admin/schedules/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { name, cron: cronExpr } = req.body;
+  const { cron: cronExpr } = req.body;
   const task = await getScheduledTask(id);
   if (task) {
+    let name = task.command;
+    if (task.company_id) {
+      const c = await getCompanyById(task.company_id);
+      if (c) {
+        name = `${c.name} ${task.command}`;
+      }
+    }
     await updateScheduledTask(id, task.company_id, name, task.command, cronExpr);
   }
   await scheduleAllTasks();
-  res.redirect('/admin/schedules');
+  res.redirect('/admin#schedules');
 });
 
 app.post('/admin/schedules/:id/run', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   await runScheduledTask(id);
-  res.redirect('/admin/schedules');
+  res.redirect('/admin#schedules');
 });
 
 app.post('/admin/schedules/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   await deleteScheduledTask(id);
   await scheduleAllTasks();
-  res.redirect('/admin/schedules');
+  res.redirect('/admin#schedules');
 });
 
 app.get('/admin/syncro/customers', ensureAuth, ensureSuperAdmin, async (req, res) => {

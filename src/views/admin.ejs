@@ -14,6 +14,7 @@
             <button data-tab="api-keys">API Keys</button>
             <button data-tab="companies">Companies</button>
             <button data-tab="assignments">Current Assignments</button>
+            <button data-tab="schedules">Schedules</button>
             <button data-tab="apps">Apps</button>
             <button data-tab="shop-settings">Shop Settings</button>
             <button data-tab="products">Products</button>
@@ -224,6 +225,119 @@
             <p><em>Note: Not all functionality is currently available and will be added in future MyPortal releases.</em></p>
           </section>
           </div>
+          <% if (isSuperAdmin) { %>
+          <div id="schedules" class="tab-content">
+            <section>
+              <h2>Add Schedule</h2>
+              <form action="/admin/schedules" method="post">
+                <select name="command">
+                  <option value="sync_staff">Sync Staff From Syncro</option>
+                  <option value="sync_o365">Sync Office 365 License Counts</option>
+                  <option value="sync_xero">Sync Xero Invoices</option>
+                  <option value="sync_assets">Sync Assets From Syncro</option>
+                  <option value="system_update">MyPortal System Update</option>
+                </select>
+                <select name="companyId">
+                  <option value="">System</option>
+                  <% allCompanies.forEach(function(c){ %>
+                    <option value="<%= c.id %>"><%= c.name %></option>
+                  <% }); %>
+                </select>
+                <input type="text" name="cron" id="cron-input" placeholder="Cron Expression" required>
+                <div id="cron-generator">
+                  <label>Minute
+                    <select id="cron-minute">
+                      <option value="*">*</option>
+                      <% for (let i = 0; i < 60; i++) { %>
+                        <option value="<%= i %>"><%= i %></option>
+                      <% } %>
+                    </select>
+                  </label>
+                  <label>Hour
+                    <select id="cron-hour">
+                      <option value="*">*</option>
+                      <% for (let i = 0; i < 24; i++) { %>
+                        <option value="<%= i %>"><%= i %></option>
+                      <% } %>
+                    </select>
+                  </label>
+                  <label>Day of Month
+                    <select id="cron-dom">
+                      <option value="*">*</option>
+                      <% for (let i = 1; i <= 31; i++) { %>
+                        <option value="<%= i %>"><%= i %></option>
+                      <% } %>
+                    </select>
+                  </label>
+                  <label>Month
+                    <select id="cron-month">
+                      <option value="*">*</option>
+                      <% for (let i = 1; i <= 12; i++) { %>
+                        <option value="<%= i %>"><%= i %></option>
+                      <% } %>
+                    </select>
+                  </label>
+                  <label>Day of Week
+                    <select id="cron-dow">
+                      <option value="*">*</option>
+                      <% for (let i = 0; i <= 6; i++) { %>
+                        <option value="<%= i %>"><%= i %></option>
+                      <% } %>
+                    </select>
+                  </label>
+                </div>
+                <button type="submit">Add</button>
+              </form>
+            </section>
+            <section>
+              <h2>Schedules</h2>
+              <table>
+                <thead>
+                  <tr><th>ID</th><th>Company</th><th>Command</th><th>Cron</th><th>Last Run</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                  <% tasks.forEach(function(t){ %>
+                    <tr>
+                      <td><%= t.id %></td>
+                      <td><%= t.company_name || '' %></td>
+                      <td><%= t.command %></td>
+                      <td><%= t.cron %></td>
+                      <td><%= t.last_run_at ? new Date(t.last_run_at).toLocaleString() : '' %></td>
+                      <td>
+                        <form action="/admin/schedules/<%= t.id %>/run" method="post" style="display:inline">
+                          <button type="submit">Run Now</button>
+                        </form>
+                        <form action="/admin/schedules/<%= t.id %>" method="post" style="display:inline">
+                          <input type="text" name="cron" value="<%= t.cron %>" required>
+                          <button type="submit">Save</button>
+                        </form>
+                        <form action="/admin/schedules/<%= t.id %>/delete" method="post" style="display:inline" onsubmit="return confirm('Delete?');">
+                          <button type="submit">Delete</button>
+                        </form>
+                      </td>
+                    </tr>
+                  <% }); %>
+                </tbody>
+              </table>
+            </section>
+            <script>
+              (function(){
+                function updateCron(){
+                  const m=document.getElementById('cron-minute').value;
+                  const h=document.getElementById('cron-hour').value;
+                  const d=document.getElementById('cron-dom').value;
+                  const mo=document.getElementById('cron-month').value;
+                  const w=document.getElementById('cron-dow').value;
+                  document.getElementById('cron-input').value = `${m} ${h} ${d} ${mo} ${w}`;
+                }
+                document.querySelectorAll('#cron-generator select').forEach(function(sel){
+                  sel.addEventListener('change', updateCron);
+                });
+                updateCron();
+              })();
+            </script>
+          </div>
+          <% } %>
         <% } %>
         <div id="account" class="tab-content<% if (!isSuperAdmin) { %> active<% } %>">
           <section>
