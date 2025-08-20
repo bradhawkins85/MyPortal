@@ -556,29 +556,8 @@ app.post('/login', async (req, res) => {
   const { email, password } = req.body;
   const user = await getUserByEmail(email);
   if (user && (await bcrypt.compare(password, user.password_hash))) {
-    const companies = await getCompaniesForUser(user.id);
-    const isAdmin = user.id === 1 || companies.some((c) => c.is_admin);
-    if (isAdmin) {
-      const trusted = req.cookies[`trusted_${user.id}`];
-      if (trusted && verifyTrustedDeviceToken(trusted, user.id)) {
-        await completeLogin(req, user.id);
-        if (user.force_password_change) {
-          req.session.mustChangePassword = true;
-          return res.redirect('/force-password-change');
-        }
-        return res.redirect('/');
-      }
-      req.session.tempUserId = user.id;
-      req.session.pendingForcePassword = !!user.force_password_change;
-      const totpAuths = await getUserTotpAuthenticators(user.id);
-      if (totpAuths.length === 0) {
-        req.session.pendingTotpSecret = authenticator.generateSecret();
-        req.session.requireTotpSetup = true;
-      } else {
-        req.session.requireTotpSetup = false;
-      }
-      return res.redirect('/totp');
-    } else {
+    const trusted = req.cookies[`trusted_${user.id}`];
+    if (trusted && verifyTrustedDeviceToken(trusted, user.id)) {
       await completeLogin(req, user.id);
       if (user.force_password_change) {
         req.session.mustChangePassword = true;
@@ -586,6 +565,16 @@ app.post('/login', async (req, res) => {
       }
       return res.redirect('/');
     }
+    req.session.tempUserId = user.id;
+    req.session.pendingForcePassword = !!user.force_password_change;
+    const totpAuths = await getUserTotpAuthenticators(user.id);
+    if (totpAuths.length === 0) {
+      req.session.pendingTotpSecret = authenticator.generateSecret();
+      req.session.requireTotpSetup = true;
+    } else {
+      req.session.requireTotpSetup = false;
+    }
+    return res.redirect('/totp');
   }
   res.render('login', { error: 'Invalid credentials' });
 });
