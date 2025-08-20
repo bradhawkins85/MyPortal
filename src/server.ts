@@ -2078,8 +2078,9 @@ app.get('/office-groups', ensureAuth, ensureStaffAccess, async (req, res) => {
   ]);
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
+  const isAdmin = req.session.userId === 1 || (current?.is_admin ?? 0);
   res.render('office-groups', {
-    isAdmin: true,
+    isAdmin,
     isSuperAdmin,
     companies,
     currentCompanyId: req.session.companyId,
