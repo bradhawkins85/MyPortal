@@ -14,6 +14,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - VIP pricing for companies with special product rates
 - Shop admin interface to archive products and view archived items
 - Order details include product image, SKU and description
+- CSRF protection on authenticated state-changing requests
 
 ## Setup
 
@@ -38,6 +39,13 @@ There are no default login credentials; the first visit will prompt you to regis
    ```bash
    npm test
    ```
+
+## CSRF Protection
+
+Authenticated POST, PUT and DELETE routes require a CSRF token. Tokens are
+automatically embedded in forms rendered by the server. For custom forms or
+JavaScript requests, read the token from the `csrf-token` meta tag and include
+it as the `_csrf` form field or the `CSRF-Token` header.
 
 ## Running with PM2
 

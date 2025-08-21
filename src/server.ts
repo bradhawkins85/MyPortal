@@ -6,6 +6,7 @@ import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
 import cookieParser from 'cookie-parser';
+import csurf from 'csurf';
 import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
 import swaggerUi from 'swagger-ui-express';
@@ -491,6 +492,25 @@ app.use(auditLogger);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+const csrfProtection = csurf();
+function csrfMiddleware(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  if (req.session.userId) {
+    csrfProtection(req, res, (err) => {
+      if (err) return next(err);
+      res.locals.csrfToken = req.csrfToken();
+      next();
+    });
+  } else {
+    next();
+  }
+}
+
+app.use(csrfMiddleware);
 
 // Secure file upload handling
 const uploadDir = path.join(__dirname, '..', 'uploads');
@@ -5648,6 +5668,20 @@ api.delete('/invoices/:id', async (req, res) => {
 
 app.use('/api', api);
 
+app.use(
+  (
+    err: any,
+    _req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+  ) => {
+    if (err.code === 'EBADCSRFTOKEN') {
+      return res.status(403).send('Invalid CSRF token');
+    }
+    next(err);
+  }
+);
+
 const port = parseInt(process.env.PORT || '3000', 10);
 const host = process.env.HOST || '0.0.0.0';
 
@@ -5663,4 +5697,4 @@ if (require.main === module) {
   start();
 }
 
-export { app, api, start };
+export { app, api, start, csrfMiddleware };
