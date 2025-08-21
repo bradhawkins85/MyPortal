@@ -172,6 +172,11 @@ import { runMigrations } from './db';
 
 dotenv.config();
 
+const sessionSecret = process.env.SESSION_SECRET || '';
+if (!sessionSecret) {
+  throw new Error('SESSION_SECRET environment variable is required');
+}
+
 let appVersion = 'unknown';
 let appBuild = 'unknown';
 try {
@@ -478,9 +483,10 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(cookieParser());
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || 'secret',
+    secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
+    cookie: { httpOnly: true, secure: true, sameSite: 'lax' },
   })
 );
 
@@ -615,7 +621,7 @@ function generateTrustedDeviceToken(userId: number): string {
   const expires = Date.now() + 24 * 60 * 60 * 1000;
   const data = `${userId}.${expires}`;
   const hmac = crypto
-    .createHmac('sha256', process.env.SESSION_SECRET || 'secret')
+    .createHmac('sha256', sessionSecret)
     .update(data)
     .digest('hex');
   return `${data}.${hmac}`;
@@ -629,7 +635,7 @@ function verifyTrustedDeviceToken(token: string, userId: number): boolean {
   if (Number(expires) < Date.now()) return false;
   const data = `${id}.${expires}`;
   const hmac = crypto
-    .createHmac('sha256', process.env.SESSION_SECRET || 'secret')
+    .createHmac('sha256', sessionSecret)
     .update(data)
     .digest('hex');
   return hmac === signature;
