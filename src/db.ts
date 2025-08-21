@@ -11,7 +11,8 @@ export const pool = mysql.createPool({
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  multipleStatements: true,
+  multipleStatements:
+    process.env.DB_ALLOW_MULTIPLE_STATEMENTS === 'true',
 });
 
 export async function runMigrations(): Promise<void> {
@@ -55,7 +56,13 @@ export async function runMigrations(): Promise<void> {
       continue;
     }
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
-    await pool.query(sql);
+    const statements = sql
+      .split(/;\s*(?:\r?\n|$)/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const statement of statements) {
+      await pool.query(statement);
+    }
     await pool.query('INSERT INTO migrations (name) VALUES (?)', [file]);
   }
 }
