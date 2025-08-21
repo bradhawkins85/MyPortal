@@ -15,6 +15,7 @@ import cron from 'node-cron';
 import { getRandomDailyCron } from './cron';
 import { execFile } from 'child_process';
 import util from 'util';
+import rateLimit from 'express-rate-limit';
 import {
   getSyncroCustomers,
   getSyncroCustomer,
@@ -482,6 +483,24 @@ const memoryUpload = multer();
 
 const verifyAttempts: Record<string, { count: number; reset: number }> = {};
 
+const failedLoginAttempts: Record<string, { count: number; lockUntil?: number }> = {};
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCK_TIME_MS = 15 * 60 * 1000;
+
+const loginLimiter = rateLimit({
+  windowMs: LOCK_TIME_MS,
+  max: MAX_FAILED_ATTEMPTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.body.email || req.ip),
+  handler: (req, res) => {
+    res.status(429);
+    res.render('login', {
+      error: 'Too many login attempts. Please try again later.',
+    });
+  },
+});
+
 // Populate common template variables
 app.use(async (req, res, next) => {
   res.locals.isSuperAdmin = req.session.userId === 1;
@@ -744,10 +763,24 @@ app.get('/login', async (req, res) => {
   res.render('login', { error: '' });
 });
 
-app.post('/login', async (req, res) => {
+app.post('/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
+  const identifier = email || req.ip;
+  const attempt = failedLoginAttempts[identifier];
+  if (attempt?.lockUntil) {
+    if (attempt.lockUntil > Date.now()) {
+      return res
+        .status(423)
+        .render('login', { error: 'Account locked. Try again later.' });
+    }
+    attempt.count = 0;
+    attempt.lockUntil = undefined;
+  }
+
   const user = await getUserByEmail(email);
   if (user && (await bcrypt.compare(password, user.password_hash))) {
+    delete failedLoginAttempts[identifier];
+    loginLimiter.resetKey(identifier);
     const trusted = req.cookies[`trusted_${user.id}`];
     if (trusted && verifyTrustedDeviceToken(trusted, user.id)) {
       await completeLogin(req, user.id);
@@ -768,7 +801,17 @@ app.post('/login', async (req, res) => {
     }
     return res.redirect('/totp');
   }
-  res.render('login', { error: 'Invalid credentials' });
+
+  const record = failedLoginAttempts[identifier] || { count: 0 };
+  record.count += 1;
+  if (record.count >= MAX_FAILED_ATTEMPTS) {
+    record.lockUntil = Date.now() + LOCK_TIME_MS;
+  }
+  failedLoginAttempts[identifier] = record;
+  const message = record.lockUntil
+    ? 'Account locked due to too many failed attempts. Try again later.'
+    : 'Invalid credentials';
+  res.status(401).render('login', { error: message });
 });
 
 app.get('/totp', async (req, res) => {
