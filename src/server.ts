@@ -492,8 +492,68 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const upload = multer({ dest: path.join(__dirname, 'public', 'uploads') });
+// Secure file upload handling
+const uploadDir = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true, mode: 0o700 });
+}
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadDir),
+  filename: (_req, file, cb) => {
+    const safeName = file.originalname
+      .toLowerCase()
+      .replace(/[^a-z0-9.]/g, '_');
+    const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e9)}-${safeName}`;
+    cb(null, uniqueName);
+  },
+});
+
+const allowedMimes = ['image/jpeg', 'image/png', 'image/gif'];
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type'));
+    }
+  },
+});
+
+async function scanFileForViruses(filePath: string): Promise<void> {
+  try {
+    await execFileAsync('clamscan', ['--no-summary', filePath]);
+  } catch (err: any) {
+    if (err && typeof err.code === 'number' && err.code === 1) {
+      fs.unlinkSync(filePath);
+      throw new Error('Virus detected in uploaded file');
+    }
+    console.error('Virus scan failed or clamscan not installed', err);
+  }
+}
+
+const enforceFilePermissions: express.RequestHandler = async (req, _res, next) => {
+  if (req.file) {
+    try {
+      await scanFileForViruses(req.file.path);
+      await fs.promises.chmod(req.file.path, 0o600);
+    } catch (err) {
+      return next(err);
+    }
+  }
+  next();
+};
+
+const uploadMiddleware = [upload.single('image'), enforceFilePermissions];
 const memoryUpload = multer();
+
+// Serve uploaded files via controlled route
+app.get('/uploads/:filename', (req, res) => {
+  const filePath = path.join(uploadDir, path.basename(req.params.filename));
+  res.sendFile(filePath);
+});
 
 const verifyAttempts: Record<string, { count: number; reset: number }> = {};
 
@@ -1972,8 +2032,8 @@ app.post(
   '/shop/admin/product',
   ensureAuth,
   ensureSuperAdmin,
-  upload.single('image'),
-  async (req, res) => {
+  uploadMiddleware,
+  async (req: express.Request, res: express.Response) => {
     const { name, sku, vendor_sku, description, price, vip_price, stock, category_id } =
       req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
@@ -1996,8 +2056,8 @@ app.post(
   '/shop/admin/product/:id',
   ensureAuth,
   ensureSuperAdmin,
-  upload.single('image'),
-  async (req, res) => {
+  uploadMiddleware,
+  async (req: express.Request, res: express.Response) => {
     const { name, sku, vendor_sku, description, price, vip_price, stock, category_id } =
       req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
@@ -3234,7 +3294,7 @@ api.route('/shop/products')
     );
     res.json(products);
   })
-  .post(upload.single('image'), async (req, res) => {
+.post(uploadMiddleware, async (req: express.Request, res: express.Response) => {
     const { name, sku, vendor_sku, description, price, vip_price, stock, category_id } =
       req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
@@ -3368,7 +3428,7 @@ api.route('/shop/products/:id')
     }
     res.json(product);
   })
-  .put(upload.single('image'), async (req, res) => {
+  .put(uploadMiddleware, async (req: express.Request, res: express.Response) => {
     const { name, sku, vendor_sku, description, price, vip_price, stock, category_id } =
       req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
