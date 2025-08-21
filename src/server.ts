@@ -1,6 +1,7 @@
 import express from 'express';
 import session from 'express-session';
 import path from 'path';
+import fs from 'fs';
 import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
@@ -169,6 +170,13 @@ import {
 import { runMigrations } from './db';
 
 dotenv.config();
+
+let appVersion = 'unknown';
+try {
+  appVersion = fs.readFileSync(path.join(__dirname, '..', 'version.txt'), 'utf8').trim();
+} catch (err) {
+  console.error('Failed to read version file', err);
+}
 
 const smtpUser = process.env.SMTP_USER || process.env.SMTP_USERNAME;
 const smtpPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
@@ -506,6 +514,7 @@ app.use(async (req, res, next) => {
   res.locals.isSuperAdmin = req.session.userId === 1;
   res.locals.cart = req.session.cart || [];
   res.locals.hasForms = req.session.hasForms ?? false;
+  res.locals.version = appVersion;
   try {
     res.locals.siteSettings = await getSiteSettings();
   } catch (err) {
