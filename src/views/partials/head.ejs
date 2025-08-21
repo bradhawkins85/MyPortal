@@ -10,4 +10,21 @@
       $('table').not('#cron-generator-container table').DataTable();
     });
   </script>
+  <% if (typeof csrfToken !== 'undefined') { %>
+    <meta name="csrf-token" content="<%= csrfToken %>">
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        document.querySelectorAll('form[method="post"]').forEach((form) => {
+          if (!form.querySelector('input[name="_csrf"]')) {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = '_csrf';
+            input.value = token;
+            form.appendChild(input);
+          }
+        });
+      });
+    </script>
+  <% } %>
 </head>
