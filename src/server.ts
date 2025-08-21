@@ -172,10 +172,16 @@ import { runMigrations } from './db';
 dotenv.config();
 
 let appVersion = 'unknown';
+let appBuild = 'unknown';
 try {
   appVersion = fs.readFileSync(path.join(__dirname, '..', 'version.txt'), 'utf8').trim();
 } catch (err) {
   console.error('Failed to read version file', err);
+}
+try {
+  appBuild = fs.readFileSync(path.join(__dirname, '..', 'build.txt'), 'utf8').trim();
+} catch (err) {
+  console.error('Failed to read build file', err);
 }
 
 const smtpUser = process.env.SMTP_USER || process.env.SMTP_USERNAME;
@@ -515,6 +521,7 @@ app.use(async (req, res, next) => {
   res.locals.cart = req.session.cart || [];
   res.locals.hasForms = req.session.hasForms ?? false;
   res.locals.version = appVersion;
+  res.locals.build = appBuild;
   try {
     res.locals.siteSettings = await getSiteSettings();
   } catch (err) {

@@ -22,13 +22,10 @@ fi
 
 npm install
 npm run build
-# Increment application version
-if [ -f version.txt ]; then
-  current_version=$(cat version.txt)
-else
-  current_version=0
-fi
-new_version=$((current_version + 1))
-echo "$new_version" > version.txt
+# Update application version and build time
+current_date=$(date +%Y%m%d)
+current_time=$(date +%H:%M)
+echo "$current_date" > version.txt
+echo "$current_time" > build.txt
 
 pm2 restart myportal
