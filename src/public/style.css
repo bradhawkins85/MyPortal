@@ -30,9 +30,11 @@ body.login-page {
 .version-number {
   position: absolute;
   bottom: 10px;
-  right: 10px;
-  font-size: 0.8rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.4rem;
   color: #666;
+  text-align: center;
 }
 
 .login-container form {
