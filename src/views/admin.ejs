@@ -460,7 +460,7 @@
                       <td><%= t.cron %></td>
                       <td>
                         <% if (t.last_run_at) { %>
-                          <span class="local-time" data-time="<%= t.last_run_at %>"></span>
+                          <span class="local-time" data-time="<%= new Date(t.last_run_at).toISOString() %>"></span>
                         <% } %>
                       </td>
                       <td>
