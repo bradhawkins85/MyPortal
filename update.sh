@@ -24,7 +24,7 @@ npm install
 npm run build
 # Update application version and build time
 current_date=$(date +%Y%m%d)
-current_time=$(date +%H:%M)
+current_time=$(date +%H%M)
 echo "$current_date" > version.txt
 echo "$current_time" > build.txt
 
