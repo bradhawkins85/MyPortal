@@ -21,6 +21,7 @@ import { getRandomDailyCron } from './cron';
 import { execFile } from 'child_process';
 import util from 'util';
 import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
 import {
   getSyncroCustomers,
   getSyncroCustomer,
@@ -487,6 +488,26 @@ const app = express();
 app.set('trust proxy', 1);
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+
+// Register security middleware early
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'", 'https:', 'data:'],
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: [],
+      },
+    },
+    referrerPolicy: { policy: 'no-referrer' },
+    crossOriginEmbedderPolicy: false,
+  })
+);
 
 // Register core middleware needed for all requests first
 app.use(cookieParser());
