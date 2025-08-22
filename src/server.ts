@@ -508,6 +508,9 @@ function csrfMiddleware(
   next: express.NextFunction
 ) {
   if (req.session.userId) {
+    if (req.is('multipart/form-data')) {
+      return next();
+    }
     csrfProtection(req, res, (err) => {
       if (err) return next(err);
       res.locals.csrfToken = req.csrfToken();
@@ -583,7 +586,11 @@ const enforceFilePermissions: express.RequestHandler = async (req, _res, next) =
   next();
 };
 
-const uploadMiddleware = [upload.single('image'), enforceFilePermissions];
+const uploadMiddleware = [
+  upload.single('image'),
+  enforceFilePermissions,
+  csrfProtection,
+];
 const memoryUpload = multer();
 
 // Serve uploaded files via controlled route
@@ -2895,6 +2902,7 @@ app.post(
     { name: 'loginLogo', maxCount: 1 },
     { name: 'sidebarLogo', maxCount: 1 },
   ]),
+  csrfProtection,
   async (req, res) => {
     const { companyName } = req.body;
     const files = req.files as {
@@ -5714,4 +5722,4 @@ if (require.main === module) {
   start();
 }
 
-export { app, api, start, csrfMiddleware };
+export { app, api, start, csrfMiddleware, csrfProtection };
