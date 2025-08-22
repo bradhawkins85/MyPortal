@@ -1,6 +1,7 @@
 import { pool } from './db';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import crypto from 'crypto';
+import { encryptSecret } from './crypto';
 
 export interface User {
   id: number;
@@ -908,12 +909,27 @@ export async function addUserTotpAuthenticator(
 ): Promise<void> {
   await pool.execute(
     'INSERT INTO user_totp_authenticators (user_id, name, secret) VALUES (?, ?, ?)',
-    [userId, name, secret]
+    [userId, name, encryptSecret(secret)]
   );
 }
 
 export async function deleteUserTotpAuthenticator(id: number): Promise<void> {
   await pool.execute('DELETE FROM user_totp_authenticators WHERE id = ?', [id]);
+}
+
+export async function encryptExistingTotpSecrets(): Promise<void> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT id, secret FROM user_totp_authenticators'
+  );
+  const updates = (rows as { id: number; secret: string }[])
+    .filter((r) => !r.secret.includes(':'))
+    .map((r) =>
+      pool.execute('UPDATE user_totp_authenticators SET secret = ? WHERE id = ?', [
+        encryptSecret(r.secret),
+        r.id,
+      ])
+    );
+  await Promise.all(updates);
 }
 
 export async function deleteUser(id: number): Promise<void> {
