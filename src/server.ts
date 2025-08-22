@@ -62,6 +62,9 @@ import {
   updateUserName,
   updateUserMobile,
   setUserForcePasswordChange,
+  createPasswordToken,
+  getUserIdByPasswordToken,
+  markPasswordTokenUsed,
   getUserTotpAuthenticators,
   addUserTotpAuthenticator,
   deleteUserTotpAuthenticator,
@@ -1050,6 +1053,40 @@ app.post('/register', async (req, res) => {
   }
 });
 
+app.get('/password-setup', async (req, res) => {
+  const token = req.query.token as string;
+  if (!token) {
+    return res.status(400).send('Invalid token');
+  }
+  const userId = await getUserIdByPasswordToken(token);
+  if (!userId) {
+    return res.status(400).send('Invalid or expired token');
+  }
+  const siteSettings = await getSiteSettings();
+  res.render('password-setup', { error: '', token, siteSettings });
+});
+
+app.post('/password-setup', async (req, res) => {
+  const { token, newPassword } = req.body;
+  if (!token || !newPassword) {
+    const siteSettings = await getSiteSettings();
+    return res
+      .status(400)
+      .render('password-setup', { error: 'Invalid token', token: '', siteSettings });
+  }
+  const userId = await getUserIdByPasswordToken(token);
+  if (!userId) {
+    const siteSettings = await getSiteSettings();
+    return res
+      .status(400)
+      .render('password-setup', { error: 'Invalid or expired token', token: '', siteSettings });
+  }
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await updateUserPassword(userId, passwordHash);
+  await markPasswordTokenUsed(token);
+  res.redirect('/login');
+});
+
 app.get('/verify', (req, res) => {
   res.render('verify', { result: null, adminName: null });
 });
@@ -1619,9 +1656,15 @@ app.post('/staff/:id/invite', ensureAuth, ensureStaffAccess, async (req, res) =>
   if (existing) {
     return res.status(400).json({ error: 'User already exists' });
   }
-  const tempPassword = crypto.randomBytes(12).toString('base64url');
-  const passwordHash = await bcrypt.hash(tempPassword, 10);
-  const userId = await createUser(staff.email, passwordHash, staff.company_id, true);
+  const placeholderPassword = crypto.randomBytes(12).toString('base64url');
+  const passwordHash = await bcrypt.hash(placeholderPassword, 10);
+  const userId = await createUser(staff.email, passwordHash, staff.company_id);
+  const token = crypto.randomBytes(32).toString('base64url');
+  await createPasswordToken(
+    userId,
+    token,
+    new Date(Date.now() + 60 * 60 * 1000)
+  );
   await assignUserToCompany(
     userId,
     staff.company_id,
@@ -1640,11 +1683,13 @@ app.post('/staff/:id/invite', ensureAuth, ensureStaffAccess, async (req, res) =>
     getSiteSettings(),
   ]);
   if (template) {
-    const portalUrl =
-      process.env.PORTAL_URL || `${req.protocol}://${req.get('host')}/login`;
+    const baseUrl =
+      process.env.PORTAL_URL || `${req.protocol}://${req.get('host')}`;
+    const portalUrl = `${baseUrl}/login`;
+    const setupLink = `${baseUrl}/password-setup?token=${token}`;
     const html = template.body
       .replace(/\{\{companyName\}\}/g, siteSettings?.company_name || '')
-      .replace(/\{\{tempPassword\}\}/g, tempPassword)
+      .replace(/\{\{setupLink\}\}/g, setupLink)
       .replace(/\{\{portalUrl\}\}/g, portalUrl)
       .replace(/\{\{loginLogo\}\}/g, siteSettings?.login_logo || '');
     const subject = template.subject.replace(
