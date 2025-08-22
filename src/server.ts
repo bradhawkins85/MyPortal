@@ -593,7 +593,16 @@ const uploadMiddleware = [
   enforceFilePermissions,
   csrfProtection,
 ];
-const memoryUpload = multer();
+const memoryUpload = multer({
+  limits: { fileSize: 1 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type'));
+    }
+  },
+});
 
 // Serve uploaded files via controlled route
 app.get('/uploads/:filename', (req, res) => {
@@ -2917,11 +2926,19 @@ app.post(
     let sidebarLogo: string | undefined;
     if (files && files.loginLogo && files.loginLogo[0]) {
       const file = files.loginLogo[0];
-      loginLogo = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+      if (allowedMimes.includes(file.mimetype)) {
+        loginLogo = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+      } else {
+        return res.status(400).send('Invalid file type');
+      }
     }
     if (files && files.sidebarLogo && files.sidebarLogo[0]) {
       const file = files.sidebarLogo[0];
-      sidebarLogo = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+      if (allowedMimes.includes(file.mimetype)) {
+        sidebarLogo = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+      } else {
+        return res.status(400).send('Invalid file type');
+      }
     }
     await updateSiteSettings(companyName, loginLogo, sidebarLogo);
     res.redirect('/admin#site-settings');
