@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 process.env.SESSION_SECRET = 'test';
+process.env.TOTP_ENCRYPTION_KEY = 'test';
 const { updateCompanyHandler } = require('../src/server');
 
 test('omitting address keeps existing address', async () => {
