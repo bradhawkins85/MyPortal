@@ -2464,6 +2464,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
     products,
     productRestrictions,
     tasks,
+    cronTimezone: process.env.CRON_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone,
     showArchived: includeArchived,
     selectedFormId: isNaN(formId) ? null : formId,
     selectedCompanyId: isNaN(companyIdParam) ? null : companyIdParam,
