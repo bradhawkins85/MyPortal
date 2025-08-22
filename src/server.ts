@@ -554,11 +554,15 @@ async function scanFileForViruses(filePath: string): Promise<void> {
   try {
     await execFileAsync('clamscan', ['--no-summary', filePath]);
   } catch (err: any) {
-    if (err && typeof err.code === 'number' && err.code === 1) {
-      fs.unlinkSync(filePath);
-      throw new Error('Virus detected in uploaded file');
+    if (err && typeof err.code === 'number') {
+      if (err.code === 1) {
+        throw new Error('Virus detected in uploaded file');
+      }
+      console.warn('Virus scan failed or clamscan not installed', err);
+      throw new Error('Virus scan failed');
     }
-    console.error('Virus scan failed or clamscan not installed', err);
+    console.warn('Failed to run virus scan', err);
+    throw new Error('Virus scan failed');
   }
 }
 
@@ -568,6 +572,11 @@ const enforceFilePermissions: express.RequestHandler = async (req, _res, next) =
       await scanFileForViruses(req.file.path);
       await fs.promises.chmod(req.file.path, 0o600);
     } catch (err) {
+      try {
+        await fs.promises.unlink(req.file.path);
+      } catch (unlinkErr) {
+        console.error('Failed to remove uploaded file after scan error', unlinkErr);
+      }
       return next(err);
     }
   }
