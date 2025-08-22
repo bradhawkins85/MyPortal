@@ -75,6 +75,7 @@ import {
   deleteApiKey,
   getApiKeyRecord,
   recordApiKeyUsage,
+  hashExistingApiKeys,
   logAudit,
   getAuditLogs,
   getAssetsByCompany,
@@ -2867,9 +2868,8 @@ app.post('/admin/invite', ensureAuth, ensureAdmin, async (req, res) => {
 
 app.post('/admin/api-key', ensureAuth, ensureAdmin, async (req, res) => {
   const { description, expiryDate } = req.body;
-  const key = crypto.randomBytes(32).toString('hex');
-  await createApiKey(key, description, expiryDate);
-  res.redirect('/admin');
+  const key = await createApiKey(description, expiryDate);
+  res.render('api-key', { key });
 });
 
 app.post('/admin/api-key/delete', ensureAuth, ensureAdmin, async (req, res) => {
@@ -5694,6 +5694,7 @@ const host = process.env.HOST || '0.0.0.0';
 
 async function start() {
   await runMigrations();
+  await hashExistingApiKeys();
   await scheduleAllTasks();
   app.listen(port, host, () => {
     console.log(`Server running at http://${host}:${port}`);
