@@ -1,5 +1,6 @@
 import { pool } from './db';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
+import crypto from 'crypto';
 
 export interface User {
   id: number;
@@ -200,6 +201,26 @@ export interface ApiKeyWithUsage extends ApiKey {
   usage_count: number;
   last_used_at: string | null;
   ips: ApiKeyUsage[];
+}
+
+function hashApiKey(key: string): string {
+  const secret = process.env.API_KEY_SECRET;
+  if (!secret) {
+    throw new Error('API_KEY_SECRET not set');
+  }
+  return crypto.createHmac('sha256', secret).update(key).digest('hex');
+}
+
+export async function hashExistingApiKeys(): Promise<void> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT id, api_key FROM api_keys'
+  );
+  for (const row of rows as { id: number; api_key: string }[]) {
+    if (!/^[0-9a-f]{64}$/i.test(row.api_key)) {
+      const hashedKey = hashApiKey(row.api_key);
+      await pool.execute('UPDATE api_keys SET api_key = ? WHERE id = ?', [hashedKey, row.id]);
+    }
+  }
 }
 
 export interface AuditLog {
@@ -963,14 +984,16 @@ export async function getStaffForLicense(
 }
 
 export async function createApiKey(
-  apiKey: string,
   description: string,
   expiryDate?: string
-): Promise<void> {
+): Promise<string> {
+  const rawKey = crypto.randomBytes(32).toString('hex');
+  const hashedKey = hashApiKey(rawKey);
   await pool.execute(
     'INSERT INTO api_keys (api_key, description, expiry_date) VALUES (?, ?, ?)',
-    [apiKey, description, expiryDate || null]
+    [hashedKey, description, expiryDate || null]
   );
+  return rawKey;
 }
 
 export async function getApiKeys(): Promise<ApiKey[]> {
@@ -983,9 +1006,10 @@ export async function deleteApiKey(id: number): Promise<void> {
 }
 
 export async function getApiKeyRecord(apiKey: string): Promise<ApiKey | null> {
+  const hashedKey = hashApiKey(apiKey);
   const [rows] = await pool.query<RowDataPacket[]>(
     'SELECT * FROM api_keys WHERE api_key = ? AND (expiry_date IS NULL OR expiry_date >= CURRENT_DATE())',
-    [apiKey]
+    [hashedKey]
   );
   return (rows as ApiKey[])[0] || null;
 }
