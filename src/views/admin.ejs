@@ -482,17 +482,11 @@
             </section>
             <script>
               const tz = <%= JSON.stringify(cronTimezone) %>;
-              document.querySelectorAll('.local-time').forEach(function (el) {
+              document.querySelectorAll('.local-time').forEach(function(el){
                 const date = new Date(el.dataset.time);
                 if (!isNaN(date)) {
-                  try {
-                    const opts = tz ? { timeZone: tz } : undefined;
-                    el.textContent = date.toLocaleString(undefined, opts);
-                  } catch (err) {
-                    // Fall back to default locale without timezone if the provided
-                    // timezone is not supported by the browser.
-                    el.textContent = date.toLocaleString();
-                  }
+                  const opts = tz ? { timeZone: tz } : undefined;
+                  el.textContent = date.toLocaleString(undefined, opts);
                 }
               });
             </script>
