@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { updateCompanyHandler } from '../src/server';
+process.env.SESSION_SECRET = 'test';
+const { updateCompanyHandler } = require('../src/server');
 
 test('omitting address keeps existing address', async () => {
   const getCompanyByIdCalls: number[] = [];
