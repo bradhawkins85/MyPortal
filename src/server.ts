@@ -1,5 +1,7 @@
 import express from 'express';
 import session from 'express-session';
+import RedisStore from 'connect-redis';
+import { createClient } from 'redis';
 import path from 'path';
 import fs from 'fs';
 import bcrypt from 'bcrypt';
@@ -488,12 +490,32 @@ app.set('views', path.join(__dirname, 'views'));
 
 // Register core middleware needed for all requests first
 app.use(cookieParser());
+const sessionTtlMs = 1000 * 60 * 60 * 24; // 1 day
+let sessionStore: session.Store;
+if (process.env.REDIS_URL) {
+  const redisClient = createClient({ url: process.env.REDIS_URL });
+  redisClient.on('error', (err) => console.error('Redis error', err));
+  redisClient.connect().catch((err) => console.error('Redis connect error', err));
+  sessionStore = new RedisStore({
+    client: redisClient,
+    prefix: 'sess:',
+    ttl: sessionTtlMs / 1000,
+  });
+} else {
+  sessionStore = new session.MemoryStore();
+}
 app.use(
   session({
+    store: sessionStore,
     secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
-    cookie: { httpOnly: true, secure: true, sameSite: 'lax' },
+    cookie: {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      maxAge: sessionTtlMs,
+    },
   })
 );
 
