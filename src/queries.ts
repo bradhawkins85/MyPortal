@@ -870,6 +870,31 @@ export async function updateUserPassword(
   await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, id]);
 }
 
+export async function createPasswordToken(
+  userId: number,
+  token: string,
+  expiresAt: Date
+): Promise<void> {
+  await pool.execute(
+    'INSERT INTO password_tokens (token, user_id, expires_at) VALUES (?, ?, ?)',
+    [token, userId, expiresAt]
+  );
+}
+
+export async function getUserIdByPasswordToken(
+  token: string
+): Promise<number | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT user_id FROM password_tokens WHERE token = ? AND used = 0 AND expires_at > NOW()',
+    [token]
+  );
+  return rows.length ? (rows[0] as any).user_id : null;
+}
+
+export async function markPasswordTokenUsed(token: string): Promise<void> {
+  await pool.execute('UPDATE password_tokens SET used = 1 WHERE token = ?', [token]);
+}
+
 export async function getEmailTemplate(
   name: string
 ): Promise<EmailTemplate | null> {

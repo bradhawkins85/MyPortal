@@ -5,6 +5,7 @@ import session from 'express-session';
 import request from 'supertest';
 import multer from 'multer';
 process.env.SESSION_SECRET = 'test';
+process.env.TOTP_ENCRYPTION_KEY = 'test';
 const { csrfMiddleware, csrfProtection } = require('../src/server');
 
 function buildApp(authenticated: boolean) {
