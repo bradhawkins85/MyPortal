@@ -22,10 +22,10 @@ There are no default login credentials; the first visit will prompt you to regis
    ```bash
    npm install
    ```
-2. Copy `.env.example` to `.env` and update the MySQL credentials. Set a high-entropy
-   `SESSION_SECRET` (e.g. via `openssl rand -hex 32`). Optionally set `CRON_TIMEZONE`
-   to control the timezone for scheduled tasks (defaults to UTC).
-3. On first run, the application will automatically apply the database schema.
+2. Copy `.env.example` to `.env` and update the MySQL credentials. Set high-entropy
+   values for `SESSION_SECRET` and `TOTP_ENCRYPTION_KEY` (e.g. via `openssl rand -hex 32`).
+   Optionally set `CRON_TIMEZONE` to control the timezone for scheduled tasks (defaults to UTC).
+3. On first run, the application will automatically apply the database schema and encrypt any existing TOTP secrets.
 4. On first run, visiting `/login` will redirect to a registration page to create the initial user and company.
 5. Run in development mode:
    ```bash

@@ -5,6 +5,7 @@ import fs from 'fs';
 import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import { decryptSecret } from './crypto';
 import cookieParser from 'cookie-parser';
 import csurf from 'csurf';
 import { authenticator } from 'otplib';
@@ -76,6 +77,7 @@ import {
   getApiKeyRecord,
   recordApiKeyUsage,
   hashExistingApiKeys,
+  encryptExistingTotpSecrets,
   logAudit,
   getAuditLogs,
   getAssetsByCompany,
@@ -969,7 +971,10 @@ app.post('/totp', async (req, res) => {
   } else {
     const auths = await getUserTotpAuthenticators(userId);
     valid = auths.some((a) =>
-      authenticator.verify({ token: req.body.token, secret: a.secret })
+      authenticator.verify({
+        token: req.body.token,
+        secret: decryptSecret(a.secret),
+      })
     );
   }
   if (valid) {
@@ -5712,6 +5717,7 @@ const host = process.env.HOST || '0.0.0.0';
 async function start() {
   await runMigrations();
   await hashExistingApiKeys();
+  await encryptExistingTotpSecrets();
   await scheduleAllTasks();
   app.listen(port, host, () => {
     console.log(`Server running at http://${host}:${port}`);
