@@ -572,13 +572,13 @@ function csrfMiddleware(
 app.use(csrfMiddleware);
 
 // Secure file upload handling
-const uploadDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true, mode: 0o700 });
+const privateUploadDir = path.join(__dirname, '..', 'private_uploads');
+if (!fs.existsSync(privateUploadDir)) {
+  fs.mkdirSync(privateUploadDir, { recursive: true, mode: 0o700 });
 }
 
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
+  destination: (_req, _file, cb) => cb(null, privateUploadDir),
   filename: (_req, file, cb) => {
     const safeName = file.originalname
       .toLowerCase()
@@ -651,8 +651,8 @@ const memoryUpload = multer({
 });
 
 // Serve uploaded files via controlled route
-app.get('/uploads/:filename', (req, res) => {
-  const filePath = path.join(uploadDir, path.basename(req.params.filename));
+app.get('/uploads/:filename', ensureAuth, (req, res) => {
+  const filePath = path.join(privateUploadDir, path.basename(req.params.filename));
   res.sendFile(filePath);
 });
 
