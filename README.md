@@ -41,6 +41,15 @@ There are no default login credentials; the first visit will prompt you to regis
    npm test
    ```
 
+## File Storage
+
+Static assets located under `src/public` are served directly and are intended
+to be publicly accessible. User-uploaded files and other sensitive assets are
+stored in the `private_uploads` directory outside of the public tree. These
+files are only available through the `/uploads/:filename` route, which now
+requires authentication. Generating a signed URL can be used to grant
+temporary access if public sharing is needed.
+
 ## CSRF Protection
 
 Authenticated POST, PUT and DELETE routes require a CSRF token. Tokens are
