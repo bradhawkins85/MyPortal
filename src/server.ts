@@ -2987,7 +2987,7 @@ app.post('/admin/invite', ensureAuth, ensureAdmin, async (req, res) => {
 app.post('/admin/api-key', ensureAuth, ensureAdmin, async (req, res) => {
   const { description, expiryDate } = req.body;
   const key = await createApiKey(description, expiryDate);
-  res.render('api-key', { key });
+  res.json({ key });
 });
 
 app.post('/admin/api-key/delete', ensureAuth, ensureAdmin, async (req, res) => {
