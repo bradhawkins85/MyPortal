@@ -692,7 +692,7 @@
         <div id="api-keys" class="tab-content">
           <section>
             <h2>API Keys</h2>
-            <form action="/admin/api-key" method="post">
+            <form action="/admin/api-key" method="post" id="api-key-form">
               <input type="text" name="description" placeholder="Description">
               <input type="date" name="expiryDate">
               <button type="submit">Add API Key</button>
@@ -700,13 +700,12 @@
             <table>
               <thead>
                 <tr>
-                  <th>Key</th><th>Description</th><th>Expiry</th><th>Usage</th><th>Last Used</th><th>IPs</th><th></th>
+                  <th>Description</th><th>Expiry</th><th>Usage</th><th>Last Used</th><th>IPs</th><th></th>
                 </tr>
               </thead>
               <tbody>
               <% apiKeys.forEach(function(k) { %>
                 <tr>
-                  <td><a href="#" class="show-key" data-full="<%= k.api_key %>"><%= k.api_key.slice(0,3) %>...<%= k.api_key.slice(-3) %></a></td>
                   <td><%= k.description %></td>
                   <td><%= k.expiry_date || '' %></td>
                   <td><%= k.usage_count %></td>
@@ -728,10 +727,11 @@
                 <ul id="ip-list"></ul>
               </div>
             </div>
-            <div id="key-modal" class="modal" style="display:none;">
+            <div id="new-key-modal" class="modal" style="display:none;">
               <div class="modal-content">
-                <button id="key-modal-close">Close</button>
-                <pre id="full-key"></pre>
+                <p>This is your new API key. Please store it securely; it will not be shown again.</p>
+                <pre id="new-key"></pre>
+                <button id="new-key-modal-close">Close</button>
               </div>
             </div>
           </section>
@@ -1144,15 +1144,25 @@
       document.getElementById('ip-modal-close')?.addEventListener('click', function(){
         document.getElementById('ip-modal').style.display = 'none';
       });
-      document.querySelectorAll('.show-key').forEach(function(link){
-        link.addEventListener('click', function(e){
-          e.preventDefault();
-          document.getElementById('full-key').textContent = this.dataset.full || '';
-          document.getElementById('key-modal').style.display = 'flex';
+      const apiKeyForm = document.getElementById('api-key-form');
+      apiKeyForm?.addEventListener('submit', async function(e){
+        e.preventDefault();
+        const description = apiKeyForm.querySelector('input[name="description"]').value;
+        const expiryDate = apiKeyForm.querySelector('input[name="expiryDate"]').value;
+        const res = await fetch('/admin/api-key', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description, expiryDate })
         });
+        if(res.ok){
+          const data = await res.json();
+          document.getElementById('new-key').textContent = data.key;
+          document.getElementById('new-key-modal').style.display = 'flex';
+        }
       });
-      document.getElementById('key-modal-close')?.addEventListener('click', function(){
-        document.getElementById('key-modal').style.display = 'none';
+      document.getElementById('new-key-modal-close')?.addEventListener('click', function(){
+        document.getElementById('new-key-modal').style.display = 'none';
+        location.reload();
       });
       document.querySelectorAll('td.last-used').forEach(function(td){
         const val = td.dataset.last;
