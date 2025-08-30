@@ -2687,8 +2687,28 @@ app.post('/admin/schedules/:id', ensureAuth, ensureSuperAdmin, async (req, res) 
 
 app.post('/admin/schedules/:id/run', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  await runScheduledTask(id);
-  res.redirect('/admin#schedules');
+  const task = await getScheduledTask(id);
+  if (task && task.command === 'system_update') {
+    runScheduledTask(id);
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Updating</title>
+  </head>
+  <body>
+    <p>System update in progress. This page will refresh shortly.</p>
+    <script>
+      setTimeout(function () {
+        window.location.href = '/admin#schedules';
+      }, 60000);
+    </script>
+  </body>
+</html>`);
+  } else {
+    await runScheduledTask(id);
+    res.redirect('/admin#schedules');
+  }
 });
 
 app.post('/admin/schedules/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
