@@ -499,6 +499,7 @@ app.use(
           "'self'",
           "'unsafe-inline'",
           'https://cdn.datatables.net',
+          'https://cdn.jsdelivr.net',
           'https://static.cloudflareinsights.com',
         ],
         styleSrc: [
