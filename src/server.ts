@@ -3507,10 +3507,6 @@ api.route('/shop/products')
  *                   type: integer
  *                 category_name:
  *                   type: string
- *                 category_id:
- *                   type: integer
- *                 category_name:
- *                   type: string
  *       404:
  *         description: Product not found
  *   put:
