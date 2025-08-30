@@ -4,8 +4,17 @@ set -e
 # Navigate to the project root directory
 cd "$(dirname "$0")"
 
-# Pull latest changes and rebuild the project
-git_output=$(git pull origin main 2>&1)
+# Optional credentials for authenticated pulls
+USERNAME="${GITHUB_USERNAME:-$1}"
+PASSWORD="${GITHUB_PASSWORD:-$2}"
+REMOTE_URL=$(git config --get remote.origin.url)
+
+if [[ -n "$USERNAME" && -n "$PASSWORD" && "$REMOTE_URL" == https://* ]]; then
+  AUTH_REMOTE_URL="https://${USERNAME}:${PASSWORD}@${REMOTE_URL#https://}"
+  git_output=$(git pull "$AUTH_REMOTE_URL" main 2>&1)
+else
+  git_output=$(git pull origin main 2>&1)
+fi
 git_status=$?
 echo "$git_output"
 
