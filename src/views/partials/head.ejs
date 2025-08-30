@@ -46,4 +46,14 @@
       });
     </script>
   <% } %>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const companySwitcher = document.getElementById('company-switcher');
+      if (companySwitcher) {
+        companySwitcher.addEventListener('change', () => {
+          companySwitcher.form?.submit();
+        });
+      }
+    });
+  </script>
 </head>
