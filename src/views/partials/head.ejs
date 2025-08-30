@@ -10,9 +10,8 @@
   />
   <link rel="stylesheet" href="https://cdn.datatables.net/2.0.0/css/dataTables.dataTables.min.css">
   <script src="/app.js" defer></script>
-  <script type="module">
-    import DataTable from 'https://cdn.datatables.net/2.0.0/js/dataTables.min.mjs';
-
+  <script src="https://cdn.datatables.net/2.0.0/js/dataTables.min.js"></script>
+  <script>
     document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('table').forEach((table) => {
         if (!table.closest('#cron-generator-container')) {
