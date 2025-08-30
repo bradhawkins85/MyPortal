@@ -4,7 +4,7 @@ CREATE TABLE user_companies (
   can_manage_licenses TINYINT(1) DEFAULT 0,
   can_manage_staff TINYINT(1) DEFAULT 0,
   PRIMARY KEY (user_id, company_id),
-  FOREIGN KEY (user_id) REFERENCES users(id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (company_id) REFERENCES companies(id)
 );
 
