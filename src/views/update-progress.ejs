@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+  <%- include('partials/head', { title: 'System Update' }) %>
+  <body class="login-page">
+    <div class="login-container">
+      <h1>Installing Update</h1>
+      <p>An update is being installed. This page will refresh once the process completes.</p>
+    </div>
+    <script>
+      setTimeout(function() {
+        window.location.href = '/admin#schedules';
+      }, 15000);
+    </script>
+  </body>
+</html>
