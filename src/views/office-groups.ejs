@@ -27,7 +27,7 @@
               <tr>
                 <td><%= g.name %></td>
                 <td>
-                  <button type="button" onclick="openGroupModal(<%= g.id %>)">Edit</button>
+                  <button type="button" data-open-group-modal="<%= g.id %>">Edit</button>
                   <% if (isSuperAdmin) { %>
                     <form action="/office-groups/<%= g.id %>/delete" method="post" style="display:inline;">
                       <button type="submit">Delete</button>
@@ -60,7 +60,7 @@
                 </tbody>
               </table>
               <button type="submit">Save</button>
-              <button type="button" onclick="closeGroupModal()">Close</button>
+              <button type="button" data-close-group-modal>Close</button>
             </form>
           </div>
         </div>
