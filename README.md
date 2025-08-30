@@ -82,6 +82,12 @@ Run the included update script to fetch the latest changes and rebuild the proje
 ./update.sh
 ```
 
+If the repository is private or otherwise requires authentication, set
+`GITHUB_USERNAME` and `GITHUB_PASSWORD` before running the script (they may
+also be supplied as the first two positional arguments). When using a
+fine-grained personal access token as the password, grant the token access to
+this repository with the **Contents: Read-only** permission.
+
 Alternatively, to run the steps manually:
 
 ```bash
