@@ -1688,7 +1688,7 @@ export async function getSmsSubscriptionsForUser(
     'SELECT order_number FROM order_sms_subscriptions WHERE user_id = ?',
     [userId]
   );
-  return rows.map((r) => r.order_number as string);
+  return rows.map((r) => String(r.order_number));
 }
 
 export async function setSmsSubscription(

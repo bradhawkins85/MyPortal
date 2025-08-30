@@ -1,11 +1,17 @@
 <head>
   <title><%= title %></title>
   <link rel="stylesheet" href="/style.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" integrity="sha512-Fo3rlrZj/k7ujTnH1zqD+XzdzN7D8YGN9VOGZsv5nYeD1yfknhk+aoCA8DmF5asJ5AZt0fjOEtRjdbc/YWZL0w==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"
+    integrity="sha512-Fo3rlrZj/k7ujTnHg4CGR2D7kSs0v4LLanw2qksYuRlEzO+tcaEPQogQ0KaoGN26/zrn20ImR1DfuLWnOo7aBA=="
+    crossorigin="anonymous"
+    referrerpolicy="no-referrer"
+  />
   <link rel="stylesheet" href="https://cdn.datatables.net/2.0.0/css/dataTables.dataTables.min.css">
   <script src="/app.js" defer></script>
   <script type="module">
-    import DataTable from 'https://cdn.datatables.net/2.0.0/js/dataTables.min.js';
+    import DataTable from 'https://cdn.datatables.net/2.0.0/js/dataTables.min.mjs';
 
     document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('table').forEach((table) => {
