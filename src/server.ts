@@ -678,7 +678,7 @@ const loginLimiter = rateLimit({
 
 // Populate common template variables
 app.use(async (req, res, next) => {
-  res.locals.isSuperAdmin = req.session.userId === 1;
+  res.locals.isSuperAdmin = Number(req.session.userId) === 1;
   res.locals.cart = req.session.cart || [];
   res.locals.hasForms = req.session.hasForms ?? false;
   res.locals.version = appVersion;
@@ -880,7 +880,7 @@ async function ensureAdmin(
   res: express.Response,
   next: express.NextFunction
 ) {
-  if (req.session.userId === 1) {
+  if (Number(req.session.userId) === 1) {
     return next();
   }
   const companies = await getCompaniesForUser(req.session.userId!);
@@ -896,7 +896,7 @@ function ensureSuperAdmin(
   res: express.Response,
   next: express.NextFunction
 ) {
-  if (req.session.userId === 1) {
+  if (Number(req.session.userId) === 1) {
     return next();
   }
   return res.redirect('/');
@@ -1227,12 +1227,12 @@ app.get('/', ensureAuth, async (req, res) => {
   let unpaidInvoices = 0;
 
   if (company) {
-    if ((current?.staff_permission ?? 0) > 0 || req.session.userId === 1) {
+    if ((current?.staff_permission ?? 0) > 0 || Number(req.session.userId) === 1) {
       const staff = await getStaffByCompany(company.id);
       activeUsers = staff.filter((s) => s.enabled === 1).length;
     }
 
-    if (current?.can_manage_licenses || req.session.userId === 1) {
+    if (current?.can_manage_licenses || Number(req.session.userId) === 1) {
       const licenses = await getLicensesByCompany(company.id);
       licenseStats = licenses.map((l) => {
         const used = l.allocated || 0;
@@ -1240,12 +1240,12 @@ app.get('/', ensureAuth, async (req, res) => {
       });
     }
 
-    if (current?.can_manage_assets || req.session.userId === 1) {
+    if (current?.can_manage_assets || Number(req.session.userId) === 1) {
       const assets = await getAssetsByCompany(company.id);
       assetCount = assets.length;
     }
 
-    if (current?.can_manage_invoices || req.session.userId === 1) {
+    if (current?.can_manage_invoices || Number(req.session.userId) === 1) {
       const invoices = await getInvoicesByCompany(company.id);
       paidInvoices = invoices.filter(
         (i) => i.status.toLowerCase() === 'paid'
@@ -1258,7 +1258,7 @@ app.get('/', ensureAuth, async (req, res) => {
     company,
     companies,
     currentCompanyId: req.session.companyId,
-    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.staff_permission ? 1 : 0,
     staffPermission: current?.staff_permission ?? 0,
@@ -1293,7 +1293,7 @@ async function ensureStaffAccess(
   res: express.Response,
   next: express.NextFunction
 ) {
-  if (req.session.userId === 1) {
+  if (Number(req.session.userId) === 1) {
     return next();
   }
   const companies = await getCompaniesForUser(req.session.userId!);
@@ -1309,7 +1309,7 @@ async function ensureOfficeGroupAccess(
   res: express.Response,
   next: express.NextFunction
 ) {
-  if (req.session.userId === 1) {
+  if (Number(req.session.userId) === 1) {
     return next();
   }
   const companies = await getCompaniesForUser(req.session.userId!);
@@ -1364,7 +1364,7 @@ app.get('/licenses', ensureAuth, ensureLicenseAccess, async (req, res) => {
   const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('licenses', {
     licenses,
-    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
     companies,
     currentCompanyId: req.session.companyId,
     canManageLicenses: current?.can_manage_licenses ?? 0,
@@ -1516,8 +1516,8 @@ app.get('/staff', ensureAuth, ensureStaffAccess, async (req, res) => {
     staff,
     companies,
     currentCompanyId: companyId,
-    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
-    isSuperAdmin: req.session.userId === 1,
+    isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
+    isSuperAdmin: Number(req.session.userId) === 1,
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: staffPermission > 0 ? 1 : 0,
     staffPermission,
@@ -1602,7 +1602,7 @@ app.put('/staff/:id', ensureAuth, ensureStaffAccess, async (req, res) => {
     return res.status(400).json({ error: 'No company selected' });
   }
   const id = parseInt(req.params.id, 10);
-  const isSuperAdmin = req.session.userId === 1;
+  const isSuperAdmin = Number(req.session.userId) === 1;
   let existing: any;
   if (!isSuperAdmin) {
     existing = await getStaffById(id);
@@ -1758,7 +1758,7 @@ app.get('/assets', ensureAuth, ensureAssetsAccess, async (req, res) => {
     assets,
     companies,
     currentCompanyId: req.session.companyId,
-    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.staff_permission ? 1 : 0,
     staffPermission: current?.staff_permission ?? 0,
@@ -1785,7 +1785,7 @@ app.get('/invoices', ensureAuth, ensureInvoicesAccess, async (req, res) => {
     invoices,
     companies,
     currentCompanyId: req.session.companyId,
-    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.staff_permission ? 1 : 0,
     staffPermission: current?.staff_permission ?? 0,
@@ -1811,7 +1811,7 @@ app.get('/forms', ensureAuth, async (req, res) => {
     forms,
     companies,
     currentCompanyId: req.session.companyId,
-    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.staff_permission ? 1 : 0,
     staffPermission: current?.staff_permission ?? 0,
@@ -1894,7 +1894,7 @@ app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
     cartError: error,
     companies,
     currentCompanyId: req.session.companyId,
-    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.staff_permission ? 1 : 0,
     staffPermission: current?.staff_permission ?? 0,
@@ -1965,7 +1965,7 @@ app.get('/cart', ensureAuth, ensureShopAccess, async (req, res) => {
     orderMessage: message,
     companies,
     currentCompanyId: req.session.companyId,
-    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.staff_permission ? 1 : 0,
     staffPermission: current?.staff_permission ?? 0,
@@ -2056,7 +2056,7 @@ app.get('/orders', ensureAuth, ensureShopAccess, async (req, res) => {
     smsSubscriptions,
     companies,
     currentCompanyId: req.session.companyId,
-    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.staff_permission ? 1 : 0,
     staffPermission: current?.staff_permission ?? 0,
@@ -2098,7 +2098,7 @@ app.get('/orders/:orderNumber', ensureAuth, ensureShopAccess, async (req, res) =
     smsSubscribed,
     companies,
     currentCompanyId: req.session.companyId,
-    isAdmin: req.session.userId === 1 || (current?.is_admin ?? 0),
+    isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
     canManageLicenses: current?.can_manage_licenses ?? 0,
     canManageStaff: current?.staff_permission ? 1 : 0,
     staffPermission: current?.staff_permission ?? 0,
@@ -2377,7 +2377,7 @@ app.post('/apps/:appId/add', ensureAuth, ensureSuperAdmin, async (req, res) => {
 });
 
 app.get('/admin', ensureAuth, async (req, res) => {
-  const isSuperAdmin = req.session.userId === 1;
+  const isSuperAdmin = Number(req.session.userId) === 1;
   const formId = req.query.formId ? parseInt(req.query.formId as string, 10) : NaN;
   const companyIdParam = req.query.companyId ? parseInt(req.query.companyId as string, 10) : NaN;
   const includeArchived = req.query.showArchived === '1';
@@ -2469,7 +2469,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
   req.session.nameSuccess = undefined;
   req.session.mobileError = undefined;
   req.session.mobileSuccess = undefined;
-  const isAdmin = req.session.userId === 1 || (current?.is_admin ?? 0);
+  const isAdmin = Number(req.session.userId) === 1 || (current?.is_admin ?? 0);
   res.render('admin', {
     allCompanies,
     users,
@@ -2562,7 +2562,7 @@ app.post('/admin/totp/:id/delete', ensureAuth, async (req, res) => {
 });
 
 app.get('/audit-logs', ensureAuth, ensureAdmin, async (req, res) => {
-  const isSuperAdmin = req.session.userId === 1;
+  const isSuperAdmin = Number(req.session.userId) === 1;
   const companiesForSidebar = await getCompaniesForUser(req.session.userId!);
   const current = companiesForSidebar.find((c) => c.company_id === req.session.companyId);
   let selectedCompanyId: number | null = null;
@@ -2598,14 +2598,14 @@ app.get('/audit-logs', ensureAuth, ensureAdmin, async (req, res) => {
 });
 
 app.get('/office-groups', ensureAuth, ensureOfficeGroupAccess, async (req, res) => {
-  const isSuperAdmin = req.session.userId === 1;
+  const isSuperAdmin = Number(req.session.userId) === 1;
   const [officeGroups, staff] = await Promise.all([
     getOfficeGroupsByCompany(req.session.companyId!),
     getStaffByCompany(req.session.companyId!),
   ]);
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
-  const isAdmin = req.session.userId === 1 || (current?.is_admin ?? 0);
+  const isAdmin = Number(req.session.userId) === 1 || (current?.is_admin ?? 0);
   res.render('office-groups', {
     isAdmin,
     isSuperAdmin,
@@ -2920,7 +2920,7 @@ app.post('/admin/syncro/unhide', ensureAuth, ensureSuperAdmin, async (req, res) 
 
 app.post('/admin/user', ensureAuth, ensureAdmin, async (req, res) => {
   const { email, password } = req.body;
-  const isSuperAdmin = req.session.userId === 1;
+  const isSuperAdmin = Number(req.session.userId) === 1;
   const passwordHash = await bcrypt.hash(password, 10);
   const companyId = isSuperAdmin
     ? parseInt(req.body.companyId, 10)
@@ -2937,7 +2937,7 @@ app.delete('/admin/user/:id', ensureAuth, ensureSuperAdmin, async (req, res) => 
 
 app.post('/admin/invite', ensureAuth, ensureAdmin, async (req, res) => {
   const { email, firstName, lastName } = req.body;
-  const isSuperAdmin = req.session.userId === 1;
+  const isSuperAdmin = Number(req.session.userId) === 1;
   const companyId = isSuperAdmin
     ? parseInt(req.body.companyId, 10)
     : req.session.companyId!;
@@ -3063,7 +3063,7 @@ app.post('/admin/email-templates', ensureAuth, ensureSuperAdmin, async (req, res
 
 app.post('/admin/assign', ensureAuth, ensureAdmin, async (req, res) => {
   const { userId } = req.body;
-  const companyId = req.session.userId === 1
+  const companyId = Number(req.session.userId) === 1
     ? parseInt(req.body.companyId, 10)
     : req.session.companyId!;
   await assignUserToCompany(
@@ -3113,7 +3113,7 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
     isAdmin: isAdminField,
   } = req.body;
   const uid = parseInt(userId, 10);
-  const cid = req.session.userId === 1 ? parseInt(companyId, 10) : req.session.companyId!;
+  const cid = Number(req.session.userId) === 1 ? parseInt(companyId, 10) : req.session.companyId!;
   if (typeof canManageLicenses !== 'undefined') {
     await updateUserCompanyPermission(
       uid,
@@ -3171,7 +3171,7 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
   }
   if (typeof isAdminField !== 'undefined') {
     const isAdminValue = parseCheckbox(isAdminField);
-    if (uid !== req.session.userId || req.session.userId === 1 || isAdminValue) {
+    if (uid !== req.session.userId || Number(req.session.userId) === 1 || isAdminValue) {
       await updateUserCompanyPermission(
         uid,
         cid,
@@ -5833,4 +5833,4 @@ if (require.main === module) {
   start();
 }
 
-export { app, api, start, csrfMiddleware, csrfProtection };
+export { app, api, start, csrfMiddleware, csrfProtection, ensureAdmin, ensureSuperAdmin };
