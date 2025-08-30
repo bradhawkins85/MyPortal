@@ -500,6 +500,7 @@ app.use(
           "'unsafe-inline'",
           'https://cdn.datatables.net',
           'https://cdn.jsdelivr.net',
+          'https://code.jquery.com',
           'https://static.cloudflareinsights.com',
         ],
         styleSrc: [
