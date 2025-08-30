@@ -11,7 +11,7 @@
       <% } %>
       <form method="get">
         <label>Category:
-          <select name="category" onchange="this.form.submit()">
+          <select name="category" data-submit-on-change>
             <option value="" <%= typeof currentCategory === 'undefined' ? 'selected' : '' %>>All</option>
             <% categories.forEach(function(c){ %>
               <option value="<%= c.id %>" <%= currentCategory === c.id ? 'selected' : '' %>><%= c.name %></option>

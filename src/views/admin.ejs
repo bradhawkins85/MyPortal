@@ -20,7 +20,7 @@
             <button data-tab="products">Products</button>
             <button data-tab="forms-admin">Forms</button>
             <button data-tab="form-permissions">Form Permissions</button>
-            <button type="button" onclick="window.location.href='/admin/email-templates'">Email Templates</button>
+            <button type="button" data-href="/admin/email-templates">Email Templates</button>
           <% } else if (isAdmin) { %>
             <button data-tab="account" class="active">Account</button>
             <button data-tab="companies">Companies</button>
@@ -471,7 +471,7 @@
                           <input type="text" name="cron" value="<%= t.cron %>" required>
                           <button type="submit">Save</button>
                         </form>
-                        <form action="/admin/schedules/<%= t.id %>/delete" method="post" style="display:inline" onsubmit="return confirm('Delete?');">
+                        <form action="/admin/schedules/<%= t.id %>/delete" method="post" style="display:inline" data-confirm="Delete?">
                           <button type="submit">Delete</button>
                         </form>
                       </td>
@@ -778,13 +778,13 @@
           <section>
             <h2>Manage Permissions</h2>
             <form action="/forms/admin" method="get">
-              <select name="formId" onchange="this.form.submit()">
+              <select name="formId" data-submit-on-change>
                 <option value="">Select Form</option>
                 <% forms.forEach(function(f){ %>
                   <option value="<%= f.id %>" <%= selectedFormId === f.id ? 'selected' : '' %>><%= f.name %></option>
                 <% }); %>
               </select>
-              <select name="companyId" onchange="this.form.submit()">
+              <select name="companyId" data-submit-on-change>
                 <option value="">Select Company</option>
                 <% allCompanies.forEach(function(c){ %>
                   <option value="<%= c.id %>" <%= selectedCompanyId === c.id ? 'selected' : '' %>><%= c.name %></option>
@@ -839,7 +839,7 @@
               <% categories.forEach(function(c){ %>
                 <li>
                   <%= c.name %>
-                  <form action="/shop/admin/category/<%= c.id %>/delete" method="post" style="display:inline" onsubmit="return confirm('Delete category?');">
+                  <form action="/shop/admin/category/<%= c.id %>/delete" method="post" style="display:inline" data-confirm="Delete category?">
                     <button type="submit">Delete</button>
                   </form>
                 </li>
@@ -908,14 +908,14 @@
                     <td><%= p.category_name || '' %></td>
                     <td><%= p.stock %></td>
                     <td>
-                      <button type="button" onclick="openEditModal(<%= p.id %>)">Edit</button>
+                      <button type="button" data-open-edit-modal="<%= p.id %>">Edit</button>
                       <form action="/shop/admin/product/<%= p.id %>/<%= p.archived ? 'unarchive' : 'archive' %>" method="post" style="display:inline-block">
                         <button type="submit"><%= p.archived ? 'Unarchive' : 'Archive' %></button>
                       </form>
-                      <form action="/shop/admin/product/<%= p.id %>/delete" method="post" style="display:inline-block" onsubmit="return confirm('Are you sure you want to delete this product?');">
+                      <form action="/shop/admin/product/<%= p.id %>/delete" method="post" style="display:inline-block" data-confirm="Are you sure you want to delete this product?">
                         <button type="submit">Delete</button>
                       </form>
-                      <button type="button" onclick="openVisibilityModal(<%= p.id %>)">Visibility</button>
+                      <button type="button" data-open-visibility-modal="<%= p.id %>">Visibility</button>
                     </td>
                   </tr>
                 <% }) %>
@@ -1029,7 +1029,7 @@
                   </label>
                   <img id="editImagePreview" src="" width="100" alt="" style="display:none;">
                   <button type="submit">Save</button>
-                  <button type="button" onclick="closeEditModal()">Close</button>
+                  <button type="button" data-close-edit-modal>Close</button>
                 </form>
               </div>
             </div>
@@ -1041,7 +1041,7 @@
                     <label><input type="checkbox" name="excluded" value="<%= c.id %>"> <%= c.name %></label><br>
                   <% }) %>
                   <button type="submit">Save</button>
-                  <button type="button" onclick="closeVisibilityModal()">Close</button>
+                  <button type="button" data-close-visibility-modal>Close</button>
                 </form>
               </div>
             </div>
