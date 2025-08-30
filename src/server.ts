@@ -3176,7 +3176,7 @@ app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
   }
   if (typeof isAdminField !== 'undefined') {
     const isAdminValue = parseCheckbox(isAdminField);
-    if (uid !== req.session.userId || Number(req.session.userId) === 1 || isAdminValue) {
+    if (uid !== Number(req.session.userId) || Number(req.session.userId) === 1 || isAdminValue) {
       await updateUserCompanyPermission(
         uid,
         cid,
