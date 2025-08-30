@@ -154,7 +154,7 @@
                       <input type="hidden" name="userId" value="<%= a.user_id %>">
                       <input type="hidden" name="companyId" value="<%= a.company_id %>">
                       <input type="hidden" name="isAdmin" value="0">
-                      <input type="checkbox" name="isAdmin" value="1" <%= a.is_admin ? 'checked' : '' %> <%= (!isSuperAdmin && a.user_id === currentUserId) ? 'disabled' : '' %> onchange="submitPermission(this.form)">
+                      <input type="checkbox" name="isAdmin" value="1" class="permission-input" <%= a.is_admin ? 'checked' : '' %> <%= (!isSuperAdmin && a.user_id === currentUserId) ? 'disabled' : '' %>>
                     </form>
                   </td>
                   <td>
@@ -162,7 +162,7 @@
                       <input type="hidden" name="userId" value="<%= a.user_id %>">
                       <input type="hidden" name="companyId" value="<%= a.company_id %>">
                       <input type="hidden" name="canManageLicenses" value="0">
-                      <input type="checkbox" name="canManageLicenses" value="1" <%= a.can_manage_licenses ? 'checked' : '' %> onchange="submitPermission(this.form)">
+                      <input type="checkbox" name="canManageLicenses" value="1" class="permission-input" <%= a.can_manage_licenses ? 'checked' : '' %>>
                     </form>
                   </td>
                   <td>
@@ -170,14 +170,14 @@
                       <input type="hidden" name="userId" value="<%= a.user_id %>">
                       <input type="hidden" name="companyId" value="<%= a.company_id %>">
                       <input type="hidden" name="canOrderLicenses" value="0">
-                      <input type="checkbox" name="canOrderLicenses" value="1" <%= a.can_order_licenses ? 'checked' : '' %> onchange="submitPermission(this.form)">
+                      <input type="checkbox" name="canOrderLicenses" value="1" class="permission-input" <%= a.can_order_licenses ? 'checked' : '' %>>
                     </form>
                   </td>
                   <td>
                     <form action="/admin/permission" method="post">
                       <input type="hidden" name="userId" value="<%= a.user_id %>">
                       <input type="hidden" name="companyId" value="<%= a.company_id %>">
-                      <select name="staffPermission" onchange="submitPermission(this.form)">
+                      <select name="staffPermission" class="permission-input">
                         <option value="0" <%= a.staff_permission === 0 ? 'selected' : '' %>>None</option>
                         <option value="1" <%= a.staff_permission === 1 ? 'selected' : '' %>>Department</option>
                         <option value="2" <%= a.staff_permission === 2 ? 'selected' : '' %>>Department + Unassigned</option>
@@ -190,7 +190,7 @@
                       <input type="hidden" name="userId" value="<%= a.user_id %>">
                       <input type="hidden" name="companyId" value="<%= a.company_id %>">
                       <input type="hidden" name="canManageOfficeGroups" value="0">
-                      <input type="checkbox" name="canManageOfficeGroups" value="1" <%= a.can_manage_office_groups ? 'checked' : '' %> onchange="submitPermission(this.form)">
+                      <input type="checkbox" name="canManageOfficeGroups" value="1" class="permission-input" <%= a.can_manage_office_groups ? 'checked' : '' %>>
                     </form>
                   </td>
                   <td>
@@ -198,7 +198,7 @@
                       <input type="hidden" name="userId" value="<%= a.user_id %>">
                       <input type="hidden" name="companyId" value="<%= a.company_id %>">
                       <input type="hidden" name="canManageAssets" value="0">
-                      <input type="checkbox" name="canManageAssets" value="1" <%= a.can_manage_assets ? 'checked' : '' %> onchange="submitPermission(this.form)">
+                      <input type="checkbox" name="canManageAssets" value="1" class="permission-input" <%= a.can_manage_assets ? 'checked' : '' %>>
                     </form>
                   </td>
                   <td>
@@ -206,7 +206,7 @@
                       <input type="hidden" name="userId" value="<%= a.user_id %>">
                       <input type="hidden" name="companyId" value="<%= a.company_id %>">
                       <input type="hidden" name="canManageInvoices" value="0">
-                      <input type="checkbox" name="canManageInvoices" value="1" <%= a.can_manage_invoices ? 'checked' : '' %> onchange="submitPermission(this.form)">
+                      <input type="checkbox" name="canManageInvoices" value="1" class="permission-input" <%= a.can_manage_invoices ? 'checked' : '' %>>
                     </form>
                   </td>
                   <td>
@@ -214,7 +214,7 @@
                       <input type="hidden" name="userId" value="<%= a.user_id %>">
                       <input type="hidden" name="companyId" value="<%= a.company_id %>">
                       <input type="hidden" name="canAccessShop" value="0">
-                      <input type="checkbox" name="canAccessShop" value="1" <%= a.can_access_shop ? 'checked' : '' %> onchange="submitPermission(this.form)">
+                      <input type="checkbox" name="canAccessShop" value="1" class="permission-input" <%= a.can_access_shop ? 'checked' : '' %>>
                     </form>
                   </td>
                   <% if (isSuperAdmin) { %>
@@ -1058,6 +1058,12 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
+      document.querySelectorAll('.permission-input').forEach(function(el){
+        el.addEventListener('change', function(){
+          submitPermission(el.form);
+        });
+      });
+
       const tabs = document.querySelectorAll('.tabs button');
       const contents = document.querySelectorAll('.tab-content');
       const ACTIVE_TAB_KEY = 'admin-active-tab';
