@@ -31,7 +31,7 @@
         <h2>Current Staff</h2>
         <form id="filter-form" method="get" action="/staff">
           <label>Show
-            <select name="enabled" onchange="document.getElementById('filter-form').submit()">
+            <select name="enabled" data-submit-on-change>
               <option value="" <%= enabledFilter === '' ? 'selected' : '' %>>All</option>
               <option value="1" <%= enabledFilter === '1' ? 'selected' : '' %>>Enabled</option>
               <option value="0" <%= enabledFilter === '0' ? 'selected' : '' %>>Disabled</option>
@@ -39,7 +39,7 @@
           </label>
           <% if (staffPermission === 3 && departments && departments.length) { %>
           <label>Department
-            <select name="department" onchange="document.getElementById('filter-form').submit()">
+            <select name="department" data-submit-on-change>
               <option value="" <%= departmentFilter === '' ? 'selected' : '' %>>All</option>
               <% departments.forEach(function(d) { %>
                 <option value="<%= d %>" <%= departmentFilter === d ? 'selected' : '' %>><%= d %></option>
@@ -64,7 +64,7 @@
               <td>
                 <form action="/staff/enabled" method="post">
                   <input type="hidden" name="staffId" value="<%= s.id %>">
-                  <input type="checkbox" name="enabled" value="1" <%= s.enabled ? 'checked' : '' %> onchange="this.form.submit()">
+                  <input type="checkbox" name="enabled" value="1" <%= s.enabled ? 'checked' : '' %> data-submit-on-change>
                 </form>
               </td>
               <td>

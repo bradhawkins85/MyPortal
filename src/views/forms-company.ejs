@@ -8,7 +8,7 @@
       <h1>Manage Form Access</h1>
       <% if (forms.length > 0) { %>
         <form action="/forms/company" method="get">
-          <select name="formId" onchange="this.form.submit()">
+          <select name="formId" data-submit-on-change>
             <option value="">Select Form</option>
             <% forms.forEach(function(f){ %>
               <option value="<%= f.id %>" <%= selectedFormId === f.id ? 'selected' : '' %>><%= f.name %></option>

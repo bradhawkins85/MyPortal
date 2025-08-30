@@ -46,7 +46,7 @@
                 <% if (isSuperAdmin) { %><td><%= o.consignment_id || '' %></td><% } %>
                 <% if (isSuperAdmin) { %>
                   <td>
-                    <form action="/orders/<%= o.order_number %>/delete" method="post" onsubmit="return confirm('Delete order?');">
+                    <form action="/orders/<%= o.order_number %>/delete" method="post" data-confirm="Delete order?">
                       <button type="submit">Delete</button>
                     </form>
                   </td>

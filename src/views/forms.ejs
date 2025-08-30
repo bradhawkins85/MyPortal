@@ -9,7 +9,7 @@
       <% if (forms.length > 0) { %>
         <div class="forms-menu">
           <% forms.forEach(function(f, idx){ %>
-            <button onclick="showForm('<%= f.url %>', this)" class="<%= idx === 0 ? 'active' : '' %>"><%= f.name %></button>
+            <button data-open-form data-url="<%= f.url %>" class="<%= idx === 0 ? 'active' : '' %>"><%= f.name %></button>
           <% }); %>
         </div>
         <iframe id="form-frame" class="form-frame" src="<%= forms[0].url %>"></iframe>
