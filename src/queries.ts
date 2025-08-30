@@ -553,6 +553,14 @@ export async function getUserCompanyAssignments(companyId?: number): Promise<Use
   const [rows] = await pool.query<RowDataPacket[]>(sql, params);
   return (rows as RowDataPacket[]).map((row) => ({
     ...(row as any),
+    can_manage_licenses: Number(row.can_manage_licenses),
+    staff_permission: Number(row.staff_permission),
+    can_manage_office_groups: Number(row.can_manage_office_groups),
+    can_manage_assets: Number(row.can_manage_assets),
+    can_manage_invoices: Number(row.can_manage_invoices),
+    can_order_licenses: Number(row.can_order_licenses),
+    can_access_shop: Number(row.can_access_shop),
+    is_admin: Number(row.is_admin),
     is_vip: Number(row.is_vip),
   })) as UserCompany[];
 }
