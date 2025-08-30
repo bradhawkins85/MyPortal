@@ -17,10 +17,35 @@
   <script src="https://cdn.datatables.net/2.0.0/js/dataTables.min.js"></script>
   <script>
     document.addEventListener('DOMContentLoaded', () => {
-      document.querySelectorAll('table').forEach((table) => {
-        if (!table.closest('#cron-generator-container')) {
-          new DataTable(table);
-        }
+      function initDataTable(table) {
+        if (table.dataset.datatableInitialized) return;
+        new DataTable(table);
+        table.dataset.datatableInitialized = 'true';
+      }
+
+      function initVisibleTables() {
+        document.querySelectorAll('table').forEach((table) => {
+          if (
+            !table.closest('#cron-generator-container') &&
+            table.offsetParent !== null
+          ) {
+            initDataTable(table);
+          }
+        });
+      }
+
+      initVisibleTables();
+      setTimeout(initVisibleTables, 0);
+
+      document.querySelectorAll('.tabs button').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const tab = document.getElementById(btn.dataset.tab);
+          tab?.querySelectorAll('table').forEach((table) => {
+            if (!table.closest('#cron-generator-container')) {
+              initDataTable(table);
+            }
+          });
+        });
       });
     });
   </script>
