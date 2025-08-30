@@ -23,6 +23,12 @@
         table.dataset.datatableInitialized = 'true';
       }
 
+      function adjustDataTables() {
+        DataTable.tables({ visible: true, api: true }).forEach((dt) =>
+          dt.columns.adjust()
+        );
+      }
+
       function initVisibleTables() {
         document.querySelectorAll('table').forEach((table) => {
           if (
@@ -32,10 +38,12 @@
             initDataTable(table);
           }
         });
+        adjustDataTables();
       }
 
       initVisibleTables();
       setTimeout(initVisibleTables, 0);
+      window.addEventListener('resize', adjustDataTables);
 
       document.querySelectorAll('.tabs button').forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -45,6 +53,7 @@
               initDataTable(table);
             }
           });
+          adjustDataTables();
         });
       });
     });
