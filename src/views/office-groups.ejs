@@ -69,18 +69,29 @@
   </div>
   <script>
     const officeGroupsData = <%- JSON.stringify(officeGroups) %>;
+
     function openGroupModal(id) {
       const group = officeGroupsData.find(g => g.id === id);
       const form = document.getElementById('groupMembersForm');
       form.action = '/office-groups/' + id + '/members';
       form.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-        cb.checked = group.members.some(m => m.id === parseInt(cb.value, 10));
+        cb.checked = group.members.some((m) => m.id === parseInt(cb.value, 10));
       });
       document.getElementById('groupModal').style.display = 'block';
     }
+
     function closeGroupModal() {
       document.getElementById('groupModal').style.display = 'none';
     }
+
+    document.querySelectorAll('.open-group-modal').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = parseInt(btn.dataset.groupId, 10);
+        openGroupModal(id);
+      });
+    });
+
+    document.getElementById('groupModalClose')?.addEventListener('click', closeGroupModal);
   </script>
 </body>
 </html>
