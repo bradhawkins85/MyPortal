@@ -330,3 +330,14 @@ table th {
 .multipleEntries select {
   width: 100%;
 }
+
+#email-templates form label {
+  display: block;
+  margin-top: 1rem;
+}
+
+#email-templates form input[type="text"],
+#email-templates form textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
