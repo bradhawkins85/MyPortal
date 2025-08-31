@@ -176,6 +176,7 @@ import {
   Invoice,
   Staff,
   OfficeGroupWithMembers,
+  EmailTemplate,
 } from './queries';
 import { runMigrations } from './db';
 
@@ -2369,6 +2370,23 @@ app.post('/apps/price', ensureAuth, ensureSuperAdmin, async (req, res) => {
   res.redirect('/admin#apps');
 });
 
+app.post('/apps/:id/update', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { sku, name, price, contractTerm } = req.body;
+  await updateApp(
+    parseInt(req.params.id, 10),
+    sku,
+    name,
+    parseFloat(price),
+    contractTerm
+  );
+  res.redirect('/admin#apps');
+});
+
+app.post('/apps/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  await deleteApp(parseInt(req.params.id, 10));
+  res.redirect('/admin#apps');
+});
+
 app.post('/apps/:appId/add', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const appId = parseInt(req.params.appId, 10);
   const { companyId, quantity } = req.body;
@@ -2407,6 +2425,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
   let products: any[] = [];
   let productRestrictions: Record<number, ProductCompanyRestriction[]> = {};
   let tasks: any[] = [];
+  let emailTemplate: EmailTemplate | null = null;
   if (isSuperAdmin) {
     allCompanies = await getAllCompanies();
     users = await getAllUsers();
@@ -2439,6 +2458,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
       company_name:
         allCompanies.find((c) => c.id === t.company_id)?.name || null,
     }));
+    emailTemplate = await getEmailTemplate('staff_invitation');
   } else {
     const companyId = req.session.companyId!;
     const company = await getCompanyById(companyId);
@@ -2528,6 +2548,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
     currentUserLastName: currentUser?.last_name || '',
     currentUserMobilePhone: currentUser?.mobile_phone || '',
     siteSettings: res.locals.siteSettings,
+    emailTemplate,
   });
 });
 
@@ -3050,32 +3071,14 @@ app.post(
   }
 );
 
-app.get('/admin/email-templates', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const [template, companies] = await Promise.all([
-    getEmailTemplate('staff_invitation'),
-    getCompaniesForUser(req.session.userId!),
-  ]);
-  const current = companies.find((c) => c.company_id === req.session.companyId);
-  res.render('email-templates', {
-    template,
-    companies,
-    currentCompanyId: req.session.companyId,
-    isAdmin: true,
-    canManageLicenses: current?.can_manage_licenses ?? 0,
-    canManageStaff: current?.staff_permission ? 1 : 0,
-    staffPermission: current?.staff_permission ?? 0,
-    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
-    canManageAssets: current?.can_manage_assets ?? 0,
-    canManageInvoices: current?.can_manage_invoices ?? 0,
-    canOrderLicenses: current?.can_order_licenses ?? 0,
-    canAccessShop: current?.can_access_shop ?? 0,
-  });
+app.get('/admin/email-templates', ensureAuth, ensureSuperAdmin, (req, res) => {
+  res.redirect('/admin#email-templates');
 });
 
 app.post('/admin/email-templates', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { subject, body } = req.body;
   await upsertEmailTemplate('staff_invitation', subject, body);
-  res.redirect('/admin/email-templates');
+  res.redirect('/admin#email-templates');
 });
 
 app.post('/admin/assign', ensureAuth, ensureAdmin, async (req, res) => {
