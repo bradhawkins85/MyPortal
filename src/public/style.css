@@ -195,8 +195,10 @@ table th {
 
 .form-frame {
   width: 100%;
-  height: calc(100vh - 200px);
+  /* Maintain a 10px buffer at the top and bottom */
+  height: calc(100vh - 200px - 20px);
   border: none;
+  margin: 10px 0;
 }
 
 .modal {
