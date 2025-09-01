@@ -601,7 +601,14 @@ const storage = multer.diskStorage({
   },
 });
 
-const allowedMimes = ['image/jpeg', 'image/png', 'image/gif'];
+const allowedMimes = [
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/x-icon',
+  'image/vnd.microsoft.icon',
+  'image/svg+xml',
+];
 const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -700,7 +707,12 @@ app.use(async (req, res, next) => {
     res.locals.siteSettings = await getSiteSettings();
   } catch (err) {
     console.error('Failed to load site settings', err);
-    res.locals.siteSettings = { company_name: null, login_logo: null, sidebar_logo: null };
+    res.locals.siteSettings = {
+      company_name: null,
+      login_logo: null,
+      sidebar_logo: null,
+      favicon: null,
+    };
   }
   next();
 });
@@ -3041,6 +3053,7 @@ app.post(
   memoryUpload.fields([
     { name: 'loginLogo', maxCount: 1 },
     { name: 'sidebarLogo', maxCount: 1 },
+    { name: 'favicon', maxCount: 1 },
   ]),
   csrfProtection,
   async (req, res) => {
@@ -3050,6 +3063,7 @@ app.post(
     };
     let loginLogo: string | undefined;
     let sidebarLogo: string | undefined;
+    let favicon: string | undefined;
     if (files && files.loginLogo && files.loginLogo[0]) {
       const file = files.loginLogo[0];
       if (allowedMimes.includes(file.mimetype)) {
@@ -3066,7 +3080,15 @@ app.post(
         return res.status(400).send('Invalid file type');
       }
     }
-    await updateSiteSettings(companyName, loginLogo, sidebarLogo);
+    if (files && files.favicon && files.favicon[0]) {
+      const file = files.favicon[0];
+      if (allowedMimes.includes(file.mimetype)) {
+        favicon = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+      } else {
+        return res.status(400).send('Invalid file type');
+      }
+    }
+    await updateSiteSettings(companyName, loginLogo, sidebarLogo, favicon);
     res.redirect('/admin#site-settings');
   }
 );

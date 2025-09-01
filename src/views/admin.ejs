@@ -620,6 +620,14 @@
                   <img src="<%= siteSettings.sidebar_logo %>" alt="Sidebar Logo" style="max-width:200px;display:block;margin-top:10px;"/>
                 <% } %>
               </div>
+              <div>
+                <label>Favicon:
+                  <input type="file" name="favicon" accept="image/*">
+                </label>
+                <% if (siteSettings && siteSettings.favicon) { %>
+                  <img src="<%= siteSettings.favicon %>" alt="Favicon" style="max-width:64px;display:block;margin-top:10px;"/>
+                <% } %>
+              </div>
               <button type="submit">Save</button>
             </form>
           </section>

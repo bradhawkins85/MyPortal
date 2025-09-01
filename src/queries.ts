@@ -241,6 +241,7 @@ export interface SiteSettings {
   company_name: string | null;
   login_logo: string | null;
   sidebar_logo: string | null;
+  favicon: string | null;
 }
 
 export interface Form {
@@ -1921,24 +1922,26 @@ export async function updateOfficeGroupMembers(groupId: number, staffIds: number
 
 export async function getSiteSettings(): Promise<SiteSettings> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT company_name, login_logo, sidebar_logo FROM site_settings WHERE id = 1'
+    'SELECT company_name, login_logo, sidebar_logo, favicon FROM site_settings WHERE id = 1'
   );
   const row = (rows as SiteSettings[])[0];
   return {
     company_name: row?.company_name || null,
     login_logo: row?.login_logo || null,
     sidebar_logo: row?.sidebar_logo || null,
+    favicon: row?.favicon || null,
   };
 }
 
 export async function updateSiteSettings(
   companyName: string,
   loginLogo?: string | null,
-  sidebarLogo?: string | null
+  sidebarLogo?: string | null,
+  favicon?: string | null
 ): Promise<void> {
   await pool.query(
-    'UPDATE site_settings SET company_name = ?, login_logo = COALESCE(?, login_logo), sidebar_logo = COALESCE(?, sidebar_logo) WHERE id = 1',
-    [companyName, loginLogo ?? null, sidebarLogo ?? null]
+    'UPDATE site_settings SET company_name = ?, login_logo = COALESCE(?, login_logo), sidebar_logo = COALESCE(?, sidebar_logo), favicon = COALESCE(?, favicon) WHERE id = 1',
+    [companyName, loginLogo ?? null, sidebarLogo ?? null, favicon ?? null]
   );
 }
 
