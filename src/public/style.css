@@ -263,6 +263,12 @@ table th {
   margin: 0 auto;
 }
 
+#details-modal .modal-content {
+  width: 60vw;
+  max-width: 60vw;
+  height: auto;
+}
+
 /* Admin tabs */
 .tabs {
   display: flex;
