@@ -31,10 +31,11 @@
               <td><%= p.sku %></td>
               <td>$<%= p.price.toFixed(2) %></td>
               <td><button type="button" class="details-btn" data-image="<%= p.image_url || '' %>" data-price="<%= p.price.toFixed(2) %>" data-stock="<%= p.stock %>" data-details="<%- p.description.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '&#10;') %>">Details</button></td>
-              <td>
+              <td class="order-column">
                 <form action="/cart/add" method="post">
                   <input type="hidden" name="productId" value="<%= p.id %>">
                   <input type="number" name="quantity" min="1" max="<%= p.stock %>" value="1">
+                  <br>
                   <button type="submit">Add to Cart</button>
                 </form>
               </td>
