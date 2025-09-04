@@ -431,11 +431,35 @@ async function downloadStockFeed(): Promise<void> {
 
 function formatDate(d: string | null): string | null {
   if (!d) return null;
-  const parts = d.split('/');
-  if (parts.length === 3) {
-    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  const slashParts = d.split('/');
+  if (slashParts.length === 3) {
+    const [day, month, year] = slashParts;
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
   }
-  return d;
+  const parsed = new Date(d);
+  if (!isNaN(parsed.getTime())) {
+    let offsetMinutes = 0;
+    const gmt = d.match(/GMT([+-]\d{4})/);
+    if (gmt) {
+      const sign = gmt[1][0] === '+' ? 1 : -1;
+      const hours = parseInt(gmt[1].slice(1, 3), 10);
+      const minutes = parseInt(gmt[1].slice(3, 5), 10);
+      offsetMinutes = sign * (hours * 60 + minutes);
+    } else {
+      const off = d.match(/([+-]\d{2}):?(\d{2})/);
+      if (off) {
+        const sign = off[1][0] === '+' ? 1 : -1;
+        const hours = parseInt(off[1].slice(1), 10);
+        const minutes = parseInt(off[2], 10);
+        offsetMinutes = sign * (hours * 60 + minutes);
+      }
+    }
+    if (offsetMinutes) {
+      parsed.setTime(parsed.getTime() + offsetMinutes * 60000);
+    }
+    return parsed.toISOString().slice(0, 10);
+  }
+  return null;
 }
 
 async function processFeedItem(item: any, existing?: any): Promise<void> {
@@ -505,7 +529,9 @@ async function processFeedItem(item: any, existing?: any): Promise<void> {
     : item.height !== undefined
     ? Number(item.height)
     : null;
-  const stockAt = formatDate(item.pubDate || item.pub_date || null);
+  const stockAt = formatDate(
+    (item.pubDate || item.pub_date || null) as string | null
+  );
   const warrantyLength = item.WarrantyLength || item.warranty_length || null;
   const manufacturer = item.Manufacturer || item.manufacturer || null;
   let imageUrl: string | null = null;
