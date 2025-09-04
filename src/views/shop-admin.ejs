@@ -24,6 +24,13 @@
         </ul>
       </section>
       <section>
+        <h2>Import Product</h2>
+        <form action="/shop/admin/product/import" method="post">
+          <input type="text" name="vendor_sku" placeholder="Vendor SKU" required>
+          <button type="submit">Import</button>
+        </form>
+      </section>
+      <section>
         <h2>Add Product</h2>
         <form action="/shop/admin/product" method="post" enctype="multipart/form-data">
           <input type="text" name="name" placeholder="Name" required>
