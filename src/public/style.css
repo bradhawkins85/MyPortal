@@ -266,7 +266,28 @@ table th {
 #details-modal .modal-content {
   width: 60vw;
   max-width: 60vw;
-  height: auto;
+  max-height: 95vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#details-modal .close {
+  align-self: flex-end;
+}
+
+#details-content {
+  width: 100%;
+  text-align: center;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+#details-content img {
+  max-height: 300px;
+  width: auto;
+  margin: 0 auto 1rem;
 }
 
 /* Admin tabs */
