@@ -276,6 +276,7 @@ async function sendSmsUpdate(
 }
 
 const scheduledJobs = new Map<number, cron.ScheduledTask>();
+let systemUpdateInProgress = false;
 
 async function importSyncroContactsForCompany(companyId: number) {
   const company = await getCompanyById(companyId);
@@ -618,7 +619,12 @@ async function runScheduledTask(id: number) {
         await updateProductsFromFeed();
         break;
       case 'system_update':
-        await execFileAsync(path.join(__dirname, '..', 'update.sh'));
+        systemUpdateInProgress = true;
+        try {
+          await execFileAsync(path.join(__dirname, '..', 'update.sh'));
+        } finally {
+          systemUpdateInProgress = false;
+        }
         break;
       default:
         console.log(`Task ${task.command} not implemented`);
@@ -2992,6 +2998,10 @@ app.post('/admin/schedules/:id/run', ensureAuth, ensureSuperAdmin, async (req, r
   } else {
     res.redirect('/admin#schedules');
   }
+});
+
+app.get('/admin/system-update-status', ensureAuth, ensureSuperAdmin, (req, res) => {
+  res.json({ complete: !systemUpdateInProgress });
 });
 
 app.post('/admin/schedules/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
