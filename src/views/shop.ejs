@@ -30,7 +30,7 @@
               <td><%= p.name %></td>
               <td><%= p.sku %></td>
               <td>$<%= p.price.toFixed(2) %></td>
-              <td><button type="button" class="details-btn" data-details="<%- p.description.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '&#10;') %>">Details</button></td>
+              <td><button type="button" class="details-btn" data-image="<%= p.image_url || '' %>" data-price="<%= p.price.toFixed(2) %>" data-stock="<%= p.stock %>" data-details="<%- p.description.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '&#10;') %>">Details</button></td>
               <td>
                 <form action="/cart/add" method="post">
                   <input type="hidden" name="productId" value="<%= p.id %>">
@@ -74,12 +74,30 @@
       }
     });
 
-    document.querySelectorAll('.details-btn').forEach(function(btn) {
-      btn.addEventListener('click', function () {
-        document.getElementById('details-content').innerHTML = this.dataset.details.replace(/\n/g, '<br>');
-        document.getElementById('details-modal').style.display = 'flex';
+      document.querySelectorAll('.details-btn').forEach(function(btn) {
+        btn.addEventListener('click', function () {
+          const img = this.dataset.image;
+          const price = parseFloat(this.dataset.price).toFixed(2);
+          const stock = parseInt(this.dataset.stock, 10);
+          let stockText;
+          if (stock <= 0) {
+            stockText = 'Out of Stock';
+          } else if (stock <= 5) {
+            stockText = 'Low Stock';
+          } else {
+            stockText = 'In Stock';
+          }
+          let html = '';
+          if (img) {
+            html += `<img src="${img}" alt="" style="max-width:100%;"><br>`;
+          }
+          html += `<p>Price: $${price}</p>`;
+          html += `<p>${stockText}</p>`;
+          html += `<p>${this.dataset.details.replace(/\n/g, '<br>')}</p>`;
+          document.getElementById('details-content').innerHTML = html;
+          document.getElementById('details-modal').style.display = 'flex';
+        });
       });
-    });
 
     document.getElementById('details-close').addEventListener('click', function () {
       document.getElementById('details-modal').style.display = 'none';
