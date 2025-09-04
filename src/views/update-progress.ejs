@@ -5,11 +5,27 @@
     <div class="login-container">
       <h1>Installing Update</h1>
       <p>An update is being installed. This page will refresh once the process completes.</p>
+      <p id="loading">Checking status...</p>
     </div>
     <script>
-      setTimeout(function() {
-        window.location.href = '/admin#schedules';
-      }, 15000);
+      var loadingEl = document.getElementById('loading');
+      var dots = 0;
+      var loadingInterval = setInterval(function () {
+        dots = (dots + 1) % 4;
+        loadingEl.textContent = 'Checking status' + '.'.repeat(dots);
+      }, 500);
+
+      var pollInterval = setInterval(function () {
+        fetch('/admin/system-update-status')
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            if (data.complete) {
+              clearInterval(pollInterval);
+              clearInterval(loadingInterval);
+              window.location.href = '/admin#schedules';
+            }
+          });
+      }, 3000);
     </script>
   </body>
 </html>
