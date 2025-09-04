@@ -984,7 +984,8 @@
               const productRestrictions = <%- JSON.stringify(productRestrictions) %>;
               const productsData = <%- JSON.stringify(products) %>;
               function openEditModal(id) {
-                const product = productsData.find(p => p.id === id);
+                const product = productsData.find(p => p.id === Number(id));
+                if (!product) return;
                 const modal = document.getElementById('editModal');
                 const form = document.getElementById('editForm');
                 form.action = `/shop/admin/product/${id}`;
