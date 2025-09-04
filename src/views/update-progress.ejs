@@ -17,13 +17,21 @@
 
       var pollInterval = setInterval(function () {
         fetch('/admin/system-update-status')
-          .then(function (res) { return res.json(); })
-          .then(function (data) {
-            if (data.complete) {
-              clearInterval(pollInterval);
-              clearInterval(loadingInterval);
-              window.location.href = '/admin#schedules';
+          .then(function (res) { return res.text(); })
+          .then(function (text) {
+            try {
+              var data = JSON.parse(text);
+              if (data.complete) {
+                clearInterval(pollInterval);
+                clearInterval(loadingInterval);
+                window.location.href = '/admin#schedules';
+              }
+            } catch (err) {
+              // Response was not JSON (e.g. HTML during reload); ignore and retry
             }
+          })
+          .catch(function () {
+            // Network error; ignore and retry
           });
       }, 3000);
     </script>
