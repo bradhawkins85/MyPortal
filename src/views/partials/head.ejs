@@ -27,9 +27,7 @@
       }
 
       function adjustDataTables() {
-        DataTable.tables({ visible: true, api: true }).forEach((dt) =>
-          dt.columns.adjust()
-        );
+        DataTable.tables({ visible: true, api: true }).columns.adjust();
       }
 
       function initVisibleTables() {
