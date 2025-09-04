@@ -486,7 +486,14 @@ async function processFeedItem(item: any): Promise<void> {
 
 async function updateProductsFromFeed(): Promise<void> {
   const items = await loadFeedItems();
+  const existingProducts = await getAllProducts(true);
+  const existingSkus = new Set(
+    existingProducts.map((p) => (p.vendor_sku || p.sku).toLowerCase())
+  );
   for (const item of items) {
+    const code = String(item.StockCode || item['@_StockCode'] || '').toLowerCase();
+    if (!code) continue;
+    if (!existingSkus.has(code)) continue;
     await processFeedItem(item);
   }
 }
