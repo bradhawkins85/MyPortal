@@ -90,6 +90,18 @@ export interface Product {
   stock: number;
   archived: number;
   category_id: number | null;
+  buy_price?: number | null;
+  weight?: number | null;
+  length?: number | null;
+  width?: number | null;
+  height?: number | null;
+  stock_at?: string | null;
+  warranty_length?: string | null;
+  manufacturer?: string | null;
+  stock_nsw?: number;
+  stock_qld?: number;
+  stock_vic?: number;
+  stock_sa?: number;
   category_name?: string;
 }
 
@@ -1259,6 +1271,14 @@ export async function getCategoryById(id: number): Promise<Category | null> {
   return (rows as Category[])[0] || null;
 }
 
+export async function getCategoryByName(name: string): Promise<Category | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM shop_categories WHERE name = ?',
+    [name]
+  );
+  return (rows as Category[])[0] || null;
+}
+
 export async function createCategory(name: string): Promise<number> {
   const [result] = await pool.execute<ResultSetHeader>(
     'INSERT INTO shop_categories (name) VALUES (?)',
@@ -1313,8 +1333,19 @@ export async function getAllProducts(
     ...(row as any),
     price: Number(row.price),
     vip_price: row.vip_price !== null ? Number(row.vip_price) : null,
-    category_id:
-      row.category_id !== null ? Number(row.category_id) : null,
+    category_id: row.category_id !== null ? Number(row.category_id) : null,
+    buy_price: row.buy_price !== null ? Number(row.buy_price) : null,
+    weight: row.weight !== null ? Number(row.weight) : null,
+    length: row.length !== null ? Number(row.length) : null,
+    width: row.width !== null ? Number(row.width) : null,
+    height: row.height !== null ? Number(row.height) : null,
+    stock_at: row.stock_at ? String(row.stock_at) : null,
+    warranty_length: row.warranty_length || null,
+    manufacturer: row.manufacturer || null,
+    stock_nsw: row.stock_nsw !== null ? Number(row.stock_nsw) : 0,
+    stock_qld: row.stock_qld !== null ? Number(row.stock_qld) : 0,
+    stock_vic: row.stock_vic !== null ? Number(row.stock_vic) : 0,
+    stock_sa: row.stock_sa !== null ? Number(row.stock_sa) : 0,
   })) as Product[];
 }
 
@@ -1346,8 +1377,19 @@ export async function getProductById(
         ...(row as any),
         price: Number(row.price),
         vip_price: row.vip_price !== null ? Number(row.vip_price) : null,
-        category_id:
-          row.category_id !== null ? Number(row.category_id) : null,
+        category_id: row.category_id !== null ? Number(row.category_id) : null,
+        buy_price: row.buy_price !== null ? Number(row.buy_price) : null,
+        weight: row.weight !== null ? Number(row.weight) : null,
+        length: row.length !== null ? Number(row.length) : null,
+        width: row.width !== null ? Number(row.width) : null,
+        height: row.height !== null ? Number(row.height) : null,
+        stock_at: row.stock_at ? String(row.stock_at) : null,
+        warranty_length: row.warranty_length || null,
+        manufacturer: row.manufacturer || null,
+        stock_nsw: row.stock_nsw !== null ? Number(row.stock_nsw) : 0,
+        stock_qld: row.stock_qld !== null ? Number(row.stock_qld) : 0,
+        stock_vic: row.stock_vic !== null ? Number(row.stock_vic) : 0,
+        stock_sa: row.stock_sa !== null ? Number(row.stock_sa) : 0,
       } as Product)
     : null;
 }
@@ -1380,8 +1422,19 @@ export async function getProductBySku(
         ...(row as any),
         price: Number(row.price),
         vip_price: row.vip_price !== null ? Number(row.vip_price) : null,
-        category_id:
-          row.category_id !== null ? Number(row.category_id) : null,
+        category_id: row.category_id !== null ? Number(row.category_id) : null,
+        buy_price: row.buy_price !== null ? Number(row.buy_price) : null,
+        weight: row.weight !== null ? Number(row.weight) : null,
+        length: row.length !== null ? Number(row.length) : null,
+        width: row.width !== null ? Number(row.width) : null,
+        height: row.height !== null ? Number(row.height) : null,
+        stock_at: row.stock_at ? String(row.stock_at) : null,
+        warranty_length: row.warranty_length || null,
+        manufacturer: row.manufacturer || null,
+        stock_nsw: row.stock_nsw !== null ? Number(row.stock_nsw) : 0,
+        stock_qld: row.stock_qld !== null ? Number(row.stock_qld) : 0,
+        stock_vic: row.stock_vic !== null ? Number(row.stock_vic) : 0,
+        stock_sa: row.stock_sa !== null ? Number(row.stock_sa) : 0,
       } as Product)
     : null;
 }
@@ -1439,6 +1492,61 @@ export async function updateProduct(
       stock,
       categoryId,
       id,
+    ]
+  );
+}
+
+export interface UpsertProductInput {
+  name: string;
+  sku: string;
+  vendorSku: string;
+  description: string;
+  imageUrl: string | null;
+  price: number;
+  vipPrice: number | null;
+  stock: number;
+  categoryId: number | null;
+  stockNsw: number;
+  stockQld: number;
+  stockVic: number;
+  stockSa: number;
+  buyPrice: number | null;
+  weight: number | null;
+  length: number | null;
+  width: number | null;
+  height: number | null;
+  stockAt: string | null;
+  warrantyLength: string | null;
+  manufacturer: string | null;
+}
+
+export async function upsertProductFromFeed(data: UpsertProductInput): Promise<void> {
+  await pool.execute(
+    `INSERT INTO shop_products (name, sku, vendor_sku, description, image_url, price, vip_price, stock, category_id, stock_nsw, stock_qld, stock_vic, stock_sa, buy_price, weight, length, width, height, stock_at, warranty_length, manufacturer)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE name=VALUES(name), sku=VALUES(sku), description=VALUES(description), image_url=IFNULL(VALUES(image_url), image_url), price=VALUES(price), vip_price=VALUES(vip_price), stock=VALUES(stock), category_id=VALUES(category_id), stock_nsw=VALUES(stock_nsw), stock_qld=VALUES(stock_qld), stock_vic=VALUES(stock_vic), stock_sa=VALUES(stock_sa), buy_price=VALUES(buy_price), weight=VALUES(weight), length=VALUES(length), width=VALUES(width), height=VALUES(height), stock_at=VALUES(stock_at), warranty_length=VALUES(warranty_length), manufacturer=VALUES(manufacturer)`,
+    [
+      data.name,
+      data.sku,
+      data.vendorSku,
+      data.description,
+      data.imageUrl,
+      data.price,
+      data.vipPrice,
+      data.stock,
+      data.categoryId,
+      data.stockNsw,
+      data.stockQld,
+      data.stockVic,
+      data.stockSa,
+      data.buyPrice,
+      data.weight,
+      data.length,
+      data.width,
+      data.height,
+      data.stockAt,
+      data.warrantyLength,
+      data.manufacturer,
     ]
   );
 }

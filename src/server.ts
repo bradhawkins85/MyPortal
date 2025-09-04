@@ -4,6 +4,7 @@ import RedisStore from 'connect-redis';
 import { createClient } from 'redis';
 import path from 'path';
 import fs from 'fs';
+import { XMLParser } from 'fast-xml-parser';
 import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
@@ -106,6 +107,7 @@ import {
     deleteFormPermission,
   getAllCategories,
   getCategoryById,
+  getCategoryByName,
   createCategory,
   updateCategory,
   deleteCategory,
@@ -114,6 +116,7 @@ import {
   getProductById,
   getProductBySku,
   updateProduct,
+  upsertProductFromFeed,
   archiveProduct,
   unarchiveProduct,
   deleteProduct,
@@ -381,6 +384,123 @@ async function importSyncroContactsForCompany(companyId: number) {
   }
 }
 
+const STOCK_FEED_FILE = path.join(__dirname, '..', 'stock-feed.xml');
+const xmlParser = new XMLParser({ ignoreAttributes: false });
+
+async function downloadStockFeed(): Promise<void> {
+  const url = process.env.STOCK_FEED_URL;
+  if (!url) {
+    throw new Error('STOCK_FEED_URL not set');
+  }
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to download feed: ${res.status}`);
+  const text = await res.text();
+  await fs.promises.writeFile(STOCK_FEED_FILE, text);
+}
+
+async function loadFeedItems(): Promise<any[]> {
+  try {
+    const xml = await fs.promises.readFile(STOCK_FEED_FILE, 'utf-8');
+    const parsed = xmlParser.parse(xml);
+    const items = parsed?.rss?.channel?.item || parsed?.items || parsed?.item || [];
+    return Array.isArray(items) ? items : [items];
+  } catch {
+    return [];
+  }
+}
+
+function formatDate(d: string | null): string | null {
+  if (!d) return null;
+  const parts = d.split('/');
+  if (parts.length === 3) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  return d;
+}
+
+async function processFeedItem(item: any): Promise<void> {
+  const code = item.StockCode || item['@_StockCode'];
+  if (!code) return;
+  const name = item.ProductName || '';
+  const description = item.ProductName2 || '';
+  const price = item.RRP ? parseFloat(item.RRP) : 0;
+  const categoryName = item.CategoryName || '';
+  let categoryId: number | null = null;
+  if (categoryName) {
+    const existing = await getCategoryByName(categoryName);
+    categoryId = existing ? existing.id : await createCategory(categoryName);
+  }
+  const stockNsw = parseInt(item.OnHandChanelNsw || '0', 10);
+  const stockQld = parseInt(item.OnHandChanelQld || '0', 10);
+  const stockVic = parseInt(item.OnHandChanelVic || '0', 10);
+  const stockSa = parseInt(item.OnHandChanelSa || '0', 10);
+  const stock = stockNsw + stockQld + stockVic + stockSa;
+  const buyPrice = item.DBP ? parseFloat(item.DBP) : null;
+  const weight = item.Weight ? parseFloat(item.Weight) : null;
+  const length = item.Length ? parseFloat(item.Length) : null;
+  const width = item.Width ? parseFloat(item.Width) : null;
+  const height = item.Height ? parseFloat(item.Height) : null;
+  const stockAt = formatDate(item.pubDate || null);
+  const warrantyLength = item.WarrantyLength || null;
+  const manufacturer = item.Manufacturer || null;
+  let imageUrl: string | null = null;
+  if (item.ImageUrl) {
+    try {
+      const res = await fetch(item.ImageUrl);
+      if (res.ok) {
+        const buf = Buffer.from(await res.arrayBuffer());
+        const ext = path.extname(new URL(item.ImageUrl).pathname) || '.jpg';
+        const fileName = `${code}${ext}`;
+        const dest = path.join(__dirname, 'public', 'uploads', fileName);
+        await fs.promises.writeFile(dest, buf);
+        imageUrl = `/uploads/${fileName}`;
+      }
+    } catch (err) {
+      console.error('Image download failed', err);
+    }
+  }
+  await upsertProductFromFeed({
+    name,
+    sku: code,
+    vendorSku: code,
+    description,
+    imageUrl,
+    price,
+    vipPrice: price,
+    stock,
+    categoryId,
+    stockNsw,
+    stockQld,
+    stockVic,
+    stockSa,
+    buyPrice,
+    weight,
+    length,
+    width,
+    height,
+    stockAt,
+    warrantyLength,
+    manufacturer,
+  });
+}
+
+async function updateProductsFromFeed(): Promise<void> {
+  const items = await loadFeedItems();
+  for (const item of items) {
+    await processFeedItem(item);
+  }
+}
+
+async function importProductByVendorSku(vendorSku: string): Promise<boolean> {
+  const items = await loadFeedItems();
+  const item = items.find(
+    (i) => String(i.StockCode || i['@_StockCode']).toLowerCase() === vendorSku.toLowerCase()
+  );
+  if (!item) return false;
+  await processFeedItem(item);
+  return true;
+}
+
 async function runScheduledTask(id: number) {
   const task = await getScheduledTask(id);
   if (!task) return;
@@ -388,6 +508,12 @@ async function runScheduledTask(id: number) {
     switch (task.command) {
       case 'sync_staff':
         if (task.company_id) await importSyncroContactsForCompany(task.company_id);
+        break;
+      case 'update_stock_feed':
+        await downloadStockFeed();
+        break;
+      case 'update_products':
+        await updateProductsFromFeed();
         break;
       case 'system_update':
         await execFileAsync(path.join(__dirname, '..', 'update.sh'));
@@ -444,6 +570,16 @@ async function createDefaultSchedulesForCompany(companyId: number) {
     cronExpr
   );
   await scheduleAllTasks();
+}
+
+async function createDefaultSystemSchedules() {
+  const tasks = await getScheduledTasks();
+  if (!tasks.some((t) => t.command === 'update_stock_feed')) {
+    await createScheduledTask(null, 'Update Stock Feed', 'update_stock_feed', getRandomDailyCron());
+  }
+  if (!tasks.some((t) => t.command === 'update_products')) {
+    await createScheduledTask(null, 'Update Products', 'update_products', getRandomDailyCron());
+  }
 }
 
 setInterval(() => {
@@ -2198,6 +2334,21 @@ app.post(
 app.get('/shop/admin', ensureAuth, ensureSuperAdmin, (req, res) => {
   res.redirect('/admin');
 });
+
+app.post(
+  '/shop/admin/product/import',
+  ensureAuth,
+  ensureSuperAdmin,
+  async (req: express.Request, res: express.Response) => {
+    const { vendor_sku } = req.body;
+    try {
+      await importProductByVendorSku(vendor_sku);
+    } catch (err) {
+      console.error('Product import failed', err);
+    }
+    res.redirect('/admin');
+  }
+);
 
 app.post(
   '/shop/admin/product',
@@ -5861,6 +6012,7 @@ async function start() {
   await runMigrations();
   await hashExistingApiKeys();
   await encryptExistingTotpSecrets();
+  await createDefaultSystemSchedules();
   await scheduleAllTasks();
   app.listen(port, host, () => {
     console.log(`Server running at http://${host}:${port}`);
