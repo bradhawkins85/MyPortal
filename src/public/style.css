@@ -381,3 +381,8 @@ table th {
   margin: 0 auto;
   text-align: center;
 }
+
+.order-column form button {
+  display: block;
+  margin: 3px auto 0;
+}
