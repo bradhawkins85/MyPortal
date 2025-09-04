@@ -82,12 +82,92 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  document.querySelectorAll('[data-close-group-modal]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (typeof closeGroupModal === 'function') {
-        closeGroupModal();
-      }
+    document.querySelectorAll('[data-close-group-modal]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (typeof closeGroupModal === 'function') {
+          closeGroupModal();
+        }
+      });
     });
+
+    // Initialize DataTables for visible tables
+    if (typeof DataTable !== 'undefined') {
+      function initDataTable(table) {
+        if (table.dataset.datatableInitialized) return;
+        new DataTable(table);
+        table.dataset.datatableInitialized = 'true';
+      }
+
+      function adjustDataTables() {
+        DataTable.tables({ visible: true, api: true }).columns.adjust();
+      }
+
+      function initVisibleTables() {
+        document.querySelectorAll('table').forEach((table) => {
+          if (
+            !table.closest('#cron-generator-container') &&
+            table.offsetParent !== null
+          ) {
+            initDataTable(table);
+          }
+        });
+        adjustDataTables();
+      }
+
+      initVisibleTables();
+      setTimeout(initVisibleTables, 0);
+      window.addEventListener('resize', adjustDataTables);
+
+      document.querySelectorAll('.tabs button').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const tab = document.getElementById(btn.dataset.tab);
+          tab?.querySelectorAll('table').forEach((table) => {
+            if (!table.closest('#cron-generator-container')) {
+              initDataTable(table);
+            }
+          });
+          adjustDataTables();
+        });
+      });
+    }
+
+    // CSRF token handling
+    const tokenMeta = document.querySelector('meta[name="csrf-token"]');
+    const token = tokenMeta?.getAttribute('content');
+    if (token) {
+      document.querySelectorAll('form[method="post"]').forEach((form) => {
+        if (!form.querySelector('input[name="_csrf"]')) {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = '_csrf';
+          input.value = token;
+          form.appendChild(input);
+        }
+      });
+
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = (input, init = {}) => {
+        init.headers = init.headers || {};
+        if (init.headers instanceof Headers) {
+          if (!init.headers.has('X-CSRF-Token')) {
+            init.headers.set('X-CSRF-Token', token);
+          }
+        } else if (!('X-CSRF-Token' in init.headers)) {
+          init.headers['X-CSRF-Token'] = token;
+        }
+        if (!init.credentials) {
+          init.credentials = 'same-origin';
+        }
+        return originalFetch(input, init);
+      };
+    }
+
+    // Company switcher form submission
+    const companySwitcher = document.getElementById('company-switcher');
+    if (companySwitcher) {
+      companySwitcher.addEventListener('change', () => {
+        companySwitcher.form?.submit();
+      });
+    }
   });
-});
 
