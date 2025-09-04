@@ -119,7 +119,6 @@ import {
   upsertProductFromFeed,
   clearStockFeed,
   insertStockFeedItem,
-  getStockFeedItems,
   getStockFeedItemBySku,
   archiveProduct,
   unarchiveProduct,
@@ -439,20 +438,25 @@ function formatDate(d: string | null): string | null {
   return d;
 }
 
-async function processFeedItem(item: any): Promise<void> {
+async function processFeedItem(item: any, existing?: any): Promise<void> {
   const code =
     item.StockCode ||
     item['@_StockCode'] ||
     item.stock_code ||
     item.sku;
   if (!code) return;
-  const name = item.ProductName || item.product_name || '';
+  const feedName = item.ProductName || item.product_name || '';
   const description = item.ProductName2 || item.product_name2 || '';
-  const price = item.RRP
+  const price = existing
+    ? Number(existing.price)
+    : item.RRP
     ? parseFloat(item.RRP)
     : item.rrp !== undefined
     ? Number(item.rrp)
     : 0;
+  const vipPrice = existing
+    ? existing.vip_price ?? Number(existing.price)
+    : price;
   const categoryName = item.CategoryName || item.category_name || '';
   let categoryId: number | null = null;
   if (categoryName) {
@@ -521,6 +525,13 @@ async function processFeedItem(item: any): Promise<void> {
       console.error('Image download failed', err);
     }
   }
+  let name = feedName;
+  if (existing) {
+    const existingSku = (existing.vendor_sku || existing.sku || '').toLowerCase();
+    if (existing.name && existing.name.toLowerCase() !== existingSku) {
+      name = existing.name;
+    }
+  }
   await upsertProductFromFeed({
     name,
     sku: code,
@@ -528,7 +539,7 @@ async function processFeedItem(item: any): Promise<void> {
     description,
     imageUrl,
     price,
-    vipPrice: price,
+    vipPrice,
     stock,
     categoryId,
     stockNsw,
@@ -547,16 +558,13 @@ async function processFeedItem(item: any): Promise<void> {
 }
 
 async function updateProductsFromFeed(): Promise<void> {
-  const items = await getStockFeedItems();
-  const existingProducts = await getAllProducts(true);
-  const existingSkus = new Set(
-    existingProducts.map((p) => (p.vendor_sku || p.sku).toLowerCase())
-  );
-  for (const item of items) {
-    const code = String(item.sku || '').toLowerCase();
-    if (!code) continue;
-    if (!existingSkus.has(code)) continue;
-    await processFeedItem(item);
+  const products = await getAllProducts(true);
+  for (const p of products) {
+    const sku = p.vendor_sku || p.sku;
+    if (!sku) continue;
+    const item = await getStockFeedItemBySku(String(sku));
+    if (!item) continue;
+    await processFeedItem(item, p);
   }
 }
 
