@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS stock_feed (
+  sku VARCHAR(255) PRIMARY KEY,
+  product_name VARCHAR(255) NOT NULL,
+  product_name2 VARCHAR(255) NULL,
+  rrp DECIMAL(10,2) NULL,
+  category_name VARCHAR(255) NULL,
+  on_hand_nsw INT NOT NULL DEFAULT 0,
+  on_hand_qld INT NOT NULL DEFAULT 0,
+  on_hand_vic INT NOT NULL DEFAULT 0,
+  on_hand_sa INT NOT NULL DEFAULT 0,
+  dbp DECIMAL(10,2) NULL,
+  weight DECIMAL(10,2) NULL,
+  length DECIMAL(10,2) NULL,
+  width DECIMAL(10,2) NULL,
+  height DECIMAL(10,2) NULL,
+  pub_date DATE NULL,
+  warranty_length VARCHAR(255) NULL,
+  manufacturer VARCHAR(255) NULL,
+  image_url VARCHAR(2048) NULL
+);
