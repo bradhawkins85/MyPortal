@@ -105,6 +105,27 @@ export interface Product {
   category_name?: string;
 }
 
+export interface StockFeedItem {
+  sku: string;
+  product_name: string;
+  product_name2?: string | null;
+  rrp?: number | null;
+  category_name?: string | null;
+  on_hand_nsw: number;
+  on_hand_qld: number;
+  on_hand_vic: number;
+  on_hand_sa: number;
+  dbp?: number | null;
+  weight?: number | null;
+  length?: number | null;
+  width?: number | null;
+  height?: number | null;
+  pub_date?: string | null;
+  warranty_length?: string | null;
+  manufacturer?: string | null;
+  image_url?: string | null;
+}
+
 export interface Category {
   id: number;
   name: string;
@@ -1549,6 +1570,92 @@ export async function upsertProductFromFeed(data: UpsertProductInput): Promise<v
       data.manufacturer,
     ]
   );
+}
+
+export async function clearStockFeed(): Promise<void> {
+  await pool.execute('TRUNCATE TABLE stock_feed');
+}
+
+export async function insertStockFeedItem(item: StockFeedItem): Promise<void> {
+  await pool.execute(
+    `INSERT INTO stock_feed (sku, product_name, product_name2, rrp, category_name, on_hand_nsw, on_hand_qld, on_hand_vic, on_hand_sa, dbp, weight, length, width, height, pub_date, warranty_length, manufacturer, image_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      item.sku,
+      item.product_name,
+      item.product_name2 || null,
+      item.rrp ?? null,
+      item.category_name || null,
+      item.on_hand_nsw,
+      item.on_hand_qld,
+      item.on_hand_vic,
+      item.on_hand_sa,
+      item.dbp ?? null,
+      item.weight ?? null,
+      item.length ?? null,
+      item.width ?? null,
+      item.height ?? null,
+      item.pub_date || null,
+      item.warranty_length || null,
+      item.manufacturer || null,
+      item.image_url || null,
+    ]
+  );
+}
+
+export async function getStockFeedItems(): Promise<StockFeedItem[]> {
+  const [rows] = await pool.query('SELECT * FROM stock_feed');
+  return (rows as any[]).map((row) => ({
+    sku: row.sku,
+    product_name: row.product_name,
+    product_name2: row.product_name2,
+    rrp: row.rrp !== null ? Number(row.rrp) : null,
+    category_name: row.category_name,
+    on_hand_nsw: row.on_hand_nsw !== null ? Number(row.on_hand_nsw) : 0,
+    on_hand_qld: row.on_hand_qld !== null ? Number(row.on_hand_qld) : 0,
+    on_hand_vic: row.on_hand_vic !== null ? Number(row.on_hand_vic) : 0,
+    on_hand_sa: row.on_hand_sa !== null ? Number(row.on_hand_sa) : 0,
+    dbp: row.dbp !== null ? Number(row.dbp) : null,
+    weight: row.weight !== null ? Number(row.weight) : null,
+    length: row.length !== null ? Number(row.length) : null,
+    width: row.width !== null ? Number(row.width) : null,
+    height: row.height !== null ? Number(row.height) : null,
+    pub_date: row.pub_date ? String(row.pub_date) : null,
+    warranty_length: row.warranty_length,
+    manufacturer: row.manufacturer,
+    image_url: row.image_url,
+  }));
+}
+
+export async function getStockFeedItemBySku(
+  sku: string
+): Promise<StockFeedItem | null> {
+  const [rows] = await pool.query('SELECT * FROM stock_feed WHERE sku = ? LIMIT 1', [
+    sku,
+  ]);
+  const row = (rows as any[])[0];
+  return row
+    ? {
+        sku: row.sku,
+        product_name: row.product_name,
+        product_name2: row.product_name2,
+        rrp: row.rrp !== null ? Number(row.rrp) : null,
+        category_name: row.category_name,
+        on_hand_nsw: row.on_hand_nsw !== null ? Number(row.on_hand_nsw) : 0,
+        on_hand_qld: row.on_hand_qld !== null ? Number(row.on_hand_qld) : 0,
+        on_hand_vic: row.on_hand_vic !== null ? Number(row.on_hand_vic) : 0,
+        on_hand_sa: row.on_hand_sa !== null ? Number(row.on_hand_sa) : 0,
+        dbp: row.dbp !== null ? Number(row.dbp) : null,
+        weight: row.weight !== null ? Number(row.weight) : null,
+        length: row.length !== null ? Number(row.length) : null,
+        width: row.width !== null ? Number(row.width) : null,
+        height: row.height !== null ? Number(row.height) : null,
+        pub_date: row.pub_date ? String(row.pub_date) : null,
+        warranty_length: row.warranty_length,
+        manufacturer: row.manufacturer,
+        image_url: row.image_url,
+      }
+    : null;
 }
 
 export async function archiveProduct(id: number): Promise<void> {

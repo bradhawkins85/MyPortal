@@ -117,6 +117,10 @@ import {
   getProductBySku,
   updateProduct,
   upsertProductFromFeed,
+  clearStockFeed,
+  insertStockFeedItem,
+  getStockFeedItems,
+  getStockFeedItemBySku,
   archiveProduct,
   unarchiveProduct,
   deleteProduct,
@@ -396,16 +400,33 @@ async function downloadStockFeed(): Promise<void> {
   if (!res.ok) throw new Error(`Failed to download feed: ${res.status}`);
   const text = await res.text();
   await fs.promises.writeFile(STOCK_FEED_FILE, text);
-}
-
-async function loadFeedItems(): Promise<any[]> {
-  try {
-    const xml = await fs.promises.readFile(STOCK_FEED_FILE, 'utf-8');
-    const parsed = xmlParser.parse(xml);
-    const items = parsed?.rss?.channel?.item || parsed?.items || parsed?.item || [];
-    return Array.isArray(items) ? items : [items];
-  } catch {
-    return [];
+  const parsed = xmlParser.parse(text);
+  const items = parsed?.rss?.channel?.item || parsed?.items || parsed?.item || [];
+  const arr = Array.isArray(items) ? items : [items];
+  await clearStockFeed();
+  for (const item of arr) {
+    const sku = item.StockCode || item['@_StockCode'];
+    if (!sku) continue;
+    await insertStockFeedItem({
+      sku,
+      product_name: item.ProductName || '',
+      product_name2: item.ProductName2 || '',
+      rrp: item.RRP ? parseFloat(item.RRP) : null,
+      category_name: item.CategoryName || null,
+      on_hand_nsw: parseInt(item.OnHandChanelNsw || '0', 10),
+      on_hand_qld: parseInt(item.OnHandChanelQld || '0', 10),
+      on_hand_vic: parseInt(item.OnHandChanelVic || '0', 10),
+      on_hand_sa: parseInt(item.OnHandChanelSa || '0', 10),
+      dbp: item.DBP ? parseFloat(item.DBP) : null,
+      weight: item.Weight ? parseFloat(item.Weight) : null,
+      length: item.Length ? parseFloat(item.Length) : null,
+      width: item.Width ? parseFloat(item.Width) : null,
+      height: item.Height ? parseFloat(item.Height) : null,
+      pub_date: formatDate(item.pubDate || null),
+      warranty_length: item.WarrantyLength || null,
+      manufacturer: item.Manufacturer || null,
+      image_url: item.ImageUrl || null,
+    });
   }
 }
 
@@ -419,37 +440,78 @@ function formatDate(d: string | null): string | null {
 }
 
 async function processFeedItem(item: any): Promise<void> {
-  const code = item.StockCode || item['@_StockCode'];
+  const code =
+    item.StockCode ||
+    item['@_StockCode'] ||
+    item.stock_code ||
+    item.sku;
   if (!code) return;
-  const name = item.ProductName || '';
-  const description = item.ProductName2 || '';
-  const price = item.RRP ? parseFloat(item.RRP) : 0;
-  const categoryName = item.CategoryName || '';
+  const name = item.ProductName || item.product_name || '';
+  const description = item.ProductName2 || item.product_name2 || '';
+  const price = item.RRP
+    ? parseFloat(item.RRP)
+    : item.rrp !== undefined
+    ? Number(item.rrp)
+    : 0;
+  const categoryName = item.CategoryName || item.category_name || '';
   let categoryId: number | null = null;
   if (categoryName) {
     const existing = await getCategoryByName(categoryName);
     categoryId = existing ? existing.id : await createCategory(categoryName);
   }
-  const stockNsw = parseInt(item.OnHandChanelNsw || '0', 10);
-  const stockQld = parseInt(item.OnHandChanelQld || '0', 10);
-  const stockVic = parseInt(item.OnHandChanelVic || '0', 10);
-  const stockSa = parseInt(item.OnHandChanelSa || '0', 10);
+  const stockNsw = parseInt(
+    item.OnHandChanelNsw || item.on_hand_nsw || '0',
+    10
+  );
+  const stockQld = parseInt(
+    item.OnHandChanelQld || item.on_hand_qld || '0',
+    10
+  );
+  const stockVic = parseInt(
+    item.OnHandChanelVic || item.on_hand_vic || '0',
+    10
+  );
+  const stockSa = parseInt(
+    item.OnHandChanelSa || item.on_hand_sa || '0',
+    10
+  );
   const stock = stockNsw + stockQld + stockVic + stockSa;
-  const buyPrice = item.DBP ? parseFloat(item.DBP) : null;
-  const weight = item.Weight ? parseFloat(item.Weight) : null;
-  const length = item.Length ? parseFloat(item.Length) : null;
-  const width = item.Width ? parseFloat(item.Width) : null;
-  const height = item.Height ? parseFloat(item.Height) : null;
-  const stockAt = formatDate(item.pubDate || null);
-  const warrantyLength = item.WarrantyLength || null;
-  const manufacturer = item.Manufacturer || null;
+  const buyPrice = item.DBP
+    ? parseFloat(item.DBP)
+    : item.dbp !== undefined
+    ? Number(item.dbp)
+    : null;
+  const weight = item.Weight
+    ? parseFloat(item.Weight)
+    : item.weight !== undefined
+    ? Number(item.weight)
+    : null;
+  const length = item.Length
+    ? parseFloat(item.Length)
+    : item.length !== undefined
+    ? Number(item.length)
+    : null;
+  const width = item.Width
+    ? parseFloat(item.Width)
+    : item.width !== undefined
+    ? Number(item.width)
+    : null;
+  const height = item.Height
+    ? parseFloat(item.Height)
+    : item.height !== undefined
+    ? Number(item.height)
+    : null;
+  const stockAt = formatDate(item.pubDate || item.pub_date || null);
+  const warrantyLength = item.WarrantyLength || item.warranty_length || null;
+  const manufacturer = item.Manufacturer || item.manufacturer || null;
   let imageUrl: string | null = null;
-  if (item.ImageUrl) {
+  const imageSrc = item.ImageUrl || item.image_url;
+  if (imageSrc) {
     try {
-      const res = await fetch(item.ImageUrl);
+      const res = await fetch(imageSrc);
       if (res.ok) {
         const buf = Buffer.from(await res.arrayBuffer());
-        const ext = path.extname(new URL(item.ImageUrl).pathname) || '.jpg';
+        const ext = path.extname(new URL(imageSrc).pathname) || '.jpg';
         const fileName = `${code}${ext}`;
         const dest = path.join(__dirname, 'public', 'uploads', fileName);
         await fs.promises.writeFile(dest, buf);
@@ -485,17 +547,23 @@ async function processFeedItem(item: any): Promise<void> {
 }
 
 async function updateProductsFromFeed(): Promise<void> {
-  const items = await loadFeedItems();
+  const items = await getStockFeedItems();
+  const existingProducts = await getAllProducts(true);
+  const existingSkus = new Set(
+    existingProducts.map((p) => (p.vendor_sku || p.sku).toLowerCase())
+  );
   for (const item of items) {
+    const code = String(item.sku || '').toLowerCase();
+    if (!code) continue;
+    if (!existingSkus.has(code)) continue;
     await processFeedItem(item);
   }
 }
 
-async function importProductByVendorSku(vendorSku: string): Promise<boolean> {
-  const items = await loadFeedItems();
-  const item = items.find(
-    (i) => String(i.StockCode || i['@_StockCode']).toLowerCase() === vendorSku.toLowerCase()
-  );
+async function importProductByVendorSku(
+  vendorSku: string
+): Promise<boolean> {
+  const item = await getStockFeedItemBySku(vendorSku);
   if (!item) return false;
   await processFeedItem(item);
   return true;
