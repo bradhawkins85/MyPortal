@@ -158,7 +158,7 @@ test('extractAssetDetails maps nested properties', () => {
         last_synced_at: '2025-07-27T06:11:41.000Z',
         motherboard: { manufacturer: 'HP' },
         last_user: 'DOMAIN\\user',
-        cpu_age: 2,
+        cpu_age: '2',
       },
       form_factor: 'Physical Desktop',
       'Performance Score': '7',
