@@ -26,7 +26,7 @@ test('getSyncroContacts uses /contacts endpoint', async () => {
     await getSyncroContacts(customerId);
     assert.equal(
       requestedUrl,
-      `https://example.com/contacts?customer_id=${customerId}`
+      `https://example.com/api/v1/contacts?customer_id=${customerId}`
     );
   } finally {
     // restore env and fetch
@@ -59,7 +59,7 @@ test('getSyncroAssets uses /assets endpoint', async () => {
     await getSyncroAssets(customerId);
     assert.equal(
       requestedUrl,
-      `https://example.com/assets?customer_id=${customerId}`
+      `https://example.com/api/v1/assets?customer_id=${customerId}&page=1`
     );
   } finally {
     if (originalFetch) {
@@ -88,6 +88,49 @@ test('getSyncroAssets returns empty array on 404', async () => {
   try {
     const assets = await getSyncroAssets(customerId);
     assert.deepEqual(assets, []);
+  } finally {
+    if (originalFetch) {
+      global.fetch = originalFetch;
+    }
+    delete process.env.SYNCRO_WEBHOOK_URL;
+  }
+});
+
+test('getSyncroAssets paginates through pages', async () => {
+  const customerId = 456;
+  const requestedUrls: string[] = [];
+  const responses = [
+    {
+      ok: true,
+      json: async () => ({ assets: [{ id: 1 }], meta: { total_pages: 2 } }),
+    },
+    {
+      ok: true,
+      json: async () => ({ assets: [{ id: 2 }], meta: { total_pages: 2 } }),
+    },
+  ] as Response[];
+
+  const mockFetch = async (url: string, _init?: RequestInit) => {
+    requestedUrls.push(url);
+    return responses.shift()!;
+  };
+
+  const originalFetch = global.fetch;
+  // @ts-expect-error assign mock
+  global.fetch = mockFetch;
+  process.env.SYNCRO_WEBHOOK_URL = 'https://example.com';
+
+  try {
+    const assets = await getSyncroAssets(customerId);
+    assert.deepEqual(assets, [{ id: 1 }, { id: 2 }]);
+    assert.equal(
+      requestedUrls[0],
+      `https://example.com/api/v1/assets?customer_id=${customerId}&page=1`
+    );
+    assert.equal(
+      requestedUrls[1],
+      `https://example.com/api/v1/assets?customer_id=${customerId}&page=2`
+    );
   } finally {
     if (originalFetch) {
       global.fetch = originalFetch;
