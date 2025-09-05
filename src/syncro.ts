@@ -31,6 +31,27 @@ export interface SyncroContact {
   [key: string]: any;
 }
 
+export interface SyncroAsset {
+  id: number;
+  name?: string;
+  os_name?: string;
+  cpu_name?: string;
+  ram_gb?: number;
+  hdd_size?: string;
+  last_sync?: string;
+  motherboard_manufacturer?: string;
+  form_factor?: string;
+  last_user?: string;
+  cpu_age?: number;
+  performance_score?: number;
+  warranty_status?: string;
+  warranty_end_date?: string;
+  serial_number?: string;
+  type?: string;
+  status?: string;
+  [key: string]: any;
+}
+
 async function syncroRequest(path: string, init: RequestInit = {}): Promise<any> {
   const base = process.env.SYNCRO_WEBHOOK_URL;
   if (!base) {
@@ -84,6 +105,22 @@ export async function getSyncroContacts(
   }
   if (Array.isArray((data as any)?.data)) {
     return (data as any).data as SyncroContact[];
+  }
+  return [];
+}
+
+export async function getSyncroAssets(
+  customerId: string | number
+): Promise<SyncroAsset[]> {
+  const data = await syncroRequest(`/assets?customer_id=${customerId}`);
+  if (Array.isArray(data)) {
+    return data as SyncroAsset[];
+  }
+  if (Array.isArray((data as any)?.assets)) {
+    return (data as any).assets as SyncroAsset[];
+  }
+  if (Array.isArray((data as any)?.data)) {
+    return (data as any).data as SyncroAsset[];
   }
   return [];
 }
