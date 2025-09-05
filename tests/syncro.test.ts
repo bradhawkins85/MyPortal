@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getSyncroContacts, getSyncroAssets } from '../src/syncro';
+import {
+  getSyncroContacts,
+  getSyncroAssets,
+  extractAssetDetails,
+} from '../src/syncro';
 
 // Ensure getSyncroContacts requests the correct contacts endpoint
 // Uses a mock fetch implementation to capture the requested URL
@@ -137,6 +141,48 @@ test('getSyncroAssets paginates through pages', async () => {
     }
     delete process.env.SYNCRO_WEBHOOK_URL;
   }
+});
+
+test('extractAssetDetails maps nested properties', () => {
+  const asset = {
+    id: 1,
+    status: 'active',
+    type: 'desktop',
+    properties: {
+      kabuto_information: {
+        general: { serial_number: 'ABC', form_factor: 'desktop', name: 'Device' },
+        os: { name: 'Windows 11 Pro' },
+        cpu: [{ name: 'Intel CPU' }],
+        ram_gb: 8,
+        hdd: [{ size: '238.47 GB' }],
+        last_synced_at: '2025-07-27T06:11:41.000Z',
+        motherboard: { manufacturer: 'HP' },
+        last_user: 'DOMAIN\\user',
+        cpu_age: 2,
+      },
+      form_factor: 'Physical Desktop',
+      'Performance Score': '7',
+      warranty_status: 'in-warranty',
+      warranty_end_date: '2026-01-01',
+    },
+  } as any;
+
+  const details = extractAssetDetails(asset);
+  assert.equal(details.type, 'desktop');
+  assert.equal(details.serial_number, 'ABC');
+  assert.equal(details.status, 'active');
+  assert.equal(details.os_name, 'Windows 11 Pro');
+  assert.equal(details.cpu_name, 'Intel CPU');
+  assert.equal(details.ram_gb, 8);
+  assert.equal(details.hdd_size, '238.47 GB');
+  assert.equal(details.last_sync, '2025-07-27T06:11:41.000Z');
+  assert.equal(details.motherboard_manufacturer, 'HP');
+  assert.equal(details.form_factor, 'Physical Desktop');
+  assert.equal(details.last_user, 'DOMAIN\\user');
+  assert.equal(details.cpu_age, 2);
+  assert.equal(details.performance_score, 7);
+  assert.equal(details.warranty_status, 'in-warranty');
+  assert.equal(details.warranty_end_date, '2026-01-01');
 });
 
 test('upsertAsset uses syncro id when serial missing', async () => {

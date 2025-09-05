@@ -154,4 +154,85 @@ export async function getSyncroAssets(
   return results;
 }
 
+export interface ExtractedAssetDetails {
+  id: number;
+  name?: string;
+  type?: string;
+  serial_number?: string;
+  status?: string;
+  os_name?: string;
+  cpu_name?: string;
+  ram_gb?: number;
+  hdd_size?: string;
+  last_sync?: string;
+  motherboard_manufacturer?: string;
+  form_factor?: string;
+  last_user?: string;
+  cpu_age?: number;
+  performance_score?: number;
+  warranty_status?: string;
+  warranty_end_date?: string;
+}
+
+export function extractAssetDetails(asset: any): ExtractedAssetDetails {
+  const props = asset?.properties ?? {};
+  const kabuto = props.kabuto_information ?? {};
+  const general = kabuto.general ?? {};
+
+  const cpuArray = Array.isArray(kabuto.cpu) ? kabuto.cpu : [];
+  const hddArray = Array.isArray(kabuto.hdd) ? kabuto.hdd : [];
+  const ramArray = Array.isArray(kabuto.ram) ? kabuto.ram : [];
+
+  const performance =
+    asset.performance_score ??
+    props.performance_score ??
+    kabuto.performance_score ??
+    (props['Performance Score'] !== undefined
+      ? Number(props['Performance Score'])
+      : undefined);
+
+  return {
+    id: asset.id,
+    name: asset.name ?? props.device_name ?? general.name,
+    type: asset.type ?? props.type ?? general.type,
+    serial_number:
+      asset.serial_number ?? props.serial_number ?? general.serial_number,
+    status: asset.status ?? props.status,
+    os_name:
+      asset.os_name ??
+      props.os_name ??
+      props.os ??
+      (kabuto.os ? kabuto.os.name : undefined),
+    cpu_name:
+      asset.cpu_name ??
+      props.cpu_name ??
+      (cpuArray.length ? cpuArray[0]?.name : undefined),
+    ram_gb:
+      asset.ram_gb ??
+      props.ram_gb ??
+      kabuto.ram_gb ??
+      (ramArray.length
+        ? Number(String(ramArray[0]?.size).replace(/[^0-9.]/g, ''))
+        : undefined),
+    hdd_size:
+      asset.hdd_size ??
+      props.hdd_size ??
+      (hddArray.length ? hddArray[0]?.size : undefined) ??
+      (typeof props.hdd === 'string' ? props.hdd : undefined),
+    last_sync:
+      asset.last_sync ?? props.last_sync ?? kabuto.last_synced_at,
+    motherboard_manufacturer:
+      asset.motherboard_manufacturer ??
+      props.motherboard_manufacturer ??
+      kabuto.motherboard?.manufacturer,
+    form_factor:
+      asset.form_factor ?? props.form_factor ?? kabuto.form_factor ?? general.form_factor,
+    last_user: asset.last_user ?? props.last_user ?? kabuto.last_user,
+    cpu_age: asset.cpu_age ?? props.cpu_age ?? kabuto.cpu_age,
+    performance_score: performance !== undefined ? Number(performance) : undefined,
+    warranty_status: asset.warranty_status ?? props.warranty_status,
+    warranty_end_date: asset.warranty_end_date ?? props.warranty_end_date,
+  };
+}
+
 export { syncroRequest };

@@ -28,6 +28,7 @@ import {
   getSyncroCustomer,
   getSyncroContacts,
   getSyncroAssets,
+  extractAssetDetails,
 } from './syncro';
 import { findExistingStaff } from './staff-import';
 import {
@@ -411,27 +412,28 @@ async function importSyncroAssetsForCompany(companyId: number) {
   try {
     const assets = await getSyncroAssets(company.syncro_company_id);
     for (const asset of assets) {
-      const type = (asset as any).type || '';
-      const serial =
-        (asset as any).serial_number || (asset as any).serial || null;
-      const status = (asset as any).status || '';
-      const osName = (asset as any).os_name || null;
-      const cpuName = (asset as any).cpu_name || null;
-      const ramGb = (asset as any).ram_gb || null;
-      const hddSize = (asset as any).hdd_size || null;
-      const lastSync = (asset as any).last_sync || null;
+      const details = extractAssetDetails(asset);
+      const name = details.name || asset.name || 'Asset';
+      const type = details.type || '';
+      const serial = details.serial_number || null;
+      const status = details.status || '';
+      const osName = details.os_name || null;
+      const cpuName = details.cpu_name || null;
+      const ramGb = details.ram_gb ?? null;
+      const hddSize = details.hdd_size || null;
+      const lastSync = details.last_sync || null;
       const motherboardManufacturer =
-        (asset as any).motherboard_manufacturer || null;
-      const formFactor = (asset as any).form_factor || null;
-      const lastUser = (asset as any).last_user || null;
-      const approxAge = (asset as any).cpu_age || null;
-      const performanceScore = (asset as any).performance_score || null;
-      const warrantyStatus = (asset as any).warranty_status || null;
-      const warrantyEndDate = (asset as any).warranty_end_date || null;
-      const syncroId = (asset as any).id?.toString() || null;
+        details.motherboard_manufacturer || null;
+      const formFactor = details.form_factor || null;
+      const lastUser = details.last_user || null;
+      const approxAge = details.cpu_age ?? null;
+      const performanceScore = details.performance_score ?? null;
+      const warrantyStatus = details.warranty_status || null;
+      const warrantyEndDate = details.warranty_end_date || null;
+      const syncroId = asset.id?.toString() || null;
       await upsertAsset(
         company.id,
-        asset.name || 'Asset',
+        name,
         type,
         serial,
         status,
