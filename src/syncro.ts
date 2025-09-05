@@ -53,11 +53,15 @@ export interface SyncroAsset {
 }
 
 async function syncroRequest(path: string, init: RequestInit = {}): Promise<any> {
-  const base = process.env.SYNCRO_WEBHOOK_URL;
+  let base = process.env.SYNCRO_WEBHOOK_URL;
   if (!base) {
     throw new Error('SYNCRO_WEBHOOK_URL not set');
   }
-  const url = `${base}${path}`;
+  base = base.replace(/\/$/, '');
+  if (!/\/api\/v1$/.test(base)) {
+    base += '/api/v1';
+  }
+  const url = `${base}${path.startsWith('/') ? path : `/${path}`}`;
   const headers: Record<string, string> = {
     ...(init.headers as Record<string, string>),
   };
@@ -118,17 +122,28 @@ export async function getSyncroContacts(
 export async function getSyncroAssets(
   customerId: string | number
 ): Promise<SyncroAsset[]> {
-  const data = await syncroRequest(`/assets?customer_id=${customerId}`);
-  if (Array.isArray(data)) {
-    return data as SyncroAsset[];
+  const results: SyncroAsset[] = [];
+  for (let page = 1; page <= 100; page++) {
+    const data = await syncroRequest(
+      `/assets?customer_id=${customerId}&page=${page}`
+    );
+    if (!data) break;
+    let assets: SyncroAsset[] = [];
+    if (Array.isArray(data)) {
+      assets = data as SyncroAsset[];
+    } else if (Array.isArray((data as any)?.assets)) {
+      assets = (data as any).assets as SyncroAsset[];
+    } else if (Array.isArray((data as any)?.data)) {
+      assets = (data as any).data as SyncroAsset[];
+    }
+    if (!assets.length) break;
+    results.push(...assets);
+    const totalPages =
+      (data as any)?.meta?.total_pages ||
+      (data as any)?.pagination?.total_pages;
+    if (totalPages && page >= totalPages) break;
   }
-  if (Array.isArray((data as any)?.assets)) {
-    return (data as any).assets as SyncroAsset[];
-  }
-  if (Array.isArray((data as any)?.data)) {
-    return (data as any).data as SyncroAsset[];
-  }
-  return [];
+  return results;
 }
 
 export { syncroRequest };
