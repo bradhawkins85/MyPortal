@@ -18,6 +18,10 @@
             <% }) %>
           </select>
         </label>
+        <label>
+          <input type="checkbox" name="showOutOfStock" value="1" <%= showOutOfStock ? 'checked' : '' %> data-submit-on-change>
+          Show out of stock
+        </label>
       </form>
       <table>
         <thead>
@@ -32,11 +36,15 @@
               <td>$<%= p.price.toFixed(2) %></td>
               <td><button type="button" class="details-btn" data-image="<%= p.image_url || '' %>" data-price="<%= p.price.toFixed(2) %>" data-stock="<%= p.stock %>" data-details="<%- p.description.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '&#10;') %>">Details</button></td>
               <td class="order-column">
-                <form action="/cart/add" method="post">
-                  <input type="hidden" name="productId" value="<%= p.id %>">
-                  <input type="number" name="quantity" min="1" max="<%= p.stock %>" value="1">
-                  <button type="submit">Add to Cart</button>
-                </form>
+                <% if (p.stock > 0) { %>
+                  <form action="/cart/add" method="post">
+                    <input type="hidden" name="productId" value="<%= p.id %>">
+                    <input type="number" name="quantity" min="1" max="<%= p.stock %>" value="1">
+                    <button type="submit">Add to Cart</button>
+                  </form>
+                <% } else { %>
+                  Out of Stock
+                <% } %>
               </td>
             </tr>
           <% }) %>

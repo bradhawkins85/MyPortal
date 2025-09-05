@@ -2143,6 +2143,7 @@ app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
   const categoryId = req.query.category
     ? parseInt(req.query.category as string, 10)
     : undefined;
+  const showOutOfStock = req.query.showOutOfStock === '1';
   const [products, companies, categories] = await Promise.all([
     getAllProducts(false, req.session.companyId, categoryId),
     getCompaniesForUser(req.session.userId!),
@@ -2150,7 +2151,10 @@ app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
   ]);
   const current = companies.find((c) => c.company_id === req.session.companyId);
   const isVip = current?.is_vip === 1;
-  const adjusted = products.map((p) => ({
+  const filtered = products.filter(
+    (p) => p.name !== p.sku && (showOutOfStock || p.stock > 0)
+  );
+  const adjusted = filtered.map((p) => ({
     ...p,
     price: isVip && p.vip_price !== null ? p.vip_price : p.price,
   }));
@@ -2160,6 +2164,7 @@ app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
     products: adjusted,
     categories,
     currentCategory: categoryId,
+    showOutOfStock,
     cartError: error,
     companies,
     currentCompanyId: req.session.companyId,
