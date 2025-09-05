@@ -66,7 +66,13 @@ async function syncroRequest(path: string, init: RequestInit = {}): Promise<any>
   }
   const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
+    if (res.status === 404) {
+      return null;
+    }
     throw new Error(`Syncro API request failed: ${res.status}`);
+  }
+  if (res.status === 204) {
+    return null;
   }
   return res.json();
 }
