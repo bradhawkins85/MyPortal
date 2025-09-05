@@ -173,9 +173,9 @@ export interface Asset {
   id: number;
   company_id: number;
   name: string;
-  type: string;
-  serial_number: string;
-  status: string;
+  type: string | null;
+  serial_number: string | null;
+  status: string | null;
   os_name?: string | null;
   cpu_name?: string | null;
   ram_gb?: number | null;
@@ -188,6 +188,7 @@ export interface Asset {
   performance_score?: number | null;
   warranty_status?: string | null;
   warranty_end_date?: string | null;
+  syncro_asset_id?: string | null;
 }
 
 export interface Invoice {
@@ -1226,15 +1227,25 @@ export async function upsertAsset(
   approxAge?: number | null,
   performanceScore?: number | null,
   warrantyStatus?: string | null,
-  warrantyEndDate?: string | null
+  warrantyEndDate?: string | null,
+  syncroAssetId?: string | null
 ): Promise<void> {
-  const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT id FROM assets WHERE company_id = ? AND serial_number = ?',
-    [companyId, serialNumber]
-  );
+  const syncId = syncroAssetId ?? null;
+  let rows: RowDataPacket[] = [];
+  if (serialNumber) {
+    [rows] = await pool.query<RowDataPacket[]>(
+      'SELECT id FROM assets WHERE company_id = ? AND serial_number = ?',
+      [companyId, serialNumber]
+    );
+  } else if (syncId) {
+    [rows] = await pool.query<RowDataPacket[]>(
+      'SELECT id FROM assets WHERE company_id = ? AND syncro_asset_id = ?',
+      [companyId, syncId]
+    );
+  }
   if (rows.length) {
     await pool.execute(
-      'UPDATE assets SET name = ?, type = ?, status = ?, os_name = ?, cpu_name = ?, ram_gb = ?, hdd_size = ?, last_sync = ?, motherboard_manufacturer = ?, form_factor = ?, last_user = ?, approx_age = ?, performance_score = ?, warranty_status = ?, warranty_end_date = ? WHERE id = ?',
+      'UPDATE assets SET name = ?, type = ?, status = ?, os_name = ?, cpu_name = ?, ram_gb = ?, hdd_size = ?, last_sync = ?, motherboard_manufacturer = ?, form_factor = ?, last_user = ?, approx_age = ?, performance_score = ?, warranty_status = ?, warranty_end_date = ?, syncro_asset_id = ?, serial_number = ? WHERE id = ?',
       [
         name,
         type,
@@ -1251,12 +1262,14 @@ export async function upsertAsset(
         performanceScore,
         warrantyStatus,
         warrantyEndDate,
+        syncId,
+        serialNumber,
         rows[0].id,
       ]
     );
   } else {
     await pool.execute(
-      'INSERT INTO assets (company_id, name, type, serial_number, status, os_name, cpu_name, ram_gb, hdd_size, last_sync, motherboard_manufacturer, form_factor, last_user, approx_age, performance_score, warranty_status, warranty_end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO assets (company_id, name, type, serial_number, status, os_name, cpu_name, ram_gb, hdd_size, last_sync, motherboard_manufacturer, form_factor, last_user, approx_age, performance_score, warranty_status, warranty_end_date, syncro_asset_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         companyId,
         name,
@@ -1275,6 +1288,7 @@ export async function upsertAsset(
         performanceScore,
         warrantyStatus,
         warrantyEndDate,
+        syncId,
       ]
     );
   }

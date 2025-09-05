@@ -399,7 +399,7 @@ async function importSyncroAssetsForCompany(companyId: number) {
     for (const asset of assets) {
       const type = (asset as any).type || '';
       const serial =
-        (asset as any).serial_number || (asset as any).serial || '';
+        (asset as any).serial_number || (asset as any).serial || null;
       const status = (asset as any).status || '';
       const osName = (asset as any).os_name || null;
       const cpuName = (asset as any).cpu_name || null;
@@ -414,6 +414,7 @@ async function importSyncroAssetsForCompany(companyId: number) {
       const performanceScore = (asset as any).performance_score || null;
       const warrantyStatus = (asset as any).warranty_status || null;
       const warrantyEndDate = (asset as any).warranty_end_date || null;
+      const syncroId = (asset as any).id?.toString() || null;
       await upsertAsset(
         company.id,
         asset.name || 'Asset',
@@ -431,7 +432,8 @@ async function importSyncroAssetsForCompany(companyId: number) {
         approxAge,
         performanceScore,
         warrantyStatus,
-        warrantyEndDate
+        warrantyEndDate,
+        syncroId
       );
     }
   } catch (err) {
