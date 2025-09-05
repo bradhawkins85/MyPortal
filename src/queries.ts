@@ -1262,7 +1262,8 @@ export async function upsertAsset(
       'SELECT id FROM assets WHERE company_id = ? AND serial_number = ?',
       [companyId, serialNumber]
     );
-  } else if (syncId) {
+  }
+  if (!rows.length && syncId) {
     [rows] = await pool.query<RowDataPacket[]>(
       'SELECT id FROM assets WHERE company_id = ? AND syncro_asset_id = ?',
       [companyId, syncId]
