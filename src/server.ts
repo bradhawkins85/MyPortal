@@ -2101,6 +2101,25 @@ app.post('/staff/:id/invite', ensureAuth, ensureStaffAccess, async (req, res) =>
   res.json({ success: true });
 });
 
+const assetColumns = [
+  { key: 'name', label: 'Name' },
+  { key: 'type', label: 'Type' },
+  { key: 'serial_number', label: 'Serial Number' },
+  { key: 'status', label: 'Status' },
+  { key: 'os_name', label: 'OS Name' },
+  { key: 'cpu_name', label: 'CPU Name' },
+  { key: 'ram_gb', label: 'RAM (GB)' },
+  { key: 'hdd_size', label: 'HDD Size' },
+  { key: 'last_sync', label: 'Last Sync' },
+  { key: 'motherboard_manufacturer', label: 'Motherboard Manufacturer' },
+  { key: 'form_factor', label: 'Form Factor' },
+  { key: 'last_user', label: 'Last User' },
+  { key: 'approx_age', label: 'Approx Age' },
+  { key: 'performance_score', label: 'Performance Score' },
+  { key: 'warranty_status', label: 'Warranty Status' },
+  { key: 'warranty_end_date', label: 'Warranty End Date' },
+];
+
 app.get('/assets', ensureAuth, ensureAssetsAccess, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
   const assets = req.session.companyId
@@ -2109,6 +2128,7 @@ app.get('/assets', ensureAuth, ensureAssetsAccess, async (req, res) => {
   const current = companies.find((c) => c.company_id === req.session.companyId);
   res.render('assets', {
     assets,
+    columns: assetColumns,
     companies,
     currentCompanyId: req.session.companyId,
     isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
