@@ -113,12 +113,12 @@
       const type = td.dataset.date;
       const value = td.textContent;
       if (!value) return;
-      const date =
-        type === 'date'
-          ? new Date(value + 'T00:00:00Z')
-          : new Date(value + 'Z');
+      const date = new Date(value);
+      if (isNaN(date)) return;
       td.textContent =
-        type === 'date' ? date.toLocaleDateString() : date.toLocaleString();
+        type === 'date'
+          ? new Intl.DateTimeFormat('en-CA').format(date)
+          : date.toLocaleString();
     });
 
     applyPreferences();
