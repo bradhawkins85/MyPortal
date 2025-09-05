@@ -158,14 +158,11 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!init.credentials) {
             init.credentials = 'same-origin';
           }
-          const url = typeof input === 'string' ? input : input.url;
-          const method = init.method || (typeof input !== 'string' && input.method) || 'GET';
-          if (localStorage.getItem('apiDebug') === '1') {
-            console.debug('API Call:', method, url);
-          }
-          return originalFetch(input, init);
-        };
-      }
+            const url = typeof input === 'string' ? input : input.url;
+            const method = init.method || (typeof input !== 'string' && input.method) || 'GET';
+            return originalFetch(input, init);
+          };
+        }
 
     // Company switcher form submission
     const companySwitcher = document.getElementById('company-switcher');

@@ -790,6 +790,14 @@ app.set('trust proxy', 1);
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
+// Log API calls to pm2 logs when enabled
+if (process.env.API_DEBUG === '1' || process.env.API_DEBUG === 'true') {
+  app.use('/api', (req, _res, next) => {
+    console.debug('API Call:', req.method, req.originalUrl);
+    next();
+  });
+}
+
 // Register security middleware early
 app.use(
   helmet({
