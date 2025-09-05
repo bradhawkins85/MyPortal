@@ -1257,16 +1257,16 @@ export async function upsertAsset(
   const lastSyncDb = toMysqlDatetime(lastSync);
   const warrantyEndDb = toMysqlDate(warrantyEndDate);
   let rows: RowDataPacket[] = [];
-  if (serialNumber) {
-    [rows] = await pool.query<RowDataPacket[]>(
-      'SELECT id FROM assets WHERE company_id = ? AND serial_number = ?',
-      [companyId, serialNumber]
-    );
-  }
-  if (!rows.length && syncId) {
+  if (syncId) {
     [rows] = await pool.query<RowDataPacket[]>(
       'SELECT id FROM assets WHERE company_id = ? AND syncro_asset_id = ?',
       [companyId, syncId]
+    );
+  }
+  if (!rows.length && serialNumber) {
+    [rows] = await pool.query<RowDataPacket[]>(
+      'SELECT id FROM assets WHERE company_id = ? AND serial_number = ?',
+      [companyId, serialNumber]
     );
   }
   if (rows.length) {
