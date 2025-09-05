@@ -186,6 +186,7 @@ import {
   EmailTemplate,
 } from './queries';
 import { runMigrations } from './db';
+import { logInfo, logError } from './logger';
 
 dotenv.config();
 
@@ -255,7 +256,12 @@ async function sendSmsUpdate(
       if (!recipients.length) {
         return;
       }
-      await fetch(SMS_WEBHOOK_URL, {
+      logInfo('Calling SMS webhook', {
+        url: SMS_WEBHOOK_URL,
+        orderNumber,
+        recipientCount: recipients.length,
+      });
+      const res = await fetch(SMS_WEBHOOK_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -270,8 +276,16 @@ async function sendSmsUpdate(
           recipients,
         }),
       });
+      logInfo('SMS webhook responded', {
+        url: SMS_WEBHOOK_URL,
+        status: res.status,
+        orderNumber,
+      });
     } catch (err) {
-      console.error('Failed to call SMS webhook', err);
+      logError('Failed to call SMS webhook', {
+        error: (err as Error).message,
+        url: SMS_WEBHOOK_URL,
+      });
     }
   }
 }
@@ -1276,9 +1290,11 @@ app.get('/login', async (req, res) => {
 app.post('/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
   const identifier = email || req.ip;
+  logInfo('Login attempt', { email, ip: req.ip });
   const attempt = failedLoginAttempts[identifier];
   if (attempt?.lockUntil) {
     if (attempt.lockUntil > Date.now()) {
+      logInfo('Login locked', { email, ip: req.ip });
       return res
         .status(423)
         .render('login', { error: 'Account locked. Try again later.' });
@@ -1294,6 +1310,7 @@ app.post('/login', loginLimiter, async (req, res) => {
     const trusted = req.cookies[`trusted_${user.id}`];
     if (trusted && verifyTrustedDeviceToken(trusted, user.id)) {
       await completeLogin(req, user.id);
+      logInfo('Login success', { userId: user.id, ip: req.ip });
       if (user.force_password_change) {
         req.session.mustChangePassword = true;
         return res.redirect('/force-password-change');
@@ -1321,6 +1338,7 @@ app.post('/login', loginLimiter, async (req, res) => {
   const message = record.lockUntil
     ? 'Account locked due to too many failed attempts. Try again later.'
     : 'Invalid credentials';
+  logInfo('Login failed', { email, ip: req.ip });
   res.status(401).render('login', { error: message });
 });
 
@@ -6275,7 +6293,7 @@ async function start() {
   await createDefaultSystemSchedules();
   await scheduleAllTasks();
   app.listen(port, host, () => {
-    console.log(`Server running at http://${host}:${port}`);
+    logInfo('Server running', { url: `http://${host}:${port}` });
   });
 }
 

@@ -2,6 +2,7 @@ import { pool } from './db';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import crypto from 'crypto';
 import { encryptSecret } from './crypto';
+import { logInfo } from './logger';
 
 export interface User {
   id: number;
@@ -1181,6 +1182,14 @@ export async function logAudit(options: {
       options.ipAddress || null,
     ]
   );
+  logInfo('Audit log entry', {
+    action: options.action,
+    userId: options.userId || null,
+    companyId: options.companyId || null,
+    apiKey: snippet,
+    ipAddress: options.ipAddress || null,
+    value: valueToLog,
+  });
 }
 
 export async function getAuditLogs(companyId?: number): Promise<AuditLog[]> {
