@@ -16,18 +16,26 @@
       }, 500);
 
       var pollInterval = setInterval(function () {
-        fetch('/admin/system-update-status')
-          .then(function (res) { return res.text(); })
+        fetch('/admin/system-update-status', { credentials: 'same-origin' })
+          .then(function (res) {
+            if (res.redirected) {
+              window.location.href = res.url;
+              return '';
+            }
+            return res.text();
+          })
           .then(function (text) {
             try {
               var data = JSON.parse(text);
               if (data.complete) {
                 clearInterval(pollInterval);
                 clearInterval(loadingInterval);
-                window.location.href = '/admin#schedules';
+                window.location.href = '/login';
               }
             } catch (err) {
-              // Response was not JSON (e.g. HTML during reload); ignore and retry
+              if (text && text.includes('login')) {
+                window.location.href = '/login';
+              }
             }
           })
           .catch(function () {
