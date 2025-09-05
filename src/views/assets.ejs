@@ -8,19 +8,41 @@
       <h1>Assets</h1>
       <section>
         <h2>Company Assets</h2>
-        <table>
+        <div class="asset-controls">
+          <label for="asset-search">Search: <input type="text" id="asset-search"></label>
+          <div id="column-toggles">
+            <% columns.forEach(function(col){ %>
+              <label>
+                <input type="checkbox" class="column-toggle" data-column="<%= col.key %>" <%= col.key === 'name' ? 'checked disabled' : 'checked' %>>
+                <%= col.label %>
+              </label>
+            <% }); %>
+          </div>
+        </div>
+        <table id="assets-table">
           <thead>
-            <tr><th>Name</th><th>Type</th><th>Serial Number</th><th>Status</th><% if (isSuperAdmin) { %><th>Actions</th><% } %></tr>
+            <tr>
+              <% columns.forEach(function(col){ %>
+                <th data-column="<%= col.key %>"><%= col.label %></th>
+              <% }); %>
+              <% if (isSuperAdmin) { %><th data-column="actions">Actions</th><% } %>
+            </tr>
           </thead>
           <tbody>
           <% assets.forEach(function(a) { %>
             <tr>
-              <td><%= a.name %></td>
-              <td><%= a.type %></td>
-              <td><%= a.serial_number %></td>
-              <td><%= a.status %></td>
+              <% columns.forEach(function(col){ %>
+                <% const val = a[col.key]; %>
+                <% if (col.key === 'last_sync') { %>
+                  <td data-column="<%= col.key %>" data-date="datetime"><%= val || '' %></td>
+                <% } else if (col.key === 'warranty_end_date') { %>
+                  <td data-column="<%= col.key %>" data-date="date"><%= val || '' %></td>
+                <% } else { %>
+                  <td data-column="<%= col.key %>"><%= val || '' %></td>
+                <% } %>
+              <% }); %>
               <% if (isSuperAdmin) { %>
-              <td><button class="delete-btn" data-asset-id="<%= a.id %>">Delete</button></td>
+              <td data-column="actions"><button class="delete-btn" data-asset-id="<%= a.id %>">Delete</button></td>
               <% } %>
             </tr>
           <% }); %>
@@ -29,6 +51,79 @@
       </section>
     </div>
   </div>
+  <script>
+    const table = document.getElementById('assets-table');
+    const searchInput = document.getElementById('asset-search');
+    const STORAGE_KEY = 'assetsTableColumns';
+    const toggles = document.querySelectorAll('.column-toggle');
+
+    function toggleColumn(col, show) {
+      table.querySelectorAll('[data-column="' + col + '"]').forEach((el) => {
+        el.style.display = show ? '' : 'none';
+      });
+    }
+
+    function applyPreferences() {
+      let visible = [];
+      try {
+        visible = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+      } catch (e) {
+        visible = [];
+      }
+      if (visible.length === 0) {
+        visible = Array.from(toggles).map((t) => t.dataset.column);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(visible));
+      }
+      toggles.forEach((t) => {
+        const col = t.dataset.column;
+        const show = col === 'name' ? true : visible.includes(col);
+        t.checked = show;
+        toggleColumn(col, show);
+      });
+    }
+
+    toggles.forEach((t) => {
+      t.addEventListener('change', () => {
+        const visible = Array.from(toggles)
+          .filter((t) => t.checked)
+          .map((t) => t.dataset.column);
+        if (!visible.includes('name')) visible.push('name');
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(visible));
+        toggleColumn(t.dataset.column, t.checked);
+        filterRows();
+      });
+    });
+
+    function filterRows() {
+      const term = searchInput.value.toLowerCase();
+      table.querySelectorAll('tbody tr').forEach((row) => {
+        const cells = Array.from(row.querySelectorAll('td')).filter(
+          (td) => td.style.display !== 'none'
+        );
+        const match = cells.some((td) =>
+          (td.textContent || '').toLowerCase().includes(term)
+        );
+        row.style.display = match ? '' : 'none';
+      });
+    }
+
+    searchInput.addEventListener('input', filterRows);
+
+    document.querySelectorAll('td[data-date]').forEach((td) => {
+      const type = td.dataset.date;
+      const value = td.textContent;
+      if (!value) return;
+      const date =
+        type === 'date'
+          ? new Date(value + 'T00:00:00Z')
+          : new Date(value + 'Z');
+      td.textContent =
+        type === 'date' ? date.toLocaleDateString() : date.toLocaleString();
+    });
+
+    applyPreferences();
+    filterRows();
+  </script>
 <% if (isSuperAdmin) { %>
 <script>
   document.querySelectorAll('.delete-btn').forEach(function(btn) {
