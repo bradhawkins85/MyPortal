@@ -1219,6 +1219,20 @@ export async function getAssetsByCompany(companyId: number): Promise<Asset[]> {
   return rows as Asset[];
 }
 
+function toMysqlDatetime(date?: string | null): string | null {
+  if (!date) return null;
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function toMysqlDate(date?: string | null): string | null {
+  if (!date) return null;
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
 export async function upsertAsset(
   companyId: number,
   name: string,
@@ -1240,6 +1254,8 @@ export async function upsertAsset(
   syncroAssetId?: string | null
 ): Promise<void> {
   const syncId = syncroAssetId ?? null;
+  const lastSyncDb = toMysqlDatetime(lastSync);
+  const warrantyEndDb = toMysqlDate(warrantyEndDate);
   let rows: RowDataPacket[] = [];
   if (serialNumber) {
     [rows] = await pool.query<RowDataPacket[]>(
@@ -1263,14 +1279,14 @@ export async function upsertAsset(
         cpuName,
         ramGb,
         hddSize,
-        lastSync,
+        lastSyncDb,
         motherboardManufacturer,
         formFactor,
         lastUser,
         approxAge,
         performanceScore,
         warrantyStatus,
-        warrantyEndDate,
+        warrantyEndDb,
         syncId,
         serialNumber,
         rows[0].id,
@@ -1289,14 +1305,14 @@ export async function upsertAsset(
         cpuName,
         ramGb,
         hddSize,
-        lastSync,
+        lastSyncDb,
         motherboardManufacturer,
         formFactor,
         lastUser,
         approxAge,
         performanceScore,
         warrantyStatus,
-        warrantyEndDate,
+        warrantyEndDb,
         syncId,
       ]
     );
@@ -1328,6 +1344,8 @@ export async function updateAsset(
   warrantyStatus?: string | null,
   warrantyEndDate?: string | null
 ): Promise<void> {
+  const lastSyncDb = toMysqlDatetime(lastSync);
+  const warrantyEndDb = toMysqlDate(warrantyEndDate);
   await pool.execute(
     'UPDATE assets SET company_id = ?, name = ?, type = ?, serial_number = ?, status = ?, os_name = ?, cpu_name = ?, ram_gb = ?, hdd_size = ?, last_sync = ?, motherboard_manufacturer = ?, form_factor = ?, last_user = ?, approx_age = ?, performance_score = ?, warranty_status = ?, warranty_end_date = ? WHERE id = ?',
     [
@@ -1340,14 +1358,14 @@ export async function updateAsset(
       cpuName,
       ramGb,
       hddSize,
-      lastSync,
+      lastSyncDb,
       motherboardManufacturer,
       formFactor,
       lastUser,
       approxAge,
       performanceScore,
       warrantyStatus,
-      warrantyEndDate,
+      warrantyEndDb,
       id,
     ]
   );
