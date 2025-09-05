@@ -6,11 +6,6 @@
     <%- include('partials/sidebar') %>
     <div class="content">
       <h1><%= isAdmin ? 'Admin' : 'Account' %></h1>
-      <div class="debug-toggle">
-        <label>
-          <input type="checkbox" id="enable-api-debug"> Enable API debug logging
-        </label>
-      </div>
       <div class="admin-tabs">
         <div class="tabs">
           <% if (isSuperAdmin) { %>
@@ -1100,18 +1095,6 @@
           submitPermission(el.form);
         });
       });
-
-      const debugCheckbox = document.getElementById('enable-api-debug');
-      if (debugCheckbox) {
-        debugCheckbox.checked = localStorage.getItem('apiDebug') === '1';
-        debugCheckbox.addEventListener('change', function () {
-          if (debugCheckbox.checked) {
-            localStorage.setItem('apiDebug', '1');
-          } else {
-            localStorage.removeItem('apiDebug');
-          }
-        });
-      }
 
       const tabs = document.querySelectorAll('.tabs button');
       const contents = document.querySelectorAll('.tab-content');

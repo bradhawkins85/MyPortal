@@ -75,6 +75,14 @@ pm2 logs myportal
 pm2 restart myportal
 ```
 
+### API Debug Logging
+
+Enable API request logging to the pm2 logs by setting `API_DEBUG=1` when starting the server:
+
+```bash
+API_DEBUG=1 pm2 start dist/server.js --name myportal
+```
+
 ## Updating from GitHub
 
 Run the included update script to fetch the latest changes and rebuild the project:
