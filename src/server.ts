@@ -27,6 +27,7 @@ import {
   getSyncroCustomers,
   getSyncroCustomer,
   getSyncroContacts,
+  getSyncroAssets,
 } from './syncro';
 import { findExistingStaff } from './staff-import';
 import {
@@ -388,6 +389,58 @@ async function importSyncroContactsForCompany(companyId: number) {
   }
 }
 
+async function importSyncroAssetsForCompany(companyId: number) {
+  const company = await getCompanyById(companyId);
+  if (!company || !company.syncro_company_id) {
+    return;
+  }
+  try {
+    const assets = await getSyncroAssets(company.syncro_company_id);
+    for (const asset of assets) {
+      const type = (asset as any).type || '';
+      const serial =
+        (asset as any).serial_number || (asset as any).serial || null;
+      const status = (asset as any).status || '';
+      const osName = (asset as any).os_name || null;
+      const cpuName = (asset as any).cpu_name || null;
+      const ramGb = (asset as any).ram_gb || null;
+      const hddSize = (asset as any).hdd_size || null;
+      const lastSync = (asset as any).last_sync || null;
+      const motherboardManufacturer =
+        (asset as any).motherboard_manufacturer || null;
+      const formFactor = (asset as any).form_factor || null;
+      const lastUser = (asset as any).last_user || null;
+      const approxAge = (asset as any).cpu_age || null;
+      const performanceScore = (asset as any).performance_score || null;
+      const warrantyStatus = (asset as any).warranty_status || null;
+      const warrantyEndDate = (asset as any).warranty_end_date || null;
+      const syncroId = (asset as any).id?.toString() || null;
+      await upsertAsset(
+        company.id,
+        asset.name || 'Asset',
+        type,
+        serial,
+        status,
+        osName,
+        cpuName,
+        ramGb,
+        hddSize,
+        lastSync,
+        motherboardManufacturer,
+        formFactor,
+        lastUser,
+        approxAge,
+        performanceScore,
+        warrantyStatus,
+        warrantyEndDate,
+        syncroId
+      );
+    }
+  } catch (err) {
+    console.error('Syncro assets import failed', err);
+  }
+}
+
 const STOCK_FEED_FILE = path.join(__dirname, '..', 'stock-feed.xml');
 const xmlParser = new XMLParser({ ignoreAttributes: false });
 
@@ -611,6 +664,9 @@ async function runScheduledTask(id: number) {
     switch (task.command) {
       case 'sync_staff':
         if (task.company_id) await importSyncroContactsForCompany(task.company_id);
+        break;
+      case 'sync_assets':
+        if (task.company_id) await importSyncroAssetsForCompany(task.company_id);
         break;
       case 'update_stock_feed':
         await downloadStockFeed();
@@ -3216,6 +3272,29 @@ app.post(
     } catch (err) {
       console.error('Syncro contacts import failed', err);
       res.status(500).send('Failed to import Syncro contacts');
+    }
+  }
+);
+
+app.post(
+  '/admin/syncro/import-assets',
+  ensureAuth,
+  ensureSuperAdmin,
+  async (req, res) => {
+    const { syncroCompanyId } = req.body;
+    if (!syncroCompanyId) {
+      return res.status(400).send('syncroCompanyId required');
+    }
+    try {
+      const company = await getCompanyBySyncroId(syncroCompanyId);
+      if (!company) {
+        return res.status(404).send('Company not found');
+      }
+      await importSyncroAssetsForCompany(company.id);
+      res.sendStatus(200);
+    } catch (err) {
+      console.error('Syncro assets import failed', err);
+      res.status(500).send('Failed to import Syncro assets');
     }
   }
 );
@@ -5887,11 +5966,47 @@ api.get('/assets/:id', async (req, res) => {
  *         description: Update successful
  */
 api.put('/assets/:id', async (req, res) => {
-  const { companyId, name, type, serialNumber, status } = req.body;
+  const {
+    companyId,
+    name,
+    type,
+    serialNumber,
+    status,
+    osName,
+    cpuName,
+    ramGb,
+    hddSize,
+    lastSync,
+    motherboardManufacturer,
+    formFactor,
+    lastUser,
+    approxAge,
+    performanceScore,
+    warrantyStatus,
+    warrantyEndDate,
+  } = req.body;
   const id = parseInt(req.params.id, 10);
   let current: Asset | null = null;
   if (
-    [companyId, name, type, serialNumber, status].some(
+    [
+      companyId,
+      name,
+      type,
+      serialNumber,
+      status,
+      osName,
+      cpuName,
+      ramGb,
+      hddSize,
+      lastSync,
+      motherboardManufacturer,
+      formFactor,
+      lastUser,
+      approxAge,
+      performanceScore,
+      warrantyStatus,
+      warrantyEndDate,
+    ].some(
       (v) => v === undefined
     )
   ) {
@@ -5906,7 +6021,27 @@ api.put('/assets/:id', async (req, res) => {
     name !== undefined ? name : current!.name,
     type !== undefined ? type : current!.type,
     serialNumber !== undefined ? serialNumber : current!.serial_number,
-    status !== undefined ? status : current!.status
+    status !== undefined ? status : current!.status,
+    osName !== undefined ? osName : current!.os_name || null,
+    cpuName !== undefined ? cpuName : current!.cpu_name || null,
+    ramGb !== undefined ? ramGb : current!.ram_gb || null,
+    hddSize !== undefined ? hddSize : current!.hdd_size || null,
+    lastSync !== undefined ? lastSync : current!.last_sync || null,
+    motherboardManufacturer !== undefined
+      ? motherboardManufacturer
+      : current!.motherboard_manufacturer || null,
+    formFactor !== undefined ? formFactor : current!.form_factor || null,
+    lastUser !== undefined ? lastUser : current!.last_user || null,
+    approxAge !== undefined ? approxAge : current!.approx_age || null,
+    performanceScore !== undefined
+      ? performanceScore
+      : current!.performance_score || null,
+    warrantyStatus !== undefined
+      ? warrantyStatus
+      : current!.warranty_status || null,
+    warrantyEndDate !== undefined
+      ? warrantyEndDate
+      : current!.warranty_end_date || null
   );
   res.json({ success: true });
 });
