@@ -228,7 +228,11 @@ export function extractAssetDetails(asset: any): ExtractedAssetDetails {
     form_factor:
       asset.form_factor ?? props.form_factor ?? kabuto.form_factor ?? general.form_factor,
     last_user: asset.last_user ?? props.last_user ?? kabuto.last_user,
-    cpu_age: asset.cpu_age ?? props.cpu_age ?? kabuto.cpu_age,
+    cpu_age:
+      (() => {
+        const cpuAge = asset.cpu_age ?? props.cpu_age ?? kabuto.cpu_age;
+        return cpuAge !== undefined ? Number(cpuAge) : undefined;
+      })(),
     performance_score: performance !== undefined ? Number(performance) : undefined,
     warranty_status: asset.warranty_status ?? props.warranty_status,
     warranty_end_date: asset.warranty_end_date ?? props.warranty_end_date,
