@@ -69,6 +69,33 @@ test('getSyncroAssets uses /assets endpoint', async () => {
   }
 });
 
+// Ensure getSyncroAssets handles 404 responses gracefully
+test('getSyncroAssets returns empty array on 404', async () => {
+  const customerId = 999;
+
+  const mockFetch = async (_url: string, _init?: RequestInit) => {
+    return {
+      ok: false,
+      status: 404,
+    } as Response;
+  };
+
+  const originalFetch = global.fetch;
+  // @ts-expect-error assign mock
+  global.fetch = mockFetch;
+  process.env.SYNCRO_WEBHOOK_URL = 'https://example.com';
+
+  try {
+    const assets = await getSyncroAssets(customerId);
+    assert.deepEqual(assets, []);
+  } finally {
+    if (originalFetch) {
+      global.fetch = originalFetch;
+    }
+    delete process.env.SYNCRO_WEBHOOK_URL;
+  }
+});
+
 test('upsertAsset uses syncro id when serial missing', async () => {
   const origEnv = {
     TOTP_ENCRYPTION_KEY: process.env.TOTP_ENCRYPTION_KEY,
