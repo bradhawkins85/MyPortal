@@ -145,22 +145,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
-      const originalFetch = window.fetch.bind(window);
-      window.fetch = (input, init = {}) => {
-        init.headers = init.headers || {};
-        if (init.headers instanceof Headers) {
-          if (!init.headers.has('X-CSRF-Token')) {
-            init.headers.set('X-CSRF-Token', token);
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (input, init = {}) => {
+          init.headers = init.headers || {};
+          if (init.headers instanceof Headers) {
+            if (!init.headers.has('X-CSRF-Token')) {
+              init.headers.set('X-CSRF-Token', token);
+            }
+          } else if (!('X-CSRF-Token' in init.headers)) {
+            init.headers['X-CSRF-Token'] = token;
           }
-        } else if (!('X-CSRF-Token' in init.headers)) {
-          init.headers['X-CSRF-Token'] = token;
-        }
-        if (!init.credentials) {
-          init.credentials = 'same-origin';
-        }
-        return originalFetch(input, init);
-      };
-    }
+          if (!init.credentials) {
+            init.credentials = 'same-origin';
+          }
+          const url = typeof input === 'string' ? input : input.url;
+          const method = init.method || (typeof input !== 'string' && input.method) || 'GET';
+          if (localStorage.getItem('apiDebug') === '1') {
+            console.debug('API Call:', method, url);
+          }
+          return originalFetch(input, init);
+        };
+      }
 
     // Company switcher form submission
     const companySwitcher = document.getElementById('company-switcher');
