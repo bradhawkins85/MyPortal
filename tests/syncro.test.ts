@@ -37,8 +37,8 @@ test('getSyncroContacts uses /contacts endpoint', async () => {
   }
 });
 
-// Ensure getSyncroAssets requests the correct assets endpoint
-test('getSyncroAssets uses /assets endpoint', async () => {
+// Ensure getSyncroAssets requests the correct customer assets endpoint
+test('getSyncroAssets uses /customer_assets endpoint', async () => {
   const customerId = 321;
   let requestedUrl: string | undefined;
 
@@ -59,7 +59,7 @@ test('getSyncroAssets uses /assets endpoint', async () => {
     await getSyncroAssets(customerId);
     assert.equal(
       requestedUrl,
-      `https://example.com/api/v1/assets?customer_id=${customerId}&page=1`
+      `https://example.com/api/v1/customer_assets?customer_id=${customerId}&page=1`
     );
   } finally {
     if (originalFetch) {
@@ -125,11 +125,11 @@ test('getSyncroAssets paginates through pages', async () => {
     assert.deepEqual(assets, [{ id: 1 }, { id: 2 }]);
     assert.equal(
       requestedUrls[0],
-      `https://example.com/api/v1/assets?customer_id=${customerId}&page=1`
+      `https://example.com/api/v1/customer_assets?customer_id=${customerId}&page=1`
     );
     assert.equal(
       requestedUrls[1],
-      `https://example.com/api/v1/assets?customer_id=${customerId}&page=2`
+      `https://example.com/api/v1/customer_assets?customer_id=${customerId}&page=2`
     );
   } finally {
     if (originalFetch) {

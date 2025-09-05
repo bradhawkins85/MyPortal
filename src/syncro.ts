@@ -133,7 +133,7 @@ export async function getSyncroAssets(
   const results: SyncroAsset[] = [];
   for (let page = 1; page <= 100; page++) {
     const data = await syncroRequest(
-      `/assets?customer_id=${customerId}&page=${page}`
+      `/customer_assets?customer_id=${customerId}&page=${page}`
     );
     if (!data) break;
     let assets: SyncroAsset[] = [];
