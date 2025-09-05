@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { logInfo, logError } from './logger';
 
 dotenv.config();
 
@@ -68,17 +69,24 @@ async function syncroRequest(path: string, init: RequestInit = {}): Promise<any>
   if (process.env.SYNCRO_API_KEY) {
     headers['Authorization'] = `Bearer ${process.env.SYNCRO_API_KEY}`;
   }
-  const res = await fetch(url, { ...init, headers });
-  if (!res.ok) {
-    if (res.status === 404) {
+  logInfo('Calling Syncro API', { url, method: init.method || 'GET' });
+  try {
+    const res = await fetch(url, { ...init, headers });
+    logInfo('Syncro API response', { url, status: res.status });
+    if (!res.ok) {
+      if (res.status === 404) {
+        return null;
+      }
+      throw new Error(`Syncro API request failed: ${res.status}`);
+    }
+    if (res.status === 204) {
       return null;
     }
-    throw new Error(`Syncro API request failed: ${res.status}`);
+    return res.json();
+  } catch (err) {
+    logError('Syncro API request error', { url, error: (err as Error).message });
+    throw err;
   }
-  if (res.status === 204) {
-    return null;
-  }
-  return res.json();
 }
 
 export async function getSyncroCustomers(): Promise<SyncroCustomer[]> {
