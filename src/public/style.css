@@ -175,6 +175,22 @@ table th {
   overflow-x: auto;
 }
 
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.page-body {
+  overflow-x: auto;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .swagger-frame {
   width: 100%;
   height: calc(100vh - 80px - 4rem);

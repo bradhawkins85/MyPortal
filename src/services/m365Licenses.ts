@@ -5,35 +5,60 @@ import {
   createLicense,
   updateLicense,
   getLicenseByCompanyAndSku,
+  getM365Credentials,
+  upsertM365Credentials,
 } from '../queries';
+import { decryptSecret, encryptSecret } from '../crypto';
 import { logInfo, logError } from '../logger';
 
-const tenantId = process.env.AZURE_AD_TENANT_ID;
-const clientId = process.env.AZURE_AD_CLIENT_ID;
-const clientSecret = process.env.AZURE_AD_CLIENT_SECRET;
-
-function createCca(): ConfidentialClientApplication | null {
-  if (!tenantId || !clientId || !clientSecret) {
-    return null;
+async function createCca(companyId: number): Promise<ConfidentialClientApplication> {
+  const creds = await getM365Credentials(companyId);
+  if (!creds) {
+    throw new Error('Missing Azure AD credentials');
   }
   return new ConfidentialClientApplication({
     auth: {
-      clientId,
-      authority: `https://login.microsoftonline.com/${tenantId}`,
-      clientSecret,
+      clientId: creds.client_id,
+      authority: `https://login.microsoftonline.com/${creds.tenant_id}`,
+      clientSecret: decryptSecret(creds.client_secret),
     },
   });
 }
 
-async function getClient(): Promise<Client> {
-  const app = createCca();
-  if (!app) {
-    throw new Error('Missing Azure AD credentials');
+async function getClient(companyId: number): Promise<Client> {
+  const app = await createCca(companyId);
+  let token = '';
+  const creds = await getM365Credentials(companyId);
+  try {
+    if (creds?.refresh_token) {
+      const result: any = await app.acquireTokenByRefreshToken({
+        refreshToken: decryptSecret(creds.refresh_token),
+        scopes: ['https://graph.microsoft.com/.default'],
+      });
+      token = result?.accessToken || '';
+      await upsertM365Credentials(
+        companyId,
+        creds.tenant_id,
+        creds.client_id,
+        creds.client_secret,
+        result?.refreshToken
+          ? encryptSecret(result.refreshToken)
+          : creds.refresh_token,
+        result?.accessToken ? encryptSecret(result.accessToken) : null,
+        result?.expiresOn
+          ? result.expiresOn.toISOString().slice(0, 19).replace('T', ' ')
+          : null
+      );
+    } else {
+      const result: any = await app.acquireTokenByClientCredential({
+        scopes: ['https://graph.microsoft.com/.default'],
+      });
+      token = result?.accessToken || '';
+    }
+  } catch (err) {
+    logError('Failed to acquire Microsoft 365 token', { err });
+    throw err;
   }
-  const result = await app.acquireTokenByClientCredential({
-    scopes: ['https://graph.microsoft.com/.default'],
-  });
-  const token = result && result.accessToken ? result.accessToken : '';
   return Client.init({
     authProvider: (done) => {
       done(null, token);
@@ -43,11 +68,7 @@ async function getClient(): Promise<Client> {
 
 export async function syncM365Licenses(companyId: number): Promise<void> {
   try {
-    if (!tenantId || !clientId || !clientSecret) {
-      logError('Missing Azure AD credentials for Microsoft 365 sync');
-      return;
-    }
-    const client = await getClient();
+    const client = await getClient(companyId);
     const skus = await client.api('/subscribedSkus').get();
     if (skus.value && Array.isArray(skus.value)) {
       for (const sku of skus.value) {
@@ -75,7 +96,10 @@ export async function syncM365Licenses(companyId: number): Promise<void> {
   }
 }
 
-export async function getUserLicenseDetails(userId: string) {
-  const client = await getClient();
+export async function getUserLicenseDetails(
+  companyId: number,
+  userId: string
+) {
+  const client = await getClient(companyId);
   return client.api(`/users/${userId}/licenseDetails`).get();
 }
