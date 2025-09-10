@@ -1765,21 +1765,50 @@ app.get('/m365', ensureAuth, ensureLicenseAccess, async (req, res) => {
   });
 });
 
-app.post('/m365/credentials', ensureAuth, ensureLicenseAccess, async (req, res) => {
+app.get('/m365/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  const allCompanies = await getAllCompanies();
+  const credentials: Record<number, { tenant_id: string; client_id: string }> = {};
+  for (const c of allCompanies) {
+    const cred = await getM365Credentials(c.id);
+    if (cred) {
+      credentials[c.id] = { tenant_id: cred.tenant_id, client_id: cred.client_id };
+    }
+  }
+  res.render('m365-admin', {
+    allCompanies,
+    credentials,
+    csrfToken: req.csrfToken(),
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: true,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+  });
+});
+
+app.post('/m365/admin/:companyId', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { tenantId, clientId, clientSecret } = req.body;
   const secret = encryptSecret(clientSecret);
   await upsertM365Credentials(
-    req.session.companyId!,
+    parseInt(req.params.companyId, 10),
     tenantId,
     clientId,
     secret
   );
-  res.redirect('/m365');
+  res.redirect('/m365/admin');
 });
 
-app.post('/m365/credentials/delete', ensureAuth, ensureLicenseAccess, async (req, res) => {
-  await deleteM365Credentials(req.session.companyId!);
-  res.redirect('/m365');
+app.post('/m365/admin/:companyId/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  await deleteM365Credentials(parseInt(req.params.companyId, 10));
+  res.redirect('/m365/admin');
 });
 
 app.get('/m365/connect', ensureAuth, ensureLicenseAccess, async (req, res) => {
