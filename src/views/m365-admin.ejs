@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+  <%- include('partials/head', { title: 'Office 365 Admin' }) %>
+<body>
+  <div class="app-container">
+    <%- include('partials/sidebar') %>
+    <div class="content">
+      <div class="page-header">
+        <h1>Office 365 Credentials</h1>
+      </div>
+      <div class="page-body">
+        <% allCompanies.forEach(function(c){ const cred = credentials[c.id] || {}; %>
+          <form method="post" action="/m365/admin/<%= c.id %>" class="credential-form">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <h2><%= c.name %></h2>
+            <label>Tenant ID
+              <input type="text" name="tenantId" value="<%= cred.tenant_id || '' %>" required>
+            </label>
+            <label>Client ID
+              <input type="text" name="clientId" value="<%= cred.client_id || '' %>" required>
+            </label>
+            <label>Client Secret
+              <input type="password" name="clientSecret" required>
+            </label>
+            <button type="submit">Save</button>
+            <% if (cred.tenant_id) { %>
+              <button type="submit" formaction="/m365/admin/<%= c.id %>/delete" formmethod="post" onclick="return confirm('Delete credentials for <%= c.name %>?');">Delete</button>
+            <% } %>
+          </form>
+        <% }); %>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
