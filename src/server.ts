@@ -949,12 +949,18 @@ async function scanFileForViruses(filePath: string): Promise<void> {
   try {
     await execFileAsync('clamscan', ['--no-summary', filePath]);
   } catch (err: any) {
-    if (err && typeof err.code === 'number') {
-      if (err.code === 1) {
-        throw new Error('Virus detected in uploaded file');
+    if (err) {
+      if (typeof err.code === 'number') {
+        if (err.code === 1) {
+          throw new Error('Virus detected in uploaded file');
+        }
+        console.warn('Virus scan failed or clamscan not installed', err);
+        throw new Error('Virus scan failed');
       }
-      console.warn('Virus scan failed or clamscan not installed', err);
-      throw new Error('Virus scan failed');
+      if (err.code === 'ENOENT') {
+        console.warn('clamscan not found, skipping virus scan');
+        return;
+      }
     }
     console.warn('Failed to run virus scan', err);
     throw new Error('Virus scan failed');
