@@ -10,28 +10,15 @@
         <% if (credential) { %>
           <div class="header-actions">
             <a href="/m365/connect" class="authorize-link">Authorize</a>
-            <form method="post" action="/m365/credentials/delete" style="display:inline;">
-              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-              <button type="submit">Disconnect</button>
-            </form>
           </div>
         <% } %>
       </div>
       <div class="page-body">
         <% if (!credential) { %>
-          <form method="post" action="/m365/credentials">
-            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-            <label>Tenant ID
-              <input type="text" name="tenantId" required>
-            </label>
-            <label>Client ID
-              <input type="text" name="clientId" required>
-            </label>
-            <label>Client Secret
-              <input type="password" name="clientSecret" required>
-            </label>
-            <button type="submit">Save</button>
-          </form>
+          <p>No Office 365 credentials configured.</p>
+          <% if (typeof isSuperAdmin !== 'undefined' && isSuperAdmin) { %>
+            <p><a href="/m365/admin">Manage credentials in the Office 365 admin page.</a></p>
+          <% } %>
         <% } else { %>
           <p><strong>Tenant ID:</strong> <%= credential.tenant_id %></p>
           <p><strong>Client ID:</strong> <%= credential.client_id %></p>

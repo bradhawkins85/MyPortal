@@ -42,6 +42,29 @@ There are no default login credentials; the first visit will prompt you to regis
    npm test
    ```
 
+## Office 365 Sync
+
+To enable Microsoft 365 license synchronization, register an application in
+Azure Active Directory and grant it the required Graph permissions.
+
+1. Sign in to the Azure portal and open **Azure Active Directory** →
+   **App registrations** → **New registration**.
+2. Choose a name for the application and select the supported account types
+   for your tenant.
+3. Under **Redirect URI**, select **Web** and enter
+   `https://<your-domain>/m365/callback`.
+4. After creation, note the **Application (client) ID** and **Directory (tenant)
+   ID**.
+5. Create a client secret in **Certificates & secrets** and record the value; it
+   is shown only once.
+6. In **API permissions**, add Microsoft Graph **Application permissions**
+   `Directory.Read.All` and `User.Read.All`, then grant admin consent.
+7. Open the Office 365 admin page in MyPortal and enter the tenant ID, client
+   ID and client secret. The credentials can be edited or removed at any time.
+8. From the Office 365 page for a company, click **Authorize** to grant the
+   application access. The portal requests the `offline_access` scope so that a
+   refresh token is stored for background sync jobs.
+
 ## File Storage
 
 Static assets located under `src/public` are served directly and are intended
