@@ -18,6 +18,8 @@ import swaggerJSDoc from 'swagger-jsdoc';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
 import { ConfidentialClientApplication } from '@azure/msal-node';
+import { Client } from '@microsoft/microsoft-graph-client';
+import 'isomorphic-fetch';
 import cron from 'node-cron';
 import { getRandomDailyCron } from './cron';
 import { execFile } from 'child_process';
@@ -1808,6 +1810,99 @@ app.post('/m365/admin/:companyId', ensureAuth, ensureSuperAdmin, async (req, res
 
 app.post('/m365/admin/:companyId/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
   await deleteM365Credentials(parseInt(req.params.companyId, 10));
+  res.redirect('/m365/admin');
+});
+
+app.get('/m365/admin/:companyId/authorize', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { M365_ADMIN_CLIENT_ID, M365_ADMIN_CLIENT_SECRET } = process.env;
+  if (!M365_ADMIN_CLIENT_ID || !M365_ADMIN_CLIENT_SECRET) {
+    return res.status(500).send('Missing Azure AD admin credentials');
+  }
+  const companyId = parseInt(req.params.companyId, 10);
+  const cca = new ConfidentialClientApplication({
+    auth: {
+      clientId: M365_ADMIN_CLIENT_ID,
+      authority: 'https://login.microsoftonline.com/common',
+      clientSecret: M365_ADMIN_CLIENT_SECRET,
+    },
+  });
+  const authUrl = await cca.getAuthCodeUrl({
+    scopes: ['offline_access', 'Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All'],
+    redirectUri: `${req.protocol}://${req.get('host')}/m365/admin/callback`,
+    state: String(companyId),
+  });
+  res.redirect(authUrl);
+});
+
+app.get('/m365/admin/callback', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { M365_ADMIN_CLIENT_ID, M365_ADMIN_CLIENT_SECRET } = process.env;
+  if (!M365_ADMIN_CLIENT_ID || !M365_ADMIN_CLIENT_SECRET) {
+    return res.status(500).send('Missing Azure AD admin credentials');
+  }
+  const code = req.query.code as string;
+  const state = req.query.state as string;
+  const companyId = parseInt(state, 10);
+  const cca = new ConfidentialClientApplication({
+    auth: {
+      clientId: M365_ADMIN_CLIENT_ID,
+      authority: 'https://login.microsoftonline.com/common',
+      clientSecret: M365_ADMIN_CLIENT_SECRET,
+    },
+  });
+  try {
+    const token: any = await cca.acquireTokenByCode({
+      code,
+      scopes: ['offline_access', 'Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All'],
+      redirectUri: `${req.protocol}://${req.get('host')}/m365/admin/callback`,
+    });
+    const tenantId = token.idTokenClaims?.tid as string;
+    const graphClient = Client.init({
+      authProvider: (done) => done(null, token.accessToken),
+    });
+    const spRes = await graphClient
+      .api('/servicePrincipals')
+      .filter("appId eq '00000003-0000-0000-c000-000000000000'")
+      .get();
+    const graphSp = spRes.value[0];
+    const requiredRoles = ['User.Read.All', 'Group.Read.All'];
+    const resourceAccess = graphSp.appRoles
+      .filter((r: any) => requiredRoles.includes(r.value))
+      .map((r: any) => ({ id: r.id, type: 'Role' }));
+    const app = await graphClient.api('/applications').post({
+      displayName: `MyPortal ${companyId}`,
+      requiredResourceAccess: [
+        {
+          resourceAppId: '00000003-0000-0000-c000-000000000000',
+          resourceAccess,
+        },
+      ],
+    });
+    const password = await graphClient
+      .api(`/applications/${app.id}/addPassword`)
+      .post({ passwordCredential: { displayName: 'Client secret' } });
+    const appSpRes = await graphClient
+      .api('/servicePrincipals')
+      .filter(`appId eq '${app.appId}'`)
+      .get();
+    const appSp = appSpRes.value[0];
+    for (const ra of resourceAccess) {
+      await graphClient
+        .api(`/servicePrincipals/${appSp.id}/appRoleAssignments`)
+        .post({
+          principalId: appSp.id,
+          resourceId: graphSp.id,
+          appRoleId: ra.id,
+        });
+    }
+    await upsertM365Credentials(
+      companyId,
+      tenantId,
+      app.appId,
+      encryptSecret(password.secretText)
+    );
+  } catch (err) {
+    logError('Failed to authorize Microsoft 365', { err });
+  }
   res.redirect('/m365/admin');
 });
 

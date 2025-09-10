@@ -23,6 +23,7 @@
               <input type="password" name="clientSecret" required>
             </label>
             <button type="submit">Save</button>
+            <button type="button" onclick="window.location.href='/m365/admin/<%= c.id %>/authorize'">Sign in to Office 365</button>
             <% if (cred.tenant_id) { %>
               <button type="submit" formaction="/m365/admin/<%= c.id %>/delete" formmethod="post" onclick="return confirm('Delete credentials for <%= c.name %>?');">Delete</button>
             <% } %>
