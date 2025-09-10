@@ -8,7 +8,7 @@ import { XMLParser } from 'fast-xml-parser';
 import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
-import { decryptSecret } from './crypto';
+import { encryptSecret, decryptSecret } from './crypto';
 import cookieParser from 'cookie-parser';
 import csurf from 'csurf';
 import { authenticator } from 'otplib';
@@ -17,6 +17,7 @@ import swaggerUi from 'swagger-ui-express';
 import swaggerJSDoc from 'swagger-jsdoc';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
+import { ConfidentialClientApplication } from '@azure/msal-node';
 import cron from 'node-cron';
 import { getRandomDailyCron } from './cron';
 import { execFile } from 'child_process';
@@ -98,6 +99,9 @@ import {
   getInvoiceById,
   updateInvoice,
   deleteInvoice,
+  getM365Credentials,
+  upsertM365Credentials,
+  deleteM365Credentials,
     getAllForms,
     getFormsByCompany,
     createForm,
@@ -1739,6 +1743,98 @@ app.get('/licenses', ensureAuth, ensureLicenseAccess, async (req, res) => {
     canOrderLicenses: current?.can_order_licenses ?? 0,
     canAccessShop: current?.can_access_shop ?? 0,
   });
+});
+
+app.get('/m365', ensureAuth, ensureLicenseAccess, async (req, res) => {
+  const companies = await getCompaniesForUser(req.session.userId!);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  const credential = await getM365Credentials(req.session.companyId!);
+  res.render('m365', {
+    credential,
+    isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
+    companies,
+    currentCompanyId: req.session.companyId,
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+  });
+});
+
+app.post('/m365/credentials', ensureAuth, ensureLicenseAccess, async (req, res) => {
+  const { tenantId, clientId, clientSecret } = req.body;
+  const secret = encryptSecret(clientSecret);
+  await upsertM365Credentials(
+    req.session.companyId!,
+    tenantId,
+    clientId,
+    secret
+  );
+  res.redirect('/m365');
+});
+
+app.post('/m365/credentials/delete', ensureAuth, ensureLicenseAccess, async (req, res) => {
+  await deleteM365Credentials(req.session.companyId!);
+  res.redirect('/m365');
+});
+
+app.get('/m365/connect', ensureAuth, ensureLicenseAccess, async (req, res) => {
+  const companyId = req.session.companyId!;
+  const creds = await getM365Credentials(companyId);
+  if (!creds) return res.redirect('/m365');
+  const appCca = new ConfidentialClientApplication({
+    auth: {
+      clientId: creds.client_id,
+      authority: `https://login.microsoftonline.com/${creds.tenant_id}`,
+      clientSecret: decryptSecret(creds.client_secret),
+    },
+  });
+  const authUrl = await appCca.getAuthCodeUrl({
+    scopes: ['offline_access', 'https://graph.microsoft.com/.default'],
+    redirectUri: `${req.protocol}://${req.get('host')}/m365/callback`,
+    state: String(companyId),
+  });
+  res.redirect(authUrl);
+});
+
+app.get('/m365/callback', async (req, res) => {
+  const code = req.query.code as string;
+  const state = req.query.state as string;
+  const companyId = parseInt(state, 10);
+  const creds = await getM365Credentials(companyId);
+  if (!creds) return res.status(400).send('Missing credentials');
+  const appCca = new ConfidentialClientApplication({
+    auth: {
+      clientId: creds.client_id,
+      authority: `https://login.microsoftonline.com/${creds.tenant_id}`,
+      clientSecret: decryptSecret(creds.client_secret),
+    },
+  });
+  try {
+    const token: any = await appCca.acquireTokenByCode({
+      code,
+      scopes: ['offline_access', 'https://graph.microsoft.com/.default'],
+      redirectUri: `${req.protocol}://${req.get('host')}/m365/callback`,
+    });
+    await upsertM365Credentials(
+      companyId,
+      creds.tenant_id,
+      creds.client_id,
+      creds.client_secret,
+      token?.refreshToken ? encryptSecret(token.refreshToken) : null,
+      token?.accessToken ? encryptSecret(token.accessToken) : null,
+      token?.expiresOn
+        ? token.expiresOn.toISOString().slice(0, 19).replace('T', ' ')
+        : null
+    );
+  } catch (err) {
+    logError('Failed to complete Microsoft 365 OAuth', { err });
+  }
+  res.redirect('/m365');
 });
 
 app.get(
@@ -6296,6 +6392,106 @@ api.put('/invoices/:id', async (req, res) => {
  */
 api.delete('/invoices/:id', async (req, res) => {
   await deleteInvoice(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
+/**
+ * @openapi
+ * /api/companies/{companyId}/m365-credentials:
+ *   get:
+ *     tags:
+ *       - Office365
+ *     summary: Get Office 365 credentials for a company
+ *     parameters:
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Credentials
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 tenantId:
+ *                   type: string
+ *                 clientId:
+ *                   type: string
+ *                 tokenExpiresAt:
+ *                   type: string
+ *                   format: date-time
+ *                   nullable: true
+ *   post:
+ *     tags:
+ *       - Office365
+ *     summary: Create or update Office 365 credentials
+ *     parameters:
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - tenantId
+ *               - clientId
+ *               - clientSecret
+ *             properties:
+ *               tenantId:
+ *                 type: string
+ *               clientId:
+ *                 type: string
+ *               clientSecret:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Saved
+ *   delete:
+ *     tags:
+ *       - Office365
+ *     summary: Delete Office 365 credentials
+ *     parameters:
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Deleted
+ */
+api.get('/companies/:companyId/m365-credentials', async (req, res) => {
+  const companyId = parseInt(req.params.companyId, 10);
+  const cred = await getM365Credentials(companyId);
+  if (!cred) return res.json(null);
+  res.json({
+    tenantId: cred.tenant_id,
+    clientId: cred.client_id,
+    tokenExpiresAt: cred.token_expires_at
+      ? new Date(cred.token_expires_at).toISOString()
+      : null,
+  });
+});
+
+api.post('/companies/:companyId/m365-credentials', async (req, res) => {
+  const companyId = parseInt(req.params.companyId, 10);
+  const { tenantId, clientId, clientSecret } = req.body;
+  const secret = encryptSecret(clientSecret);
+  await upsertM365Credentials(companyId, tenantId, clientId, secret);
+  res.json({ success: true });
+});
+
+api.delete('/companies/:companyId/m365-credentials', async (req, res) => {
+  const companyId = parseInt(req.params.companyId, 10);
+  await deleteM365Credentials(companyId);
   res.json({ success: true });
 });
 

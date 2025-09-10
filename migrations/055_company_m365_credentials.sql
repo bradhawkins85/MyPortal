@@ -1,0 +1,13 @@
+CREATE TABLE company_m365_credentials (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  company_id INT NOT NULL UNIQUE,
+  tenant_id VARCHAR(255) NOT NULL,
+  client_id VARCHAR(255) NOT NULL,
+  client_secret TEXT NOT NULL,
+  refresh_token TEXT NULL,
+  access_token TEXT NULL,
+  token_expires_at DATETIME NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+);

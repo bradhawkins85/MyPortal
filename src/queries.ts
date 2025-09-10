@@ -2373,3 +2373,44 @@ export async function deleteScheduledTask(id: number): Promise<void> {
 export async function markScheduledTaskRun(id: number): Promise<void> {
   await pool.execute('UPDATE scheduled_tasks SET last_run_at = NOW() WHERE id = ?', [id]);
 }
+
+export interface CompanyM365Credential {
+  id: number;
+  company_id: number;
+  tenant_id: string;
+  client_id: string;
+  client_secret: string;
+  refresh_token: string | null;
+  access_token: string | null;
+  token_expires_at: Date | null;
+}
+
+export async function getM365Credentials(companyId: number): Promise<CompanyM365Credential | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM company_m365_credentials WHERE company_id = ?',
+    [companyId]
+  );
+  return (rows as CompanyM365Credential[])[0] || null;
+}
+
+export async function upsertM365Credentials(
+  companyId: number,
+  tenantId: string,
+  clientId: string,
+  clientSecret: string,
+  refreshToken?: string | null,
+  accessToken?: string | null,
+  expiresAt?: string | null
+): Promise<void> {
+  await pool.execute(
+    `INSERT INTO company_m365_credentials (company_id, tenant_id, client_id, client_secret, refresh_token, access_token, token_expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id), client_id = VALUES(client_id), client_secret = VALUES(client_secret), refresh_token = VALUES(refresh_token), access_token = VALUES(access_token), token_expires_at = VALUES(token_expires_at)`,
+    [companyId, tenantId, clientId, clientSecret, refreshToken ?? null, accessToken ?? null, expiresAt ?? null]
+  );
+}
+
+export async function deleteM365Credentials(companyId: number): Promise<void> {
+  await pool.execute('DELETE FROM company_m365_credentials WHERE company_id = ?', [companyId]);
+}
+
