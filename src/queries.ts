@@ -375,6 +375,21 @@ export async function getLicenseById(id: number): Promise<License | null> {
   return (rows as License[])[0] || null;
 }
 
+export async function getLicenseByCompanyAndSku(
+  companyId: number,
+  sku: string
+): Promise<License | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT l.*, COUNT(sl.staff_id) AS allocated
+     FROM licenses l
+     LEFT JOIN staff_licenses sl ON l.id = sl.license_id
+     WHERE l.company_id = ? AND l.platform = ?
+     GROUP BY l.id`,
+    [companyId, sku]
+  );
+  return (rows as License[])[0] || null;
+}
+
 export async function getAllApps(): Promise<App[]> {
   const [rows] = await pool.query<RowDataPacket[]>('SELECT * FROM apps');
   return rows as App[];

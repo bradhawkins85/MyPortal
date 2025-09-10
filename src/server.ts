@@ -31,6 +31,7 @@ import {
   extractAssetDetails,
 } from './syncro';
 import { findExistingStaff } from './staff-import';
+import { syncM365Licenses } from './services/m365Licenses';
 import {
   getUserByEmail,
   getCompanyById,
@@ -683,6 +684,9 @@ async function runScheduledTask(id: number) {
         break;
       case 'sync_assets':
         if (task.company_id) await importSyncroAssetsForCompany(task.company_id);
+        break;
+      case 'sync_o365':
+        if (task.company_id) await syncM365Licenses(task.company_id);
         break;
       case 'update_stock_feed':
         await downloadStockFeed();
