@@ -173,7 +173,6 @@ table th {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   margin-left: 1rem;
   overflow-x: auto;
-  height: 100vw;
 }
 
 .page-header {
