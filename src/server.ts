@@ -1943,7 +1943,7 @@ app.get('/m365/callback', async (req, res) => {
   try {
     const token: any = await appCca.acquireTokenByCode({
       code,
-      scopes: ['openid', 'profile', 'offline_access', 'User.Read'],
+      scopes: ['openid', 'profile', 'offline_access', 'User.Read', 'https://graph.microsoft.com/.default'],
       redirectUri: `${req.protocol}://${req.get('host')}/m365/callback`,
     });
     await upsertM365Credentials(
