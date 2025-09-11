@@ -672,16 +672,19 @@
           <section>
             <h2>App Price Options</h2>
             <form action="/apps/prices" method="post">
-              <select name="appId">
+              <label for="appId">App</label>
+              <select id="appId" name="appId">
                 <% apps.forEach(function(a){ %>
                   <option value="<%= a.id %>"><%= a.name %></option>
                 <% }); %>
               </select>
-              <select name="paymentTerm">
+              <label for="paymentTerm">Payment Term</label>
+              <select id="paymentTerm" name="paymentTerm">
                 <option value="monthly">Monthly</option>
                 <option value="annual">Annual</option>
               </select>
-              <select name="contractTerm">
+              <label for="contractTerm">Contract Term</label>
+              <select id="contractTerm" name="contractTerm">
                 <option value="monthly">Monthly</option>
                 <option value="annual">Annual</option>
               </select>
