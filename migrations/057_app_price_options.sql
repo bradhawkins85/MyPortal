@@ -13,7 +13,16 @@ ALTER TABLE company_app_prices
   ADD COLUMN IF NOT EXISTS contract_term ENUM('monthly','annual') NOT NULL DEFAULT 'monthly';
 
 INSERT INTO app_price_options (app_id, payment_term, contract_term, price)
-SELECT id, 'monthly', contract_term, default_price FROM apps;
+SELECT
+  id,
+  'monthly',
+  CASE
+    WHEN LOWER(contract_term) IN ('monthly', 'month') THEN 'monthly'
+    WHEN LOWER(contract_term) IN ('annual', 'year', 'yearly') THEN 'annual'
+    ELSE 'annual'
+  END,
+  default_price
+FROM apps;
 
 ALTER TABLE apps
   DROP COLUMN IF EXISTS default_price,
