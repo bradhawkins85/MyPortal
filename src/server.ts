@@ -2995,6 +2995,15 @@ app.post('/apps/price', ensureAuth, ensureSuperAdmin, async (req, res) => {
   res.redirect('/admin#apps');
 });
 
+app.post('/apps/price/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { companyId, appId } = req.body;
+  await deleteCompanyAppPrice(
+    parseInt(companyId, 10),
+    parseInt(appId, 10)
+  );
+  res.redirect('/admin#apps');
+});
+
   app.post('/apps/:id/update', ensureAuth, ensureSuperAdmin, async (req, res) => {
     const { sku, vendorSku, name, price, contractTerm } = req.body;
     await updateApp(
@@ -4734,7 +4743,7 @@ api
  *   get:
  *     tags:
  *       - Apps
- *     summary: Get company-specific price for an app
+ *     summary: Get price for an app for a company
  *     parameters:
  *       - in: path
  *         name: appId
@@ -4748,9 +4757,9 @@ api
  *           type: integer
  *     responses:
  *       200:
- *         description: Price details
- *       404:
- *         description: Price not found
+ *         description: Effective price, returns default app price when no company-specific price exists
+  *       404:
+  *         description: App not found
  *   post:
  *     tags:
  *       - Apps
@@ -4824,18 +4833,35 @@ api
  *       200:
  *         description: Deletion successful
  */
+
+export async function getCompanyAppPriceHandler(
+  req: express.Request,
+  res: express.Response,
+  deps: {
+    getAppPrice: typeof getAppPrice;
+    getAppById: typeof getAppById;
+  } = {
+    getAppPrice,
+    getAppById,
+  }
+): Promise<void> {
+  const companyId = parseInt(req.params.companyId, 10);
+  const appId = parseInt(req.params.appId, 10);
+  let price = await deps.getAppPrice(companyId, appId);
+  if (price === null) {
+    const app = await deps.getAppById(appId);
+    if (!app) {
+      res.status(404).json({ error: 'App not found' });
+      return;
+    }
+    price = app.default_price;
+  }
+  res.json({ price });
+}
+
 api
   .route('/apps/:appId/companies/:companyId/price')
-  .get(async (req, res) => {
-    const price = await getAppPrice(
-      parseInt(req.params.companyId, 10),
-      parseInt(req.params.appId, 10)
-    );
-    if (price === null) {
-      return res.status(404).json({ error: 'Price not found' });
-    }
-    res.json({ price });
-  })
+  .get((req, res) => getCompanyAppPriceHandler(req, res))
   .post(async (req, res) => {
     const { price } = req.body;
     await upsertCompanyAppPrice(
@@ -6680,4 +6706,12 @@ if (require.main === module) {
   start();
 }
 
-export { app, api, start, csrfMiddleware, csrfProtection, ensureAdmin, ensureSuperAdmin };
+export {
+  app,
+  api,
+  start,
+  csrfMiddleware,
+  csrfProtection,
+  ensureAdmin,
+  ensureSuperAdmin,
+};
