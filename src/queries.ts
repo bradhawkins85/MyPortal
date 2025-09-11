@@ -756,6 +756,17 @@ export async function getStaffById(id: number): Promise<Staff | null> {
   return (rows as Staff[])[0] || null;
 }
 
+export async function getStaffByCompanyAndEmail(
+  companyId: number,
+  email: string
+): Promise<Staff | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name FROM staff s LEFT JOIN staff_verification_codes svc ON s.id = svc.staff_id WHERE s.company_id = ? AND LOWER(s.email) = LOWER(?)',
+    [companyId, email]
+  );
+  return (rows as Staff[])[0] || null;
+}
+
 export async function addStaff(
   companyId: number,
   firstName: string,
