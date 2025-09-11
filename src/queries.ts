@@ -40,6 +40,7 @@ export interface License {
   expiry_date: string;
   contract_term: string;
   allocated?: number;
+  display_name?: string;
 }
 
 export interface App {
@@ -344,8 +345,11 @@ export async function unhideSyncroCustomer(id: string): Promise<void> {
 
 export async function getLicensesByCompany(companyId: number): Promise<License[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT l.*, COUNT(sl.staff_id) AS allocated
+    `SELECT l.id, l.company_id, l.name, l.platform, l.count, l.expiry_date, l.contract_term,
+            COALESCE(a.name, l.platform) AS display_name,
+            COUNT(DISTINCT sl.staff_id) AS allocated
      FROM licenses l
+     LEFT JOIN apps a ON l.platform = a.vendor_sku
      LEFT JOIN staff_licenses sl ON l.id = sl.license_id
      WHERE l.company_id = ?
      GROUP BY l.id`,
@@ -356,8 +360,11 @@ export async function getLicensesByCompany(companyId: number): Promise<License[]
 
 export async function getAllLicenses(): Promise<License[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT l.*, COUNT(sl.staff_id) AS allocated
+    `SELECT l.id, l.company_id, l.name, l.platform, l.count, l.expiry_date, l.contract_term,
+            COALESCE(a.name, l.platform) AS display_name,
+            COUNT(DISTINCT sl.staff_id) AS allocated
      FROM licenses l
+     LEFT JOIN apps a ON l.platform = a.vendor_sku
      LEFT JOIN staff_licenses sl ON l.id = sl.license_id
      GROUP BY l.id`
   );
@@ -366,8 +373,11 @@ export async function getAllLicenses(): Promise<License[]> {
 
 export async function getLicenseById(id: number): Promise<License | null> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT l.*, COUNT(sl.staff_id) AS allocated
+    `SELECT l.id, l.company_id, l.name, l.platform, l.count, l.expiry_date, l.contract_term,
+            COALESCE(a.name, l.platform) AS display_name,
+            COUNT(DISTINCT sl.staff_id) AS allocated
      FROM licenses l
+     LEFT JOIN apps a ON l.platform = a.vendor_sku
      LEFT JOIN staff_licenses sl ON l.id = sl.license_id
      WHERE l.id = ?
      GROUP BY l.id`,
@@ -381,8 +391,11 @@ export async function getLicenseByCompanyAndSku(
   sku: string
 ): Promise<License | null> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT l.*, COUNT(sl.staff_id) AS allocated
+    `SELECT l.id, l.company_id, l.name, l.platform, l.count, l.expiry_date, l.contract_term,
+            COALESCE(a.name, l.platform) AS display_name,
+            COUNT(DISTINCT sl.staff_id) AS allocated
      FROM licenses l
+     LEFT JOIN apps a ON l.platform = a.vendor_sku
      LEFT JOIN staff_licenses sl ON l.id = sl.license_id
      WHERE l.company_id = ? AND l.platform = ?
      GROUP BY l.id`,

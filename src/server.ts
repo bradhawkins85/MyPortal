@@ -1605,7 +1605,7 @@ app.get('/', ensureAuth, async (req, res) => {
       const licenses = await getLicensesByCompany(company.id);
       licenseStats = licenses.map((l) => {
         const used = l.allocated || 0;
-        return { name: l.name, count: l.count, used, unused: l.count - used };
+        return { name: l.display_name || l.platform, count: l.count, used, unused: l.count - used };
       });
     }
 
