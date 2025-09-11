@@ -21,6 +21,7 @@
             <button data-tab="forms-admin">Forms</button>
             <button data-tab="form-permissions">Form Permissions</button>
             <button data-tab="email-templates">Email Templates</button>
+            <button data-tab="m365-admin">Office 365 Admin</button>
           <% } else if (isAdmin) { %>
             <button data-tab="account" class="active">Account</button>
             <button data-tab="companies">Companies</button>
@@ -908,6 +909,34 @@
               <p>Available placeholders: {{companyName}}, {{portalUrl}}, {{tempPassword}}, {{loginLogo}}</p>
               <button type="submit">Save</button>
             </form>
+          </section>
+        </div>
+        <div id="m365-admin" class="tab-content">
+          <section>
+            <h2>Office 365 Credentials</h2>
+            <% allCompanies.forEach(function(c){ const cred = credentials[c.id] || {}; %>
+              <form method="post" action="/m365/admin/<%= c.id %>" class="credential-form">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <h3><%= c.name %></h3>
+                <label>Tenant ID
+                  <input type="text" name="tenantId" value="<%= cred.tenant_id || '' %>" required>
+                </label>
+                <label>Client ID
+                  <input type="text" name="clientId" value="<%= cred.client_id || '' %>" required>
+                </label>
+                <label>Client Secret
+                  <input type="password" name="clientSecret" required>
+                </label>
+                <button type="submit">Save</button>
+                <button type="button" data-href="/m365/admin/<%= c.id %>/authorize">Sign in to Office 365</button>
+              </form>
+              <% if (cred.tenant_id) { %>
+                <form method="post" action="/m365/admin/<%= c.id %>/delete" data-confirm="Delete credentials for <%= c.name %>?">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                  <button type="submit">Delete</button>
+                </form>
+              <% } %>
+            <% }); %>
           </section>
         </div>
         <% } %>
