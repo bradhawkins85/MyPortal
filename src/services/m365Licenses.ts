@@ -8,6 +8,7 @@ import {
   getM365Credentials,
   upsertM365Credentials,
   getStaffByCompanyAndEmail,
+  addStaff,
   linkStaffToLicense,
   getStaffForLicense,
   unlinkStaffFromLicense,
@@ -109,14 +110,40 @@ export async function syncM365Licenses(companyId: number): Promise<void> {
         const users = await client
           .api('/users')
           .filter(`assignedLicenses/any(x:x/skuId eq ${skuId})`)
-          .select(['id', 'userPrincipalName', 'mail'])
+          .select(['id', 'userPrincipalName', 'mail', 'givenName', 'surname'])
           .get();
         const assignedEmails: string[] = [];
         if (users.value && Array.isArray(users.value)) {
           for (const u of users.value) {
             const email = String(u.mail || u.userPrincipalName || '').toLowerCase();
             if (!email) continue;
-            const staff = await getStaffByCompanyAndEmail(companyId, email);
+            let staff = await getStaffByCompanyAndEmail(companyId, email);
+            if (!staff) {
+              const first = String(u.givenName || '').trim();
+              const last = String(u.surname || '').trim();
+              await addStaff(
+                companyId,
+                first,
+                last,
+                email,
+                null,
+                null,
+                null,
+                true,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              );
+              staff = await getStaffByCompanyAndEmail(companyId, email);
+            }
             if (staff) {
               assignedEmails.push(staff.email.toLowerCase());
               await linkStaffToLicense(staff.id, licenseId);
