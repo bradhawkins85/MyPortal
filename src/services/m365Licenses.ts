@@ -107,7 +107,8 @@ export async function syncM365Licenses(companyId: number): Promise<void> {
         }
 
         const users = await client
-          .api(`/subscribedSkus/${skuId}/users`)
+          .api('/users')
+          .filter(`assignedLicenses/any(x:x/skuId eq ${skuId})`)
           .select(['id', 'userPrincipalName', 'mail'])
           .get();
         const assignedEmails: string[] = [];
