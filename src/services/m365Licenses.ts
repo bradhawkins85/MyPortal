@@ -12,6 +12,7 @@ import {
   linkStaffToLicense,
   getStaffForLicense,
   unlinkStaffFromLicense,
+  getAppByVendorSku,
 } from '../queries';
 import { decryptSecret, encryptSecret } from '../crypto';
 import { logInfo, logError } from '../logger';
@@ -80,7 +81,9 @@ export async function syncM365Licenses(companyId: number): Promise<void> {
         const partNumber = sku.skuPartNumber as string;
         const skuId = sku.skuId as string;
         const count = sku.prepaidUnits?.enabled || 0;
+        const app = await getAppByVendorSku(partNumber);
         const name =
+          app?.name ??
           m365SkuNameMap[partNumber as keyof typeof m365SkuNameMap] ??
           partNumber;
         const existing = await getLicenseByCompanyAndSku(companyId, partNumber);
