@@ -1751,8 +1751,10 @@ app.get('/m365', ensureAuth, ensureLicenseAccess, async (req, res) => {
   const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
   const credential = await getM365Credentials(req.session.companyId!);
+  const error = req.query.error as string | undefined;
   res.render('m365', {
     credential,
+    error,
     isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
     companies,
     currentCompanyId: req.session.companyId,
@@ -1955,10 +1957,17 @@ app.get('/m365/callback', async (req, res) => {
         ? token.expiresOn.toISOString().slice(0, 19).replace('T', ' ')
         : null
     );
+    return res.redirect('/m365');
   } catch (err) {
-    logError('Failed to complete Microsoft 365 OAuth', { err });
+    logError('Failed to complete Microsoft 365 OAuth', {
+      error: err,
+      companyId,
+    });
+    const message = encodeURIComponent(
+      'Authorization with Microsoft 365 failed. Please try again.'
+    );
+    return res.redirect(`/m365?error=${message}`);
   }
-  res.redirect('/m365');
 });
 
 app.get(
