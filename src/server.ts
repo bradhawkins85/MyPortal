@@ -164,6 +164,10 @@ import {
   getCompanyAppPrices,
   deleteCompanyAppPrice,
   upsertCompanyAppPrice,
+  addAppPriceOption,
+  getAppPriceOptions,
+  deleteAppPriceOption,
+  getAppPriceOption,
   updateCompanyIds,
   getHiddenSyncroCustomerIds,
   hideSyncroCustomer,
@@ -185,6 +189,7 @@ import {
   ApiKeyWithUsage,
   AuditLog,
   App,
+  AppPriceOption,
   ProductCompanyRestriction,
   Category,
   Asset,
@@ -2974,45 +2979,62 @@ app.post(
 );
 
   app.post('/apps', ensureAuth, ensureSuperAdmin, async (req, res) => {
-    const { sku, vendorSku, name, price, contractTerm } = req.body;
+    const { sku, vendorSku, name } = req.body;
     await createApp(
       sku,
       vendorSku || null,
-      name,
-      parseFloat(price),
-      contractTerm
+      name
     );
     res.redirect('/admin#apps');
   });
 
+app.post('/apps/prices', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { appId, paymentTerm, contractTerm, price } = req.body;
+  await addAppPriceOption(
+    parseInt(appId, 10),
+    paymentTerm,
+    contractTerm,
+    parseFloat(price)
+  );
+  res.redirect('/admin#apps');
+});
+
+app.post('/apps/prices/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  await deleteAppPriceOption(parseInt(req.params.id, 10));
+  res.redirect('/admin#apps');
+});
+
 app.post('/apps/price', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { companyId, appId, price } = req.body;
+  const { companyId, combo, price } = req.body;
+  const [appId, paymentTerm, contractTerm] = combo.split('|');
   await upsertCompanyAppPrice(
     parseInt(companyId, 10),
     parseInt(appId, 10),
+    paymentTerm,
+    contractTerm,
     parseFloat(price)
   );
   res.redirect('/admin#apps');
 });
 
 app.post('/apps/price/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { companyId, appId } = req.body;
+  const { companyId, appId, paymentTerm, contractTerm } = req.body;
   await deleteCompanyAppPrice(
     parseInt(companyId, 10),
-    parseInt(appId, 10)
+    parseInt(appId, 10),
+    paymentTerm,
+    contractTerm
   );
   res.redirect('/admin#apps');
 });
 
   app.post('/apps/:id/update', ensureAuth, ensureSuperAdmin, async (req, res) => {
-    const { sku, vendorSku, name, price, contractTerm } = req.body;
+    const { sku, vendorSku, name } = req.body;
     await updateApp(
       parseInt(req.params.id, 10),
       sku,
       vendorSku || null,
-      name,
-      parseFloat(price),
-      contractTerm
+      name
     );
     res.redirect('/admin#apps');
   });
@@ -3024,7 +3046,7 @@ app.post('/apps/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
 
 app.post('/apps/:appId/add', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const appId = parseInt(req.params.appId, 10);
-  const { companyId, quantity } = req.body;
+  const { companyId, quantity, contractTerm } = req.body;
   const appInfo = await getAppById(appId);
   if (!appInfo) {
     res.status(404).send('App not found');
@@ -3036,7 +3058,7 @@ app.post('/apps/:appId/add', ensureAuth, ensureSuperAdmin, async (req, res) => {
     appInfo.sku,
     parseInt(quantity, 10),
     null,
-    appInfo.contract_term
+    contractTerm
   );
   res.status(204).end();
 });
@@ -3051,6 +3073,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
   let assignments: UserCompany[] = [];
   let apiKeys: ApiKeyWithUsage[] = [];
   let apps: App[] = [];
+  let appPrices: AppPriceOption[] = [];
   let companyPrices: any[] = [];
   let forms: any[] = [];
   let formUsers: UserCompany[] = [];
@@ -3067,6 +3090,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
     assignments = await getUserCompanyAssignments();
     apiKeys = await getApiKeysWithUsage();
     apps = await getAllApps();
+    appPrices = await getAppPriceOptions();
     companyPrices = await getCompanyAppPrices();
     forms = await getAllForms();
     formAccess = await getAllFormPermissionEntries();
@@ -3082,10 +3106,10 @@ app.get('/admin', ensureAuth, async (req, res) => {
     products = prodList;
     categories = catList;
     restrictionsList.forEach((r) => {
-    if (!productRestrictions[r.product_id]) {
-      productRestrictions[r.product_id] = [];
-    }
-    productRestrictions[r.product_id].push(r);
+      if (!productRestrictions[r.product_id]) {
+        productRestrictions[r.product_id] = [];
+      }
+      productRestrictions[r.product_id].push(r);
     });
     const rawTasks = await getScheduledTasks();
     tasks = rawTasks.map((t) => ({
@@ -3143,6 +3167,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
     assignments,
     apiKeys,
     apps,
+    appPrices,
     companyPrices,
     forms,
     formUsers,
@@ -3945,11 +3970,7 @@ api.use(async (req, res, next) => {
   *                 type: string
   *               name:
   *                 type: string
-  *               defaultPrice:
-  *                 type: number
-  *               contractTerm:
- *                 type: string
- *     responses:
+  *     responses:
  *       200:
  *         description: App created
  */
@@ -3959,13 +3980,11 @@ api.route('/apps')
     res.json(apps);
   })
   .post(async (req, res) => {
-      const { sku, vendorSku, name, defaultPrice, contractTerm } = req.body;
+      const { sku, vendorSku, name } = req.body;
       const id = await createApp(
         sku,
         vendorSku || null,
-        name,
-        defaultPrice,
-        contractTerm
+        name
       );
       res.json({ id });
     });
@@ -4011,11 +4030,7 @@ api.route('/apps')
   *                 type: string
   *               name:
   *                 type: string
-  *               defaultPrice:
-  *                 type: number
-  *               contractTerm:
- *                 type: string
- *     responses:
+  *     responses:
  *       200:
  *         description: Update successful
  *   delete:
@@ -4041,14 +4056,12 @@ api.route('/apps/:id')
     res.json(app);
   })
     .put(async (req, res) => {
-      const { sku, vendorSku, name, defaultPrice, contractTerm } = req.body;
+      const { sku, vendorSku, name } = req.body;
       await updateApp(
         parseInt(req.params.id, 10),
         sku,
         vendorSku || null,
-        name,
-        defaultPrice,
-        contractTerm
+        name
       );
       res.json({ success: true });
     })
@@ -4839,22 +4852,24 @@ export async function getCompanyAppPriceHandler(
   res: express.Response,
   deps: {
     getAppPrice: typeof getAppPrice;
-    getAppById: typeof getAppById;
+    getAppPriceOption: typeof getAppPriceOption;
   } = {
     getAppPrice,
-    getAppById,
+    getAppPriceOption,
   }
 ): Promise<void> {
   const companyId = parseInt(req.params.companyId, 10);
   const appId = parseInt(req.params.appId, 10);
-  let price = await deps.getAppPrice(companyId, appId);
+  const paymentTerm = String(req.query.paymentTerm || 'monthly');
+  const contractTerm = String(req.query.contractTerm || 'monthly');
+  let price = await deps.getAppPrice(companyId, appId, paymentTerm, contractTerm);
   if (price === null) {
-    const app = await deps.getAppById(appId);
-    if (!app) {
-      res.status(404).json({ error: 'App not found' });
+    const option = await deps.getAppPriceOption(appId, paymentTerm, contractTerm);
+    if (!option) {
+      res.status(404).json({ error: 'App price not found' });
       return;
     }
-    price = app.default_price;
+    price = option.price;
   }
   res.json({ price });
 }
@@ -4863,27 +4878,34 @@ api
   .route('/apps/:appId/companies/:companyId/price')
   .get((req, res) => getCompanyAppPriceHandler(req, res))
   .post(async (req, res) => {
-    const { price } = req.body;
+    const { price, paymentTerm, contractTerm } = req.body;
     await upsertCompanyAppPrice(
       parseInt(req.params.companyId, 10),
       parseInt(req.params.appId, 10),
+      paymentTerm,
+      contractTerm,
       price
     );
     res.json({ success: true });
   })
   .put(async (req, res) => {
-    const { price } = req.body;
+    const { price, paymentTerm, contractTerm } = req.body;
     await upsertCompanyAppPrice(
       parseInt(req.params.companyId, 10),
       parseInt(req.params.appId, 10),
+      paymentTerm,
+      contractTerm,
       price
     );
     res.json({ success: true });
   })
   .delete(async (req, res) => {
+    const { paymentTerm, contractTerm } = req.body;
     await deleteCompanyAppPrice(
       parseInt(req.params.companyId, 10),
-      parseInt(req.params.appId, 10)
+      parseInt(req.params.appId, 10),
+      paymentTerm,
+      contractTerm
     );
     res.json({ success: true });
   });
