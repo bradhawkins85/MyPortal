@@ -347,7 +347,7 @@ export async function getLicensesByCompany(companyId: number): Promise<License[]
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT l.id, l.company_id, l.name, l.platform, l.count, l.expiry_date, l.contract_term,
             COALESCE(a.name, l.platform) AS display_name,
-            COUNT(sl.staff_id) AS allocated
+            COUNT(DISTINCT sl.staff_id) AS allocated
      FROM licenses l
      LEFT JOIN apps a ON l.platform = a.vendor_sku
      LEFT JOIN staff_licenses sl ON l.id = sl.license_id
@@ -362,7 +362,7 @@ export async function getAllLicenses(): Promise<License[]> {
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT l.id, l.company_id, l.name, l.platform, l.count, l.expiry_date, l.contract_term,
             COALESCE(a.name, l.platform) AS display_name,
-            COUNT(sl.staff_id) AS allocated
+            COUNT(DISTINCT sl.staff_id) AS allocated
      FROM licenses l
      LEFT JOIN apps a ON l.platform = a.vendor_sku
      LEFT JOIN staff_licenses sl ON l.id = sl.license_id
@@ -375,7 +375,7 @@ export async function getLicenseById(id: number): Promise<License | null> {
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT l.id, l.company_id, l.name, l.platform, l.count, l.expiry_date, l.contract_term,
             COALESCE(a.name, l.platform) AS display_name,
-            COUNT(sl.staff_id) AS allocated
+            COUNT(DISTINCT sl.staff_id) AS allocated
      FROM licenses l
      LEFT JOIN apps a ON l.platform = a.vendor_sku
      LEFT JOIN staff_licenses sl ON l.id = sl.license_id
@@ -393,7 +393,7 @@ export async function getLicenseByCompanyAndSku(
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT l.id, l.company_id, l.name, l.platform, l.count, l.expiry_date, l.contract_term,
             COALESCE(a.name, l.platform) AS display_name,
-            COUNT(sl.staff_id) AS allocated
+            COUNT(DISTINCT sl.staff_id) AS allocated
      FROM licenses l
      LEFT JOIN apps a ON l.platform = a.vendor_sku
      LEFT JOIN staff_licenses sl ON l.id = sl.license_id
