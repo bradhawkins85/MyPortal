@@ -45,6 +45,7 @@ export interface License {
 export interface App {
   id: number;
   sku: string;
+  vendor_sku: string | null;
   name: string;
   default_price: number;
   contract_term: string;
@@ -397,13 +398,14 @@ export async function getAllApps(): Promise<App[]> {
 
 export async function createApp(
   sku: string,
+  vendorSku: string | null,
   name: string,
   defaultPrice: number,
   contractTerm: string
 ): Promise<number> {
   const [result] = await pool.execute(
-    'INSERT INTO apps (sku, name, default_price, contract_term) VALUES (?, ?, ?, ?)',
-    [sku, name, defaultPrice, contractTerm]
+      'INSERT INTO apps (sku, vendor_sku, name, default_price, contract_term) VALUES (?, ?, ?, ?, ?)',
+      [sku, vendorSku, name, defaultPrice, contractTerm]
   );
   const insert = result as ResultSetHeader;
   return insert.insertId;
@@ -420,13 +422,14 @@ export async function getAppById(id: number): Promise<App | null> {
 export async function updateApp(
   id: number,
   sku: string,
+  vendorSku: string | null,
   name: string,
   defaultPrice: number,
   contractTerm: string
 ): Promise<void> {
   await pool.execute(
-    'UPDATE apps SET sku = ?, name = ?, default_price = ?, contract_term = ? WHERE id = ?',
-    [sku, name, defaultPrice, contractTerm, id]
+    'UPDATE apps SET sku = ?, vendor_sku = ?, name = ?, default_price = ?, contract_term = ? WHERE id = ?',
+    [sku, vendorSku, name, defaultPrice, contractTerm, id]
   );
 }
 
@@ -459,10 +462,15 @@ export async function getAppPrice(
 }
 
 export async function getCompanyAppPrices(): Promise<
-  (CompanyAppPrice & { company_name: string; app_name: string; sku: string })[]
+  (CompanyAppPrice & {
+    company_name: string;
+    app_name: string;
+    sku: string;
+    vendor_sku: string | null;
+  })[]
 > {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT cap.company_id, cap.app_id, cap.price, c.name AS company_name, a.name AS app_name, a.sku AS sku
+    `SELECT cap.company_id, cap.app_id, cap.price, c.name AS company_name, a.name AS app_name, a.sku AS sku, a.vendor_sku AS vendor_sku
      FROM company_app_prices cap
      JOIN companies c ON cap.company_id = c.id
      JOIN apps a ON cap.app_id = a.id`
