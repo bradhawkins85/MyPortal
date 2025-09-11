@@ -51,7 +51,6 @@
     <% } %>
     <% if (isSuperAdmin) { %>
       <a href="/api-docs" class="menu-link"><i class="fas fa-book"></i> API Docs</a>
-      <a href="/m365/admin" class="menu-link"><i class="fas fa-cloud"></i> Office 365 Admin</a>
     <% } %>
     <a href="/admin" class="menu-link"><i class="fas fa-user"></i> <%= (isAdmin || isSuperAdmin) ? 'Admin' : 'Account' %></a>
     <a href="/logout" class="menu-link logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
