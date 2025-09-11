@@ -713,8 +713,8 @@
             <h2>Company Pricing</h2>
             <form action="/apps/price" method="post">
               <select name="combo">
-                <% appPrices.forEach(function(p){ %>
-                  const app = apps.find(a => a.id === p.app_id);
+                <% appPrices.forEach(function(p){
+                     const app = apps.find(a => a.id === p.app_id);
                 %>
                   <option value="<%= p.app_id %>|<%= p.payment_term %>|<%= p.contract_term %>"><%= app ? app.name : '' %> - <%= p.payment_term %> / <%= p.contract_term %></option>
                 <% }); %>
