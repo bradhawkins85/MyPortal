@@ -48,6 +48,7 @@ export interface App {
   sku: string;
   vendor_sku: string | null;
   name: string;
+  license_sku_id: string | null;
 }
 
 export interface CompanyAppPrice {
@@ -420,11 +421,12 @@ export async function getAllApps(): Promise<App[]> {
 export async function createApp(
   sku: string,
   vendorSku: string | null,
-  name: string
+  name: string,
+  licenseSkuId: string | null = null
 ): Promise<number> {
   const [result] = await pool.execute(
-      'INSERT INTO apps (sku, vendor_sku, name) VALUES (?, ?, ?)',
-      [sku, vendorSku, name]
+    'INSERT INTO apps (sku, vendor_sku, name, license_sku_id) VALUES (?, ?, ?, ?)',
+    [sku, vendorSku, name, licenseSkuId]
   );
   const insert = result as ResultSetHeader;
   return insert.insertId;
@@ -442,12 +444,23 @@ export async function updateApp(
   id: number,
   sku: string,
   vendorSku: string | null,
-  name: string
+  name: string,
+  licenseSkuId: string | null = null
 ): Promise<void> {
   await pool.execute(
-    'UPDATE apps SET sku = ?, vendor_sku = ?, name = ? WHERE id = ?',
-    [sku, vendorSku, name, id]
+    'UPDATE apps SET sku = ?, vendor_sku = ?, name = ?, license_sku_id = ? WHERE id = ?',
+    [sku, vendorSku, name, licenseSkuId, id]
   );
+}
+
+export async function getAppByVendorSku(
+  vendorSku: string
+): Promise<App | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM apps WHERE vendor_sku = ? OR sku = ? LIMIT 1',
+    [vendorSku, vendorSku]
+  );
+  return (rows as App[])[0] || null;
 }
 
 export async function deleteApp(id: number): Promise<void> {
