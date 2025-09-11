@@ -25,7 +25,7 @@
         <% } else { %>
           <p><strong>Tenant ID:</strong> <%= credential.tenant_id %></p>
           <p><strong>Client ID:</strong> <%= credential.client_id %></p>
-          <% if (credential.refresh_token) { %>
+          <% if (credential.refresh_token || credential.access_token) { %>
             <p>Connected. Token expires at <%= credential.token_expires_at ? new Date(credential.token_expires_at).toLocaleString() : 'unknown' %></p>
           <% } else { %>
             <p>Not authorized with Microsoft 365.</p>
