@@ -21,7 +21,7 @@
         <tbody>
         <% licenses.forEach(function(lic) { %>
           <tr>
-            <td><%= lic.name %></td>
+            <td><%= lic.display_name %></td>
             <td><%= lic.platform %></td>
             <td><%= lic.count %></td>
             <td><a href="#" class="allocated-link" data-license-id="<%= lic.id %>"><%= lic.allocated %></a></td>
