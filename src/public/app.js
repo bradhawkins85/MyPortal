@@ -93,6 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize DataTables for visible tables
     if (typeof DataTable !== 'undefined') {
       DataTable.defaults.pageLength = 5;
+      DataTable.defaults.lengthMenu = [5, 10, 25, 50, 100];
       function initDataTable(table) {
         if (table.dataset.datatableInitialized) return;
         new DataTable(table);
