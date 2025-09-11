@@ -2973,11 +2973,17 @@ app.post(
   }
 );
 
-app.post('/apps', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { sku, name, price, contractTerm } = req.body;
-  await createApp(sku, name, parseFloat(price), contractTerm);
-  res.redirect('/admin#apps');
-});
+  app.post('/apps', ensureAuth, ensureSuperAdmin, async (req, res) => {
+    const { sku, vendorSku, name, price, contractTerm } = req.body;
+    await createApp(
+      sku,
+      vendorSku || null,
+      name,
+      parseFloat(price),
+      contractTerm
+    );
+    res.redirect('/admin#apps');
+  });
 
 app.post('/apps/price', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { companyId, appId, price } = req.body;
@@ -2989,17 +2995,18 @@ app.post('/apps/price', ensureAuth, ensureSuperAdmin, async (req, res) => {
   res.redirect('/admin#apps');
 });
 
-app.post('/apps/:id/update', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { sku, name, price, contractTerm } = req.body;
-  await updateApp(
-    parseInt(req.params.id, 10),
-    sku,
-    name,
-    parseFloat(price),
-    contractTerm
-  );
-  res.redirect('/admin#apps');
-});
+  app.post('/apps/:id/update', ensureAuth, ensureSuperAdmin, async (req, res) => {
+    const { sku, vendorSku, name, price, contractTerm } = req.body;
+    await updateApp(
+      parseInt(req.params.id, 10),
+      sku,
+      vendorSku || null,
+      name,
+      parseFloat(price),
+      contractTerm
+    );
+    res.redirect('/admin#apps');
+  });
 
 app.post('/apps/:id/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
   await deleteApp(parseInt(req.params.id, 10));
@@ -3922,14 +3929,16 @@ api.use(async (req, res, next) => {
  *         application/json:
  *           schema:
  *             type: object
- *             properties:
- *               sku:
- *                 type: string
- *               name:
- *                 type: string
- *               defaultPrice:
- *                 type: number
- *               contractTerm:
+  *             properties:
+  *               sku:
+  *                 type: string
+  *               vendorSku:
+  *                 type: string
+  *               name:
+  *                 type: string
+  *               defaultPrice:
+  *                 type: number
+  *               contractTerm:
  *                 type: string
  *     responses:
  *       200:
@@ -3941,10 +3950,16 @@ api.route('/apps')
     res.json(apps);
   })
   .post(async (req, res) => {
-    const { sku, name, defaultPrice, contractTerm } = req.body;
-    const id = await createApp(sku, name, defaultPrice, contractTerm);
-    res.json({ id });
-  });
+      const { sku, vendorSku, name, defaultPrice, contractTerm } = req.body;
+      const id = await createApp(
+        sku,
+        vendorSku || null,
+        name,
+        defaultPrice,
+        contractTerm
+      );
+      res.json({ id });
+    });
 
 /**
  * @openapi
@@ -3980,14 +3995,16 @@ api.route('/apps')
  *         application/json:
  *           schema:
  *             type: object
- *             properties:
- *               sku:
- *                 type: string
- *               name:
- *                 type: string
- *               defaultPrice:
- *                 type: number
- *               contractTerm:
+  *             properties:
+  *               sku:
+  *                 type: string
+  *               vendorSku:
+  *                 type: string
+  *               name:
+  *                 type: string
+  *               defaultPrice:
+  *                 type: number
+  *               contractTerm:
  *                 type: string
  *     responses:
  *       200:
@@ -4014,17 +4031,18 @@ api.route('/apps/:id')
     }
     res.json(app);
   })
-  .put(async (req, res) => {
-    const { sku, name, defaultPrice, contractTerm } = req.body;
-    await updateApp(
-      parseInt(req.params.id, 10),
-      sku,
-      name,
-      defaultPrice,
-      contractTerm
-    );
-    res.json({ success: true });
-  })
+    .put(async (req, res) => {
+      const { sku, vendorSku, name, defaultPrice, contractTerm } = req.body;
+      await updateApp(
+        parseInt(req.params.id, 10),
+        sku,
+        vendorSku || null,
+        name,
+        defaultPrice,
+        contractTerm
+      );
+      res.json({ success: true });
+    })
   .delete(async (req, res) => {
     await deleteApp(parseInt(req.params.id, 10));
     res.json({ success: true });

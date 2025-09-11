@@ -10,18 +10,7 @@ import {
 } from '../queries';
 import { decryptSecret, encryptSecret } from '../crypto';
 import { logInfo, logError } from '../logger';
-
-// Map Microsoft 365 SKU part numbers to friendly product names
-const skuNameMap: Record<string, string> = {
-  O365_BUSINESS: 'Microsoft 365 Apps for Business',
-  O365_BUSINESS_ESSENTIALS: 'Microsoft 365 Business Basic',
-  O365_BUSINESS_PREMIUM: 'Microsoft 365 Business Standard',
-  STANDARDPACK: 'Office 365 E1',
-  ENTERPRISEPACK: 'Office 365 E3',
-  ENTERPRISEPREMIUM: 'Office 365 E5',
-  ENTERPRISEPREMIUM_NOPSTNCONF: 'Office 365 E5 without Audio Conferencing',
-  DESKLESSPACK: 'Office 365 F3',
-};
+import { m365SkuNameMap } from '../data/m365SkuMap';
 async function createCca(companyId: number): Promise<ConfidentialClientApplication> {
   const creds = await getM365Credentials(companyId);
   if (!creds) {
@@ -85,7 +74,9 @@ export async function syncM365Licenses(companyId: number): Promise<void> {
       for (const sku of skus.value) {
         const partNumber = sku.skuPartNumber as string;
         const count = sku.prepaidUnits?.enabled || 0;
-        const name = skuNameMap[partNumber as keyof typeof skuNameMap] ?? partNumber;
+        const name =
+          m365SkuNameMap[partNumber as keyof typeof m365SkuNameMap] ??
+          partNumber;
         const existing = await getLicenseByCompanyAndSku(companyId, partNumber);
         if (existing) {
           await updateLicense(
