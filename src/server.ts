@@ -1920,7 +1920,7 @@ app.get('/m365/connect', ensureAuth, ensureLicenseAccess, async (req, res) => {
     },
   });
   const authUrl = await appCca.getAuthCodeUrl({
-    scopes: ['offline_access', 'https://graph.microsoft.com/.default'],
+    scopes: ['openid', 'profile', 'offline_access', 'User.Read'],
     redirectUri: `${req.protocol}://${req.get('host')}/m365/callback`,
     state: String(companyId),
   });
@@ -1943,7 +1943,7 @@ app.get('/m365/callback', async (req, res) => {
   try {
     const token: any = await appCca.acquireTokenByCode({
       code,
-      scopes: ['offline_access', 'https://graph.microsoft.com/.default'],
+      scopes: ['openid', 'profile', 'offline_access', 'User.Read'],
       redirectUri: `${req.protocol}://${req.get('host')}/m365/callback`,
     });
     await upsertM365Credentials(
