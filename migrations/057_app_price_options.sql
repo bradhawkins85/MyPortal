@@ -1,4 +1,8 @@
-CREATE TABLE app_price_options (
+-- Create the table only if it doesn't already exist to ensure that
+-- rerunning the migration doesn't throw an error when the table is
+-- present. This makes the migration idempotent and keeps application
+-- start-up resilient even if the database was partially migrated.
+CREATE TABLE IF NOT EXISTS app_price_options (
   id INT AUTO_INCREMENT PRIMARY KEY,
   app_id INT NOT NULL,
   payment_term ENUM('monthly','annual') NOT NULL,
@@ -12,7 +16,10 @@ ALTER TABLE company_app_prices
   ADD COLUMN IF NOT EXISTS payment_term ENUM('monthly','annual') NOT NULL DEFAULT 'monthly',
   ADD COLUMN IF NOT EXISTS contract_term ENUM('monthly','annual') NOT NULL DEFAULT 'monthly';
 
-INSERT INTO app_price_options (app_id, payment_term, contract_term, price)
+-- Populate the table with default pricing options.  Using INSERT IGNORE
+-- prevents duplicate entry errors if the migration is executed after
+-- rows have already been inserted.
+INSERT IGNORE INTO app_price_options (app_id, payment_term, contract_term, price)
 SELECT
   id,
   'monthly',
