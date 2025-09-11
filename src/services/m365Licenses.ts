@@ -7,6 +7,10 @@ import {
   getLicenseByCompanyAndSku,
   getM365Credentials,
   upsertM365Credentials,
+  getStaffByCompanyAndEmail,
+  linkStaffToLicense,
+  getStaffForLicense,
+  unlinkStaffFromLicense,
 } from '../queries';
 import { decryptSecret, encryptSecret } from '../crypto';
 import { logInfo, logError } from '../logger';
@@ -73,11 +77,13 @@ export async function syncM365Licenses(companyId: number): Promise<void> {
     if (skus.value && Array.isArray(skus.value)) {
       for (const sku of skus.value) {
         const partNumber = sku.skuPartNumber as string;
+        const skuId = sku.skuId as string;
         const count = sku.prepaidUnits?.enabled || 0;
         const name =
           m365SkuNameMap[partNumber as keyof typeof m365SkuNameMap] ??
           partNumber;
         const existing = await getLicenseByCompanyAndSku(companyId, partNumber);
+        let licenseId: number;
         if (existing) {
           await updateLicense(
             existing.id,
@@ -88,8 +94,39 @@ export async function syncM365Licenses(companyId: number): Promise<void> {
             existing.expiry_date,
             existing.contract_term
           );
+          licenseId = existing.id;
         } else {
-          await createLicense(companyId, name, partNumber, count, null, '');
+          licenseId = await createLicense(
+            companyId,
+            name,
+            partNumber,
+            count,
+            null,
+            ''
+          );
+        }
+
+        const users = await client
+          .api(`/subscribedSkus/${skuId}/users`)
+          .select(['id', 'userPrincipalName', 'mail'])
+          .get();
+        const assignedEmails: string[] = [];
+        if (users.value && Array.isArray(users.value)) {
+          for (const u of users.value) {
+            const email = String(u.mail || u.userPrincipalName || '').toLowerCase();
+            if (!email) continue;
+            const staff = await getStaffByCompanyAndEmail(companyId, email);
+            if (staff) {
+              assignedEmails.push(staff.email.toLowerCase());
+              await linkStaffToLicense(staff.id, licenseId);
+            }
+          }
+        }
+        const current = await getStaffForLicense(licenseId);
+        for (const s of current) {
+          if (!assignedEmails.includes(s.email.toLowerCase())) {
+            await unlinkStaffFromLicense(s.id, licenseId);
+          }
         }
       }
     }
