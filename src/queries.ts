@@ -48,13 +48,21 @@ export interface App {
   sku: string;
   vendor_sku: string | null;
   name: string;
-  default_price: number;
-  contract_term: string;
 }
 
 export interface CompanyAppPrice {
   company_id: number;
   app_id: number;
+  price: number;
+  payment_term: string;
+  contract_term: string;
+}
+
+export interface AppPriceOption {
+  id: number;
+  app_id: number;
+  payment_term: string;
+  contract_term: string;
   price: number;
 }
 
@@ -412,13 +420,11 @@ export async function getAllApps(): Promise<App[]> {
 export async function createApp(
   sku: string,
   vendorSku: string | null,
-  name: string,
-  defaultPrice: number,
-  contractTerm: string
+  name: string
 ): Promise<number> {
   const [result] = await pool.execute(
-      'INSERT INTO apps (sku, vendor_sku, name, default_price, contract_term) VALUES (?, ?, ?, ?, ?)',
-      [sku, vendorSku, name, defaultPrice, contractTerm]
+      'INSERT INTO apps (sku, vendor_sku, name) VALUES (?, ?, ?)',
+      [sku, vendorSku, name]
   );
   const insert = result as ResultSetHeader;
   return insert.insertId;
@@ -436,13 +442,11 @@ export async function updateApp(
   id: number,
   sku: string,
   vendorSku: string | null,
-  name: string,
-  defaultPrice: number,
-  contractTerm: string
+  name: string
 ): Promise<void> {
   await pool.execute(
-    'UPDATE apps SET sku = ?, vendor_sku = ?, name = ?, default_price = ?, contract_term = ? WHERE id = ?',
-    [sku, vendorSku, name, defaultPrice, contractTerm, id]
+    'UPDATE apps SET sku = ?, vendor_sku = ?, name = ? WHERE id = ?',
+    [sku, vendorSku, name, id]
   );
 }
 
@@ -453,23 +457,27 @@ export async function deleteApp(id: number): Promise<void> {
 export async function upsertCompanyAppPrice(
   companyId: number,
   appId: number,
+  paymentTerm: string,
+  contractTerm: string,
   price: number
 ): Promise<void> {
   await pool.execute(
-    `INSERT INTO company_app_prices (company_id, app_id, price)
-     VALUES (?, ?, ?)
+    `INSERT INTO company_app_prices (company_id, app_id, payment_term, contract_term, price)
+     VALUES (?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE price = VALUES(price)` ,
-    [companyId, appId, price]
+    [companyId, appId, paymentTerm, contractTerm, price]
   );
 }
 
 export async function getAppPrice(
   companyId: number,
-  appId: number
+  appId: number,
+  paymentTerm: string,
+  contractTerm: string
 ): Promise<number | null> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT price FROM company_app_prices WHERE company_id = ? AND app_id = ?',
-    [companyId, appId]
+    'SELECT price FROM company_app_prices WHERE company_id = ? AND app_id = ? AND payment_term = ? AND contract_term = ?',
+    [companyId, appId, paymentTerm, contractTerm]
   );
   return rows[0] ? (rows[0] as any).price : null;
 }
@@ -483,7 +491,8 @@ export async function getCompanyAppPrices(): Promise<
   })[]
 > {
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT cap.company_id, cap.app_id, cap.price, c.name AS company_name, a.name AS app_name, a.sku AS sku, a.vendor_sku AS vendor_sku
+    `SELECT cap.company_id, cap.app_id, cap.price, cap.payment_term, cap.contract_term,
+            c.name AS company_name, a.name AS app_name, a.sku AS sku, a.vendor_sku AS vendor_sku
      FROM company_app_prices cap
      JOIN companies c ON cap.company_id = c.id
      JOIN apps a ON cap.app_id = a.id`
@@ -493,12 +502,57 @@ export async function getCompanyAppPrices(): Promise<
 
 export async function deleteCompanyAppPrice(
   companyId: number,
-  appId: number
+  appId: number,
+  paymentTerm: string,
+  contractTerm: string
 ): Promise<void> {
   await pool.execute(
-    'DELETE FROM company_app_prices WHERE company_id = ? AND app_id = ?',
-    [companyId, appId]
+    'DELETE FROM company_app_prices WHERE company_id = ? AND app_id = ? AND payment_term = ? AND contract_term = ?',
+    [companyId, appId, paymentTerm, contractTerm]
   );
+}
+
+export async function addAppPriceOption(
+  appId: number,
+  paymentTerm: string,
+  contractTerm: string,
+  price: number
+): Promise<void> {
+  await pool.execute(
+    `INSERT INTO app_price_options (app_id, payment_term, contract_term, price)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+    [appId, paymentTerm, contractTerm, price]
+  );
+}
+
+export async function getAppPriceOptions(
+  appId?: number
+): Promise<AppPriceOption[]> {
+  let sql = 'SELECT * FROM app_price_options';
+  const params: any[] = [];
+  if (appId !== undefined) {
+    sql += ' WHERE app_id = ?';
+    params.push(appId);
+  }
+  const [rows] = await pool.query<RowDataPacket[]>(sql, params);
+  return rows as any;
+}
+
+export async function getAppPriceOption(
+  appId: number,
+  paymentTerm: string,
+  contractTerm: string
+): Promise<AppPriceOption | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM app_price_options WHERE app_id = ? AND payment_term = ? AND contract_term = ?',
+    [appId, paymentTerm, contractTerm]
+  );
+  return (rows as AppPriceOption[])[0] || null;
+}
+
+export async function deleteAppPriceOption(id: number): Promise<void> {
+  await pool.execute('DELETE FROM app_price_options WHERE id = ?', [id]);
 }
 
 export async function getUserCount(): Promise<number> {
