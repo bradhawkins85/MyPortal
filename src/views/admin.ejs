@@ -700,7 +700,14 @@
                   <td><%= p.sku %></td>
                   <td><%= p.app_name %></td>
                   <td><%= p.price %></td>
-                  <td><button class="add-sku-company" data-app-id="<%= p.app_id %>" data-company-id="<%= p.company_id %>" data-company-name="<%= p.company_name %>">Add to Company</button></td>
+                  <td>
+                    <form action="/apps/price/delete" method="post" style="display:inline" data-confirm="Delete company price?">
+                      <input type="hidden" name="companyId" value="<%= p.company_id %>">
+                      <input type="hidden" name="appId" value="<%= p.app_id %>">
+                      <button type="submit">Delete</button>
+                    </form>
+                    <button class="add-sku-company" data-app-id="<%= p.app_id %>" data-company-id="<%= p.company_id %>" data-company-name="<%= p.company_name %>">Add to Company</button>
+                  </td>
                 </tr>
               <% }); %>
               </tbody>
