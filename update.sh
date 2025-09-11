@@ -4,6 +4,12 @@ set -e
 # Navigate to the project root directory
 cd "$(dirname "$0")"
 
+# Load GitHub credentials from .env if present
+if [ -f .env ]; then
+  GITHUB_USERNAME=$(grep -E '^GITHUB_USERNAME=' .env | head -n 1 | cut -d '=' -f2- | sed 's/#.*//' | tr -d '"')
+  GITHUB_PASSWORD=$(grep -E '^GITHUB_PASSWORD=' .env | head -n 1 | cut -d '=' -f2- | sed 's/#.*//' | tr -d '"')
+fi
+
 # Optional credentials for authenticated pulls
 USERNAME="${GITHUB_USERNAME:-$1}"
 PASSWORD="${GITHUB_PASSWORD:-$2}"
