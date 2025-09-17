@@ -167,3 +167,10 @@ to that service so that super admins can launch the builder directly from the
 Forms admin area. See [docs/opnform.md](docs/opnform.md) for deployment and
 security guidance, including the supplied nginx configuration snippet in
 [`deploy/nginx/opnform.conf`](deploy/nginx/opnform.conf).
+
+When OpnForm is hosted on a different origin, add the host to the
+`FORM_PROXY_ALLOWED_HOSTS` environment variable (comma separated). The portal
+will securely proxy matching forms so that they continue to render inside the
+iframe while preserving the “Open form in new tab” behaviour for everything
+else. The value from `OPNFORM_BASE_URL` and `form.hawkinsit.au` are permitted by
+default.
