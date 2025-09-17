@@ -7,12 +7,40 @@
     <div class="content">
       <h1>Forms</h1>
       <% if (forms.length > 0) { %>
+        <% const firstEmbeddable = forms.find(function(f){ return f.embedUrl; }); %>
+        <% const activeFormId = firstEmbeddable ? firstEmbeddable.id : null; %>
         <div class="forms-menu">
           <% forms.forEach(function(f, idx){ %>
-            <button data-open-form data-url="<%= f.url %>" class="<%= idx === 0 ? 'active' : '' %>"><%= f.name %></button>
+            <% const isEmbeddable = !!f.embedUrl; %>
+            <button
+              type="button"
+              data-open-form
+              data-url="<%= isEmbeddable ? f.embedUrl : '' %>"
+              <%= !isEmbeddable ? 'data-direct-url="' + f.url + '"' : '' %>
+              class="<%= activeFormId === f.id ? 'active' : '' %> <%= !isEmbeddable ? 'external' : '' %>"
+            >
+              <span><%= f.name %></span>
+              <% if (!isEmbeddable) { %>
+                <span class="forms-external-note" aria-hidden="true">(opens new tab)</span>
+              <% } %>
+            </button>
           <% }); %>
         </div>
-        <iframe id="form-frame" class="form-frame" src="<%= forms[0].url %>"></iframe>
+        <div class="form-viewer">
+          <iframe
+            id="form-frame"
+            class="form-frame"
+            src="<%= firstEmbeddable ? firstEmbeddable.embedUrl : '' %>"
+            <%= firstEmbeddable ? '' : 'hidden' %>
+            title="Selected form"
+          ></iframe>
+          <div id="form-unavailable" class="form-unavailable" <%= firstEmbeddable ? 'hidden' : '' %>>
+            <p>The selected form must be opened in a new tab due to security restrictions.</p>
+            <% if (!firstEmbeddable && forms.length > 0) { %>
+              <p>Select a form to open it in a separate tab.</p>
+            <% } %>
+          </div>
+        </div>
       <% } else { %>
         <p>No forms available.</p>
       <% } %>
@@ -20,8 +48,32 @@
   </div>
   <script>
     function showForm(url, btn) {
-      document.getElementById('form-frame').src = url;
-      document.querySelectorAll('.forms-menu button').forEach(b => b.classList.remove('active'));
+      const frame = document.getElementById('form-frame');
+      const unavailable = document.getElementById('form-unavailable');
+      if (!frame || !unavailable) return;
+
+      if (!url) {
+        const directUrl = btn ? btn.getAttribute('data-direct-url') : null;
+        frame.hidden = true;
+        frame.src = 'about:blank';
+        unavailable.hidden = false;
+        document
+          .querySelectorAll('.forms-menu button')
+          .forEach((b) => b.classList.remove('active'));
+        if (btn) btn.classList.add('active');
+        if (directUrl) {
+          window.open(directUrl, '_blank', 'noopener');
+        }
+        return;
+      }
+
+      frame.hidden = false;
+      frame.src = url;
+      unavailable.hidden = true;
+
+      document
+        .querySelectorAll('.forms-menu button')
+        .forEach((b) => b.classList.remove('active'));
       if (btn) btn.classList.add('active');
     }
   </script>

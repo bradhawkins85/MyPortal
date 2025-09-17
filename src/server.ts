@@ -24,6 +24,9 @@ import cron from 'node-cron';
 import { getRandomDailyCron } from './cron';
 import { execFile } from 'child_process';
 import util from 'util';
+import http from 'http';
+import https from 'https';
+import { pipeline } from 'stream';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import {
@@ -227,6 +230,21 @@ const opnformBaseUrl = configuredOpnformBaseUrl
     ? configuredOpnformBaseUrl
     : `${configuredOpnformBaseUrl}/`
   : defaultOpnformBaseUrl;
+
+const defaultAllowedFormHosts = 'form.hawkinsit.au';
+const configuredAllowedFormHosts = process.env.FORM_PROXY_ALLOWED_HOSTS;
+const formProxyAllowedHosts = new Set(
+  (configuredAllowedFormHosts ?? defaultAllowedFormHosts)
+    .split(',')
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+const primaryFormProxyHost =
+  formProxyAllowedHosts.values().next().value ?? defaultAllowedFormHosts;
+
+const FORM_PROXY_ROUTE = '/forms/proxy';
+const FORM_PROXY_MAX_HTML_SIZE = 2 * 1024 * 1024; // 2 MiB safety limit
 
 let appVersion = 'unknown';
 let appBuild = 'unknown';
@@ -913,6 +931,321 @@ function mapStaff(s: Staff) {
   };
 }
 
+function isAllowedFormProxyHost(hostname: string): boolean {
+  return formProxyAllowedHosts.has(hostname.toLowerCase());
+}
+
+function resolveFormProxyTarget(rawTarget: unknown): URL | null {
+  if (!rawTarget) {
+    return null;
+  }
+  let value: string;
+  if (Array.isArray(rawTarget)) {
+    const first = rawTarget[0];
+    if (typeof first !== 'string') {
+      return null;
+    }
+    value = first;
+  } else if (typeof rawTarget === 'string') {
+    value = rawTarget;
+  } else {
+    return null;
+  }
+  let decoded = value;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch (err) {
+    // Ignore decode errors and use the raw value
+  }
+  let target: URL;
+  try {
+    target = new URL(decoded);
+  } catch (err) {
+    if (!decoded.startsWith('/')) {
+      return null;
+    }
+    target = new URL(decoded, `https://${primaryFormProxyHost}`);
+  }
+  if (!isAllowedFormProxyHost(target.hostname)) {
+    return null;
+  }
+  return target;
+}
+
+function buildFormProxyUrl(target: URL): string {
+  return `${FORM_PROXY_ROUTE}?target=${encodeURIComponent(target.toString())}`;
+}
+
+function getFormBaseHref(target: URL): string {
+  const clone = new URL(target.toString());
+  clone.hash = '';
+  const path = clone.pathname;
+  const basePath = path.endsWith('/')
+    ? path
+    : path.substring(0, path.lastIndexOf('/') + 1);
+  return `${clone.origin}${basePath}`;
+}
+
+function injectFormProxyHelpers(html: string, target: URL): string {
+  const baseHref = getFormBaseHref(target);
+  const hasBaseTag = /<base\b[^>]*>/i.test(html);
+  const baseTag = `<base href="${baseHref}">`;
+  if (!hasBaseTag) {
+    if (/<head\b[^>]*>/i.test(html)) {
+      html = html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`);
+    } else {
+      html = `${baseTag}${html}`;
+    }
+  }
+
+  const proxyBase = `${FORM_PROXY_ROUTE}?target=`;
+  const scriptContent = [
+    '(function(){',
+    `const originalUrl=${JSON.stringify(target.toString())};`,
+    `const targetOrigin=${JSON.stringify(target.origin)};`,
+    `const proxyBase=${JSON.stringify(proxyBase)};`,
+    'function toProxy(url){',
+    'try{',
+    'const absolute=new URL(url,originalUrl);',
+    "if(absolute.origin!==targetOrigin){return url;}",
+    'return proxyBase+encodeURIComponent(absolute.toString());',
+    '}catch{return url;}',
+    '}',
+    'document.querySelectorAll(\'form\').forEach(function(form){',
+    "const action=form.getAttribute('action')||originalUrl;",
+    'const proxied=toProxy(action);',
+    'if(proxied!==action){form.setAttribute(\'action\',proxied);}',
+    '});',
+    'document.addEventListener(\'click\',function(event){',
+    'const anchor=event.target instanceof Element?event.target.closest(\'a[href]\'):null;',
+    'if(!anchor){return;}',
+    "const href=anchor.getAttribute('href');",
+    "if(!href||href.startsWith('#')||href.startsWith('javascript:')){return;}",
+    'const proxied=toProxy(href);',
+    'if(proxied!==href){event.preventDefault();window.location.assign(proxied);}',
+    '});',
+    '})();',
+  ].join('');
+  const script = `\n<script>${scriptContent}</scr` + 'ipt>\n';
+
+  if (/<\/body>/i.test(html)) {
+    html = html.replace(/<\/body>/i, `${script}</body>`);
+  } else {
+    html += script;
+  }
+  return html;
+}
+
+function rewriteFormProxyLocation(
+  value: string | string[] | undefined,
+  currentTarget: URL
+): string | string[] | undefined {
+  if (!value) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => rewriteFormProxyLocation(item, currentTarget) as string);
+  }
+  try {
+    const absolute = new URL(value, currentTarget);
+    if (isAllowedFormProxyHost(absolute.hostname)) {
+      return buildFormProxyUrl(absolute);
+    }
+    return value;
+  } catch (err) {
+    return value;
+  }
+}
+
+const hopByHopHeaders = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
+
+const formProxyMiddleware: express.RequestHandler = (req, res) => {
+  const targetUrl = resolveFormProxyTarget(req.query.target);
+  if (!targetUrl) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(400).type('text/plain').send('Invalid form target');
+    return;
+  }
+  if (!['GET', 'HEAD', 'POST'].includes(req.method)) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(405).type('text/plain').send('Method not allowed');
+    return;
+  }
+
+  const requestHeaders: http.OutgoingHttpHeaders = {};
+  const passThroughHeaders = ['accept', 'accept-language', 'content-type'];
+  for (const header of passThroughHeaders) {
+    const value = req.headers[header];
+    if (typeof value === 'string') {
+      requestHeaders[header] = value;
+    } else if (Array.isArray(value) && value.length) {
+      requestHeaders[header] = value.join(',');
+    }
+  }
+  if (typeof req.headers['content-length'] === 'string') {
+    requestHeaders['content-length'] = req.headers['content-length'];
+  }
+  requestHeaders['accept-encoding'] = 'identity';
+  requestHeaders['host'] = targetUrl.host;
+  requestHeaders['origin'] = targetUrl.origin;
+  requestHeaders['referer'] = targetUrl.toString();
+  requestHeaders['user-agent'] =
+    typeof req.headers['user-agent'] === 'string'
+      ? req.headers['user-agent']
+      : 'MyPortalFormProxy/1.0';
+
+  const requestOptions: https.RequestOptions = {
+    protocol: targetUrl.protocol,
+    hostname: targetUrl.hostname,
+    port:
+      targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80),
+    method: req.method,
+    path: `${targetUrl.pathname}${targetUrl.search}`,
+    headers: requestHeaders,
+  };
+
+  const transport = targetUrl.protocol === 'https:' ? https : http;
+  const proxyReq = transport.request(requestOptions, (proxyRes) => {
+    const statusCode = proxyRes.statusCode ?? 502;
+    res.status(statusCode);
+
+    for (const [header, value] of Object.entries(proxyRes.headers)) {
+      if (!value) {
+        continue;
+      }
+      const headerName = header.toLowerCase();
+      if (hopByHopHeaders.has(headerName)) {
+        continue;
+      }
+      if (headerName === 'x-frame-options' || headerName === 'content-security-policy') {
+        continue;
+      }
+      if (headerName === 'set-cookie') {
+        continue;
+      }
+      if (headerName === 'content-length') {
+        continue;
+      }
+      if (headerName === 'location') {
+        const rewritten = rewriteFormProxyLocation(value, targetUrl);
+        if (rewritten) {
+          res.setHeader(header, rewritten);
+        }
+        continue;
+      }
+      res.setHeader(header, value as string | readonly string[]);
+    }
+
+    const contentTypeHeader = proxyRes.headers['content-type'];
+    const contentType = Array.isArray(contentTypeHeader)
+      ? contentTypeHeader[0]
+      : contentTypeHeader ?? '';
+    const isHtml = typeof contentType === 'string' && contentType.includes('text/html');
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    if (isHtml) {
+      const chunks: Buffer[] = [];
+      let totalLength = 0;
+      proxyRes.on('data', (chunk) => {
+        const bufferChunk =
+          typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : Buffer.from(chunk);
+        totalLength += bufferChunk.length;
+        if (totalLength > FORM_PROXY_MAX_HTML_SIZE) {
+          proxyReq.destroy(new Error('Form response exceeded size limit'));
+          return;
+        }
+        chunks.push(bufferChunk);
+      });
+      proxyRes.on('end', () => {
+        if (res.headersSent && res.writableEnded) {
+          return;
+        }
+        let body = Buffer.concat(chunks).toString('utf8');
+        body = injectFormProxyHelpers(body, targetUrl);
+        const defaultSrc = [
+          "'self'",
+          targetUrl.origin,
+          'data:',
+          'blob:',
+        ].join(' ');
+        const scriptSrc = ["'self'", "'unsafe-inline'", targetUrl.origin].join(' ');
+        const styleSrc = ["'self'", "'unsafe-inline'", targetUrl.origin].join(' ');
+        const imgSrc = ["'self'", targetUrl.origin, 'data:'].join(' ');
+        const connectSrc = ["'self'", targetUrl.origin].join(' ');
+        const fontSrc = ["'self'", targetUrl.origin, 'data:'].join(' ');
+        const frameSrc = ["'self'", targetUrl.origin].join(' ');
+        const formAction = ["'self'", targetUrl.origin].join(' ');
+        const policy = [
+          `default-src ${defaultSrc}`,
+          `script-src ${scriptSrc}`,
+          `style-src ${styleSrc}`,
+          `img-src ${imgSrc}`,
+          `connect-src ${connectSrc}`,
+          `font-src ${fontSrc}`,
+          `frame-src ${frameSrc}`,
+          `form-action ${formAction}`,
+          "frame-ancestors 'self'",
+        ].join('; ');
+        res.setHeader('Content-Security-Policy', policy);
+        res.removeHeader('Content-Length');
+        res.setHeader('Content-Type', contentType || 'text/html; charset=utf-8');
+        res.send(body);
+      });
+      proxyRes.on('error', () => {
+        if (!res.headersSent) {
+          res.setHeader('Cache-Control', 'no-store');
+          res.status(502).type('text/plain').send('Failed to load form');
+        } else {
+          res.end();
+        }
+      });
+      return;
+    }
+
+    pipeline(proxyRes, res, (err) => {
+      if (err && !res.headersSent) {
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(502).type('text/plain').send('Failed to load form');
+      }
+    });
+  });
+
+  proxyReq.on('timeout', () => {
+    proxyReq.destroy(new Error('Form proxy timeout'));
+  });
+
+  proxyReq.on('error', (err) => {
+    if (!res.headersSent) {
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(502).type('text/plain').send('Failed to load form');
+    } else {
+      res.end();
+    }
+  });
+
+  req.on('aborted', () => {
+    proxyReq.destroy();
+  });
+
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    proxyReq.end();
+  } else {
+    req.pipe(proxyReq);
+  }
+};
+
 const app = express();
 app.set('trust proxy', 1);
 app.set('view engine', 'ejs');
@@ -993,6 +1326,8 @@ app.use(
 // Attach the audit logger before body parsing so that even requests that
 // fail in the parsers (e.g. malformed JSON) are still recorded
 app.use(auditLogger);
+
+app.use(FORM_PROXY_ROUTE, ensureAuth, formProxyMiddleware);
 
 // Body parsing and static serving come after the audit logger
 app.use(express.urlencoded({ extended: true }));
@@ -2528,10 +2863,15 @@ app.get('/forms', ensureAuth, async (req, res) => {
       loginUrl: `${baseUrl}/login`,
     },
   });
-  const hydratedForms = forms.map((form) => ({
-    ...form,
-    url: applyTemplateVariables(form.url, replacements),
-  }));
+  const hydratedForms = forms.map((form) => {
+    const appliedUrl = applyTemplateVariables(form.url, replacements);
+    const proxyTarget = resolveFormProxyTarget(appliedUrl);
+    return {
+      ...form,
+      url: appliedUrl,
+      embedUrl: proxyTarget ? buildFormProxyUrl(proxyTarget) : null,
+    };
+  });
   res.render('forms', {
     forms: hydratedForms,
     companies,
