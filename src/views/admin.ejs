@@ -637,6 +637,7 @@
           <section>
               <h2>Add App</h2>
               <form action="/apps" method="post">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                 <input type="text" name="sku" placeholder="SKU" required>
                 <input type="text" name="vendorSku" placeholder="Vendor SKU">
                 <input type="text" name="name" placeholder="Name" required>
@@ -657,9 +658,11 @@
                     <td><input type="text" name="name" value="<%= a.name %>" form="app-<%= a.id %>"></td>
                     <td>
                       <form id="app-<%= a.id %>" action="/apps/<%= a.id %>/update" method="post" style="display:inline">
+                        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                         <button type="submit">Save</button>
                       </form>
                       <form action="/apps/<%= a.id %>/delete" method="post" style="display:inline" data-confirm="Delete app?">
+                        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                         <button type="submit">Delete</button>
                       </form>
                       <button class="add-sku-default" data-app-id="<%= a.id %>" data-app-name="<%= a.name %>">Add to Company</button>
@@ -672,6 +675,7 @@
           <section>
             <h2>App Price Options</h2>
             <form action="/apps/prices" method="post">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <label for="appId">App</label>
               <select id="appId" name="appId">
                 <% apps.forEach(function(a){ %>
@@ -705,6 +709,7 @@
                   <td><%= p.price %></td>
                   <td>
                     <form action="/apps/prices/<%= p.id %>/delete" method="post" style="display:inline" data-confirm="Delete price option?">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <button type="submit">Delete</button>
                     </form>
                   </td>
@@ -716,6 +721,7 @@
           <section>
             <h2>Company Pricing</h2>
             <form action="/apps/price" method="post">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <select name="combo">
                 <% appPrices.forEach(function(p){
                      const app = apps.find(a => a.id === p.app_id);
@@ -747,6 +753,7 @@
                   <td><%= p.price %></td>
                   <td>
                     <form action="/apps/price/delete" method="post" style="display:inline" data-confirm="Delete company price?">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="companyId" value="<%= p.company_id %>">
                       <input type="hidden" name="appId" value="<%= p.app_id %>">
                       <input type="hidden" name="paymentTerm" value="<%= p.payment_term %>">
