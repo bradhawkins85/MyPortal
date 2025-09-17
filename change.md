@@ -6,3 +6,4 @@
 - 2025-09-17, 07:08 UTC, Fix, Repositioned asset search/view controls above the table with a default-collapsed column accordion
 - 2025-09-17, 07:18 UTC, Fix, Added CSRF protection tokens to scheduled task forms to prevent invalid token errors when managing schedules
 - 2025-09-17, 07:26 UTC, Feature, Split scheduled tasks into system and company tables for clearer administration and visibility
+- 2025-09-17, 07:38 UTC, Feature, Added automated product DBP threshold alerts with super admin email and popup notifications
