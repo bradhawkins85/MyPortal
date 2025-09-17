@@ -215,6 +215,14 @@ if (!sessionSecret) {
   throw new Error('SESSION_SECRET environment variable is required');
 }
 
+const defaultOpnformBaseUrl = '/forms/';
+const configuredOpnformBaseUrl = process.env.OPNFORM_BASE_URL;
+const opnformBaseUrl = configuredOpnformBaseUrl
+  ? configuredOpnformBaseUrl.endsWith('/')
+    ? configuredOpnformBaseUrl
+    : `${configuredOpnformBaseUrl}/`
+  : defaultOpnformBaseUrl;
+
 let appVersion = 'unknown';
 let appBuild = 'unknown';
 try {
@@ -1132,6 +1140,7 @@ app.use(async (req, res, next) => {
   res.locals.hasForms = req.session.hasForms ?? false;
   res.locals.version = appVersion;
   res.locals.build = appBuild;
+  res.locals.opnformBaseUrl = opnformBaseUrl;
   try {
     res.locals.siteSettings = await getSiteSettings();
   } catch (err) {
