@@ -12,4 +12,3 @@
 - 2025-09-17, 09:16 UTC, Fix, Updated CSP frame policy to allow embedding OpnForm frames from form.hawkinsit.au
 - 2025-09-17, 09:34 UTC, Feature, Added dynamic template variables for app URLs and documented usage in README
 - 2025-09-17, 14:09 UTC, Fix, Added secure proxying for external OpnForm embeds with in-portal fallback messaging and documentation
-- 2025-09-17, 14:20 UTC, Fix, Normalised form identifiers to numeric values before proxying embeds to prevent 404 errors on allowed hosts
