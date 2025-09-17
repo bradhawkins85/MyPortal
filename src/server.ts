@@ -2795,7 +2795,7 @@ app.post(
     const { name, sku, vendor_sku, description, price, vip_price, stock, category_id } =
       req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
-    await createProduct(
+    const createdProductId = await createProduct(
       name,
       sku,
       vendor_sku,
@@ -2806,6 +2806,23 @@ app.post(
       parseInt(stock, 10),
       category_id ? parseInt(category_id, 10) : null
     );
+    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    const trimmedVendorSku =
+      typeof vendor_sku === 'string' ? vendor_sku.trim() : '';
+    const normalizedName = trimmedName ? trimmedName.toLowerCase() : '';
+    const normalizedVendorSku = trimmedVendorSku
+      ? trimmedVendorSku.toLowerCase()
+      : '';
+    if (normalizedName && normalizedName === normalizedVendorSku) {
+      try {
+        await importProductByVendorSku(trimmedVendorSku);
+      } catch (err) {
+        console.error(
+          `Automatic stock feed update failed for product ${createdProductId}`,
+          err
+        );
+      }
+    }
     res.redirect('/admin');
   }
 );
