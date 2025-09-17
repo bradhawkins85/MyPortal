@@ -90,13 +90,6 @@ OPNFORM_BASE_URL=https://forms.example.com/
 The middleware normalises this URL so that templates, notifications, and future
 integrations always generate consistent links.
 
-To embed forms hosted on separate domains, set the
-`FORM_PROXY_ALLOWED_HOSTS` environment variable to a comma-separated list of
-trusted hostnames (for example, `forms.example.com`). Matching forms are
-retrieved through the portal so they render inside the iframe while still
-providing an “Open form in new tab” option. The host defined in
-`OPNFORM_BASE_URL` and `form.hawkinsit.au` are always allowed.
-
 ## 4. Verify the integration
 
 1. Sign in as the super admin and visit **Admin → Forms**.

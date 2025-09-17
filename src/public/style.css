@@ -91,31 +91,6 @@ button:hover {
   background-color: #3700b3;
 }
 
-.button-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  padding: 0.55rem 1.1rem;
-  border-radius: 4px;
-  background-color: #4a00e0;
-  color: #fff;
-  font-weight: 600;
-  text-decoration: none;
-  transition: background-color 0.2s ease-in-out, opacity 0.2s ease-in-out;
-}
-
-.button-link:hover,
-.button-link:focus {
-  background-color: #3700b3;
-}
-
-.button-link.is-disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
 table {
   width: 100%;
   border-collapse: collapse;
@@ -425,41 +400,12 @@ table th {
   background-color: #3700b3;
 }
 
-.form-viewer {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.form-toolbar {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .form-frame {
   width: 100%;
   /* Maintain a 10px buffer at the top and bottom */
   height: calc(100vh - 200px - 20px);
   border: none;
   margin: 10px 0;
-}
-
-.form-unavailable {
-  border: 1px solid #d1d5db;
-  background-color: #f8fafc;
-  border-radius: 8px;
-  padding: 1.5rem;
-  color: #1f2937;
-}
-
-.form-unavailable[hidden] {
-  display: none !important;
-}
-
-.form-unavailable-hint {
-  margin-top: 0.75rem;
-  color: #475569;
-  font-size: 0.95rem;
 }
 
 .modal {
