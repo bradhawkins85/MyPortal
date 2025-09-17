@@ -36,6 +36,11 @@ import {
 import { findExistingStaff } from './staff-import';
 import { syncM365Licenses } from './services/m365Licenses';
 import {
+  TEMPLATE_VARIABLES,
+  applyTemplateVariables,
+  buildTemplateReplacementMap,
+} from './services/templateVariables';
+import {
   getUserByEmail,
   getCompanyById,
   getCompanyBySyncroId,
@@ -1142,6 +1147,7 @@ app.use(async (req, res, next) => {
   res.locals.version = appVersion;
   res.locals.build = appBuild;
   res.locals.opnformBaseUrl = opnformBaseUrl;
+  res.locals.templateVariables = TEMPLATE_VARIABLES;
   try {
     res.locals.siteSettings = await getSiteSettings();
   } catch (err) {
@@ -2489,12 +2495,45 @@ app.delete('/invoices/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
 });
 
 app.get('/forms', ensureAuth, async (req, res) => {
-  const forms = await getFormsForUser(req.session.userId!);
+  const userId = req.session.userId!;
+  const [forms, companies, currentUser] = await Promise.all([
+    getFormsForUser(userId),
+    getCompaniesForUser(userId),
+    getUserById(userId),
+  ]);
   req.session.hasForms = forms.length > 0;
-  const companies = await getCompaniesForUser(req.session.userId!);
   const current = companies.find((c) => c.company_id === req.session.companyId);
+  const currentCompanyDetails = current?.company_id
+    ? await getCompanyById(current.company_id)
+    : null;
+  const baseUrl = process.env.PORTAL_URL || `${req.protocol}://${req.get('host')}`;
+  const replacements = buildTemplateReplacementMap({
+    user: currentUser
+      ? {
+          id: currentUser.id,
+          email: currentUser.email,
+          firstName: currentUser.first_name ?? '',
+          lastName: currentUser.last_name ?? '',
+        }
+      : undefined,
+    company: current
+      ? {
+          id: current.company_id,
+          name: currentCompanyDetails?.name ?? current.company_name ?? '',
+          syncroCustomerId: currentCompanyDetails?.syncro_company_id ?? null,
+        }
+      : undefined,
+    portal: {
+      baseUrl,
+      loginUrl: `${baseUrl}/login`,
+    },
+  });
+  const hydratedForms = forms.map((form) => ({
+    ...form,
+    url: applyTemplateVariables(form.url, replacements),
+  }));
   res.render('forms', {
-    forms,
+    forms: hydratedForms,
     companies,
     currentCompanyId: req.session.companyId,
     isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
