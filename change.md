@@ -9,3 +9,4 @@
 - 2025-09-17, 07:38 UTC, Feature, Added automated product DBP threshold alerts with super admin email and popup notifications
 - 2025-09-17, 07:47 UTC, Fix, Normalised Syncro CPUAge import to populate asset Approx Age
 - 2025-09-17, 07:54 UTC, Feature, Added OpnForm deployment guidance, nginx proxy config, and super admin builder link
+- 2025-09-17, 09:16 UTC, Fix, Updated CSP frame policy to allow embedding OpnForm frames from form.hawkinsit.au

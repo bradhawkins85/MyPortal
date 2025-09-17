@@ -943,6 +943,7 @@ app.use(
         ],
         imgSrc: ["'self'", 'data:', 'https:'],
         connectSrc: ["'self'"],
+        frameSrc: ["'self'", 'https://form.hawkinsit.au'],
         fontSrc: ["'self'", 'https:', 'data:'],
         objectSrc: ["'none'"],
         upgradeInsecureRequests: [],
