@@ -5,21 +5,49 @@
   <div class="app-container">
     <%- include('partials/sidebar') %>
     <div class="content">
-      <h1>Assets</h1>
-      <section>
-        <h2>Company Assets</h2>
-        <div class="asset-controls">
-          <label for="asset-search">Search: <input type="text" id="asset-search"></label>
-          <div id="column-toggles">
-            <% columns.forEach(function(col){ %>
-              <label>
-                <input type="checkbox" class="column-toggle" data-column="<%= col.key %>" <%= col.key === 'name' ? 'checked disabled' : 'checked' %>>
-                <%= col.label %>
-              </label>
-            <% }); %>
+      <div class="page-header">
+        <div class="page-title">
+          <h1>Assets</h1>
+          <p class="page-subtitle">Company Assets</p>
+        </div>
+        <div class="header-actions">
+          <label for="asset-search" class="search-control">
+            <span class="visually-hidden">Search assets</span>
+            <i class="fas fa-search" aria-hidden="true"></i>
+            <input type="text" id="asset-search" placeholder="Search assets" autocomplete="off" />
+          </label>
+          <div class="view-menu">
+            <button
+              type="button"
+              id="view-menu-toggle"
+              class="view-menu-button"
+              aria-haspopup="true"
+              aria-expanded="false"
+              aria-controls="view-menu-dropdown"
+            >
+              <i class="fas fa-eye" aria-hidden="true"></i>
+              <span>View</span>
+              <i class="fas fa-chevron-down" aria-hidden="true"></i>
+            </button>
+            <div class="view-menu-dropdown" id="view-menu-dropdown" role="menu" aria-hidden="true">
+              <p class="view-menu-title">Toggle columns</p>
+              <ul>
+                <% columns.forEach(function(col){ %>
+                  <li>
+                    <label>
+                      <input type="checkbox" class="column-toggle" data-column="<%= col.key %>" <%= col.key === 'name' ? 'checked disabled' : 'checked' %>>
+                      <span><%= col.label %></span>
+                    </label>
+                  </li>
+                <% }); %>
+              </ul>
+            </div>
           </div>
         </div>
-        <table id="assets-table">
+      </div>
+      <div class="page-body">
+        <section class="asset-section">
+          <table id="assets-table">
           <thead>
             <tr>
               <% columns.forEach(function(col){ %>
@@ -47,8 +75,9 @@
             </tr>
           <% }); %>
           </tbody>
-        </table>
-      </section>
+          </table>
+        </section>
+      </div>
     </div>
   </div>
   <script>
@@ -56,6 +85,40 @@
     const searchInput = document.getElementById('asset-search');
     const STORAGE_KEY = 'assetsTableColumns';
     const toggles = document.querySelectorAll('.column-toggle');
+    const viewMenu = document.querySelector('.view-menu');
+    const viewMenuToggle = document.getElementById('view-menu-toggle');
+    const viewMenuDropdown = document.getElementById('view-menu-dropdown');
+
+    function setViewMenuState(isOpen) {
+      if (!viewMenu || !viewMenuToggle || !viewMenuDropdown) return;
+      viewMenu.classList.toggle('open', isOpen);
+      viewMenuToggle.setAttribute('aria-expanded', String(isOpen));
+      viewMenuDropdown.setAttribute('aria-hidden', String(!isOpen));
+    }
+
+    if (viewMenu && viewMenuToggle && viewMenuDropdown) {
+      viewMenuToggle.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const expanded = viewMenuToggle.getAttribute('aria-expanded') === 'true';
+        setViewMenuState(!expanded);
+      });
+
+      viewMenuDropdown.addEventListener('click', (event) => {
+        event.stopPropagation();
+      });
+
+      document.addEventListener('click', (event) => {
+        if (!viewMenu.contains(event.target)) {
+          setViewMenuState(false);
+        }
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          setViewMenuState(false);
+        }
+      });
+    }
 
     function toggleColumn(col, show) {
       table.querySelectorAll('[data-column="' + col + '"]').forEach((el) => {
