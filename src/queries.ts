@@ -117,6 +117,23 @@ export interface Product {
   category_name?: string;
 }
 
+export interface ProductPriceAlert {
+  id: number;
+  product_id: number;
+  price: number;
+  vip_price: number | null;
+  buy_price: number;
+  threshold_price: number;
+  triggered_at: string;
+  emailed_at: string | null;
+  resolved_at: string | null;
+}
+
+export interface ProductPriceAlertWithProduct extends ProductPriceAlert {
+  product_name: string;
+  product_sku: string;
+}
+
 export interface StockFeedItem {
   sku: string;
   product_name: string;
@@ -1827,6 +1844,83 @@ export async function upsertProductFromFeed(data: UpsertProductInput): Promise<v
       data.manufacturer,
     ]
   );
+}
+
+function mapProductPriceAlert(row: RowDataPacket): ProductPriceAlert {
+  return {
+    id: Number(row.id),
+    product_id: Number(row.product_id),
+    price: Number(row.price),
+    vip_price: row.vip_price !== null ? Number(row.vip_price) : null,
+    buy_price: Number(row.buy_price),
+    threshold_price: Number(row.threshold_price),
+    triggered_at: String(row.triggered_at),
+    emailed_at: row.emailed_at ? String(row.emailed_at) : null,
+    resolved_at: row.resolved_at ? String(row.resolved_at) : null,
+  };
+}
+
+export async function getActiveProductPriceAlertByProductId(
+  productId: number
+): Promise<ProductPriceAlert | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM product_price_alerts WHERE product_id = ? AND resolved_at IS NULL LIMIT 1',
+    [productId]
+  );
+  const row = rows[0];
+  return row ? mapProductPriceAlert(row) : null;
+}
+
+export async function createProductPriceAlert(
+  productId: number,
+  price: number,
+  vipPrice: number | null,
+  buyPrice: number,
+  thresholdPrice: number,
+  triggeredAt: string
+): Promise<number> {
+  const [result] = await pool.execute<ResultSetHeader>(
+    'INSERT INTO product_price_alerts (product_id, price, vip_price, buy_price, threshold_price, triggered_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [productId, price, vipPrice, buyPrice, thresholdPrice, triggeredAt]
+  );
+  return (result as ResultSetHeader).insertId;
+}
+
+export async function markProductPriceAlertEmailed(
+  id: number,
+  emailedAt: string
+): Promise<void> {
+  await pool.execute(
+    'UPDATE product_price_alerts SET emailed_at = ? WHERE id = ?',
+    [emailedAt, id]
+  );
+}
+
+export async function resolveProductPriceAlerts(
+  productId: number,
+  resolvedAt: string
+): Promise<void> {
+  await pool.execute(
+    'UPDATE product_price_alerts SET resolved_at = ? WHERE product_id = ? AND resolved_at IS NULL',
+    [resolvedAt, productId]
+  );
+}
+
+export async function getActiveProductPriceAlerts(): Promise<
+  ProductPriceAlertWithProduct[]
+> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT a.*, p.name AS product_name, p.sku AS product_sku
+     FROM product_price_alerts a
+     JOIN shop_products p ON p.id = a.product_id
+     WHERE a.resolved_at IS NULL
+     ORDER BY a.triggered_at DESC`
+  );
+  return rows.map((row) => ({
+    ...mapProductPriceAlert(row),
+    product_name: String(row.product_name),
+    product_sku: String(row.product_sku),
+  }));
 }
 
 export async function clearStockFeed(): Promise<void> {
