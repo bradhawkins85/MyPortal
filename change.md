@@ -13,4 +13,3 @@
 - 2025-09-17, 09:34 UTC, Feature, Added dynamic template variables for app URLs and documented usage in README
 - 2025-09-17, 13:27 UTC, Fix, Implemented authenticated Hawkins forms proxy with UI fallback to bypass X-Frame-Options errors
 - 2025-09-17, 13:34 UTC, Fix, Rewrote proxied form asset URLs to avoid cross-origin module preloads failing via CORS
-- 2025-09-17, 13:44 UTC, Fix, Forced proxied form assets to use the portal origin so scripts and styles load without CORS failures
