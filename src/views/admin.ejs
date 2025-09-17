@@ -895,7 +895,7 @@
             <h2>Add Form</h2>
             <form action="/forms/admin" method="post">
               <input type="text" name="name" placeholder="Name" required>
-              <input type="url" name="url" placeholder="URL" required>
+              <textarea name="embedCode" placeholder="Paste the OpnForm iframe embed code" rows="4" required></textarea>
               <input type="text" name="description" placeholder="Description">
               <button type="submit">Add</button>
             </form>
@@ -904,13 +904,13 @@
             <h2>Edit Forms</h2>
             <table>
               <thead>
-                <tr><th>Name</th><th>URL</th><th>Description</th><th>Actions</th></tr>
+                <tr><th>Name</th><th>Embed Code</th><th>Description</th><th>Actions</th></tr>
               </thead>
               <tbody>
                 <% forms.forEach(function(f){ %>
                   <tr>
                     <td><input form="form-<%= f.id %>" type="text" name="name" value="<%= f.name %>" required></td>
-                    <td><input form="form-<%= f.id %>" type="url" name="url" value="<%= f.url %>" required></td>
+                    <td><textarea form="form-<%= f.id %>" name="embedCode" rows="4" required><%= f.embedCodeForDisplay %></textarea></td>
                     <td><input form="form-<%= f.id %>" type="text" name="description" value="<%= f.description %>"></td>
                     <td>
                       <form id="form-<%= f.id %>" action="/forms/admin/edit" method="post">

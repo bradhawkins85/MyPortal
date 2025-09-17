@@ -212,6 +212,7 @@ import {
 } from './queries';
 import { runMigrations } from './db';
 import { logInfo, logError } from './logger';
+import { normalizeOpnformEmbedCode } from './opnform-embed';
 
 dotenv.config();
 
@@ -227,6 +228,16 @@ const opnformBaseUrl = configuredOpnformBaseUrl
     ? configuredOpnformBaseUrl
     : `${configuredOpnformBaseUrl}/`
   : defaultOpnformBaseUrl;
+
+let opnformAllowedHost: string | null = null;
+if (configuredOpnformBaseUrl) {
+  try {
+    const parsed = new URL(configuredOpnformBaseUrl);
+    opnformAllowedHost = parsed.host;
+  } catch (err) {
+    opnformAllowedHost = null;
+  }
+}
 
 let appVersion = 'unknown';
 let appBuild = 'unknown';
@@ -2500,6 +2511,11 @@ function escapeHtmlAttribute(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+function buildDefaultOpnformEmbedSnippet(formUrl: string): string {
+  const safeUrl = escapeHtmlAttribute(formUrl);
+  return `<iframe src="${safeUrl}" style="border:0;width:100%;min-height:480px;" loading="lazy" allow="publickey-credentials-get *; publickey-credentials-create *" title="OpnForm form"></iframe>`;
+}
+
 app.get('/forms', ensureAuth, async (req, res) => {
   const userId = req.session.userId!;
   const [forms, companies, currentUser] = await Promise.all([
@@ -3204,9 +3220,26 @@ app.get('/forms/admin', ensureAuth, ensureSuperAdmin, (req, res) => {
 });
 
 app.post('/forms/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { name, url, description } = req.body;
-  await createForm(name, url, description);
-  res.redirect('/admin');
+  const { name, embedCode, description } = req.body as {
+    name?: string;
+    embedCode?: string;
+    description?: string;
+  };
+  if (!name || !embedCode) {
+    return res.status(400).send('Name and embed code are required');
+  }
+  try {
+    const normalized = normalizeOpnformEmbedCode(embedCode, {
+      allowedHost: opnformAllowedHost,
+    });
+    await createForm(name, normalized.formUrl, normalized.sanitizedEmbedCode, description ?? '');
+    res.redirect('/admin');
+  } catch (err) {
+    logError('Failed to create form from embed code', {
+      error: (err as Error).message,
+    });
+    res.status(400).send('Invalid OpnForm embed code provided');
+  }
 });
 
 app.post('/forms/admin/permissions', ensureAuth, ensureSuperAdmin, async (req, res) => {
@@ -3226,9 +3259,29 @@ app.post('/forms/admin/permissions', ensureAuth, ensureSuperAdmin, async (req, r
 });
 
 app.post('/forms/admin/edit', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { id, name, url, description } = req.body;
-  await updateForm(parseInt(id, 10), name, url, description);
-  res.redirect('/admin');
+  const { id, name, embedCode, description } = req.body as {
+    id?: string;
+    name?: string;
+    embedCode?: string;
+    description?: string;
+  };
+  const formId = id ? parseInt(id, 10) : NaN;
+  if (!name || !embedCode || Number.isNaN(formId)) {
+    return res.status(400).send('Form id, name, and embed code are required');
+  }
+  try {
+    const normalized = normalizeOpnformEmbedCode(embedCode, {
+      allowedHost: opnformAllowedHost,
+    });
+    await updateForm(formId, name, normalized.formUrl, normalized.sanitizedEmbedCode, description ?? '');
+    res.redirect('/admin');
+  } catch (err) {
+    logError('Failed to update form from embed code', {
+      error: (err as Error).message,
+      formId,
+    });
+    res.status(400).send('Invalid OpnForm embed code provided');
+  }
 });
 
 app.post('/forms/admin/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
@@ -3451,6 +3504,11 @@ app.get('/admin', ensureAuth, async (req, res) => {
   const priceAlerts: ProductPriceAlertWithProduct[] = isSuperAdmin
     ? await getActiveProductPriceAlerts()
     : [];
+  const formsForView = forms.map((form) => ({
+    ...form,
+    embedCodeForDisplay: form.embed_code ?? buildDefaultOpnformEmbedSnippet(form.url),
+  }));
+
   res.render('admin', {
     allCompanies,
     users,
@@ -3459,7 +3517,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
     apps,
     appPrices,
     companyPrices,
-    forms,
+    forms: formsForView,
     formUsers,
     permissions,
     formAccess,

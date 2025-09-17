@@ -324,6 +324,7 @@ export interface Form {
   name: string;
   url: string;
   description: string;
+  embed_code: string | null;
 }
 
 export async function getUserByEmail(email: string): Promise<User | null> {
@@ -2300,11 +2301,12 @@ export async function isUserSubscribedToOrder(
 export async function createForm(
   name: string,
   url: string,
+  embedCode: string,
   description: string
 ): Promise<number> {
   const [result] = await pool.execute(
-    'INSERT INTO forms (name, url, description) VALUES (?, ?, ?)',
-    [name, url, description]
+    'INSERT INTO forms (name, url, embed_code, description) VALUES (?, ?, ?, ?)',
+    [name, url, embedCode, description]
   );
   const insert = result as ResultSetHeader;
   return insert.insertId;
@@ -2314,11 +2316,12 @@ export async function updateForm(
   id: number,
   name: string,
   url: string,
+  embedCode: string,
   description: string
 ): Promise<void> {
   await pool.execute(
-    'UPDATE forms SET name = ?, url = ?, description = ? WHERE id = ?',
-    [name, url, description, id]
+    'UPDATE forms SET name = ?, url = ?, embed_code = ?, description = ? WHERE id = ?',
+    [name, url, embedCode, description, id]
   );
 }
 

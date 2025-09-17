@@ -95,8 +95,14 @@ integrations always generate consistent links.
 1. Sign in as the super admin and visit **Admin → Forms**.
 2. Click **Open OpnForm**; the builder should open in a new tab.
 3. Create or update a form in OpnForm and publish it.
-4. Return to MyPortal and refresh the page—the form should appear in the list
-   for assignment to companies and users.
+4. From the OpnForm share dialog, copy the **Embed** snippet (the `<iframe>` code
+   block). MyPortal normalises this HTML and validates that it points to the
+   configured OpnForm host.
+5. Return to MyPortal and, under **Admin → Forms**, paste the embed snippet into
+   the **Embed Code** textarea alongside the form name and description. Submit
+   the form to save it.
+6. Refresh the page—the form will now appear in the list for assignment to
+   companies and users.
 
 Troubleshooting tips:
 
