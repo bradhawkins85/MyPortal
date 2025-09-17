@@ -174,6 +174,28 @@ export interface ExtractedAssetDetails {
   warranty_end_date?: string;
 }
 
+function parseNumericValue(value: unknown): number | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (typeof value === 'number' && !Number.isNaN(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const match = trimmed.match(/-?\d+(?:\.\d+)?/);
+    if (!match) {
+      return undefined;
+    }
+    const num = Number(match[0]);
+    return Number.isNaN(num) ? undefined : num;
+  }
+  return undefined;
+}
+
 export function extractAssetDetails(asset: any): ExtractedAssetDetails {
   const props = asset?.properties ?? {};
   const kabuto = props.kabuto_information ?? {};
@@ -230,8 +252,31 @@ export function extractAssetDetails(asset: any): ExtractedAssetDetails {
     last_user: asset.last_user ?? props.last_user ?? kabuto.last_user,
     cpu_age:
       (() => {
-        const cpuAge = asset.cpu_age ?? props.cpu_age ?? kabuto.cpu_age;
-        return cpuAge !== undefined ? Number(cpuAge) : undefined;
+        const candidates = [
+          asset.cpu_age,
+          props.cpu_age,
+          kabuto.cpu_age,
+          general.cpu_age,
+          asset.CPUAge,
+          props.CPUAge,
+          kabuto.CPUAge,
+          general.CPUAge,
+          asset['CPU Age'],
+          props['CPU Age'],
+          kabuto['CPU Age'],
+          general['CPU Age'],
+          asset.approx_age,
+          props.approx_age,
+          kabuto.approx_age,
+          general.approx_age,
+        ];
+        for (const candidate of candidates) {
+          const parsed = parseNumericValue(candidate);
+          if (parsed !== undefined) {
+            return parsed;
+          }
+        }
+        return undefined;
       })(),
     performance_score: performance !== undefined ? Number(performance) : undefined,
     warranty_status: asset.warranty_status ?? props.warranty_status,

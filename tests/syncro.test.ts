@@ -185,6 +185,18 @@ test('extractAssetDetails maps nested properties', () => {
   assert.equal(details.warranty_end_date, '2026-01-01');
 });
 
+test('extractAssetDetails normalises CPUAge variants to cpu_age', () => {
+  const asset = {
+    id: 2,
+    properties: {
+      CPUAge: '3 years',
+    },
+  } as any;
+
+  const details = extractAssetDetails(asset);
+  assert.equal(details.cpu_age, 3);
+});
+
 test('upsertAsset uses syncro id when serial missing', async () => {
   const origEnv = {
     TOTP_ENCRYPTION_KEY: process.env.TOTP_ENCRYPTION_KEY,
