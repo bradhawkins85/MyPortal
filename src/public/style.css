@@ -593,3 +593,44 @@ table th {
   display: block;
   margin: 3px auto 0;
 }
+
+.opnform-banner {
+  background: #f8fafc;
+  border: 1px solid #d9e3f0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.opnform-banner h2 {
+  margin-top: 0;
+}
+
+.opnform-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 1rem;
+}
+
+.opnform-banner .button-link {
+  display: inline-block;
+  background-color: #2563eb;
+  color: #fff;
+  padding: 0.6rem 1.2rem;
+  border-radius: 4px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.opnform-banner .button-link:hover,
+.opnform-banner .button-link:focus {
+  background-color: #1d4ed8;
+}
+
+.opnform-banner-note {
+  color: #475569;
+  font-size: 0.9rem;
+}

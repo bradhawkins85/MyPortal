@@ -8,3 +8,4 @@
 - 2025-09-17, 07:26 UTC, Feature, Split scheduled tasks into system and company tables for clearer administration and visibility
 - 2025-09-17, 07:38 UTC, Feature, Added automated product DBP threshold alerts with super admin email and popup notifications
 - 2025-09-17, 07:47 UTC, Fix, Normalised Syncro CPUAge import to populate asset Approx Age
+- 2025-09-17, 07:54 UTC, Feature, Added OpnForm deployment guidance, nginx proxy config, and super admin builder link
