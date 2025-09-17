@@ -167,3 +167,8 @@ to that service so that super admins can launch the builder directly from the
 Forms admin area. See [docs/opnform.md](docs/opnform.md) for deployment and
 security guidance, including the supplied nginx configuration snippet in
 [`deploy/nginx/opnform.conf`](deploy/nginx/opnform.conf).
+
+When registering a form inside MyPortal, paste the OpnForm **Embed** snippet
+(the iframe code) into the Forms admin. The server validates that the embed
+targets the configured OpnForm host, normalises the markup, and stores the
+resolved form URL for secure proxying through MyPortal.
