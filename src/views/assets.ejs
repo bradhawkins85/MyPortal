@@ -10,26 +10,27 @@
           <h1>Assets</h1>
           <p class="page-subtitle">Company Assets</p>
         </div>
-        <div class="header-actions">
+      </div>
+      <div class="page-body">
+        <div class="asset-controls">
           <label for="asset-search" class="search-control">
             <span class="visually-hidden">Search assets</span>
             <i class="fas fa-search" aria-hidden="true"></i>
             <input type="text" id="asset-search" placeholder="Search assets" autocomplete="off" />
           </label>
-          <div class="view-menu">
+          <section class="view-accordion" aria-label="Asset view options">
             <button
               type="button"
-              id="view-menu-toggle"
-              class="view-menu-button"
-              aria-haspopup="true"
+              id="view-accordion-toggle"
+              class="view-accordion-toggle"
               aria-expanded="false"
-              aria-controls="view-menu-dropdown"
+              aria-controls="view-accordion-content"
             >
               <i class="fas fa-eye" aria-hidden="true"></i>
-              <span>View</span>
-              <i class="fas fa-chevron-down" aria-hidden="true"></i>
+              <span>View options</span>
+              <i class="fas fa-chevron-down accordion-chevron" aria-hidden="true"></i>
             </button>
-            <div class="view-menu-dropdown" id="view-menu-dropdown" role="menu" aria-hidden="true">
+            <div class="view-accordion-content" id="view-accordion-content" hidden>
               <p class="view-menu-title">Toggle columns</p>
               <ul>
                 <% columns.forEach(function(col){ %>
@@ -42,10 +43,8 @@
                 <% }); %>
               </ul>
             </div>
-          </div>
+          </section>
         </div>
-      </div>
-      <div class="page-body">
         <section class="asset-section">
           <table id="assets-table">
           <thead>
@@ -85,39 +84,44 @@
     const searchInput = document.getElementById('asset-search');
     const STORAGE_KEY = 'assetsTableColumns';
     const toggles = document.querySelectorAll('.column-toggle');
-    const viewMenu = document.querySelector('.view-menu');
-    const viewMenuToggle = document.getElementById('view-menu-toggle');
-    const viewMenuDropdown = document.getElementById('view-menu-dropdown');
+    const viewAccordion = document.querySelector('.view-accordion');
+    const viewAccordionToggle = document.getElementById('view-accordion-toggle');
+    const viewAccordionContent = document.getElementById('view-accordion-content');
 
-    function setViewMenuState(isOpen) {
-      if (!viewMenu || !viewMenuToggle || !viewMenuDropdown) return;
-      viewMenu.classList.toggle('open', isOpen);
-      viewMenuToggle.setAttribute('aria-expanded', String(isOpen));
-      viewMenuDropdown.setAttribute('aria-hidden', String(!isOpen));
+    function setViewAccordionState(isOpen) {
+      if (!viewAccordion || !viewAccordionToggle || !viewAccordionContent) return;
+      viewAccordion.classList.toggle('open', isOpen);
+      viewAccordionToggle.setAttribute('aria-expanded', String(isOpen));
+      viewAccordionContent.hidden = !isOpen;
     }
 
-    if (viewMenu && viewMenuToggle && viewMenuDropdown) {
-      viewMenuToggle.addEventListener('click', (event) => {
+    if (viewAccordion && viewAccordionToggle && viewAccordionContent) {
+      viewAccordionToggle.addEventListener('click', (event) => {
         event.stopPropagation();
-        const expanded = viewMenuToggle.getAttribute('aria-expanded') === 'true';
-        setViewMenuState(!expanded);
-      });
-
-      viewMenuDropdown.addEventListener('click', (event) => {
-        event.stopPropagation();
+        const expanded = viewAccordionToggle.getAttribute('aria-expanded') === 'true';
+        setViewAccordionState(!expanded);
       });
 
       document.addEventListener('click', (event) => {
-        if (!viewMenu.contains(event.target)) {
-          setViewMenuState(false);
+        if (!viewAccordion.contains(event.target)) {
+          setViewAccordionState(false);
         }
       });
 
-      document.addEventListener('keydown', (event) => {
+      viewAccordionToggle.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
-          setViewMenuState(false);
+          setViewAccordionState(false);
         }
       });
+
+      viewAccordionContent.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          setViewAccordionState(false);
+          viewAccordionToggle.focus();
+        }
+      });
+
+      setViewAccordionState(false);
     }
 
     function toggleColumn(col, show) {
