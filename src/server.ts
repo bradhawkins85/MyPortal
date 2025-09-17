@@ -124,6 +124,11 @@ import {
   createProduct,
   getProductById,
   getProductBySku,
+  getActiveProductPriceAlertByProductId,
+  createProductPriceAlert,
+  markProductPriceAlertEmailed,
+  resolveProductPriceAlerts,
+  getActiveProductPriceAlerts,
   updateProduct,
   upsertProductFromFeed,
   clearStockFeed,
@@ -190,6 +195,8 @@ import {
   AuditLog,
   App,
   AppPriceOption,
+  Product,
+  ProductPriceAlertWithProduct,
   ProductCompanyRestriction,
   Category,
   Asset,
@@ -300,6 +307,79 @@ async function sendSmsUpdate(
         url: SMS_WEBHOOK_URL,
       });
     }
+  }
+}
+
+function getCurrentUtcTimestamp(): string {
+  return new Date().toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function handleProductPricingAlert(product: Product): Promise<void> {
+  const buyPrice = product.buy_price;
+  if (buyPrice === null || buyPrice === undefined || buyPrice <= 0) {
+    await resolveProductPriceAlerts(product.id, getCurrentUtcTimestamp());
+    return;
+  }
+  const thresholdPrice = Number((buyPrice * 1.1).toFixed(2));
+  const priceBelowThreshold = product.price < thresholdPrice;
+  const vipPriceBelowThreshold =
+    product.vip_price !== null && product.vip_price < thresholdPrice;
+  if (!priceBelowThreshold && !vipPriceBelowThreshold) {
+    await resolveProductPriceAlerts(product.id, getCurrentUtcTimestamp());
+    return;
+  }
+  const existingAlert = await getActiveProductPriceAlertByProductId(product.id);
+  if (existingAlert) {
+    return;
+  }
+  const triggeredAt = getCurrentUtcTimestamp();
+  const alertId = await createProductPriceAlert(
+    product.id,
+    product.price,
+    product.vip_price,
+    buyPrice,
+    thresholdPrice,
+    triggeredAt
+  );
+  const superAdmin = await getUserById(1);
+  if (!superAdmin?.email) {
+    return;
+  }
+  const escapedName = escapeHtml(product.name);
+  const escapedSku = escapeHtml(product.sku);
+  const htmlLines = [
+    `<p>Product <strong>${escapedName}</strong> (${escapedSku}) has a current price of $${product.price.toFixed(
+      2
+    )}.</p>`,
+    `<p>The supplier DBP plus 10% is $${thresholdPrice.toFixed(2)}, which is higher than the${
+      vipPriceBelowThreshold && product.vip_price !== null ? ' configured VIP price' : ' configured price'
+    }.</p>`,
+    `<p>VIP Price: ${
+      product.vip_price !== null
+        ? `$${product.vip_price.toFixed(2)}`
+        : 'Not configured'
+    }</p>`,
+  ];
+  const html = `${htmlLines.join('')}
+    <p>Please review the product pricing to ensure margins remain protected.</p>`;
+  const subject = `Product pricing alert: ${product.name}`;
+  try {
+    await sendEmail(superAdmin.email, subject, html);
+    await markProductPriceAlertEmailed(alertId, getCurrentUtcTimestamp());
+  } catch (err) {
+    logError('Failed to send product pricing alert email', {
+      error: (err as Error).message,
+      productId: product.id,
+    });
   }
 }
 
@@ -663,6 +743,10 @@ async function processFeedItem(item: any, existing?: any): Promise<void> {
     warrantyLength,
     manufacturer,
   });
+  const updatedProduct = await getProductBySku(String(code));
+  if (updatedProduct) {
+    await handleProductPricingAlert(updatedProduct);
+  }
 }
 
 async function updateProductsFromFeed(): Promise<void> {
@@ -2806,6 +2890,10 @@ app.post(
       parseInt(stock, 10),
       category_id ? parseInt(category_id, 10) : null
     );
+    const createdProduct = await getProductById(createdProductId, true);
+    if (createdProduct) {
+      await handleProductPricingAlert(createdProduct);
+    }
     const trimmedName = typeof name === 'string' ? name.trim() : '';
     const trimmedVendorSku =
       typeof vendor_sku === 'string' ? vendor_sku.trim() : '';
@@ -2848,6 +2936,10 @@ app.post(
       parseInt(stock, 10),
       category_id ? parseInt(category_id, 10) : null
     );
+    const updatedProduct = await getProductById(parseInt(req.params.id, 10), true);
+    if (updatedProduct) {
+      await handleProductPricingAlert(updatedProduct);
+    }
     res.redirect('/admin');
   }
 );
@@ -3166,6 +3258,9 @@ app.get('/admin', ensureAuth, async (req, res) => {
   req.session.mobileError = undefined;
   req.session.mobileSuccess = undefined;
   const isAdmin = Number(req.session.userId) === 1 || (current?.is_admin ?? 0);
+  const priceAlerts: ProductPriceAlertWithProduct[] = isSuperAdmin
+    ? await getActiveProductPriceAlerts()
+    : [];
   res.render('admin', {
     allCompanies,
     users,
@@ -3217,6 +3312,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
     currentUserMobilePhone: currentUser?.mobile_phone || '',
     siteSettings: res.locals.siteSettings,
     emailTemplate,
+    priceAlerts,
   });
 });
 
