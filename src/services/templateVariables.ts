@@ -93,8 +93,11 @@ export function buildTemplateReplacementMap(context: TemplateContext): TemplateR
     const rawValue = variable.resolve(context);
     const stringValue = rawValue === undefined || rawValue === null ? '' : String(rawValue);
     const token = `{{${variable.key}}}`;
+    const encodedValue = encodeURIComponent(stringValue);
+
     replacements[token] = stringValue;
-    replacements[`${token}UrlEncoded`] = encodeURIComponent(stringValue);
+    replacements[`${token}UrlEncoded`] = encodedValue;
+    replacements[`{{${variable.key}UrlEncoded}}`] = encodedValue;
   }
   return replacements;
 }

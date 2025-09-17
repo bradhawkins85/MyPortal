@@ -27,6 +27,7 @@ test('buildTemplateReplacementMap returns raw and encoded values', () => {
   });
 
   assert.equal(replacements['{{user.email}}'], 'user@example.com');
+  assert.equal(replacements['{{user.emailUrlEncoded}}'], 'user%40example.com');
   assert.equal(replacements['{{user.email}}UrlEncoded'], 'user%40example.com');
   assert.equal(replacements['{{user.fullName}}'], 'Ada Lovelace');
   assert.equal(replacements['{{company.id}}'], '42');
@@ -37,10 +38,14 @@ test('applyTemplateVariables replaces tokens in a string', () => {
   const replacements = {
     '{{user.email}}': 'user@example.com',
     '{{user.email}}UrlEncoded': 'user%40example.com',
+    '{{user.emailUrlEncoded}}': 'user%40example.com',
   };
-  const url = 'mailto:{{user.email}}?to={{user.email}}UrlEncoded';
+  const url = 'mailto:{{user.email}}?legacy={{user.email}}UrlEncoded&preferred={{user.emailUrlEncoded}}';
   const rendered = applyTemplateVariables(url, replacements);
-  assert.equal(rendered, 'mailto:user@example.com?to=user%40example.com');
+  assert.equal(
+    rendered,
+    'mailto:user@example.com?legacy=user%40example.com&preferred=user%40example.com'
+  );
 });
 
 test('missing values result in empty strings without undefined leakage', () => {
@@ -48,6 +53,7 @@ test('missing values result in empty strings without undefined leakage', () => {
   for (const variable of TEMPLATE_VARIABLES) {
     const token = `{{${variable.key}}}`;
     assert.equal(replacements[token], '');
+    assert.equal(replacements[`{{${variable.key}UrlEncoded}}`], '');
     assert.equal(replacements[`${token}UrlEncoded`], '');
   }
 });
