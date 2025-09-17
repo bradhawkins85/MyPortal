@@ -243,6 +243,7 @@
             <section>
               <h2>Add Schedule</h2>
               <form action="/admin/schedules" method="post">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                 <select name="command">
                   <option value="sync_staff">Sync Staff From Syncro</option>
                   <option value="sync_o365">Sync Office 365 License Counts</option>
@@ -466,13 +467,16 @@
                       </td>
                       <td>
                         <form action="/admin/schedules/<%= t.id %>/run" method="post" style="display:inline">
+                          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                           <button type="submit">Run Now</button>
                         </form>
                         <form action="/admin/schedules/<%= t.id %>" method="post" style="display:inline">
+                          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                           <input type="text" name="cron" value="<%= t.cron %>" required>
                           <button type="submit">Save</button>
                         </form>
                         <form action="/admin/schedules/<%= t.id %>/delete" method="post" style="display:inline" data-confirm="Delete?">
+                          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                           <button type="submit">Delete</button>
                         </form>
                       </td>

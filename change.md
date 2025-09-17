@@ -4,3 +4,4 @@
 - 2025-09-17, 06:59 UTC, Feature, Consolidated Company Assets column toggles into a secure header view menu
 - 2025-09-17, 07:02 UTC, Fix, Added server-rendered CSRF tokens to Apps management forms to prevent invalid token errors when saving changes
 - 2025-09-17, 07:08 UTC, Fix, Repositioned asset search/view controls above the table with a default-collapsed column accordion
+- 2025-09-17, 07:18 UTC, Fix, Added CSRF protection tokens to scheduled task forms to prevent invalid token errors when managing schedules
