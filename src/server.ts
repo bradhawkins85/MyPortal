@@ -3075,6 +3075,8 @@ app.get('/admin', ensureAuth, async (req, res) => {
   let products: any[] = [];
   let productRestrictions: Record<number, ProductCompanyRestriction[]> = {};
   let tasks: any[] = [];
+  let systemTasks: any[] = [];
+  let companyTasks: any[] = [];
   let emailTemplate: EmailTemplate | null = null;
   if (isSuperAdmin) {
     allCompanies = await getAllCompanies();
@@ -3109,6 +3111,8 @@ app.get('/admin', ensureAuth, async (req, res) => {
       company_name:
         allCompanies.find((c) => c.id === t.company_id)?.name || null,
     }));
+    systemTasks = tasks.filter((t) => t.company_id === null);
+    companyTasks = tasks.filter((t) => t.company_id !== null);
     emailTemplate = await getEmailTemplate('staff_invitation');
   } else {
     const companyId = req.session.companyId!;
@@ -3178,6 +3182,8 @@ app.get('/admin', ensureAuth, async (req, res) => {
     products,
     productRestrictions,
     tasks,
+    systemTasks,
+    companyTasks,
     credentials,
     showArchived: includeArchived,
     selectedFormId: isNaN(formId) ? null : formId,

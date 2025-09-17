@@ -449,41 +449,94 @@
             </section>
             <section>
               <h2>Schedules</h2>
-              <table>
-                <thead>
-                  <tr><th>ID</th><th>Company</th><th>Command</th><th>Cron</th><th>Last Run</th><th>Actions</th></tr>
-                </thead>
-                <tbody>
-                  <% tasks.forEach(function(t){ %>
-                    <tr>
-                      <td><%= t.id %></td>
-                      <td><%= t.company_name || '' %></td>
-                      <td><%= t.command %></td>
-                      <td><%= t.cron %></td>
-                      <td>
-                        <% if (t.last_run_at) { %>
-                          <span class="local-time" data-time="<%= new Date(t.last_run_at).toISOString() %>"></span>
-                        <% } %>
-                      </td>
-                      <td>
-                        <form action="/admin/schedules/<%= t.id %>/run" method="post" style="display:inline">
-                          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                          <button type="submit">Run Now</button>
-                        </form>
-                        <form action="/admin/schedules/<%= t.id %>" method="post" style="display:inline">
-                          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                          <input type="text" name="cron" value="<%= t.cron %>" required>
-                          <button type="submit">Save</button>
-                        </form>
-                        <form action="/admin/schedules/<%= t.id %>/delete" method="post" style="display:inline" data-confirm="Delete?">
-                          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                          <button type="submit">Delete</button>
-                        </form>
-                      </td>
-                    </tr>
-                  <% }); %>
-                </tbody>
-              </table>
+              <div class="schedule-table">
+                <h3>System Tasks</h3>
+                <table>
+                  <thead>
+                    <tr><th>ID</th><th>Scope</th><th>Command</th><th>Cron</th><th>Last Run</th><th>Actions</th></tr>
+                  </thead>
+                  <tbody>
+                    <% if (systemTasks.length === 0) { %>
+                      <tr>
+                        <td colspan="6" class="empty-state">No system tasks scheduled.</td>
+                      </tr>
+                    <% } else { %>
+                      <% systemTasks.forEach(function(t){ %>
+                        <tr>
+                          <td><%= t.id %></td>
+                          <td>System</td>
+                          <td><%= t.command %></td>
+                          <td><%= t.cron %></td>
+                          <td>
+                            <% if (t.last_run_at) { %>
+                              <span class="local-time" data-time="<%= new Date(t.last_run_at).toISOString() %>"></span>
+                            <% } %>
+                          </td>
+                          <td>
+                            <form action="/admin/schedules/<%= t.id %>/run" method="post" style="display:inline">
+                              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                              <button type="submit">Run Now</button>
+                            </form>
+                            <form action="/admin/schedules/<%= t.id %>" method="post" style="display:inline">
+                              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                              <input type="text" name="cron" value="<%= t.cron %>" required>
+                              <button type="submit">Save</button>
+                            </form>
+                            <form action="/admin/schedules/<%= t.id %>/delete" method="post" style="display:inline" data-confirm="Delete?">
+                              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                              <button type="submit">Delete</button>
+                            </form>
+                          </td>
+                        </tr>
+                      <% }); %>
+                    <% } %>
+                  </tbody>
+                </table>
+              </div>
+              <div class="schedule-table">
+                <h3>Company Tasks</h3>
+                <table>
+                  <thead>
+                    <tr><th>ID</th><th>Company</th><th>Command</th><th>Cron</th><th>Last Run</th><th>Actions</th></tr>
+                  </thead>
+                  <tbody>
+                    <% if (companyTasks.length === 0) { %>
+                      <tr>
+                        <td colspan="6" class="empty-state">No company tasks scheduled.</td>
+                      </tr>
+                    <% } else { %>
+                      <% companyTasks.forEach(function(t){ %>
+                        <tr>
+                          <td><%= t.id %></td>
+                          <td><%= t.company_name || '' %></td>
+                          <td><%= t.command %></td>
+                          <td><%= t.cron %></td>
+                          <td>
+                            <% if (t.last_run_at) { %>
+                              <span class="local-time" data-time="<%= new Date(t.last_run_at).toISOString() %>"></span>
+                            <% } %>
+                          </td>
+                          <td>
+                            <form action="/admin/schedules/<%= t.id %>/run" method="post" style="display:inline">
+                              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                              <button type="submit">Run Now</button>
+                            </form>
+                            <form action="/admin/schedules/<%= t.id %>" method="post" style="display:inline">
+                              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                              <input type="text" name="cron" value="<%= t.cron %>" required>
+                              <button type="submit">Save</button>
+                            </form>
+                            <form action="/admin/schedules/<%= t.id %>/delete" method="post" style="display:inline" data-confirm="Delete?">
+                              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                              <button type="submit">Delete</button>
+                            </form>
+                          </td>
+                        </tr>
+                      <% }); %>
+                    <% } %>
+                  </tbody>
+                </table>
+              </div>
             </section>
             <script>
               document.querySelectorAll('.local-time').forEach(function(el){
