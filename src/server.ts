@@ -516,14 +516,27 @@ async function buildFormsContext(
       loginUrl: `${portalBaseUrl}/login`,
     },
   });
-  const hydratedForms: FormWithEmbedUrl[] = forms.map((form) => {
-    const hydratedUrl = applyTemplateVariables(form.url, replacements);
-    return {
-      ...form,
-      url: hydratedUrl,
-      embedUrl: getEmbedUrlForForm(hydratedUrl, form.id, portalBaseUrl),
-    };
-  });
+  const hydratedForms: FormWithEmbedUrl[] = forms
+    .map((form) => {
+      const rawId = (form as { id: number | string }).id;
+      const numericId =
+        typeof rawId === 'number' ? rawId : Number.parseInt(String(rawId), 10);
+      if (!Number.isFinite(numericId)) {
+        logError('Encountered form with non-numeric identifier', {
+          formId: rawId,
+          formName: form.name,
+        });
+        return null;
+      }
+      const hydratedUrl = applyTemplateVariables(form.url, replacements);
+      return {
+        ...form,
+        id: numericId,
+        url: hydratedUrl,
+        embedUrl: getEmbedUrlForForm(hydratedUrl, numericId, portalBaseUrl),
+      };
+    })
+    .filter((form): form is FormWithEmbedUrl => form !== null);
   return { hydratedForms, companies, currentCompanyAssignment, portalBaseUrl };
 }
 
