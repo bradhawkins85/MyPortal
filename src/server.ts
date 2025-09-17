@@ -2494,6 +2494,12 @@ app.delete('/invoices/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
   res.json({ success: true });
 });
 
+const FORM_EMBED_TIMEOUT_MS = 10000;
+
+function escapeHtmlAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 app.get('/forms', ensureAuth, async (req, res) => {
   const userId = req.session.userId!;
   const [forms, companies, currentUser] = await Promise.all([
@@ -2528,10 +2534,14 @@ app.get('/forms', ensureAuth, async (req, res) => {
       loginUrl: `${baseUrl}/login`,
     },
   });
-  const hydratedForms = forms.map((form) => ({
-    ...form,
-    url: applyTemplateVariables(form.url, replacements),
-  }));
+  const hydratedForms = forms.map((form) => {
+    const resolvedUrl = applyTemplateVariables(form.url, replacements);
+    return {
+      ...form,
+      url: resolvedUrl,
+      embedPath: `/forms/embed/${form.id}`,
+    };
+  });
   res.render('forms', {
     forms: hydratedForms,
     companies,
@@ -2546,6 +2556,125 @@ app.get('/forms', ensureAuth, async (req, res) => {
     canOrderLicenses: current?.can_order_licenses ?? 0,
     canAccessShop: current?.can_access_shop ?? 0,
   });
+});
+
+app.get('/forms/embed/:formId', ensureAuth, async (req, res) => {
+  const userId = req.session.userId!;
+  const formId = Number.parseInt(req.params.formId, 10);
+  if (Number.isNaN(formId)) {
+    return res.status(400).send('Invalid form id');
+  }
+
+  const [forms, companies, currentUser] = await Promise.all([
+    getFormsForUser(userId),
+    getCompaniesForUser(userId),
+    getUserById(userId),
+  ]);
+
+  const form = forms.find((f) => f.id === formId);
+  if (!form) {
+    return res.status(404).send('Form not found');
+  }
+
+  const currentCompany = companies.find((c) => c.company_id === req.session.companyId);
+  const currentCompanyDetails = currentCompany?.company_id
+    ? await getCompanyById(currentCompany.company_id)
+    : null;
+
+  const baseUrl = process.env.PORTAL_URL || `${req.protocol}://${req.get('host')}`;
+  const replacements = buildTemplateReplacementMap({
+    user: currentUser
+      ? {
+          id: currentUser.id,
+          email: currentUser.email,
+          firstName: currentUser.first_name ?? '',
+          lastName: currentUser.last_name ?? '',
+        }
+      : undefined,
+    company: currentCompany
+      ? {
+          id: currentCompany.company_id,
+          name: currentCompanyDetails?.name ?? currentCompany.company_name ?? '',
+          syncroCustomerId: currentCompanyDetails?.syncro_company_id ?? null,
+        }
+      : undefined,
+    portal: {
+      baseUrl,
+      loginUrl: `${baseUrl}/login`,
+    },
+  });
+
+  const resolvedUrl = applyTemplateVariables(form.url, replacements);
+  let externalUrl: URL;
+  try {
+    externalUrl = new URL(resolvedUrl);
+  } catch (_err) {
+    return res.status(400).send('Form URL is invalid');
+  }
+
+  if (!['https:', 'http:'].includes(externalUrl.protocol)) {
+    return res.status(400).send('Unsupported form URL protocol');
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FORM_EMBED_TIMEOUT_MS);
+
+  let upstreamResponse;
+  try {
+    upstreamResponse = await fetch(externalUrl.toString(), {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'MyPortalFormsEmbed/1.0',
+      },
+    });
+  } catch (err) {
+    clearTimeout(timeout);
+    if ((err as Error).name === 'AbortError') {
+      return res.status(504).send('Timed out loading form');
+    }
+    console.error('Error fetching embedded form', err);
+    return res.status(502).send('Failed to load form');
+  }
+
+  clearTimeout(timeout);
+
+  if (!upstreamResponse.ok) {
+    return res.status(502).send('Failed to load form');
+  }
+
+  const contentType = upstreamResponse.headers.get('content-type') ?? 'text/html';
+  if (!contentType.includes('text/html')) {
+    return res.status(415).send('Unsupported form content type');
+  }
+
+  let html: string;
+  try {
+    html = await upstreamResponse.text();
+  } catch (err) {
+    console.error('Failed to read embedded form response', err);
+    return res.status(502).send('Failed to load form');
+  }
+
+  const baseHref = new URL('./', externalUrl).toString();
+  if (/<head[^>]*>/i.test(html)) {
+    if (!/<base\s/i.test(html)) {
+      html = html.replace(
+        /<head([^>]*)>/i,
+        (match, attrs) =>
+          `<head${attrs}>\n<base href="${escapeHtmlAttribute(baseHref)}">`
+      );
+    }
+  } else {
+    html = `<head><base href="${escapeHtmlAttribute(baseHref)}"></head>${html}`;
+  }
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self' https: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' data: https:; connect-src 'self' https:; frame-src 'self' https:;"
+  );
+  res.send(html);
 });
 
 app.get('/forms/company', ensureAuth, ensureAdmin, async (req, res) => {
