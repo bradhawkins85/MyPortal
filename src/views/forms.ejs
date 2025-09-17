@@ -12,7 +12,14 @@
             <button data-open-form data-embed-url="<%= f.embedPath %>" class="<%= idx === 0 ? 'active' : '' %>"><%= f.name %></button>
           <% }); %>
         </div>
-        <iframe id="form-frame" class="form-frame" src="<%= forms[0].embedPath %>" loading="lazy" title="Selected form"></iframe>
+        <iframe
+          id="form-frame"
+          class="form-frame"
+          src="<%= forms[0].embedPath %>"
+          loading="lazy"
+          title="Selected form"
+          sandbox="allow-forms allow-scripts"
+        ></iframe>
       <% } else { %>
         <p>No forms available.</p>
       <% } %>
