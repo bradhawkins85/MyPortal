@@ -15,6 +15,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - Shop admin interface to archive products and view archived items
 - Order details include product image, SKU and description
 - CSRF protection on authenticated state-changing requests
+- Super admin access to the OpnForm builder for creating and editing forms
 
 ## Setup
 
@@ -25,7 +26,9 @@ There are no default login credentials; the first visit will prompt you to regis
 2. Copy `.env.example` to `.env` and update the MySQL credentials. Set high-entropy
    values for `SESSION_SECRET` and `TOTP_ENCRYPTION_KEY` (e.g. via `openssl rand -hex 32`).
    Optionally set `CRON_TIMEZONE` to control the timezone for scheduled tasks (defaults to UTC).
-   Provide `STOCK_FEED_URL` to point to the remote XML product feed.
+   Provide `STOCK_FEED_URL` to point to the remote XML product feed. When OpnForm
+   runs behind a different path or host, set `OPNFORM_BASE_URL` so that admin links
+   resolve correctly.
 3. On first run, the application will automatically apply the database schema and encrypt any existing TOTP secrets.
 4. On first run, visiting `/login` will redirect to a registration page to create the initial user and company.
 5. Run in development mode:
@@ -128,3 +131,11 @@ npm install
 npm run build
 pm2 restart myportal
 ```
+
+## OpnForm Integration
+
+MyPortal expects an OpnForm instance on the same server. nginx proxies `/forms/`
+to that service so that super admins can launch the builder directly from the
+Forms admin area. See [docs/opnform.md](docs/opnform.md) for deployment and
+security guidance, including the supplied nginx configuration snippet in
+[`deploy/nginx/opnform.conf`](deploy/nginx/opnform.conf).
