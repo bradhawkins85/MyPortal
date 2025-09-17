@@ -17,6 +17,34 @@ There are no default login credentials; the first visit will prompt you to regis
 - CSRF protection on authenticated state-changing requests
 - Super admin access to the OpnForm builder for creating and editing forms
 
+## Template Variables for External Apps
+
+MyPortal exposes a curated set of template variables that can be embedded in
+form URLs or other external application links. When a page is rendered these
+placeholders are substituted with details from the logged-in user and their
+currently selected company. Each variable is available in two forms:
+
+- `{{variable}}` – the raw value.
+- `{{variable}}UrlEncoded` – the same value pre-encoded with
+  `encodeURIComponent` so it can be safely appended to query strings.
+
+| Placeholder | Description |
+| --- | --- |
+| `{{user.email}}` | Email address for the logged-in user. |
+| `{{user.firstName}}` | User's first name. |
+| `{{user.lastName}}` | User's last name. |
+| `{{user.fullName}}` | Combination of first and last name with whitespace trimmed. |
+| `{{company.id}}` | Numeric identifier of the active company. |
+| `{{company.name}}` | Name of the active company. |
+| `{{company.syncroId}}` | Syncro customer ID when available for the company. |
+| `{{portal.baseUrl}}` | Base URL of the MyPortal instance. |
+| `{{portal.loginUrl}}` | Direct link to the MyPortal login page. |
+
+For example, a form URL such as
+`https://forms.example.com/start?email={{user.emailUrlEncoded}}&company={{company.nameUrlEncoded}}`
+will resolve to the current user's email and company at runtime. Missing values
+gracefully fall back to an empty string.
+
 ## Setup
 
 1. Install dependencies:
