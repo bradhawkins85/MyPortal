@@ -972,8 +972,18 @@ function resolveFormProxyTarget(rawTarget: unknown): URL | null {
   return target;
 }
 
-function buildFormProxyUrl(target: URL): string {
-  return `${FORM_PROXY_ROUTE}?target=${encodeURIComponent(target.toString())}`;
+function normalizeProxyOrigin(origin: string): string {
+  return origin.endsWith('/') ? origin.slice(0, -1) : origin;
+}
+
+function buildFormProxyUrl(target: URL, proxyOrigin?: string): string {
+  const proxyPath = `${FORM_PROXY_ROUTE}?target=${encodeURIComponent(
+    target.toString()
+  )}`;
+  if (!proxyOrigin) {
+    return proxyPath;
+  }
+  return `${normalizeProxyOrigin(proxyOrigin)}${proxyPath}`;
 }
 
 function getFormBaseHref(target: URL): string {
@@ -986,7 +996,11 @@ function getFormBaseHref(target: URL): string {
   return `${clone.origin}${basePath}`;
 }
 
-function injectFormProxyHelpers(html: string, target: URL): string {
+function injectFormProxyHelpers(
+  html: string,
+  target: URL,
+  proxyOrigin: string
+): string {
   const baseHref = getFormBaseHref(target);
   const hasBaseTag = /<base\b[^>]*>/i.test(html);
   const baseTag = `<base href="${baseHref}">`;
@@ -998,7 +1012,8 @@ function injectFormProxyHelpers(html: string, target: URL): string {
     }
   }
 
-  const proxyBasePrefix = `${FORM_PROXY_ROUTE}?target=`;
+  const normalizedProxyOrigin = normalizeProxyOrigin(proxyOrigin);
+  const proxyBasePrefix = `${normalizedProxyOrigin}${FORM_PROXY_ROUTE}?target=`;
 
   const toProxyIfSameOrigin = (value: string): string => {
     const trimmed = value.trim();
@@ -1066,7 +1081,7 @@ function injectFormProxyHelpers(html: string, target: URL): string {
 
   html = rewriteTagAttribute(html, 'img', 'src', () => true);
 
-  const proxyBase = `${FORM_PROXY_ROUTE}?target=`;
+  const proxyBase = `${normalizedProxyOrigin}${FORM_PROXY_ROUTE}?target=`;
   const scriptContent = [
     '(function(){',
     `const originalUrl=${JSON.stringify(target.toString())};`,
@@ -1106,18 +1121,21 @@ function injectFormProxyHelpers(html: string, target: URL): string {
 
 function rewriteFormProxyLocation(
   value: string | string[] | undefined,
-  currentTarget: URL
+  currentTarget: URL,
+  proxyOrigin: string
 ): string | string[] | undefined {
   if (!value) {
     return value;
   }
   if (Array.isArray(value)) {
-    return value.map((item) => rewriteFormProxyLocation(item, currentTarget) as string);
+    return value.map(
+      (item) => rewriteFormProxyLocation(item, currentTarget, proxyOrigin) as string
+    );
   }
   try {
     const absolute = new URL(value, currentTarget);
     if (isAllowedFormProxyHost(absolute.hostname)) {
-      return buildFormProxyUrl(absolute);
+      return buildFormProxyUrl(absolute, proxyOrigin);
     }
     return value;
   } catch (err) {
@@ -1148,6 +1166,9 @@ const formProxyMiddleware: express.RequestHandler = (req, res) => {
     res.status(405).type('text/plain').send('Method not allowed');
     return;
   }
+
+  const host = req.get('host');
+  const proxyOrigin = process.env.PORTAL_URL || (host ? `${req.protocol}://${host}` : '');
 
   const requestHeaders: http.OutgoingHttpHeaders = {};
   const passThroughHeaders = ['accept', 'accept-language', 'content-type'];
@@ -1204,7 +1225,7 @@ const formProxyMiddleware: express.RequestHandler = (req, res) => {
         continue;
       }
       if (headerName === 'location') {
-        const rewritten = rewriteFormProxyLocation(value, targetUrl);
+        const rewritten = rewriteFormProxyLocation(value, targetUrl, proxyOrigin);
         if (rewritten) {
           res.setHeader(header, rewritten);
         }
@@ -1241,7 +1262,7 @@ const formProxyMiddleware: express.RequestHandler = (req, res) => {
           return;
         }
         let body = Buffer.concat(chunks).toString('utf8');
-        body = injectFormProxyHelpers(body, targetUrl);
+        body = injectFormProxyHelpers(body, targetUrl, proxyOrigin);
         const defaultSrc = [
           "'self'",
           targetUrl.origin,
@@ -2937,7 +2958,7 @@ app.get('/forms', ensureAuth, async (req, res) => {
     return {
       ...form,
       url: appliedUrl,
-      embedUrl: proxyTarget ? buildFormProxyUrl(proxyTarget) : null,
+      embedUrl: proxyTarget ? buildFormProxyUrl(proxyTarget, baseUrl) : null,
     };
   });
   res.render('forms', {
