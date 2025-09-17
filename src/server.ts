@@ -2672,7 +2672,16 @@ app.get('/forms/embed/:formId', ensureAuth, async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self' https: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' data: https:; connect-src 'self' https:; frame-src 'self' https:;"
+    [
+      'sandbox allow-forms allow-scripts',
+      "default-src 'self' https: data: blob:",
+      "script-src 'self' 'unsafe-inline' https:",
+      "style-src 'self' 'unsafe-inline' https:",
+      "img-src 'self' data: https:",
+      "font-src 'self' data: https:",
+      "connect-src 'self' https:",
+      "frame-src 'self' https:"
+    ].join('; ') + ';'
   );
   res.send(html);
 });
