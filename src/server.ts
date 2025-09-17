@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express from 'express';
 import session from 'express-session';
 import RedisStore from 'connect-redis';
 import { createClient } from 'redis';
@@ -109,17 +109,16 @@ import {
   getM365Credentials,
   upsertM365Credentials,
   deleteM365Credentials,
-  getAllForms,
-  getFormsByCompany,
-  createForm,
-  updateForm,
-  deleteForm,
-  getFormsForUser,
-  getFormPermissions,
-  updateFormPermissions,
-  getAllFormPermissionEntries,
-  deleteFormPermission,
-  Form,
+    getAllForms,
+    getFormsByCompany,
+    createForm,
+    updateForm,
+    deleteForm,
+    getFormsForUser,
+    getFormPermissions,
+    updateFormPermissions,
+    getAllFormPermissionEntries,
+    deleteFormPermission,
   getAllCategories,
   getCategoryById,
   getCategoryByName,
@@ -228,304 +227,6 @@ const opnformBaseUrl = configuredOpnformBaseUrl
     ? configuredOpnformBaseUrl
     : `${configuredOpnformBaseUrl}/`
   : defaultOpnformBaseUrl;
-
-const formProxyAllowedHosts = new Set<string>();
-
-function addAllowedFormProxyHost(value: string): void {
-  if (!value) {
-    return;
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return;
-  }
-  if (trimmed.includes('://')) {
-    try {
-      const parsed = new URL(trimmed);
-      if (parsed.hostname) {
-        formProxyAllowedHosts.add(parsed.hostname.toLowerCase());
-      }
-      if (parsed.host) {
-        formProxyAllowedHosts.add(parsed.host.toLowerCase());
-      }
-    } catch (error) {
-      logError('Invalid form proxy host provided', {
-        host: trimmed,
-        ...buildErrorMeta(error),
-      });
-    }
-    return;
-  }
-  formProxyAllowedHosts.add(trimmed.toLowerCase());
-}
-
-const rawFormProxyHosts = process.env.FORM_PROXY_ALLOWED_HOSTS;
-if (rawFormProxyHosts) {
-  for (const candidate of rawFormProxyHosts.split(',')) {
-    addAllowedFormProxyHost(candidate);
-  }
-}
-
-if (configuredOpnformBaseUrl && configuredOpnformBaseUrl.includes('://')) {
-  addAllowedFormProxyHost(configuredOpnformBaseUrl);
-}
-
-addAllowedFormProxyHost('form.hawkinsit.au');
-
-const FORM_PROXY_TIMEOUT_MS = 15000;
-const FORM_PROXY_SUCCESS_CSP =
-  "default-src 'self' https: data: blob:; " +
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; " +
-  "style-src 'self' 'unsafe-inline' https:; " +
-  "img-src 'self' data: https:; " +
-  "font-src 'self' data: https:; " +
-  "connect-src 'self' https:; " +
-  "frame-src 'self' https:; " +
-  "form-action 'self' https:;";
-
-const FORM_PROXY_ERROR_CSP =
-  "default-src 'self'; " +
-  "style-src 'self' 'unsafe-inline'; " +
-  "img-src 'self' data:; " +
-  "connect-src 'self'; " +
-  "frame-src 'self';";
-
-type FormWithEmbedUrl = Form & { embedUrl: string | null };
-
-function buildErrorMeta(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return {
-      message: error.message,
-      name: error.name,
-      stack: error.stack,
-    };
-  }
-  return { error: String(error) };
-}
-
-function renderFormProxyError(message: string): string {
-  const safeMessage = escapeHtml(message);
-  return `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Form unavailable</title>
-    <style>
-      body {
-        margin: 0;
-        padding: 2rem;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        background: #f8fafc;
-        color: #111827;
-      }
-      .message {
-        max-width: 520px;
-        margin: 0 auto;
-        background: #ffffff;
-        border-radius: 12px;
-        padding: 1.75rem;
-        box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
-        border: 1px solid #e2e8f0;
-      }
-      h1 {
-        margin: 0 0 0.75rem 0;
-        font-size: 1.25rem;
-        color: #1f2937;
-      }
-      p {
-        margin: 0;
-        line-height: 1.55;
-      }
-    </style>
-  </head>
-  <body data-form-proxy-error="true" data-error-message="${safeMessage}">
-    <div class="message">
-      <h1>Form unavailable</h1>
-      <p>${safeMessage}</p>
-      <p style="margin-top: 0.75rem; color: #475569; font-size: 0.95rem;">
-        Return to the portal and use the “Open form in new tab” button to continue.
-      </p>
-    </div>
-  </body>
-</html>`;
-}
-
-function sendFormProxyError(res: Response, status: number, message: string): void {
-  res.status(status);
-  res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Content-Security-Policy', FORM_PROXY_ERROR_CSP);
-  res.type('html').send(renderFormProxyError(message));
-}
-
-function injectBaseTag(html: string, url: URL): string {
-  const baseHref = new URL('./', url.toString()).toString();
-  if (/<base\s/i.test(html)) {
-    return html;
-  }
-  if (/<head[^>]*>/i.test(html)) {
-    return html.replace(
-      /<head([^>]*)>/i,
-      `<head$1><base href="${escapeHtml(baseHref)}">`
-    );
-  }
-  return `<head><base href="${escapeHtml(baseHref)}"></head>${html}`;
-}
-
-function canProxyFormUrl(url: URL, portalOrigin: string): boolean {
-  if (url.origin === portalOrigin) {
-    return false;
-  }
-  if (url.protocol !== 'https:') {
-    return false;
-  }
-  const host = url.host.toLowerCase();
-  const hostname = url.hostname.toLowerCase();
-  return formProxyAllowedHosts.has(host) || formProxyAllowedHosts.has(hostname);
-}
-
-class ExternalFormFetchError extends Error {
-  public readonly statusCode: number;
-
-  public readonly userMessage: string;
-
-  constructor(message: string, statusCode: number, userMessage: string) {
-    super(message);
-    this.name = 'ExternalFormFetchError';
-    this.statusCode = statusCode;
-    this.userMessage = userMessage;
-  }
-}
-
-async function fetchExternalForm(url: URL): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FORM_PROXY_TIMEOUT_MS);
-  try {
-    const response = await fetch(url.toString(), {
-      headers: {
-        Accept: 'text/html,application/xhtml+xml',
-      },
-      redirect: 'follow',
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      if (response.status === 404) {
-        throw new ExternalFormFetchError(
-          `Form not found at ${url.toString()}`,
-          404,
-          'The requested form could not be found.'
-        );
-      }
-      throw new ExternalFormFetchError(
-        `Unexpected status ${response.status} when fetching form ${url.toString()}`,
-        response.status,
-        'The form provider returned an unexpected response.'
-      );
-    }
-    const contentType = response.headers.get('content-type');
-    if (contentType && !contentType.includes('text/html')) {
-      throw new ExternalFormFetchError(
-        `Unsupported content type ${contentType} for form ${url.toString()}`,
-        502,
-        'The form provider returned an unsupported response.'
-      );
-    }
-    return await response.text();
-  } catch (error) {
-    if (error instanceof ExternalFormFetchError) {
-      throw error;
-    }
-    const isAbortError = error instanceof Error && error.name === 'AbortError';
-    throw new ExternalFormFetchError(
-      isAbortError
-        ? `Timed out fetching form ${url.toString()}`
-        : `Failed to fetch form ${url.toString()}: ${String(error)}`,
-      502,
-      'We could not contact the form provider.'
-    );
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function getPortalBaseUrl(req: Request): string {
-  return process.env.PORTAL_URL || `${req.protocol}://${req.get('host')}`;
-}
-
-function getEmbedUrlForForm(
-  hydratedUrl: string,
-  formId: number,
-  portalBaseUrl: string
-): string | null {
-  let resolved: URL;
-  try {
-    resolved = new URL(hydratedUrl, portalBaseUrl);
-  } catch (error) {
-    logError('Invalid form URL after template replacement', {
-      url: hydratedUrl,
-      ...buildErrorMeta(error),
-    });
-    return null;
-  }
-  const portalOrigin = new URL(portalBaseUrl).origin;
-  if (resolved.origin === portalOrigin) {
-    return resolved.toString();
-  }
-  return canProxyFormUrl(resolved, portalOrigin) ? `/forms/embed/${formId}` : null;
-}
-
-async function buildFormsContext(
-  req: Request
-): Promise<{
-  hydratedForms: FormWithEmbedUrl[];
-  companies: Awaited<ReturnType<typeof getCompaniesForUser>>;
-  currentCompanyAssignment: Awaited<ReturnType<typeof getCompaniesForUser>>[number] | undefined;
-  portalBaseUrl: string;
-}> {
-  const userId = req.session.userId!;
-  const [forms, companies, currentUser] = await Promise.all([
-    getFormsForUser(userId),
-    getCompaniesForUser(userId),
-    getUserById(userId),
-  ]);
-  const currentCompanyAssignment = companies.find(
-    (company) => company.company_id === req.session.companyId
-  );
-  const currentCompanyDetails = currentCompanyAssignment?.company_id
-    ? await getCompanyById(currentCompanyAssignment.company_id)
-    : null;
-  const portalBaseUrl = getPortalBaseUrl(req);
-  const replacements = buildTemplateReplacementMap({
-    user: currentUser
-      ? {
-          id: currentUser.id,
-          email: currentUser.email,
-          firstName: currentUser.first_name ?? '',
-          lastName: currentUser.last_name ?? '',
-        }
-      : undefined,
-    company: currentCompanyAssignment
-      ? {
-          id: currentCompanyAssignment.company_id,
-          name: currentCompanyDetails?.name ?? currentCompanyAssignment.company_name ?? '',
-          syncroCustomerId: currentCompanyDetails?.syncro_company_id ?? null,
-        }
-      : undefined,
-    portal: {
-      baseUrl: portalBaseUrl,
-      loginUrl: `${portalBaseUrl}/login`,
-    },
-  });
-  const hydratedForms: FormWithEmbedUrl[] = forms.map((form) => {
-    const hydratedUrl = applyTemplateVariables(form.url, replacements);
-    return {
-      ...form,
-      url: hydratedUrl,
-      embedUrl: getEmbedUrlForForm(hydratedUrl, form.id, portalBaseUrl),
-    };
-  });
-  return { hydratedForms, companies, currentCompanyAssignment, portalBaseUrl };
-}
 
 let appVersion = 'unknown';
 let appBuild = 'unknown';
@@ -2794,11 +2495,43 @@ app.delete('/invoices/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
 });
 
 app.get('/forms', ensureAuth, async (req, res) => {
-  const { hydratedForms, companies, currentCompanyAssignment } = await buildFormsContext(
-    req
-  );
-  req.session.hasForms = hydratedForms.length > 0;
-  const current = currentCompanyAssignment;
+  const userId = req.session.userId!;
+  const [forms, companies, currentUser] = await Promise.all([
+    getFormsForUser(userId),
+    getCompaniesForUser(userId),
+    getUserById(userId),
+  ]);
+  req.session.hasForms = forms.length > 0;
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  const currentCompanyDetails = current?.company_id
+    ? await getCompanyById(current.company_id)
+    : null;
+  const baseUrl = process.env.PORTAL_URL || `${req.protocol}://${req.get('host')}`;
+  const replacements = buildTemplateReplacementMap({
+    user: currentUser
+      ? {
+          id: currentUser.id,
+          email: currentUser.email,
+          firstName: currentUser.first_name ?? '',
+          lastName: currentUser.last_name ?? '',
+        }
+      : undefined,
+    company: current
+      ? {
+          id: current.company_id,
+          name: currentCompanyDetails?.name ?? current.company_name ?? '',
+          syncroCustomerId: currentCompanyDetails?.syncro_company_id ?? null,
+        }
+      : undefined,
+    portal: {
+      baseUrl,
+      loginUrl: `${baseUrl}/login`,
+    },
+  });
+  const hydratedForms = forms.map((form) => ({
+    ...form,
+    url: applyTemplateVariables(form.url, replacements),
+  }));
   res.render('forms', {
     forms: hydratedForms,
     companies,
@@ -2813,67 +2546,6 @@ app.get('/forms', ensureAuth, async (req, res) => {
     canOrderLicenses: current?.can_order_licenses ?? 0,
     canAccessShop: current?.can_access_shop ?? 0,
   });
-});
-
-app.get('/forms/embed/:id', ensureAuth, async (req, res) => {
-  const formId = Number.parseInt(req.params.id, 10);
-  if (!Number.isFinite(formId)) {
-    return sendFormProxyError(res, 400, 'The requested form identifier is invalid.');
-  }
-  const { hydratedForms, portalBaseUrl } = await buildFormsContext(req);
-  const target = hydratedForms.find((form) => form.id === formId);
-  if (!target) {
-    return sendFormProxyError(res, 404, 'The requested form is no longer assigned to your account.');
-  }
-  let resolvedUrl: URL;
-  try {
-    resolvedUrl = new URL(target.url, portalBaseUrl);
-  } catch (error) {
-    logError('Failed to resolve hydrated form URL', {
-      formId,
-      url: target.url,
-      ...buildErrorMeta(error),
-    });
-    return sendFormProxyError(res, 400, 'The form URL could not be resolved.');
-  }
-  const portalOrigin = new URL(portalBaseUrl).origin;
-  if (resolvedUrl.origin === portalOrigin) {
-    return res.redirect(resolvedUrl.toString());
-  }
-  if (!canProxyFormUrl(resolvedUrl, portalOrigin)) {
-    return sendFormProxyError(
-      res,
-      403,
-      'This form cannot be embedded securely. Use the “Open form in new tab” button to continue.'
-    );
-  }
-  try {
-    const html = await fetchExternalForm(resolvedUrl);
-    const responseHtml = injectBaseTag(html, resolvedUrl);
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Content-Security-Policy', FORM_PROXY_SUCCESS_CSP);
-    res.type('html').send(responseHtml);
-  } catch (error) {
-    if (error instanceof ExternalFormFetchError) {
-      logError('External form fetch error', {
-        formId,
-        url: resolvedUrl.toString(),
-        statusCode: error.statusCode,
-        ...buildErrorMeta(error),
-      });
-      return sendFormProxyError(res, error.statusCode, error.userMessage);
-    }
-    logError('Unexpected error while embedding form', {
-      formId,
-      url: resolvedUrl.toString(),
-      ...buildErrorMeta(error),
-    });
-    return sendFormProxyError(
-      res,
-      502,
-      'We could not load this form. Use the “Open form in new tab” button to continue.'
-    );
-  }
 });
 
 app.get('/forms/company', ensureAuth, ensureAdmin, async (req, res) => {
