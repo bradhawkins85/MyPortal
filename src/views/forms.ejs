@@ -9,18 +9,21 @@
       <% if (forms.length > 0) { %>
         <div class="forms-menu">
           <% forms.forEach(function(f, idx){ %>
-            <button data-open-form data-url="<%= f.url %>" class="<%= idx === 0 ? 'active' : '' %>"><%= f.name %></button>
+            <button data-open-form data-embed-url="<%= f.embedPath %>" class="<%= idx === 0 ? 'active' : '' %>"><%= f.name %></button>
           <% }); %>
         </div>
-        <iframe id="form-frame" class="form-frame" src="<%= forms[0].url %>"></iframe>
+        <iframe id="form-frame" class="form-frame" src="<%= forms[0].embedPath %>" loading="lazy" title="Selected form"></iframe>
       <% } else { %>
         <p>No forms available.</p>
       <% } %>
     </div>
   </div>
   <script>
-    function showForm(url, btn) {
-      document.getElementById('form-frame').src = url;
+    function showForm(embedUrl, btn) {
+      const frame = document.getElementById('form-frame');
+      if (frame && embedUrl) {
+        frame.src = embedUrl;
+      }
       document.querySelectorAll('.forms-menu button').forEach(b => b.classList.remove('active'));
       if (btn) btn.classList.add('active');
     }
