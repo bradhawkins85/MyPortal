@@ -12,3 +12,4 @@
 - 2025-09-17, 09:16 UTC, Fix, Updated CSP frame policy to allow embedding OpnForm frames from form.hawkinsit.au
 - 2025-09-17, 09:34 UTC, Feature, Added dynamic template variables for app URLs and documented usage in README
 - 2025-09-17, 14:47 UTC, Fix, Proxied OpnForm embeds through an internal viewer to keep forms inside the portal while honouring template variables
+- 2025-09-17, 15:30 UTC, Fix, Relaxed embedded form sandbox and CSP to support FIDO2 postMessage flows while keeping CSP restrictions

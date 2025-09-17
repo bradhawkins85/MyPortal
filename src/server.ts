@@ -2670,10 +2670,13 @@ app.get('/forms/embed/:formId', ensureAuth, async (req, res) => {
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
+  // Allow the embedded OpnForm experience to use WebAuthn (FIDO2) flows which rely on
+  // postMessage communication and popups. The sandbox is kept while explicitly allowing
+  // the required capabilities and still forcing everything through a restrictive CSP.
   res.setHeader(
     'Content-Security-Policy',
     [
-      'sandbox allow-forms allow-scripts',
+      'sandbox allow-forms allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox',
       "default-src 'self' https: data: blob:",
       "script-src 'self' 'unsafe-inline' https:",
       "style-src 'self' 'unsafe-inline' https:",
