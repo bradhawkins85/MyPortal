@@ -400,43 +400,12 @@ table th {
   background-color: #3700b3;
 }
 
-.forms-menu button.external {
-  border: 1px dashed #3700b3;
-}
-
-.forms-menu button.external .forms-external-note {
-  display: block;
-  font-size: 0.75rem;
-  font-weight: 400;
-}
-
 .form-frame {
   width: 100%;
   /* Maintain a 10px buffer at the top and bottom */
   height: calc(100vh - 200px - 20px);
   border: none;
   margin: 10px 0;
-}
-
-.form-viewer {
-  position: relative;
-}
-
-.form-unavailable {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  text-align: center;
-  gap: 0.5rem;
-  width: 100%;
-  height: calc(100vh - 200px - 20px);
-  border: 1px dashed #ccc;
-  border-radius: 4px;
-  background: #f9f9f9;
-  color: #333;
-  margin: 10px 0;
-  padding: 1.5rem;
 }
 
 .modal {
