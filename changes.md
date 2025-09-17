@@ -14,3 +14,4 @@
 - 2025-09-17, 14:47 UTC, Fix, Proxied OpnForm embeds through an internal viewer to keep forms inside the portal while honouring template variables
 - 2025-09-17, 15:30 UTC, Fix, Relaxed embedded form sandbox and CSP to support FIDO2 postMessage flows while keeping CSP restrictions
 - 2025-09-17, 23:06 UTC, Feature, Enabled OpnForm iframe embed snippets in Forms admin with validation and sanitised storage
+- 2025-09-18, 01:20 UTC, Fix, Served sanitised OpnForm embed snippets directly to avoid upstream fetch failures when loading forms
