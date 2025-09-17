@@ -11,3 +11,4 @@
 - 2025-09-17, 07:54 UTC, Feature, Added OpnForm deployment guidance, nginx proxy config, and super admin builder link
 - 2025-09-17, 09:16 UTC, Fix, Updated CSP frame policy to allow embedding OpnForm frames from form.hawkinsit.au
 - 2025-09-17, 09:34 UTC, Feature, Added dynamic template variables for app URLs and documented usage in README
+- 2025-09-17, 14:09 UTC, Fix, Added secure proxying for external OpnForm embeds with in-portal fallback messaging and documentation
