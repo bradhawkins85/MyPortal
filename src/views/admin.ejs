@@ -1368,5 +1368,31 @@
       });
     });
   </script>
+  <% if (isSuperAdmin && priceAlerts && priceAlerts.length) { %>
+    <script>
+      window.addEventListener('load', function () {
+        const alerts = <%- JSON.stringify(priceAlerts.map(function(alert) {
+          return {
+            name: alert.product_name,
+            sku: alert.product_sku,
+            price: Number(alert.price),
+            vipPrice: alert.vip_price !== null ? Number(alert.vip_price) : null,
+            threshold: Number(alert.threshold_price)
+          };
+        })).replace(/</g, '\\u003c') %>;
+        if (!Array.isArray(alerts) || !alerts.length) {
+          return;
+        }
+        const lines = alerts.map(function (alert) {
+          let message = alert.name + ' (' + alert.sku + ') has DBP +10% of $' + alert.threshold.toFixed(2) + ' while the current price is $' + alert.price.toFixed(2);
+          if (alert.vipPrice !== null) {
+            message += ' and the VIP price is $' + alert.vipPrice.toFixed(2);
+          }
+          return message;
+        });
+        alert('Product pricing alert:\n\n' + lines.join('\n\n'));
+      });
+    </script>
+  <% } %>
 </body>
 </html>
