@@ -1343,7 +1343,7 @@ app.use(
 
 function ensureAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (!req.session.userId) {
-    return res.redirect('/login');
+    return res.redirect('/logon');
   }
   if (
     req.session.mustChangePassword &&
@@ -1412,7 +1412,14 @@ app.get('/api-docs', ensureAuth, ensureSuperAdmin, async (req, res) => {
   });
 });
 
-app.get('/login', async (req, res) => {
+app.all('/login', (req, res) => {
+  if (req.method === 'GET') {
+    return res.redirect('/logon');
+  }
+  return res.redirect(307, '/logon');
+});
+
+app.get('/logon', async (req, res) => {
   const count = await getUserCount();
   if (count === 0) {
     return res.redirect('/register');
@@ -1420,7 +1427,7 @@ app.get('/login', async (req, res) => {
   res.render('login', { error: '' });
 });
 
-app.post('/login', loginLimiter, async (req, res) => {
+app.post('/logon', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
   const identifier = email || req.ip;
   logInfo('Login attempt', { email, ip: req.ip });
@@ -1477,7 +1484,7 @@ app.post('/login', loginLimiter, async (req, res) => {
 
 app.get('/totp', async (req, res) => {
   if (!req.session.tempUserId) {
-    return res.redirect('/login');
+    return res.redirect('/logon');
   }
   let qrCode: string | null = null;
   let secret: string | null = null;
@@ -1496,7 +1503,7 @@ app.get('/totp', async (req, res) => {
 
 app.post('/totp', async (req, res) => {
   if (!req.session.tempUserId) {
-    return res.redirect('/login');
+    return res.redirect('/logon');
   }
   const userId = req.session.tempUserId;
   let valid = false;
@@ -1558,7 +1565,7 @@ app.post('/totp', async (req, res) => {
 app.get('/register', async (req, res) => {
   const count = await getUserCount();
   if (count > 0) {
-    return res.redirect('/login');
+    return res.redirect('/logon');
   }
   res.render('register', { error: '' });
 });
@@ -1611,7 +1618,7 @@ app.post('/password-setup', async (req, res) => {
   const passwordHash = await bcrypt.hash(newPassword, 10);
   await updateUserPassword(userId, passwordHash);
   await markPasswordTokenUsed(token);
-  res.redirect('/login');
+  res.redirect('/logon');
 });
 
 app.get('/verify', (req, res) => {
@@ -1642,7 +1649,7 @@ app.post('/verify', async (req, res) => {
 
 app.get('/logout', (req, res) => {
   req.session.destroy(() => {
-    res.redirect('/login');
+    res.redirect('/logon');
   });
 });
 
@@ -2410,7 +2417,7 @@ app.post('/staff/:id/invite', ensureAuth, ensureStaffAccess, async (req, res) =>
   if (template) {
     const baseUrl =
       process.env.PORTAL_URL || `${req.protocol}://${req.get('host')}`;
-    const portalUrl = `${baseUrl}/login`;
+    const portalUrl = `${baseUrl}/logon`;
     const setupLink = `${baseUrl}/password-setup?token=${token}`;
     const html = template.body
       .replace(/\{\{companyName\}\}/g, siteSettings?.company_name || '')
@@ -2559,7 +2566,7 @@ app.get('/forms', ensureAuth, async (req, res) => {
       : undefined,
     portal: {
       baseUrl,
-      loginUrl: `${baseUrl}/login`,
+      loginUrl: `${baseUrl}/logon`,
     },
   });
   const hydratedForms = forms.map((form) => {
@@ -3914,7 +3921,7 @@ app.post('/admin/invite', ensureAuth, ensureAdmin, async (req, res) => {
   ]);
   if (template) {
     const portalUrl =
-      process.env.PORTAL_URL || `${req.protocol}://${req.get('host')}/login`;
+      process.env.PORTAL_URL || `${req.protocol}://${req.get('host')}/logon`;
     const html = template.body
       .replace(/\{\{companyName\}\}/g, siteSettings?.company_name || '')
       .replace(/\{\{tempPassword\}\}/g, tempPassword)
