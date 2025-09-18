@@ -2516,6 +2516,42 @@ function buildDefaultOpnformEmbedSnippet(formUrl: string): string {
   return `<iframe src="${safeUrl}" style="border:0;width:100%;min-height:480px;" loading="lazy" allow="publickey-credentials-get *; publickey-credentials-create *" title="OpnForm form"></iframe>`;
 }
 
+function overrideIframeSrc(embedCode: string, newSrc: string): string {
+  const safeSrc = escapeHtmlAttribute(newSrc);
+  let replaced = false;
+  const updated = embedCode.replace(
+    /(<iframe\b[^>]*\bsrc=)("[^"]*"|'[^']*'|[^\s>]+)/i,
+    (match, prefix) => {
+      replaced = true;
+      return `${prefix}"${safeSrc}"`;
+    }
+  );
+  if (!replaced) {
+    return buildDefaultOpnformEmbedSnippet(newSrc);
+  }
+  return updated;
+}
+
+function buildOpnformEmbedPage(embedCode: string, formName: string): string {
+  const title = formName ? `${formName} form` : 'Form';
+  return [
+    '<!DOCTYPE html>',
+    '<html lang="en">',
+    '<head>',
+    '<meta charset="utf-8">',
+    `<title>${escapeHtmlAttribute(title)}</title>`,
+    '<meta name="viewport" content="width=device-width,initial-scale=1">',
+    '<style>',
+    '  html, body { margin: 0; padding: 0; min-height: 100%; background: #fff; }',
+    '</style>',
+    '</head>',
+    '<body>',
+    embedCode,
+    '</body>',
+    '</html>',
+  ].join('');
+}
+
 app.get('/forms', ensureAuth, async (req, res) => {
   const userId = req.session.userId!;
   const [forms, companies, currentUser] = await Promise.all([
@@ -2632,12 +2668,39 @@ app.get('/forms/embed/:formId', ensureAuth, async (req, res) => {
     return res.status(400).send('Unsupported form URL protocol');
   }
 
+  const embedCode = form.embed_code?.trim();
+  const externalUrlString = externalUrl.toString();
+  const applyEmbedResponseHeaders = () => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader(
+      'Content-Security-Policy',
+      [
+        'sandbox allow-forms allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox',
+        "default-src 'self' https: data: blob:",
+        "script-src 'self' 'unsafe-inline' https:",
+        "style-src 'self' 'unsafe-inline' https:",
+        "img-src 'self' data: https:",
+        "font-src 'self' data: https:",
+        "connect-src 'self' https:",
+        "frame-src 'self' https:",
+      ].join('; ') + ';'
+    );
+  };
+
+  if (embedCode) {
+    const updatedEmbedCode = overrideIframeSrc(embedCode, externalUrlString);
+    const pageHtml = buildOpnformEmbedPage(updatedEmbedCode, form.name);
+    applyEmbedResponseHeaders();
+    return res.send(pageHtml);
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FORM_EMBED_TIMEOUT_MS);
 
   let upstreamResponse;
   try {
-    upstreamResponse = await fetch(externalUrl.toString(), {
+    upstreamResponse = await fetch(externalUrlString, {
       signal: controller.signal,
       headers: {
         'User-Agent': 'MyPortalFormsEmbed/1.0',
@@ -2684,24 +2747,7 @@ app.get('/forms/embed/:formId', ensureAuth, async (req, res) => {
     html = `<head><base href="${escapeHtmlAttribute(baseHref)}"></head>${html}`;
   }
 
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-store');
-  // Allow the embedded OpnForm experience to use WebAuthn (FIDO2) flows which rely on
-  // postMessage communication and popups. The sandbox is kept while explicitly allowing
-  // the required capabilities and still forcing everything through a restrictive CSP.
-  res.setHeader(
-    'Content-Security-Policy',
-    [
-      'sandbox allow-forms allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox',
-      "default-src 'self' https: data: blob:",
-      "script-src 'self' 'unsafe-inline' https:",
-      "style-src 'self' 'unsafe-inline' https:",
-      "img-src 'self' data: https:",
-      "font-src 'self' data: https:",
-      "connect-src 'self' https:",
-      "frame-src 'self' https:"
-    ].join('; ') + ';'
-  );
+  applyEmbedResponseHeaders();
   res.send(html);
 });
 
