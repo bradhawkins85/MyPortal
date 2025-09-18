@@ -212,7 +212,6 @@ import {
 } from './queries';
 import { runMigrations } from './db';
 import { logInfo, logError } from './logger';
-import { normalizeOpnformEmbedCode } from './opnform-embed';
 
 dotenv.config();
 
@@ -2563,9 +2562,28 @@ function buildFormUnavailablePage(formName: string): string {
   ].join('');
 }
 
-function buildDefaultOpnformEmbedSnippet(formUrl: string): string {
-  const safeUrl = escapeHtmlAttribute(formUrl);
-  return `<iframe src="${safeUrl}" style="border:0;width:100%;min-height:480px;" loading="lazy" allow="publickey-credentials-get *; publickey-credentials-create *" title="OpnForm form"></iframe>`;
+function normalizeOpnformFormUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) {
+    throw new Error('Form URL is required');
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch (err) {
+    throw new Error('Form URL must be an absolute URL');
+  }
+
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('Form URL must use HTTP or HTTPS');
+  }
+
+  if (opnformAllowedHost && parsed.host !== opnformAllowedHost) {
+    throw new Error('Form URL host is not allowed');
+  }
+
+  return parsed.toString();
 }
 
 app.get('/forms', ensureAuth, async (req, res) => {
@@ -3286,25 +3304,23 @@ app.get('/forms/admin', ensureAuth, ensureSuperAdmin, (req, res) => {
 });
 
 app.post('/forms/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { name, embedCode, description } = req.body as {
+  const { name, url, description } = req.body as {
     name?: string;
-    embedCode?: string;
+    url?: string;
     description?: string;
   };
-  if (!name || !embedCode) {
-    return res.status(400).send('Name and embed code are required');
+  if (!name || !url) {
+    return res.status(400).send('Name and URL are required');
   }
   try {
-    const normalized = normalizeOpnformEmbedCode(embedCode, {
-      allowedHost: opnformAllowedHost,
-    });
-    await createForm(name, normalized.formUrl, normalized.sanitizedEmbedCode, description ?? '');
+    const normalizedUrl = normalizeOpnformFormUrl(url);
+    await createForm(name, normalizedUrl, null, description ?? '');
     res.redirect('/admin');
   } catch (err) {
-    logError('Failed to create form from embed code', {
+    logError('Failed to create form from URL', {
       error: (err as Error).message,
     });
-    res.status(400).send('Invalid OpnForm embed code provided');
+    res.status(400).send('Invalid OpnForm form URL provided');
   }
 });
 
@@ -3325,28 +3341,26 @@ app.post('/forms/admin/permissions', ensureAuth, ensureSuperAdmin, async (req, r
 });
 
 app.post('/forms/admin/edit', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  const { id, name, embedCode, description } = req.body as {
+  const { id, name, url, description } = req.body as {
     id?: string;
     name?: string;
-    embedCode?: string;
+    url?: string;
     description?: string;
   };
   const formId = id ? parseInt(id, 10) : NaN;
-  if (!name || !embedCode || Number.isNaN(formId)) {
-    return res.status(400).send('Form id, name, and embed code are required');
+  if (!name || !url || Number.isNaN(formId)) {
+    return res.status(400).send('Form id, name, and URL are required');
   }
   try {
-    const normalized = normalizeOpnformEmbedCode(embedCode, {
-      allowedHost: opnformAllowedHost,
-    });
-    await updateForm(formId, name, normalized.formUrl, normalized.sanitizedEmbedCode, description ?? '');
+    const normalizedUrl = normalizeOpnformFormUrl(url);
+    await updateForm(formId, name, normalizedUrl, null, description ?? '');
     res.redirect('/admin');
   } catch (err) {
-    logError('Failed to update form from embed code', {
+    logError('Failed to update form from URL', {
       error: (err as Error).message,
       formId,
     });
-    res.status(400).send('Invalid OpnForm embed code provided');
+    res.status(400).send('Invalid OpnForm form URL provided');
   }
 });
 
@@ -3570,11 +3584,6 @@ app.get('/admin', ensureAuth, async (req, res) => {
   const priceAlerts: ProductPriceAlertWithProduct[] = isSuperAdmin
     ? await getActiveProductPriceAlerts()
     : [];
-  const formsForView = forms.map((form) => ({
-    ...form,
-    embedCodeForDisplay: form.embed_code ?? buildDefaultOpnformEmbedSnippet(form.url),
-  }));
-
   res.render('admin', {
     allCompanies,
     users,
@@ -3583,7 +3592,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
     apps,
     appPrices,
     companyPrices,
-    forms: formsForView,
+    forms,
     formUsers,
     permissions,
     formAccess,
