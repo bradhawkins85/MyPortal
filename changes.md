@@ -15,3 +15,4 @@
 - 2025-09-17, 15:30 UTC, Fix, Relaxed embedded form sandbox and CSP to support FIDO2 postMessage flows while keeping CSP restrictions
 - 2025-09-17, 23:06 UTC, Feature, Enabled OpnForm iframe embed snippets in Forms admin with validation and sanitised storage
 - 2025-09-18, 01:20 UTC, Fix, Served sanitised OpnForm embed snippets directly to avoid upstream fetch failures when loading forms
+- 2025-09-18, 02:45 UTC, Fix, Always proxy OpnForm content and show an in-portal unavailable message when upstream embedding is blocked
