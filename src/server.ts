@@ -2511,45 +2511,61 @@ function escapeHtmlAttribute(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-function buildDefaultOpnformEmbedSnippet(formUrl: string): string {
-  const safeUrl = escapeHtmlAttribute(formUrl);
-  return `<iframe src="${safeUrl}" style="border:0;width:100%;min-height:480px;" loading="lazy" allow="publickey-credentials-get *; publickey-credentials-create *" title="OpnForm form"></iframe>`;
-}
-
-function overrideIframeSrc(embedCode: string, newSrc: string): string {
-  const safeSrc = escapeHtmlAttribute(newSrc);
-  let replaced = false;
-  const updated = embedCode.replace(
-    /(<iframe\b[^>]*\bsrc=)("[^"]*"|'[^']*'|[^\s>]+)/i,
-    (match, prefix) => {
-      replaced = true;
-      return `${prefix}"${safeSrc}"`;
-    }
-  );
-  if (!replaced) {
-    return buildDefaultOpnformEmbedSnippet(newSrc);
-  }
-  return updated;
-}
-
-function buildOpnformEmbedPage(embedCode: string, formName: string): string {
+function buildFormUnavailablePage(formName: string): string {
   const title = formName ? `${formName} form` : 'Form';
+  const safeTitle = escapeHtmlAttribute(title);
+  const safeName = formName ? escapeHtml(formName) : 'This form';
   return [
     '<!DOCTYPE html>',
     '<html lang="en">',
     '<head>',
     '<meta charset="utf-8">',
-    `<title>${escapeHtmlAttribute(title)}</title>`,
+    `<title>${safeTitle}</title>`,
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
     '<style>',
-    '  html, body { margin: 0; padding: 0; min-height: 100%; background: #fff; }',
+    '  :root { color-scheme: light dark; }',
+    '  body {',
+    '    margin: 0;',
+    '    padding: 2rem 1.5rem;',
+    '    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;',
+    '    background: #f9fafb;',
+    '    color: #111827;',
+    '    display: flex;',
+    '    align-items: center;',
+    '    justify-content: center;',
+    '  }',
+    '  main {',
+    '    max-width: 480px;',
+    '    background: #ffffff;',
+    '    border-radius: 12px;',
+    '    padding: 2rem;',
+    '    box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12);',
+    '    text-align: center;',
+    '  }',
+    '  h1 {',
+    '    font-size: 1.5rem;',
+    '    margin-bottom: 1rem;',
+    '  }',
+    '  p {',
+    '    margin: 0 0 1.5rem;',
+    '    line-height: 1.5;',
+    '  }',
     '</style>',
     '</head>',
     '<body>',
-    embedCode,
+    '<main>',
+    `<h1>${safeName} can&#8217;t be displayed right now</h1>`,
+    '<p>We couldn&#8217;t securely load this form at the moment.</p>',
+    '<p>Please try again shortly or contact your administrator if the issue continues.</p>',
+    '</main>',
     '</body>',
     '</html>',
   ].join('');
+}
+
+function buildDefaultOpnformEmbedSnippet(formUrl: string): string {
+  const safeUrl = escapeHtmlAttribute(formUrl);
+  return `<iframe src="${safeUrl}" style="border:0;width:100%;min-height:480px;" loading="lazy" allow="publickey-credentials-get *; publickey-credentials-create *" title="OpnForm form"></iframe>`;
 }
 
 app.get('/forms', ensureAuth, async (req, res) => {
@@ -2668,7 +2684,6 @@ app.get('/forms/embed/:formId', ensureAuth, async (req, res) => {
     return res.status(400).send('Unsupported form URL protocol');
   }
 
-  const embedCode = form.embed_code?.trim();
   const externalUrlString = externalUrl.toString();
   const applyEmbedResponseHeaders = () => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -2688,12 +2703,10 @@ app.get('/forms/embed/:formId', ensureAuth, async (req, res) => {
     );
   };
 
-  if (embedCode) {
-    const updatedEmbedCode = overrideIframeSrc(embedCode, externalUrlString);
-    const pageHtml = buildOpnformEmbedPage(updatedEmbedCode, form.name);
+  const respondWithFallback = () => {
     applyEmbedResponseHeaders();
-    return res.send(pageHtml);
-  }
+    return res.status(200).send(buildFormUnavailablePage(form.name));
+  };
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FORM_EMBED_TIMEOUT_MS);
@@ -2709,21 +2722,28 @@ app.get('/forms/embed/:formId', ensureAuth, async (req, res) => {
   } catch (err) {
     clearTimeout(timeout);
     if ((err as Error).name === 'AbortError') {
-      return res.status(504).send('Timed out loading form');
+      console.warn('Timed out loading form from upstream', externalUrlString);
+    } else {
+      console.error('Error fetching embedded form', err);
     }
-    console.error('Error fetching embedded form', err);
-    return res.status(502).send('Failed to load form');
+    return respondWithFallback();
   }
 
   clearTimeout(timeout);
 
   if (!upstreamResponse.ok) {
-    return res.status(502).send('Failed to load form');
+    console.warn(
+      'Upstream form responded with status',
+      upstreamResponse.status,
+      upstreamResponse.statusText
+    );
+    return respondWithFallback();
   }
 
   const contentType = upstreamResponse.headers.get('content-type') ?? 'text/html';
   if (!contentType.includes('text/html')) {
-    return res.status(415).send('Unsupported form content type');
+    console.warn('Unsupported upstream form content type', contentType);
+    return respondWithFallback();
   }
 
   let html: string;
@@ -2731,7 +2751,7 @@ app.get('/forms/embed/:formId', ensureAuth, async (req, res) => {
     html = await upstreamResponse.text();
   } catch (err) {
     console.error('Failed to read embedded form response', err);
-    return res.status(502).send('Failed to load form');
+    return respondWithFallback();
   }
 
   const baseHref = new URL('./', externalUrl).toString();
