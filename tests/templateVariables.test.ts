@@ -22,7 +22,7 @@ test('buildTemplateReplacementMap returns raw and encoded values', () => {
     },
     portal: {
       baseUrl: 'https://portal.example.com',
-      loginUrl: 'https://portal.example.com/login',
+      loginUrl: 'https://portal.example.com/logon',
     },
   });
 

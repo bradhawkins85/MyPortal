@@ -30,11 +30,11 @@
               if (data.complete) {
                 clearInterval(pollInterval);
                 clearInterval(loadingInterval);
-                window.location.href = '/login';
+                window.location.href = '/logon';
               }
             } catch (err) {
-              if (text && text.includes('login')) {
-                window.location.href = '/login';
+              if (text && text.includes('logon')) {
+                window.location.href = '/logon';
               }
             }
           })
