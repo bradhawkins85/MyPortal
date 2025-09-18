@@ -1,8 +1,10 @@
 # OpnForm Integration Guide
 
-MyPortal expects an OpnForm instance to run on the same host. Requests for
-`/forms/` are reverse-proxied by nginx to the OpnForm application. This document
-covers provisioning OpnForm, wiring nginx, and exposing the builder link inside
+MyPortal expects an OpnForm instance to run on the same host. The supplied
+nginx snippet can reverse-proxy `/forms/` to the OpnForm application so that the
+builder opens within the same origin, while published forms displayed to end
+users now load directly in an iframe from the OpnForm host. This document covers
+provisioning OpnForm, wiring nginx, and exposing the builder link inside
 MyPortal.
 
 ## 1. Provision OpnForm
@@ -81,7 +83,9 @@ Key security considerations:
 
 MyPortal automatically links to `/forms/`. When the reverse proxy needs to point
 somewhere else (for example, a sub-domain), set the `OPNFORM_BASE_URL` variable
-in `.env`:
+in `.env`. Embedded forms use this value to build the iframe `src`, so ensure the
+URL allows cross-origin framing (e.g. send the proper `X-Frame-Options` /
+`Content-Security-Policy` headers from OpnForm):
 
 ```env
 OPNFORM_BASE_URL=https://forms.example.com/
@@ -101,7 +105,9 @@ integrations always generate consistent links.
    **Form URL** field alongside the form name and description. Submit the form
    to save it.
 6. Refresh the page—the form will now appear in the list for assignment to
-   companies and users.
+   companies and users. When selected from the portal it loads directly from
+   OpnForm in an iframe, so the upstream host must permit embedding from your
+   MyPortal origin.
 
 Troubleshooting tips:
 
@@ -111,3 +117,6 @@ Troubleshooting tips:
   stack with `docker compose restart` if necessary.
 - Confirm that both MyPortal and OpnForm share the same session cookie domain if
   you intend to implement SSO or embed forms with authenticated submissions.
+- If forms refuse to render inside the iframe, double-check the OpnForm
+  deployment does not send `X-Frame-Options: DENY` or a restrictive
+  `Content-Security-Policy` that blocks framing by MyPortal.

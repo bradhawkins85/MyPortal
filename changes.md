@@ -17,3 +17,4 @@
 - 2025-09-18, 01:20 UTC, Fix, Served sanitised OpnForm embed snippets directly to avoid upstream fetch failures when loading forms
 - 2025-09-18, 02:45 UTC, Fix, Always proxy OpnForm content and show an in-portal unavailable message when upstream embedding is blocked
 - 2025-09-18, 04:10 UTC, Fix, Restored direct OpnForm URL management in Forms admin instead of requiring iframe embed snippets
+- 2025-09-18, 07:03 UTC, Fix, Replaced proxied form viewer with direct iframe embedding and refreshed OpnForm documentation
