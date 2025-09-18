@@ -1,7 +1,7 @@
 # OpnForm Integration Guide
 
 MyPortal expects an OpnForm instance to run on the same host. The supplied
-nginx snippet can reverse-proxy `/forms/` to the OpnForm application so that the
+nginx snippet can reverse-proxy `/myforms/` to the OpnForm application so that the
 builder opens within the same origin, while published forms displayed to end
 users now load directly in an iframe from the OpnForm host. This document covers
 provisioning OpnForm, wiring nginx, and exposing the builder link inside
@@ -31,7 +31,7 @@ single server.
 
    Recommended changes:
 
-   - `APP_URL=https://portal.example.com/forms` (match your public hostname)
+   - `APP_URL=https://portal.example.com/myforms` (match your public hostname)
    - `SESSION_DOMAIN=portal.example.com`
    - `APP_KEY=` (generate with `php artisan key:generate --show`)
    - Configure the database section to use a local MySQL/PostgreSQL instance or
@@ -76,12 +76,12 @@ Key security considerations:
   ssl http2;`).
 - Issue certificates with an automated client such as Certbot and renew them on
   a schedule.
-- Restrict nginx access to the `/forms/` builder route by IP allow-lists or SSO
+- Restrict nginx access to the `/myforms/` builder route by IP allow-lists or SSO
   if the forms should not be publicly browsable.
 
 ## 3. Tell MyPortal where OpnForm lives
 
-MyPortal automatically links to `/forms/`. When the reverse proxy needs to point
+MyPortal automatically links to `/myforms/`. When the reverse proxy needs to point
 somewhere else (for example, a sub-domain), set the `OPNFORM_BASE_URL` variable
 in `.env`. Embedded forms use this value to build the iframe `src`, so ensure the
 URL allows cross-origin framing (e.g. send the proper `X-Frame-Options` /

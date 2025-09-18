@@ -7,7 +7,7 @@
     <div class="content">
       <h1>Manage Form Access</h1>
       <% if (forms.length > 0) { %>
-        <form action="/forms/company" method="get">
+        <form action="/myforms/company" method="get">
           <select name="formId" data-submit-on-change>
             <option value="">Select Form</option>
             <% forms.forEach(function(f){ %>
@@ -16,7 +16,7 @@
           </select>
         </form>
         <% if (selectedFormId) { %>
-          <form action="/forms/company" method="post">
+          <form action="/myforms/company" method="post">
             <input type="hidden" name="formId" value="<%= selectedFormId %>">
             <% users.forEach(function(u){ %>
               <label><input type="checkbox" name="userIds" value="<%= u.user_id %>" <%= permissions.includes(u.user_id) ? 'checked' : '' %>> <%= u.email %></label><br>

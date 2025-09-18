@@ -893,7 +893,7 @@
           </section>
           <section>
             <h2>Add Form</h2>
-            <form action="/forms/admin" method="post">
+            <form action="/myforms/admin" method="post">
               <input type="text" name="name" placeholder="Name" required>
               <input type="text" name="url" placeholder="https://forms.example.com/your-form" required>
               <input type="text" name="description" placeholder="Description">
@@ -913,11 +913,11 @@
                     <td><input form="form-<%= f.id %>" type="text" name="url" value="<%= f.url %>" required></td>
                     <td><input form="form-<%= f.id %>" type="text" name="description" value="<%= f.description %>"></td>
                     <td>
-                      <form id="form-<%= f.id %>" action="/forms/admin/edit" method="post">
+                      <form id="form-<%= f.id %>" action="/myforms/admin/edit" method="post">
                         <input type="hidden" name="id" value="<%= f.id %>">
                         <button type="submit">Save</button>
                       </form>
-                      <form action="/forms/admin/delete" method="post">
+                      <form action="/myforms/admin/delete" method="post">
                         <input type="hidden" name="id" value="<%= f.id %>">
                         <button type="submit">Delete</button>
                       </form>
@@ -931,7 +931,7 @@
         <div id="form-permissions" class="tab-content">
           <section>
             <h2>Manage Permissions</h2>
-            <form action="/forms/admin" method="get">
+            <form action="/myforms/admin" method="get">
               <select name="formId" data-submit-on-change>
                 <option value="">Select Form</option>
                 <% forms.forEach(function(f){ %>
@@ -946,7 +946,7 @@
               </select>
             </form>
             <% if (selectedFormId && selectedCompanyId) { %>
-              <form action="/forms/admin/permissions" method="post">
+              <form action="/myforms/admin/permissions" method="post">
                 <input type="hidden" name="formId" value="<%= selectedFormId %>">
                 <input type="hidden" name="companyId" value="<%= selectedCompanyId %>">
                 <% formUsers.forEach(function(u){ %>
@@ -969,7 +969,7 @@
                     <td><%= p.company_name %></td>
                     <td><%= p.form_name %></td>
                     <td>
-                      <form action="/forms/admin/permissions/delete" method="post">
+                      <form action="/myforms/admin/permissions/delete" method="post">
                         <input type="hidden" name="formId" value="<%= p.form_id %>">
                         <input type="hidden" name="userId" value="<%= p.user_id %>">
                         <input type="hidden" name="companyId" value="<%= p.company_id %>">
