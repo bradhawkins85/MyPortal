@@ -58,7 +58,7 @@ gracefully fall back to an empty string.
    runs behind a different path or host, set `OPNFORM_BASE_URL` so that admin links
    resolve correctly.
 3. On first run, the application will automatically apply the database schema and encrypt any existing TOTP secrets.
-4. On first run, visiting `/login` will redirect to a registration page to create the initial user and company.
+4. On first run, visiting `/logon` will redirect to a registration page to create the initial user and company.
 5. Run in development mode:
    ```bash
    npm run dev
