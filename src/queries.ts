@@ -2301,7 +2301,7 @@ export async function isUserSubscribedToOrder(
 export async function createForm(
   name: string,
   url: string,
-  embedCode: string,
+  embedCode: string | null,
   description: string
 ): Promise<number> {
   const [result] = await pool.execute(
@@ -2316,7 +2316,7 @@ export async function updateForm(
   id: number,
   name: string,
   url: string,
-  embedCode: string,
+  embedCode: string | null,
   description: string
 ): Promise<void> {
   await pool.execute(
