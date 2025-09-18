@@ -162,14 +162,15 @@ pm2 restart myportal
 
 ## OpnForm Integration
 
-MyPortal expects an OpnForm instance on the same server. nginx proxies `/forms/`
-to that service so that super admins can launch the builder directly from the
-Forms admin area. See [docs/opnform.md](docs/opnform.md) for deployment and
-security guidance, including the supplied nginx configuration snippet in
+MyPortal expects an OpnForm instance on the same server. nginx can still proxy
+`/forms/` to that service so that super admins can launch the builder directly
+from the Forms admin area. See [docs/opnform.md](docs/opnform.md) for deployment
+and security guidance, including the supplied nginx configuration snippet in
 [`deploy/nginx/opnform.conf`](deploy/nginx/opnform.conf).
 
 When registering a form inside MyPortal, paste the published OpnForm form URL
 into the Forms admin. The server validates that the URL targets the expected
-OpnForm host (when configured) and stores it for secure proxying through
-MyPortal. Template variables remain available so query string parameters can be
-personalised for the current user and company.
+OpnForm host (when configured) and stores it. Forms assigned to users now load
+directly in an iframe without being proxied through MyPortal, and template
+variables remain available so query string parameters can be personalised for
+the current user and company.
