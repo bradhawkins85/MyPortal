@@ -31,9 +31,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Show forms in iframe
   document.querySelectorAll('[data-open-form]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const embedUrl = btn.getAttribute('data-embed-url');
-      if (typeof showForm === 'function' && embedUrl) {
-        showForm(embedUrl, btn);
+      const formUrl = btn.getAttribute('data-form-url');
+      if (typeof showForm === 'function' && formUrl) {
+        showForm(formUrl, btn);
       }
     });
   });
