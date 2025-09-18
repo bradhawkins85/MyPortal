@@ -220,7 +220,7 @@ if (!sessionSecret) {
   throw new Error('SESSION_SECRET environment variable is required');
 }
 
-const defaultOpnformBaseUrl = '/forms/';
+const defaultOpnformBaseUrl = '/myforms/';
 const configuredOpnformBaseUrl = process.env.OPNFORM_BASE_URL;
 const opnformBaseUrl = configuredOpnformBaseUrl
   ? configuredOpnformBaseUrl.endsWith('/')
@@ -2535,7 +2535,7 @@ function normalizeOpnformFormUrl(rawUrl: string): string {
   return parsed.toString();
 }
 
-app.get('/forms', ensureAuth, async (req, res) => {
+app.get('/myforms', ensureAuth, async (req, res) => {
   const userId = req.session.userId!;
   const [forms, companies, currentUser] = await Promise.all([
     getFormsForUser(userId),
@@ -2593,7 +2593,7 @@ app.get('/forms', ensureAuth, async (req, res) => {
   });
 });
 
-app.get('/forms/company', ensureAuth, ensureAdmin, async (req, res) => {
+app.get('/myforms/company', ensureAuth, ensureAdmin, async (req, res) => {
   const formId = req.query.formId ? parseInt(req.query.formId as string, 10) : NaN;
   const [forms, companies, users] = await Promise.all([
     getFormsByCompany(req.session.companyId!),
@@ -2623,7 +2623,7 @@ app.get('/forms/company', ensureAuth, ensureAdmin, async (req, res) => {
   });
 });
 
-app.post('/forms/company', ensureAuth, ensureAdmin, async (req, res) => {
+app.post('/myforms/company', ensureAuth, ensureAdmin, async (req, res) => {
   const { formId } = req.body;
   let { userIds } = req.body as { userIds?: string | string[] };
   const ids = Array.isArray(userIds)
@@ -2634,10 +2634,10 @@ app.post('/forms/company', ensureAuth, ensureAdmin, async (req, res) => {
   const allowedForms = await getFormsByCompany(req.session.companyId!);
   const idNum = parseInt(formId, 10);
   if (!allowedForms.some((f) => f.id === idNum)) {
-    return res.redirect('/forms/company');
+    return res.redirect('/myforms/company');
   }
   await updateFormPermissions(idNum, req.session.companyId!, ids);
-  res.redirect(`/forms/company?formId=${formId}`);
+  res.redirect(`/myforms/company?formId=${formId}`);
 });
 
 app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
@@ -3101,13 +3101,13 @@ app.post('/switch-company', ensureAuth, async (req, res) => {
   res.redirect('/');
 });
 
-app.get('/forms/admin', ensureAuth, ensureSuperAdmin, (req, res) => {
+app.get('/myforms/admin', ensureAuth, ensureSuperAdmin, (req, res) => {
   const params = new URLSearchParams(req.query as Record<string, string>);
   const query = params.toString();
   res.redirect(`/admin${query ? '?' + query : ''}`);
 });
 
-app.post('/forms/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
+app.post('/myforms/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { name, url, description } = req.body as {
     name?: string;
     url?: string;
@@ -3128,7 +3128,7 @@ app.post('/forms/admin', ensureAuth, ensureSuperAdmin, async (req, res) => {
   }
 });
 
-app.post('/forms/admin/permissions', ensureAuth, ensureSuperAdmin, async (req, res) => {
+app.post('/myforms/admin/permissions', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { formId, companyId } = req.body;
   let { userIds } = req.body as { userIds?: string | string[] };
   const ids = Array.isArray(userIds)
@@ -3144,7 +3144,7 @@ app.post('/forms/admin/permissions', ensureAuth, ensureSuperAdmin, async (req, r
   res.redirect(`/admin?formId=${formId}&companyId=${companyId}`);
 });
 
-app.post('/forms/admin/edit', ensureAuth, ensureSuperAdmin, async (req, res) => {
+app.post('/myforms/admin/edit', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { id, name, url, description } = req.body as {
     id?: string;
     name?: string;
@@ -3168,14 +3168,14 @@ app.post('/forms/admin/edit', ensureAuth, ensureSuperAdmin, async (req, res) => 
   }
 });
 
-app.post('/forms/admin/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
+app.post('/myforms/admin/delete', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const { id } = req.body;
   await deleteForm(parseInt(id, 10));
   res.redirect('/admin');
 });
 
 app.post(
-  '/forms/admin/permissions/delete',
+  '/myforms/admin/permissions/delete',
   ensureAuth,
   ensureSuperAdmin,
   async (req, res) => {
@@ -3188,6 +3188,12 @@ app.post(
     res.redirect('/admin');
   }
 );
+
+app.use('/forms', ensureAuth, (req, res) => {
+  const target = req.originalUrl.replace(/^\/forms/, '/myforms');
+  const status = req.method === 'GET' ? 301 : 307;
+  res.redirect(status, target);
+});
 
   app.post('/apps', ensureAuth, ensureSuperAdmin, async (req, res) => {
     const { sku, vendorSku, name } = req.body;

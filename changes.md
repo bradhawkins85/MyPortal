@@ -19,3 +19,4 @@
 - 2025-09-18, 04:10 UTC, Fix, Restored direct OpnForm URL management in Forms admin instead of requiring iframe embed snippets
 - 2025-09-18, 07:03 UTC, Fix, Replaced proxied form viewer with direct iframe embedding and refreshed OpnForm documentation
 - 2025-09-18, 07:21 UTC, Change, Switched the portal authentication route from /login to /logon and updated dependent redirects and templates
+- 2025-09-18, 07:28 UTC, Change, Migrated forms routes from /forms to /myforms with documentation, nginx, and template updates plus legacy redirects
