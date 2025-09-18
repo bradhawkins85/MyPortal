@@ -34,7 +34,7 @@
       <a href="/invoices" class="menu-link"><i class="fas fa-file-invoice"></i> Invoices</a>
     <% } %>
     <% if (hasForms) { %>
-      <a href="/forms" class="menu-link"><i class="fas fa-wpforms"></i> Forms</a>
+      <a href="/myforms" class="menu-link"><i class="fas fa-wpforms"></i> Forms</a>
     <% } %>
     <% if (canAccessShop) { %>
       <a href="/shop" class="menu-link"><i class="fas fa-shopping-cart"></i> Shop</a>
@@ -45,7 +45,7 @@
   <div class="sidebar-bottom">
     <% if (typeof isAdmin !== 'undefined' && isAdmin) { %>
       <% if (!isSuperAdmin) { %>
-        <a href="/forms/company" class="menu-link"><i class="fas fa-wpforms"></i> Manage Forms</a>
+        <a href="/myforms/company" class="menu-link"><i class="fas fa-wpforms"></i> Manage Forms</a>
       <% } %>
       <a href="/audit-logs" class="menu-link"><i class="fas fa-clipboard-list"></i> Audit Logs</a>
     <% } %>

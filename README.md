@@ -163,7 +163,7 @@ pm2 restart myportal
 ## OpnForm Integration
 
 MyPortal expects an OpnForm instance on the same server. nginx can still proxy
-`/forms/` to that service so that super admins can launch the builder directly
+`/myforms/` to that service so that super admins can launch the builder directly
 from the Forms admin area. See [docs/opnform.md](docs/opnform.md) for deployment
 and security guidance, including the supplied nginx configuration snippet in
 [`deploy/nginx/opnform.conf`](deploy/nginx/opnform.conf).
