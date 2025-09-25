@@ -1028,6 +1028,24 @@
         <% } %>
         <div id="shop-settings" class="tab-content">
           <section>
+            <h2>Discord Webhook Alerts</h2>
+            <form action="/shop/admin/discord-webhook" method="post">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <label>Webhook URL
+                <input
+                  type="url"
+                  name="discordWebhookUrl"
+                  value="<%= shopSettings && shopSettings.discord_webhook_url ? shopSettings.discord_webhook_url : '' %>"
+                  placeholder="https://discord.com/api/webhooks/..."
+                >
+              </label>
+              <p class="hint">
+                The webhook will receive notifications when products go out of stock or return to stock.
+              </p>
+              <button type="submit">Save</button>
+            </form>
+          </section>
+          <section>
             <h2>Categories</h2>
             <form action="/shop/admin/category" method="post">
               <input type="text" name="name" placeholder="Name" required>

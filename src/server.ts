@@ -184,6 +184,8 @@ import {
   unhideSyncroCustomer,
   getSiteSettings,
   updateSiteSettings,
+  getShopSettings,
+  updateShopDiscordWebhook,
   getEmailTemplate,
   upsertEmailTemplate,
   getScheduledTasks,
@@ -404,6 +406,81 @@ async function handleProductPricingAlert(product: Product): Promise<void> {
       productId: product.id,
     });
   }
+}
+
+function escapeDiscordMarkdown(value: string): string {
+  return value.replace(/([*_`~<>@\\])/g, '\\$1');
+}
+
+async function sendDiscordStockNotification(
+  product: Product,
+  previousStock: number,
+  newStock: number
+): Promise<void> {
+  const { discord_webhook_url } = await getShopSettings();
+  if (!discord_webhook_url) {
+    return;
+  }
+  let content: string | null = null;
+  const safeName = escapeDiscordMarkdown(product.name);
+  const safeSku = escapeDiscordMarkdown(product.sku);
+  const normalizedNewStock = newStock < 0 ? 0 : newStock;
+  if (previousStock > 0 && newStock <= 0) {
+    content = `⚠️ **${safeName}** (${safeSku}) is now **Out Of Stock** (was ${previousStock}).`;
+  } else if (previousStock <= 0 && newStock > 0) {
+    content = `✅ **${safeName}** (${safeSku}) is back **In Stock** with ${normalizedNewStock} available.`;
+  }
+  if (!content) {
+    return;
+  }
+  try {
+    await fetch(discord_webhook_url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+  } catch (err) {
+    console.error('Failed to send Discord webhook', err);
+  }
+}
+
+async function maybeSendDiscordStockNotification(
+  previous: Product | null,
+  current: Product | null
+): Promise<void> {
+  if (!current || previous === null) {
+    return;
+  }
+  if (previous.stock === undefined || current.stock === undefined) {
+    return;
+  }
+  if (
+    previous.stock > 0 && current.stock <= 0
+  ) {
+    await sendDiscordStockNotification(current, previous.stock, current.stock);
+  } else if (previous.stock <= 0 && current.stock > 0) {
+    await sendDiscordStockNotification(current, previous.stock, current.stock);
+  }
+}
+
+async function maybeSendDiscordStockNotificationById(
+  productId: number,
+  previousStock: number | null,
+  newStock: number | null
+): Promise<void> {
+  if (
+    previousStock === null ||
+    newStock === null ||
+    (previousStock > 0 && newStock > 0) ||
+    (previousStock <= 0 && newStock <= 0)
+  ) {
+    return;
+  }
+  const product = await getProductById(productId, true);
+  if (!product) {
+    return;
+  }
+  await sendDiscordStockNotification(product, previousStock, newStock);
 }
 
 const scheduledJobs = new Map<number, cron.ScheduledTask>();
@@ -647,7 +724,10 @@ function formatDate(d: string | null): string | null {
   return null;
 }
 
-async function processFeedItem(item: any, existing?: any): Promise<void> {
+async function processFeedItem(
+  item: any,
+  existingProduct?: Product | null
+): Promise<void> {
   const code =
     item.StockCode ||
     item['@_StockCode'] ||
@@ -656,21 +736,27 @@ async function processFeedItem(item: any, existing?: any): Promise<void> {
   if (!code) return;
   const feedName = item.ProductName || item.product_name || '';
   const description = item.ProductName2 || item.product_name2 || '';
-  const price = existing
-    ? Number(existing.price)
+  let currentExisting: Product | null = existingProduct ?? null;
+  if (!currentExisting) {
+    currentExisting = await getProductBySku(String(code), true);
+  }
+  const price = currentExisting
+    ? Number(currentExisting.price)
     : item.RRP
     ? parseFloat(item.RRP)
     : item.rrp !== undefined
     ? Number(item.rrp)
     : 0;
-  const vipPrice = existing
-    ? existing.vip_price ?? Number(existing.price)
+  const vipPrice = currentExisting
+    ? currentExisting.vip_price ?? Number(currentExisting.price)
     : price;
   const categoryName = item.CategoryName || item.category_name || '';
   let categoryId: number | null = null;
   if (categoryName) {
-    const existing = await getCategoryByName(categoryName);
-    categoryId = existing ? existing.id : await createCategory(categoryName);
+    const existingCategory = await getCategoryByName(categoryName);
+    categoryId = existingCategory
+      ? existingCategory.id
+      : await createCategory(categoryName);
   }
   const stockNsw = parseInt(
     item.OnHandChanelNsw || item.on_hand_nsw || '0',
@@ -737,10 +823,10 @@ async function processFeedItem(item: any, existing?: any): Promise<void> {
     }
   }
   let name = feedName;
-  if (existing) {
-    const existingSku = (existing.vendor_sku || existing.sku || '').toLowerCase();
-    if (existing.name && existing.name.toLowerCase() !== existingSku) {
-      name = existing.name;
+  if (currentExisting) {
+    const existingSku = (currentExisting.vendor_sku || currentExisting.sku || '').toLowerCase();
+    if (currentExisting.name && currentExisting.name.toLowerCase() !== existingSku) {
+      name = currentExisting.name;
     }
   }
   await upsertProductFromFeed({
@@ -769,6 +855,7 @@ async function processFeedItem(item: any, existing?: any): Promise<void> {
   const updatedProduct = await getProductBySku(String(code));
   if (updatedProduct) {
     await handleProductPricingAlert(updatedProduct);
+    await maybeSendDiscordStockNotification(currentExisting, updatedProduct);
   }
 }
 
@@ -2788,7 +2875,7 @@ app.post('/cart/place-order', ensureAuth, ensureShopAccess, async (req, res) => 
       orderNumber += Math.floor(Math.random() * 10).toString();
     }
     for (const item of req.session.cart) {
-      await createOrder(
+      const stockChange = await createOrder(
         req.session.userId!,
         req.session.companyId,
         item.productId,
@@ -2796,6 +2883,11 @@ app.post('/cart/place-order', ensureAuth, ensureShopAccess, async (req, res) => 
         orderNumber,
         'pending',
         poNumber || null
+      );
+      await maybeSendDiscordStockNotificationById(
+        item.productId,
+        stockChange.previousStock,
+        stockChange.newStock
       );
     }
     req.session.cart = [];
@@ -2939,7 +3031,14 @@ app.post(
   async (req, res) => {
     const orderNumber = req.params.orderNumber;
     if (req.session.companyId) {
-      await deleteOrder(orderNumber, req.session.companyId);
+      const stockChanges = await deleteOrder(orderNumber, req.session.companyId);
+      for (const change of stockChanges) {
+        await maybeSendDiscordStockNotificationById(
+          change.productId,
+          change.previousStock,
+          change.newStock
+        );
+      }
     }
     res.redirect('/orders');
   }
@@ -3015,11 +3114,13 @@ app.post(
   ensureSuperAdmin,
   uploadMiddleware,
   async (req: express.Request, res: express.Response) => {
+    const productId = parseInt(req.params.id, 10);
+    const existingProduct = await getProductById(productId, true);
     const { name, sku, vendor_sku, description, price, vip_price, stock, category_id } =
       req.body;
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     await updateProduct(
-      parseInt(req.params.id, 10),
+      productId,
       name,
       sku,
       vendor_sku,
@@ -3030,9 +3131,10 @@ app.post(
       parseInt(stock, 10),
       category_id ? parseInt(category_id, 10) : null
     );
-    const updatedProduct = await getProductById(parseInt(req.params.id, 10), true);
+    const updatedProduct = await getProductById(productId, true);
     if (updatedProduct) {
       await handleProductPricingAlert(updatedProduct);
+      await maybeSendDiscordStockNotification(existingProduct ?? null, updatedProduct);
     }
     res.redirect('/admin');
   }
@@ -3089,6 +3191,21 @@ app.post(
   async (req, res) => {
     await deleteCategory(parseInt(req.params.id, 10));
     res.redirect('/admin');
+  }
+);
+
+app.post(
+  '/shop/admin/discord-webhook',
+  ensureAuth,
+  ensureSuperAdmin,
+  csrfProtection,
+  async (req, res) => {
+    const rawUrl = typeof req.body.discordWebhookUrl === 'string'
+      ? req.body.discordWebhookUrl.trim()
+      : '';
+    const url = rawUrl ? rawUrl : null;
+    await updateShopDiscordWebhook(url);
+    res.redirect('/admin#shop-settings');
   }
 );
 
@@ -3394,6 +3511,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
   const priceAlerts: ProductPriceAlertWithProduct[] = isSuperAdmin
     ? await getActiveProductPriceAlerts()
     : [];
+  const shopSettings = isSuperAdmin ? await getShopSettings() : null;
   res.render('admin', {
     allCompanies,
     users,
@@ -3440,6 +3558,7 @@ app.get('/admin', ensureAuth, async (req, res) => {
     nameSuccess,
     mobileError,
     mobileSuccess,
+    shopSettings,
     currentUserFirstName: currentUser?.first_name || '',
     currentUserLastName: currentUser?.last_name || '',
     currentUserMobilePhone: currentUser?.mobile_phone || '',
@@ -4833,7 +4952,7 @@ api
         console.error('Webhook error', err);
       }
     }
-    await createOrder(
+    const stockChange = await createOrder(
       uId,
       cId,
       pId,
@@ -4841,6 +4960,11 @@ api
       num,
       status || 'pending',
       poNumber || null
+    );
+    await maybeSendDiscordStockNotificationById(
+      pId,
+      stockChange.previousStock,
+      stockChange.newStock
     );
     res.json({ success: true, orderNumber: num });
   });
@@ -4913,10 +5037,17 @@ api
     if (!companyId) {
       return res.status(400).json({ error: 'companyId required' });
     }
-    await deleteOrder(
+    const stockChanges = await deleteOrder(
       req.params.orderNumber,
       parseInt(companyId as string, 10)
     );
+    for (const change of stockChanges) {
+      await maybeSendDiscordStockNotificationById(
+        change.productId,
+        change.previousStock,
+        change.newStock
+      );
+    }
     res.json({ success: true });
   });
 
