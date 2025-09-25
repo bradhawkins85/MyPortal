@@ -4053,7 +4053,7 @@ function parseCheckbox(value: unknown): boolean {
   return value === '1' || value === 'on' || value === true;
 }
 
-app.post('/admin/permission', ensureAuth, ensureAdmin, async (req, res) => {
+app.post('/admin/permission', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const {
     userId,
     companyId,
