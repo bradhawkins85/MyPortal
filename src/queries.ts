@@ -319,6 +319,10 @@ export interface SiteSettings {
   favicon: string | null;
 }
 
+export interface ShopSettings {
+  discord_webhook_url: string | null;
+}
+
 export interface Form {
   id: number;
   name: string;
@@ -2074,6 +2078,12 @@ export async function setProductCompanyExclusions(
   );
 }
 
+export interface StockChange {
+  productId: number;
+  previousStock: number | null;
+  newStock: number | null;
+}
+
 export async function createOrder(
   userId: number,
   companyId: number,
@@ -2082,10 +2092,20 @@ export async function createOrder(
   orderNumber: string,
   status: string,
   poNumber: string | null
-): Promise<void> {
+): Promise<{ previousStock: number | null; newStock: number | null }> {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+    let previousStock: number | null = null;
+    let newStock: number | null = null;
+    const [productRows] = await conn.query<RowDataPacket[]>(
+      'SELECT stock FROM shop_products WHERE id = ? FOR UPDATE',
+      [productId]
+    );
+    if ((productRows as RowDataPacket[]).length > 0) {
+      previousStock = Number((productRows as RowDataPacket[])[0].stock);
+      newStock = previousStock - quantity;
+    }
     await conn.execute(
       'INSERT INTO shop_orders (user_id, company_id, product_id, quantity, order_number, status, notes, po_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [userId, companyId, productId, quantity, orderNumber, status, null, poNumber]
@@ -2095,6 +2115,7 @@ export async function createOrder(
       [quantity, productId]
     );
     await conn.commit();
+    return { previousStock, newStock };
   } catch (err) {
     await conn.rollback();
     throw err;
@@ -2167,8 +2188,9 @@ export async function getOrdersByConsignmentId(
 export async function deleteOrder(
   orderNumber: string,
   companyId: number
-): Promise<void> {
+): Promise<StockChange[]> {
   const conn = await pool.getConnection();
+  const stockChanges: StockChange[] = [];
   try {
     await conn.beginTransaction();
     const [rows] = await conn.query<RowDataPacket[]>(
@@ -2176,10 +2198,27 @@ export async function deleteOrder(
       [orderNumber, companyId]
     );
     for (const row of rows as any[]) {
-      await conn.execute('UPDATE shop_products SET stock = stock + ? WHERE id = ?', [row.quantity, row.product_id]);
+      const quantity = Number(row.quantity);
+      const productId = Number(row.product_id);
+      const [productRows] = await conn.query<RowDataPacket[]>(
+        'SELECT stock FROM shop_products WHERE id = ? FOR UPDATE',
+        [productId]
+      );
+      let previousStock: number | null = null;
+      let newStock: number | null = null;
+      if ((productRows as RowDataPacket[]).length > 0) {
+        previousStock = Number((productRows as RowDataPacket[])[0].stock);
+        newStock = previousStock + quantity;
+      }
+      await conn.execute('UPDATE shop_products SET stock = stock + ? WHERE id = ?', [
+        quantity,
+        productId,
+      ]);
+      stockChanges.push({ productId, previousStock, newStock });
     }
     await conn.execute('DELETE FROM shop_orders WHERE order_number = ? AND company_id = ?', [orderNumber, companyId]);
     await conn.commit();
+    return stockChanges;
   } catch (err) {
     await conn.rollback();
     throw err;
@@ -2512,6 +2551,24 @@ export async function updateSiteSettings(
     'UPDATE site_settings SET company_name = ?, login_logo = COALESCE(?, login_logo), sidebar_logo = COALESCE(?, sidebar_logo), favicon = COALESCE(?, favicon) WHERE id = 1',
     [companyName, loginLogo ?? null, sidebarLogo ?? null, favicon ?? null]
   );
+}
+
+export async function getShopSettings(): Promise<ShopSettings> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT discord_webhook_url FROM shop_settings WHERE id = 1'
+  );
+  const row = (rows as RowDataPacket[])[0];
+  return {
+    discord_webhook_url: row?.discord_webhook_url || null,
+  };
+}
+
+export async function updateShopDiscordWebhook(
+  url: string | null
+): Promise<void> {
+  await pool.execute('UPDATE shop_settings SET discord_webhook_url = ? WHERE id = 1', [
+    url,
+  ]);
 }
 
 export interface ScheduledTask {
