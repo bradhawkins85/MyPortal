@@ -5,7 +5,15 @@
     <div class="app-container">
       <%- include('partials/sidebar') %>
       <div class="content">
-        <h1>Syncro Customers</h1>
+        <header class="page-header">
+          <div class="page-title">
+            <p class="page-subtitle">Modern GMP learning</p>
+            <h1>Syncro Customers</h1>
+            <p class="page-description">Import and reconcile Syncro customer records with your portal data.</p>
+          </div>
+          <div class="header-actions"></div>
+        </header>
+        <div class="page-body">
         <p>
           <a href="/admin/syncro/customers<%= showHidden ? '' : '?showHidden=1' %>">
             <%= showHidden ? 'Hide Hidden Customers' : 'Show Hidden Customers' %>
@@ -50,6 +58,7 @@
         </table>
         <p><a href="/admin">Back</a></p>
       </div>
+        </div>
     </div>
   </body>
 </html>

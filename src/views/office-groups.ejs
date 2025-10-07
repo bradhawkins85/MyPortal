@@ -5,7 +5,15 @@
   <div class="app-container">
     <%- include('partials/sidebar') %>
     <div class="content">
-      <h1>Office Groups</h1>
+      <header class="page-header">
+        <div class="page-title">
+          <p class="page-subtitle">Modern GMP learning</p>
+          <h1>Office Groups</h1>
+          <p class="page-description">Organise teams into office groups for faster communication and provisioning.</p>
+        </div>
+        <div class="header-actions"></div>
+      </header>
+      <div class="page-body">
       <% if (isSuperAdmin) { %>
       <section>
         <h2>Add Group</h2>
@@ -66,6 +74,7 @@
         </div>
       </section>
     </div>
+      </div>
   </div>
   <script>
     const officeGroupsData = <%- JSON.stringify(officeGroups) %>;

@@ -5,15 +5,23 @@
   <div class="app-container">
     <%- include('partials/sidebar') %>
     <div class="content">
-      <div class="page-header">
-        <h1>Office 365 Connection</h1>
+      <header class="page-header">
+        <div class="page-title">
+          <p class="page-subtitle">Modern GMP learning</p>
+          <h1>Office 365 Connection</h1>
+          <p class="page-description">Manage Microsoft 365 licensing and tenant connectivity.</p>
+        </div>
+        <div class="header-actions"></div>
+      </header>
+      <div class="page-body">
+      <div class="section-header">
         <% if (credential) { %>
           <div class="header-actions">
             <a href="/m365/connect" class="authorize-link">Authorize</a>
           </div>
         <% } %>
       </div>
-      <div class="page-body">
+      <div class="section-body">
         <% if (error) { %>
           <div class="alert alert-error"><%= error %></div>
         <% } %>
@@ -33,6 +41,7 @@
         <% } %>
       </div>
     </div>
+      </div>
   </div>
 </body>
 </html>
