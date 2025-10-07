@@ -28,3 +28,4 @@
 - 2025-10-07, 12:19 UTC, Feature, Added secure upgrade automation script for pulling updates and restarting services
 
 - 2025-10-07, 12:30 UTC, Fix, Guarded MySQL bootstrap connection shutdown to support aiomysql versions without wait_closed
+- 2025-10-09, 13:05 UTC, Feature, Documented legacy Node.js parity gaps and outlined restoration tasks in docs/node-parity-gap.md
