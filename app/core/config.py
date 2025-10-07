@@ -38,7 +38,11 @@ class Settings(BaseSettings):
     enable_csrf: bool = Field(default=True, alias="ENABLE_CSRF")
     swagger_ui_url: str = Field(default="/docs", alias="SWAGGER_UI_URL")
 
-    model_config = SettingsConfigDict(env_file=(Path(__file__).resolve().parent.parent.parent / ".env"), env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=(Path(__file__).resolve().parent.parent.parent / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 class TemplatesConfig(BaseModel):
