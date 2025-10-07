@@ -5,15 +5,7 @@
     <div class="app-container">
       <%- include('partials/sidebar') %>
       <div class="content">
-        <header class="page-header">
-          <div class="page-title">
-            <p class="page-subtitle">Modern GMP learning</p>
-            <h1>Order <%= orderNumber %></h1>
-            <p class="page-description">Review order contents, fulfilment status, and shipping updates in real time.</p>
-          </div>
-          <div class="header-actions"></div>
-        </header>
-        <div class="page-body">
+        <h1>Order <%= orderNumber %></h1>
         <p>PO Number: <%= poNumber %></p>
         <p>Status: <%= status %></p>
         <p>Shipping Status: <%= shippingStatus %></p>
@@ -75,7 +67,6 @@
           });
         </script>
       </div>
-        </div>
     </div>
   </body>
 </html>
