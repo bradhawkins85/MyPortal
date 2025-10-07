@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import AnyHttpUrl, BaseModel, Field
+from pydantic import AnyHttpUrl, AliasChoices, BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,26 +17,32 @@ class Settings(BaseSettings):
 
     app_name: str = "MyPortal"
     environment: str = "development"
-    secret_key: str = Field(alias="SESSION_SECRET")
-    totp_encryption_key: str = Field(alias="TOTP_ENCRYPTION_KEY")
-    database_host: str = Field(alias="DB_HOST")
-    database_user: str = Field(alias="DB_USER")
-    database_password: str = Field(alias="DB_PASSWORD")
-    database_name: str = Field(alias="DB_NAME")
-    redis_url: str | None = Field(default=None, alias="REDIS_URL")
-    session_cookie_name: str = Field(default="myportal_session", alias="SESSION_COOKIE_NAME")
-    allowed_origins: List[AnyHttpUrl] = Field(default_factory=list, alias="ALLOWED_ORIGINS")
-    smtp_host: str | None = Field(default=None, alias="SMTP_HOST")
-    smtp_port: int = Field(default=587, alias="SMTP_PORT")
-    smtp_user: str | None = Field(default=None, alias="SMTP_USER")
-    smtp_password: str | None = Field(default=None, alias="SMTP_PASS")
-    smtp_use_tls: bool = Field(default=True, alias="SMTP_SECURE")
-    azure_client_id: str | None = Field(default=None, alias="AZURE_CLIENT_ID")
-    azure_client_secret: str | None = Field(default=None, alias="AZURE_CLIENT_SECRET")
-    azure_tenant_id: str | None = Field(default=None, alias="AZURE_TENANT_ID")
-    default_timezone: str = Field(default="UTC", alias="CRON_TIMEZONE")
-    enable_csrf: bool = Field(default=True, alias="ENABLE_CSRF")
-    swagger_ui_url: str = Field(default="/docs", alias="SWAGGER_UI_URL")
+    secret_key: str = Field(validation_alias=AliasChoices("SESSION_SECRET", "SECRET_KEY"))
+    totp_encryption_key: str = Field(validation_alias="TOTP_ENCRYPTION_KEY")
+    database_host: str = Field(validation_alias="DB_HOST")
+    database_user: str = Field(validation_alias="DB_USER")
+    database_password: str = Field(validation_alias="DB_PASSWORD")
+    database_name: str = Field(validation_alias="DB_NAME")
+    redis_url: str | None = Field(default=None, validation_alias="REDIS_URL")
+    session_cookie_name: str = Field(
+        default="myportal_session",
+        validation_alias=AliasChoices("SESSION_COOKIE_NAME", "SESSION_COOKIE"),
+    )
+    allowed_origins: List[AnyHttpUrl] = Field(
+        default_factory=list,
+        validation_alias="ALLOWED_ORIGINS",
+    )
+    smtp_host: str | None = Field(default=None, validation_alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, validation_alias="SMTP_PORT")
+    smtp_user: str | None = Field(default=None, validation_alias="SMTP_USER")
+    smtp_password: str | None = Field(default=None, validation_alias="SMTP_PASS")
+    smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_SECURE")
+    azure_client_id: str | None = Field(default=None, validation_alias="AZURE_CLIENT_ID")
+    azure_client_secret: str | None = Field(default=None, validation_alias="AZURE_CLIENT_SECRET")
+    azure_tenant_id: str | None = Field(default=None, validation_alias="AZURE_TENANT_ID")
+    default_timezone: str = Field(default="UTC", validation_alias="CRON_TIMEZONE")
+    enable_csrf: bool = Field(default=True, validation_alias="ENABLE_CSRF")
+    swagger_ui_url: str = Field(default="/docs", validation_alias="SWAGGER_UI_URL")
 
     model_config = SettingsConfigDict(
         env_file=(Path(__file__).resolve().parent.parent.parent / ".env"),
