@@ -24,3 +24,4 @@
 - 2025-09-18, 09:05 UTC, Fix, Replaced binary image assets with SVG icons to unblock PR creation and retain themeable layout
 - 2025-10-07, 11:53 UTC, Fix, Added a virtual environment bootstrap script and README guidance to bypass externally managed pip install failures
 - 2025-10-07, 12:00 UTC, Fix, Allowed extra environment variables in Python settings loader to restore API startup
+- 2025-10-07, 12:10 UTC, Fix, Switched configuration fields to validation aliases so startup accepts secret and database env vars
