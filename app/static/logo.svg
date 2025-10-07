@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="title desc">
+  <title id="title">MyPortal Logo</title>
+  <desc id="desc">Stylised portal glyph</desc>
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+  </defs>
+  <rect width="120" height="120" rx="28" fill="#0f172a" />
+  <circle cx="60" cy="60" r="42" fill="url(#grad)" opacity="0.9" />
+  <circle cx="60" cy="60" r="24" fill="#0f172a" opacity="0.95" />
+  <path d="M60 28a32 32 0 0132 32v4a32 32 0 01-32 32 32 32 0 01-32-32v-4a32 32 0 0132-32z" fill="none" stroke="#f8fafc" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity="0.85" />
+  <circle cx="60" cy="60" r="10" fill="#f8fafc" opacity="0.85" />
+</svg>
