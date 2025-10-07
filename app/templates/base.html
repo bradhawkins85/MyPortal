@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ app_name }} - {{ title | default('Dashboard') }}</title>
+    <link rel="stylesheet" href="/static/css/app.css" />
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  </head>
+  <body class="theme-default">
+    <div class="layout">
+      <nav class="layout__sidebar">
+        <div class="brand">
+          <img src="/static/logo.svg" alt="{{ app_name }}" class="brand__logo" />
+          <span class="brand__name">{{ app_name }}</span>
+        </div>
+        <ul class="menu">
+          <li class="menu__item"><a href="/">Dashboard</a></li>
+          <li class="menu__item"><a href="/docs">API Docs</a></li>
+        </ul>
+      </nav>
+      <main class="layout__main">
+        <header class="layout__header">
+          <div class="header__title">{{ title | default('Dashboard') }}</div>
+          {% block header_actions %}{% endblock %}
+        </header>
+        <section class="layout__content">
+          {% block content %}{% endblock %}
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

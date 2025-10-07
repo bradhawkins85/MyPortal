@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard">
+  <h1>Welcome to {{ app_name }}</h1>
+  <p class="dashboard__lead">
+    The platform has been migrated to Python. Use the navigation to manage users and companies
+    or explore the automatically generated Swagger documentation.
+  </p>
+  <div class="dashboard__grid">
+    <div class="card">
+      <h2>Users</h2>
+      <p>Manage user accounts, security policies, and company assignments.</p>
+    </div>
+    <div class="card">
+      <h2>Companies</h2>
+      <p>Administer customer records, pricing, and access controls.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
