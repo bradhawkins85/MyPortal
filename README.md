@@ -48,18 +48,28 @@ gracefully fall back to an empty string.
 ## Setup
 
 1. Ensure Python 3.10+ is available.
-2. Install dependencies:
+2. Create a project-local virtual environment so `pip install -e .` does not conflict with externally managed Python installations:
    ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows use: .\.venv\\Scripts\\activate
+   ```
+   The helper script below automates the process and installs dependencies in one step. Pass `--recreate` to rebuild the environment from scratch.
+   ```bash
+   python scripts/bootstrap_venv.py
+   ```
+3. If you did not run the bootstrap script, upgrade pip inside the virtual environment and install dependencies:
+   ```bash
+   python -m pip install --upgrade pip
    pip install -e .
    ```
-3. Copy `.env.example` to `.env` and update the MySQL credentials. Define strong values for `SESSION_SECRET` and `TOTP_ENCRYPTION_KEY`. Optional settings such as Redis, SMTP, and Azure Graph credentials mirror the legacy environment variables.
-4. Start the development server:
+4. Copy `.env.example` to `.env` and update the MySQL credentials. Define strong values for `SESSION_SECRET` and `TOTP_ENCRYPTION_KEY`. Optional settings such as Redis, SMTP, and Azure Graph credentials mirror the legacy environment variables.
+5. Start the development server:
    ```bash
    uvicorn app.main:app --reload
    ```
    On startup the application automatically applies any pending SQL migrations and ensures the database exists.
-5. Access `http://localhost:8000` for the responsive portal UI or `http://localhost:8000/docs` for the interactive Swagger UI covering every API endpoint.
-6. The first visit will redirect the login flow to the registration page if no users exist, ensuring the first account becomes the super administrator.
+6. Access `http://localhost:8000` for the responsive portal UI or `http://localhost:8000/docs` for the interactive Swagger UI covering every API endpoint.
+7. The first visit will redirect the login flow to the registration page if no users exist, ensuring the first account becomes the super administrator.
 
 ## Office 365 Sync
 

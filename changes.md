@@ -22,3 +22,4 @@
 - 2025-09-18, 07:28 UTC, Change, Migrated forms routes from /forms to /myforms with documentation, nginx, and template updates plus legacy redirects
 - 2025-09-18, 08:30 UTC, Feature, Rebuilt the MyPortal backend and UI in Python with FastAPI, async MySQL access, and responsive 3-panel theming
 - 2025-09-18, 09:05 UTC, Fix, Replaced binary image assets with SVG icons to unblock PR creation and retain themeable layout
+- 2025-10-07, 11:53 UTC, Fix, Added a virtual environment bootstrap script and README guidance to bypass externally managed pip install failures
