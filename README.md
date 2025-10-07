@@ -1,8 +1,8 @@
 # MyPortal
 
-MyPortal is a simple customer portal built with Node.js, TypeScript and MySQL. It allows users from a company to log in and view company information and allocated software licenses.
+MyPortal is now a Python-first customer portal built with FastAPI, async MySQL access, and Jinja-powered views. The application retains parity with the prior TypeScript experience while embracing a modern Python architecture that is easier to extend, test, and deploy.
 
-There are no default login credentials; the first visit will prompt you to register.
+There are no default login credentials; the first visit will prompt you to register the initial super administrator. If no user records exist the login flow transparently redirects to the registration screen.
 
 ## Features
 
@@ -47,31 +47,19 @@ gracefully fall back to an empty string.
 
 ## Setup
 
-1. Install dependencies:
+1. Ensure Python 3.10+ is available.
+2. Install dependencies:
    ```bash
-   npm install
+   pip install -e .
    ```
-2. Copy `.env.example` to `.env` and update the MySQL credentials. Set high-entropy
-   values for `SESSION_SECRET` and `TOTP_ENCRYPTION_KEY` (e.g. via `openssl rand -hex 32`).
-   Optionally set `CRON_TIMEZONE` to control the timezone for scheduled tasks (defaults to UTC).
-   Provide `STOCK_FEED_URL` to point to the remote XML product feed. When OpnForm
-   runs behind a different path or host, set `OPNFORM_BASE_URL` so that admin links
-   resolve correctly.
-3. On first run, the application will automatically apply the database schema and encrypt any existing TOTP secrets.
-4. On first run, visiting `/logon` will redirect to a registration page to create the initial user and company.
-5. Run in development mode:
+3. Copy `.env.example` to `.env` and update the MySQL credentials. Define strong values for `SESSION_SECRET` and `TOTP_ENCRYPTION_KEY`. Optional settings such as Redis, SMTP, and Azure Graph credentials mirror the legacy environment variables.
+4. Start the development server:
    ```bash
-   npm run dev
+   uvicorn app.main:app --reload
    ```
-6. Build and start the application:
-   ```bash
-   npm run build
-   npm start
-   ```
-7. Run type checks:
-   ```bash
-   npm test
-   ```
+   On startup the application automatically applies any pending SQL migrations and ensures the database exists.
+5. Access `http://localhost:8000` for the responsive portal UI or `http://localhost:8000/docs` for the interactive Swagger UI covering every API endpoint.
+6. The first visit will redirect the login flow to the registration page if no users exist, ensuring the first account becomes the super administrator.
 
 ## Office 365 Sync
 
@@ -112,52 +100,24 @@ automatically embedded in forms rendered by the server. For custom forms or
 JavaScript requests, read the token from the `csrf-token` meta tag and include
 it as the `_csrf` form field or the `CSRF-Token` header.
 
-## Running with PM2
+## Deployment
 
-PM2 can be used to manage the application in production. After building the
-project, start the compiled server with PM2:
-
-```bash
-npm run build
-pm2 start dist/server.js --name myportal
-```
-
-To view logs or restart the process later:
+Run the service with Uvicorn or Gunicorn in production. A representative command using Uvicorn is shown below:
 
 ```bash
-pm2 logs myportal
-pm2 restart myportal
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
-### API Debug Logging
-
-Enable API request logging to the pm2 logs by setting `API_DEBUG=1` when starting the server:
-
-```bash
-API_DEBUG=1 pm2 start dist/server.js --name myportal
-```
+The application emits structured logs via Loguru and applies database migrations on boot, ensuring zero-touch deployments. Supervisor, systemd, Docker, or any process manager can be used based on your infrastructure standards.
 
 ## Updating from GitHub
 
-Run the included update script to fetch the latest changes and rebuild the project:
-
-```bash
-./update.sh
-```
-
-If the repository is private or otherwise requires authentication, set
-`GITHUB_USERNAME` and `GITHUB_PASSWORD` before running the script (they may
-also be supplied as the first two positional arguments). When using a
-fine-grained personal access token as the password, grant the token access to
-this repository with the **Contents: Read-only** permission.
-
-Alternatively, to run the steps manually:
+The legacy `update.sh` script has been preserved for historical reference, however the recommended approach is to pull changes, update the Python dependencies, and restart the ASGI server:
 
 ```bash
 git pull origin main
-npm install
-npm run build
-pm2 restart myportal
+pip install -e .
+systemctl restart myportal.service
 ```
 
 ## OpnForm Integration
