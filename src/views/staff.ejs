@@ -5,15 +5,7 @@
   <div class="app-container">
     <%- include('partials/sidebar') %>
     <div class="content">
-      <header class="page-header">
-        <div class="page-title">
-          <p class="page-subtitle">Modern GMP learning</p>
-          <h1>Staff</h1>
-          <p class="page-description">Manage staff onboarding, verification, and secure portal access.</p>
-        </div>
-        <div class="header-actions"></div>
-      </header>
-      <div class="page-body">
+      <h1>Staff</h1>
       <% if (isSuperAdmin && syncroCompanyId) { %>
       <section>
         <h2>Import from Syncro</h2>
@@ -113,7 +105,6 @@
         </table>
       </section>
     </div>
-      </div>
   </div>
   <div id="edit-modal" class="modal" style="display:none;">
     <div class="modal-content">

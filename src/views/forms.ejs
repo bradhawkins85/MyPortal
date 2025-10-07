@@ -5,15 +5,7 @@
   <div class="app-container">
     <%- include('partials/sidebar') %>
     <div class="content">
-      <header class="page-header">
-        <div class="page-title">
-          <p class="page-subtitle">Modern GMP learning</p>
-          <h1>Forms</h1>
-          <p class="page-description">Complete assigned GMP forms and keep every process documented.</p>
-        </div>
-        <div class="header-actions"></div>
-      </header>
-      <div class="page-body">
+      <h1>Forms</h1>
       <% if (forms.length > 0) { %>
         <div class="forms-menu">
           <% forms.forEach(function(f, idx){ %>
@@ -32,7 +24,6 @@
         <p>No forms available.</p>
       <% } %>
     </div>
-      </div>
   </div>
   <script>
     function showForm(formUrl, btn) {
