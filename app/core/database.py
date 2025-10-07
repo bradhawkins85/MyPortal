@@ -79,7 +79,9 @@ class Database:
                 f"CREATE DATABASE IF NOT EXISTS `{self._settings.database_name}`"
             )
         temp_conn.close()
-        await temp_conn.wait_closed()
+        wait_closed = getattr(temp_conn, "wait_closed", None)
+        if wait_closed:
+            await wait_closed()
 
         await self.connect()
         migrations_dir = Path(__file__).resolve().parent.parent.parent / "migrations"
