@@ -5,92 +5,51 @@
   <div class="app-container">
     <%- include('partials/sidebar') %>
     <div class="content">
-      <header class="page-header">
-        <div class="page-title">
-          <p class="page-subtitle">Modern GMP learning</p>
-          <h1>Business Information</h1>
-          <p class="page-description">Monitor the health of your organisation and keep tabs on every critical data point in one central hub.</p>
-        </div>
-        <div class="header-actions">
-          <% if (canManageLicenses || isSuperAdmin) { %>
-            <a class="button" href="#licenses">View Licenses</a>
-          <% } %>
-        </div>
-      </header>
-      <div class="page-body">
-        <% if (company) { %>
-          <section class="info-card">
-            <div class="info-grid">
-              <div>
-                <h2>Company</h2>
-                <p class="muted">Name</p>
-                <p class="info-value"><%= company.name %></p>
-              </div>
-              <% if (company.address) { %>
-                <div>
-                  <h2>Location</h2>
-                  <p class="muted">Primary address</p>
-                  <p class="info-value"><%= company.address %></p>
-                </div>
-              <% } %>
-            </div>
-          </section>
-          <section class="stat-group">
-            <% if (canManageStaff || isSuperAdmin) { %>
-              <article class="stat-card">
-                <div class="stat-icon"><i class="fas fa-users"></i></div>
-                <div>
-                  <p class="muted">Active users</p>
-                  <p class="stat-value"><%= activeUsers %></p>
-                </div>
-              </article>
-            <% } %>
-            <% if (canManageAssets || isSuperAdmin) { %>
-              <article class="stat-card">
-                <div class="stat-icon"><i class="fas fa-desktop"></i></div>
-                <div>
-                  <p class="muted">Assets</p>
-                  <p class="stat-value"><%= assetCount %></p>
-                </div>
-              </article>
-            <% } %>
-            <% if (canManageInvoices || isSuperAdmin) { %>
-              <article class="stat-card">
-                <div class="stat-icon"><i class="fas fa-file-invoice"></i></div>
-                <div>
-                  <p class="muted">Invoices</p>
-                  <p class="stat-value">Paid: <%= paidInvoices %> · Unpaid: <%= unpaidInvoices %></p>
-                </div>
-              </article>
-            <% } %>
-          </section>
-          <% if (canManageLicenses || isSuperAdmin) { %>
-            <section class="panel" id="licenses">
-              <div class="panel-header">
-                <h2>Licenses</h2>
-                <p class="muted">Track your purchased and assigned licenses at a glance.</p>
-              </div>
-              <div class="table-wrapper">
-                <table>
-                  <thead>
-                    <tr><th>SKU</th><th>Purchased</th><th>Used</th><th>Unused</th></tr>
-                  </thead>
-                  <tbody>
-                    <% licenseStats.forEach(function(l) { %>
-                      <tr>
-                        <td><%= l.name %></td>
-                        <td><%= l.count %></td>
-                        <td><%= l.used %></td>
-                        <td><%= l.unused %></td>
-                      </tr>
-                    <% }); %>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          <% } %>
+      <h1>Business Information</h1>
+      <% if (company) { %>
+        <p>Name: <%= company.name %></p>
+        <% if (company.address) { %>
+          <p>Address: <%= company.address %></p>
         <% } %>
-      </div>
+        <div class="stats">
+          <% if (canManageStaff || isSuperAdmin) { %>
+          <div class="stat-card">
+            <h3>Active Users</h3>
+            <p><%= activeUsers %></p>
+          </div>
+          <% } %>
+          <% if (canManageAssets || isSuperAdmin) { %>
+          <div class="stat-card">
+            <h3>Assets</h3>
+            <p><%= assetCount %></p>
+          </div>
+          <% } %>
+          <% if (canManageInvoices || isSuperAdmin) { %>
+          <div class="stat-card">
+            <h3>Invoices</h3>
+            <p>Paid: <%= paidInvoices %> | Unpaid: <%= unpaidInvoices %></p>
+          </div>
+          <% } %>
+        </div>
+        <% if (canManageLicenses || isSuperAdmin) { %>
+        <h2>Licenses</h2>
+        <table>
+          <thead>
+            <tr><th>SKU</th><th>Purchased</th><th>Used</th><th>Unused</th></tr>
+          </thead>
+          <tbody>
+          <% licenseStats.forEach(function(l) { %>
+            <tr>
+              <td><%= l.name %></td>
+              <td><%= l.count %></td>
+              <td><%= l.used %></td>
+              <td><%= l.unused %></td>
+            </tr>
+          <% }); %>
+          </tbody>
+        </table>
+        <% } %>
+      <% } %>
     </div>
   </div>
 </body>

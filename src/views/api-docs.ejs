@@ -5,25 +5,7 @@
     <div class="app-container">
       <%- include('partials/sidebar') %>
       <div class="content">
-        <header class="page-header">
-          <div class="page-title">
-            <p class="page-subtitle">Modern GMP learning</p>
-            <h1>API Catalogue</h1>
-            <p class="page-description">Explore and test every available endpoint through the embedded Swagger UI.</p>
-          </div>
-          <div class="header-actions">
-            <a class="button" href="/swagger" target="_blank" rel="noopener">Open in new tab</a>
-          </div>
-        </header>
-        <div class="page-body">
-          <section class="panel">
-            <div class="panel-header">
-              <h2>Interactive documentation</h2>
-              <p class="muted">Authenticate with an API key to execute real requests directly from this interface.</p>
-            </div>
-            <iframe src="/swagger" class="swagger-frame" title="Swagger API documentation"></iframe>
-          </section>
-        </div>
+        <iframe src="/swagger" class="swagger-frame"></iframe>
       </div>
     </div>
   </body>
