@@ -25,4 +25,6 @@
 - 2025-10-07, 11:53 UTC, Fix, Added a virtual environment bootstrap script and README guidance to bypass externally managed pip install failures
 - 2025-10-07, 12:00 UTC, Fix, Allowed extra environment variables in Python settings loader to restore API startup
 - 2025-10-07, 12:10 UTC, Fix, Switched configuration fields to validation aliases so startup accepts secret and database env vars
+- 2025-10-07, 12:19 UTC, Feature, Added secure upgrade automation script for pulling updates and restarting services
+
 - 2025-10-07, 12:30 UTC, Fix, Guarded MySQL bootstrap connection shutdown to support aiomysql versions without wait_closed
