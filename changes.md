@@ -26,3 +26,4 @@
 - 2025-10-07, 12:00 UTC, Fix, Allowed extra environment variables in Python settings loader to restore API startup
 - 2025-10-07, 12:10 UTC, Fix, Switched configuration fields to validation aliases so startup accepts secret and database env vars
 - 2025-10-07, 12:30 UTC, Fix, Guarded MySQL bootstrap connection shutdown to support aiomysql versions without wait_closed
+- 2025-10-09, 13:05 UTC, Feature, Documented legacy Node.js parity gaps and outlined restoration tasks in docs/node-parity-gap.md
