@@ -5,7 +5,19 @@
   <div class="app-container">
     <%- include('partials/sidebar') %>
     <div class="content">
-      <h1><%= isAdmin ? 'Admin' : 'Account' %></h1>
+      <header class="page-header">
+        <div class="page-title">
+          <p class="page-subtitle">Control centre</p>
+          <h1><%= isAdmin ? 'Admin' : 'Account' %></h1>
+          <p class="page-description">Configure organisational settings, manage access, and keep every workflow compliant.</p>
+        </div>
+        <div class="header-actions">
+          <% if (isSuperAdmin) { %>
+            <a class="button" href="/api-docs" target="_blank" rel="noopener">Swagger Docs</a>
+          <% } %>
+        </div>
+      </header>
+      <div class="page-body">
       <div class="admin-tabs">
         <div class="tabs">
           <% if (isSuperAdmin) { %>
@@ -1265,6 +1277,7 @@
           </section>
         </div>
         <% } %>
+      </div>
       </div>
     </div>
   </div>

@@ -5,7 +5,15 @@
   <div class="app-container">
     <%- include('partials/sidebar') %>
     <div class="content">
-      <h1>Licenses</h1>
+      <header class="page-header">
+        <div class="page-title">
+          <p class="page-subtitle">Modern GMP learning</p>
+          <h1>Licenses</h1>
+          <p class="page-description">Track license assignments and usage to ensure optimal coverage.</p>
+        </div>
+        <div class="header-actions"></div>
+      </header>
+      <div class="page-body">
       <table>
         <thead>
           <tr>
@@ -52,6 +60,7 @@
         </tbody>
       </table>
     </div>
+      </div>
   </div>
 
   <div id="allocated-modal" class="modal" style="display:none;">
