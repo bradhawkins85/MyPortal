@@ -27,3 +27,4 @@
 - 2025-10-07, 12:10 UTC, Fix, Switched configuration fields to validation aliases so startup accepts secret and database env vars
 - 2025-10-07, 12:19 UTC, Feature, Added secure upgrade automation script for pulling updates and restarting services
 
+- 2025-10-07, 12:30 UTC, Fix, Guarded MySQL bootstrap connection shutdown to support aiomysql versions without wait_closed
