@@ -3,20 +3,19 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
-from datetime import date, datetime, time, timedelta, timezone
-from pathlib import Path, PurePosixPath
-
 from collections.abc import Iterable, Mapping
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from pathlib import Path, PurePosixPath
 from typing import Any
-from urllib.parse import parse_qsl
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode
 
+import aiomysql
 import httpx
-from fastapi import FastAPI, Form, HTTPException, Query, Request, status
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 from starlette.datastructures import FormData
@@ -59,8 +58,8 @@ from app.security.encryption import encrypt_secret
 from app.security.rate_limiter import RateLimiterMiddleware, SimpleRateLimiter
 from app.security.session import session_manager
 from app.services.scheduler import scheduler_service
-from app.services import staff_importer
 from app.services import m365 as m365_service
+from app.services import staff_importer
 from app.services import template_variables
 from app.services import webhook_monitor
 from app.services.opnform import (
@@ -69,6 +68,7 @@ from app.services.opnform import (
     normalize_opnform_embed_code,
     normalize_opnform_form_url,
 )
+from app.services.file_storage import store_product_image
 
 configure_logging()
 settings = get_settings()
@@ -107,6 +107,7 @@ tags_metadata = [
     },
     {"name": "Office365", "description": "Microsoft 365 credential management and synchronisation APIs."},
     {"name": "Notifications", "description": "System-wide and user-specific notification feeds."},
+    {"name": "Shop", "description": "Product catalogue management and visibility controls."},
 ]
 app = FastAPI(
     title=settings.app_name,
@@ -1859,6 +1860,118 @@ async def admin_shop_page(
         "show_archived": show_archived,
     }
     return await _render_template("admin/shop.html", request, current_user, extra=extra)
+
+
+@app.post(
+    "/shop/admin/product",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Create a shop product",
+    tags=["Shop"],
+)
+async def admin_create_shop_product(
+    request: Request,
+    name: str = Form(...),
+    sku: str = Form(...),
+    vendor_sku: str = Form(...),
+    price: str = Form(...),
+    stock: str = Form(...),
+    vip_price: str | None = Form(default=None),
+    category_id: str | None = Form(default=None),
+    image: UploadFile | None = File(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    cleaned_name = name.strip()
+    if not cleaned_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Product name cannot be empty")
+
+    cleaned_sku = sku.strip()
+    if not cleaned_sku:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SKU cannot be empty")
+
+    cleaned_vendor_sku = vendor_sku.strip()
+    if not cleaned_vendor_sku:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vendor SKU cannot be empty")
+
+    try:
+        price_decimal = Decimal(price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (TypeError, InvalidOperation):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Price must be a valid number")
+    if price_decimal < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Price must be at least zero")
+
+    try:
+        stock_int = int(stock)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stock must be a whole number")
+    if stock_int < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stock must be at least zero")
+
+    vip_decimal: Decimal | None = None
+    if vip_price not in (None, ""):
+        try:
+            vip_decimal = Decimal(vip_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except (TypeError, InvalidOperation):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="VIP price must be a valid number")
+        if vip_decimal < 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="VIP price must be at least zero")
+
+    category_value: int | None = None
+    if category_id:
+        try:
+            category_value = int(category_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid category selection")
+        category = await shop_repo.get_category(category_value)
+        if not category:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected category does not exist")
+
+    image_url: str | None = None
+    stored_path: Path | None = None
+    if image is not None:
+        if image.filename:
+            image_url, stored_path = await store_product_image(
+                upload=image,
+                uploads_root=_private_uploads_path,
+                max_size=5 * 1024 * 1024,
+            )
+        else:
+            await image.close()
+
+    try:
+        product = await shop_repo.create_product(
+            name=cleaned_name,
+            sku=cleaned_sku,
+            vendor_sku=cleaned_vendor_sku,
+            price=price_decimal,
+            stock=stock_int,
+            vip_price=vip_decimal,
+            category_id=category_value,
+            image_url=image_url,
+        )
+    except aiomysql.IntegrityError as exc:
+        if stored_path:
+            stored_path.unlink(missing_ok=True)
+        if exc.args and exc.args[0] == 1062:
+            detail = "A product with that SKU or vendor SKU already exists."
+        else:
+            detail = "Unable to create product."
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
+    except Exception:
+        if stored_path:
+            stored_path.unlink(missing_ok=True)
+        raise
+
+    log_info(
+        "Shop product created",
+        product_id=product["id"],
+        sku=product["sku"],
+        vendor_sku=product["vendor_sku"],
+        created_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get("/login", response_class=HTMLResponse)
