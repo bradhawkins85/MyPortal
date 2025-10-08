@@ -18,7 +18,7 @@ class AuthForm {
     form.addEventListener('submit', (event) => this.handleSubmit(event));
 
     if (this.totpToggle && this.totpField) {
-      this.totpToggle.setAttribute('aria-expanded', this.totpField.hasAttribute('hidden') ? 'false' : 'true');
+      this.syncTotpVisibility();
       this.totpToggle.addEventListener('click', (event) => this.toggleTotp(event));
     }
   }
@@ -30,25 +30,7 @@ class AuthForm {
     }
 
     const isHidden = this.totpField.hasAttribute('hidden');
-    if (isHidden) {
-      this.totpField.removeAttribute('hidden');
-      this.totpField.setAttribute('aria-hidden', 'false');
-      this.totpToggle.textContent = 'Hide authenticator code';
-      this.totpToggle.setAttribute('aria-expanded', 'true');
-      const input = this.totpField.querySelector('input');
-      if (input) {
-        window.requestAnimationFrame(() => input.focus());
-      }
-    } else {
-      this.totpField.setAttribute('hidden', '');
-      this.totpField.setAttribute('aria-hidden', 'true');
-      this.totpToggle.textContent = 'Use authenticator code';
-      this.totpToggle.setAttribute('aria-expanded', 'false');
-      const input = this.totpField.querySelector('input');
-      if (input) {
-        input.value = '';
-      }
-    }
+    this.applyTotpVisibility(isHidden, { focus: isHidden, clearOnHide: !isHidden });
   }
 
   async handleSubmit(event) {
@@ -82,6 +64,10 @@ class AuthForm {
 
       if (!response.ok) {
         const detail = this.extractDetail(result) || 'Unable to complete the request. Check your credentials and try again.';
+        if (detail && /totp/i.test(detail)) {
+          const shouldSelect = /invalid/i.test(detail);
+          this.revealTotpField({ focus: true, select: shouldSelect });
+        }
         this.showError(detail);
         return;
       }
@@ -119,9 +105,6 @@ class AuthForm {
       }
 
       if (key === 'totp_code') {
-        if (this.totpField && this.totpField.hasAttribute('hidden')) {
-          continue;
-        }
         payload[key] = trimmed.replace(/\s+/g, '');
         continue;
       }
@@ -200,6 +183,80 @@ class AuthForm {
       this.form.classList.add('is-loading');
     } else {
       this.form.classList.remove('is-loading');
+    }
+  }
+
+  syncTotpVisibility() {
+    if (!this.totpField) {
+      return;
+    }
+    const isHidden = this.totpField.hasAttribute('hidden');
+    this.totpField.setAttribute('aria-hidden', isHidden ? 'true' : 'false');
+    if (this.totpToggle) {
+      this.totpToggle.textContent = isHidden ? 'Use authenticator code' : 'Hide authenticator code';
+      this.totpToggle.setAttribute('aria-expanded', isHidden ? 'false' : 'true');
+    }
+  }
+
+  applyTotpVisibility(shouldShow, { focus = false, clearOnHide = false } = {}) {
+    if (!this.totpField) {
+      return;
+    }
+
+    if (shouldShow) {
+      this.totpField.removeAttribute('hidden');
+      this.syncTotpVisibility();
+      if (focus) {
+        this.focusTotpInput({ select: false });
+      }
+      return;
+    }
+
+    this.totpField.setAttribute('hidden', '');
+    this.syncTotpVisibility();
+    if (clearOnHide) {
+      this.clearTotpInput();
+    }
+  }
+
+  revealTotpField({ focus = false, select = false } = {}) {
+    if (!this.totpField) {
+      return;
+    }
+    const wasHidden = this.totpField.hasAttribute('hidden');
+    if (wasHidden) {
+      this.totpField.removeAttribute('hidden');
+      this.syncTotpVisibility();
+    }
+    if (focus || select) {
+      this.focusTotpInput({ select });
+    }
+  }
+
+  focusTotpInput({ select = false } = {}) {
+    if (!this.totpField) {
+      return;
+    }
+    const input = this.totpField.querySelector('input');
+    if (!input) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      if (select) {
+        input.select();
+      } else {
+        input.focus();
+      }
+    });
+  }
+
+  clearTotpInput() {
+    if (!this.totpField) {
+      return;
+    }
+    const input = this.totpField.querySelector('input');
+    if (input) {
+      input.value = '';
     }
   }
 }
