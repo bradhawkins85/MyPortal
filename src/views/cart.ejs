@@ -13,6 +13,7 @@
         <p>Your cart is empty.</p>
       <% } else { %>
         <form action="/cart/remove" method="post">
+          <%- include('partials/csrf-field') %>
           <table>
             <thead>
               <tr>
@@ -42,6 +43,7 @@
           <button type="submit">Remove Selected</button>
         </form>
         <form action="/cart/place-order" method="post">
+          <%- include('partials/csrf-field') %>
           <p>Total: $<%= total.toFixed(2) %></p>
           <label>PO Number: <input type="text" name="poNumber" /></label>
           <button type="submit">Place Order</button>

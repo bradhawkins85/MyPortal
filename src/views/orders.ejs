@@ -47,6 +47,7 @@
                 <% if (isSuperAdmin) { %>
                   <td>
                     <form action="/orders/<%= o.order_number %>/delete" method="post" data-confirm="Delete order?">
+                      <%- include('partials/csrf-field') %>
                       <button type="submit">Delete</button>
                     </form>
                   </td>

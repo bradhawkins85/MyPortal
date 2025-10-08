@@ -11,6 +11,7 @@
         <p>Manual code: <code><%= secret %></code></p>
       <% } %>
       <form method="post" action="/totp">
+        <%- include('partials/csrf-field') %>
         <% if (requireSetup) { %>
         <label>Device Name:
           <input type="text" name="deviceName" required>
