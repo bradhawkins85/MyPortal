@@ -24,6 +24,7 @@
         </div>
       </header>
       <form action="/staff" method="post" class="form-grid">
+        {% include "partials/csrf.html" %}
         <div class="form-field">
           <label class="form-label" for="staff-first-name">First name</label>
           <input class="form-input" id="staff-first-name" name="firstName" required />
@@ -126,6 +127,7 @@
               </td>
               <td data-label="Enabled">
                 <form action="/staff/enabled" method="post" class="inline-form">
+                  {% include "partials/csrf.html" %}
                   <input type="hidden" name="staffId" value="{{ member.id }}" />
                   <label class="visually-hidden" for="staff-enabled-{{ member.id }}">Toggle enabled state for {{ member.first_name }} {{ member.last_name }}</label>
                   <input

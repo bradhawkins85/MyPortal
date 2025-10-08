@@ -27,6 +27,7 @@
       <section>
         <h2>Add Form</h2>
         <form action="/myforms/admin" method="post">
+          <%- include('partials/csrf-field') %>
           <input type="text" name="name" placeholder="Name" required>
           <input type="text" name="url" placeholder="https://forms.example.com/your-form" required>
           <input type="text" name="description" placeholder="Description">
@@ -47,10 +48,12 @@
                 <td><input form="form-<%= f.id %>" type="text" name="description" value="<%= f.description %>"></td>
                 <td>
                   <form id="form-<%= f.id %>" action="/myforms/admin/edit" method="post">
+                    <%- include('partials/csrf-field') %>
                     <input type="hidden" name="id" value="<%= f.id %>">
                     <button type="submit">Save</button>
                   </form>
                   <form action="/myforms/admin/delete" method="post">
+                    <%- include('partials/csrf-field') %>
                     <input type="hidden" name="id" value="<%= f.id %>">
                     <button type="submit">Delete</button>
                   </form>

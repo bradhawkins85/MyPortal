@@ -1,3 +1,4 @@
+- 2025-10-11, 09:30 UTC, Fix, Added server-rendered CSRF tokens across portal forms so submissions succeed even without client-side scripts
 - 2025-10-08, 12:12 UTC, Fix, Removed product description input from the shop admin creation form per request
 - 2025-10-08, 12:10 UTC, Fix, Stored imported shop images in the secure uploads directory and enforced validation to resolve 404s
 - 2025-10-10, 16:05 UTC, Fix, Namespaced the forms API under /api/forms so the customer UI renders instead of JSON responses

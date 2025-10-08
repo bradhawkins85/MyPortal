@@ -8,6 +8,7 @@
       <p class="error"><%= error %></p>
     <% } %>
     <form method="post" action="/register">
+      <%- include('partials/csrf-field') %>
       <label>Company:<br><input type="text" name="company" required></label><br><br>
       <label>Email:<br><input type="email" name="email" required></label><br><br>
       <label>Password:<br><input type="password" name="password" required></label><br><br>

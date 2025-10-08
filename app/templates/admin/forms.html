@@ -23,6 +23,7 @@
       </div>
     </header>
     <form action="/myforms/admin" method="post" class="form-grid">
+      {% include "partials/csrf.html" %}
       <div class="form-field">
         <label class="form-label" for="new-form-name">Name</label>
         <input class="form-input" id="new-form-name" name="name" required />
@@ -82,10 +83,12 @@
               <td class="table__actions">
                 <div class="table__action-buttons">
                   <form id="form-{{ form.id }}" action="/myforms/admin/edit" method="post" class="inline-form">
+                    {% include "partials/csrf.html" %}
                     <input type="hidden" name="id" value="{{ form.id }}" />
                     <button type="submit" class="button button--ghost">Save</button>
                   </form>
                   <form action="/myforms/admin/delete" method="post" class="inline-form" data-confirm="Delete this form?">
+                    {% include "partials/csrf.html" %}
                     <input type="hidden" name="id" value="{{ form.id }}" />
                     <button type="submit" class="button button--danger">Delete</button>
                   </form>

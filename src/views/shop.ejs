@@ -38,6 +38,7 @@
               <td class="order-column">
                 <% if (p.stock > 0) { %>
                   <form action="/cart/add" method="post">
+                    <%- include('partials/csrf-field') %>
                     <input type="hidden" name="productId" value="<%= p.id %>">
                     <input type="number" name="quantity" min="1" max="<%= p.stock %>" value="1">
                     <button type="submit">Add to Cart</button>
