@@ -1,3 +1,4 @@
+- 2025-10-12, 08:15 UTC, Fix, Restored shop product import via stock feed lookup with category syncing and secure image downloads
 - 2025-10-08, 12:51 UTC, Fix, Restored shop product creation with validated uploads and database persistence to resolve Not Found errors
 - 2025-10-08, 12:41 UTC, Fix, Updated API documentation links to open in a new tab with secure attributes for consistent navigation
 - 2025-10-11, 09:30 UTC, Fix, Added server-rendered CSRF tokens across portal forms so submissions succeed even without client-side scripts

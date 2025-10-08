@@ -69,6 +69,7 @@ from app.services.opnform import (
     normalize_opnform_form_url,
 )
 from app.services.file_storage import store_product_image
+from app.services.shop_importer import ProductImportError, import_product_by_vendor_sku
 
 configure_logging()
 settings = get_settings()
@@ -1860,6 +1861,50 @@ async def admin_shop_page(
         "show_archived": show_archived,
     }
     return await _render_template("admin/shop.html", request, current_user, extra=extra)
+
+
+@app.post(
+    "/shop/admin/product/import",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Import a shop product from the stock feed",
+    tags=["Shop"],
+)
+async def admin_import_shop_product(
+    request: Request,
+    vendor_sku: str = Form(...),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    cleaned_vendor_sku = vendor_sku.strip()
+    if not cleaned_vendor_sku:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vendor SKU cannot be empty",
+        )
+
+    try:
+        await import_product_by_vendor_sku(
+            cleaned_vendor_sku,
+            uploads_root=_private_uploads_path,
+        )
+    except ProductImportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except Exception as exc:  # pragma: no cover - defensive logging for unexpected errors
+        log_error(
+            "Unexpected error during product import",
+            vendor_sku=cleaned_vendor_sku,
+            error=str(exc),
+        )
+        raise
+
+    log_info(
+        "Shop product import triggered from admin UI",
+        vendor_sku=cleaned_vendor_sku,
+        user_id=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post(

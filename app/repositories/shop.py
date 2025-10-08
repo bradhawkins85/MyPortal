@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Iterable
 
 import aiomysql
 
@@ -99,6 +99,27 @@ async def get_category(category_id: int) -> dict[str, Any] | None:
     return {"id": int(row["id"]), "name": row["name"]}
 
 
+async def get_category_by_name(name: str) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT id, name FROM shop_categories WHERE name = %s",
+        (name,),
+    )
+    if not row:
+        return None
+    return {"id": int(row["id"]), "name": row["name"]}
+
+
+async def create_category(name: str) -> dict[str, Any]:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                "INSERT INTO shop_categories (name) VALUES (%s)",
+                (name,),
+            )
+            category_id = int(cursor.lastrowid)
+    return {"id": category_id, "name": name}
+
+
 async def get_product_by_id(product_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
         """
@@ -108,6 +129,20 @@ async def get_product_by_id(product_id: int) -> dict[str, Any] | None:
         WHERE p.id = %s
         """,
         (product_id,),
+    )
+    return _normalise_product(row) if row else None
+
+
+async def get_product_by_sku(sku: str) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        """
+        SELECT p.*, c.name AS category_name
+        FROM shop_products AS p
+        LEFT JOIN shop_categories AS c ON c.id = p.category_id
+        WHERE p.sku = %s OR p.vendor_sku = %s
+        LIMIT 1
+        """,
+        (sku, sku),
     )
     return _normalise_product(row) if row else None
 
@@ -149,6 +184,125 @@ async def create_product(
     if not product:
         raise RuntimeError("Failed to create product")
     return product
+
+
+async def upsert_product_from_feed(
+    *,
+    name: str,
+    sku: str,
+    vendor_sku: str,
+    description: str,
+    image_url: str | None,
+    price: Decimal,
+    vip_price: Decimal | None,
+    stock: int,
+    category_id: int | None,
+    stock_nsw: int,
+    stock_qld: int,
+    stock_vic: int,
+    stock_sa: int,
+    buy_price: Decimal | None,
+    weight: Decimal | None,
+    length: Decimal | None,
+    width: Decimal | None,
+    height: Decimal | None,
+    stock_at: str | None,
+    warranty_length: str | None,
+    manufacturer: str | None,
+) -> None:
+    params: Iterable[Any]
+    params = (
+        name,
+        sku,
+        vendor_sku,
+        description,
+        image_url,
+        price,
+        vip_price,
+        stock,
+        category_id,
+        stock_nsw,
+        stock_qld,
+        stock_vic,
+        stock_sa,
+        buy_price,
+        weight,
+        length,
+        width,
+        height,
+        stock_at,
+        warranty_length,
+        manufacturer,
+    )
+    await db.execute(
+        """
+        INSERT INTO shop_products
+            (
+                name, sku, vendor_sku, description, image_url, price, vip_price,
+                stock, category_id, stock_nsw, stock_qld, stock_vic, stock_sa,
+                buy_price, weight, length, width, height, stock_at,
+                warranty_length, manufacturer
+            )
+        VALUES
+            (
+                %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s,
+                %s, %s
+            )
+        ON DUPLICATE KEY UPDATE
+            name = VALUES(name),
+            sku = VALUES(sku),
+            description = VALUES(description),
+            image_url = IFNULL(VALUES(image_url), image_url),
+            price = VALUES(price),
+            vip_price = VALUES(vip_price),
+            stock = VALUES(stock),
+            category_id = VALUES(category_id),
+            stock_nsw = VALUES(stock_nsw),
+            stock_qld = VALUES(stock_qld),
+            stock_vic = VALUES(stock_vic),
+            stock_sa = VALUES(stock_sa),
+            buy_price = VALUES(buy_price),
+            weight = VALUES(weight),
+            length = VALUES(length),
+            width = VALUES(width),
+            height = VALUES(height),
+            stock_at = VALUES(stock_at),
+            warranty_length = VALUES(warranty_length),
+            manufacturer = VALUES(manufacturer)
+        """,
+        tuple(params),
+    )
+
+
+async def get_stock_feed_item_by_sku(sku: str) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT * FROM stock_feed WHERE sku = %s",
+        (sku,),
+    )
+    if not row:
+        return None
+    return {
+        "sku": row.get("sku"),
+        "product_name": row.get("product_name"),
+        "product_name2": row.get("product_name2"),
+        "rrp": row.get("rrp"),
+        "category_name": row.get("category_name"),
+        "on_hand_nsw": _coerce_int(row.get("on_hand_nsw"), default=0),
+        "on_hand_qld": _coerce_int(row.get("on_hand_qld"), default=0),
+        "on_hand_vic": _coerce_int(row.get("on_hand_vic"), default=0),
+        "on_hand_sa": _coerce_int(row.get("on_hand_sa"), default=0),
+        "dbp": row.get("dbp"),
+        "weight": row.get("weight"),
+        "length": row.get("length"),
+        "width": row.get("width"),
+        "height": row.get("height"),
+        "pub_date": row.get("pub_date"),
+        "warranty_length": row.get("warranty_length"),
+        "manufacturer": row.get("manufacturer"),
+        "image_url": row.get("image_url"),
+    }
 
 
 def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
