@@ -43,10 +43,22 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             or request.headers.get("X-CSRFToken")
             or request.headers.get("CSRF-Token")
         )
+
         if not header_token:
-            form = await request.form() if request.headers.get("content-type", "").startswith("application/x-www-form-urlencoded") else None
-            if form and "_csrf" in form:
-                header_token = form.get("_csrf")
+            content_type = request.headers.get("content-type", "").lower()
+            should_check_form = content_type.startswith("application/x-www-form-urlencoded") or content_type.startswith(
+                "multipart/form-data"
+            )
+            if should_check_form:
+                try:
+                    # BaseHTTPMiddleware consumes the request stream the first time it is read.
+                    # Populate the cached body so downstream handlers still receive the payload.
+                    await request.body()
+                    form = await request.form()
+                except Exception:  # pragma: no cover - fall back to header validation on parse errors
+                    form = None
+                if form and "_csrf" in form:
+                    header_token = form.get("_csrf")
 
         session = await self._session_manager.load_session(request, allow_inactive=False)
         if not session:
