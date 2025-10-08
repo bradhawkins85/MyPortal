@@ -114,6 +114,13 @@ All authentication routes are documented in the interactive Swagger UI and summa
 - `POST /auth/totp/verify` – Confirms the authenticator code and persists it for future logins.
 - `DELETE /auth/totp/{id}` – Removes an existing authenticator.
 
+## Company Context Switching
+
+- `POST /switch-company` – Updates the active company for the authenticated session. The endpoint accepts either
+  form-encoded or JSON payloads with a `companyId` field and honours an optional `returnUrl` parameter. Clients may
+  also supply these parameters via the query string when making server-side redirects. A valid CSRF token is required
+  for authenticated browsers; send it as the `_csrf` form field or `X-CSRF-Token` header.
+
 ## Office 365 Sync
 
 To enable Microsoft 365 license synchronization, register an application in

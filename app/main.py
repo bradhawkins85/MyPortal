@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 from datetime import date, datetime, time, timedelta, timezone
 
+from collections.abc import Iterable, Mapping
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Request, status, Form
+from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
+from starlette.datastructures import FormData
 
 from app.api.routes import (
     audit_logs,
@@ -377,6 +381,51 @@ async def on_shutdown() -> None:
     log_info("Application shutdown")
 
 
+def _first_non_blank(keys: Iterable[str], *sources: Mapping[str, Any]) -> Any | None:
+    for source in sources:
+        if not source:
+            continue
+        for key in keys:
+            if key not in source:
+                continue
+            value = source[key]
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            return value
+    return None
+
+
+async def _extract_switch_company_payload(request: Request) -> dict[str, Any]:
+    raw_content_type = request.headers.get("content-type", "")
+    content_type = raw_content_type.split(";", 1)[0].strip().lower()
+
+    if content_type == "application/json":
+        try:
+            payload = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            payload = None
+        if isinstance(payload, dict):
+            return payload
+        return {}
+
+    try:
+        form_data: FormData | None = await request.form()
+    except Exception:  # pragma: no cover - fallback when Starlette cannot parse the body
+        form_data = None
+
+    if not form_data:
+        return {}
+
+    data: dict[str, Any] = {}
+    for key in form_data.keys():
+        values = form_data.getlist(key)
+        if values:
+            data[key] = values[0]
+    return data
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     user, redirect = await _require_authenticated_user(request)
@@ -504,8 +553,6 @@ async def remove_license(request: Request, license_id: int):
 @app.post("/switch-company", response_class=RedirectResponse)
 async def switch_company(
     request: Request,
-    company_id: int = Form(..., alias="companyId"),
-    return_url: str | None = Form(None, alias="returnUrl"),
 ):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -513,6 +560,24 @@ async def switch_company(
     session = await session_manager.load_session(request)
     if not session:
         return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    body_data = await _extract_switch_company_payload(request)
+    query_params = request.query_params
+
+    company_id_raw = _first_non_blank(("companyId", "company_id"), body_data, query_params)
+    if company_id_raw is not None:
+        try:
+            company_id = int(company_id_raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier")
+    else:
+        company_id = None
+
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="companyId is required")
+
+    return_url_raw = _first_non_blank(("returnUrl", "return_url"), body_data, query_params)
+    return_url: str | None = return_url_raw if isinstance(return_url_raw, str) else None
 
     companies = await user_company_repo.list_companies_for_user(user["id"])
     request.state.available_companies = companies
