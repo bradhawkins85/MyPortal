@@ -24,6 +24,7 @@ dependencies = [
     "httpx",
     "loguru",
     "cryptography",
+    "email-validator",
 ]
 
 [project.optional-dependencies]

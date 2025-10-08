@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.schemas.users import UserResponse
 
@@ -18,9 +18,32 @@ class RegistrationRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     email: EmailStr
     password: str
-    totp_code: Optional[str] = None
+    totp_code: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("totp_code", "totpCode", "totp"),
+        serialization_alias="totp_code",
+        description=(
+            "6-digit authenticator code. Accepts `totp_code`, `totpCode`, or `totp` keys "
+            "and ignores internal whitespace."
+        ),
+    )
+
+    @field_validator("totp_code")
+    @classmethod
+    def _normalise_totp_code(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+
+        normalised = "".join(value.split())
+        if not normalised:
+            return None
+        if not normalised.isdigit():
+            raise ValueError("TOTP code must contain only digits")
+        return normalised
 
 
 class SessionInfo(BaseModel):
