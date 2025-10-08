@@ -6,6 +6,7 @@
     <title>{{ app_name }} - {{ title | default('Dashboard') }}</title>
     <link rel="stylesheet" href="/static/css/app.css" />
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    {% block extra_head %}{% endblock %}
   </head>
   <body class="theme-default">
     <div class="layout">
@@ -15,8 +16,24 @@
           <span class="brand__name">{{ app_name }}</span>
         </div>
         <ul class="menu">
-          <li class="menu__item"><a href="/">Dashboard</a></li>
-          <li class="menu__item"><a href="/docs">API Docs</a></li>
+          {% block sidebar_menu %}
+          <li class="menu__item">
+            <a href="/">
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>
+              </span>
+              <span class="menu__label">Dashboard</span>
+            </a>
+          </li>
+          <li class="menu__item">
+            <a href="/docs">
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm8 6V4.5L18.5 9H14z"/></svg>
+              </span>
+              <span class="menu__label">API Docs</span>
+            </a>
+          </li>
+          {% endblock %}
         </ul>
       </nav>
       <main class="layout__main">
@@ -29,5 +46,6 @@
         </section>
       </main>
     </div>
+    {% block scripts %}{% endblock %}
   </body>
 </html>

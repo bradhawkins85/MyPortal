@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% set title = "Create super administrator" %}
+
+{% block sidebar_menu %}
+<li class="menu__item">
+  <a href="/register" aria-current="page">
+    <span class="menu__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-4.35 0-8 2.24-8 5v1h16v-1c0-2.76-3.65-5-8-5zm9-11h-3V2h3a1 1 0 0 1 1 1v3h-2zM5 6H3V3a1 1 0 0 1 1-1h3v2H5zm16 13h-2v2h-3v-2h3v-3h2zm-16 0H3v-3H1v-2h3v3h3v2H5z"/></svg>
+    </span>
+    <span class="menu__label">Register</span>
+  </a>
+</li>
+<li class="menu__item">
+  <a href="/login">
+    <span class="menu__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false"><path d="M14 4H4a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-3h-2v2H5V6h8v2h2V5a1 1 0 0 0-1-1zm1.707 7.293-2.586-2.586L11.707 10.12 13.586 12l-1.879 1.879 1.414 1.414 2.586-2.586a1 1 0 0 0 0-1.414z"/></svg>
+    </span>
+    <span class="menu__label">Sign in</span>
+  </a>
+</li>
+{% endblock %}
+
+{% block header_actions %}
+<a class="button-link" href="/login">Already registered?</a>
+{% endblock %}
+
+{% block content %}
+<div class="auth-card">
+  <header class="auth-card__header">
+    <h1 class="auth-card__title">Create the first account</h1>
+    <p class="auth-card__subtitle">
+      Set up the super administrator who will manage users, companies, and security settings for {{ app_name }}.
+    </p>
+  </header>
+  <form
+    class="auth-form"
+    method="post"
+    data-auth-form
+    data-endpoint="/auth/register"
+    data-loading-text="Creating account&hellip;"
+    data-success-redirect="/"
+    novalidate
+  >
+    <div class="form-grid">
+      <div class="form-field">
+        <label class="form-label" for="register-first-name">First name</label>
+        <div class="form-input-wrapper">
+          <input
+            id="register-first-name"
+            class="form-input"
+            type="text"
+            name="first_name"
+            autocomplete="given-name"
+            placeholder="Alex"
+            required
+          />
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="register-last-name">Last name</label>
+        <div class="form-input-wrapper">
+          <input
+            id="register-last-name"
+            class="form-input"
+            type="text"
+            name="last_name"
+            autocomplete="family-name"
+            placeholder="Rivera"
+            required
+          />
+        </div>
+      </div>
+    </div>
+    <div class="form-field">
+      <label class="form-label" for="register-email">Work email</label>
+      <div class="form-input-wrapper">
+        <input
+          id="register-email"
+          class="form-input"
+          type="email"
+          name="email"
+          autocomplete="email"
+          required
+          placeholder="admin@example.com"
+        />
+      </div>
+    </div>
+    <div class="form-field">
+      <label class="form-label" for="register-password">Password</label>
+      <div class="form-input-wrapper">
+        <input
+          id="register-password"
+          class="form-input"
+          type="password"
+          name="password"
+          autocomplete="new-password"
+          minlength="12"
+          required
+          placeholder="Use a strong password"
+        />
+      </div>
+      <p class="form-help">Passwords must be at least 12 characters and will be stored using bcrypt hashing.</p>
+    </div>
+    <div class="form-grid">
+      <div class="form-field">
+        <label class="form-label" for="register-phone">Mobile phone (optional)</label>
+        <div class="form-input-wrapper">
+          <input
+            id="register-phone"
+            class="form-input"
+            type="tel"
+            name="mobile_phone"
+            autocomplete="tel"
+            placeholder="+61 400 000 000"
+          />
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="register-company">Company ID (optional)</label>
+        <div class="form-input-wrapper">
+          <input
+            id="register-company"
+            class="form-input"
+            type="number"
+            min="1"
+            step="1"
+            name="company_id"
+            placeholder="1234"
+          />
+        </div>
+      </div>
+    </div>
+    <p class="form-help">You can associate the super administrator with a company now or later from the admin area.</p>
+    <div class="form-error" role="alert" data-auth-error hidden></div>
+    <div class="form-actions">
+      <button type="submit" class="button" data-auth-submit>Create account</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/auth.js"></script>
+{% endblock %}

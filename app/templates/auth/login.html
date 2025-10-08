@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% set title = "Sign in" %}
+
+{% block sidebar_menu %}
+<li class="menu__item">
+  <a href="/login" aria-current="page">
+    <span class="menu__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false"><path d="M10 4h10a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H10a1 1 0 0 1-1-1v-3h2v2h8V6h-8v2H9V5a1 1 0 0 1 1-1zm-1.707 7.293 2.586-2.586L12.293 10.12 10.414 12l1.879 1.879-1.414 1.414-2.586-2.586a1 1 0 0 1 0-1.414z"/></svg>
+    </span>
+    <span class="menu__label">Sign in</span>
+  </a>
+</li>
+<li class="menu__item">
+  <a href="/docs">
+    <span class="menu__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm8 6V4.5L18.5 9H14z"/></svg>
+    </span>
+    <span class="menu__label">API Docs</span>
+  </a>
+</li>
+{% endblock %}
+
+{% block header_actions %}
+<a class="button-link" href="/docs" aria-label="Open API documentation">Swagger UI</a>
+{% endblock %}
+
+{% block content %}
+<div class="auth-card">
+  <header class="auth-card__header">
+    <h1 class="auth-card__title">Welcome back</h1>
+    <p class="auth-card__subtitle">Use your portal credentials to access the dashboard.</p>
+  </header>
+  <form
+    class="auth-form"
+    method="post"
+    data-auth-form
+    data-endpoint="/auth/login"
+    data-loading-text="Signing in&hellip;"
+    data-success-redirect="/"
+    novalidate
+  >
+    <div class="form-field">
+      <label class="form-label" for="login-email">Email address</label>
+      <div class="form-input-wrapper">
+        <input
+          id="login-email"
+          class="form-input"
+          type="email"
+          name="email"
+          autocomplete="username"
+          required
+          placeholder="you@example.com"
+        />
+      </div>
+    </div>
+    <div class="form-field">
+      <label class="form-label" for="login-password">Password</label>
+      <div class="form-input-wrapper">
+        <input
+          id="login-password"
+          class="form-input"
+          type="password"
+          name="password"
+          autocomplete="current-password"
+          required
+          minlength="8"
+          placeholder="••••••••"
+        />
+      </div>
+    </div>
+    <div class="form-field" id="login-totp-field" data-totp-field hidden aria-hidden="true">
+      <label class="form-label" for="login-totp">Authenticator code</label>
+      <div class="form-input-wrapper">
+        <input
+          id="login-totp"
+          class="form-input"
+          type="text"
+          name="totp_code"
+          inputmode="numeric"
+          pattern="[0-9]{6}"
+          autocomplete="one-time-code"
+          placeholder="123456"
+        />
+      </div>
+    </div>
+    <div class="form-actions form-actions--stacked">
+      <button
+        type="button"
+        class="button-link"
+        data-auth-toggle-totp
+        aria-controls="login-totp-field"
+      >
+        Use authenticator code
+      </button>
+    </div>
+    <p class="form-help">Forgotten your password? Contact a super administrator to trigger a reset email.</p>
+    <div class="form-error" role="alert" data-auth-error hidden></div>
+    <div class="form-actions">
+      <button type="submit" class="button" data-auth-submit>Sign in</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/auth.js"></script>
+{% endblock %}

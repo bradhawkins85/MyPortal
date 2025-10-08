@@ -2,18 +2,20 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.api.routes import auth, companies, users
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
-from app.core.logging import configure_logging, log_info
+from app.core.logging import configure_logging, log_error, log_info
+from app.repositories import users as user_repo
 from app.security.csrf import CSRFMiddleware
 from app.security.rate_limiter import RateLimiterMiddleware, SimpleRateLimiter
+from app.security.session import session_manager
 
 configure_logging()
 settings = get_settings()
@@ -66,6 +68,54 @@ async def index(request: Request):
         "current_year": datetime.utcnow().year,
     }
     return templates.TemplateResponse("dashboard.html", context)
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    session = await session_manager.load_session(request)
+    if session:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        user_count = await user_repo.count_users()
+    except Exception as exc:  # pragma: no cover - defensive logging for startup issues
+        log_error("Failed to determine user count during login", error=str(exc))
+        user_count = 1
+
+    if user_count == 0:
+        return RedirectResponse(url="/register", status_code=status.HTTP_303_SEE_OTHER)
+
+    context = {
+        "request": request,
+        "app_name": settings.app_name,
+        "current_year": datetime.utcnow().year,
+        "title": "Sign in",
+    }
+    return templates.TemplateResponse("auth/login.html", context)
+
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request):
+    session = await session_manager.load_session(request)
+    if session:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        user_count = await user_repo.count_users()
+    except Exception as exc:  # pragma: no cover - defensive logging for startup issues
+        log_error("Failed to determine user count during registration", error=str(exc))
+        user_count = 1
+
+    if user_count > 0:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    context = {
+        "request": request,
+        "app_name": settings.app_name,
+        "current_year": datetime.utcnow().year,
+        "title": "Create super administrator",
+    }
+    return templates.TemplateResponse("auth/register.html", context)
 
 
 @app.get("/health")
