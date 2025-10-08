@@ -175,6 +175,16 @@ async def create_product(
     return product
 
 
+async def delete_product(product_id: int) -> bool:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                "DELETE FROM shop_products WHERE id = %s",
+                (product_id,),
+            )
+            return cursor.rowcount > 0
+
+
 async def get_category_by_name(name: str) -> dict[str, Any] | None:
     row = await db.fetch_one(
         "SELECT id, name FROM shop_categories WHERE name = %s",
