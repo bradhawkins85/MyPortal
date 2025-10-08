@@ -8,6 +8,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from collections.abc import Iterable, Mapping
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
+from urllib.parse import parse_qsl
 from urllib.parse import urlencode
 
 import httpx
@@ -410,19 +411,51 @@ async def _extract_switch_company_payload(request: Request) -> dict[str, Any]:
             return payload
         return {}
 
+    data: dict[str, Any] = {}
+    body_bytes: bytes | None = None
+
     try:
         form_data: FormData | None = await request.form()
     except Exception:  # pragma: no cover - fallback when Starlette cannot parse the body
         form_data = None
 
-    if not form_data:
-        return {}
+    if form_data is not None:
+        keys = list(form_data.keys())
+        if keys:
+            for key in keys:
+                values = form_data.getlist(key)
+                if values:
+                    data[key] = values[0]
+            return data
 
-    data: dict[str, Any] = {}
-    for key in form_data.keys():
-        values = form_data.getlist(key)
-        if values:
-            data[key] = values[0]
+    if body_bytes is None:
+        body_bytes = await request.body()
+
+    if not body_bytes:
+        return data
+
+    charset = getattr(request, "charset", None) or "utf-8"
+    try:
+        text_body = body_bytes.decode(charset, errors="replace")
+    except LookupError:  # pragma: no cover - unsupported encodings
+        text_body = body_bytes.decode("utf-8", errors="replace")
+
+    if "=" in text_body or "&" in text_body:
+        for key, value in parse_qsl(text_body, keep_blank_values=True):
+            if key not in data:
+                data[key] = value
+
+        if data:
+            return data
+
+    try:
+        payload = json.loads(text_body)
+    except (json.JSONDecodeError, ValueError):
+        return data
+
+    if isinstance(payload, dict):
+        return payload
+
     return data
 
 

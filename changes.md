@@ -47,3 +47,4 @@
 - 2025-10-09, 21:15 UTC, Feature, Restored license management UI, Microsoft 365 sync services, OAuth callbacks, and admin credential workflows for parity with the legacy portal
 - 2025-10-08, 10:14 UTC, Fix, Allowed company switching endpoint to accept JSON and form payloads while validating memberships
 - 2025-10-08, 10:19 UTC, Fix, Hardened company switching payload parsing to support form, JSON, and query parameters with updated documentation
+- 2025-10-08, 10:32 UTC, Fix, Added resilient switch-company payload parsing fallback for raw form bodies and undocumented clients
