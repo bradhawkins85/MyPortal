@@ -3,9 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+from datetime import date, datetime, time, timedelta, timezone
+
 from collections.abc import Iterable, Mapping
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, status
@@ -13,13 +16,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from itsdangerous import BadSignature, URLSafeSerializer
 from starlette.datastructures import FormData
 
 from app.api.routes import (
     audit_logs,
     auth,
     companies,
+    licenses as licenses_api,
     memberships,
+    m365 as m365_api,
     notifications,
     ports,
     roles,
@@ -33,20 +39,25 @@ from app.repositories import audit_logs as audit_repo
 from app.repositories import auth as auth_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
+from app.repositories import licenses as license_repo
+from app.repositories import m365 as m365_repo
 from app.repositories import roles as role_repo
 from app.repositories import shop as shop_repo
 from app.repositories import staff as staff_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.security.csrf import CSRFMiddleware
+from app.security.encryption import encrypt_secret
 from app.security.rate_limiter import RateLimiterMiddleware, SimpleRateLimiter
 from app.security.session import session_manager
 from app.services.scheduler import scheduler_service
 from app.services import staff_importer
+from app.services import m365 as m365_service
 
 configure_logging()
 settings = get_settings()
 templates_config = get_templates_config()
+oauth_state_serializer = URLSafeSerializer(settings.secret_key, salt="m365-oauth")
 tags_metadata = [
     {"name": "Auth", "description": "Authentication, registration, and session management."},
     {"name": "Users", "description": "User administration, profile management, and self-service endpoints."},
@@ -59,6 +70,8 @@ tags_metadata = [
     },
     {"name": "Audit Logs", "description": "Structured audit trail of privileged actions."},
     {"name": "Ports", "description": "Port catalogue, document storage, and pricing workflow APIs."},
+    {"name": "Licenses", "description": "Software license catalogue, assignments, and ordering workflows."},
+    {"name": "Office365", "description": "Microsoft 365 credential management and synchronisation APIs."},
     {"name": "Notifications", "description": "System-wide and user-specific notification feeds."},
 ]
 app = FastAPI(
@@ -94,8 +107,10 @@ app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), n
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(companies.router)
+app.include_router(licenses_api.router)
 app.include_router(roles.router)
 app.include_router(memberships.router)
+app.include_router(m365_api.router)
 app.include_router(ports.router)
 app.include_router(notifications.router)
 app.include_router(staff_api.router)
@@ -202,6 +217,11 @@ async def _build_base_context(
         if company.get("company_id") == active_company_id:
             active_company = company
             break
+    membership = None
+    if active_company_id is not None:
+        membership = await user_company_repo.get_user_company(user["id"], int(active_company_id))
+        request.state.active_membership = membership
+
     context: dict[str, Any] = {
         "request": request,
         "app_name": settings.app_name,
@@ -210,6 +230,7 @@ async def _build_base_context(
         "available_companies": available_companies,
         "active_company": active_company,
         "active_company_id": active_company_id,
+        "active_membership": membership,
         "csrf_token": session.csrf_token if session else None,
     }
     if extra:
@@ -226,6 +247,85 @@ async def _render_template(
 ):
     context = await _build_base_context(request, user, extra=extra)
     return templates.TemplateResponse(template_name, context)
+
+
+async def _load_license_context(
+    request: Request,
+    *,
+    require_manage: bool = True,
+    require_order: bool = False,
+):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return user, None, None, None, redirect
+    is_super_admin = bool(user.get("is_super_admin"))
+    company_id_raw = user.get("company_id")
+    if company_id_raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No company associated with the current user",
+        )
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier")
+    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    can_manage = bool(membership and membership.get("can_manage_licenses"))
+    can_order = bool(membership and membership.get("can_order_licenses"))
+    if require_manage and not (is_super_admin or can_manage):
+        return (
+            user,
+            membership,
+            None,
+            company_id,
+            RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
+        )
+    if require_order and not (is_super_admin or can_order):
+        return (
+            user,
+            membership,
+            None,
+            company_id,
+            RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
+        )
+    company = await company_repo.get_company_by_id(company_id)
+    return user, membership, company, company_id, None
+
+
+async def _send_license_webhook(
+    *,
+    action: str,
+    company_id: int,
+    license_id: int,
+    quantity: int,
+) -> None:
+    if not settings.licenses_webhook_url or not settings.licenses_webhook_api_key:
+        return
+    payload = {
+        "companyId": company_id,
+        "licenseId": license_id,
+        "quantity": quantity,
+        "action": action,
+    }
+    headers = {
+        "x-api-key": settings.licenses_webhook_api_key,
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                str(settings.licenses_webhook_url),
+                json=payload,
+                headers=headers,
+            )
+        if response.status_code >= 400:
+            log_error(
+                "License webhook responded with error",
+                status=response.status_code,
+                body=response.text,
+            )
+    except httpx.HTTPError as exc:  # pragma: no cover - network failure logging
+        log_error("Failed to call license webhook", error=str(exc))
 
 
 async def _load_staff_context(
@@ -334,6 +434,122 @@ async def index(request: Request):
     return await _render_template("dashboard.html", request, user)
 
 
+@app.get("/licenses", response_class=HTMLResponse)
+async def licenses_page(request: Request):
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    records = await license_repo.list_company_licenses(company_id)
+    formatted: list[dict[str, Any]] = []
+    for record in records:
+        expiry_value = record.get("expiry_date")
+        if isinstance(expiry_value, datetime):
+            expiry_display = expiry_value.strftime("%Y-%m-%d")
+        elif isinstance(expiry_value, date):
+            expiry_display = expiry_value.strftime("%Y-%m-%d")
+        elif expiry_value:
+            expiry_display = str(expiry_value)
+        else:
+            expiry_display = ""
+        formatted.append(record | {"expiry_display": expiry_display})
+    is_super_admin = bool(user.get("is_super_admin"))
+    can_order = bool(is_super_admin or (membership and membership.get("can_order_licenses")))
+    can_manage = bool(is_super_admin or (membership and membership.get("can_manage_licenses")))
+    credentials = await m365_repo.get_credentials(company_id)
+    extra = {
+        "title": "Licenses",
+        "licenses": formatted,
+        "company": company,
+        "can_order_licenses": can_order,
+        "can_manage_licenses": can_manage,
+        "webhook_enabled": bool(settings.licenses_webhook_url and settings.licenses_webhook_api_key),
+        "has_m365_credentials": bool(credentials),
+    }
+    return await _render_template("licenses/index.html", request, user, extra=extra)
+
+
+@app.get("/licenses/{license_id}/allocated", response_class=JSONResponse)
+async def license_allocations(request: Request, license_id: int):
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    record = await license_repo.get_license_by_id(license_id)
+    if not record or int(record.get("company_id", 0)) != company_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License not found")
+    members = await license_repo.list_staff_for_license(license_id)
+    return JSONResponse(members)
+
+
+@app.post("/licenses/{license_id}/order", response_class=JSONResponse)
+async def order_license(request: Request, license_id: int):
+    user, membership, _, company_id, redirect = await _load_license_context(
+        request,
+        require_manage=False,
+        require_order=True,
+    )
+    if redirect:
+        return redirect
+    record = await license_repo.get_license_by_id(license_id)
+    if not record or int(record.get("company_id", 0)) != company_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License not found")
+    try:
+        payload = await request.json()
+    except Exception as exc:  # pragma: no cover - defensive parsing
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload") from exc
+    quantity = int(payload.get("quantity", 0) or 0)
+    if quantity <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be greater than zero")
+    await _send_license_webhook(
+        action="order",
+        company_id=company_id,
+        license_id=license_id,
+        quantity=quantity,
+    )
+    log_info(
+        "License order submitted",
+        company_id=company_id,
+        license_id=license_id,
+        quantity=quantity,
+        user_id=user.get("id"),
+    )
+    return JSONResponse({"success": True})
+
+
+@app.post("/licenses/{license_id}/remove", response_class=JSONResponse)
+async def remove_license(request: Request, license_id: int):
+    user, membership, _, company_id, redirect = await _load_license_context(
+        request,
+        require_manage=False,
+        require_order=True,
+    )
+    if redirect:
+        return redirect
+    record = await license_repo.get_license_by_id(license_id)
+    if not record or int(record.get("company_id", 0)) != company_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License not found")
+    try:
+        payload = await request.json()
+    except Exception as exc:  # pragma: no cover - defensive parsing
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload") from exc
+    quantity = int(payload.get("quantity", 0) or 0)
+    if quantity <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be greater than zero")
+    await _send_license_webhook(
+        action="remove",
+        company_id=company_id,
+        license_id=license_id,
+        quantity=quantity,
+    )
+    log_info(
+        "License removal requested",
+        company_id=company_id,
+        license_id=license_id,
+        quantity=quantity,
+        user_id=user.get("id"),
+    )
+    return JSONResponse({"success": True})
+
+
 @app.post("/switch-company", response_class=RedirectResponse)
 async def switch_company(
     request: Request,
@@ -378,6 +594,168 @@ async def switch_company(
             destination = candidate
 
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/m365", response_class=HTMLResponse)
+async def m365_page(request: Request, error: str | None = None):
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    credentials = await m365_service.get_credentials(company_id)
+    credential_view = None
+    if credentials:
+        expires = credentials.get("token_expires_at")
+        if isinstance(expires, datetime):
+            expires_display = expires.replace(tzinfo=timezone.utc).isoformat()
+        elif expires:
+            expires_display = str(expires)
+        else:
+            expires_display = None
+        credential_view = {
+            "tenant_id": credentials.get("tenant_id"),
+            "client_id": credentials.get("client_id"),
+            "token_expires_at": expires_display,
+        }
+    extra = {
+        "title": "Office 365",
+        "company": company,
+        "credential": credential_view,
+        "error": error,
+        "is_super_admin": bool(user.get("is_super_admin")),
+        "has_credentials": bool(credentials),
+        "admin_credentials_configured": bool(
+            settings.m365_admin_client_id and settings.m365_admin_client_secret
+        ),
+    }
+    return await _render_template("m365/index.html", request, user, extra=extra)
+
+
+@app.post("/m365/credentials", response_class=RedirectResponse)
+async def save_m365_credentials(
+    request: Request,
+    tenant_id: str = Form(..., alias="tenantId"),
+    client_id: str = Form(..., alias="clientId"),
+    client_secret: str = Form(..., alias="clientSecret"),
+):
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    await m365_service.upsert_credentials(
+        company_id=company_id,
+        tenant_id=tenant_id.strip(),
+        client_id=client_id.strip(),
+        client_secret=client_secret.strip(),
+    )
+    log_info("Microsoft 365 credentials updated", company_id=company_id, user_id=user.get("id"))
+    return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/m365/credentials/delete", response_class=RedirectResponse)
+async def delete_m365_credentials(request: Request):
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    await m365_service.delete_credentials(company_id)
+    log_info("Microsoft 365 credentials deleted", company_id=company_id, user_id=user.get("id"))
+    return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/m365/sync", response_class=JSONResponse)
+async def sync_m365(request: Request):
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    try:
+        await m365_service.sync_company_licenses(company_id)
+    except m365_service.M365Error as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    log_info("Microsoft 365 license sync triggered", company_id=company_id, user_id=user.get("id"))
+    return JSONResponse({"success": True})
+
+
+@app.get("/m365/connect")
+async def m365_connect(request: Request):
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    credentials = await m365_service.get_credentials(company_id)
+    if not credentials:
+        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+    redirect_uri = str(request.url_for("m365_callback"))
+    state = oauth_state_serializer.dumps({
+        "company_id": company_id,
+        "user_id": user.get("id"),
+    })
+    params = {
+        "client_id": credentials["client_id"],
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": "offline_access https://graph.microsoft.com/.default User.Read.All Directory.Read.All",
+        "state": state,
+        "prompt": "consent",
+    }
+    authorize_url = (
+        f"https://login.microsoftonline.com/{credentials['tenant_id']}/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/m365/callback", name="m365_callback")
+async def m365_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
+    if error:
+        message = request.query_params.get("error_description", error)
+        encoded = urlencode({"error": message})
+        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+    if not code or not state:
+        return RedirectResponse(url="/m365?error=invalid+response", status_code=status.HTTP_303_SEE_OTHER)
+    try:
+        state_data = oauth_state_serializer.loads(state)
+    except BadSignature:
+        return RedirectResponse(url="/m365?error=invalid+state", status_code=status.HTTP_303_SEE_OTHER)
+    company_id = int(state_data.get("company_id", 0))
+    credentials = await m365_service.get_credentials(company_id)
+    if not credentials:
+        return RedirectResponse(url="/m365?error=missing+credentials", status_code=status.HTTP_303_SEE_OTHER)
+    token_endpoint = f"https://login.microsoftonline.com/{credentials['tenant_id']}/oauth2/v2.0/token"
+    redirect_uri = str(request.url_for("m365_callback"))
+    data = {
+        "client_id": credentials["client_id"],
+        "client_secret": credentials.get("client_secret") or "",
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "scope": "offline_access https://graph.microsoft.com/.default User.Read.All Directory.Read.All",
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(token_endpoint, data=data)
+    if response.status_code != 200:
+        log_error(
+            "Microsoft 365 authorization failed",
+            status=response.status_code,
+            body=response.text,
+        )
+        return RedirectResponse(url="/m365?error=authorization+failed", status_code=status.HTTP_303_SEE_OTHER)
+    payload = response.json()
+    refresh_token = payload.get("refresh_token")
+    access_token = payload.get("access_token")
+    expires_in = payload.get("expires_in")
+    expires_at = None
+    if isinstance(expires_in, (int, float)):
+        expires_at = datetime.utcnow() + timedelta(seconds=float(expires_in))
+    await m365_repo.update_tokens(
+        company_id=company_id,
+        refresh_token=encrypt_secret(refresh_token) if refresh_token else None,
+        access_token=encrypt_secret(access_token) if access_token else None,
+        token_expires_at=expires_at.replace(tzinfo=None) if expires_at else None,
+    )
+    log_info("Microsoft 365 OAuth callback processed", company_id=company_id)
+    return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get("/shop", response_class=HTMLResponse)
