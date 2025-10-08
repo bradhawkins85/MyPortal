@@ -243,6 +243,15 @@ body {
   justify-content: flex-end;
 }
 
+.form-actions--inline {
+  justify-content: flex-start;
+}
+
+.form-input--textarea {
+  resize: vertical;
+  min-height: 140px;
+}
+
 .form-actions--stacked {
   justify-content: flex-start;
 }
@@ -324,6 +333,231 @@ body {
   border: 1px solid rgba(148, 163, 184, 0.1);
 }
 
+.card--panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem;
+}
+
+.card__header--stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.card__title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.card__subtitle {
+  margin: 0.35rem 0 0;
+  color: rgba(226, 232, 240, 0.75);
+  font-size: 0.95rem;
+}
+
+.card__controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.card__control {
+  margin: 0;
+}
+
+.admin-grid {
+  display: grid;
+  gap: 2rem;
+}
+
+.admin-grid--columns {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  align-items: flex-start;
+}
+
+@media (max-width: 1080px) {
+  .admin-grid--columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 680px;
+}
+
+.table th,
+.table td {
+  padding: 0.9rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.table th {
+  font-weight: 600;
+  color: rgba(248, 250, 252, 0.85);
+  cursor: pointer;
+  user-select: none;
+}
+
+.table th:hover {
+  color: #38bdf8;
+}
+
+.table__actions {
+  text-align: right;
+}
+
+.table__action-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.table__empty {
+  text-align: center;
+  padding: 2rem;
+  color: rgba(148, 163, 184, 0.85);
+}
+
+.button--ghost {
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  color: #e2e8f0;
+  padding: 0.75rem 1.25rem;
+}
+
+.button--ghost:hover,
+.button--ghost:focus {
+  background: rgba(148, 163, 184, 0.15);
+}
+
+.button--danger {
+  background: rgba(248, 113, 113, 0.2);
+  color: #fecaca;
+  border: 1px solid rgba(248, 113, 113, 0.6);
+  padding: 0.75rem 1.25rem;
+}
+
+.button--danger:hover,
+.button--danger:focus {
+  background: rgba(248, 113, 113, 0.35);
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.2);
+  color: #bae6fd;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.status--active {
+  background: rgba(134, 239, 172, 0.18);
+  color: #bbf7d0;
+}
+
+.status--invited {
+  background: rgba(253, 186, 116, 0.18);
+  color: #fed7aa;
+}
+
+.status--suspended {
+  background: rgba(248, 113, 113, 0.18);
+  color: #fecaca;
+}
+
+.text-muted {
+  color: rgba(148, 163, 184, 0.8);
+  font-size: 0.9rem;
+}
+
+.stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.divider {
+  border: none;
+  height: 1px;
+  background: rgba(148, 163, 184, 0.15);
+  margin: 1.5rem 0;
+}
+
+.filter-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.code-block {
+  margin-top: 0.75rem;
+  background: rgba(15, 23, 42, 0.65);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  max-height: 220px;
+  overflow: auto;
+}
+
+.code-block pre {
+  margin: 0.35rem 0 0.85rem;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.details summary {
+  cursor: pointer;
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .card h2 {
   margin-top: 0;
   color: #f8fafc;
