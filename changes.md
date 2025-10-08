@@ -1,3 +1,4 @@
+- 2025-10-11, 11:45 UTC, Fix, Synced stock feed images into the portal and replaced zero pricing with RRP during product updates
 - 2025-10-08, 13:23 UTC, Feature, Restored company management console with invitations, permissions, and admin UI parity
 - 2025-10-08, 13:22 UTC, Fix, Restricted Swagger UI and OpenAPI schema to authenticated sessions to keep API documentation private
 - 2025-10-11, 14:05 UTC, Fix, Locked the shop category sidebar to the scroll container top so it no longer drifts when many products load
