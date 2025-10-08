@@ -1,542 +1,333 @@
 <!DOCTYPE html>
 <html>
   <%- include('partials/head', { title: 'Staff' }) %>
-  <body>
-    <div class="app-container">
-      <%- include('partials/sidebar') %>
-      <div class="content workspace">
-        <% const totalStaff = staff.length; %>
-        <% const activeStaff = staff.filter((member) => Number(member.enabled) === 1).length; %>
-        <% const inactiveStaff = totalStaff - activeStaff; %>
-        <% const filterLabel = enabledFilter === '1' ? 'Active' : enabledFilter === '0' ? 'Inactive' : 'All'; %>
-
-        <header class="page-header">
-          <div class="page-header__title">
-            <h1>Staff Directory</h1>
-            <p class="page-subtitle">
-              Manage onboarding, invitations, and contact details for everyone in your organisation.
-            </p>
-          </div>
-          <div class="header-actions">
-            <% if (isSuperAdmin && syncroCompanyId) { %>
-              <button id="import-syncro-btn" class="btn btn-secondary" type="button">
-                <i class="fas fa-cloud-download-alt" aria-hidden="true"></i>
-                <span>Import from Syncro</span>
-              </button>
-            <% } %>
-            <% if (isAdmin) { %>
-              <a class="btn btn-primary" href="#add-staff-card">
-                <i class="fas fa-user-plus" aria-hidden="true"></i>
-                <span>Add Staff Member</span>
-              </a>
-            <% } %>
-          </div>
-        </header>
-
-        <main class="page-body">
-          <section class="panel info-panel" aria-label="Staff overview">
-            <div class="panel-header">
-              <h2>Team Overview</h2>
-              <span class="badge">Showing <%= filterLabel %> records</span>
-            </div>
-            <div class="info-grid">
-              <article class="info-card">
-                <h3>Total Staff</h3>
-                <p class="info-value"><%= totalStaff %></p>
-                <p class="info-meta">Across all departments</p>
-              </article>
-              <article class="info-card">
-                <h3>Active</h3>
-                <p class="info-value text-success"><%= activeStaff %></p>
-                <p class="info-meta">Enabled in the portal</p>
-              </article>
-              <article class="info-card">
-                <h3>Inactive</h3>
-                <p class="info-value text-warning"><%= inactiveStaff %></p>
-                <p class="info-meta">Disabled or awaiting activation</p>
-              </article>
-            </div>
-          </section>
-
-          <% if (isAdmin) { %>
-            <section class="panel" id="add-staff-card">
-              <div class="panel-header">
-                <h2>Add Staff Member</h2>
-                <p class="panel-description">Capture the essentials to invite a new colleague into the portal.</p>
-              </div>
-              <form action="/staff" method="post" class="form-grid" autocomplete="off">
-                <div class="form-field">
-                  <label for="add-first-name">First Name</label>
-                  <input id="add-first-name" type="text" name="firstName" placeholder="First name" required>
-                </div>
-                <div class="form-field">
-                  <label for="add-last-name">Last Name</label>
-                  <input id="add-last-name" type="text" name="lastName" placeholder="Last name" required>
-                </div>
-                <div class="form-field">
-                  <label for="add-email">Email</label>
-                  <input id="add-email" type="email" name="email" placeholder="name@example.com" required autocomplete="email">
-                </div>
-                <div class="form-field">
-                  <label for="add-mobile">Mobile</label>
-                  <input id="add-mobile" type="tel" name="mobilePhone" placeholder="Mobile number" autocomplete="tel">
-                </div>
-                <div class="form-field">
-                  <label for="add-department">Department</label>
-                  <input id="add-department" type="text" name="department" placeholder="Department">
-                </div>
-                <div class="form-field">
-                  <label for="add-date-onboarded">Date Onboarded</label>
-                  <input id="add-date-onboarded" type="date" name="dateOnboarded">
-                </div>
-                <div class="form-field form-checkbox">
-                  <label for="add-enabled" class="checkbox-label">
-                    <input id="add-enabled" type="checkbox" name="enabled" value="1" checked>
-                    <span>Enabled</span>
-                  </label>
-                </div>
-                <div class="form-actions">
-                  <button type="submit" class="btn btn-primary">
-                    <i class="fas fa-save" aria-hidden="true"></i>
-                    <span>Save Staff Member</span>
-                  </button>
-                </div>
-              </form>
-            </section>
-          <% } %>
-
-          <section class="panel filters-panel" aria-label="Staff filters">
-            <div class="panel-header">
-              <h2>Filter Staff</h2>
-              <p class="panel-description">Combine quick filters with table search for precision lookups.</p>
-            </div>
-            <form id="filter-form" method="get" action="/staff" class="filters-form">
-              <div class="form-field">
-                <label for="enabled-filter">Status</label>
-                <select id="enabled-filter" name="enabled" data-submit-on-change>
-                  <option value="" <%= enabledFilter === '' ? 'selected' : '' %>>All</option>
-                  <option value="1" <%= enabledFilter === '1' ? 'selected' : '' %>>Enabled</option>
-                  <option value="0" <%= enabledFilter === '0' ? 'selected' : '' %>>Disabled</option>
-                </select>
-              </div>
-              <% if (staffPermission === 3 && departments && departments.length) { %>
-                <div class="form-field">
-                  <label for="department-filter">Department</label>
-                  <select id="department-filter" name="department" data-submit-on-change>
-                    <option value="" <%= departmentFilter === '' ? 'selected' : '' %>>All departments</option>
-                    <% departments.forEach(function(d) { %>
-                      <option value="<%= d %>" <%= departmentFilter === d ? 'selected' : '' %>><%= d %></option>
-                    <% }) %>
-                  </select>
-                </div>
-              <% } %>
-              <div class="form-field form-field--hint">
-                <p class="hint">Use the column headers below to sort, and the table search for live filtering.</p>
-              </div>
-            </form>
-          </section>
-
-          <section class="panel" aria-label="Staff list">
-            <div class="panel-header">
-              <h2>Staff Directory</h2>
-              <div class="panel-header__meta">
-                <span class="badge">Filtered: <%= filterLabel %></span>
-                <% if (departmentFilter) { %>
-                  <span class="badge badge-muted">Department: <%= departmentFilter %></span>
-                <% } %>
-              </div>
-            </div>
-            <div class="table-container">
-              <table id="staff-table" class="display" data-table-title="Staff Directory">
-                <thead>
-                  <tr>
-                    <th scope="col">First Name</th>
-                    <th scope="col">Last Name</th>
-                    <th scope="col">Email</th>
-                    <th scope="col">Mobile</th>
-                    <th scope="col">Verification Code</th>
-                    <th scope="col">Date Onboarded</th>
-                    <th scope="col">Status</th>
-                    <th scope="col" class="actions-column">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <% staff.forEach(function(member) { %>
-                    <tr>
-                      <td data-label="First Name"><%= member.first_name %></td>
-                      <td data-label="Last Name"><%= member.last_name %></td>
-                      <td data-label="Email"><a href="mailto:<%= member.email %>" class="link"><%= member.email %></a></td>
-                      <td data-label="Mobile"><%= member.mobile_phone || '' %></td>
-                      <td data-label="Verification Code" class="verification-code"><%= member.verification_code || '' %></td>
-                      <td
-                        data-label="Date Onboarded"
-                        class="date-onboarded"
-                        data-date="<%= member.date_onboarded ? member.date_onboarded : '' %>"
-                      >
-                        <%= member.date_onboarded || '' %>
-                      </td>
-                      <td data-label="Status" class="status-cell">
-                        <form action="/staff/enabled" method="post" class="inline-form">
-                          <input type="hidden" name="staffId" value="<%= member.id %>">
-                          <label class="switch">
-                            <span class="visually-hidden">Toggle status for <%= member.first_name %> <%= member.last_name %></span>
-                            <input type="checkbox" name="enabled" value="1" <%= member.enabled ? 'checked' : '' %> data-submit-on-change>
-                            <span class="switch-slider" aria-hidden="true"></span>
-                          </label>
-                        </form>
-                        <span class="status-badge <%= member.enabled ? 'status-badge--active' : 'status-badge--inactive' %>">
-                          <%= member.enabled ? 'Active' : 'Inactive' %>
-                        </span>
-                      </td>
-                      <td data-label="Actions" class="actions-column">
-                        <div class="action-buttons">
-                          <% if (isSuperAdmin) { %>
-                            <button class="btn btn-ghost verify-btn" type="button" data-id="<%= member.id %>" <%= member.mobile_phone ? '' : 'disabled' %>>
-                              <i class="fas fa-sms" aria-hidden="true"></i>
-                              <span>Verify</span>
-                            </button>
-                          <% } %>
-                          <% if (isAdmin || isSuperAdmin) { %>
-                            <button class="btn btn-ghost invite-btn" type="button" data-id="<%= member.id %>">
-                              <i class="fas fa-paper-plane" aria-hidden="true"></i>
-                              <span>Invite</span>
-                            </button>
-                          <% } %>
-                          <button
-                            class="btn btn-ghost edit-btn"
-                            type="button"
-                            data-id="<%= member.id %>"
-                            data-first-name="<%= member.first_name %>"
-                            data-last-name="<%= member.last_name %>"
-                            data-email="<%= member.email %>"
-                            data-mobile-phone="<%= member.mobile_phone || '' %>"
-                            data-date-onboarded="<%= member.date_onboarded ? new Date(member.date_onboarded).toISOString().slice(0, 10) : '' %>"
-                            data-date-offboarded="<%= member.date_offboarded ? new Date(member.date_offboarded).toISOString().slice(0, 16) : '' %>"
-                            data-enabled="<%= member.enabled %>"
-                            data-street="<%= member.street || '' %>"
-                            data-city="<%= member.city || '' %>"
-                            data-state="<%= member.state || '' %>"
-                            data-postcode="<%= member.postcode || '' %>"
-                            data-country="<%= member.country || '' %>"
-                            data-department="<%= member.department || '' %>"
-                            data-job-title="<%= member.job_title || '' %>"
-                            data-company="<%= member.org_company || '' %>"
-                            data-manager-name="<%= member.manager_name || '' %>"
-                            data-account-action="<%= member.account_action || '' %>"
-                          >
-                            <i class="fas fa-edit" aria-hidden="true"></i>
-                            <span>Edit</span>
-                          </button>
-                          <% if (isSuperAdmin) { %>
-                            <button class="btn btn-ghost btn-danger delete-btn" type="button" data-id="<%= member.id %>">
-                              <i class="fas fa-trash" aria-hidden="true"></i>
-                              <span>Delete</span>
-                            </button>
-                          <% } %>
-                        </div>
-                      </td>
-                    </tr>
-                  <% }); %>
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </main>
-      </div>
-    </div>
-
-    <div id="edit-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title" aria-hidden="true" style="display:none;">
-      <div class="modal-content modal-content--wide" role="document">
-        <button id="edit-close" class="modal-close" type="button" aria-label="Close edit staff dialog">&times;</button>
-        <h2 id="edit-modal-title">Edit Staff Member</h2>
-        <form id="edit-form" class="form-grid" autocomplete="off">
-          <div class="form-field">
-            <label for="edit-first-name">First Name</label>
-            <input type="text" id="edit-first-name" <%= isSuperAdmin ? '' : 'readonly' %>>
-          </div>
-          <div class="form-field">
-            <label for="edit-last-name">Last Name</label>
-            <input type="text" id="edit-last-name" <%= isSuperAdmin ? '' : 'readonly' %>>
-          </div>
-          <div class="form-field">
-            <label for="edit-email">Email</label>
-            <input type="email" id="edit-email" <%= isSuperAdmin ? '' : 'readonly' %>>
-          </div>
-          <div class="form-field">
-            <label for="edit-mobile-phone">Mobile Phone</label>
-            <input type="tel" id="edit-mobile-phone" <%= isSuperAdmin ? '' : 'readonly' %>>
-          </div>
-          <div class="form-field">
-            <label for="edit-date-onboarded">Date Onboarded</label>
-            <input type="date" id="edit-date-onboarded" <%= isSuperAdmin ? '' : 'readonly' %>>
-          </div>
-          <div class="form-field">
-            <label for="edit-date-offboarded">Offboard Date</label>
-            <input type="datetime-local" id="edit-date-offboarded" <%= isAdmin ? '' : 'readonly' %>>
-          </div>
-          <div class="form-field">
-            <label for="edit-account-action">Account Action</label>
-            <select id="edit-account-action" <%= isSuperAdmin ? '' : 'disabled' %>>
-              <option value="">Select action</option>
-              <option value="Onboard Requested">Onboard Requested</option>
-              <option value="Onboard Approved">Onboard Approved</option>
-              <option value="Onboarding In Progress">Onboarding In Progress</option>
-              <option value="Onboarded">Onboarded</option>
-              <option value="Offboard Requested">Offboard Requested</option>
-              <option value="Offboard Approved">Offboard Approved</option>
-              <option value="Offboard Scheduled">Offboard Scheduled</option>
-              <option value="Offboarded">Offboarded</option>
-            </select>
-          </div>
-          <div class="form-field form-checkbox">
-            <label for="edit-enabled" class="checkbox-label">
-              <input type="checkbox" id="edit-enabled" <%= isSuperAdmin ? '' : 'disabled' %>>
-              <span>Enabled</span>
-            </label>
-          </div>
-
-          <fieldset class="form-fieldset">
-            <legend>Address</legend>
-            <div class="form-grid two-column">
-              <div class="form-field">
-                <label for="edit-street">Street</label>
-                <input type="text" id="edit-street" <%= isSuperAdmin ? '' : 'readonly' %>>
-              </div>
-              <div class="form-field">
-                <label for="edit-city">City</label>
-                <input type="text" id="edit-city" <%= isSuperAdmin ? '' : 'readonly' %>>
-              </div>
-              <div class="form-field">
-                <label for="edit-state">State</label>
-                <input type="text" id="edit-state" <%= isSuperAdmin ? '' : 'readonly' %>>
-              </div>
-              <div class="form-field">
-                <label for="edit-postcode">Postcode</label>
-                <input type="text" id="edit-postcode" <%= isSuperAdmin ? '' : 'readonly' %>>
-              </div>
-              <div class="form-field">
-                <label for="edit-country">Country</label>
-                <input type="text" id="edit-country" <%= isSuperAdmin ? '' : 'readonly' %>>
-              </div>
-            </div>
-          </fieldset>
-
-          <fieldset class="form-fieldset">
-            <legend>Organisation</legend>
-            <div class="form-grid two-column">
-              <div class="form-field">
-                <label for="edit-department">Department</label>
-                <input type="text" id="edit-department" <%= isSuperAdmin ? '' : 'readonly' %>>
-              </div>
-              <div class="form-field">
-                <label for="edit-job-title">Job Title</label>
-                <input type="text" id="edit-job-title" <%= isSuperAdmin ? '' : 'readonly' %>>
-              </div>
-              <div class="form-field">
-                <label for="edit-company">Company</label>
-                <input type="text" id="edit-company" <%= isSuperAdmin ? '' : 'readonly' %>>
-              </div>
-              <div class="form-field">
-                <label for="edit-manager-name">Manager's Name</label>
-                <input type="text" id="edit-manager-name" <%= isSuperAdmin ? '' : 'readonly' %>>
-              </div>
-            </div>
-          </fieldset>
-
-          <div class="form-actions">
-            <button type="submit" class="btn btn-primary">
-              <i class="fas fa-save" aria-hidden="true"></i>
-              <span>Save Changes</span>
-            </button>
-          </div>
+<body>
+  <div class="app-container">
+    <%- include('partials/sidebar') %>
+    <div class="content">
+      <h1>Staff</h1>
+      <% if (isSuperAdmin && syncroCompanyId) { %>
+      <section>
+        <h2>Import from Syncro</h2>
+        <button id="import-syncro-btn">Import Contacts</button>
+      </section>
+      <% } %>
+      <% if (isAdmin) { %>
+      <section>
+        <h2>Add Staff</h2>
+        <form action="/staff" method="post">
+          <input type="text" name="firstName" placeholder="First Name" required>
+          <input type="text" name="lastName" placeholder="Last Name" required>
+          <input type="email" name="email" placeholder="Email" required>
+          <input type="tel" name="mobilePhone" placeholder="Mobile">
+          <input type="text" name="department" placeholder="Department">
+          <input type="date" name="dateOnboarded">
+          <label><input type="checkbox" name="enabled" value="1" checked> Enabled</label>
+          <button type="submit">Add</button>
         </form>
-      </div>
+      </section>
+      <% } %>
+      <section>
+        <h2>Current Staff</h2>
+        <form id="filter-form" method="get" action="/staff">
+          <label>Show
+            <select name="enabled" data-submit-on-change>
+              <option value="" <%= enabledFilter === '' ? 'selected' : '' %>>All</option>
+              <option value="1" <%= enabledFilter === '1' ? 'selected' : '' %>>Enabled</option>
+              <option value="0" <%= enabledFilter === '0' ? 'selected' : '' %>>Disabled</option>
+            </select>
+          </label>
+          <% if (staffPermission === 3 && departments && departments.length) { %>
+          <label>Department
+            <select name="department" data-submit-on-change>
+              <option value="" <%= departmentFilter === '' ? 'selected' : '' %>>All</option>
+              <% departments.forEach(function(d) { %>
+                <option value="<%= d %>" <%= departmentFilter === d ? 'selected' : '' %>><%= d %></option>
+              <% }) %>
+            </select>
+          </label>
+          <% } %>
+        </form>
+        <table>
+          <thead>
+            <tr><th>First Name</th><th>Last Name</th><th>Email</th><th>Mobile</th><th>Code</th><th>Date Onboarded</th><th>Enabled</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+          <% staff.forEach(function(s) { %>
+            <tr>
+              <td><%= s.first_name %></td>
+              <td><%= s.last_name %></td>
+              <td><%= s.email %></td>
+              <td><%= s.mobile_phone || '' %></td>
+              <td class="verification-code"><%= s.verification_code || '' %></td>
+              <td class="date-onboarded" data-date="<%= s.date_onboarded %>"><%= s.date_onboarded %></td>
+              <td>
+                <form action="/staff/enabled" method="post">
+                  <input type="hidden" name="staffId" value="<%= s.id %>">
+                  <input type="checkbox" name="enabled" value="1" <%= s.enabled ? 'checked' : '' %> data-submit-on-change>
+                </form>
+              </td>
+              <td>
+                <% if (isSuperAdmin) { %>
+                <button class="verify-btn" data-id="<%= s.id %>" <%= s.mobile_phone ? '' : 'disabled' %>>Verify</button>
+                <% } %>
+                <% if (isAdmin || isSuperAdmin) { %>
+                <button class="invite-btn" data-id="<%= s.id %>">Invite</button>
+                <% } %>
+                <button
+                  class="edit-btn"
+                  data-id="<%= s.id %>"
+                  data-first-name="<%= s.first_name %>"
+                  data-last-name="<%= s.last_name %>"
+                  data-email="<%= s.email %>"
+                  data-mobile-phone="<%= s.mobile_phone || '' %>"
+                  data-date-onboarded="<%= s.date_onboarded ? new Date(s.date_onboarded).toISOString().slice(0,10) : '' %>"
+                  data-date-offboarded="<%= s.date_offboarded ? new Date(s.date_offboarded).toISOString().slice(0,16) : '' %>"
+                  data-enabled="<%= s.enabled %>"
+                  data-street="<%= s.street || '' %>"
+                  data-city="<%= s.city || '' %>"
+                  data-state="<%= s.state || '' %>"
+                  data-postcode="<%= s.postcode || '' %>"
+                  data-country="<%= s.country || '' %>"
+                  data-department="<%= s.department || '' %>"
+                  data-job-title="<%= s.job_title || '' %>"
+                  data-company="<%= s.org_company || '' %>"
+                  data-manager-name="<%= s.manager_name || '' %>"
+                  data-account-action="<%= s.account_action || '' %>"
+                >Edit</button>
+                <% if (isSuperAdmin) { %>
+                  <button class="delete-btn" data-id="<%= s.id %>">Delete</button>
+                <% } %>
+              </td>
+            </tr>
+          <% }); %>
+          </tbody>
+        </table>
+      </section>
     </div>
+  </div>
+  <div id="edit-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <span id="edit-close" class="close">&times;</span>
+      <h2>Edit Staff</h2>
+      <form id="edit-form">
+        <label for="edit-first-name">First Name
+          <input type="text" id="edit-first-name" <%= isSuperAdmin ? '' : 'readonly' %>>
+        </label>
+        <label for="edit-last-name">Last Name
+          <input type="text" id="edit-last-name" <%= isSuperAdmin ? '' : 'readonly' %>>
+        </label>
+        <label for="edit-email">Email
+          <input type="email" id="edit-email" <%= isSuperAdmin ? '' : 'readonly' %>>
+        </label>
+        <label for="edit-mobile-phone">Mobile Phone
+          <input type="tel" id="edit-mobile-phone" <%= isSuperAdmin ? '' : 'readonly' %>>
+        </label>
+        <label for="edit-date-onboarded">Date Onboarded
+          <input type="date" id="edit-date-onboarded" <%= isSuperAdmin ? '' : 'readonly' %>>
+        </label>
+        <label for="edit-date-offboarded">Offboard Date
+          <input type="datetime-local" id="edit-date-offboarded" <%= isAdmin ? '' : 'readonly' %>>
+        </label>
+        <label for="edit-account-action">Account Action
+          <select id="edit-account-action" <%= isSuperAdmin ? '' : 'disabled' %>>
+            <option value="Onboard Requested">Onboard Requested</option>
+            <option value="Onboard Approved">Onboard Approved</option>
+            <option value="Onboarding In Progress">Onboarding In Progress</option>
+            <option value="Onboarded">Onboarded</option>
+            <option value="Offboard Requested">Offboard Requested</option>
+            <option value="Offboard Approved">Offboard Approved</option>
+            <option value="Offboard Scheduled">Offboard Scheduled</option>
+            <option value="Offboarded">Offboarded</option>
+          </select>
+        </label>
+        <label><input type="checkbox" id="edit-enabled" <%= isSuperAdmin ? '' : 'disabled' %>> Enabled</label>
+        <fieldset>
+          <legend>Address</legend>
+          <label for="edit-street">Street
+            <input type="text" id="edit-street" <%= isSuperAdmin ? '' : 'readonly' %>>
+          </label>
+          <label for="edit-city">City
+            <input type="text" id="edit-city" <%= isSuperAdmin ? '' : 'readonly' %>>
+          </label>
+          <label for="edit-state">State
+            <input type="text" id="edit-state" <%= isSuperAdmin ? '' : 'readonly' %>>
+          </label>
+          <label for="edit-postcode">Postcode
+            <input type="text" id="edit-postcode" <%= isSuperAdmin ? '' : 'readonly' %>>
+          </label>
+          <label for="edit-country">Country
+            <input type="text" id="edit-country" <%= isSuperAdmin ? '' : 'readonly' %>>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Organisation</legend>
+          <label for="edit-department">Department
+            <input type="text" id="edit-department" <%= isSuperAdmin ? '' : 'readonly' %>>
+          </label>
+          <label for="edit-job-title">Job Title
+            <input type="text" id="edit-job-title" <%= isSuperAdmin ? '' : 'readonly' %>>
+          </label>
+          <label for="edit-company">Company
+            <input type="text" id="edit-company" <%= isSuperAdmin ? '' : 'readonly' %>>
+          </label>
+          <label for="edit-manager-name">Manager's Name
+            <input type="text" id="edit-manager-name" <%= isSuperAdmin ? '' : 'readonly' %>>
+          </label>
+        </fieldset>
+        <button type="submit">Save</button>
+      </form>
+    </div>
+  </div>
 
-    <script>
-      (() => {
-        const isSuperAdmin = <%- JSON.stringify(isSuperAdmin) %>;
-        const isAdmin = <%- JSON.stringify(isAdmin) %>;
-        const syncroCompanyId = <%- JSON.stringify(syncroCompanyId) %>;
-        const editModal = document.getElementById('edit-modal');
-        const editForm = document.getElementById('edit-form');
-        let editingId = null;
+  <script>
+    const isSuperAdmin = <%- JSON.stringify(isSuperAdmin) %>;
+    const isAdmin = <%- JSON.stringify(isAdmin) %>;
+    const syncroCompanyId = <%- JSON.stringify(syncroCompanyId) %>;
+    const editModal = document.getElementById('edit-modal');
+    const editForm = document.getElementById('edit-form');
+    let editingId = null;
 
-        const closeEditModal = () => {
-          if (!editModal) return;
-          editModal.style.display = 'none';
-          editModal.setAttribute('aria-hidden', 'true');
-          editingId = null;
-        };
-
-        const openEditModal = () => {
-          if (!editModal) return;
-          editModal.style.display = 'flex';
-          editModal.setAttribute('aria-hidden', 'false');
-          const firstInput = editModal.querySelector('input, select, button');
-          firstInput?.focus();
-        };
-
-        if (isAdmin && !isSuperAdmin) {
-          const offboardInput = document.getElementById('edit-date-offboarded');
-          offboardInput?.addEventListener('change', function () {
-            if (this.value) {
-              window.alert(
-                'Warning: The offboard will be scheduled immediately for the requested date and time, any changes require contacting IT after saving changes.'
-              );
-            }
-          });
+    if (isAdmin && !isSuperAdmin) {
+      document.getElementById('edit-date-offboarded').addEventListener('change', function() {
+        if (this.value) {
+          alert('Warning: The offboard will be scheduled immediately for the requested date and time, any changes require contacting IT after saving changes.');
         }
+      });
+    }
 
-        document.querySelectorAll('.date-onboarded').forEach((cell) => {
-          const value = cell.dataset.date;
-          if (value) {
-            try {
-              const formatted = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value));
-              cell.textContent = formatted;
-            } catch (err) {
-              cell.textContent = value;
-            }
+    document.querySelectorAll('.date-onboarded').forEach(function(cell) {
+      const value = cell.dataset.date;
+      if (value) {
+        cell.textContent = new Date(value).toLocaleDateString();
+      }
+    });
+
+    document.querySelectorAll('.edit-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        editingId = this.dataset.id;
+        document.getElementById('edit-first-name').value = this.dataset.firstName;
+        document.getElementById('edit-last-name').value = this.dataset.lastName;
+        document.getElementById('edit-email').value = this.dataset.email;
+        document.getElementById('edit-mobile-phone').value = this.dataset.mobilePhone || '';
+        document.getElementById('edit-date-onboarded').value = this.dataset.dateOnboarded;
+        document.getElementById('edit-date-offboarded').value = this.dataset.dateOffboarded || '';
+        document.getElementById('edit-enabled').checked = this.dataset.enabled === '1';
+        document.getElementById('edit-street').value = this.dataset.street || '';
+        document.getElementById('edit-city').value = this.dataset.city || '';
+        document.getElementById('edit-state').value = this.dataset.state || '';
+        document.getElementById('edit-postcode').value = this.dataset.postcode || '';
+        document.getElementById('edit-country').value = this.dataset.country || '';
+        document.getElementById('edit-department').value = this.dataset.department || '';
+        document.getElementById('edit-job-title').value = this.dataset.jobTitle || '';
+        document.getElementById('edit-company').value = this.dataset.company || '';
+        document.getElementById('edit-manager-name').value = this.dataset.managerName || '';
+        document.getElementById('edit-account-action').value = this.dataset.accountAction || '';
+        editModal.style.display = 'flex';
+      });
+    });
+
+    <% if (isSuperAdmin) { %>
+    document.querySelectorAll('.verify-btn').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        const res = await fetch(`/staff/${this.dataset.id}/verify`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          const row = this.closest('tr');
+          const codeCell = row.querySelector('.verification-code');
+          if (codeCell) {
+            codeCell.textContent = data.code || '';
+            codeCell.style.color = data.status === 202 ? 'green' : 'black';
           }
-        });
-
-        document.querySelectorAll('.edit-btn').forEach((btn) => {
-          btn.addEventListener('click', function () {
-            editingId = this.dataset.id;
-            document.getElementById('edit-first-name').value = this.dataset.firstName || '';
-            document.getElementById('edit-last-name').value = this.dataset.lastName || '';
-            document.getElementById('edit-email').value = this.dataset.email || '';
-            document.getElementById('edit-mobile-phone').value = this.dataset.mobilePhone || '';
-            document.getElementById('edit-date-onboarded').value = this.dataset.dateOnboarded || '';
-            document.getElementById('edit-date-offboarded').value = this.dataset.dateOffboarded || '';
-            document.getElementById('edit-enabled').checked = this.dataset.enabled === '1';
-            document.getElementById('edit-street').value = this.dataset.street || '';
-            document.getElementById('edit-city').value = this.dataset.city || '';
-            document.getElementById('edit-state').value = this.dataset.state || '';
-            document.getElementById('edit-postcode').value = this.dataset.postcode || '';
-            document.getElementById('edit-country').value = this.dataset.country || '';
-            document.getElementById('edit-department').value = this.dataset.department || '';
-            document.getElementById('edit-job-title').value = this.dataset.jobTitle || '';
-            document.getElementById('edit-company').value = this.dataset.company || '';
-            document.getElementById('edit-manager-name').value = this.dataset.managerName || '';
-            document.getElementById('edit-account-action').value = this.dataset.accountAction || '';
-            openEditModal();
-          });
-        });
-
-        document.getElementById('edit-close')?.addEventListener('click', closeEditModal);
-        editModal?.addEventListener('click', (event) => {
-          if (event.target === editModal) {
-            closeEditModal();
+          if (data.status !== 202) {
+            alert('Failed to send code');
           }
-        });
-        document.addEventListener('keydown', (event) => {
-          if (event.key === 'Escape' && editModal?.getAttribute('aria-hidden') === 'false') {
-            closeEditModal();
-          }
-        });
-
-        <% if (isSuperAdmin) { %>
-          document.querySelectorAll('.verify-btn').forEach((btn) => {
-            btn.addEventListener('click', async function () {
-              const response = await fetch(`/staff/${this.dataset.id}/verify`, { method: 'POST' });
-              const data = await response.json().catch(() => ({}));
-              if (response.ok) {
-                const row = this.closest('tr');
-                const codeCell = row?.querySelector('.verification-code');
-                if (codeCell) {
-                  codeCell.textContent = data.code || '';
-                  codeCell.classList.toggle('text-success', data.status === 202);
-                }
-                if (data.status !== 202) {
-                  window.alert('Failed to send verification code.');
-                }
-              } else {
-                window.alert(data.error || 'Failed to send verification code.');
-              }
-            });
-          });
-        <% } %>
-
-        const importBtn = document.getElementById('import-syncro-btn');
-        if (importBtn && syncroCompanyId) {
-          importBtn.addEventListener('click', async () => {
-            if (!window.confirm('Import contacts from Syncro?')) return;
-            const response = await fetch('/admin/syncro/import-contacts', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ syncroCompanyId })
-            });
-            if (response.ok) {
-              window.location.reload();
-            } else {
-              const text = await response.text();
-              window.alert(text || 'Failed to import contacts');
-            }
-          });
+        } else {
+          alert(data.error || 'Failed to send code');
         }
+      });
+    });
+    <% } %>
 
-        document.querySelectorAll('.invite-btn').forEach((btn) => {
-          btn.addEventListener('click', async function () {
-            if (!window.confirm('Send invitation to this staff member?')) return;
-            const response = await fetch(`/staff/${this.dataset.id}/invite`, { method: 'POST' });
-            const data = await response.json().catch(() => ({}));
-            if (response.ok) {
-              window.alert('Invitation sent');
-            } else {
-              window.alert(data.error || 'Failed to send invitation');
-            }
-          });
+    const importBtn = document.getElementById('import-syncro-btn');
+    if (importBtn && syncroCompanyId) {
+      importBtn.addEventListener('click', async function() {
+        if (!confirm('Import contacts from Syncro?')) return;
+        const res = await fetch('/admin/syncro/import-contacts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ syncroCompanyId })
         });
+        if (res.ok) {
+          location.reload();
+        } else {
+          const text = await res.text();
+          alert(text || 'Failed to import contacts');
+        }
+      });
+    }
 
-        document.querySelectorAll('.delete-btn').forEach((btn) => {
-          btn.addEventListener('click', async function () {
-            if (!window.confirm('Delete staff member?')) return;
-            const response = await fetch(`/staff/${this.dataset.id}`, { method: 'DELETE' });
-            if (response.ok) {
-              window.location.reload();
-            } else {
-              window.alert('Failed to delete staff');
-            }
-          });
-        });
+    document.querySelectorAll('.invite-btn').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        if (!confirm('Send invitation to this staff member?')) return;
+        const res = await fetch(`/staff/${this.dataset.id}/invite`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          alert('Invitation sent');
+        } else {
+          alert(data.error || 'Failed to send invitation');
+        }
+      });
+    });
 
-        editForm?.addEventListener('submit', async (event) => {
-          event.preventDefault();
-          if (!editingId) {
-            return;
-          }
-          const payload = {
-            firstName: document.getElementById('edit-first-name').value,
-            lastName: document.getElementById('edit-last-name').value,
-            email: document.getElementById('edit-email').value,
-            mobilePhone: document.getElementById('edit-mobile-phone').value,
-            dateOnboarded: document.getElementById('edit-date-onboarded').value,
-            dateOffboarded: document.getElementById('edit-date-offboarded').value,
-            enabled: document.getElementById('edit-enabled').checked,
-            street: document.getElementById('edit-street').value,
-            city: document.getElementById('edit-city').value,
-            state: document.getElementById('edit-state').value,
-            postcode: document.getElementById('edit-postcode').value,
-            country: document.getElementById('edit-country').value,
-            department: document.getElementById('edit-department').value,
-            jobTitle: document.getElementById('edit-job-title').value,
-            company: document.getElementById('edit-company').value,
-            managerName: document.getElementById('edit-manager-name').value,
-            accountAction: document.getElementById('edit-account-action').value,
-          };
-          const response = await fetch(`/staff/${editingId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          if (response.ok) {
-            window.location.reload();
-          } else {
-            window.alert('Failed to update staff');
-          }
-        });
-      })();
-    </script>
-  </body>
+    document.querySelectorAll('.delete-btn').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        if (!confirm('Delete staff member?')) return;
+        const res = await fetch(`/staff/${this.dataset.id}`, { method: 'DELETE' });
+        if (res.ok) {
+          location.reload();
+        } else {
+          alert('Failed to delete staff');
+        }
+      });
+    });
+
+    document.getElementById('edit-close').addEventListener('click', function() {
+      editModal.style.display = 'none';
+    });
+
+    editForm.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const payload = {
+        firstName: document.getElementById('edit-first-name').value,
+        lastName: document.getElementById('edit-last-name').value,
+        email: document.getElementById('edit-email').value,
+        mobilePhone: document.getElementById('edit-mobile-phone').value,
+        dateOnboarded: document.getElementById('edit-date-onboarded').value,
+        dateOffboarded: document.getElementById('edit-date-offboarded').value,
+        enabled: document.getElementById('edit-enabled').checked,
+        street: document.getElementById('edit-street').value,
+        city: document.getElementById('edit-city').value,
+        state: document.getElementById('edit-state').value,
+        postcode: document.getElementById('edit-postcode').value,
+        country: document.getElementById('edit-country').value,
+        department: document.getElementById('edit-department').value,
+        jobTitle: document.getElementById('edit-job-title').value,
+        company: document.getElementById('edit-company').value,
+        managerName: document.getElementById('edit-manager-name').value,
+        accountAction: document.getElementById('edit-account-action').value,
+      };
+      const res = await fetch(`/staff/${editingId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        location.reload();
+      } else {
+        alert('Failed to update staff');
+      }
+    });
+  </script>
+</body>
 </html>
