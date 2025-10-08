@@ -223,6 +223,23 @@
         if (!form) return;
         const select = form.querySelector('.company-switcher__select');
         if (!select) return;
+
+        form.addEventListener('submit', function () {
+          const selected = select.value;
+          if (!selected) {
+            return;
+          }
+          let hidden = form.querySelector('input[data-company-switcher-hidden="true"]');
+          if (!hidden) {
+            hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.name = 'companyId';
+            hidden.setAttribute('data-company-switcher-hidden', 'true');
+            form.appendChild(hidden);
+          }
+          hidden.value = selected;
+        });
+
         select.addEventListener('change', function () {
           if (typeof form.requestSubmit === 'function') {
             form.requestSubmit();
