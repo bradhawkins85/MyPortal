@@ -38,3 +38,4 @@
 - 2025-10-09, 16:18 UTC, Fix, Normalised login TOTP payload handling to accept legacy keys and enforce numeric codes server-side
 - 2025-10-08, 04:05 UTC, Feature, Introduced role-based company memberships with audit logging and admin control panels
 - 2025-10-08, 06:07 UTC, Feature, Rebuilt shop, forms, staff, and commerce admin dashboards with Jinja templates, responsive layout components, and supporting scripts
+- 2025-10-08, 06:33 UTC, Fix, Added global sidebar navigation for admin pages so new management views are accessible from the portal
