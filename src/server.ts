@@ -273,6 +273,20 @@ const transporter = nodemailer.createTransport({
 
 const execFileAsync = util.promisify(execFile);
 
+const privateUploadDir = path.join(__dirname, '..', 'private_uploads');
+if (!fs.existsSync(privateUploadDir)) {
+  fs.mkdirSync(privateUploadDir, { recursive: true, mode: 0o700 });
+}
+
+const allowedMimes = [
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/x-icon',
+  'image/vnd.microsoft.icon',
+  'image/svg+xml',
+];
+
 async function sendEmail(to: string, subject: string, html: string) {
   await transporter.sendMail({
     from: process.env.SMTP_FROM || smtpUser,
@@ -810,13 +824,59 @@ async function processFeedItem(
   if (imageSrc) {
     try {
       const res = await fetch(imageSrc);
-      if (res.ok) {
-        const buf = Buffer.from(await res.arrayBuffer());
-        const ext = path.extname(new URL(imageSrc).pathname) || '.jpg';
-        const fileName = `${code}${ext}`;
-        const dest = path.join(__dirname, 'public', 'uploads', fileName);
-        await fs.promises.writeFile(dest, buf);
-        imageUrl = `/uploads/${fileName}`;
+      if (!res.ok) {
+        logInfo('Skipping shop image download due to HTTP error', {
+          imageSrc,
+          status: res.status,
+        });
+      } else {
+        const contentTypeHeader = res.headers.get('content-type');
+        const mimeType = contentTypeHeader
+          ? contentTypeHeader.split(';')[0].trim().toLowerCase()
+          : '';
+        if (mimeType && !allowedMimes.includes(mimeType)) {
+          logInfo('Skipping shop image with unsupported mime type', {
+            imageSrc,
+            mimeType,
+          });
+        } else {
+          const buf = Buffer.from(await res.arrayBuffer());
+          const parsedUrl = new URL(imageSrc);
+          const extFromPath = path.extname(parsedUrl.pathname).toLowerCase();
+          const allowedExts = new Map([
+            ['.jpeg', '.jpeg'],
+            ['.jpg', '.jpg'],
+            ['.png', '.png'],
+            ['.gif', '.gif'],
+            ['.ico', '.ico'],
+            ['.svg', '.svg'],
+          ]);
+          let ext = allowedExts.get(extFromPath) || '.jpg';
+          if (!allowedExts.has(extFromPath) && mimeType) {
+            const mimeExtMap: Record<string, string> = {
+              'image/png': '.png',
+              'image/gif': '.gif',
+              'image/svg+xml': '.svg',
+              'image/x-icon': '.ico',
+              'image/vnd.microsoft.icon': '.ico',
+            };
+            ext = mimeExtMap[mimeType] || ext;
+          }
+          const safeBase = `${code}`
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]/g, '_')
+            .replace(/_+/g, '_')
+            .replace(/^_+|_+$/g, '');
+          const fileName = `${safeBase || 'product'}${ext}`;
+          const dest = path.join(privateUploadDir, fileName);
+          await fs.promises.writeFile(dest, buf, { mode: 0o600 });
+          try {
+            await fs.promises.chmod(dest, 0o600);
+          } catch (chmodErr) {
+            console.warn('Failed to set permissions on shop image', chmodErr);
+          }
+          imageUrl = `/uploads/${fileName}`;
+        }
       }
     } catch (err) {
       console.error('Image download failed', err);
@@ -1118,12 +1178,6 @@ function csrfMiddleware(
 
 app.use(csrfMiddleware);
 
-// Secure file upload handling
-const privateUploadDir = path.join(__dirname, '..', 'private_uploads');
-if (!fs.existsSync(privateUploadDir)) {
-  fs.mkdirSync(privateUploadDir, { recursive: true, mode: 0o700 });
-}
-
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, privateUploadDir),
   filename: (_req, file, cb) => {
@@ -1135,14 +1189,6 @@ const storage = multer.diskStorage({
   },
 });
 
-const allowedMimes = [
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/x-icon',
-  'image/vnd.microsoft.icon',
-  'image/svg+xml',
-];
 const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 },

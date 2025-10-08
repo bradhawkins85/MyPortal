@@ -1,4 +1,7 @@
 - 2025-10-08, 12:12 UTC, Fix, Removed product description input from the shop admin creation form per request
+- 2025-10-08, 12:10 UTC, Fix, Stored imported shop images in the secure uploads directory and enforced validation to resolve 404s
+- 2025-10-10, 16:05 UTC, Fix, Namespaced the forms API under /api/forms so the customer UI renders instead of JSON responses
+- 2025-10-08, 12:08 UTC, Fix, Sanitised automation scheduler task payloads before JSON encoding to restore the admin dashboard
 - 2025-10-10, 14:20 UTC, Fix, Replaced MariaDB-incompatible UTC timestamp defaults in scheduler migration to restore service startup
 - 2025-10-08, 11:49 UTC, Fix, Restored the licenses admin HTML view by namespacing the API under /api to prevent JSON responses from hijacking the UI route
 - 2025-10-10, 04:45 UTC, Fix, Routed staff API under /api to restore the staff management UI rendering on the Python portal
