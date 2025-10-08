@@ -98,6 +98,17 @@
               <span class="menu__label">Staff</span>
             </a>
           </li>
+          {% set is_company_admin = membership and membership.get('is_admin') %}
+          {% if is_company_admin and not is_super_admin %}
+          <li class="menu__item">
+            <a href="/admin/companies" {% if current_path.startswith('/admin/companies') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M4 3h16a1 1 0 0 1 1 1v17h-6v-6h-6v6H3V4a1 1 0 0 1 1-1zm7 17v-4h2v4h3v-6h2V5H6v9h2v6z"/></svg>
+              </span>
+              <span class="menu__label">Company admin</span>
+            </a>
+          </li>
+          {% endif %}
           <li class="menu__item">
             <a
               href="/docs"
@@ -115,6 +126,14 @@
           {% if is_super_admin %}
             <li class="menu__divider" role="presentation"></li>
             <li class="menu__heading" role="presentation">Administration</li>
+            <li class="menu__item">
+              <a href="/admin/companies" {% if current_path.startswith('/admin/companies') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M4 3h16a1 1 0 0 1 1 1v17h-6v-6h-6v6H3V4a1 1 0 0 1 1-1zm7 17v-4h2v4h3v-6h2V5H6v9h2v6z"/></svg>
+                </span>
+                <span class="menu__label">Companies</span>
+              </a>
+            </li>
             <li class="menu__item">
               <a href="/admin/memberships" {% if current_path.startswith('/admin/memberships') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
