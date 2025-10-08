@@ -848,6 +848,32 @@ async def _load_staff_context(
     return user, membership, company, staff_permission, company_id, None
 
 
+def _companies_redirect(
+    *,
+    company_id: int | None = None,
+    success: str | None = None,
+    error: str | None = None,
+    extra: dict[str, str] | None = None,
+) -> RedirectResponse:
+    params: dict[str, str] = {}
+    if company_id is not None:
+        params["company_id"] = str(company_id)
+    if success:
+        params["success"] = success.strip()[:200]
+    if error:
+        params["error"] = error.strip()[:200]
+    if extra:
+        for key, value in extra.items():
+            if value is None:
+                continue
+            params[key] = value
+    query = urlencode(params)
+    url = "/admin/companies"
+    if query:
+        url = f"{url}?{query}"
+    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     await db.connect()
