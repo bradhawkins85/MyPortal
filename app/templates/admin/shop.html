@@ -1,0 +1,332 @@
+{% extends "base.html" %}
+
+{% block sidebar_menu %}
+  {{ super() }}
+  <li class="menu__item">
+    <a href="/admin/memberships">
+      <span class="menu__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-3.33 0-10 1.67-10 5v1h20v-1c0-3.33-6.67-5-10-5z"/></svg>
+      </span>
+      <span class="menu__label">Memberships</span>
+    </a>
+  </li>
+  <li class="menu__item">
+    <a href="/admin/roles">
+      <span class="menu__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M10.67 3.5a1 1 0 0 1 1.66 0l1.36 2.04a1 1 0 0 0 .63.43l2.35.5a1 1 0 0 1 .54 1.68l-1.67 1.8a1 1 0 0 0-.26.74l.2 2.4a1 1 0 0 1-1.4 1l-2.2-1a1 1 0 0 0-.84 0l-2.2 1a1 1 0 0 1-1.4-1l.2-2.4a1 1 0 0 0-.26-.74L6.39 8.15a1 1 0 0 1 .54-1.68l2.35-.5a1 1 0 0 0 .63-.43z"/></svg>
+      </span>
+      <span class="menu__label">Roles</span>
+    </a>
+  </li>
+  <li class="menu__item">
+    <a href="/admin/audit-logs">
+      <span class="menu__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M5 4h14a1 1 0 0 1 1 1v15l-8-3-8 3V5a1 1 0 0 1 1-1z"/></svg>
+      </span>
+      <span class="menu__label">Audit trail</span>
+    </a>
+  </li>
+  <li class="menu__item">
+    <a href="/admin/forms">
+      <span class="menu__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h9l5 5v15H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm8 7h4.5L14 4.5V9z"/></svg>
+      </span>
+      <span class="menu__label">Forms admin</span>
+    </a>
+  </li>
+  <li class="menu__item">
+    <a href="/admin/shop" aria-current="page">
+      <span class="menu__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M4 7h16l-1.5 12.5A2 2 0 0 1 16.52 21H7.48a2 2 0 0 1-1.98-1.5zM6 3h12a1 1 0 0 1 1 1v2H5V4a1 1 0 0 1 1-1z"/></svg>
+      </span>
+      <span class="menu__label">Shop admin</span>
+    </a>
+  </li>
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Product categories</h2>
+        <p class="card__subtitle">Group products for faster browsing and targeted visibility rules.</p>
+      </div>
+    </header>
+    <form action="/shop/admin/category" method="post" class="form-grid">
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="category-name">Category name</label>
+        <input class="form-input" id="category-name" name="name" required />
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Add category</button>
+      </div>
+    </form>
+    <ul class="category-list">
+      {% for category in categories %}
+        <li class="category-list__item">
+          <span>{{ category.name }}</span>
+          <form action="/shop/admin/category/{{ category.id }}/delete" method="post" class="inline-form" data-confirm="Delete this category?">
+            <button type="submit" class="button button--danger">Delete</button>
+          </form>
+        </li>
+      {% else %}
+        <li class="category-list__item category-list__item--empty">No categories defined.</li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Import product</h2>
+        <p class="card__subtitle">Pull catalogue data from upstream vendors via their SKU.</p>
+      </div>
+    </header>
+    <form action="/shop/admin/product/import" method="post" class="form-grid">
+      <div class="form-field">
+        <label class="form-label" for="import-vendor-sku">Vendor SKU</label>
+        <input class="form-input" id="import-vendor-sku" name="vendor_sku" required />
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Import</button>
+      </div>
+    </form>
+  </section>
+</div>
+
+<div class="admin-grid">
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Add product</h2>
+        <p class="card__subtitle">Create catalogue items with rich descriptions, pricing, and stock levels.</p>
+      </div>
+    </header>
+    <form action="/shop/admin/product" method="post" enctype="multipart/form-data" class="form-grid">
+      <div class="form-field">
+        <label class="form-label" for="product-name">Name</label>
+        <input class="form-input" id="product-name" name="name" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="product-sku">SKU</label>
+        <input class="form-input" id="product-sku" name="sku" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="product-vendor-sku">Vendor SKU</label>
+        <input class="form-input" id="product-vendor-sku" name="vendor_sku" required />
+      </div>
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="product-description">Description</label>
+        <textarea class="form-input form-input--textarea" id="product-description" name="description"></textarea>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="product-price">Price</label>
+        <input class="form-input" id="product-price" name="price" type="number" step="0.01" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="product-vip-price">VIP price</label>
+        <input class="form-input" id="product-vip-price" name="vip_price" type="number" step="0.01" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="product-stock">Stock</label>
+        <input class="form-input" id="product-stock" name="stock" type="number" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="product-category">Category</label>
+        <select class="form-input" id="product-category" name="category_id">
+          <option value="">No category</option>
+          {% for category in categories %}
+            <option value="{{ category.id }}">{{ category.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="product-image">Image</label>
+        <input class="form-input" id="product-image" name="image" type="file" accept="image/*" />
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Add product</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Product catalogue</h2>
+        <p class="card__subtitle">Filter, sort, and manage catalogue items with real-time previews.</p>
+      </div>
+      <div class="card__controls">
+        <input
+          type="search"
+          class="form-input card__control"
+          placeholder="Search products"
+          aria-label="Search products"
+          data-table-filter="admin-products-table"
+        />
+        <select class="form-input card__control" id="stock-filter">
+          <option value="">All stock</option>
+          <option value="in">In stock</option>
+          <option value="out">Out of stock</option>
+        </select>
+        <label class="checkbox card__control">
+          <input type="checkbox" id="show-archived" {% if show_archived %}checked{% endif %} />
+          <span>Show archived</span>
+        </label>
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table" id="admin-products-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col">Image</th>
+            <th scope="col" data-sort="string">Name</th>
+            <th scope="col" data-sort="string">SKU</th>
+            <th scope="col" data-sort="string">Vendor SKU</th>
+            <th scope="col" data-sort="number">Price</th>
+            <th scope="col" data-sort="number">VIP</th>
+            <th scope="col" data-sort="string">Category</th>
+            <th scope="col" data-sort="number">Stock</th>
+            <th scope="col" class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for product in products %}
+            <tr data-product-id="{{ product.id }}" data-stock="{{ product.stock }}" data-archived="{{ 'true' if product.archived else 'false' }}">
+              <td data-label="Image">
+                {% if product.image_url %}
+                  <img src="{{ product.image_url }}" alt="" class="product-thumb" loading="lazy" />
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="Name">{{ product.name }}</td>
+              <td data-label="SKU">{{ product.sku }}</td>
+              <td data-label="Vendor SKU">{{ product.vendor_sku }}</td>
+              <td data-label="Price" data-value="{{ product.price }}">${{ '%.2f'|format(product.price) }}</td>
+              <td data-label="VIP" data-value="{{ product.vip_price if product.vip_price is not none else '' }}">
+                {% if product.vip_price is not none %}
+                  ${{ '%.2f'|format(product.vip_price) }}
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="Category">{{ product.category_name or '—' }}</td>
+              <td data-label="Stock" data-value="{{ product.stock }}">{{ product.stock }}</td>
+              <td class="table__actions">
+                <div class="table__action-buttons">
+                  <button type="button" class="button button--ghost" data-product-edit="{{ product.id }}">Edit</button>
+                  <form action="/shop/admin/product/{{ product.id }}/{{ 'unarchive' if product.archived else 'archive' }}" method="post" class="inline-form">
+                    <button type="submit" class="button button--ghost">{{ 'Unarchive' if product.archived else 'Archive' }}</button>
+                  </form>
+                  <form action="/shop/admin/product/{{ product.id }}/delete" method="post" class="inline-form" data-confirm="Delete this product?">
+                    <button type="submit" class="button button--danger">Delete</button>
+                  </form>
+                  <button type="button" class="button button--ghost" data-product-visibility="{{ product.id }}">Visibility</button>
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="9" class="table__empty">No products found.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<div class="modal" id="product-edit-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close product editor</span>
+      &times;
+    </button>
+    <h2 class="modal__title">Edit product</h2>
+    <form id="product-edit-form" method="post" enctype="multipart/form-data" class="form-grid">
+      <input type="hidden" id="edit-product-id" />
+      <div class="form-field">
+        <label class="form-label" for="edit-product-name">Name</label>
+        <input class="form-input" id="edit-product-name" name="name" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-product-sku">SKU</label>
+        <input class="form-input" id="edit-product-sku" name="sku" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-product-vendor">Vendor SKU</label>
+        <input class="form-input" id="edit-product-vendor" name="vendor_sku" required />
+      </div>
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="edit-product-description">Description</label>
+        <textarea class="form-input form-input--textarea" id="edit-product-description" name="description"></textarea>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-product-price">Price</label>
+        <input class="form-input" id="edit-product-price" name="price" type="number" step="0.01" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-product-vip">VIP price</label>
+        <input class="form-input" id="edit-product-vip" name="vip_price" type="number" step="0.01" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-product-stock">Stock</label>
+        <input class="form-input" id="edit-product-stock" name="stock" type="number" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-product-category">Category</label>
+        <select class="form-input" id="edit-product-category" name="category_id">
+          <option value="">No category</option>
+          {% for category in categories %}
+            <option value="{{ category.id }}">{{ category.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-product-image">Image</label>
+        <input class="form-input" id="edit-product-image" name="image" type="file" accept="image/*" />
+        <img id="edit-product-preview" alt="Current product image" class="product-preview" hidden />
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Save product</button>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="product-visibility-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close visibility modal</span>
+      &times;
+    </button>
+    <h2 class="modal__title">Product visibility</h2>
+    <form id="product-visibility-form" method="post" class="form-grid">
+      <div class="visibility-grid">
+        {% for company in all_companies %}
+          <label class="checkbox visibility-grid__item">
+            <input type="checkbox" name="excluded" value="{{ company.id }}" />
+            <span>{{ company.name }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Save visibility</button>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script type="application/json" id="admin-products-data">{{ products | tojson }}</script>
+<script type="application/json" id="admin-product-restrictions">{{ product_restrictions | tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/shop_admin.js" defer></script>
+{% endblock %}
