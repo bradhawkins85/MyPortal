@@ -6,7 +6,7 @@ from datetime import datetime
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -58,13 +58,20 @@ app.include_router(memberships.router)
 app.include_router(audit_logs.router)
 
 
-async def _require_super_admin_page(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
+async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
     session = await session_manager.load_session(request)
     if not session:
         return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
         return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    return user, None
+
+
+async def _require_super_admin_page(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return None, redirect
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     return user, None
@@ -97,12 +104,87 @@ async def on_shutdown() -> None:
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
     context = {
         "request": request,
         "app_name": settings.app_name,
         "current_year": datetime.utcnow().year,
+        "current_user": user,
     }
     return templates.TemplateResponse("dashboard.html", context)
+
+
+@app.get("/shop", response_class=HTMLResponse)
+async def shop_page(
+    request: Request,
+    category: int | None = None,
+    show_out_of_stock: bool = Query(False, alias="showOutOfStock"),
+    q: str | None = None,
+    cart_error: str | None = None,
+):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    context = {
+        "request": request,
+        "app_name": settings.app_name,
+        "current_year": datetime.utcnow().year,
+        "title": "Shop",
+        "current_user": user,
+        "categories": [],
+        "products": [],
+        "current_category": category,
+        "show_out_of_stock": show_out_of_stock,
+        "search_term": q or "",
+        "cart_error": cart_error,
+    }
+    return templates.TemplateResponse("shop/index.html", context)
+
+
+@app.get("/forms", response_class=HTMLResponse)
+async def forms_page(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    context = {
+        "request": request,
+        "app_name": settings.app_name,
+        "current_year": datetime.utcnow().year,
+        "title": "Forms",
+        "current_user": user,
+        "forms": [],
+        "opnform_base_url": settings.opnform_base_url,
+    }
+    return templates.TemplateResponse("forms/index.html", context)
+
+
+@app.get("/staff", response_class=HTMLResponse)
+async def staff_page(
+    request: Request,
+    enabled: str = "",
+    department: str = "",
+):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    context = {
+        "request": request,
+        "app_name": settings.app_name,
+        "current_year": datetime.utcnow().year,
+        "title": "Staff",
+        "current_user": user,
+        "is_super_admin": bool(user.get("is_super_admin")),
+        "is_admin": bool(user.get("is_admin")),
+        "syncro_company_id": user.get("syncro_company_id"),
+        "staff_permission": user.get("staff_permission", 0),
+        "departments": [],
+        "staff_members": [],
+        "enabled_filter": enabled,
+        "department_filter": department,
+    }
+    return templates.TemplateResponse("staff/index.html", context)
 
 
 @app.get("/admin/roles", response_class=HTMLResponse)
@@ -203,6 +285,46 @@ async def admin_audit_logs(
         },
     }
     return templates.TemplateResponse("admin/audit_logs.html", context)
+
+
+@app.get("/admin/forms", response_class=HTMLResponse)
+async def admin_forms_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    context = {
+        "request": request,
+        "app_name": settings.app_name,
+        "current_year": datetime.utcnow().year,
+        "title": "Forms admin",
+        "current_user": current_user,
+        "forms": [],
+        "opnform_base_url": settings.opnform_base_url,
+    }
+    return templates.TemplateResponse("admin/forms.html", context)
+
+
+@app.get("/admin/shop", response_class=HTMLResponse)
+async def admin_shop_page(
+    request: Request,
+    show_archived: bool = Query(False, alias="showArchived"),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    context = {
+        "request": request,
+        "app_name": settings.app_name,
+        "current_year": datetime.utcnow().year,
+        "title": "Shop admin",
+        "current_user": current_user,
+        "categories": [],
+        "products": [],
+        "product_restrictions": {},
+        "all_companies": [],
+        "show_archived": show_archived,
+    }
+    return templates.TemplateResponse("admin/shop.html", context)
 
 
 @app.get("/login", response_class=HTMLResponse)
