@@ -1542,6 +1542,17 @@ async def shop_page(
             if vip_price is not None:
                 product["price"] = vip_price
 
+    def _product_has_price(product: Mapping[str, Any]) -> bool:
+        raw_price = product.get("price")
+        if raw_price is None:
+            return False
+        try:
+            return Decimal(str(raw_price)) > 0
+        except (InvalidOperation, TypeError, ValueError):
+            return False
+
+    products = [product for product in products if _product_has_price(product)]
+
     extra = {
         "title": "Shop",
         "categories": categories,
