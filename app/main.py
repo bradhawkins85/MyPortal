@@ -75,6 +75,7 @@ from app.services.scheduler import scheduler_service
 from app.security.api_keys import mask_api_key
 from app.services import audit as audit_service
 from app.services import m365 as m365_service
+from app.services import products as products_service
 from app.services import staff_importer
 from app.services import template_variables
 from app.services import webhook_monitor
@@ -2500,6 +2501,34 @@ async def admin_shop_page(
         "show_archived": show_archived,
     }
     return await _render_template("admin/shop.html", request, current_user, extra=extra)
+
+
+@app.post(
+    "/shop/admin/product/import",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Import a shop product from the stock feed",
+    tags=["Shop"],
+)
+async def admin_import_shop_product(
+    request: Request,
+    vendor_sku: str = Form(...),
+):
+    """Import a single product by vendor SKU using the stock feed."""
+
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    cleaned_vendor_sku = vendor_sku.strip()
+    if not cleaned_vendor_sku:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vendor SKU cannot be empty",
+        )
+
+    await products_service.import_product_by_vendor_sku(cleaned_vendor_sku)
+
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post(
