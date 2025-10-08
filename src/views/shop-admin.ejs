@@ -9,6 +9,7 @@
       <section>
         <h2>Categories</h2>
         <form action="/shop/admin/category" method="post">
+          <%- include('partials/csrf-field') %>
           <input type="text" name="name" placeholder="Name" required>
           <button type="submit">Add</button>
         </form>
@@ -17,6 +18,7 @@
             <li>
               <%= c.name %>
               <form action="/shop/admin/category/<%= c.id %>/delete" method="post" style="display:inline" data-confirm="Delete category?">
+                <%- include('partials/csrf-field') %>
                 <button type="submit">Delete</button>
               </form>
             </li>
@@ -26,6 +28,7 @@
       <section>
         <h2>Import Product</h2>
         <form action="/shop/admin/product/import" method="post">
+          <%- include('partials/csrf-field') %>
           <input type="text" name="vendor_sku" placeholder="Vendor SKU" required>
           <button type="submit">Import</button>
         </form>
@@ -33,6 +36,7 @@
       <section>
         <h2>Add Product</h2>
         <form action="/shop/admin/product" method="post" enctype="multipart/form-data">
+          <%- include('partials/csrf-field') %>
           <input type="text" name="name" placeholder="Name" required>
           <input type="text" name="sku" placeholder="SKU" required>
           <input type="text" name="vendor_sku" placeholder="Vendor SKU" required>
@@ -91,9 +95,11 @@
                 <td>
                   <button type="button" data-open-edit-modal="<%= p.id %>">Edit</button>
                   <form action="/shop/admin/product/<%= p.id %>/<%= p.archived ? 'unarchive' : 'archive' %>" method="post" style="display:inline-block">
+                    <%- include('partials/csrf-field') %>
                     <button type="submit"><%= p.archived ? 'Unarchive' : 'Archive' %></button>
                   </form>
                   <form action="/shop/admin/product/<%= p.id %>/delete" method="post" style="display:inline-block" data-confirm="Are you sure you want to delete this product?">
+                    <%- include('partials/csrf-field') %>
                     <button type="submit">Delete</button>
                   </form>
                   <button type="button" data-open-visibility-modal="<%= p.id %>">Visibility</button>
@@ -176,6 +182,7 @@
           <div class="modal-content" style="width:300px;">
             <h3>Edit Product</h3>
             <form id="editForm" method="post" enctype="multipart/form-data">
+              <%- include('partials/csrf-field') %>
               <label for="edit-name">Name
                 <input type="text" id="edit-name" name="name" required>
               </label>
@@ -218,6 +225,7 @@
           <div class="modal-content" style="width:300px;">
             <h3>Product Visibility</h3>
             <form id="visibilityForm" method="post">
+              <%- include('partials/csrf-field') %>
               <% allCompanies.forEach(function(c){ %>
                 <label><input type="checkbox" name="excluded" value="<%= c.id %>"> <%= c.name %></label><br>
               <% }) %>
