@@ -42,6 +42,8 @@ fi
 
 REMOTE_URL=$(git config --get remote.origin.url || true)
 
+PRE_PULL_HEAD=$(git rev-parse HEAD)
+
 if [[ -n "${GITHUB_USERNAME:-}" && -n "${GITHUB_PASSWORD:-}" && "$REMOTE_URL" == https://* ]]; then
   AUTH_REMOTE_URL="https://${GITHUB_USERNAME}:${GITHUB_PASSWORD}@${REMOTE_URL#https://}"
   git pull "$AUTH_REMOTE_URL" main
@@ -49,6 +51,12 @@ else
   git pull origin main
 fi
 
-pip install -e .
+POST_PULL_HEAD=$(git rev-parse HEAD)
 
-systemctl restart myportal.service
+if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
+  echo "Repository updated to $POST_PULL_HEAD. Installing dependencies and restarting service."
+  pip install -e .
+  systemctl restart myportal.service
+else
+  echo "No changes detected from remote. Skipping dependency installation and service restart."
+fi
