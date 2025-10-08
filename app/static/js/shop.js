@@ -95,10 +95,6 @@
     }
     container.appendChild(createDetailRow('Availability', stockText));
 
-    if (product.vendor_sku) {
-      container.appendChild(createDetailRow('Vendor SKU', product.vendor_sku));
-    }
-
     if (product.description) {
       const descriptionTitle = document.createElement('h3');
       descriptionTitle.className = 'modal__subtitle';
