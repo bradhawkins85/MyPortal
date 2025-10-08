@@ -6,6 +6,7 @@
 - 2025-10-11, 09:30 UTC, Fix, Added server-rendered CSRF tokens across portal forms so submissions succeed even without client-side scripts
 - 2025-10-08, 12:36 UTC, Fix, Allowed the CSRF middleware to validate multipart form tokens so shop product uploads succeed
 - 2025-10-08, 12:22 UTC, Fix, Removed the product description textarea from the shop admin add product form and refreshed helper copy
+- 2025-10-14, 09:15 UTC, Fix, Reinstated shop admin product import via stock feed with FastAPI endpoint and service coverage
 - 2025-10-11, 10:30 UTC, Fix, Restored legacy shop product image loading by securing nested upload path handling
 - 2025-10-08, 12:34 UTC, Fix, Added multipart fallback parsing for mislabelled switch-company submissions so company switching succeeds for FormData clients
 - 2025-10-08, 12:44 UTC, Fix, Ensured company switch submissions always post the selected companyId by injecting a hidden field before form submission
