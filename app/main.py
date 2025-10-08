@@ -8,15 +8,27 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path, PurePosixPath
 from typing import Any
-from urllib.parse import parse_qsl, urlencode
+from urllib.parse import parse_qsl, quote, urlencode
 
 import aiomysql
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.openapi.docs import get_swagger_ui_html
 from itsdangerous import BadSignature, URLSafeSerializer
 from starlette.datastructures import FormData
 
@@ -57,11 +69,13 @@ from app.repositories import users as user_repo
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import encrypt_secret
 from app.security.rate_limiter import RateLimiterMiddleware, SimpleRateLimiter
-from app.security.session import session_manager
+from app.security.session import SessionData, session_manager
+from app.api.dependencies.auth import get_current_session
 from app.services.scheduler import scheduler_service
 from app.security.api_keys import mask_api_key
 from app.services import audit as audit_service
 from app.services import m365 as m365_service
+from app.services import products as products_service
 from app.services import staff_importer
 from app.services import template_variables
 from app.services import webhook_monitor
@@ -118,9 +132,13 @@ app = FastAPI(
         "Customer portal API exposing authentication, company administration, port catalogue, "
         "and pricing workflow capabilities."
     ),
-    docs_url=settings.swagger_ui_url,
+    docs_url=None,
+    openapi_url=None,
     openapi_tags=tags_metadata,
 )
+
+SWAGGER_UI_PATH = settings.swagger_ui_url or "/docs"
+PROTECTED_OPENAPI_PATH = "/internal/openapi.json"
 
 app.add_middleware(
     CORSMiddleware,
@@ -134,7 +152,7 @@ general_rate_limiter = SimpleRateLimiter(limit=300, window_seconds=900)
 app.add_middleware(
     RateLimiterMiddleware,
     rate_limiter=general_rate_limiter,
-    exempt_paths=("/docs", "/openapi.json", "/static"),
+    exempt_paths=(SWAGGER_UI_PATH, PROTECTED_OPENAPI_PATH, "/static"),
 )
 
 app.add_middleware(CSRFMiddleware)
@@ -200,6 +218,33 @@ def _resolve_private_upload(file_path: str) -> Path:
 
 
 app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
+
+
+@app.get(PROTECTED_OPENAPI_PATH, include_in_schema=False)
+async def authenticated_openapi_schema(
+    _: SessionData = Depends(get_current_session),
+) -> JSONResponse:
+    """Return the OpenAPI schema for authenticated users only."""
+
+    return JSONResponse(app.openapi())
+
+
+@app.get(SWAGGER_UI_PATH, include_in_schema=False)
+async def authenticated_swagger_ui(request: Request) -> Response:
+    """Render the Swagger UI after verifying the user session."""
+
+    session = await session_manager.load_session(request)
+    if not session:
+        next_target = quote(SWAGGER_UI_PATH, safe="/")
+        login_url = f"/login?next={next_target}"
+        redirect = RedirectResponse(url=login_url, status_code=status.HTTP_303_SEE_OTHER)
+        return redirect
+
+    return get_swagger_ui_html(
+        openapi_url=PROTECTED_OPENAPI_PATH,
+        title=f"{settings.app_name} API Docs",
+        oauth2_redirect_url=None,
+    )
 
 app.include_router(auth.router)
 app.include_router(users.router)
@@ -802,6 +847,32 @@ async def _load_staff_context(
         )
     company = await company_repo.get_company_by_id(company_id)
     return user, membership, company, staff_permission, company_id, None
+
+
+def _companies_redirect(
+    *,
+    company_id: int | None = None,
+    success: str | None = None,
+    error: str | None = None,
+    extra: dict[str, str] | None = None,
+) -> RedirectResponse:
+    params: dict[str, str] = {}
+    if company_id is not None:
+        params["company_id"] = str(company_id)
+    if success:
+        params["success"] = success.strip()[:200]
+    if error:
+        params["error"] = error.strip()[:200]
+    if extra:
+        for key, value in extra.items():
+            if value is None:
+                continue
+            params[key] = value
+    query = urlencode(params)
+    url = "/admin/companies"
+    if query:
+        url = f"{url}?{query}"
+    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.on_event("startup")
@@ -2430,6 +2501,34 @@ async def admin_shop_page(
         "show_archived": show_archived,
     }
     return await _render_template("admin/shop.html", request, current_user, extra=extra)
+
+
+@app.post(
+    "/shop/admin/product/import",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Import a shop product from the stock feed",
+    tags=["Shop"],
+)
+async def admin_import_shop_product(
+    request: Request,
+    vendor_sku: str = Form(...),
+):
+    """Import a single product by vendor SKU using the stock feed."""
+
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    cleaned_vendor_sku = vendor_sku.strip()
+    if not cleaned_vendor_sku:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vendor SKU cannot be empty",
+        )
+
+    await products_service.import_product_by_vendor_sku(cleaned_vendor_sku)
+
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post(
