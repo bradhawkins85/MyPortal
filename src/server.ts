@@ -2169,30 +2169,6 @@ app.get(
   }
 );
 
-app.post('/licenses', ensureAuth, ensureSuperAdmin, async (req, res) => {
-  if (!req.session.companyId) {
-    return res.status(400).send('No company selected.');
-  }
-  const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
-  const platform = typeof req.body.platform === 'string' ? req.body.platform.trim() : '';
-  const contractTerm = typeof req.body.contractTerm === 'string' ? req.body.contractTerm.trim() : '';
-  const expiryDateRaw = typeof req.body.expiryDate === 'string' ? req.body.expiryDate.trim() : '';
-  const seatCount = Number.parseInt(String(req.body.count ?? ''), 10);
-  if (!name || !platform || Number.isNaN(seatCount) || seatCount < 0) {
-    return res.status(400).send('Name, SKU, and a non-negative seat count are required.');
-  }
-  const expiryDate = expiryDateRaw ? expiryDateRaw : null;
-  await createLicense(
-    req.session.companyId!,
-    name,
-    platform,
-    seatCount,
-    expiryDate,
-    contractTerm
-  );
-  return res.status(201).json({ success: true });
-});
-
 app.post('/licenses/:id/order', ensureAuth, async (req, res) => {
   const { quantity } = req.body;
   const companies = await getCompaniesForUser(req.session.userId!);
@@ -2254,25 +2230,17 @@ app.post('/licenses/:id/remove', ensureAuth, async (req, res) => {
 });
 
 app.put('/licenses/:id', ensureAuth, ensureSuperAdmin, async (req, res) => {
+  const { name, platform, count, expiryDate, contractTerm } = req.body;
   if (!req.session.companyId) {
-    return res.status(400).send('No company selected.');
+    return res.status(400).json({ error: 'No company selected' });
   }
-  const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
-  const platform = typeof req.body.platform === 'string' ? req.body.platform.trim() : '';
-  const contractTerm = typeof req.body.contractTerm === 'string' ? req.body.contractTerm.trim() : '';
-  const expiryDateRaw = typeof req.body.expiryDate === 'string' ? req.body.expiryDate.trim() : '';
-  const seatCount = Number.parseInt(String(req.body.count ?? ''), 10);
-  if (!name || !platform || Number.isNaN(seatCount) || seatCount < 0) {
-    return res.status(400).send('Name, SKU, and a non-negative seat count are required.');
-  }
-  const expiryDate = expiryDateRaw ? expiryDateRaw : null;
   await updateLicense(
     parseInt(req.params.id, 10),
     req.session.companyId!,
     name,
     platform,
-    seatCount,
-    expiryDate,
+    count,
+    expiryDate || null,
     contractTerm
   );
   res.json({ success: true });
