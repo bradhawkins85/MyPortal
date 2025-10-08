@@ -169,6 +169,51 @@ async def _process_feed_item(
     return True
 
 
+async def import_product_by_vendor_sku(vendor_sku: str) -> bool:
+    """Import a single product from the stock feed by vendor SKU."""
+
+    cleaned_vendor_sku = vendor_sku.strip()
+    if not cleaned_vendor_sku:
+        return False
+
+    item = await stock_feed_repo.get_item_by_sku(cleaned_vendor_sku)
+    if not item:
+        log_info(
+            "Stock feed item not found for vendor SKU import",
+            vendor_sku=cleaned_vendor_sku,
+        )
+        return False
+
+    existing_product = await shop_repo.get_product_by_sku(
+        cleaned_vendor_sku, include_archived=True
+    )
+
+    try:
+        processed = await _process_feed_item(item, existing_product)
+    except Exception as exc:
+        log_error(
+            "Failed to import product from stock feed",
+            vendor_sku=cleaned_vendor_sku,
+            error=str(exc),
+        )
+        raise
+
+    if processed:
+        existing_id = None
+        if existing_product and "id" in existing_product:
+            try:
+                existing_id = int(existing_product["id"])
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                existing_id = None
+        log_info(
+            "Imported product from stock feed",
+            vendor_sku=cleaned_vendor_sku,
+            existing_product_id=existing_id,
+        )
+
+    return processed
+
+
 async def update_products_from_feed() -> None:
     products = await shop_repo.list_all_products(include_archived=True)
     processed = 0
