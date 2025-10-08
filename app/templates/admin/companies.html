@@ -1,0 +1,381 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if error_message or success_message or temporary_password %}
+    <div class="stacked" style="margin-bottom: 1.5rem; gap: 1rem;">
+      {% if success_message %}
+        <div class="alert" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+      {% if temporary_password %}
+        <div class="alert" role="status">
+          <p class="stacked" style="gap: 0.5rem; margin: 0;">
+            <strong>Temporary password generated for {{ invited_email }}</strong>
+            <span>Share this secret securely with the recipient. They will be prompted to change it at first login.</span>
+            <code style="word-break: break-word;">{{ temporary_password }}</code>
+          </p>
+        </div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="admin-grid admin-grid--columns">
+    {% if is_super_admin %}
+      <section class="card card--panel">
+        <header class="card__header">
+          <div>
+            <h2 class="card__title">Add a company</h2>
+            <p class="card__subtitle">Create a new customer record with optional Syncro and Xero identifiers.</p>
+          </div>
+        </header>
+        <form action="/admin/companies" method="post" class="form" autocomplete="off">
+          <div class="form-field">
+            <label class="form-label" for="company-name">Company name</label>
+            <input id="company-name" name="name" class="form-input" required maxlength="255" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="company-syncro">Syncro company ID</label>
+            <input id="company-syncro" name="syncroCompanyId" class="form-input" maxlength="255" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="company-xero">Xero ID</label>
+            <input id="company-xero" name="xeroId" class="form-input" maxlength="255" />
+          </div>
+          <div class="form-field form-field--checkbox">
+            <label class="checkbox" for="company-vip">
+              <input id="company-vip" type="checkbox" name="isVip" value="1" />
+              <span>VIP pricing</span>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="button">Create company</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card card--panel">
+        <header class="card__header card__header--stacked">
+          <div>
+            <h2 class="card__title">Companies</h2>
+            <p class="card__subtitle">Update identifiers and VIP status for existing customers.</p>
+          </div>
+          <input
+            type="search"
+            class="form-input"
+            placeholder="Filter companies"
+            aria-label="Filter companies"
+            data-table-filter="companies-table"
+          />
+        </header>
+        <div class="table-wrapper">
+          <table class="table" id="companies-table" data-table>
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string">Name</th>
+                <th scope="col" data-sort="string">Syncro ID</th>
+                <th scope="col" data-sort="string">Xero ID</th>
+                <th scope="col" data-sort="string">VIP</th>
+                <th scope="col" class="table__actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if managed_companies %}
+                {% for company in managed_companies %}
+                  <tr>
+                    <td data-label="Name">{{ company.name }}</td>
+                    <td data-label="Syncro ID">
+                      <input
+                        type="text"
+                        name="syncroCompanyId"
+                        class="form-input"
+                        value="{{ company.syncro_company_id or '' }}"
+                        maxlength="255"
+                        form="company-{{ company.id }}-form"
+                      />
+                    </td>
+                    <td data-label="Xero ID">
+                      <input
+                        type="text"
+                        name="xeroId"
+                        class="form-input"
+                        value="{{ company.xero_id or '' }}"
+                        maxlength="255"
+                        form="company-{{ company.id }}-form"
+                      />
+                    </td>
+                    <td data-label="VIP">
+                      <label class="checkbox">
+                        <input
+                          type="checkbox"
+                          name="isVip"
+                          value="1"
+                          form="company-{{ company.id }}-form"
+                          {% if company.is_vip %}checked{% endif %}
+                        />
+                        <span class="visually-hidden">VIP pricing</span>
+                      </label>
+                    </td>
+                    <td class="table__actions">
+                      <form
+                        id="company-{{ company.id }}-form"
+                        action="/admin/companies/{{ company.id }}"
+                        method="post"
+                        class="inline-form"
+                      >
+                        <input type="hidden" name="name" value="{{ company.name }}" />
+                        <button type="submit" class="button button--ghost">Save</button>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="5" class="table__empty">No companies have been registered.</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+    <section class="card card--panel">
+      <header class="card__header">
+        <div>
+          <h2 class="card__title">User provisioning</h2>
+          <p class="card__subtitle">Create or invite users with access to the selected company.</p>
+        </div>
+      </header>
+      <div class="stacked" style="gap: 2rem;">
+        <form action="/admin/companies/users/create" method="post" class="form" autocomplete="off">
+          <h3 class="form-title">Create user with chosen password</h3>
+          {% if is_super_admin %}
+            <div class="form-field">
+              <label class="form-label" for="create-company">Company</label>
+              <select id="create-company" name="companyId" class="form-input" required>
+                <option value="">Select company</option>
+                {% for company in managed_companies %}
+                  <option value="{{ company.id }}" {% if company.id == selected_company_id %}selected{% endif %}>
+                    {{ company.name }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+          {% else %}
+            <input type="hidden" name="companyId" value="{{ selected_company_id or '' }}" />
+          {% endif %}
+          <div class="form-field">
+            <label class="form-label" for="create-email">Email address</label>
+            <input id="create-email" name="email" type="email" class="form-input" required maxlength="255" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="create-password">Temporary password</label>
+            <input id="create-password" name="password" type="password" class="form-input" required minlength="8" maxlength="255" />
+            <p class="form-help">Users are required to change this password on first login.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="create-first-name">First name</label>
+            <input id="create-first-name" name="firstName" class="form-input" maxlength="255" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="create-last-name">Last name</label>
+            <input id="create-last-name" name="lastName" class="form-input" maxlength="255" />
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="button">Create user</button>
+          </div>
+        </form>
+
+        <form action="/admin/companies/users/invite" method="post" class="form" autocomplete="off">
+          <h3 class="form-title">Invite user with generated password</h3>
+          {% if is_super_admin %}
+            <div class="form-field">
+              <label class="form-label" for="invite-company">Company</label>
+              <select id="invite-company" name="companyId" class="form-input" required>
+                <option value="">Select company</option>
+                {% for company in managed_companies %}
+                  <option value="{{ company.id }}" {% if company.id == selected_company_id %}selected{% endif %}>
+                    {{ company.name }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+          {% else %}
+            <input type="hidden" name="companyId" value="{{ selected_company_id or '' }}" />
+          {% endif %}
+          <div class="form-field">
+            <label class="form-label" for="invite-email">Email address</label>
+            <input id="invite-email" name="email" type="email" class="form-input" required maxlength="255" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="invite-first-name">First name</label>
+            <input id="invite-first-name" name="firstName" class="form-input" maxlength="255" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="invite-last-name">Last name</label>
+            <input id="invite-last-name" name="lastName" class="form-input" maxlength="255" />
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="button">Generate invitation</button>
+          </div>
+        </form>
+
+        {% if is_super_admin %}
+          <form action="/admin/companies/assign" method="post" class="form" autocomplete="off">
+            <h3 class="form-title">Assign existing user</h3>
+            <div class="form-field">
+              <label class="form-label" for="assign-user">User</label>
+              <select id="assign-user" name="userId" class="form-input" required>
+                <option value="">Select user</option>
+                {% for user_option in user_options %}
+                  <option value="{{ user_option.id }}">{{ user_option.email }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="assign-company">Company</label>
+              <select id="assign-company" name="companyId" class="form-input" required>
+                <option value="">Select company</option>
+                {% for company in managed_companies %}
+                  <option value="{{ company.id }}" {% if company.id == selected_company_id %}selected{% endif %}>
+                    {{ company.name }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="button">Assign user</button>
+            </div>
+          </form>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="card card--panel admin-grid__full">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Company memberships</h2>
+          <p class="card__subtitle">Toggle privileges for each user and company combination.</p>
+        </div>
+        <div class="card__controls">
+          {% if is_super_admin and managed_companies %}
+            <form method="get" class="card__control">
+              <label class="visually-hidden" for="assignment-company">Company</label>
+              <select id="assignment-company" name="company_id" class="form-input" onchange="this.form.submit()">
+                <option value="">All companies</option>
+                {% for company in managed_companies %}
+                  <option value="{{ company.id }}" {% if company.id == selected_company_id %}selected{% endif %}>
+                    {{ company.name }}
+                  </option>
+                {% endfor %}
+              </select>
+            </form>
+          {% endif %}
+          <input
+            type="search"
+            class="form-input"
+            placeholder="Filter memberships"
+            aria-label="Filter memberships"
+            data-table-filter="company-assignments"
+          />
+        </div>
+      </header>
+      <div class="table-wrapper">
+        <table class="table" id="company-assignments" data-table>
+          <thead>
+            <tr>
+              <th scope="col" data-sort="string">User</th>
+              {% if is_super_admin %}
+                <th scope="col" data-sort="string">Company</th>
+              {% endif %}
+              <th scope="col" data-sort="string">Staff</th>
+              {% for column in permission_columns %}
+                <th scope="col" data-sort="string">{{ column.label }}</th>
+              {% endfor %}
+              {% if is_super_admin %}
+                <th scope="col" class="table__actions">Actions</th>
+              {% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% if assignments %}
+              {% for assignment in assignments %}
+                <tr>
+                  <td data-label="User">
+                    <div class="stacked">
+                      <strong>{{ assignment.email }}</strong>
+                      <span class="text-muted">{{ assignment.first_name or '' }} {{ assignment.last_name or '' }}</span>
+                    </div>
+                  </td>
+                  {% if is_super_admin %}
+                    <td data-label="Company">{{ assignment.company_name }}</td>
+                  {% endif %}
+                  <td data-label="Staff">
+                    <select
+                      class="form-input"
+                      data-staff-permission
+                      data-company-id="{{ assignment.company_id }}"
+                      data-user-id="{{ assignment.user_id }}"
+                    >
+                      {% for option in staff_permission_options %}
+                        <option value="{{ option.value }}" {% if option.value == assignment.staff_permission %}selected{% endif %}>
+                          {{ option.label }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                  </td>
+                  {% for column in permission_columns %}
+                    {% set field = column.field %}
+                    <td data-label="{{ column.label }}">
+                      <label class="checkbox">
+                        <input
+                          type="checkbox"
+                          data-company-permission
+                          data-company-id="{{ assignment.company_id }}"
+                          data-user-id="{{ assignment.user_id }}"
+                          data-field="{{ field }}"
+                          {% if assignment[field] %}checked{% endif %}
+                        />
+                        <span class="visually-hidden">Toggle {{ column.label }}</span>
+                      </label>
+                    </td>
+                  {% endfor %}
+                  {% if is_super_admin %}
+                    <td class="table__actions">
+                      <button
+                        type="button"
+                        class="button button--danger"
+                        data-remove-assignment
+                        data-company-id="{{ assignment.company_id }}"
+                        data-user-id="{{ assignment.user_id }}"
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  {% endif %}
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td
+                  colspan="{{ 4 + permission_columns|length if is_super_admin else 2 + permission_columns|length }}"
+                  class="table__empty"
+                >
+                  No memberships found for the selected company.
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/admin.js" defer></script>
+{% endblock %}
