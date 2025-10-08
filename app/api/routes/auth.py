@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 import secrets
+from datetime import datetime, timedelta
+from typing import Any
 
 import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -12,6 +13,7 @@ from app.api.dependencies.database import require_database
 from app.core.config import get_settings
 from app.repositories import auth as auth_repo
 from app.repositories import users as user_repo
+from app.repositories import user_companies as user_company_repo
 from app.schemas.auth import (
     LoginRequest,
     LoginResponse,
@@ -47,6 +49,7 @@ def _serialize_session(session: SessionData) -> SessionInfo:
         ip_address=session.ip_address,
         user_agent=session.user_agent,
         csrf_token=session.csrf_token,
+        active_company_id=session.active_company_id,
     )
 
 
@@ -55,6 +58,19 @@ def _build_login_response(user: dict, session: SessionData) -> LoginResponse:
         user=UserResponse.model_validate(user),
         session=_serialize_session(session),
     )
+
+
+async def _determine_active_company_id(user: dict[str, Any]) -> int | None:
+    raw_company = user.get("company_id")
+    if raw_company is not None:
+        try:
+            return int(raw_company)
+        except (TypeError, ValueError):
+            pass
+    companies = await user_company_repo.list_companies_for_user(user["id"])
+    if companies:
+        return int(companies[0].get("company_id"))
+    return None
 
 
 @router.post(
@@ -82,7 +98,12 @@ async def register(
         is_super_admin=True,
     )
 
-    session = await session_manager.create_session(created["id"], request)
+    active_company_id = await _determine_active_company_id(created)
+    session = await session_manager.create_session(
+        created["id"], request, active_company_id=active_company_id
+    )
+    if active_company_id is not None:
+        created["company_id"] = active_company_id
     response_model = _build_login_response(created, session)
     response = JSONResponse(content=response_model.model_dump(mode="json"))
     session_manager.apply_session_cookies(response, session)
@@ -129,7 +150,12 @@ async def login(
 
     await auth_repo.clear_login_attempts(identifier)
 
-    session = await session_manager.create_session(user["id"], request)
+    active_company_id = await _determine_active_company_id(user)
+    session = await session_manager.create_session(
+        user["id"], request, active_company_id=active_company_id
+    )
+    if active_company_id is not None:
+        user["company_id"] = active_company_id
     response_model = _build_login_response(user, session)
     response = JSONResponse(content=response_model.model_dump(mode="json"))
     session_manager.apply_session_cookies(response, session)

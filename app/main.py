@@ -7,7 +7,7 @@ from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi import FastAPI, HTTPException, Query, Request, status, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -107,6 +107,14 @@ async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] 
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
         return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    active_company_id = session.active_company_id
+    if active_company_id is None:
+        active_company_id = await _resolve_initial_company_id(user)
+        if active_company_id is not None:
+            await session_manager.set_active_company(session, active_company_id)
+    if active_company_id is not None:
+        user["company_id"] = active_company_id
+    request.state.active_company_id = active_company_id
     return user, None
 
 
@@ -156,6 +164,66 @@ def _parse_input_datetime(value: str | None, *, assume_midnight: bool = False) -
     else:
         parsed = parsed.astimezone(timezone.utc)
     return parsed
+
+
+async def _resolve_initial_company_id(user: dict[str, Any]) -> int | None:
+    raw_company = user.get("company_id")
+    if raw_company is not None:
+        try:
+            return int(raw_company)
+        except (TypeError, ValueError):
+            pass
+
+    companies = await user_company_repo.list_companies_for_user(user["id"])
+    if companies:
+        return int(companies[0].get("company_id"))
+    return None
+
+
+async def _build_base_context(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    session = await session_manager.load_session(request)
+    available_companies = getattr(request.state, "available_companies", None)
+    if available_companies is None:
+        available_companies = await user_company_repo.list_companies_for_user(user["id"])
+        request.state.available_companies = available_companies
+    active_company_id = getattr(request.state, "active_company_id", None)
+    if active_company_id is None and session:
+        active_company_id = session.active_company_id
+        request.state.active_company_id = active_company_id
+    active_company = None
+    for company in available_companies:
+        if company.get("company_id") == active_company_id:
+            active_company = company
+            break
+    context: dict[str, Any] = {
+        "request": request,
+        "app_name": settings.app_name,
+        "current_year": datetime.utcnow().year,
+        "current_user": user,
+        "available_companies": available_companies,
+        "active_company": active_company,
+        "active_company_id": active_company_id,
+        "csrf_token": session.csrf_token if session else None,
+    }
+    if extra:
+        context.update(extra)
+    return context
+
+
+async def _render_template(
+    template_name: str,
+    request: Request,
+    user: dict[str, Any],
+    *,
+    extra: dict[str, Any] | None = None,
+):
+    context = await _build_base_context(request, user, extra=extra)
+    return templates.TemplateResponse(template_name, context)
 
 
 async def _load_staff_context(
@@ -216,13 +284,37 @@ async def index(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
-    context = {
-        "request": request,
-        "app_name": settings.app_name,
-        "current_year": datetime.utcnow().year,
-        "current_user": user,
-    }
-    return templates.TemplateResponse("dashboard.html", context)
+    return await _render_template("dashboard.html", request, user)
+
+
+@app.post("/switch-company", response_class=RedirectResponse)
+async def switch_company(
+    request: Request,
+    company_id: int = Form(..., alias="companyId"),
+    return_url: str | None = Form(None, alias="returnUrl"),
+):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    session = await session_manager.load_session(request)
+    if not session:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    companies = await user_company_repo.list_companies_for_user(user["id"])
+    request.state.available_companies = companies
+
+    if any(company.get("company_id") == company_id for company in companies):
+        await session_manager.set_active_company(session, company_id)
+        user["company_id"] = company_id
+        request.state.active_company_id = company_id
+
+    destination = "/"
+    if return_url:
+        candidate = return_url.strip()
+        if candidate.startswith("/") and not candidate.startswith("//"):
+            destination = candidate
+
+    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get("/shop", response_class=HTMLResponse)
@@ -276,12 +368,8 @@ async def shop_page(
             if vip_price is not None:
                 product["price"] = vip_price
 
-    context = {
-        "request": request,
-        "app_name": settings.app_name,
-        "current_year": datetime.utcnow().year,
+    extra = {
         "title": "Shop",
-        "current_user": user,
         "categories": categories,
         "products": products,
         "current_category": category_id,
@@ -289,7 +377,7 @@ async def shop_page(
         "search_term": search_term,
         "cart_error": cart_error,
     }
-    return templates.TemplateResponse("shop/index.html", context)
+    return await _render_template("shop/index.html", request, user, extra=extra)
 
 
 @app.get("/forms", response_class=HTMLResponse)
@@ -297,16 +385,12 @@ async def forms_page(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
-    context = {
-        "request": request,
-        "app_name": settings.app_name,
-        "current_year": datetime.utcnow().year,
+    extra = {
         "title": "Forms",
-        "current_user": user,
         "forms": [],
         "opnform_base_url": settings.opnform_base_url,
     }
-    return templates.TemplateResponse("forms/index.html", context)
+    return await _render_template("forms/index.html", request, user, extra=extra)
 
 
 @app.get("/staff", response_class=HTMLResponse)
@@ -395,12 +479,8 @@ async def staff_page(
                 }
             )
 
-    context = {
-        "request": request,
-        "app_name": settings.app_name,
-        "current_year": datetime.utcnow().year,
+    extra = {
         "title": "Staff",
-        "current_user": user,
         "is_super_admin": is_super_admin,
         "is_admin": is_admin,
         "syncro_company_id": company.get("syncro_company_id") if company else None,
@@ -410,7 +490,7 @@ async def staff_page(
         "enabled_filter": enabled_value,
         "department_filter": department_filter,
     }
-    return templates.TemplateResponse("staff/index.html", context)
+    return await _render_template("staff/index.html", request, user, extra=extra)
 
 
 @app.post("/staff", response_class=HTMLResponse)
@@ -758,15 +838,11 @@ async def admin_roles(request: Request):
     if redirect:
         return redirect
     roles_list = await role_repo.list_roles()
-    context = {
-        "request": request,
-        "app_name": settings.app_name,
-        "current_year": datetime.utcnow().year,
+    extra = {
         "title": "Role management",
         "roles": roles_list,
-        "current_user": current_user,
     }
-    return templates.TemplateResponse("admin/roles.html", context)
+    return await _render_template("admin/roles.html", request, current_user, extra=extra)
 
 
 @app.get("/admin/memberships", response_class=HTMLResponse)
@@ -798,12 +874,8 @@ async def admin_memberships(request: Request, company_id: int | None = None):
         {"value": "active", "label": "Active"},
         {"value": "suspended", "label": "Suspended"},
     ]
-    context = {
-        "request": request,
-        "app_name": settings.app_name,
-        "current_year": datetime.utcnow().year,
+    extra = {
         "title": "Company memberships",
-        "current_user": current_user,
         "companies": companies,
         "selected_company": selected_company,
         "selected_company_id": effective_company_id,
@@ -812,7 +884,7 @@ async def admin_memberships(request: Request, company_id: int | None = None):
         "users": users,
         "status_options": status_options,
     }
-    return templates.TemplateResponse("admin/memberships.html", context)
+    return await _render_template("admin/memberships.html", request, current_user, extra=extra)
 
 
 @app.get("/admin/audit-logs", response_class=HTMLResponse)
@@ -835,12 +907,8 @@ async def admin_audit_logs(
     )
     for log in logs:
         log["created_at_iso"] = _to_iso(log.get("created_at"))
-    context = {
-        "request": request,
-        "app_name": settings.app_name,
-        "current_year": datetime.utcnow().year,
+    extra = {
         "title": "Audit trail",
-        "current_user": current_user,
         "logs": logs,
         "filters": {
             "entity_type": entity_type or "",
@@ -849,7 +917,7 @@ async def admin_audit_logs(
             "limit": limit,
         },
     }
-    return templates.TemplateResponse("admin/audit_logs.html", context)
+    return await _render_template("admin/audit_logs.html", request, current_user, extra=extra)
 
 
 @app.get("/admin/forms", response_class=HTMLResponse)
@@ -857,16 +925,12 @@ async def admin_forms_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    context = {
-        "request": request,
-        "app_name": settings.app_name,
-        "current_year": datetime.utcnow().year,
+    extra = {
         "title": "Forms admin",
-        "current_user": current_user,
         "forms": [],
         "opnform_base_url": settings.opnform_base_url,
     }
-    return templates.TemplateResponse("admin/forms.html", context)
+    return await _render_template("admin/forms.html", request, current_user, extra=extra)
 
 
 @app.get("/admin/shop", response_class=HTMLResponse)
@@ -894,19 +958,15 @@ async def admin_shop_page(
     for restriction in restrictions:
         restrictions_map.setdefault(restriction["product_id"], []).append(restriction)
 
-    context = {
-        "request": request,
-        "app_name": settings.app_name,
-        "current_year": datetime.utcnow().year,
+    extra = {
         "title": "Shop admin",
-        "current_user": current_user,
         "categories": categories,
         "products": products,
         "product_restrictions": restrictions_map,
         "all_companies": companies,
         "show_archived": show_archived,
     }
-    return templates.TemplateResponse("admin/shop.html", context)
+    return await _render_template("admin/shop.html", request, current_user, extra=extra)
 
 
 @app.get("/login", response_class=HTMLResponse)

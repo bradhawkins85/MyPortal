@@ -13,6 +13,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - Licenses tab showing license name, SKU, count, allocated staff, expiry date and contract term
 - Centralised company membership management with reusable roles and real-time audit logging
 - Super admin UI for reviewing membership changes and role edits with filtering and sorting controls
+- Sidebar company switcher so administrators can pivot between assigned companies without re-authenticating
 - First-time visit redirects to a registration page when no users exist
 - Basic shop with product SKUs and admin management API
 - VIP pricing for companies with special product rates
