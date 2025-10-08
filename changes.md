@@ -1,3 +1,4 @@
+- 2025-10-14, 11:55 UTC, Fix, Filtered zero-priced products from the shop catalogue so customers only see priced items
 - 2025-10-11, 11:45 UTC, Feature, Recreated the invoices dashboard with FastAPI templates, filtering UI, and secured API endpoints
 - 2025-10-11, 11:45 UTC, Fix, Synced stock feed images into the portal and replaced zero pricing with RRP during product updates
 - 2025-10-08, 13:23 UTC, Feature, Restored company management console with invitations, permissions, and admin UI parity
