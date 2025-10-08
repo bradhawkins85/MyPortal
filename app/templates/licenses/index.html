@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+
+{% block title %}Licenses{% endblock %}
+
+{% block header_actions %}
+  <div class="header-actions">
+    <input type="search" id="license-filter" class="input" placeholder="Filter licenses" aria-label="Filter licenses" />
+    {% if has_m365_credentials %}
+    <button type="button" class="button" data-sync-licenses>Sync from Microsoft 365</button>
+    {% endif %}
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <header class="panel__header">
+    <div>
+      <h2 class="panel__title">Software licenses</h2>
+      <p class="panel__subtitle">Track allocations, available counts, and request entitlement changes.</p>
+    </div>
+    {% if company %}
+    <div class="panel__meta">
+      <span class="tag">{{ company.name }}</span>
+    </div>
+    {% endif %}
+  </header>
+  <div class="panel__body">
+    <div class="table-responsive">
+      <table class="table" data-license-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort-key="display_name">Name</th>
+            <th scope="col" data-sort-key="platform">SKU</th>
+            <th scope="col" data-sort-key="count">Total</th>
+            <th scope="col" data-sort-key="allocated">Allocated</th>
+            <th scope="col" data-sort-key="expiry_display">Expiry</th>
+            <th scope="col" data-sort-key="contract_term">Contract term</th>
+            {% if can_order_licenses %}<th scope="col">Actions</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for license in licenses %}
+          <tr>
+            <td data-column="display_name" data-value="{{ license.display_name or license.name }}">{{ license.display_name or license.name }}</td>
+            <td data-column="platform" data-value="{{ license.platform }}">{{ license.platform }}</td>
+            <td data-column="count" data-value="{{ license.count }}">{{ license.count }}</td>
+            <td data-column="allocated" data-value="{{ license.allocated }}">
+              <button type="button" class="link" data-license-allocated="{{ license.id }}">{{ license.allocated }}</button>
+            </td>
+            <td data-column="expiry_display" data-value="{{ license.expiry_display or '' }}">{{ license.expiry_display or '—' }}</td>
+            <td data-column="contract_term" data-value="{{ license.contract_term or '' }}">{{ license.contract_term or '—' }}</td>
+            {% if can_order_licenses %}
+            <td>
+              <div class="button-group">
+                <button type="button" class="button button--small" data-license-order="{{ license.id }}">Order more</button>
+                <button type="button" class="button button--secondary button--small" data-license-remove="{{ license.id }}">Request removal</button>
+              </div>
+            </td>
+            {% endif %}
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="{% if can_order_licenses %}7{% else %}6{% endif %}" class="text-center">No licenses recorded for this company yet.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<dialog id="allocated-dialog" class="dialog">
+  <form method="dialog" class="dialog__container">
+    <header class="dialog__header">
+      <h3 class="dialog__title">Allocated staff</h3>
+      <button type="submit" class="dialog__close" aria-label="Close">
+        <span aria-hidden="true">&times;</span>
+      </button>
+    </header>
+    <div class="dialog__body">
+      <ul id="allocated-list" class="list"></ul>
+    </div>
+    <footer class="dialog__footer">
+      <button type="submit" class="button">Close</button>
+    </footer>
+  </form>
+</dialog>
+
+<div id="license-toast" class="toast" role="status" aria-live="polite"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    const csrfToken = {{ csrf_token | tojson }};
+    const filterInput = document.getElementById('license-filter');
+    const table = document.querySelector('[data-license-table]');
+    const toast = document.getElementById('license-toast');
+    const allocatedDialog = document.getElementById('allocated-dialog');
+    const allocatedList = document.getElementById('allocated-list');
+
+    function showToast(message, type = 'info') {
+      if (!toast) return;
+      toast.textContent = message;
+      toast.className = `toast toast--${type}`;
+      toast.setAttribute('aria-hidden', 'false');
+      setTimeout(() => {
+        toast.setAttribute('aria-hidden', 'true');
+      }, 4000);
+    }
+
+    function applyFilter() {
+      if (!filterInput || !table) return;
+      const term = filterInput.value.trim().toLowerCase();
+      const rows = table.tBodies[0].rows;
+      for (const row of rows) {
+        const text = row.textContent.toLowerCase();
+        row.style.display = term && !text.includes(term) ? 'none' : '';
+      }
+    }
+
+    function sortTable(columnKey, ascending) {
+      if (!table) return;
+      const rows = Array.from(table.tBodies[0].rows);
+      const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+      rows.sort((a, b) => {
+        const aCell = a.querySelector(`[data-column='${columnKey}']`);
+        const bCell = b.querySelector(`[data-column='${columnKey}']`);
+        const aText = aCell ? aCell.getAttribute('data-value') || aCell.textContent.trim() : '';
+        const bText = bCell ? bCell.getAttribute('data-value') || bCell.textContent.trim() : '';
+        return ascending ? collator.compare(aText, bText) : collator.compare(bText, aText);
+      });
+      const fragment = document.createDocumentFragment();
+      rows.forEach((row) => fragment.appendChild(row));
+      table.tBodies[0].appendChild(fragment);
+    }
+
+    if (filterInput) {
+      filterInput.addEventListener('input', applyFilter);
+    }
+
+    if (table) {
+      table.querySelectorAll('th[data-sort-key]').forEach((header) => {
+        let ascending = true;
+        header.addEventListener('click', () => {
+          table.querySelectorAll('th[data-sort-key]').forEach((h) => h.removeAttribute('aria-sort'));
+          header.setAttribute('aria-sort', ascending ? 'ascending' : 'descending');
+          sortTable(header.dataset.sortKey, ascending);
+          ascending = !ascending;
+        });
+      });
+    }
+
+    async function handleMutation(url, licenseId, action, quantity) {
+      try {
+        const response = await fetch(url.replace(':id', licenseId), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken || '',
+          },
+          body: JSON.stringify({ quantity }),
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || 'Request failed');
+        }
+        showToast(`License ${action} submitted successfully.`, 'success');
+      } catch (err) {
+        console.error(err);
+        showToast(`Unable to ${action} licenses.`, 'error');
+      }
+    }
+
+    document.querySelectorAll('[data-license-order]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const quantity = window.prompt('How many licenses would you like to order?');
+        const value = parseInt(quantity, 10);
+        if (Number.isNaN(value) || value <= 0) return;
+        handleMutation('/licenses/:id/order', button.dataset.licenseOrder, 'order', value);
+      });
+    });
+
+    document.querySelectorAll('[data-license-remove]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const quantity = window.prompt('How many licenses should be removed?');
+        const value = parseInt(quantity, 10);
+        if (Number.isNaN(value) || value <= 0) return;
+        handleMutation('/licenses/:id/remove', button.dataset.licenseRemove, 'remove', value);
+      });
+    });
+
+    document.querySelectorAll('[data-license-allocated]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        try {
+          const response = await fetch(`/licenses/${button.dataset.licenseAllocated}/allocated`);
+          if (!response.ok) throw new Error('Request failed');
+          const data = await response.json();
+          allocatedList.innerHTML = '';
+          if (data.length === 0) {
+            const li = document.createElement('li');
+            li.textContent = 'No staff currently allocated.';
+            allocatedList.appendChild(li);
+          } else {
+            data.forEach((member) => {
+              const li = document.createElement('li');
+              const email = member.email ? ` (${member.email})` : '';
+              li.textContent = `${member.first_name || ''} ${member.last_name || ''}${email}`.trim();
+              allocatedList.appendChild(li);
+            });
+          }
+          if (typeof allocatedDialog.showModal === 'function') {
+            allocatedDialog.showModal();
+          }
+        } catch (err) {
+          console.error(err);
+          showToast('Unable to load allocation details.', 'error');
+        }
+      });
+    });
+
+    const syncButton = document.querySelector('[data-sync-licenses]');
+    if (syncButton) {
+      syncButton.addEventListener('click', async () => {
+        syncButton.disabled = true;
+        syncButton.textContent = 'Syncing…';
+        try {
+          const response = await fetch('/m365/sync', {
+            method: 'POST',
+            headers: {
+              'X-CSRF-Token': csrfToken || '',
+            },
+          });
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.detail || 'Sync failed');
+          }
+          showToast('Microsoft 365 license sync complete.', 'success');
+          window.setTimeout(() => window.location.reload(), 1500);
+        } catch (err) {
+          console.error(err);
+          showToast(err.message || 'Microsoft 365 sync failed.', 'error');
+        } finally {
+          syncButton.disabled = false;
+          syncButton.textContent = 'Sync from Microsoft 365';
+        }
+      });
+    }
+  })();
+</script>
+{% endblock %}
+
