@@ -4,7 +4,7 @@ import asyncio
 import json
 import secrets
 from datetime import date, datetime, time, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from collections.abc import Iterable, Mapping
 from datetime import datetime, time, timedelta, timezone
@@ -153,17 +153,45 @@ except OSError:
     pass
 
 
-def _resolve_private_upload(filename: str) -> Path:
-    """Resolve ``/uploads`` paths to the secured private uploads directory."""
+def _resolve_private_upload(file_path: str) -> Path:
+    """Resolve ``/uploads`` paths to the secured private uploads directory.
 
-    safe_name = Path(filename).name
-    candidate = (_private_uploads_path / safe_name).resolve()
+    Supports legacy nested directory structures while preventing path traversal
+    outside the uploads root.
+    """
+
+    if not file_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    normalised = file_path.replace("\\", "/")
+    raw_path = PurePosixPath(normalised)
+
+    if raw_path.is_absolute():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    sanitized_parts: list[str] = []
+    for segment in raw_path.parts:
+        if segment in {"", "."}:
+            continue
+        if segment == "..":
+            if sanitized_parts:
+                sanitized_parts.pop()
+            continue
+        sanitized_parts.append(segment)
+    if not sanitized_parts:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    candidate = (_private_uploads_path.joinpath(*sanitized_parts)).resolve()
+    uploads_root = _private_uploads_path.resolve()
+
     try:
-        candidate.relative_to(_private_uploads_path.resolve())
+        candidate.relative_to(uploads_root)
     except ValueError as exc:  # pragma: no cover - defensive guard
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found") from exc
+
     if not candidate.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
     return candidate
 
 
@@ -212,16 +240,16 @@ async def _require_super_admin_page(request: Request) -> tuple[dict[str, Any] | 
     return user, None
 
 
-@app.get("/uploads/{filename}", response_class=FileResponse, include_in_schema=False)
-async def serve_private_upload(filename: str, request: Request):
+@app.get("/uploads/{file_path:path}", response_class=FileResponse, include_in_schema=False)
+async def serve_private_upload(file_path: str, request: Request):
     """Serve product images stored in the legacy private uploads directory."""
 
     _, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
-    file_path = _resolve_private_upload(filename)
+    resolved_path = _resolve_private_upload(file_path)
     headers = {"Cache-Control": "public, max-age=86400"}
-    return FileResponse(file_path, headers=headers)
+    return FileResponse(resolved_path, headers=headers)
 
 
 def _to_iso(dt: Any) -> str | None:
