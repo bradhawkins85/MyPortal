@@ -55,6 +55,7 @@ class SessionInfo(BaseModel):
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
     csrf_token: str
+    active_company_id: Optional[int] = None
 
 
 class LoginResponse(BaseModel):

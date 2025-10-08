@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from app.core.database import db
 
@@ -36,6 +36,27 @@ async def get_user_company(user_id: int, company_id: int) -> Optional[dict[str, 
         (user_id, company_id),
     )
     return _normalise(row) if row else None
+
+
+async def list_companies_for_user(user_id: int) -> List[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT uc.*, c.name AS company_name, c.syncro_company_id
+        FROM user_companies AS uc
+        INNER JOIN companies AS c ON c.id = uc.company_id
+        WHERE uc.user_id = %s
+        ORDER BY c.name
+        """,
+        (user_id,),
+    )
+    companies: List[dict[str, Any]] = []
+    for row in rows:
+        normalised = _normalise(row)
+        normalised["company_name"] = row.get("company_name")
+        if "syncro_company_id" in row:
+            normalised["syncro_company_id"] = row.get("syncro_company_id")
+        companies.append(normalised)
+    return companies
 
 
 async def upsert_user_company(
