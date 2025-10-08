@@ -72,19 +72,33 @@
           {% set membership = active_membership %}
           {% set is_super_admin = current_user.get('is_super_admin') if current_user else False %}
           {% set can_manage_licenses = is_super_admin or (membership and membership.get('can_manage_licenses')) %}
+          {% set can_manage_invoices = is_super_admin or (membership and membership.get('can_manage_invoices')) %}
           {% if can_manage_licenses %}
           <li class="menu__item">
             <a href="/licenses" {% if current_path.startswith('/licenses') %}aria-current="page"{% endif %}>
               <span class="menu__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h12a1 1 0 0 1 1 1v18l-7-3-7 3V3a1 1 0 0 1 1-1zm2 4v2h8V6H8zm0 4v2h8v-2H8z"/></svg>
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h12a1 1 0 0 1 1 1v18l-7-3-7 3V3a1 1 0 0 1 1-1zm2 4v2h8V6
+H8zm0 4v2h8v-2H8z"/></svg>
               </span>
               <span class="menu__label">Licenses</span>
             </a>
           </li>
+          {% endif %}
+          {% if can_manage_invoices %}
+          <li class="menu__item">
+            <a href="/invoices" {% if current_path.startswith('/invoices') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M6 3h12a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm3 4v2h6V7H9zm0 4v2h6v-2H9zm0 4v2h6v-2H9z"/></svg>
+              </span>
+              <span class="menu__label">Invoices</span>
+            </a>
+          </li>
+          {% endif %}
           <li class="menu__item">
             <a href="/m365" {% if current_path.startswith('/m365') %}aria-current="page"{% endif %}>
               <span class="menu__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false"><path d="M3 5a2 2 0 0 1 2-2h6l4 4h6a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5zm9 10 5-3-5-3v6zm-7 0h5v-6H5v6z"/></svg>
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M3 5a2 2 0 0 1 2-2h6l4 4h6a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a
+2 2 0 0 1-2-2V5zm9 10 5-3-5-3v6zm-7 0h5v-6H5v6z"/></svg>
               </span>
               <span class="menu__label">Office 365</span>
             </a>
