@@ -87,7 +87,7 @@ from app.services.opnform import (
     normalize_opnform_embed_code,
     normalize_opnform_form_url,
 )
-from app.services.file_storage import store_product_image
+from app.services.file_storage import delete_stored_file, store_product_image
 
 configure_logging()
 settings = get_settings()
@@ -1542,6 +1542,17 @@ async def shop_page(
             if vip_price is not None:
                 product["price"] = vip_price
 
+    def _product_has_price(product: Mapping[str, Any]) -> bool:
+        raw_price = product.get("price")
+        if raw_price is None:
+            return False
+        try:
+            return Decimal(str(raw_price)) > 0
+        except (InvalidOperation, TypeError, ValueError):
+            return False
+
+    products = [product for product in products if _product_has_price(product)]
+
     extra = {
         "title": "Shop",
         "categories": categories,
@@ -2744,6 +2755,50 @@ async def admin_create_shop_product(
         sku=product["sku"],
         vendor_sku=product["vendor_sku"],
         created_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
+    "/shop/admin/product/{product_id}/delete",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Delete a shop product",
+    tags=["Shop"],
+)
+async def admin_delete_shop_product(request: Request, product_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    product = await shop_repo.get_product_by_id(product_id)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    deleted = await shop_repo.delete_product(product_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    image_url = product.get("image_url")
+    if image_url:
+        try:
+            delete_stored_file(image_url, _private_uploads_path)
+        except HTTPException as exc:
+            log_error(
+                "Failed to remove deleted product image",
+                product_id=product_id,
+                error=str(exc),
+            )
+        except OSError as exc:
+            log_error(
+                "Failed to remove deleted product image",
+                product_id=product_id,
+                error=str(exc),
+            )
+
+    log_info(
+        "Shop product deleted",
+        product_id=product_id,
+        deleted_by=current_user.get("id") if current_user else None,
     )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
