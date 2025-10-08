@@ -490,6 +490,32 @@ async def _load_staff_context(
     return user, membership, company, staff_permission, company_id, None
 
 
+def _companies_redirect(
+    *,
+    company_id: int | None = None,
+    success: str | None = None,
+    error: str | None = None,
+    extra: dict[str, str] | None = None,
+) -> RedirectResponse:
+    params: dict[str, str] = {}
+    if company_id is not None:
+        params["company_id"] = str(company_id)
+    if success:
+        params["success"] = success.strip()[:200]
+    if error:
+        params["error"] = error.strip()[:200]
+    if extra:
+        for key, value in extra.items():
+            if value is None:
+                continue
+            params[key] = value
+    query = urlencode(params)
+    url = "/admin/companies"
+    if query:
+        url = f"{url}?{query}"
+    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     await db.connect()
@@ -1596,6 +1622,381 @@ async def import_syncro_contacts(request: Request):
         "updated": summary.updated,
         "skipped": summary.skipped,
     })
+
+
+@app.get("/admin/companies", response_class=HTMLResponse)
+async def admin_companies_page(request: Request, company_id: int | None = None):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    is_super_admin = bool(user.get("is_super_admin"))
+    membership = getattr(request.state, "active_membership", None)
+    active_company_id = getattr(request.state, "active_company_id", None)
+
+    if not is_super_admin and not (membership and membership.get("is_admin")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Company admin privileges required")
+
+    managed_companies: list[dict[str, Any]] = []
+    if is_super_admin:
+        managed_companies = await company_repo.list_companies()
+    elif active_company_id is not None:
+        company_record = await company_repo.get_company_by_id(int(active_company_id))
+        if company_record:
+            managed_companies = [company_record]
+        company_id = int(active_company_id)
+
+    selected_company = None
+    if company_id is not None:
+        selected_company = await company_repo.get_company_by_id(int(company_id))
+        if not selected_company and not is_super_admin:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    elif managed_companies:
+        selected_company = managed_companies[0]
+        company_id = int(selected_company["id"])
+
+    assignments = await user_company_repo.list_assignments(company_id)
+    user_options: list[dict[str, Any]] = []
+    if is_super_admin:
+        user_options = await user_repo.list_users()
+
+    query_params = request.query_params
+    success_message = query_params.get("success")
+    error_message = query_params.get("error")
+    invited_email = query_params.get("invitedEmail")
+    temp_password = query_params.get("tempPassword")
+
+    staff_permission_options = [
+        {"value": 0, "label": "None"},
+        {"value": 1, "label": "Department"},
+        {"value": 2, "label": "Department + Unassigned"},
+        {"value": 3, "label": "Company"},
+    ]
+    permission_columns = [
+        {"field": "is_admin", "label": "Admin"},
+        {"field": "can_manage_licenses", "label": "Licenses"},
+        {"field": "can_order_licenses", "label": "Order"},
+        {"field": "can_manage_office_groups", "label": "Office groups"},
+        {"field": "can_manage_assets", "label": "Assets"},
+        {"field": "can_manage_invoices", "label": "Invoices"},
+        {"field": "can_access_shop", "label": "Shop"},
+    ]
+
+    extra = {
+        "title": "Companies",
+        "is_super_admin": is_super_admin,
+        "managed_companies": managed_companies,
+        "selected_company": selected_company,
+        "selected_company_id": company_id,
+        "assignments": assignments,
+        "user_options": user_options,
+        "staff_permission_options": staff_permission_options,
+        "permission_columns": permission_columns,
+        "success_message": success_message,
+        "error_message": error_message,
+        "invited_email": invited_email,
+        "temporary_password": temp_password,
+    }
+    return await _render_template("admin/companies.html", request, user, extra=extra)
+
+
+@app.post("/admin/companies", response_class=RedirectResponse)
+async def admin_create_company(
+    request: Request,
+    name: str = Form(...),
+    syncroCompanyId: str | None = Form(None),
+    xeroId: str | None = Form(None),
+    isVip: str | None = Form(None),
+):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    name_value = name.strip()
+    if not name_value:
+        return _companies_redirect(error="Company name is required")
+    data: dict[str, Any] = {"name": name_value}
+    syncro_value = (syncroCompanyId or "").strip() or None
+    xero_value = (xeroId or "").strip() or None
+    if syncro_value:
+        data["syncro_company_id"] = syncro_value
+    if xero_value:
+        data["xero_id"] = xero_value
+    data["is_vip"] = 1 if isVip else 0
+    created = await company_repo.create_company(**data)
+    log_info("Company created", company_id=created.get("id"), user_id=user.get("id"))
+    return _companies_redirect(company_id=int(created["id"]), success="Company created")
+
+
+@app.post("/admin/companies/{company_id}", response_class=RedirectResponse)
+async def admin_update_company(
+    company_id: int,
+    request: Request,
+    name: str = Form(...),
+    syncroCompanyId: str | None = Form(None),
+    xeroId: str | None = Form(None),
+    isVip: str | None = Form(None),
+):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    updates: dict[str, Any] = {}
+    name_value = name.strip()
+    if name_value and name_value != company.get("name"):
+        updates["name"] = name_value
+    updates["syncro_company_id"] = (syncroCompanyId or "").strip() or None
+    updates["xero_id"] = (xeroId or "").strip() or None
+    updates["is_vip"] = 1 if isVip else 0
+    await company_repo.update_company(company_id, **updates)
+    log_info("Company updated", company_id=company_id, user_id=user.get("id"))
+    return _companies_redirect(company_id=company_id, success="Company updated")
+
+
+@app.post("/admin/companies/users/create", response_class=RedirectResponse)
+async def admin_create_company_user(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    companyId: int | None = Form(None),
+    firstName: str | None = Form(None),
+    lastName: str | None = Form(None),
+):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    is_super_admin = bool(user.get("is_super_admin"))
+    membership = getattr(request.state, "active_membership", None)
+    active_company_id = getattr(request.state, "active_company_id", None)
+
+    if is_super_admin:
+        target_company_id = companyId
+    else:
+        if not (membership and membership.get("is_admin")):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Company admin privileges required")
+        if active_company_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Active company required")
+        target_company_id = int(active_company_id)
+
+    if not target_company_id:
+        return _companies_redirect(error="Select a company")
+
+    company = await company_repo.get_company_by_id(int(target_company_id))
+    if not company:
+        return _companies_redirect(error="Company not found")
+
+    email_value = email.strip().lower()
+    if not email_value:
+        return _companies_redirect(company_id=int(target_company_id), error="Email is required")
+    if await user_repo.get_user_by_email(email_value):
+        return _companies_redirect(company_id=int(target_company_id), error="Email is already registered")
+
+    password_value = password.strip()
+    if len(password_value) < 8:
+        return _companies_redirect(company_id=int(target_company_id), error="Password must be at least 8 characters")
+
+    created = await user_repo.create_user(
+        email=email_value,
+        password=password_value,
+        first_name=(firstName or "").strip() or None,
+        last_name=(lastName or "").strip() or None,
+        company_id=int(target_company_id),
+    )
+    await user_repo.update_user(created["id"], force_password_change=1)
+    await user_company_repo.assign_user_to_company(user_id=created["id"], company_id=int(target_company_id))
+    log_info(
+        "Company user created",
+        user_id=created.get("id"),
+        company_id=target_company_id,
+        created_by=user.get("id"),
+    )
+    return _companies_redirect(company_id=int(target_company_id), success="User created")
+
+
+@app.post("/admin/companies/users/invite", response_class=RedirectResponse)
+async def admin_invite_company_user(
+    request: Request,
+    email: str = Form(...),
+    firstName: str | None = Form(None),
+    lastName: str | None = Form(None),
+    companyId: int | None = Form(None),
+):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    is_super_admin = bool(user.get("is_super_admin"))
+    membership = getattr(request.state, "active_membership", None)
+    active_company_id = getattr(request.state, "active_company_id", None)
+
+    if is_super_admin:
+        target_company_id = companyId
+    else:
+        if not (membership and membership.get("is_admin")):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Company admin privileges required")
+        if active_company_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Active company required")
+        target_company_id = int(active_company_id)
+
+    if not target_company_id:
+        return _companies_redirect(error="Select a company")
+
+    company = await company_repo.get_company_by_id(int(target_company_id))
+    if not company:
+        return _companies_redirect(error="Company not found")
+
+    email_value = email.strip().lower()
+    if not email_value:
+        return _companies_redirect(company_id=int(target_company_id), error="Email is required")
+    if await user_repo.get_user_by_email(email_value):
+        return _companies_redirect(company_id=int(target_company_id), error="Email is already registered")
+
+    temp_password = secrets.token_urlsafe(12)
+    created = await user_repo.create_user(
+        email=email_value,
+        password=temp_password,
+        first_name=(firstName or "").strip() or None,
+        last_name=(lastName or "").strip() or None,
+        company_id=int(target_company_id),
+    )
+    await user_repo.update_user(created["id"], force_password_change=1)
+    await user_company_repo.assign_user_to_company(user_id=created["id"], company_id=int(target_company_id))
+    log_info(
+        "Company user invited",
+        user_id=created.get("id"),
+        company_id=target_company_id,
+        invited_by=user.get("id"),
+    )
+    return _companies_redirect(
+        company_id=int(target_company_id),
+        success="Invitation generated",
+        extra={
+            "invitedEmail": email_value,
+            "tempPassword": temp_password,
+        },
+    )
+
+
+@app.post("/admin/companies/assign", response_class=RedirectResponse)
+async def admin_assign_existing_user(
+    request: Request,
+    userId: int = Form(...),
+    companyId: int = Form(...),
+):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    company = await company_repo.get_company_by_id(companyId)
+    if not company:
+        return _companies_redirect(error="Company not found")
+    existing_user = await user_repo.get_user_by_id(userId)
+    if not existing_user:
+        return _companies_redirect(company_id=companyId, error="User not found")
+    await user_company_repo.assign_user_to_company(user_id=userId, company_id=companyId)
+    if not existing_user.get("company_id"):
+        await user_repo.update_user(userId, company_id=companyId)
+    log_info(
+        "User assigned to company",
+        target_user_id=userId,
+        company_id=companyId,
+        actor_id=user.get("id"),
+    )
+    return _companies_redirect(company_id=companyId, success="User assigned")
+
+
+@app.post("/admin/companies/assignment/{company_id}/{user_id}/permission", response_class=JSONResponse)
+async def admin_update_assignment_permission(
+    company_id: int,
+    user_id: int,
+    request: Request,
+    field: str = Form(...),
+    value: str = Form(...),
+):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    is_super_admin = bool(user.get("is_super_admin"))
+    membership = await user_company_repo.get_user_company(user.get("id"), company_id)
+    if not is_super_admin and not (membership and membership.get("is_admin")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Company admin privileges required")
+    assignment = await user_company_repo.get_user_company(user_id, company_id)
+    if not assignment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found")
+    bool_value = value.lower() in {"1", "true", "yes", "on"}
+    try:
+        await user_company_repo.update_permission(user_id=user_id, company_id=company_id, field=field, value=bool_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    log_info(
+        "Company permission updated",
+        target_user_id=user_id,
+        company_id=company_id,
+        field=field,
+        value=bool_value,
+        actor_id=user.get("id"),
+    )
+    return JSONResponse({"success": True, "value": bool_value})
+
+
+@app.post("/admin/companies/assignment/{company_id}/{user_id}/staff-permission", response_class=JSONResponse)
+async def admin_update_staff_permission(
+    company_id: int,
+    user_id: int,
+    request: Request,
+    permission: int = Form(...),
+):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    is_super_admin = bool(user.get("is_super_admin"))
+    membership = await user_company_repo.get_user_company(user.get("id"), company_id)
+    if not is_super_admin and not (membership and membership.get("is_admin")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Company admin privileges required")
+    assignment = await user_company_repo.get_user_company(user_id, company_id)
+    if not assignment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found")
+    await user_company_repo.update_staff_permission(user_id=user_id, company_id=company_id, permission=permission)
+    updated = await user_company_repo.get_user_company(user_id, company_id)
+    log_info(
+        "Staff permission updated",
+        target_user_id=user_id,
+        company_id=company_id,
+        permission=updated.get("staff_permission"),
+        actor_id=user.get("id"),
+    )
+    return JSONResponse({
+        "success": True,
+        "permission": int(updated.get("staff_permission", 0)) if updated else 0,
+    })
+
+
+@app.post("/admin/companies/assignment/{company_id}/{user_id}/remove", response_class=JSONResponse)
+async def admin_remove_assignment(company_id: int, user_id: int, request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    is_super_admin = bool(user.get("is_super_admin"))
+    membership = await user_company_repo.get_user_company(user.get("id"), company_id)
+    if not is_super_admin and not (membership and membership.get("is_admin")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Company admin privileges required")
+    if not is_super_admin and user.get("id") == user_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot remove your own membership")
+    assignment = await user_company_repo.get_user_company(user_id, company_id)
+    if not assignment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found")
+    await user_company_repo.remove_assignment(user_id=user_id, company_id=company_id)
+    log_info(
+        "Company membership removed",
+        target_user_id=user_id,
+        company_id=company_id,
+        actor_id=user.get("id"),
+    )
+    return JSONResponse({"success": True})
 
 
 @app.get("/admin/roles", response_class=HTMLResponse)
