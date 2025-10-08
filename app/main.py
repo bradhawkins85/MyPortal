@@ -4,6 +4,7 @@ import asyncio
 import json
 import secrets
 from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
 
 from collections.abc import Iterable, Mapping
 from datetime import datetime, time, timedelta, timezone
@@ -15,7 +16,7 @@ import httpx
 from fastapi import FastAPI, Form, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 from starlette.datastructures import FormData
@@ -136,19 +137,37 @@ app.add_middleware(CSRFMiddleware)
 
 templates = Jinja2Templates(directory=str(templates_config.template_path))
 
-# Ensure product and document uploads remain web-accessible with the same
-# paths used by the legacy Node.js implementation.  The uploads directory is
-# created on startup so FastAPI's static file handler can serve cached product
-# images without returning 404 responses.
+# Ensure document uploads remain web-accessible with the same paths used by the
+# legacy Node.js implementation.  Product images continue to live in the
+# private ``/uploads`` directory which requires authentication before access.
 _uploads_path = templates_config.static_path / "uploads"
 _uploads_path.mkdir(parents=True, exist_ok=True)
 
+_private_uploads_path = Path(__file__).resolve().parent.parent / "private_uploads"
+_private_uploads_path.mkdir(parents=True, exist_ok=True)
+try:
+    _private_uploads_path.chmod(0o700)
+except OSError:
+    # The filesystem may not support chmod (e.g. on Windows).  Continue with
+    # the secure default provided by ``mkdir``.
+    pass
+
+
+def _resolve_private_upload(filename: str) -> Path:
+    """Resolve ``/uploads`` paths to the secured private uploads directory."""
+
+    safe_name = Path(filename).name
+    candidate = (_private_uploads_path / safe_name).resolve()
+    try:
+        candidate.relative_to(_private_uploads_path.resolve())
+    except ValueError as exc:  # pragma: no cover - defensive guard
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found") from exc
+    if not candidate.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    return candidate
+
+
 app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
-app.mount(
-    "/uploads",
-    StaticFiles(directory=str(_uploads_path), check_dir=False),
-    name="uploads",
-)
 
 app.include_router(auth.router)
 app.include_router(users.router)
@@ -191,6 +210,18 @@ async def _require_super_admin_page(request: Request) -> tuple[dict[str, Any] | 
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     return user, None
+
+
+@app.get("/uploads/{filename}", response_class=FileResponse, include_in_schema=False)
+async def serve_private_upload(filename: str, request: Request):
+    """Serve product images stored in the legacy private uploads directory."""
+
+    _, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    file_path = _resolve_private_upload(filename)
+    headers = {"Cache-Control": "public, max-age=86400"}
+    return FileResponse(file_path, headers=headers)
 
 
 def _to_iso(dt: Any) -> str | None:
