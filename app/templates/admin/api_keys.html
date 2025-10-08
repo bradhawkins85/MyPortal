@@ -1,0 +1,421 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">API credentials</h2>
+        <p class="card__subtitle">
+          Issue, rotate, and revoke service credentials. UTC timestamps render in your browser's local timezone.
+        </p>
+      </div>
+      <div class="stats-grid">
+        <div class="stat">
+          <span class="stat__label">Active</span>
+          <span class="stat__value">{{ api_key_stats.active }}</span>
+        </div>
+        <div class="stat">
+          <span class="stat__label">Expired</span>
+          <span class="stat__value">{{ api_key_stats.expired }}</span>
+        </div>
+        <div class="stat">
+          <span class="stat__label">Total</span>
+          <span class="stat__value">{{ api_key_stats.total }}</span>
+        </div>
+      </div>
+      <form method="get" class="filter-grid">
+        <div class="form-field">
+          <label class="form-label" for="filter-search">Search</label>
+          <input
+            class="form-input"
+            type="search"
+            id="filter-search"
+            name="search"
+            value="{{ filters.search }}"
+            placeholder="Description or prefix"
+          />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="filter-order">Sort by</label>
+          <select class="form-input" id="filter-order" name="order_by">
+            {% for option in order_options %}
+              <option value="{{ option.value }}" {% if option.value == filters.order_by %}selected{% endif %}>
+                {{ option.label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="filter-direction">Direction</label>
+          <select class="form-input" id="filter-direction" name="order_direction">
+            {% for option in direction_options %}
+              <option value="{{ option.value }}" {% if option.value == filters.order_direction %}selected{% endif %}>
+                {{ option.label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="form-checkbox" for="filter-include-expired">
+            <input
+              type="checkbox"
+              id="filter-include-expired"
+              name="include_expired"
+              value="1"
+              {% if filters.include_expired %}checked{% endif %}
+            />
+            <span>Include expired keys</span>
+          </label>
+        </div>
+        <div class="form-actions form-actions--inline">
+          <button type="submit" class="button">Apply</button>
+          <a class="button button--ghost" href="/admin/api-keys">Reset</a>
+        </div>
+      </form>
+    </header>
+
+    {% if errors %}
+      {% for error in errors %}
+        <div class="alert alert--error">{{ error }}</div>
+      {% endfor %}
+    {% endif %}
+
+    {% if status_message %}
+      <div class="alert alert--info">{{ status_message }}</div>
+    {% endif %}
+
+    {% if new_api_key %}
+      <section class="secret-card">
+        <header class="secret-card__header">
+          <div>
+            <h3 class="secret-card__title">New API key issued</h3>
+            <p class="secret-card__subtitle">
+              Key preview {{ new_api_key.key_preview }}.
+              {% if new_api_key.expiry_iso %}Expires <span data-utc="{{ new_api_key.expiry_iso }}"></span>.{% endif %}
+            </p>
+          </div>
+          <button type="button" class="button button--ghost" data-copy-api-key="{{ new_api_key.value }}">
+            Copy
+          </button>
+        </header>
+        <div class="secret-card__body">
+          <code class="secret-card__value">{{ new_api_key.value }}</code>
+          <p class="secret-card__hint">
+            This value is only shown once. Update downstream services before rotating again.
+          </p>
+        </div>
+      </section>
+    {% endif %}
+
+    <div class="table-toolbar">
+      <input
+        type="search"
+        class="form-input"
+        placeholder="Quick filter rows"
+        aria-label="Filter API keys"
+        data-table-filter="api-keys-table"
+      />
+      <form class="inline-form" method="post" action="/admin/api-keys">
+        {% for name, value in filter_state.items() %}
+          <input type="hidden" name="{{ name }}" value="{{ value }}" />
+        {% endfor %}
+        <div class="inline-form__fields">
+          <label class="visually-hidden" for="new-key-description">Description</label>
+          <input
+            class="form-input"
+            id="new-key-description"
+            name="description"
+            maxlength="255"
+            placeholder="Description (optional)"
+          />
+          <label class="visually-hidden" for="new-key-expiry">Expiry</label>
+          <input
+            class="form-input"
+            id="new-key-expiry"
+            name="expiry_date"
+            type="date"
+            placeholder="Expiry date"
+          />
+          <button type="submit" class="button">Create key</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="table-wrapper">
+      <table class="table" id="api-keys-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string">Description</th>
+            <th scope="col" data-sort="string">Preview</th>
+            <th scope="col" data-sort="date">Created</th>
+            <th scope="col" data-sort="date">Expiry</th>
+            <th scope="col" data-sort="date">Last seen</th>
+            <th scope="col" data-sort="number">Usage</th>
+            <th scope="col" class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if api_keys %}
+            {% for key in api_keys %}
+              <tr>
+                <td data-label="Description">
+                  {% if key.description %}
+                    {{ key.description }}
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+                <td data-label="Preview">{{ key.key_preview }}</td>
+                <td data-label="Created" data-utc="{{ key.created_iso or '' }}" data-value="{{ key.created_iso or '' }}">
+                  {{ key.created_iso or '—' }}
+                </td>
+                <td data-label="Expiry" data-value="{{ key.expiry_iso or '' }}">
+                  {% if key.expiry_iso %}
+                    <span data-utc="{{ key.expiry_iso }}"></span>
+                    {% if key.is_expired %}
+                      <span class="badge badge--danger">Expired</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="badge badge--muted">No expiry</span>
+                  {% endif %}
+                </td>
+                <td data-label="Last seen" data-value="{{ key.last_seen_iso or '' }}">
+                  {% if key.last_seen_iso %}
+                    <span data-utc="{{ key.last_seen_iso }}"></span>
+                  {% else %}
+                    <span class="text-muted">Never</span>
+                  {% endif %}
+                </td>
+                <td data-label="Usage" data-value="{{ key.usage_count }}">{{ key.usage_count }}</td>
+                <td class="table__actions">
+                  <div class="table__action-buttons">
+                    <details class="details details--inline">
+                      <summary>Usage &amp; rotate</summary>
+                      <div class="inline-panel">
+                        <h4 class="inline-panel__title">Recent usage</h4>
+                        {% if key.usage %}
+                          <ul class="usage-list">
+                            {% for usage in key.usage %}
+                              <li>
+                                <span class="usage-list__ip">{{ usage.ip_address }}</span>
+                                <span class="usage-list__count">{{ usage.usage_count }}</span>
+                                <span class="usage-list__time">
+                                  {% if usage.last_used_iso %}
+                                    <span data-utc="{{ usage.last_used_iso }}"></span>
+                                  {% else %}
+                                    Never
+                                  {% endif %}
+                                </span>
+                              </li>
+                            {% endfor %}
+                          </ul>
+                        {% else %}
+                          <p class="text-muted">No recorded usage yet.</p>
+                        {% endif %}
+                        <form class="inline-form inline-form--stacked" method="post" action="/admin/api-keys/rotate">
+                          {% for name, value in filter_state.items() %}
+                            <input type="hidden" name="{{ name }}" value="{{ value }}" />
+                          {% endfor %}
+                          <input type="hidden" name="api_key_id" value="{{ key.id }}" />
+                          <div class="form-grid">
+                            <div class="form-field">
+                              <label class="form-label" for="rotate-description-{{ key.id }}">New description</label>
+                              <input
+                                class="form-input"
+                                id="rotate-description-{{ key.id }}"
+                                name="description"
+                                maxlength="255"
+                                placeholder="Leave blank to keep current"
+                              />
+                            </div>
+                            <div class="form-field">
+                              <label class="form-label" for="rotate-expiry-{{ key.id }}">New expiry</label>
+                              <input
+                                class="form-input"
+                                id="rotate-expiry-{{ key.id }}"
+                                name="expiry_date"
+                                type="date"
+                                placeholder="YYYY-MM-DD"
+                              />
+                              <p class="form-help">Defaults to the existing expiry.</p>
+                            </div>
+                          </div>
+                          <div class="form-field form-field--checkbox">
+                            <label class="form-checkbox" for="rotate-retire-{{ key.id }}">
+                              <input
+                                type="checkbox"
+                                id="rotate-retire-{{ key.id }}"
+                                name="retire_previous"
+                                value="1"
+                                checked
+                              />
+                              <span>Immediately retire the previous key</span>
+                            </label>
+                          </div>
+                          <div class="form-actions form-actions--inline">
+                            <button type="submit" class="button">Rotate key</button>
+                          </div>
+                        </form>
+                      </div>
+                    </details>
+                    <form class="inline-form" method="post" action="/admin/api-keys/delete">
+                      {% for name, value in filter_state.items() %}
+                        <input type="hidden" name="{{ name }}" value="{{ value }}" />
+                      {% endfor %}
+                      <input type="hidden" name="api_key_id" value="{{ key.id }}" />
+                      <button
+                        type="submit"
+                        class="button button--danger"
+                        data-confirm="Revoke this API key? Downstream services using it will lose access."
+                      >
+                        Revoke
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="7" class="table__empty">No API keys found. Create one to begin issuing credentials.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Cross-service audit correlations</h2>
+        <p class="card__subtitle">
+          Correlate privileged activity across services to trace credential usage and follow-on automation.
+        </p>
+      </div>
+      <form method="get" class="filter-grid">
+        <input type="hidden" name="search" value="{{ filters.search }}" />
+        <input type="hidden" name="order_by" value="{{ filters.order_by }}" />
+        <input type="hidden" name="order_direction" value="{{ filters.order_direction }}" />
+        {% if filters.include_expired %}
+          <input type="hidden" name="include_expired" value="1" />
+        {% endif %}
+        <div class="form-field">
+          <label class="form-label" for="correlation-search">Search correlations</label>
+          <input
+            class="form-input"
+            id="correlation-search"
+            name="correlation_search"
+            value="{{ filters.correlation_search }}"
+            placeholder="Key fingerprint, company, or task"
+          />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="correlation-service">Service filter</label>
+          <select class="form-input" id="correlation-service" name="service_filter">
+            <option value="">All services</option>
+            {% for option in service_options %}
+              <option value="{{ option.value }}" {% if option.value == filters.service_filter %}selected{% endif %}>
+                {{ option.label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-actions form-actions--inline">
+          <button type="submit" class="button">Filter correlations</button>
+        </div>
+      </form>
+    </header>
+
+    <div class="table-wrapper">
+      <table class="table" id="correlations-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string">Signal</th>
+            <th scope="col" data-sort="string">Services</th>
+            <th scope="col" data-sort="number">Events</th>
+            <th scope="col" data-sort="date">Last activity</th>
+            <th scope="col">Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if correlations %}
+            {% for correlation in correlations %}
+              <tr>
+                <td data-label="Signal">{{ correlation.label }}</td>
+                <td data-label="Services">
+                  <div class="tag-list">
+                    {% for service in correlation.services %}
+                      <span class="tag">{{ service.replace('_', ' ') }}</span>
+                    {% endfor %}
+                  </div>
+                </td>
+                <td data-label="Events" data-value="{{ correlation.event_count }}">{{ correlation.event_count }}</td>
+                <td data-label="Last activity" data-value="{{ correlation.latest_iso or '' }}">
+                  {% if correlation.latest_iso %}
+                    <span data-utc="{{ correlation.latest_iso }}"></span>
+                  {% else %}
+                    <span class="text-muted">Unknown</span>
+                  {% endif %}
+                </td>
+                <td data-label="Details">
+                  <details class="details">
+                    <summary>View events</summary>
+                    <div class="timeline">
+                      {% for event in correlation.events %}
+                        <article class="timeline__event">
+                          <header class="timeline__header">
+                            <span class="timeline__timestamp">
+                              {% if event.created_at_iso %}
+                                <span data-utc="{{ event.created_at_iso }}"></span>
+                              {% else %}
+                                Unknown
+                              {% endif %}
+                            </span>
+                            <span class="timeline__action">{{ event.action }}</span>
+                          </header>
+                          <div class="timeline__body">
+                            <p>
+                              <strong>Entity:</strong> {{ event.entity_label }}<br />
+                              <strong>Service:</strong> {{ event.service }}<br />
+                              {% if event.user_email %}
+                                <strong>User:</strong> {{ event.user_email }}
+                              {% elif event.user_id %}
+                                <strong>User:</strong> #{{ event.user_id }}
+                              {% else %}
+                                <strong>User:</strong> System
+                              {% endif %}
+                              {% if event.ip_address %}<br /><strong>IP:</strong> {{ event.ip_address }}{% endif %}
+                            </p>
+                            {% if event.metadata %}
+                              <div class="code-block">
+                                <strong>Metadata</strong>
+                                <pre>{{ event.metadata | tojson(indent=2) }}</pre>
+                              </div>
+                            {% endif %}
+                          </div>
+                        </article>
+                      {% endfor %}
+                    </div>
+                  </details>
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="5" class="table__empty">No correlated audit activity recorded for the selected filters.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/admin.js" defer></script>
+{% endblock %}
