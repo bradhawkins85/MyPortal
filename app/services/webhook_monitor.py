@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import httpx
+
+from app.core.logging import log_error, log_info
+from app.repositories import webhook_events as webhook_repo
+
+_MAX_BACKOFF_SECONDS = 3600
+
+
+def _truncate(value: str | None, *, limit: int = 4000) -> str | None:
+    if value is None:
+        return None
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3] + "..."
+
+
+async def enqueue_event(
+    *,
+    name: str,
+    target_url: str,
+    payload: Any = None,
+    headers: dict[str, str] | None = None,
+    max_attempts: int = 3,
+    backoff_seconds: int = 300,
+    attempt_immediately: bool = True,
+) -> dict[str, Any]:
+    event = await webhook_repo.create_event(
+        name=name,
+        target_url=target_url,
+        headers=headers,
+        payload=payload,
+        max_attempts=max_attempts,
+        backoff_seconds=backoff_seconds,
+    )
+    if attempt_immediately and event.get("id"):
+        await _attempt_event(event)
+        refreshed = await webhook_repo.get_event(int(event["id"]))
+        if refreshed:
+            return refreshed
+    return event
+
+
+async def process_pending_events(limit: int = 10) -> None:
+    events = await webhook_repo.list_due_events(limit=limit)
+    for event in events:
+        try:
+            await webhook_repo.mark_in_progress(int(event["id"]))
+            await _attempt_event(event)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error("Failed to process webhook event", event_id=event.get("id"), error=str(exc))
+
+
+async def force_retry(event_id: int) -> dict[str, Any] | None:
+    await webhook_repo.force_retry(event_id)
+    event = await webhook_repo.get_event(event_id)
+    if not event:
+        return None
+    await _attempt_event(event)
+    return await webhook_repo.get_event(event_id)
+
+
+async def _attempt_event(event: dict[str, Any]) -> None:
+    event_id = int(event["id"])
+    attempt = int(event.get("attempt_count") or 0) + 1
+    max_attempts = int(event.get("max_attempts") or 1)
+    backoff_seconds = int(event.get("backoff_seconds") or 300)
+    headers = {str(key): str(value) for key, value in (event.get("headers") or {}).items()}
+    payload = event.get("payload")
+    log_info("Delivering webhook", event_id=event_id, attempt=attempt, url=event.get("target_url"))
+    response_status: int | None = None
+    response_body: str | None = None
+    error_message: str | None = None
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                str(event["target_url"]),
+                json=payload,
+                headers=headers,
+            )
+        response_status = response.status_code
+        response_body = _truncate(response.text)
+        success = 200 <= response.status_code < 300
+        status_text = "succeeded" if success else "failed"
+        await webhook_repo.record_attempt(
+            event_id=event_id,
+            attempt_number=attempt,
+            status=status_text,
+            response_status=response_status,
+            response_body=response_body,
+            error_message=None if success else f"HTTP {response.status_code}",
+        )
+        if success:
+            await webhook_repo.mark_event_completed(
+                event_id,
+                attempt_number=attempt,
+                response_status=response_status,
+                response_body=response_body,
+            )
+            log_info("Webhook delivered", event_id=event_id, status=response_status)
+            return
+        error_message = f"Unexpected status {response.status_code}"
+    except Exception as exc:  # pragma: no cover - network safety
+        error_message = str(exc)
+        await webhook_repo.record_attempt(
+            event_id=event_id,
+            attempt_number=attempt,
+            status="error",
+            response_status=response_status,
+            response_body=response_body,
+            error_message=error_message,
+        )
+
+    if attempt >= max_attempts:
+        await webhook_repo.mark_event_failed(
+            event_id,
+            attempt_number=attempt,
+            error_message=error_message,
+            response_status=response_status,
+            response_body=response_body,
+        )
+        log_error("Webhook delivery failed", event_id=event_id, error=error_message)
+        return
+
+    next_attempt = _calculate_next_attempt(backoff_seconds, attempt)
+    await webhook_repo.schedule_retry(
+        event_id,
+        attempt_number=attempt,
+        next_attempt_at=next_attempt,
+        error_message=error_message,
+        response_status=response_status,
+        response_body=response_body,
+    )
+    log_info(
+        "Webhook scheduled for retry",
+        event_id=event_id,
+        attempt=attempt,
+        next_attempt=next_attempt.isoformat(),
+        reason=error_message,
+    )
+
+
+def _calculate_next_attempt(backoff_seconds: int, attempt: int) -> datetime:
+    delay = min(backoff_seconds * (2 ** (attempt - 1)), _MAX_BACKOFF_SECONDS)
+    return datetime.now(timezone.utc) + timedelta(seconds=delay)

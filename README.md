@@ -23,6 +23,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - Pricing workflow approvals with notification feed and audit-friendly status changes
 - Automated CSRF protection on authenticated state-changing requests
 - Super admin access to the OpnForm builder for creating and editing forms
+- Automation dashboard with persistent scheduler management, webhook retry monitoring, and admin controls
 
 ## Port Catalogue & Pricing Workflows
 
