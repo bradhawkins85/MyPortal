@@ -15,6 +15,30 @@
           <img src="/static/logo.svg" alt="{{ app_name }}" class="brand__logo" />
           <span class="brand__name">{{ app_name }}</span>
         </div>
+        {% if available_companies %}
+        <div class="company-switcher">
+          <form action="/switch-company" method="post" data-company-switcher>
+            {% if csrf_token %}
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+            {% endif %}
+            {% set return_url = request.url.path %}
+            {% if request.url.query %}
+              {% set return_url = return_url + '?' + request.url.query %}
+            {% endif %}
+            <input type="hidden" name="returnUrl" value="{{ return_url }}" />
+            <label for="company-switcher" class="company-switcher__label">Company</label>
+            <div class="company-switcher__field">
+              <select id="company-switcher" name="companyId" class="company-switcher__select">
+                {% for company in available_companies %}
+                  <option value="{{ company.company_id }}" {% if company.company_id == active_company_id %}selected{% endif %}>
+                    {{ company.company_name or ('Company #' ~ company.company_id) }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+          </form>
+        </div>
+        {% endif %}
         <ul class="menu">
           {% block sidebar_menu %}
           {% set current_path = request.url.path if request is defined else '' %}
@@ -116,6 +140,21 @@
         </section>
       </main>
     </div>
+    <script>
+      (function () {
+        const form = document.querySelector('[data-company-switcher]');
+        if (!form) return;
+        const select = form.querySelector('.company-switcher__select');
+        if (!select) return;
+        select.addEventListener('change', function () {
+          if (typeof form.requestSubmit === 'function') {
+            form.requestSubmit();
+          } else {
+            form.submit();
+          }
+        });
+      })();
+    </script>
     {% block scripts %}{% endblock %}
   </body>
 </html>
