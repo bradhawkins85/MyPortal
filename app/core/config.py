@@ -37,6 +37,15 @@ class Settings(BaseSettings):
     smtp_user: str | None = Field(default=None, validation_alias="SMTP_USER")
     smtp_password: str | None = Field(default=None, validation_alias="SMTP_PASS")
     smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_SECURE")
+    syncro_webhook_url: AnyHttpUrl | None = Field(
+        default=None, validation_alias="SYNCRO_WEBHOOK_URL"
+    )
+    syncro_api_key: str | None = Field(default=None, validation_alias="SYNCRO_API_KEY")
+    verify_webhook_url: AnyHttpUrl | None = Field(
+        default=None, validation_alias="VERIFY_WEBHOOK_URL"
+    )
+    verify_api_key: str | None = Field(default=None, validation_alias="VERIFY_API_KEY")
+    portal_url: AnyHttpUrl | None = Field(default=None, validation_alias="PORTAL_URL")
     azure_client_id: str | None = Field(default=None, validation_alias="AZURE_CLIENT_ID")
     azure_client_secret: str | None = Field(default=None, validation_alias="AZURE_CLIENT_SECRET")
     azure_tenant_id: str | None = Field(default=None, validation_alias="AZURE_TENANT_ID")
