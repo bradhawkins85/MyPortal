@@ -1,3 +1,4 @@
+- 2025-10-08, 11:49 UTC, Fix, Restored the licenses admin HTML view by namespacing the API under /api to prevent JSON responses from hijacking the UI route
 - 2025-10-10, 04:45 UTC, Fix, Routed staff API under /api to restore the staff management UI rendering on the Python portal
 - 2025-10-10, 13:45 UTC, Fix, Corrected scheduler monitoring migration defaults to remain MariaDB-compatible while storing UTC timestamps
 - 2025-10-08, 11:20 UTC, Feature, Added hashed API key management endpoints with usage telemetry, audit logging, and admin reporting

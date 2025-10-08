@@ -11,7 +11,7 @@ from app.schemas.licenses import (
 )
 
 
-router = APIRouter(prefix="/licenses", tags=["Licenses"])
+router = APIRouter(prefix="/api/licenses", tags=["Licenses"])
 
 
 @router.get("", response_model=list[LicenseResponse])
