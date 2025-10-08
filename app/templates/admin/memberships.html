@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+
+{% block sidebar_menu %}
+  {{ super() }}
+  <li class="menu__item">
+    <a href="/admin/memberships" aria-current="page">
+      <span class="menu__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-3.33 0-10 1.67-10 5v1h20v-1c0-3.33-6.67-5-10-5z"/></svg>
+      </span>
+      <span class="menu__label">Memberships</span>
+    </a>
+  </li>
+  <li class="menu__item">
+    <a href="/admin/roles">
+      <span class="menu__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M10.67 3.5a1 1 0 0 1 1.66 0l1.36 2.04a1 1 0 0 0 .63.43l2.35.5a1 1 0 0 1 .54 1.68l-1.67 1.8a1 1 0 0 0-.26.74l.2 2.4a1 1 0 0 1-1.4 1l-2.2-1a1 1 0 0 0-.84 0l-2.2 1a1 1 0 0 1-1.4-1l.2-2.4a1 1 0 0 0-.26-.74L6.39 8.15a1 1 0 0 1 .54-1.68l2.35-.5a1 1 0 0 0 .63-.43z"/></svg>
+      </span>
+      <span class="menu__label">Roles</span>
+    </a>
+  </li>
+  <li class="menu__item">
+    <a href="/admin/audit-logs">
+      <span class="menu__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M5 4h14a1 1 0 0 1 1 1v15l-8-3-8 3V5a1 1 0 0 1 1-1z"/></svg>
+      </span>
+      <span class="menu__label">Audit trail</span>
+    </a>
+  </li>
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Company memberships</h2>
+        <p class="card__subtitle">Assign users to companies, manage their roles, and pause access when needed.</p>
+      </div>
+      <div class="card__controls">
+        <form method="get" class="card__control">
+          <label class="visually-hidden" for="company-select">Choose company</label>
+          <select id="company-select" class="form-input" name="company_id" onchange="this.form.submit()">
+            {% for company in companies %}
+              <option value="{{ company.id }}" {% if selected_company_id == company.id %}selected{% endif %}>{{ company.name }}</option>
+            {% endfor %}
+          </select>
+        </form>
+        <input
+          type="search"
+          class="form-input"
+          placeholder="Filter memberships"
+          aria-label="Filter memberships"
+          data-table-filter="memberships-table"
+        />
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table" id="memberships-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string">User</th>
+            <th scope="col" data-sort="string">Role</th>
+            <th scope="col" data-sort="string">Status</th>
+            <th scope="col" data-sort="date">Invited</th>
+            <th scope="col" data-sort="date">Joined</th>
+            <th scope="col" data-sort="date">Last seen</th>
+            <th scope="col" class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if memberships %}
+            {% for membership in memberships %}
+              <tr
+                data-membership-id="{{ membership.id }}"
+                data-membership-user-id="{{ membership.user_id }}"
+                data-membership-role-id="{{ membership.role_id }}"
+                data-membership-status="{{ membership.status }}"
+              >
+                <td data-label="User">
+                  <div class="stacked">
+                    <strong>{{ membership.user_email }}</strong>
+                    <span class="text-muted">{{ membership.first_name or '' }} {{ membership.last_name or '' }}</span>
+                  </div>
+                </td>
+                <td data-label="Role">{{ membership.role_name }}</td>
+                <td data-label="Status">
+                  <span class="status status--{{ membership.status }}">{{ membership.status | capitalize }}</span>
+                </td>
+                <td data-label="Invited" data-utc="{{ membership.invited_at_iso or '' }}" data-value="{{ membership.invited_at_iso or '' }}">{{ membership.invited_at_iso or '—' }}</td>
+                <td data-label="Joined" data-utc="{{ membership.joined_at_iso or '' }}" data-value="{{ membership.joined_at_iso or '' }}">{{ membership.joined_at_iso or '—' }}</td>
+                <td data-label="Last seen" data-utc="{{ membership.last_seen_at_iso or '' }}" data-value="{{ membership.last_seen_at_iso or '' }}">{{ membership.last_seen_at_iso or '—' }}</td>
+                <td class="table__actions">
+                  <div class="table__action-buttons">
+                    <button type="button" class="button button--ghost" data-membership-edit>Edit</button>
+                    <button type="button" class="button button--danger" data-membership-delete>Remove</button>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="7" class="table__empty">No memberships are assigned to this company.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Invite an existing user</h2>
+        <p class="card__subtitle">Select a user and assign their role to add them to the chosen company.</p>
+      </div>
+    </header>
+    <form id="membership-create-form" class="form" autocomplete="off">
+      <input type="hidden" name="company_id" value="{{ selected_company_id or '' }}" />
+      <div class="form-field">
+        <label class="form-label" for="membership-user">User</label>
+        <select id="membership-user" name="user_id" class="form-input" required>
+          <option value="">Select a user</option>
+          {% for user in users %}
+            <option value="{{ user.id }}">{{ user.email }}{% if user.first_name or user.last_name %} — {{ user.first_name or '' }} {{ user.last_name or '' }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="membership-role">Role</label>
+        <select id="membership-role" name="role_id" class="form-input" required>
+          {% for role in roles %}
+            <option value="{{ role.id }}">{{ role.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="membership-status">Status</label>
+        <select id="membership-status" name="status" class="form-input" required>
+          {% for status in status_options %}
+            <option value="{{ status.value }}">{{ status.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Add membership</button>
+      </div>
+    </form>
+
+    <hr class="divider" />
+
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Update or suspend membership</h2>
+        <p class="card__subtitle">Select a membership to load its details. Changes take effect immediately.</p>
+      </div>
+    </header>
+    <form id="membership-update-form" class="form" autocomplete="off">
+      <input type="hidden" name="company_id" value="{{ selected_company_id or '' }}" />
+      <input type="hidden" name="membership_id" id="membership-id" />
+      <div class="form-field">
+        <label class="form-label" for="membership-user-display">User</label>
+        <input id="membership-user-display" class="form-input" disabled placeholder="Select a membership from the table" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="membership-role-update">Role</label>
+        <select id="membership-role-update" name="role_id" class="form-input" required>
+          {% for role in roles %}
+            <option value="{{ role.id }}">{{ role.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="membership-status-update">Status</label>
+        <select id="membership-status-update" name="status" class="form-input" required>
+          {% for status in status_options %}
+            <option value="{{ status.value }}">{{ status.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button" disabled data-membership-submit>Save changes</button>
+        <button type="button" class="button button--ghost" data-membership-clear>Clear selection</button>
+      </div>
+    </form>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/admin.js" defer></script>
+{% endblock %}
