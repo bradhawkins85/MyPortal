@@ -1,200 +1,613 @@
 <!DOCTYPE html>
 <html>
   <%- include('partials/head', { title: 'Licenses' }) %>
-<body>
-  <div class="app-container">
-    <%- include('partials/sidebar') %>
-    <div class="content">
-      <h1>Licenses</h1>
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>SKU</th>
-            <th>Count</th>
-            <th>Allocated</th>
-            <th>Expiry</th>
-            <th>Contract Term</th>
-            <% if (canOrderLicenses || isSuperAdmin) { %><th>Actions</th><% } %>
-          </tr>
-        </thead>
-        <tbody>
-        <% licenses.forEach(function(lic) { %>
-          <tr>
-            <td><%= lic.display_name %></td>
-            <td><%= lic.platform %></td>
-            <td><%= lic.count %></td>
-            <td><a href="#" class="allocated-link" data-license-id="<%= lic.id %>"><%= lic.allocated %></a></td>
-            <td><%= lic.expiry_date %></td>
-            <td><%= lic.contract_term %></td>
-            <% if (canOrderLicenses || isSuperAdmin) { %>
-              <td>
-                <% if (isSuperAdmin) { %>
-                  <button
-                    class="edit-btn"
-                    data-license-id="<%= lic.id %>"
-                    data-name="<%= lic.name %>"
-                    data-sku="<%= lic.platform %>"
-                    data-count="<%= lic.count %>"
-                    data-expiry-date="<%= lic.expiry_date ? new Date(lic.expiry_date).toISOString().split('T')[0] : '' %>"
-                    data-contract-term="<%= lic.contract_term %>"
-                  >Edit</button>
-                  <button class="delete-btn" data-license-id="<%= lic.id %>">Delete</button>
-                <% } %>
-                <% if (canOrderLicenses) { %>
-                  <button class="order-btn" data-license-id="<%= lic.id %>">Order More</button>
-                  <button class="remove-btn" data-license-id="<%= lic.id %>">Request Removal</button>
-                <% } %>
-              </td>
+  <body>
+    <div class="app-container">
+      <%- include('partials/sidebar') %>
+      <div class="content">
+        <div class="page-header">
+          <div class="page-header__summary">
+            <h1>Licenses</h1>
+            <p>
+              Review software entitlements, monitor seat usage, and action renewals for
+              <strong><%= companies.find((c) => c.company_id === currentCompanyId)?.company_name || 'this company' %></strong>.
+            </p>
+          </div>
+          <div class="header-actions">
+            <label class="filter-control" for="license-status-filter">
+              <span>Status</span>
+              <select id="license-status-filter" class="input-control">
+                <option value="all">All statuses</option>
+                <option value="active" selected>Active</option>
+                <option value="expiring">Expiring (30 days)</option>
+                <option value="expired">Expired</option>
+              </select>
+            </label>
+            <button type="button" id="refresh-licenses" class="btn btn-secondary">
+              <i class="fas fa-rotate"></i>
+              <span>Refresh</span>
+            </button>
+            <% if (canManageLicenses) { %>
+              <a href="/m365" class="btn btn-secondary" aria-label="Open Microsoft 365 sync">
+                <i class="fas fa-sync-alt"></i>
+                <span>Microsoft 365 Sync</span>
+              </a>
             <% } %>
-          </tr>
-        <% }); %>
-        </tbody>
-      </table>
-    </div>
-  </div>
+            <% if (isSuperAdmin) { %>
+              <button type="button" id="open-create-license" class="btn">
+                <i class="fas fa-plus"></i>
+                <span>Add License</span>
+              </button>
+            <% } %>
+          </div>
+        </div>
 
-  <div id="allocated-modal" class="modal" style="display:none;">
-    <div class="modal-content">
-      <span id="allocated-close" class="close">&times;</span>
-      <h2>Allocated Users</h2>
-      <ul id="allocated-users"></ul>
-    </div>
-  </div>
+        <%
+          const nowMs = Date.now();
+          const expiringThresholdMs = nowMs + 30 * 24 * 60 * 60 * 1000;
+          const totals = licenses.reduce(
+            (acc, lic) => {
+              const count = Number(lic.count) || 0;
+              const allocated = Number(lic.allocated) || 0;
+              acc.total += count;
+              acc.allocated += allocated;
+              const expiryRaw = lic.expiry_date;
+              if (expiryRaw) {
+                const expiryIso = expiryRaw.endsWith('Z') ? expiryRaw : `${expiryRaw}T00:00:00Z`;
+                const expiryMs = Date.parse(expiryIso);
+                if (!Number.isNaN(expiryMs)) {
+                  if (expiryMs < nowMs) {
+                    acc.expired += 1;
+                  } else if (expiryMs <= expiringThresholdMs) {
+                    acc.expiring += 1;
+                  }
+                }
+              }
+              return acc;
+            },
+            { total: 0, allocated: 0, expiring: 0, expired: 0 }
+          );
+          const availableTotal = Math.max(totals.total - totals.allocated, 0);
+        %>
 
-  <div id="edit-modal" class="modal" style="display:none;">
-    <div class="modal-content">
-      <span id="edit-close" class="close">&times;</span>
-      <h2>Edit License</h2>
-      <form id="edit-form">
-        <label for="edit-name">Name
-          <input type="text" id="edit-name">
-        </label>
-        <label for="edit-sku">SKU
-          <input type="text" id="edit-sku">
-        </label>
-        <label for="edit-count">Count
-          <input type="number" id="edit-count">
-        </label>
-        <label for="edit-expiry">Expiry
-          <input type="date" id="edit-expiry">
-        </label>
-        <label for="edit-contract">Contract Term
-          <input type="text" id="edit-contract">
-        </label>
-        <button type="submit">Save</button>
-      </form>
-    </div>
-  </div>
+        <div class="stats" aria-label="License usage overview">
+          <div class="stat-card">
+            <span class="stat-card__label">Total seats</span>
+            <strong class="stat-card__value"><%= totals.total %></strong>
+            <p class="stat-card__hint">Across all licensed products</p>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__label">Allocated</span>
+            <strong class="stat-card__value"><%= totals.allocated %></strong>
+            <p class="stat-card__hint">Seats currently assigned to staff</p>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__label">Available</span>
+            <strong class="stat-card__value"><%= availableTotal %></strong>
+            <p class="stat-card__hint">Seats ready to be provisioned</p>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__label">Expiring soon</span>
+            <strong class="stat-card__value"><%= totals.expiring %></strong>
+            <p class="stat-card__hint">Due within the next 30 days</p>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__label">Expired</span>
+            <strong class="stat-card__value"><%= totals.expired %></strong>
+            <p class="stat-card__hint">Licenses past their expiry date</p>
+          </div>
+        </div>
 
-  <script>
-    const currentCompanyId = <%= currentCompanyId %>;
-    document.querySelectorAll('.allocated-link').forEach(function (link) {
-      link.addEventListener('click', async function (e) {
-        e.preventDefault();
-        const id = this.dataset.licenseId;
-        const res = await fetch(`/licenses/${id}/allocated`);
-        if (!res.ok) return;
-        const users = await res.json();
-        const list = document.getElementById('allocated-users');
-        list.innerHTML = '';
-        if (users.length === 0) {
-          const li = document.createElement('li');
-          li.textContent = 'No users allocated';
-          list.appendChild(li);
-        } else {
-          users.forEach(function (u) {
-            const li = document.createElement('li');
-            li.textContent = `${u.first_name} ${u.last_name} (${u.email})`;
-            list.appendChild(li);
+        <div class="page-body">
+          <div class="table-card" aria-live="polite">
+            <% if (licenses.length === 0) { %>
+              <div class="empty-state">
+                <i class="fas fa-file-contract" aria-hidden="true"></i>
+                <p>No licenses found for this company yet.</p>
+                <% if (isSuperAdmin) { %>
+                  <p>Use the <strong>Add License</strong> action to onboard your first entitlement.</p>
+                <% } %>
+              </div>
+            <% } else { %>
+              <table id="licenses-table" class="display license-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">SKU</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Total</th>
+                    <th scope="col">Allocated</th>
+                    <th scope="col">Available</th>
+                    <th scope="col">Expiry</th>
+                    <th scope="col">Contract Term</th>
+                    <% if (canOrderLicenses || isSuperAdmin) { %><th scope="col">Actions</th><% } %>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% licenses.forEach(function(lic) { %>
+                    <%
+                      const count = Number(lic.count) || 0;
+                      const allocated = Number(lic.allocated) || 0;
+                      const available = Math.max(count - allocated, 0);
+                      const expiryRaw = lic.expiry_date;
+                      const expiryIso = expiryRaw ? (expiryRaw.endsWith('Z') ? expiryRaw : `${expiryRaw}T00:00:00Z`) : null;
+                      const expiryMs = expiryIso ? Date.parse(expiryIso) : NaN;
+                      const isExpired = expiryIso ? !Number.isNaN(expiryMs) && expiryMs < nowMs : false;
+                      const isExpiringSoon = expiryIso ? !Number.isNaN(expiryMs) && expiryMs >= nowMs && expiryMs <= expiringThresholdMs : false;
+                      const status = isExpired ? 'expired' : (isExpiringSoon ? 'expiring' : 'active');
+                      const statusLabel = status === 'expired' ? 'Expired' : (status === 'expiring' ? 'Expiring soon' : 'Active');
+                    %>
+                    <tr
+                      class="license-row"
+                      data-license-id="<%= lic.id %>"
+                      data-status="<%= status %>"
+                      <% if (expiryIso) { %>data-expiry="<%= expiryIso %>"<% } %>
+                    >
+                      <td data-title="Name"><%= lic.display_name || lic.name %></td>
+                      <td data-title="SKU"><%= lic.platform %></td>
+                      <td data-title="Status">
+                        <span class="status-badge status-badge--<%= status %>"><%= statusLabel %></span>
+                      </td>
+                      <td data-title="Total"><%= count %></td>
+                      <td data-title="Allocated">
+                        <% if (allocated > 0) { %>
+                          <button
+                            type="button"
+                            class="link-button allocated-link"
+                            data-license-id="<%= lic.id %>"
+                            aria-haspopup="dialog"
+                          >
+                            <%= allocated %>
+                          </button>
+                        <% } else { %>
+                          <span>0</span>
+                        <% } %>
+                      </td>
+                      <td data-title="Available"><%= available %></td>
+                      <td data-title="Expiry">
+                        <% if (expiryIso) { %>
+                          <time class="utc-date" datetime="<%= expiryIso %>"><%= expiryIso %></time>
+                          <% if (isExpiringSoon && !isExpired) { %>
+                            <span class="status-chip status-chip--warning">Expiring soon</span>
+                          <% } else if (isExpired) { %>
+                            <span class="status-chip status-chip--danger">Expired</span>
+                          <% } %>
+                        <% } else { %>
+                          <span class="text-muted">No expiry</span>
+                        <% } %>
+                      </td>
+                      <td data-title="Contract Term"><%= lic.contract_term || '—' %></td>
+                      <% if (canOrderLicenses || isSuperAdmin) { %>
+                        <td data-title="Actions">
+                          <div class="table-actions">
+                            <% if (canOrderLicenses) { %>
+                              <button type="button" class="btn btn-secondary btn-small order-btn" data-license-id="<%= lic.id %>">
+                                <i class="fas fa-cart-plus"></i>
+                                <span>Order</span>
+                              </button>
+                              <button type="button" class="btn btn-secondary btn-small remove-btn" data-license-id="<%= lic.id %>">
+                                <i class="fas fa-undo"></i>
+                                <span>Remove</span>
+                              </button>
+                            <% } %>
+                            <% if (isSuperAdmin) { %>
+                              <button
+                                type="button"
+                                class="btn btn-small edit-btn"
+                                data-license-id="<%= lic.id %>"
+                                data-name="<%= lic.name %>"
+                                data-sku="<%= lic.platform %>"
+                                data-count="<%= count %>"
+                                data-expiry-date="<%= expiryIso ? expiryIso.split('T')[0] : '' %>"
+                                data-contract-term="<%= lic.contract_term || '' %>"
+                              >
+                                <i class="fas fa-edit"></i>
+                                <span>Edit</span>
+                              </button>
+                              <button type="button" class="btn btn-danger btn-small delete-btn" data-license-id="<%= lic.id %>">
+                                <i class="fas fa-trash"></i>
+                                <span>Delete</span>
+                              </button>
+                            <% } %>
+                          </div>
+                        </td>
+                      <% } %>
+                    </tr>
+                  <% }); %>
+                </tbody>
+              </table>
+            <% } %>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="allocated-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="allocated-modal-title">
+      <div class="modal-content">
+        <button type="button" class="modal-close" data-modal-close="allocated-modal" aria-label="Close allocated users modal">
+          <i class="fas fa-times"></i>
+        </button>
+        <h2 id="allocated-modal-title">Allocated users</h2>
+        <p class="modal-description">Track which staff members currently hold seats for the selected license.</p>
+        <ul id="allocated-users" class="allocated-list" aria-live="polite"></ul>
+      </div>
+    </div>
+
+    <div id="license-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="license-modal-title">
+      <div class="modal-content">
+        <button type="button" class="modal-close" data-modal-close="license-modal" aria-label="Close license form">
+          <i class="fas fa-times"></i>
+        </button>
+        <h2 id="license-modal-title">Edit license</h2>
+        <p id="license-modal-description" class="modal-description">Update licensing details to keep counts and expiry tracking accurate.</p>
+        <form id="license-form" aria-describedby="license-modal-description">
+          <div class="form-grid">
+            <label for="license-name">Name
+              <input type="text" id="license-name" name="name" autocomplete="off" required>
+            </label>
+            <label for="license-sku">SKU
+              <input type="text" id="license-sku" name="platform" autocomplete="off" required>
+            </label>
+            <label for="license-count">Total seats
+              <input type="number" id="license-count" name="count" min="0" step="1" required>
+            </label>
+            <label for="license-expiry">Expiry date
+              <input type="date" id="license-expiry" name="expiryDate">
+            </label>
+            <label for="license-contract">Contract term
+              <input type="text" id="license-contract" name="contractTerm" autocomplete="off" placeholder="e.g. Annual">
+            </label>
+          </div>
+          <p id="license-form-error" class="form-error" role="alert" hidden></p>
+          <div class="modal-actions">
+            <button type="submit" class="btn" id="license-form-submit">Save changes</button>
+            <button type="button" class="btn btn-secondary" data-modal-close="license-modal">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const statusFilter = document.getElementById('license-status-filter');
+        const refreshBtn = document.getElementById('refresh-licenses');
+        const allocatedModal = document.getElementById('allocated-modal');
+        const allocatedList = document.getElementById('allocated-users');
+        const licenseModal = document.getElementById('license-modal');
+        const licenseForm = document.getElementById('license-form');
+        const licenseFormError = document.getElementById('license-form-error');
+        const licenseModalTitle = document.getElementById('license-modal-title');
+        const licenseModalDescription = document.getElementById('license-modal-description');
+        const licenseFormSubmit = document.getElementById('license-form-submit');
+        const licenseNameInput = document.getElementById('license-name');
+        const licenseSkuInput = document.getElementById('license-sku');
+        const licenseCountInput = document.getElementById('license-count');
+        const licenseExpiryInput = document.getElementById('license-expiry');
+        const licenseContractInput = document.getElementById('license-contract');
+        const licensesTable = document.getElementById('licenses-table');
+        let editingId = null;
+
+        function openModal(modal) {
+          if (!modal) return;
+          modal.classList.remove('hidden');
+          modal.classList.add('open');
+          modal.setAttribute('aria-hidden', 'false');
+          const focusable = modal.querySelector('button, [href], input, select, textarea');
+          if (focusable) {
+            focusable.focus();
+          }
+        }
+
+        function closeModal(modal) {
+          if (!modal) return;
+          modal.classList.remove('open');
+          modal.classList.add('hidden');
+          modal.setAttribute('aria-hidden', 'true');
+        }
+
+        document.querySelectorAll('.modal').forEach((modal) => {
+          modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+              closeModal(modal);
+            }
           });
-        }
-        document.getElementById('allocated-modal').style.display = 'flex';
-      });
-    });
-
-    document.getElementById('allocated-close').addEventListener('click', function () {
-      document.getElementById('allocated-modal').style.display = 'none';
-    });
-
-    document.querySelectorAll('.order-btn').forEach(function (btn) {
-      btn.addEventListener('click', async function () {
-        const qty = prompt('How many licenses to order?');
-        if (!qty) return;
-        await fetch(`/licenses/${this.dataset.licenseId}/order`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ quantity: parseInt(qty, 10) }),
         });
-        alert('Order submitted');
-      });
-    });
 
-    document.querySelectorAll('.remove-btn').forEach(function (btn) {
-      btn.addEventListener('click', async function () {
-        const qty = prompt('How many licenses to remove?');
-        if (!qty) return;
-        await fetch(`/licenses/${this.dataset.licenseId}/remove`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ quantity: parseInt(qty, 10) }),
+        document.querySelectorAll('[data-modal-close]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const targetId = btn.getAttribute('data-modal-close');
+            if (targetId) {
+              const modal = document.getElementById(targetId);
+              closeModal(modal);
+            }
+          });
         });
-        alert('Removal requested');
-      });
-    });
 
-    const editModal = document.getElementById('edit-modal');
-    const editForm = document.getElementById('edit-form');
-    let editingId = null;
+        window.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') {
+            closeModal(allocatedModal);
+            closeModal(licenseModal);
+          }
+        });
 
-    document.querySelectorAll('.edit-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        editingId = this.dataset.licenseId;
-        document.getElementById('edit-name').value = this.dataset.name;
-        document.getElementById('edit-sku').value = this.dataset.sku;
-        document.getElementById('edit-count').value = this.dataset.count;
-        document.getElementById('edit-expiry').value = this.dataset.expiryDate;
-        document.getElementById('edit-contract').value = this.dataset.contractTerm;
-        editModal.style.display = 'flex';
-      });
-    });
+        refreshBtn?.addEventListener('click', () => {
+          window.location.reload();
+        });
 
-    document.getElementById('edit-close').addEventListener('click', function () {
-      editModal.style.display = 'none';
-    });
+        document.querySelectorAll('.utc-date').forEach((timeEl) => {
+          const iso = timeEl.getAttribute('datetime');
+          if (!iso) return;
+          const value = iso.includes('T') ? iso : `${iso}T00:00:00Z`;
+          const date = new Date(value);
+          if (!Number.isNaN(date.getTime())) {
+            timeEl.textContent = date.toLocaleDateString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
+            });
+          }
+        });
 
-    editForm.addEventListener('submit', async function (e) {
-      e.preventDefault();
-      const payload = {
-        name: document.getElementById('edit-name').value,
-        platform: document.getElementById('edit-sku').value,
-        count: parseInt(document.getElementById('edit-count').value, 10),
-        expiryDate: document.getElementById('edit-expiry').value || null,
-        contractTerm: document.getElementById('edit-contract').value,
-      };
-      const res = await fetch(`/licenses/${editingId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        location.reload();
-      } else {
-        alert('Failed to update license');
-      }
-    });
+        document.querySelectorAll('.allocated-link').forEach((link) => {
+          link.addEventListener('click', async (event) => {
+            event.preventDefault();
+            const id = link.getAttribute('data-license-id');
+            if (!id) return;
+            try {
+              const res = await fetch(`/licenses/${id}/allocated`);
+              if (!res.ok) {
+                throw new Error('Failed to load allocated users');
+              }
+              const users = await res.json();
+              allocatedList.innerHTML = '';
+              if (!users.length) {
+                const li = document.createElement('li');
+                li.textContent = 'No users allocated';
+                allocatedList.appendChild(li);
+              } else {
+                users.forEach((user) => {
+                  const li = document.createElement('li');
+                  li.textContent = `${user.first_name} ${user.last_name} (${user.email})`;
+                  allocatedList.appendChild(li);
+                });
+              }
+              openModal(allocatedModal);
+            } catch (err) {
+              console.error(err);
+              alert('Unable to load allocated users right now. Please try again shortly.');
+            }
+          });
+        });
 
-    document.querySelectorAll('.delete-btn').forEach(function(btn) {
-      btn.addEventListener('click', async function() {
-        if (!confirm('Delete license?')) return;
-        const res = await fetch(`/licenses/${this.dataset.licenseId}`, { method: 'DELETE' });
-        if (res.ok) {
-          location.reload();
-        } else {
-          alert('Failed to delete license');
+        document.querySelectorAll('.order-btn').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const id = btn.getAttribute('data-license-id');
+            if (!id) return;
+            const qty = prompt('How many licenses would you like to order?');
+            if (!qty) return;
+            const amount = Number.parseInt(qty, 10);
+            if (!Number.isFinite(amount) || amount <= 0) {
+              alert('Please provide a valid quantity.');
+              return;
+            }
+            try {
+              const res = await fetch(`/licenses/${id}/order`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ quantity: amount }),
+              });
+              if (!res.ok) {
+                throw new Error('Failed to submit order');
+              }
+              alert('Order submitted successfully.');
+            } catch (err) {
+              console.error(err);
+              alert('We could not submit your order. Please try again later.');
+            }
+          });
+        });
+
+        document.querySelectorAll('.remove-btn').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const id = btn.getAttribute('data-license-id');
+            if (!id) return;
+            const qty = prompt('How many licenses should be removed?');
+            if (!qty) return;
+            const amount = Number.parseInt(qty, 10);
+            if (!Number.isFinite(amount) || amount <= 0) {
+              alert('Please provide a valid quantity.');
+              return;
+            }
+            try {
+              const res = await fetch(`/licenses/${id}/remove`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ quantity: amount }),
+              });
+              if (!res.ok) {
+                throw new Error('Failed to submit removal request');
+              }
+              alert('Removal request submitted.');
+            } catch (err) {
+              console.error(err);
+              alert('We could not submit your removal request. Please try again later.');
+            }
+          });
+        });
+
+        function resetForm() {
+          licenseForm?.reset();
+          if (licenseFormError) {
+            licenseFormError.hidden = true;
+            licenseFormError.textContent = '';
+          }
+        }
+
+        document.getElementById('open-create-license')?.addEventListener('click', () => {
+          editingId = null;
+          resetForm();
+          if (licenseModalTitle) {
+            licenseModalTitle.textContent = 'Add license';
+          }
+          if (licenseModalDescription) {
+            licenseModalDescription.textContent = 'Capture a new entitlement for this company.';
+          }
+          if (licenseFormSubmit) {
+            licenseFormSubmit.textContent = 'Create license';
+          }
+          openModal(licenseModal);
+        });
+
+        document.querySelectorAll('.edit-btn').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            editingId = btn.getAttribute('data-license-id');
+            resetForm();
+            if (licenseNameInput) {
+              licenseNameInput.value = btn.getAttribute('data-name') || '';
+            }
+            if (licenseSkuInput) {
+              licenseSkuInput.value = btn.getAttribute('data-sku') || '';
+            }
+            if (licenseCountInput) {
+              licenseCountInput.value = btn.getAttribute('data-count') || '0';
+            }
+            if (licenseExpiryInput) {
+              licenseExpiryInput.value = btn.getAttribute('data-expiry-date') || '';
+            }
+            if (licenseContractInput) {
+              licenseContractInput.value = btn.getAttribute('data-contract-term') || '';
+            }
+            if (licenseModalTitle) {
+              licenseModalTitle.textContent = 'Edit license';
+            }
+            if (licenseModalDescription) {
+              licenseModalDescription.textContent = 'Update licensing details to keep counts and expiry tracking accurate.';
+            }
+            if (licenseFormSubmit) {
+              licenseFormSubmit.textContent = 'Save changes';
+            }
+            openModal(licenseModal);
+          });
+        });
+
+        document.querySelectorAll('.delete-btn').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const id = btn.getAttribute('data-license-id');
+            if (!id) return;
+            if (!confirm('Are you sure you want to permanently delete this license?')) {
+              return;
+            }
+            try {
+              const res = await fetch(`/licenses/${id}`, { method: 'DELETE' });
+              if (!res.ok) {
+                throw new Error('Failed to delete license');
+              }
+              window.location.reload();
+            } catch (err) {
+              console.error(err);
+              alert('Unable to delete the license right now. Please try again later.');
+            }
+          });
+        });
+
+        licenseForm?.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          if (!licenseForm) return;
+          const formData = new FormData(licenseForm);
+          const payload = {
+            name: String(formData.get('name') || '').trim(),
+            platform: String(formData.get('platform') || '').trim(),
+            count: Number.parseInt(String(formData.get('count') || '0'), 10),
+            expiryDate: String(formData.get('expiryDate') || '').trim() || null,
+            contractTerm: String(formData.get('contractTerm') || '').trim(),
+          };
+
+          if (!payload.name || !payload.platform || !Number.isFinite(payload.count) || payload.count < 0) {
+            if (licenseFormError) {
+              licenseFormError.textContent = 'Name, SKU, and a non-negative seat count are required.';
+              licenseFormError.hidden = false;
+            }
+            return;
+          }
+
+          try {
+            const endpoint = editingId ? `/licenses/${editingId}` : '/licenses';
+            const method = editingId ? 'PUT' : 'POST';
+            const res = await fetch(endpoint, {
+              method,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            if (!res.ok) {
+              const message = await res.text();
+              throw new Error(message || 'Failed to save license');
+            }
+            window.location.reload();
+          } catch (err) {
+            console.error(err);
+            if (licenseFormError) {
+              licenseFormError.textContent = err instanceof Error ? err.message : 'Failed to save license. Please try again later.';
+              licenseFormError.hidden = false;
+            }
+          }
+        });
+
+        if (statusFilter && typeof DataTable !== 'undefined') {
+          if (!licensesTable) {
+            statusFilter.disabled = true;
+            return;
+          }
+          let tableApiRef = null;
+          const filterFn = (settings, _data, dataIndex) => {
+            if (settings.nTable.id !== 'licenses-table') {
+              return true;
+            }
+            if (!tableApiRef) {
+              return true;
+            }
+            const required = statusFilter.value;
+            if (required === 'all') {
+              return true;
+            }
+            const rowNode = tableApiRef.row(dataIndex).node();
+            if (!rowNode) {
+              return true;
+            }
+            const status = rowNode.getAttribute('data-status');
+            return status === required;
+          };
+
+          const registerFilter = () => {
+            const tablesApi = DataTable.tables({ api: true });
+            for (let i = 0; i < tablesApi.length; i += 1) {
+              const api = tablesApi[i];
+              if (api.table().node().id === 'licenses-table') {
+                tableApiRef = api;
+                break;
+              }
+            }
+            if (!tableApiRef) {
+              setTimeout(registerFilter, 100);
+              return;
+            }
+            if (!DataTable.ext.search.includes(filterFn)) {
+              DataTable.ext.search.push(filterFn);
+            }
+            statusFilter.addEventListener('change', () => {
+              tableApiRef.draw();
+            });
+            statusFilter.dispatchEvent(new Event('change'));
+            window.addEventListener('unload', () => {
+              const idx = DataTable.ext.search.indexOf(filterFn);
+              if (idx > -1) {
+                DataTable.ext.search.splice(idx, 1);
+              }
+            });
+          };
+
+          registerFilter();
         }
       });
-    });
-  </script>
-</body>
+    </script>
+  </body>
 </html>
