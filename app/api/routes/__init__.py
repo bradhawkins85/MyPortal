@@ -1,4 +1,5 @@
 from . import (
+    api_keys,
     audit_logs,
     auth,
     companies,
@@ -14,6 +15,7 @@ from . import (
 )
 
 __all__ = [
+    "api_keys",
     "audit_logs",
     "auth",
     "companies",
