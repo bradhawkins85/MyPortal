@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     default_timezone: str = Field(default="UTC", validation_alias="CRON_TIMEZONE")
     enable_csrf: bool = Field(default=True, validation_alias="ENABLE_CSRF")
     swagger_ui_url: str = Field(default="/docs", validation_alias="SWAGGER_UI_URL")
+    opnform_base_url: AnyHttpUrl | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OPNFORM_BASE_URL", "OPNFORM_URL"),
+    )
 
     model_config = SettingsConfigDict(
         env_file=(Path(__file__).resolve().parent.parent.parent / ".env"),

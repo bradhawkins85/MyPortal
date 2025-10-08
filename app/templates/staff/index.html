@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+
+{% block sidebar_menu %}
+  {{ super() }}
+  <li class="menu__item">
+    <a href="/shop">
+      <span class="menu__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M4 7h16l-1.5 12.5A2 2 0 0 1 16.52 21H7.48a2 2 0 0 1-1.98-1.5zM6 3h12a1 1 0 0 1 1 1v2H5V4a1 1 0 0 1 1-1z"/></svg>
+      </span>
+      <span class="menu__label">Shop</span>
+    </a>
+  </li>
+  <li class="menu__item">
+    <a href="/forms">
+      <span class="menu__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h9l5 5v15H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm8 7h4.5L14 4.5V9z"/></svg>
+      </span>
+      <span class="menu__label">Forms</span>
+    </a>
+  </li>
+  <li class="menu__item">
+    <a href="/staff" aria-current="page">
+      <span class="menu__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-3.31 0-8 1.66-8 5v1h16v-1c0-3.34-4.69-5-8-5z"/></svg>
+      </span>
+      <span class="menu__label">Staff</span>
+    </a>
+  </li>
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  {% if is_super_admin and syncro_company_id %}
+    <section class="card card--panel">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Syncro integration</h2>
+          <p class="card__subtitle">Import contacts from Syncro to seed staff records and verification details.</p>
+        </div>
+        <button type="button" class="button" data-import-syncro>Import contacts</button>
+      </header>
+      <p class="text-muted">The importer retries automatically if Syncro returns a transient error.</p>
+    </section>
+  {% endif %}
+
+  {% if is_admin %}
+    <section class="card card--panel">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Add staff member</h2>
+          <p class="card__subtitle">Capture onboarding details to provision accounts and workflows.</p>
+        </div>
+      </header>
+      <form action="/staff" method="post" class="form-grid">
+        <div class="form-field">
+          <label class="form-label" for="staff-first-name">First name</label>
+          <input class="form-input" id="staff-first-name" name="firstName" required />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="staff-last-name">Last name</label>
+          <input class="form-input" id="staff-last-name" name="lastName" required />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="staff-email">Email</label>
+          <input class="form-input" id="staff-email" name="email" type="email" required />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="staff-mobile">Mobile phone</label>
+          <input class="form-input" id="staff-mobile" name="mobilePhone" type="tel" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="staff-department">Department</label>
+          <input class="form-input" id="staff-department" name="department" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="staff-date-onboarded">Onboard date</label>
+          <input class="form-input" id="staff-date-onboarded" name="dateOnboarded" type="date" />
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="checkbox">
+            <input type="checkbox" name="enabled" value="1" checked />
+            <span>Enabled</span>
+          </label>
+        </div>
+        <div class="form-actions form-actions--inline">
+          <button type="submit" class="button">Add staff</button>
+        </div>
+      </form>
+    </section>
+  {% endif %}
+
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Current staff</h2>
+        <p class="card__subtitle">Invite, verify, or update records with live filtering and sorting.</p>
+      </div>
+      <div class="card__controls">
+        <form id="staff-filter-form" method="get" action="/staff" class="filters filters--compact">
+          <div class="filters__group">
+            <label class="form-label" for="staff-enabled">Status</label>
+            <select class="form-input" id="staff-enabled" name="enabled" data-submit-on-change>
+              <option value="" {% if enabled_filter == '' %}selected{% endif %}>All</option>
+              <option value="1" {% if enabled_filter == '1' %}selected{% endif %}>Enabled</option>
+              <option value="0" {% if enabled_filter == '0' %}selected{% endif %}>Disabled</option>
+            </select>
+          </div>
+          {% if staff_permission == 3 and departments %}
+            <div class="filters__group">
+              <label class="form-label" for="staff-department-filter">Department</label>
+              <select class="form-input" id="staff-department-filter" name="department" data-submit-on-change>
+                <option value="" {% if department_filter == '' %}selected{% endif %}>All departments</option>
+                {% for department in departments %}
+                  <option value="{{ department }}" {% if department_filter == department %}selected{% endif %}>{{ department }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          {% endif %}
+          <div class="filters__group">
+            <label class="form-label" for="staff-search">Search</label>
+            <input class="form-input" id="staff-search" type="search" data-table-filter="staff-table" placeholder="Search staff" />
+          </div>
+        </form>
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table" id="staff-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string">First name</th>
+            <th scope="col" data-sort="string">Last name</th>
+            <th scope="col" data-sort="string">Email</th>
+            <th scope="col" data-sort="string">Mobile</th>
+            <th scope="col" data-sort="string">Code</th>
+            <th scope="col" data-sort="date">Onboarded</th>
+            <th scope="col" data-sort="string">Enabled</th>
+            <th scope="col" class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for member in staff_members %}
+            <tr data-staff-id="{{ member.id }}">
+              <td data-label="First name">{{ member.first_name }}</td>
+              <td data-label="Last name">{{ member.last_name }}</td>
+              <td data-label="Email">{{ member.email }}</td>
+              <td data-label="Mobile">{{ member.mobile_phone or '—' }}</td>
+              <td data-label="Verification code" class="verification-code">{{ member.verification_code or '—' }}</td>
+              <td data-label="Onboarded" data-value="{{ member.date_onboarded or '' }}" data-utc="{{ member.date_onboarded or '' }}">
+                {% if member.date_onboarded %}
+                  {{ member.date_onboarded }}
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="Enabled">
+                <form action="/staff/enabled" method="post" class="inline-form">
+                  <input type="hidden" name="staffId" value="{{ member.id }}" />
+                  <label class="visually-hidden" for="staff-enabled-{{ member.id }}">Toggle enabled state for {{ member.first_name }} {{ member.last_name }}</label>
+                  <input
+                    id="staff-enabled-{{ member.id }}"
+                    type="checkbox"
+                    name="enabled"
+                    value="1"
+                    {% if member.enabled %}checked{% endif %}
+                    data-submit-on-change
+                  />
+                </form>
+              </td>
+              <td class="table__actions">
+                <div class="table__action-buttons">
+                  {% if is_super_admin %}
+                    <button type="button" class="button button--ghost" data-staff-verify="{{ member.id }}" {% if not member.mobile_phone %}disabled{% endif %}>Send code</button>
+                  {% endif %}
+                  {% if is_admin or is_super_admin %}
+                    <button type="button" class="button button--ghost" data-staff-invite="{{ member.id }}">Invite</button>
+                  {% endif %}
+                  <button type="button" class="button button--ghost" data-staff-edit="{{ member.id }}">Edit</button>
+                  {% if is_super_admin %}
+                    <button type="button" class="button button--danger" data-staff-delete="{{ member.id }}">Delete</button>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="8" class="table__empty">No staff records found.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<div class="modal" id="staff-edit-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close edit staff modal</span>
+      &times;
+    </button>
+    <h2 class="modal__title">Edit staff member</h2>
+    <form id="staff-edit-form" class="form-grid">
+      <input type="hidden" id="edit-staff-id" />
+      <div class="form-field">
+        <label class="form-label" for="edit-first-name">First name</label>
+        <input class="form-input" id="edit-first-name" {% if not is_super_admin %}readonly{% endif %} />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-last-name">Last name</label>
+        <input class="form-input" id="edit-last-name" {% if not is_super_admin %}readonly{% endif %} />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-email">Email</label>
+        <input class="form-input" id="edit-email" type="email" {% if not is_super_admin %}readonly{% endif %} />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-mobile">Mobile phone</label>
+        <input class="form-input" id="edit-mobile" type="tel" {% if not is_super_admin %}readonly{% endif %} />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-date-onboarded">Onboard date</label>
+        <input class="form-input" id="edit-date-onboarded" type="date" {% if not is_super_admin %}readonly{% endif %} />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-date-offboarded">Offboard schedule</label>
+        <input class="form-input" id="edit-date-offboarded" type="datetime-local" {% if not is_admin %}readonly{% endif %} />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-account-action">Account action</label>
+        <select class="form-input" id="edit-account-action" {% if not is_super_admin %}disabled{% endif %}>
+          <option value="Onboard Requested">Onboard Requested</option>
+          <option value="Onboard Approved">Onboard Approved</option>
+          <option value="Onboarding In Progress">Onboarding In Progress</option>
+          <option value="Onboarded">Onboarded</option>
+          <option value="Offboard Requested">Offboard Requested</option>
+          <option value="Offboard Approved">Offboard Approved</option>
+          <option value="Offboard Scheduled">Offboard Scheduled</option>
+          <option value="Offboarded">Offboarded</option>
+        </select>
+      </div>
+      <div class="form-field form-field--checkbox">
+        <label class="checkbox">
+          <input type="checkbox" id="edit-enabled" {% if not is_super_admin %}disabled{% endif %} />
+          <span>Enabled</span>
+        </label>
+      </div>
+      <fieldset class="fieldset">
+        <legend>Address</legend>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="edit-street">Street</label>
+            <input class="form-input" id="edit-street" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-city">City</label>
+            <input class="form-input" id="edit-city" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-state">State</label>
+            <input class="form-input" id="edit-state" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-postcode">Postcode</label>
+            <input class="form-input" id="edit-postcode" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-country">Country</label>
+            <input class="form-input" id="edit-country" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+        </div>
+      </fieldset>
+      <fieldset class="fieldset">
+        <legend>Organisation</legend>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="edit-department">Department</label>
+            <input class="form-input" id="edit-department" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-job-title">Job title</label>
+            <input class="form-input" id="edit-job-title" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-company">Company</label>
+            <input class="form-input" id="edit-company" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-manager-name">Manager</label>
+            <input class="form-input" id="edit-manager-name" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+        </div>
+      </fieldset>
+      <div class="form-actions">
+        <button type="submit" class="button">Save changes</button>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script type="application/json" id="staff-data">{{ staff_members | tojson }}</script>
+<script type="application/json" id="staff-flags">{{ {
+  'isSuperAdmin': is_super_admin,
+  'isAdmin': is_admin,
+  'syncroCompanyId': syncro_company_id
+} | tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/staff.js" defer></script>
+{% endblock %}
