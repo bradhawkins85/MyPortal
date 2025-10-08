@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
+from app.repositories import company_memberships as membership_repo
+from app.repositories import roles as role_repo
 from app.repositories import users as user_repo
 from app.schemas.users import UserCreate, UserResponse, UserUpdate
 
@@ -36,6 +38,23 @@ async def create_user(
         mobile_phone=payload.mobile_phone,
         company_id=payload.company_id,
     )
+    if payload.company_id:
+        try:
+            existing = await membership_repo.get_membership_by_company_user(
+                payload.company_id, created["id"]
+            )
+            if not existing:
+                default_role = await role_repo.get_role_by_name("Member")
+                if default_role:
+                    await membership_repo.create_membership(
+                        company_id=payload.company_id,
+                        user_id=created["id"],
+                        role_id=default_role["id"],
+                        status="active",
+                    )
+        except Exception:
+            # Membership creation is best-effort to avoid blocking user provisioning
+            pass
     return created
 
 

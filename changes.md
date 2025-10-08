@@ -36,3 +36,4 @@
 - 2025-10-09, 13:30 UTC, Feature, Documented systemd service setup for running MyPortal as a managed Linux service
 - 2025-10-09, 15:42 UTC, Fix, Switched password hashing to bcrypt_sha256 to support long credentials without login failures
 - 2025-10-09, 16:18 UTC, Fix, Normalised login TOTP payload handling to accept legacy keys and enforce numeric codes server-side
+- 2025-10-08, 04:05 UTC, Feature, Introduced role-based company memberships with audit logging and admin control panels
