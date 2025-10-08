@@ -2,6 +2,7 @@
 - 2025-10-08, 10:55 UTC, Fix, Hardened active company session migration for legacy MySQL compatibility so company switching succeeds
 # Change Log
 
+- 2025-10-08, 10:58 UTC, Feature, Rebuilt forms repositories, assignment APIs, and OpnForm embedding for the Python portal
 - 2025-09-17, 06:44 UTC, Feature, Setup change log file
 - 2025-10-09, 20:50 UTC, Fix, Added missing FastAPI Form import to restore API startup
 - 2025-10-09, 19:30 UTC, Fix, Restored company switching with session-backed active company tracking and sidebar selector

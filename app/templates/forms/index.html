@@ -16,6 +16,7 @@
             type="button"
             class="forms-menu__button{% if loop.first %} is-active{% endif %}"
             data-form-switch
+            data-form-index="{{ loop.index0 }}"
             data-form-url="{{ form.iframe_url }}"
           >
             <span class="forms-menu__name">{{ form.name }}</span>
@@ -41,15 +42,20 @@
       {% endif %}
     </header>
     {% if forms %}
-      <iframe
-        id="form-frame"
-        class="form-frame"
-        src="{{ forms[0].iframe_url }}"
-        loading="lazy"
-        title="Selected form"
-        allow="publickey-credentials-get *; publickey-credentials-create *"
-        referrerpolicy="strict-origin-when-cross-origin"
-      ></iframe>
+      <div id="form-viewer" class="form-viewer" data-form-container>
+        {% if forms[0].embed_html %}
+          {{ forms[0].embed_html | safe }}
+        {% else %}
+          <iframe
+            class="form-frame"
+            src="{{ forms[0].iframe_url }}"
+            loading="lazy"
+            title="Selected form"
+            allow="publickey-credentials-get *; publickey-credentials-create *"
+            referrerpolicy="strict-origin-when-cross-origin"
+          ></iframe>
+        {% endif %}
+      </div>
     {% else %}
       <div class="empty-state">
         <p>Select or create a form to begin.</p>
