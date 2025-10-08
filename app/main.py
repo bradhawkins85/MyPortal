@@ -205,6 +205,24 @@ def _to_iso(dt: Any) -> str | None:
     return str(dt)
 
 
+def _serialise_for_json(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return _to_iso(value)
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, time):
+        return value.isoformat()
+    if isinstance(value, Mapping):
+        return {key: _serialise_for_json(item) for key, item in value.items()}
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray)):
+        return [_serialise_for_json(item) for item in value]
+    return value
+
+
+def _serialise_mapping(record: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: _serialise_for_json(value) for key, value in record.items()}
+
+
 def _parse_input_datetime(value: str | None, *, assume_midnight: bool = False) -> datetime | None:
     if value is None:
         return None
@@ -1468,31 +1486,22 @@ async def admin_automation(request: Request):
     events = await webhook_events_repo.list_events(limit=50)
     prepared_tasks: list[dict[str, Any]] = []
     for task in tasks:
-        prepared_tasks.append(
-            {
-                **task,
-                "last_run_iso": _to_iso(task.get("last_run_at")),
-            }
-        )
+        serialised_task = _serialise_mapping(task)
+        serialised_task["last_run_iso"] = _to_iso(task.get("last_run_at"))
+        prepared_tasks.append(serialised_task)
     prepared_runs: list[dict[str, Any]] = []
     for run in runs:
-        prepared_runs.append(
-            {
-                **run,
-                "started_iso": _to_iso(run.get("started_at")),
-                "finished_iso": _to_iso(run.get("finished_at")),
-            }
-        )
+        serialised_run = _serialise_mapping(run)
+        serialised_run["started_iso"] = _to_iso(run.get("started_at"))
+        serialised_run["finished_iso"] = _to_iso(run.get("finished_at"))
+        prepared_runs.append(serialised_run)
     prepared_events: list[dict[str, Any]] = []
     for event in events:
-        prepared_events.append(
-            {
-                **event,
-                "created_iso": _to_iso(event.get("created_at")),
-                "updated_iso": _to_iso(event.get("updated_at")),
-                "next_attempt_iso": _to_iso(event.get("next_attempt_at")),
-            }
-        )
+        serialised_event = _serialise_mapping(event)
+        serialised_event["created_iso"] = _to_iso(event.get("created_at"))
+        serialised_event["updated_iso"] = _to_iso(event.get("updated_at"))
+        serialised_event["next_attempt_iso"] = _to_iso(event.get("next_attempt_at"))
+        prepared_events.append(serialised_event)
     command_options = [
         {"value": "sync_staff", "label": "Sync staff directory"},
         {"value": "sync_o365", "label": "Sync Microsoft 365 licenses"},
