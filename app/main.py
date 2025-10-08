@@ -39,6 +39,7 @@ from app.api.routes import (
     companies,
     licenses as licenses_api,
     forms as forms_api,
+    invoices as invoices_api,
     memberships,
     m365 as m365_api,
     notifications,
@@ -56,6 +57,7 @@ from app.repositories import api_keys as api_key_repo
 from app.repositories import auth as auth_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
+from app.repositories import invoices as invoice_repo
 from app.repositories import licenses as license_repo
 from app.repositories import forms as forms_repo
 from app.repositories import m365 as m365_repo
@@ -75,6 +77,7 @@ from app.services.scheduler import scheduler_service
 from app.security.api_keys import mask_api_key
 from app.services import audit as audit_service
 from app.services import m365 as m365_service
+from app.services import products as products_service
 from app.services import staff_importer
 from app.services import template_variables
 from app.services import webhook_monitor
@@ -84,7 +87,7 @@ from app.services.opnform import (
     normalize_opnform_embed_code,
     normalize_opnform_form_url,
 )
-from app.services.file_storage import store_product_image
+from app.services.file_storage import delete_stored_file, store_product_image
 
 configure_logging()
 settings = get_settings()
@@ -116,6 +119,7 @@ tags_metadata = [
         "description": "Super-admin management of API credentials with usage telemetry.",
     },
     {"name": "Ports", "description": "Port catalogue, document storage, and pricing workflow APIs."},
+    {"name": "Invoices", "description": "Invoice catalogue, status tracking, and reconciliation APIs."},
     {"name": "Licenses", "description": "Software license catalogue, assignments, and ordering workflows."},
     {
         "name": "Forms",
@@ -256,6 +260,7 @@ app.include_router(m365_api.router)
 app.include_router(ports.router)
 app.include_router(notifications.router)
 app.include_router(staff_api.router)
+app.include_router(invoices_api.router)
 app.include_router(audit_logs.router)
 app.include_router(api_keys.router)
 app.include_router(scheduler_api.router)
@@ -777,6 +782,35 @@ async def _load_license_context(
     return user, membership, company, company_id, None
 
 
+async def _load_invoice_context(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return user, None, None, None, redirect
+    is_super_admin = bool(user.get("is_super_admin"))
+    company_id_raw = user.get("company_id")
+    if company_id_raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No company associated with the current user",
+        )
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
+    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    can_manage = bool(membership and membership.get("can_manage_invoices"))
+    if not (is_super_admin or can_manage):
+        return (
+            user,
+            membership,
+            None,
+            company_id,
+            RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
+        )
+    company = await company_repo.get_company_by_id(company_id)
+    return user, membership, company, company_id, None
+
+
 async def _send_license_webhook(
     *,
     action: str,
@@ -1238,6 +1272,78 @@ async def licenses_page(request: Request):
     return await _render_template("licenses/index.html", request, user, extra=extra)
 
 
+@app.get("/invoices", response_class=HTMLResponse)
+async def invoices_page(request: Request):
+    user, membership, company, company_id, redirect = await _load_invoice_context(request)
+    if redirect:
+        return redirect
+    records = await invoice_repo.list_company_invoices(company_id)
+    status_class_map = {
+        "paid": "status--active",
+        "sent": "status--invited",
+        "pending": "status--invited",
+        "issued": "status--invited",
+        "draft": "status--invited",
+        "overdue": "status--suspended",
+        "past due": "status--suspended",
+        "void": "status--invited",
+        "cancelled": "status--invited",
+    }
+    total_amount = Decimal("0.00")
+    paid_count = 0
+    today = datetime.now(timezone.utc).date()
+    formatted: list[dict[str, Any]] = []
+    for record in records:
+        amount_value = record.get("amount")
+        amount_decimal = amount_value if isinstance(amount_value, Decimal) else Decimal(str(amount_value or "0"))
+        amount_decimal = amount_decimal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        total_amount += amount_decimal
+        status_text_raw = (record.get("status") or "").strip()
+        status_slug = status_text_raw.lower()
+        if status_slug == "paid":
+            paid_count += 1
+        status_class = status_class_map.get(status_slug, "status--invited" if status_slug else "")
+        due_value = record.get("due_date")
+        if isinstance(due_value, datetime):
+            due_value = due_value.date()
+        due_display = None
+        due_iso = ""
+        is_overdue = False
+        if isinstance(due_value, date):
+            due_display = due_value.strftime("%d %b %Y")
+            due_iso = datetime.combine(due_value, time.min, tzinfo=timezone.utc).isoformat()
+            is_overdue = bool(status_slug not in {"paid", "void", "cancelled"} and due_value < today)
+        formatted.append(
+            record
+            | {
+                "amount": amount_decimal,
+                "amount_display": f"${amount_decimal:,.2f}",
+                "due_display": due_display,
+                "due_iso": due_iso,
+                "due_sort": due_iso,
+                "status_display": status_text_raw.title() if status_text_raw else "—",
+                "status_class": status_class,
+                "status_slug": status_slug,
+                "is_overdue": is_overdue,
+            }
+        )
+    unpaid_count = max(len(records) - paid_count, 0)
+    total_amount_display = f"${total_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):,.2f}"
+    status_options = sorted({invoice["status_slug"] for invoice in formatted if invoice["status_slug"]})
+    extra = {
+        "title": "Invoices",
+        "invoices": formatted,
+        "company": company,
+        "has_invoices": bool(formatted),
+        "total_amount_display": total_amount_display,
+        "paid_count": paid_count,
+        "unpaid_count": unpaid_count,
+        "status_options": status_options,
+        "can_delete_invoices": bool(user.get("is_super_admin")),
+    }
+    return await _render_template("invoices/index.html", request, user, extra=extra)
+
+
 @app.get("/licenses/{license_id}/allocated", response_class=JSONResponse)
 async def license_allocations(request: Request, license_id: int):
     user, membership, _, company_id, redirect = await _load_license_context(request)
@@ -1578,6 +1684,17 @@ async def shop_page(
             vip_price = product.get("vip_price")
             if vip_price is not None:
                 product["price"] = vip_price
+
+    def _product_has_price(product: Mapping[str, Any]) -> bool:
+        raw_price = product.get("price")
+        if raw_price is None:
+            return False
+        try:
+            return Decimal(str(raw_price)) > 0
+        except (InvalidOperation, TypeError, ValueError):
+            return False
+
+    products = [product for product in products if _product_has_price(product)]
 
     extra = {
         "title": "Shop",
@@ -3014,6 +3131,34 @@ async def admin_shop_page(
 
 
 @app.post(
+    "/shop/admin/product/import",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Import a shop product from the stock feed",
+    tags=["Shop"],
+)
+async def admin_import_shop_product(
+    request: Request,
+    vendor_sku: str = Form(...),
+):
+    """Import a single product by vendor SKU using the stock feed."""
+
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    cleaned_vendor_sku = vendor_sku.strip()
+    if not cleaned_vendor_sku:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vendor SKU cannot be empty",
+        )
+
+    await products_service.import_product_by_vendor_sku(cleaned_vendor_sku)
+
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
     "/shop/admin/product",
     status_code=status.HTTP_303_SEE_OTHER,
     summary="Create a shop product",
@@ -3121,6 +3266,50 @@ async def admin_create_shop_product(
         sku=product["sku"],
         vendor_sku=product["vendor_sku"],
         created_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
+    "/shop/admin/product/{product_id}/delete",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Delete a shop product",
+    tags=["Shop"],
+)
+async def admin_delete_shop_product(request: Request, product_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    product = await shop_repo.get_product_by_id(product_id)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    deleted = await shop_repo.delete_product(product_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    image_url = product.get("image_url")
+    if image_url:
+        try:
+            delete_stored_file(image_url, _private_uploads_path)
+        except HTTPException as exc:
+            log_error(
+                "Failed to remove deleted product image",
+                product_id=product_id,
+                error=str(exc),
+            )
+        except OSError as exc:
+            log_error(
+                "Failed to remove deleted product image",
+                product_id=product_id,
+                error=str(exc),
+            )
+
+    log_info(
+        "Shop product deleted",
+        product_id=product_id,
+        deleted_by=current_user.get("id") if current_user else None,
     )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 

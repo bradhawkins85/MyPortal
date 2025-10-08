@@ -1,4 +1,9 @@
 - 2025-10-08, 13:42 UTC, Fix, Restored /admin/companies administration dashboard with user provisioning and permission controls
+- 2025-10-15, 09:20 UTC, Fix, Removed an extra Jinja endif in base.html so the dashboard template renders without 500 errors
+- 2025-10-15, 11:45 UTC, Fix, Restored shop product deletion via FastAPI with secure file cleanup and redirect handling
+- 2025-10-14, 11:55 UTC, Fix, Filtered zero-priced products from the shop catalogue so customers only see priced items
+- 2025-10-11, 11:45 UTC, Feature, Recreated the invoices dashboard with FastAPI templates, filtering UI, and secured API endpoints
+- 2025-10-11, 11:45 UTC, Fix, Synced stock feed images into the portal and replaced zero pricing with RRP during product updates
 - 2025-10-08, 13:23 UTC, Feature, Restored company management console with invitations, permissions, and admin UI parity
 - 2025-10-08, 13:22 UTC, Fix, Restricted Swagger UI and OpenAPI schema to authenticated sessions to keep API documentation private
 - 2025-10-11, 14:05 UTC, Fix, Locked the shop category sidebar to the scroll container top so it no longer drifts when many products load
@@ -11,6 +16,7 @@
 - 2025-10-11, 09:30 UTC, Fix, Added server-rendered CSRF tokens across portal forms so submissions succeed even without client-side scripts
 - 2025-10-08, 12:36 UTC, Fix, Allowed the CSRF middleware to validate multipart form tokens so shop product uploads succeed
 - 2025-10-08, 12:22 UTC, Fix, Removed the product description textarea from the shop admin add product form and refreshed helper copy
+- 2025-10-14, 09:15 UTC, Fix, Reinstated shop admin product import via stock feed with FastAPI endpoint and service coverage
 - 2025-10-11, 10:30 UTC, Fix, Restored legacy shop product image loading by securing nested upload path handling
 - 2025-10-08, 12:34 UTC, Fix, Added multipart fallback parsing for mislabelled switch-company submissions so company switching succeeds for FormData clients
 - 2025-10-08, 12:44 UTC, Fix, Ensured company switch submissions always post the selected companyId by injecting a hidden field before form submission
