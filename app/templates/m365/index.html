@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}Office 365{% endblock %}
+
+{% block header_actions %}
+  {% if has_credentials %}
+    <a class="button" href="/m365/connect">Authorize portal access</a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  {% if error %}
+  <div class="alert alert--error" role="alert">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  <section class="panel">
+    <header class="panel__header">
+      <div>
+        <h2 class="panel__title">Microsoft 365 integration</h2>
+        <p class="panel__subtitle">
+          Configure Azure AD credentials and authorize the tenant so license counts and assignments can be synchronised.
+        </p>
+      </div>
+    </header>
+    <div class="panel__body">
+      {% if credential %}
+      <dl class="definition-list">
+        <div class="definition-list__item">
+          <dt>Tenant ID</dt>
+          <dd>{{ credential.tenant_id }}</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt>Client ID</dt>
+          <dd>{{ credential.client_id }}</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt>Token expires</dt>
+          <dd>{{ credential.token_expires_at or 'Not available' }}</dd>
+        </div>
+      </dl>
+      {% else %}
+      <p>No Microsoft 365 credentials have been stored for this company.</p>
+      {% endif %}
+      <p class="text-muted">License synchronisation contacts Microsoft Graph using application permissions. The refresh token is encrypted before storage and never displayed once saved.</p>
+    </div>
+  </section>
+
+  {% if is_super_admin %}
+  <section class="panel">
+    <header class="panel__header">
+      <h3 class="panel__title">Manage credentials</h3>
+    </header>
+    <div class="panel__body">
+      <form method="post" action="/m365/credentials" class="form-grid">
+        {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <label class="form-field">
+          <span class="form-label">Tenant ID</span>
+          <input type="text" name="tenantId" class="input" value="{{ credential.tenant_id if credential else '' }}" required />
+        </label>
+        <label class="form-field">
+          <span class="form-label">Client ID</span>
+          <input type="text" name="clientId" class="input" value="{{ credential.client_id if credential else '' }}" required />
+        </label>
+        <label class="form-field">
+          <span class="form-label">Client secret</span>
+          <input type="password" name="clientSecret" class="input" placeholder="Enter a new client secret" {% if not credential %}required{% endif %} />
+          <span class="form-help">Secrets are encrypted at rest; re-enter to rotate.</span>
+        </label>
+        <div class="form-actions">
+          <button type="submit" class="button">Save credentials</button>
+        </div>
+      </form>
+      {% if credential %}
+      <form method="post" action="/m365/credentials/delete" class="form-inline">
+        {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <button type="submit" class="button button--secondary" onclick="return confirm('Delete stored Microsoft 365 credentials?');">Delete credentials</button>
+      </form>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="panel">
+    <header class="panel__header">
+      <h3 class="panel__title">How synchronisation works</h3>
+    </header>
+    <div class="panel__body">
+      <ol class="list list--ordered">
+        <li>Store a tenant ID, client ID, and client secret for the company.</li>
+        <li>Authorize the application using the "Authorize portal access" button to grant offline access.</li>
+        <li>Trigger a sync from the Licenses tab to import subscribed SKUs and assigned users.</li>
+      </ol>
+      <p class="text-muted">Scheduled tasks can also call the synchronisation service to keep allocation data aligned with Microsoft 365.</p>
+    </div>
+  </section>
+{% endblock %}
+

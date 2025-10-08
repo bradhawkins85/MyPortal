@@ -49,6 +49,18 @@ class Settings(BaseSettings):
     azure_client_id: str | None = Field(default=None, validation_alias="AZURE_CLIENT_ID")
     azure_client_secret: str | None = Field(default=None, validation_alias="AZURE_CLIENT_SECRET")
     azure_tenant_id: str | None = Field(default=None, validation_alias="AZURE_TENANT_ID")
+    licenses_webhook_url: AnyHttpUrl | None = Field(
+        default=None, validation_alias="LICENSES_WEBHOOK_URL"
+    )
+    licenses_webhook_api_key: str | None = Field(
+        default=None, validation_alias="LICENSES_WEBHOOK_API_KEY"
+    )
+    m365_admin_client_id: str | None = Field(
+        default=None, validation_alias="M365_ADMIN_CLIENT_ID"
+    )
+    m365_admin_client_secret: str | None = Field(
+        default=None, validation_alias="M365_ADMIN_CLIENT_SECRET"
+    )
     default_timezone: str = Field(default="UTC", validation_alias="CRON_TIMEZONE")
     enable_csrf: bool = Field(default=True, validation_alias="ENABLE_CSRF")
     swagger_ui_url: str = Field(default="/docs", validation_alias="SWAGGER_UI_URL")
