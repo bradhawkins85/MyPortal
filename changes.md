@@ -40,4 +40,5 @@
 - 2025-10-08, 06:07 UTC, Feature, Rebuilt shop, forms, staff, and commerce admin dashboards with Jinja templates, responsive layout components, and supporting scripts
 - 2025-10-08, 06:33 UTC, Fix, Added global sidebar navigation for admin pages so new management views are accessible from the portal
 - 2025-10-08, 06:41 UTC, Fix, Restored shop catalogue display for products whose names match their SKUs so existing items appear
+- 2025-10-08, 06:49 UTC, Fix, Restored shop admin and catalogue views to load categories and products from the database with VIP pricing and company restrictions
 - 2025-10-09, 18:00 UTC, Feature, Added port catalogue data models, secure document uploads, pricing workflow approvals, notification APIs, and refreshed Swagger documentation
