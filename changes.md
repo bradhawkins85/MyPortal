@@ -1,3 +1,4 @@
+- 2025-10-08, 10:55 UTC, Fix, Hardened active company session migration for legacy MySQL compatibility so company switching succeeds
 # Change Log
 
 - 2025-09-17, 06:44 UTC, Feature, Setup change log file
