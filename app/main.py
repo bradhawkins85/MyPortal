@@ -412,11 +412,22 @@ async def _extract_switch_company_payload(request: Request) -> dict[str, Any]:
         return {}
 
     data: dict[str, Any] = {}
-    body_bytes: bytes | None = None
 
-    try:
-        form_data: FormData | None = await request.form()
-    except Exception:  # pragma: no cover - fallback when Starlette cannot parse the body
+    should_attempt_form = content_type in {
+        "application/x-www-form-urlencoded",
+        "multipart/form-data",
+    }
+
+    cached_form: FormData | None = getattr(request, "_form", None)
+    form_data: FormData | None
+    if cached_form is not None:
+        form_data = cached_form
+    elif should_attempt_form:
+        try:
+            form_data = await request.form()
+        except Exception:  # pragma: no cover - fallback when Starlette cannot parse the body
+            form_data = None
+    else:
         form_data = None
 
     if form_data is not None:
@@ -428,8 +439,13 @@ async def _extract_switch_company_payload(request: Request) -> dict[str, Any]:
                     data[key] = values[0]
             return data
 
+    body_bytes: bytes | None = getattr(request, "_body", None)
+
     if body_bytes is None:
-        body_bytes = await request.body()
+        try:
+            body_bytes = await request.body()
+        except RuntimeError:
+            body_bytes = getattr(request, "_body", None)
 
     if not body_bytes:
         return data
