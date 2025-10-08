@@ -5,19 +5,29 @@ from typing import Any, List, Optional
 from app.core.database import db
 
 
+def _normalise_company(row: dict[str, Any]) -> dict[str, Any]:
+    normalised = dict(row)
+    if "is_vip" in normalised and normalised["is_vip"] is not None:
+        normalised["is_vip"] = int(normalised["is_vip"])
+    return normalised
+
+
 async def get_company_by_id(company_id: int) -> Optional[dict[str, Any]]:
     row = await db.fetch_one("SELECT * FROM companies WHERE id = %s", (company_id,))
-    if row and "is_vip" in row:
-        row["is_vip"] = int(row["is_vip"]) if row["is_vip"] is not None else None
-    return row
+    return _normalise_company(row) if row else None
+
+
+async def get_company_by_syncro_id(syncro_company_id: str) -> Optional[dict[str, Any]]:
+    row = await db.fetch_one(
+        "SELECT * FROM companies WHERE syncro_company_id = %s",
+        (syncro_company_id,),
+    )
+    return _normalise_company(row) if row else None
 
 
 async def list_companies() -> List[dict[str, Any]]:
     rows = await db.fetch_all("SELECT * FROM companies ORDER BY name")
-    return [
-        {**row, "is_vip": int(row["is_vip"]) if row.get("is_vip") is not None else None}
-        for row in rows
-    ]
+    return [_normalise_company(row) for row in rows]
 
 
 async def create_company(**data: Any) -> dict[str, Any]:
@@ -32,9 +42,7 @@ async def create_company(**data: Any) -> dict[str, Any]:
     )
     if not row:
         raise RuntimeError("Failed to create company")
-    if "is_vip" in row:
-        row["is_vip"] = int(row["is_vip"]) if row["is_vip"] is not None else None
-    return row
+    return _normalise_company(row)
 
 
 async def update_company(company_id: int, **updates: Any) -> dict[str, Any]:

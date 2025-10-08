@@ -1,4 +1,14 @@
-from . import audit_logs, auth, companies, memberships, notifications, ports, roles, users
+from . import (
+    audit_logs,
+    auth,
+    companies,
+    memberships,
+    notifications,
+    ports,
+    roles,
+    staff,
+    users,
+)
 
 __all__ = [
     "audit_logs",
@@ -8,5 +18,6 @@ __all__ = [
     "ports",
     "memberships",
     "roles",
+    "staff",
     "users",
 ]
