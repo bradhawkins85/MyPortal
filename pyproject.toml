@@ -25,6 +25,7 @@ dependencies = [
     "loguru",
     "cryptography",
     "email-validator",
+    "python-multipart",
 ]
 
 [project.optional-dependencies]
