@@ -3067,8 +3067,27 @@ app.post(
   ensureSuperAdmin,
   uploadMiddleware,
   async (req: express.Request, res: express.Response) => {
-    const { name, sku, vendor_sku, description, price, vip_price, stock, category_id } =
-      req.body;
+    const {
+      name,
+      sku,
+      vendor_sku,
+      price,
+      vip_price,
+      stock,
+      category_id,
+      description: rawDescription,
+    } = req.body as {
+      name: string;
+      sku: string;
+      vendor_sku: string;
+      price: string;
+      vip_price?: string;
+      stock: string;
+      category_id?: string;
+      description?: string;
+    };
+    const description =
+      typeof rawDescription === 'string' ? rawDescription : '';
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     const createdProductId = await createProduct(
       name,
@@ -3114,8 +3133,27 @@ app.post(
   async (req: express.Request, res: express.Response) => {
     const productId = parseInt(req.params.id, 10);
     const existingProduct = await getProductById(productId, true);
-    const { name, sku, vendor_sku, description, price, vip_price, stock, category_id } =
-      req.body;
+    const {
+      name,
+      sku,
+      vendor_sku,
+      price,
+      vip_price,
+      stock,
+      category_id,
+      description: rawDescription,
+    } = req.body as {
+      name: string;
+      sku: string;
+      vendor_sku: string;
+      price: string;
+      vip_price?: string;
+      stock: string;
+      category_id?: string;
+      description?: string;
+    };
+    const description =
+      typeof rawDescription === 'string' ? rawDescription : '';
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
     await updateProduct(
       productId,
