@@ -430,10 +430,49 @@ body {
   align-items: flex-start;
 }
 
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1rem;
+}
+
+.stat {
+  padding: 0.75rem 1rem;
+  border-radius: 0.85rem;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.stat__label {
+  font-size: 0.85rem;
+  color: rgba(226, 232, 240, 0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.stat__value {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
 @media (max-width: 1080px) {
   .admin-grid--columns {
     grid-template-columns: 1fr;
   }
+}
+
+.table-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.table-toolbar .inline-form {
+  margin-left: auto;
 }
 
 .table-wrapper {
@@ -504,6 +543,174 @@ body {
   background: rgba(248, 113, 113, 0.35);
 }
 
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.inline-form__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.inline-form--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1.25rem;
+}
+
+.inline-panel {
+  margin-top: 1rem;
+  padding: 1.25rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.65);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.inline-panel__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.usage-list {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.usage-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.usage-list li:last-child {
+  border-bottom: none;
+}
+
+.usage-list__ip {
+  font-weight: 600;
+}
+
+.usage-list__count {
+  color: rgba(226, 232, 240, 0.75);
+}
+
+.usage-list__time {
+  color: rgba(148, 163, 184, 0.9);
+  font-size: 0.9rem;
+}
+
+.secret-card {
+  border-radius: 0.95rem;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  background: rgba(13, 148, 136, 0.15);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.secret-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.secret-card__title {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.secret-card__subtitle {
+  margin: 0.25rem 0 0;
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.secret-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.secret-card__value {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 1.05rem;
+  word-break: break-all;
+  padding: 0.75rem 1rem;
+  background: rgba(15, 23, 42, 0.8);
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.secret-card__hint {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.75);
+  font-size: 0.95rem;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.timeline__event {
+  padding: 1rem 1.25rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  background: rgba(15, 23, 42, 0.65);
+}
+
+.timeline__header {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.timeline__timestamp {
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.timeline__action {
+  color: rgba(148, 163, 184, 0.9);
+  font-size: 0.95rem;
+}
+
+.timeline__body {
+  color: rgba(226, 232, 240, 0.85);
+  font-size: 0.95rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.timeline__body p {
+  margin: 0;
+}
+
+.timeline__body pre {
+  margin: 0.35rem 0 0;
+}
 .tag-list {
   display: flex;
   flex-wrap: wrap;
@@ -837,6 +1044,18 @@ body {
   background: rgba(248, 113, 113, 0.2);
   border: 1px solid rgba(248, 113, 113, 0.4);
   color: #fecaca;
+}
+
+.alert--info {
+  background: rgba(56, 189, 248, 0.18);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #bae6fd;
+}
+
+.alert--success {
+  background: rgba(134, 239, 172, 0.2);
+  border: 1px solid rgba(134, 239, 172, 0.45);
+  color: #bbf7d0;
 }
 
 .modal {

@@ -17,6 +17,12 @@ class ApiKeyCreateRequest(BaseModel):
     expiry_date: Optional[date]
 
 
+class ApiKeyRotateRequest(BaseModel):
+    description: Optional[str] = Field(default=None, max_length=255)
+    expiry_date: Optional[date]
+    retire_previous: bool = True
+
+
 class ApiKeyResponse(BaseModel):
     id: int
     description: Optional[str]
