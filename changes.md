@@ -31,3 +31,4 @@
 - 2025-10-07, 12:36 UTC, Feature, Added FastAPI session management, CSRF middleware, login rate limiting, password reset, and TOTP flows with documented endpoints
 - 2025-10-08, 00:58 UTC, Feature, Delivered responsive login and super-admin registration pages with session-aware redirects and client-side MFA support
 - 2025-10-09, 13:05 UTC, Feature, Documented legacy Node.js parity gaps and outlined restoration tasks in docs/node-parity-gap.md
+- 2025-10-09, 15:42 UTC, Fix, Switched password hashing to bcrypt_sha256 to support long credentials without login failures
