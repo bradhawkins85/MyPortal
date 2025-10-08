@@ -1,3 +1,4 @@
+- 2025-10-08, 11:08 UTC, Fix, Allowed switch-company requests with incorrect JSON headers to fall back to form parsing so company switching succeeds
 - 2025-10-10, 03:15 UTC, Fix, Prevented switch-company payload parsing from failing after CSRF middleware consumes the request body stream
 - 2025-10-08, 10:55 UTC, Fix, Hardened active company session migration for legacy MySQL compatibility so company switching succeeds
 # Change Log
