@@ -7,6 +7,7 @@
       <div class="company-switcher">
         <h3>Select Company</h3>
         <form action="/switch-company" method="post">
+          <%- include('partials/csrf-field') %>
           <select name="companyId" id="company-switcher">
             <% companies.forEach(function(c) { %>
               <option value="<%= c.company_id %>" <%= c.company_id === currentCompanyId ? 'selected' : '' %>><%= c.company_name %></option>

@@ -17,6 +17,7 @@
         <p class="error">Too many attempts. Please try again later.</p>
       <% } %>
       <form method="post" action="/verify">
+        <%- include('partials/csrf-field') %>
         <label>Code:
           <input type="text" name="code" required maxlength="6">
         </label>

@@ -11,6 +11,7 @@
       <p class="error"><%= error %></p>
     <% } %>
     <form method="post" action="/logon">
+      <%- include('partials/csrf-field') %>
       <label>Email:
         <input type="email" name="email" required>
       </label>

@@ -16,6 +16,7 @@
       <section>
         <h2>Add Staff</h2>
         <form action="/staff" method="post">
+          <%- include('partials/csrf-field') %>
           <input type="text" name="firstName" placeholder="First Name" required>
           <input type="text" name="lastName" placeholder="Last Name" required>
           <input type="email" name="email" placeholder="Email" required>
@@ -63,6 +64,7 @@
               <td class="date-onboarded" data-date="<%= s.date_onboarded %>"><%= s.date_onboarded %></td>
               <td>
                 <form action="/staff/enabled" method="post">
+                  <%- include('partials/csrf-field') %>
                   <input type="hidden" name="staffId" value="<%= s.id %>">
                   <input type="checkbox" name="enabled" value="1" <%= s.enabled ? 'checked' : '' %> data-submit-on-change>
                 </form>
