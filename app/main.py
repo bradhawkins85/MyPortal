@@ -324,6 +324,10 @@ def _serialise_for_json(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, time):
         return value.isoformat()
+    if isinstance(value, Decimal):
+        if value == value.to_integral():
+            return int(value)
+        return float(value)
     if isinstance(value, Mapping):
         return {key: _serialise_for_json(item) for key, item in value.items()}
     if isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray)):
