@@ -6,10 +6,10 @@ from datetime import datetime
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, status, Query
+from fastapi import FastAPI, HTTPException, Request, Response, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from app.api.routes import audit_logs, auth, companies, memberships, roles, users
@@ -23,6 +23,10 @@ from app.repositories import roles as role_repo
 from app.repositories import users as user_repo
 from app.security.csrf import CSRFMiddleware
 from app.security.rate_limiter import RateLimiterMiddleware, SimpleRateLimiter
+from pydantic import BaseModel, Field, ConfigDict
+
+import secrets
+import string
 from app.security.session import session_manager
 
 configure_logging()
@@ -49,6 +53,30 @@ app.add_middleware(CSRFMiddleware)
 
 templates = Jinja2Templates(directory=str(templates_config.template_path))
 app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
+
+
+class StaffUpdatePayload(BaseModel):
+    """Payload accepted when updating a staff member from the admin UI."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    first_name: str | None = Field(default=None, alias="firstName")
+    last_name: str | None = Field(default=None, alias="lastName")
+    email: str | None = None
+    mobile_phone: str | None = Field(default=None, alias="mobilePhone")
+    date_onboarded: str | None = Field(default=None, alias="dateOnboarded")
+    date_offboarded: str | None = Field(default=None, alias="dateOffboarded")
+    enabled: bool | None = None
+    street: str | None = None
+    city: str | None = None
+    state: str | None = None
+    postcode: str | None = None
+    country: str | None = None
+    department: str | None = None
+    job_title: str | None = Field(default=None, alias="jobTitle")
+    company: str | None = Field(default=None, alias="company")
+    manager_name: str | None = Field(default=None, alias="managerName")
+    account_action: str | None = Field(default=None, alias="accountAction")
 
 app.include_router(auth.router)
 app.include_router(users.router)
@@ -185,6 +213,46 @@ async def staff_page(
         "department_filter": department,
     }
     return templates.TemplateResponse("staff/index.html", context)
+
+
+def _generate_verification_code(length: int = 6) -> str:
+    alphabet = string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+@app.put("/staff/{staff_id}")
+async def update_staff_member(staff_id: int, payload: StaffUpdatePayload) -> Response:
+    log_info(
+        "Staff update requested",
+        staff_id=staff_id,
+        fields=payload.model_dump(exclude_none=True),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post("/staff/{staff_id}/verify")
+async def verify_staff_member(staff_id: int) -> JSONResponse:
+    code = _generate_verification_code()
+    log_info("Staff verification dispatched", staff_id=staff_id, verification_code=code)
+    return JSONResponse(
+        {"status": status.HTTP_202_ACCEPTED, "code": code},
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+
+
+@app.post("/staff/{staff_id}/invite")
+async def invite_staff_member(staff_id: int) -> JSONResponse:
+    log_info("Staff invitation requested", staff_id=staff_id)
+    return JSONResponse(
+        {"status": status.HTTP_202_ACCEPTED, "message": "Invitation dispatched"},
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+
+
+@app.delete("/staff/{staff_id}")
+async def delete_staff_member(staff_id: int) -> Response:
+    log_info("Staff deletion requested", staff_id=staff_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/admin/roles", response_class=HTMLResponse)
@@ -325,6 +393,150 @@ async def admin_shop_page(
         "show_archived": show_archived,
     }
     return templates.TemplateResponse("admin/shop.html", context)
+
+
+def _redirect_to_admin_shop() -> RedirectResponse:
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/shop/admin/category")
+async def create_shop_category(request: Request) -> RedirectResponse:
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category name is required")
+    log_info("Shop category create requested", user_id=current_user.get("id"), name=name)
+    return _redirect_to_admin_shop()
+
+
+@app.post("/shop/admin/category/{category_id}/delete")
+async def delete_shop_category(category_id: int, request: Request) -> RedirectResponse:
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    log_info("Shop category delete requested", user_id=current_user.get("id"), category_id=category_id)
+    return _redirect_to_admin_shop()
+
+
+@app.post("/shop/admin/product/import")
+async def import_shop_product(request: Request) -> RedirectResponse:
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    vendor_sku = (form.get("vendor_sku") or "").strip()
+    if not vendor_sku:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vendor SKU is required")
+    log_info("Shop product import requested", user_id=current_user.get("id"), vendor_sku=vendor_sku)
+    return _redirect_to_admin_shop()
+
+
+@app.post("/shop/admin/product")
+async def create_shop_product(request: Request) -> RedirectResponse:
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    payload = {
+        "name": (form.get("name") or "").strip(),
+        "sku": (form.get("sku") or "").strip(),
+        "vendor_sku": (form.get("vendor_sku") or "").strip(),
+        "description": form.get("description"),
+        "price": form.get("price"),
+        "vip_price": form.get("vip_price"),
+        "stock": form.get("stock"),
+        "category_id": form.get("category_id") or None,
+    }
+    image = form.get("image")
+    image_name = getattr(image, "filename", None)
+    if not payload["name"] or not payload["sku"] or not payload["vendor_sku"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name, SKU, and vendor SKU are required")
+    log_info(
+        "Shop product create requested",
+        user_id=current_user.get("id"),
+        payload=payload,
+        image_filename=image_name,
+    )
+    return _redirect_to_admin_shop()
+
+
+@app.post("/shop/admin/product/{product_id}")
+async def update_shop_product(product_id: int, request: Request) -> RedirectResponse:
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    payload = {
+        "name": (form.get("name") or "").strip(),
+        "sku": (form.get("sku") or "").strip(),
+        "vendor_sku": (form.get("vendor_sku") or "").strip(),
+        "description": form.get("description"),
+        "price": form.get("price"),
+        "vip_price": form.get("vip_price"),
+        "stock": form.get("stock"),
+        "category_id": form.get("category_id") or None,
+    }
+    image = form.get("image")
+    image_name = getattr(image, "filename", None)
+    log_info(
+        "Shop product update requested",
+        user_id=current_user.get("id"),
+        product_id=product_id,
+        payload=payload,
+        image_filename=image_name,
+    )
+    return _redirect_to_admin_shop()
+
+
+@app.post("/shop/admin/product/{product_id}/archive")
+async def archive_shop_product(product_id: int, request: Request) -> RedirectResponse:
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    log_info("Shop product archive requested", user_id=current_user.get("id"), product_id=product_id)
+    return _redirect_to_admin_shop()
+
+
+@app.post("/shop/admin/product/{product_id}/unarchive")
+async def unarchive_shop_product(product_id: int, request: Request) -> RedirectResponse:
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    log_info("Shop product unarchive requested", user_id=current_user.get("id"), product_id=product_id)
+    return _redirect_to_admin_shop()
+
+
+@app.post("/shop/admin/product/{product_id}/delete")
+async def delete_shop_product(product_id: int, request: Request) -> RedirectResponse:
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    log_info("Shop product delete requested", user_id=current_user.get("id"), product_id=product_id)
+    return _redirect_to_admin_shop()
+
+
+@app.post("/shop/admin/product/{product_id}/visibility")
+async def update_shop_product_visibility(product_id: int, request: Request) -> RedirectResponse:
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    excluded_ids: list[int] = []
+    if hasattr(form, "getlist"):
+        try:
+            excluded_ids = [int(value) for value in form.getlist("excluded")]
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid exclusion list")
+    log_info(
+        "Shop product visibility update requested",
+        user_id=current_user.get("id"),
+        product_id=product_id,
+        excluded_company_ids=excluded_ids,
+    )
+    return _redirect_to_admin_shop()
 
 
 @app.get("/login", response_class=HTMLResponse)
