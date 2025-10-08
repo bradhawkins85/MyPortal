@@ -12,7 +12,7 @@
   </a>
 </li>
 <li class="menu__item">
-  <a href="/docs">
+  <a href="/docs" target="_blank" rel="noopener noreferrer">
     <span class="menu__icon" aria-hidden="true">
       <svg viewBox="0 0 24 24" focusable="false"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm8 6V4.5L18.5 9H14z"/></svg>
     </span>
@@ -22,7 +22,14 @@
 {% endblock %}
 
 {% block header_actions %}
-<a class="button-link" href="/docs" aria-label="Open API documentation">Swagger UI</a>
+<a
+  class="button-link"
+  href="/docs"
+  target="_blank"
+  rel="noopener noreferrer"
+  aria-label="Open API documentation"
+  >Swagger UI</a
+>
 {% endblock %}
 
 {% block content %}

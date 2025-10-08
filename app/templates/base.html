@@ -99,7 +99,12 @@
             </a>
           </li>
           <li class="menu__item">
-            <a href="/docs" {% if current_path.startswith('/docs') %}aria-current="page"{% endif %}>
+            <a
+              href="/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              {% if current_path.startswith('/docs') %}aria-current="page"{% endif %}
+            >
               <span class="menu__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" focusable="false"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm8 6V4.5L18.5 9H14z"/></svg>
               </span>
