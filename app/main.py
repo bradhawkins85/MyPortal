@@ -492,6 +492,64 @@ def _first_non_blank(keys: Iterable[str], *sources: Mapping[str, Any]) -> Any | 
     return None
 
 
+def _parse_multipart_fallback(text_body: str) -> dict[str, str]:
+    """Parse rudimentary multipart form payloads when the content type is wrong."""
+
+    boundary: str | None = None
+    for line in text_body.splitlines():
+        candidate = line.strip()
+        if not candidate:
+            continue
+        if candidate.startswith("--") and "content-disposition" not in candidate.lower():
+            boundary = candidate
+            break
+
+    if not boundary:
+        return {}
+
+    parts = text_body.split(boundary)
+    parsed: dict[str, str] = {}
+
+    for part in parts:
+        chunk = part.strip()
+        if not chunk or chunk == "--":
+            continue
+        if chunk.startswith("--") and not chunk.strip("-"):
+            continue
+
+        # Remove any leading CRLF left after splitting.
+        while chunk.startswith("\r\n"):
+            chunk = chunk[2:]
+
+        headers_section, separator, value_section = chunk.partition("\r\n\r\n")
+        if not separator:
+            continue
+
+        field_name: str | None = None
+        for header_line in headers_section.splitlines():
+            header = header_line.strip()
+            if not header.lower().startswith("content-disposition"):
+                continue
+            for attribute in header.split(";"):
+                attribute = attribute.strip()
+                if attribute.lower().startswith("name="):
+                    field_name = attribute.split("=", 1)[1].strip().strip('"')
+                    break
+            if field_name:
+                break
+
+        if not field_name:
+            continue
+
+        value = value_section.rstrip()
+        if value.endswith("--"):
+            value = value[:-2].rstrip()
+
+        parsed[field_name] = value
+
+    return parsed
+
+
 async def _extract_switch_company_payload(request: Request) -> dict[str, Any]:
     raw_content_type = request.headers.get("content-type", "")
     content_type = raw_content_type.split(";", 1)[0].strip().lower()
@@ -551,6 +609,17 @@ async def _extract_switch_company_payload(request: Request) -> dict[str, Any]:
         text_body = body_bytes.decode(charset, errors="replace")
     except LookupError:  # pragma: no cover - unsupported encodings
         text_body = body_bytes.decode("utf-8", errors="replace")
+
+    lower_body = text_body.lower()
+
+    if "content-disposition:" in lower_body and "form-data" in lower_body:
+        parsed = _parse_multipart_fallback(text_body)
+        if parsed:
+            for key, value in parsed.items():
+                if key not in data:
+                    data[key] = value
+            if data:
+                return data
 
     if "=" in text_body or "&" in text_body:
         for key, value in parse_qsl(text_body, keep_blank_values=True):
