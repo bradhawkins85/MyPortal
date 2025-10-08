@@ -1,33 +1,5 @@
 {% extends "base.html" %}
 
-{% block sidebar_menu %}
-  {{ super() }}
-  <li class="menu__item">
-    <a href="/shop" aria-current="page">
-      <span class="menu__icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" focusable="false"><path d="M4 7h16l-1.5 12.5A2 2 0 0 1 16.52 21H7.48a2 2 0 0 1-1.98-1.5zM6 3h12a1 1 0 0 1 1 1v2H5V4a1 1 0 0 1 1-1z"/></svg>
-      </span>
-      <span class="menu__label">Shop</span>
-    </a>
-  </li>
-  <li class="menu__item">
-    <a href="/forms">
-      <span class="menu__icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h9l5 5v15H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm8 7h4.5L14 4.5V9z"/></svg>
-      </span>
-      <span class="menu__label">Forms</span>
-    </a>
-  </li>
-  <li class="menu__item">
-    <a href="/staff">
-      <span class="menu__icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" focusable="false"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-3.31 0-8 1.66-8 5v1h16v-1c0-3.34-4.69-5-8-5z"/></svg>
-      </span>
-      <span class="menu__label">Staff</span>
-    </a>
-  </li>
-{% endblock %}
-
 {% block header_actions %}
   <a class="button button--ghost" href="/cart">View cart</a>
 {% endblock %}
