@@ -426,16 +426,18 @@ async def _extract_switch_company_payload(request: Request) -> dict[str, Any]:
     raw_content_type = request.headers.get("content-type", "")
     content_type = raw_content_type.split(";", 1)[0].strip().lower()
 
+    data: dict[str, Any] = {}
+
     if content_type == "application/json":
         try:
             payload = await request.json()
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError, RuntimeError, UnicodeDecodeError):
             payload = None
         if isinstance(payload, dict):
             return payload
-        return {}
-
-    data: dict[str, Any] = {}
+        # Fall back to parsing the raw body below so mislabelled JSON requests
+        # (for example, form submissions with an incorrect content type) are
+        # still handled gracefully.
 
     should_attempt_form = content_type in {
         "application/x-www-form-urlencoded",
