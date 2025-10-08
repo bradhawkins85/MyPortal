@@ -87,7 +87,7 @@ from app.services.opnform import (
     normalize_opnform_embed_code,
     normalize_opnform_form_url,
 )
-from app.services.file_storage import store_product_image
+from app.services.file_storage import delete_stored_file, store_product_image
 
 configure_logging()
 settings = get_settings()
@@ -912,6 +912,149 @@ def _companies_redirect(
     return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
 
 
+_COMPANY_PERMISSION_COLUMNS: list[dict[str, str]] = [
+    {"field": "can_manage_licenses", "label": "Licenses"},
+    {"field": "can_manage_office_groups", "label": "Office groups"},
+    {"field": "can_manage_assets", "label": "Assets"},
+    {"field": "can_manage_invoices", "label": "Invoices"},
+    {"field": "can_order_licenses", "label": "Order licenses"},
+    {"field": "can_access_shop", "label": "Shop"},
+    {"field": "is_admin", "label": "Company admin"},
+]
+
+_STAFF_PERMISSION_OPTIONS: list[dict[str, Any]] = [
+    {"value": 0, "label": "No staff access"},
+    {"value": 1, "label": "Department viewer"},
+    {"value": 2, "label": "Department manager"},
+    {"value": 3, "label": "Full staff manager"},
+]
+
+
+def _sanitize_message(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text[:200]
+
+
+async def _get_company_management_scope(
+    request: Request,
+    user: dict[str, Any],
+) -> tuple[bool, list[dict[str, Any]], dict[int, dict[str, Any]]]:
+    is_super_admin = bool(user.get("is_super_admin"))
+    if is_super_admin:
+        companies = await company_repo.list_companies()
+        companies.sort(key=lambda item: (item.get("name") or "").lower())
+        return True, companies, {}
+
+    memberships = await user_company_repo.list_companies_for_user(user["id"])
+    membership_lookup: dict[int, dict[str, Any]] = {}
+    for record in memberships:
+        raw_company_id = record.get("company_id")
+        try:
+            company_id = int(raw_company_id)
+        except (TypeError, ValueError):
+            continue
+        staff_permission = int(record.get("staff_permission") or 0)
+        if (
+            bool(record.get("is_admin"))
+            or bool(record.get("can_manage_staff"))
+            or staff_permission > 0
+        ):
+            membership_lookup[company_id] = record
+
+    if not membership_lookup:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
+
+    companies: list[dict[str, Any]] = []
+    for company_id in sorted(membership_lookup.keys()):
+        company = await company_repo.get_company_by_id(company_id)
+        if company:
+            companies.append(company)
+
+    if not companies:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
+
+    return False, companies, membership_lookup
+
+
+async def _render_companies_dashboard(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    selected_company_id: int | None = None,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    temporary_password: str | None = None,
+    invited_email: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    is_super_admin, managed_companies, membership_lookup = await _get_company_management_scope(
+        request, user
+    )
+
+    ordered_company_ids: list[int] = [
+        int(company["id"]) for company in managed_companies if company.get("id") is not None
+    ]
+
+    effective_company_id = selected_company_id
+    if effective_company_id is not None and effective_company_id not in ordered_company_ids:
+        effective_company_id = ordered_company_ids[0] if ordered_company_ids else None
+
+    if effective_company_id is None and not is_super_admin and ordered_company_ids:
+        active_company_raw = getattr(request.state, "active_company_id", None)
+        try:
+            active_company_candidate = int(active_company_raw)
+        except (TypeError, ValueError):
+            active_company_candidate = None
+        if active_company_candidate in ordered_company_ids:
+            effective_company_id = active_company_candidate
+        else:
+            effective_company_id = ordered_company_ids[0]
+
+    if is_super_admin and effective_company_id is None:
+        assignments = await user_company_repo.list_assignments()
+    elif effective_company_id is not None:
+        assignments = await user_company_repo.list_assignments(effective_company_id)
+    else:
+        assignments = []
+
+    user_options: list[dict[str, Any]] = []
+    if is_super_admin:
+        raw_users = await user_repo.list_users()
+        for record in raw_users:
+            user_id = record.get("id")
+            email = (record.get("email") or "").strip()
+            if user_id is None or not email:
+                continue
+            user_options.append({"id": user_id, "email": email})
+
+    extra = {
+        "title": "Company administration",
+        "managed_companies": managed_companies,
+        "selected_company_id": effective_company_id,
+        "assignments": assignments,
+        "permission_columns": _COMPANY_PERMISSION_COLUMNS,
+        "staff_permission_options": _STAFF_PERMISSION_OPTIONS,
+        "is_super_admin": is_super_admin,
+        "success_message": success_message,
+        "error_message": error_message,
+        "temporary_password": temporary_password,
+        "invited_email": invited_email,
+        "user_options": user_options,
+    }
+
+    response = await _render_template("admin/companies.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     await db.connect()
@@ -1546,6 +1689,17 @@ async def shop_page(
             if vip_price is not None:
                 product["price"] = vip_price
 
+    def _product_has_price(product: Mapping[str, Any]) -> bool:
+        raw_price = product.get("price")
+        if raw_price is None:
+            return False
+        try:
+            return Decimal(str(raw_price)) > 0
+        except (InvalidOperation, TypeError, ValueError):
+            return False
+
+    products = [product for product in products if _product_has_price(product)]
+
     extra = {
         "title": "Shop",
         "categories": categories,
@@ -2066,6 +2220,374 @@ async def invite_staff_member(staff_id: int, request: Request):
         invited_user_id=created_user["id"],
     )
     return JSONResponse({"success": True})
+
+@app.get("/admin/companies", response_class=HTMLResponse)
+async def admin_companies_page(
+    request: Request,
+    company_id: int | None = Query(default=None),
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    return await _render_companies_dashboard(
+        request,
+        current_user,
+        selected_company_id=company_id,
+        success_message=_sanitize_message(success),
+        error_message=_sanitize_message(error),
+    )
+
+
+@app.post("/admin/companies", response_class=HTMLResponse)
+async def admin_create_company(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    name = str(form.get("name", "")).strip()
+    syncro_company_id = (str(form.get("syncroCompanyId", "")).strip() or None)
+    xero_id = (str(form.get("xeroId", "")).strip() or None)
+    is_vip = _parse_bool(form.get("isVip"))
+    if not name:
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            error_message="Enter a company name.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        return response
+    payload: dict[str, Any] = {"name": name, "is_vip": 1 if is_vip else 0}
+    if syncro_company_id:
+        payload["syncro_company_id"] = syncro_company_id
+    if xero_id:
+        payload["xero_id"] = xero_id
+    try:
+        created = await company_repo.create_company(**payload)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to create company", error=str(exc))
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            error_message="Unable to create company. Please try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+        return response
+    return _companies_redirect(
+        company_id=created.get("id"),
+        success=f"Company {created.get('name')} created.",
+    )
+
+
+@app.post("/admin/companies/{company_id}", response_class=HTMLResponse)
+async def admin_update_company(company_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    name = str(form.get("name", "")).strip()
+    syncro_company_id = (str(form.get("syncroCompanyId", "")).strip() or None)
+    xero_id = (str(form.get("xeroId", "")).strip() or None)
+    is_vip = _parse_bool(form.get("isVip"))
+    if not name:
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            selected_company_id=company_id,
+            error_message="Enter a company name.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        return response
+    existing = await company_repo.get_company_by_id(company_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    updates: dict[str, Any] = {
+        "name": name,
+        "is_vip": 1 if is_vip else 0,
+        "syncro_company_id": syncro_company_id,
+        "xero_id": xero_id,
+    }
+    try:
+        await company_repo.update_company(company_id, **updates)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to update company", company_id=company_id, error=str(exc))
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            selected_company_id=company_id,
+            error_message="Unable to update company. Please try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+        return response
+    return _companies_redirect(
+        company_id=company_id,
+        success=f"Company {name} updated.",
+    )
+
+
+async def _ensure_company_permission(
+    request: Request,
+    user: dict[str, Any],
+    company_id: int,
+    *,
+    require_admin: bool = False,
+    require_staff_manager: bool = False,
+) -> None:
+    is_super_admin, _, membership_lookup = await _get_company_management_scope(request, user)
+    if is_super_admin:
+        return
+    membership = membership_lookup.get(company_id)
+    if not membership:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    staff_permission = int(membership.get("staff_permission") or 0)
+    if require_admin and not bool(membership.get("is_admin")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    if require_staff_manager and staff_permission < 3 and not bool(membership.get("can_manage_staff")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+
+@app.post("/admin/companies/users/create", response_class=HTMLResponse)
+async def admin_create_company_user(request: Request):
+    current_user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    company_id_raw = form.get("companyId")
+    email = str(form.get("email", "")).strip().lower()
+    password = str(form.get("password", ""))
+    first_name = (str(form.get("firstName", "")).strip() or None)
+    last_name = (str(form.get("lastName", "")).strip() or None)
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError):
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            error_message="Select a company.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        return response
+    await _ensure_company_permission(
+        request,
+        current_user,
+        company_id,
+        require_admin=True,
+        require_staff_manager=True,
+    )
+    if not email:
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            selected_company_id=company_id,
+            error_message="Enter an email address.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        return response
+    if len(password) < 8:
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            selected_company_id=company_id,
+            error_message="Enter a password of at least 8 characters.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        return response
+    existing_user = await user_repo.get_user_by_email(email)
+    if existing_user:
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            selected_company_id=company_id,
+            error_message="A user with that email already exists.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        return response
+    created_user = await user_repo.create_user(
+        email=email,
+        password=password,
+        first_name=first_name,
+        last_name=last_name,
+        company_id=company_id,
+    )
+    await user_repo.update_user(created_user["id"], force_password_change=1)
+    await user_company_repo.assign_user_to_company(
+        user_id=created_user["id"],
+        company_id=company_id,
+    )
+    return _companies_redirect(
+        company_id=company_id,
+        success=f"User {email} created.",
+    )
+
+
+@app.post("/admin/companies/users/invite", response_class=HTMLResponse)
+async def admin_invite_company_user(request: Request):
+    current_user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    company_id_raw = form.get("companyId")
+    email = str(form.get("email", "")).strip().lower()
+    first_name = (str(form.get("firstName", "")).strip() or None)
+    last_name = (str(form.get("lastName", "")).strip() or None)
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError):
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            error_message="Select a company.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        return response
+    await _ensure_company_permission(
+        request,
+        current_user,
+        company_id,
+        require_admin=True,
+        require_staff_manager=True,
+    )
+    if not email:
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            selected_company_id=company_id,
+            error_message="Enter an email address.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        return response
+    existing_user = await user_repo.get_user_by_email(email)
+    if existing_user:
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            selected_company_id=company_id,
+            error_message="A user with that email already exists.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        return response
+    temporary_password = secrets.token_urlsafe(12)
+    created_user = await user_repo.create_user(
+        email=email,
+        password=temporary_password,
+        first_name=first_name,
+        last_name=last_name,
+        company_id=company_id,
+    )
+    await user_repo.update_user(created_user["id"], force_password_change=1)
+    await user_company_repo.assign_user_to_company(
+        user_id=created_user["id"],
+        company_id=company_id,
+    )
+    return await _render_companies_dashboard(
+        request,
+        current_user,
+        selected_company_id=company_id,
+        success_message=f"Invitation generated for {email}.",
+        temporary_password=temporary_password,
+        invited_email=email,
+    )
+
+
+@app.post("/admin/companies/assign", response_class=HTMLResponse)
+async def admin_assign_user_to_company(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    user_id_raw = form.get("userId")
+    company_id_raw = form.get("companyId")
+    try:
+        user_id = int(user_id_raw)
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError):
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            error_message="Select both a user and a company.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        return response
+    user_record = await user_repo.get_user_by_id(user_id)
+    company_record = await company_repo.get_company_by_id(company_id)
+    if not user_record or not company_record:
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            error_message="User or company not found.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+        return response
+    await user_company_repo.assign_user_to_company(
+        user_id=user_id,
+        company_id=company_id,
+    )
+    return _companies_redirect(
+        company_id=company_id,
+        success=f"User {user_record.get('email')} assigned to {company_record.get('name')}.",
+    )
+
+
+@app.post("/admin/companies/assignment/{company_id}/{user_id}/permission")
+async def admin_update_company_permission(company_id: int, user_id: int, request: Request):
+    current_user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    await _ensure_company_permission(
+        request,
+        current_user,
+        company_id,
+        require_admin=True,
+    )
+    form = await request.form()
+    field = str(form.get("field", "")).strip()
+    value = _parse_bool(form.get("value"))
+    try:
+        await user_company_repo.update_permission(
+            user_id=user_id,
+            company_id=company_id,
+            field=field,
+            value=value,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return JSONResponse({"success": True})
+
+
+@app.post("/admin/companies/assignment/{company_id}/{user_id}/staff-permission")
+async def admin_update_staff_permission(company_id: int, user_id: int, request: Request):
+    current_user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    await _ensure_company_permission(
+        request,
+        current_user,
+        company_id,
+        require_staff_manager=True,
+    )
+    form = await request.form()
+    permission_raw = form.get("permission")
+    try:
+        permission_value = int(permission_raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid permission value")
+    await user_company_repo.update_staff_permission(
+        user_id=user_id,
+        company_id=company_id,
+        permission=permission_value,
+    )
+    return JSONResponse({"success": True})
+
+
+@app.post("/admin/companies/assignment/{company_id}/{user_id}/remove")
+async def admin_remove_company_assignment(company_id: int, user_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    await user_company_repo.remove_assignment(user_id=user_id, company_id=company_id)
+    return JSONResponse({"success": True})
+
 
 @app.post("/admin/syncro/import-contacts")
 async def import_syncro_contacts(request: Request):
@@ -2748,6 +3270,50 @@ async def admin_create_shop_product(
         sku=product["sku"],
         vendor_sku=product["vendor_sku"],
         created_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
+    "/shop/admin/product/{product_id}/delete",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Delete a shop product",
+    tags=["Shop"],
+)
+async def admin_delete_shop_product(request: Request, product_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    product = await shop_repo.get_product_by_id(product_id)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    deleted = await shop_repo.delete_product(product_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    image_url = product.get("image_url")
+    if image_url:
+        try:
+            delete_stored_file(image_url, _private_uploads_path)
+        except HTTPException as exc:
+            log_error(
+                "Failed to remove deleted product image",
+                product_id=product_id,
+                error=str(exc),
+            )
+        except OSError as exc:
+            log_error(
+                "Failed to remove deleted product image",
+                product_id=product_id,
+                error=str(exc),
+            )
+
+    log_info(
+        "Shop product deleted",
+        product_id=product_id,
+        deleted_by=current_user.get("id") if current_user else None,
     )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
