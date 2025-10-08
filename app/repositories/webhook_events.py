@@ -1,0 +1,279 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from typing import Any
+
+from app.core.database import db
+
+
+def _serialise(value: Any) -> str | None:
+    if value is None:
+        return None
+    return json.dumps(value, default=str)
+
+
+def _deserialise(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return value
+
+
+def _make_aware(dt: Any) -> datetime | None:
+    if not dt:
+        return None
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    return None
+
+
+def _normalise_event(row: dict[str, Any]) -> dict[str, Any]:
+    data = dict(row)
+    for key in ("id", "attempt_count", "max_attempts", "backoff_seconds", "response_status"):
+        if key in data and data[key] is not None:
+            data[key] = int(data[key])
+    data["headers"] = _deserialise(data.get("headers"))
+    data["payload"] = _deserialise(data.get("payload"))
+    if data.get("created_at"):
+        data["created_at"] = _make_aware(data["created_at"])
+    if data.get("updated_at"):
+        data["updated_at"] = _make_aware(data["updated_at"])
+    if data.get("next_attempt_at"):
+        data["next_attempt_at"] = _make_aware(data["next_attempt_at"])
+    return data
+
+
+def _normalise_attempt(row: dict[str, Any]) -> dict[str, Any]:
+    data = dict(row)
+    for key in ("id", "event_id", "attempt_number", "response_status"):
+        if key in data and data[key] is not None:
+            data[key] = int(data[key])
+    if data.get("attempted_at"):
+        data["attempted_at"] = _make_aware(data["attempted_at"])
+    return data
+
+
+async def create_event(
+    *,
+    name: str,
+    target_url: str,
+    headers: dict[str, Any] | None = None,
+    payload: Any = None,
+    max_attempts: int = 3,
+    backoff_seconds: int = 300,
+) -> dict[str, Any]:
+    await db.execute(
+        """
+        INSERT INTO webhook_events
+            (name, target_url, headers, payload, max_attempts, backoff_seconds)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (
+            name,
+            target_url,
+            _serialise(headers),
+            _serialise(payload),
+            max(1, max_attempts),
+            max(1, backoff_seconds),
+        ),
+    )
+    row = await db.fetch_one("SELECT * FROM webhook_events WHERE id = LAST_INSERT_ID()")
+    return _normalise_event(row) if row else {}
+
+
+async def get_event(event_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT * FROM webhook_events WHERE id = %s",
+        (event_id,),
+    )
+    return _normalise_event(row) if row else None
+
+
+async def list_events(*, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    params: list[Any] = []
+    where = ""
+    if status:
+        where = "WHERE status = %s"
+        params.append(status)
+    params.append(limit)
+    rows = await db.fetch_all(
+        f"SELECT * FROM webhook_events {where} ORDER BY updated_at DESC LIMIT %s",
+        tuple(params),
+    )
+    return [_normalise_event(row) for row in rows]
+
+
+async def list_due_events(limit: int = 25) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT *
+        FROM webhook_events
+        WHERE status = 'pending'
+          AND (next_attempt_at IS NULL OR next_attempt_at <= UTC_TIMESTAMP())
+        ORDER BY created_at ASC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+    return [_normalise_event(row) for row in rows]
+
+
+async def mark_in_progress(event_id: int) -> None:
+    await db.execute(
+        """
+        UPDATE webhook_events
+        SET status = 'in_progress', updated_at = UTC_TIMESTAMP()
+        WHERE id = %s AND status = 'pending'
+        """,
+        (event_id,),
+    )
+
+
+async def record_attempt(
+    *,
+    event_id: int,
+    attempt_number: int,
+    status: str,
+    response_status: int | None,
+    response_body: str | None,
+    error_message: str | None,
+) -> None:
+    await db.execute(
+        """
+        INSERT INTO webhook_event_attempts
+            (event_id, attempt_number, status, response_status, response_body, error_message)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (
+            event_id,
+            attempt_number,
+            status,
+            response_status,
+            response_body,
+            error_message,
+        ),
+    )
+
+
+async def mark_event_completed(
+    event_id: int,
+    *,
+    attempt_number: int,
+    response_status: int | None,
+    response_body: str | None,
+) -> None:
+    await db.execute(
+        """
+        UPDATE webhook_events
+        SET status = 'succeeded',
+            response_status = %s,
+            response_body = %s,
+            attempt_count = %s,
+            last_error = NULL,
+            next_attempt_at = NULL,
+            updated_at = UTC_TIMESTAMP()
+        WHERE id = %s
+        """,
+        (
+            response_status,
+            response_body,
+            attempt_number,
+            event_id,
+        ),
+    )
+
+
+async def mark_event_failed(
+    event_id: int,
+    *,
+    attempt_number: int,
+    error_message: str | None,
+    response_status: int | None,
+    response_body: str | None,
+) -> None:
+    await db.execute(
+        """
+        UPDATE webhook_events
+        SET status = 'failed',
+            response_status = %s,
+            response_body = %s,
+            attempt_count = %s,
+            last_error = %s,
+            next_attempt_at = NULL,
+            updated_at = UTC_TIMESTAMP()
+        WHERE id = %s
+        """,
+        (
+            response_status,
+            response_body,
+            attempt_number,
+            error_message,
+            event_id,
+        ),
+    )
+
+
+async def schedule_retry(
+    event_id: int,
+    *,
+    attempt_number: int,
+    next_attempt_at: datetime,
+    error_message: str | None,
+    response_status: int | None,
+    response_body: str | None,
+) -> None:
+    await db.execute(
+        """
+        UPDATE webhook_events
+        SET status = 'pending',
+            attempt_count = %s,
+            next_attempt_at = %s,
+            last_error = %s,
+            response_status = %s,
+            response_body = %s,
+            updated_at = UTC_TIMESTAMP()
+        WHERE id = %s
+        """,
+        (
+            attempt_number,
+            next_attempt_at.replace(tzinfo=None),
+            error_message,
+            response_status,
+            response_body,
+            event_id,
+        ),
+    )
+
+
+async def list_attempts(event_id: int, limit: int = 20) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT *
+        FROM webhook_event_attempts
+        WHERE event_id = %s
+        ORDER BY attempted_at DESC
+        LIMIT %s
+        """,
+        (event_id, limit),
+    )
+    return [_normalise_attempt(row) for row in rows]
+
+
+async def force_retry(event_id: int) -> None:
+    await db.execute(
+        """
+        UPDATE webhook_events
+        SET status = 'pending',
+            next_attempt_at = UTC_TIMESTAMP(),
+            updated_at = UTC_TIMESTAMP()
+        WHERE id = %s
+        """,
+        (event_id,),
+    )
