@@ -23,6 +23,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - Pricing workflow approvals with notification feed and audit-friendly status changes
 - Automated CSRF protection on authenticated state-changing requests
 - Super admin access to the OpnForm builder for creating and editing forms
+- Automation dashboard with persistent scheduler management, webhook retry monitoring, and admin controls
 
 ## Port Catalogue & Pricing Workflows
 
@@ -113,6 +114,20 @@ All authentication routes are documented in the interactive Swagger UI and summa
 - `POST /auth/totp/setup` – Generates a pending TOTP secret and provisioning URI for enrolment.
 - `POST /auth/totp/verify` – Confirms the authenticator code and persists it for future logins.
 - `DELETE /auth/totp/{id}` – Removes an existing authenticator.
+
+## API Key Management
+
+Super administrators can now mint and revoke API credentials directly from the Swagger UI or via the endpoints below. Each key
+is generated as a 64-character token, stored using an HMAC-SHA256 digest peppered with the global secret, and summarised with a
+preview prefix so the plaintext is never written to the database.【F:app/security/api_keys.py†L1-L38】【F:app/repositories/api_keys.py†L1-L190】
+
+- `GET /api-keys` – Lists active and (optionally) expired keys with usage counts, last-seen timestamps, and per-IP access
+  breakdowns. Sorting, free-text search, and inclusion of expired keys are supported via query parameters.【F:app/api/routes/api_keys.py†L24-L62】
+- `POST /api-keys` – Creates a new key, returning the plaintext once alongside its metadata; the operation is captured in the
+  audit log with the requesting administrator and source IP.【F:app/api/routes/api_keys.py†L64-L92】
+- `GET /api-keys/{id}` – Retrieves a single key record with aggregated usage telemetry for investigative workflows.【F:app/api/routes/api_keys.py†L95-L105】
+- `DELETE /api-keys/{id}` – Revokes a key, removes its usage counters, and logs the previous metadata for auditing.
+  【F:app/api/routes/api_keys.py†L108-L123】【F:app/repositories/api_keys.py†L132-L190】
 
 ## Company Context Switching
 
