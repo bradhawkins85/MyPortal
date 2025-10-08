@@ -8,15 +8,27 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path, PurePosixPath
 from typing import Any
-from urllib.parse import parse_qsl, urlencode
+from urllib.parse import parse_qsl, quote, urlencode
 
 import aiomysql
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.openapi.docs import get_swagger_ui_html
 from itsdangerous import BadSignature, URLSafeSerializer
 from starlette.datastructures import FormData
 
@@ -41,6 +53,7 @@ from app.core.config import get_settings, get_templates_config
 from app.core.database import db
 from app.core.logging import configure_logging, log_error, log_info
 from app.repositories import audit_logs as audit_repo
+from app.repositories import api_keys as api_key_repo
 from app.repositories import auth as auth_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
@@ -58,9 +71,13 @@ from app.repositories import users as user_repo
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import encrypt_secret
 from app.security.rate_limiter import RateLimiterMiddleware, SimpleRateLimiter
-from app.security.session import session_manager
+from app.security.session import SessionData, session_manager
+from app.api.dependencies.auth import get_current_session
 from app.services.scheduler import scheduler_service
+from app.security.api_keys import mask_api_key
+from app.services import audit as audit_service
 from app.services import m365 as m365_service
+from app.services import products as products_service
 from app.services import staff_importer
 from app.services import template_variables
 from app.services import webhook_monitor
@@ -118,9 +135,13 @@ app = FastAPI(
         "Customer portal API exposing authentication, company administration, port catalogue, "
         "and pricing workflow capabilities."
     ),
-    docs_url=settings.swagger_ui_url,
+    docs_url=None,
+    openapi_url=None,
     openapi_tags=tags_metadata,
 )
+
+SWAGGER_UI_PATH = settings.swagger_ui_url or "/docs"
+PROTECTED_OPENAPI_PATH = "/internal/openapi.json"
 
 app.add_middleware(
     CORSMiddleware,
@@ -134,7 +155,7 @@ general_rate_limiter = SimpleRateLimiter(limit=300, window_seconds=900)
 app.add_middleware(
     RateLimiterMiddleware,
     rate_limiter=general_rate_limiter,
-    exempt_paths=("/docs", "/openapi.json", "/static"),
+    exempt_paths=(SWAGGER_UI_PATH, PROTECTED_OPENAPI_PATH, "/static"),
 )
 
 app.add_middleware(CSRFMiddleware)
@@ -200,6 +221,33 @@ def _resolve_private_upload(file_path: str) -> Path:
 
 
 app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
+
+
+@app.get(PROTECTED_OPENAPI_PATH, include_in_schema=False)
+async def authenticated_openapi_schema(
+    _: SessionData = Depends(get_current_session),
+) -> JSONResponse:
+    """Return the OpenAPI schema for authenticated users only."""
+
+    return JSONResponse(app.openapi())
+
+
+@app.get(SWAGGER_UI_PATH, include_in_schema=False)
+async def authenticated_swagger_ui(request: Request) -> Response:
+    """Render the Swagger UI after verifying the user session."""
+
+    session = await session_manager.load_session(request)
+    if not session:
+        next_target = quote(SWAGGER_UI_PATH, safe="/")
+        login_url = f"/login?next={next_target}"
+        redirect = RedirectResponse(url=login_url, status_code=status.HTTP_303_SEE_OTHER)
+        return redirect
+
+    return get_swagger_ui_html(
+        openapi_url=PROTECTED_OPENAPI_PATH,
+        title=f"{settings.app_name} API Docs",
+        oauth2_redirect_url=None,
+    )
 
 app.include_router(auth.router)
 app.include_router(users.router)
@@ -287,6 +335,18 @@ def _serialise_mapping(record: Mapping[str, Any]) -> dict[str, Any]:
     return {key: _serialise_for_json(value) for key, value in record.items()}
 
 
+def _parse_input_date(value: str | None) -> date | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
 def _parse_input_datetime(value: str | None, *, assume_midnight: bool = False) -> datetime | None:
     if value is None:
         return None
@@ -312,6 +372,17 @@ def _parse_input_datetime(value: str | None, *, assume_midnight: bool = False) -
     else:
         parsed = parsed.astimezone(timezone.utc)
     return parsed
+
+
+def _parse_bool(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    return text in {"1", "true", "t", "yes", "y", "on"}
 
 
 async def _resolve_initial_company_id(user: dict[str, Any]) -> int | None:
@@ -380,6 +451,294 @@ async def _render_template(
     return templates.TemplateResponse(template_name, context)
 
 
+_API_KEY_ORDER_CHOICES: list[tuple[str, str]] = [
+    ("created_at", "Creation date"),
+    ("last_used_at", "Last activity"),
+    ("expiry_date", "Expiry date"),
+    ("usage_count", "Usage count"),
+    ("description", "Description"),
+]
+_API_KEY_ORDER_COLUMNS = {choice[0] for choice in _API_KEY_ORDER_CHOICES}
+_API_KEY_DIRECTION_CHOICES: list[tuple[str, str]] = [
+    ("desc", "Descending"),
+    ("asc", "Ascending"),
+]
+
+
+def _normalise_api_key_order(order_by: str | None) -> str:
+    if not order_by:
+        return "created_at"
+    if order_by in _API_KEY_ORDER_COLUMNS:
+        return order_by
+    return "created_at"
+
+
+def _normalise_direction(direction: str | None) -> str:
+    if not direction:
+        return "desc"
+    return "asc" if direction.lower() == "asc" else "desc"
+
+
+def _extract_api_key_filters(data: Mapping[str, Any]) -> dict[str, Any]:
+    search = (str(data.get("search", "")).strip() or None) if data else None
+    include_expired = _parse_bool(data.get("include_expired"))
+    order_by = _normalise_api_key_order(str(data.get("order_by", "")))
+    order_direction = _normalise_direction(str(data.get("order_direction", "")))
+    service_filter = (str(data.get("service_filter", "")).strip() or None)
+    correlation_search = (str(data.get("correlation_search", "")).strip() or None)
+    return {
+        "search": search,
+        "include_expired": include_expired,
+        "order_by": order_by,
+        "order_direction": order_direction,
+        "service_filter": service_filter,
+        "correlation_search": correlation_search,
+    }
+
+
+def _format_correlation_label(raw_key: str) -> str:
+    prefix, _, value = raw_key.partition(":")
+    safe_value = (value or "").strip()
+    if prefix == "api_key":
+        preview = safe_value[-4:] if safe_value else "••••"
+        return f"API key fingerprint …{preview}"
+    if prefix == "api_key_meta":
+        preview = safe_value[-4:] if safe_value else "••••"
+        return f"Metadata API key …{preview}"
+    if prefix == "ip":
+        return f"Source IP {safe_value or 'unknown'}"
+    if prefix.endswith("_id"):
+        label = prefix.replace("_", " ").title()
+        return f"{label} #{safe_value or '?'}"
+    if prefix:
+        label = prefix.replace("_", " ").title()
+        return f"{label} {safe_value}".strip()
+    return safe_value or "Correlation"
+
+
+def _format_entity_label(log: Mapping[str, Any]) -> str:
+    entity_type = str(log.get("entity_type") or "system").strip()
+    entity_id = log.get("entity_id")
+    if entity_id is not None:
+        return f"{entity_type} #{entity_id}"
+    return entity_type
+
+
+def _derive_correlation_keys(log: Mapping[str, Any]) -> list[str]:
+    keys: list[str] = []
+    entity_type = log.get("entity_type")
+    entity_id = log.get("entity_id")
+    if entity_type and entity_id is not None:
+        keys.append(f"{entity_type}:{entity_id}")
+    metadata = log.get("metadata")
+    if isinstance(metadata, Mapping):
+        for candidate in ("api_key_id", "company_id", "webhook_event_id", "task_id", "user_id"):
+            value = metadata.get(candidate)
+            if value in (None, "", [], {}):
+                continue
+            keys.append(f"{candidate}:{value}")
+        if metadata.get("source_ip"):
+            keys.append(f"ip:{metadata['source_ip']}")
+        if metadata.get("api_key"):
+            keys.append(f"api_key_meta:{metadata['api_key']}")
+    if log.get("api_key"):
+        keys.append(f"api_key:{log['api_key']}")
+    if log.get("ip_address"):
+        keys.append(f"ip:{log['ip_address']}")
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique_keys: list[str] = []
+    for key in keys:
+        if key not in seen:
+            unique_keys.append(key)
+            seen.add(key)
+    return unique_keys
+
+
+def _extract_audit_service(action: Any) -> str:
+    if not action:
+        return "system"
+    text = str(action)
+    return text.split(".", 1)[0]
+
+
+def _prepare_api_key_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    today = date.today()
+    prepared: list[dict[str, Any]] = []
+    active_count = 0
+    for row in rows:
+        expiry = row.get("expiry_date")
+        is_expired = bool(expiry and isinstance(expiry, date) and expiry < today)
+        if not is_expired:
+            active_count += 1
+        usage_entries: list[dict[str, Any]] = []
+        for entry in row.get("usage", []) or []:
+            usage_entries.append(
+                {
+                    "ip_address": entry.get("ip_address"),
+                    "usage_count": entry.get("usage_count", 0),
+                    "last_used_iso": _to_iso(entry.get("last_used_at")),
+                }
+            )
+        expiry_iso = None
+        if isinstance(expiry, date):
+            expiry_iso = datetime.combine(expiry, time.min, tzinfo=timezone.utc).isoformat()
+        prepared.append(
+            {
+                "id": row["id"],
+                "description": row.get("description"),
+                "key_preview": mask_api_key(row.get("key_prefix")),
+                "created_iso": _to_iso(row.get("created_at")),
+                "expiry_date": expiry.isoformat() if isinstance(expiry, date) else None,
+                "expiry_iso": expiry_iso,
+                "last_used_iso": _to_iso(row.get("last_used_at")),
+                "last_seen_iso": _to_iso(row.get("last_seen_at")),
+                "usage_count": row.get("usage_count", 0),
+                "is_expired": is_expired,
+                "usage": usage_entries,
+            }
+        )
+    stats = {
+        "total": len(prepared),
+        "active": active_count,
+        "expired": len(prepared) - active_count,
+    }
+    return prepared, stats
+
+
+def _build_audit_correlations(
+    logs: list[dict[str, Any]],
+    *,
+    service_filter: str | None = None,
+    text_query: str | None = None,
+    limit: int = 25,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    services: set[str] = set()
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for log in logs:
+        service = _extract_audit_service(log.get("action"))
+        services.add(service)
+        for key in _derive_correlation_keys(log):
+            groups.setdefault(key, []).append(log)
+    correlations: list[dict[str, Any]] = []
+    text = text_query.lower().strip() if text_query else None
+    for key, items in groups.items():
+        if len(items) < 2:
+            continue
+        item_services = sorted({_extract_audit_service(item.get("action")) for item in items})
+        if service_filter and service_filter not in item_services:
+            continue
+        label = _format_correlation_label(key)
+        if text and text not in label.lower():
+            continue
+        sorted_items = sorted(
+            items,
+            key=lambda entry: entry.get("created_at") or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        latest = sorted_items[0]
+        events: list[dict[str, Any]] = []
+        for entry in sorted_items[:8]:
+            events.append(
+                {
+                    "id": entry.get("id"),
+                    "action": entry.get("action"),
+                    "service": _extract_audit_service(entry.get("action")),
+                    "created_at_iso": _to_iso(entry.get("created_at")),
+                    "entity_label": _format_entity_label(entry),
+                    "user_email": entry.get("user_email"),
+                    "user_id": entry.get("user_id"),
+                    "ip_address": entry.get("ip_address"),
+                    "metadata": _serialise_for_json(entry.get("metadata")),
+                }
+            )
+        correlations.append(
+            {
+                "key": key,
+                "label": label,
+                "services": item_services,
+                "event_count": len(items),
+                "latest_iso": _to_iso(latest.get("created_at")),
+                "events": events,
+            }
+        )
+    correlations.sort(
+        key=lambda item: item.get("latest_iso") or "",
+        reverse=True,
+    )
+    return correlations[:limit], sorted(services)
+
+
+async def _render_api_keys_dashboard(
+    request: Request,
+    current_user: dict[str, Any],
+    *,
+    search: str | None,
+    include_expired: bool,
+    order_by: str,
+    order_direction: str,
+    service_filter: str | None,
+    correlation_search: str | None,
+    status_message: str | None = None,
+    errors: list[str] | None = None,
+    new_api_key: dict[str, Any] | None = None,
+):
+    rows = await api_key_repo.list_api_keys_with_usage(
+        search=search,
+        include_expired=include_expired,
+        order_by=order_by,
+        order_direction=order_direction,
+    )
+    prepared_keys, stats = _prepare_api_key_rows(rows)
+    logs = await audit_repo.list_audit_logs(limit=250)
+    correlations, service_names = _build_audit_correlations(
+        logs,
+        service_filter=service_filter,
+        text_query=correlation_search,
+    )
+    filter_state = {
+        "search": search or "",
+        "include_expired": "1" if include_expired else "0",
+        "order_by": order_by,
+        "order_direction": order_direction,
+        "service_filter": service_filter or "",
+        "correlation_search": correlation_search or "",
+    }
+    filters = {
+        "search": search or "",
+        "include_expired": include_expired,
+        "order_by": order_by,
+        "order_direction": order_direction,
+        "service_filter": service_filter or "",
+        "correlation_search": correlation_search or "",
+    }
+    order_options = [
+        {"value": value, "label": label}
+        for value, label in _API_KEY_ORDER_CHOICES
+    ]
+    direction_options = [
+        {"value": value, "label": label}
+        for value, label in _API_KEY_DIRECTION_CHOICES
+    ]
+    service_options = [
+        {"value": value, "label": value.replace("_", " ").title()}
+        for value in service_names
+    ]
+    extra = {
+        "title": "API credentials",
+        "api_keys": prepared_keys,
+        "api_key_stats": stats,
+        "filters": filters,
+        "filter_state": filter_state,
+        "order_options": order_options,
+        "direction_options": direction_options,
+        "service_options": service_options,
+        "correlations": correlations,
+        "status_message": status_message,
+        "errors": errors or [],
+        "new_api_key": new_api_key,
+    }
+    return await _render_template("admin/api_keys.html", request, current_user, extra=extra)
 async def _load_license_context(
     request: Request,
     *,
@@ -521,6 +880,32 @@ async def _load_staff_context(
         )
     company = await company_repo.get_company_by_id(company_id)
     return user, membership, company, staff_permission, company_id, None
+
+
+def _companies_redirect(
+    *,
+    company_id: int | None = None,
+    success: str | None = None,
+    error: str | None = None,
+    extra: dict[str, str] | None = None,
+) -> RedirectResponse:
+    params: dict[str, str] = {}
+    if company_id is not None:
+        params["company_id"] = str(company_id)
+    if success:
+        params["success"] = success.strip()[:200]
+    if error:
+        params["error"] = error.strip()[:200]
+    if extra:
+        for key, value in extra.items():
+            if value is None:
+                continue
+            params[key] = value
+    query = urlencode(params)
+    url = "/admin/companies"
+    if query:
+        url = f"{url}?{query}"
+    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.on_event("startup")
@@ -1703,6 +2088,262 @@ async def import_syncro_contacts(request: Request):
     })
 
 
+@app.get("/admin/api-keys", response_class=HTMLResponse)
+async def admin_api_keys_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    filters = _extract_api_key_filters(request.query_params)
+    return await _render_api_keys_dashboard(request, current_user, **filters)
+
+
+@app.post("/admin/api-keys", response_class=HTMLResponse)
+async def admin_create_api_key_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    filters = _extract_api_key_filters(form)
+    description = (str(form.get("description", "")).strip() or None)
+    expiry_raw = form.get("expiry_date")
+    expiry_date = _parse_input_date(expiry_raw) if expiry_raw else None
+    errors: list[str] = []
+    if expiry_raw and expiry_date is None:
+        errors.append("Enter an expiry date in YYYY-MM-DD format.")
+    if errors:
+        return await _render_api_keys_dashboard(
+            request,
+            current_user,
+            **filters,
+            status_message=None,
+            errors=errors,
+        )
+    try:
+        raw_key, row = await api_key_repo.create_api_key(
+            description=description,
+            expiry_date=expiry_date,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to create API key from admin form", error=str(exc))
+        errors.append("Unable to create API key. Please try again.")
+        return await _render_api_keys_dashboard(
+            request,
+            current_user,
+            **filters,
+            status_message=None,
+            errors=errors,
+        )
+    await audit_service.log_action(
+        action="api_keys.create",
+        user_id=current_user.get("id"),
+        entity_type="api_key",
+        entity_id=row["id"],
+        new_value={
+            "description": description,
+            "expiry_date": expiry_date.isoformat() if isinstance(expiry_date, date) else None,
+        },
+        request=request,
+    )
+    new_api_key = {
+        "id": row["id"],
+        "value": raw_key,
+        "key_preview": mask_api_key(row.get("key_prefix")),
+        "description": row.get("description"),
+        "expiry_iso": (
+            datetime.combine(row.get("expiry_date"), time.min, tzinfo=timezone.utc).isoformat()
+            if row.get("expiry_date")
+            else None
+        ),
+    }
+    status_message = "New API key created. Store the value securely; it will not be shown again."
+    return await _render_api_keys_dashboard(
+        request,
+        current_user,
+        **filters,
+        status_message=status_message,
+        errors=None,
+        new_api_key=new_api_key,
+    )
+
+
+@app.post("/admin/api-keys/rotate", response_class=HTMLResponse)
+async def admin_rotate_api_key_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    filters = _extract_api_key_filters(form)
+    errors: list[str] = []
+    api_key_id_raw = form.get("api_key_id")
+    try:
+        api_key_id = int(api_key_id_raw)
+    except (TypeError, ValueError):
+        errors.append("Invalid API key identifier supplied for rotation.")
+        return await _render_api_keys_dashboard(
+            request,
+            current_user,
+            **filters,
+            status_message=None,
+            errors=errors,
+        )
+    description = str(form.get("description", "")).strip() or None
+    expiry_raw = form.get("expiry_date")
+    expiry_date = _parse_input_date(expiry_raw) if expiry_raw else None
+    if expiry_raw and expiry_date is None:
+        errors.append("Enter a valid expiry date in YYYY-MM-DD format.")
+    retire_previous = _parse_bool(form.get("retire_previous"), default=True)
+    if errors:
+        return await _render_api_keys_dashboard(
+            request,
+            current_user,
+            **filters,
+            status_message=None,
+            errors=errors,
+        )
+    existing = await api_key_repo.get_api_key_with_usage(api_key_id)
+    if not existing:
+        errors.append("The selected API key could not be found. It may have been deleted.")
+        return await _render_api_keys_dashboard(
+            request,
+            current_user,
+            **filters,
+            status_message=None,
+            errors=errors,
+        )
+    final_description = description if description is not None else existing.get("description")
+    final_expiry = expiry_date if expiry_date is not None else existing.get("expiry_date")
+    try:
+        raw_key, row = await api_key_repo.create_api_key(
+            description=final_description,
+            expiry_date=final_expiry,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to rotate API key from admin form", api_key_id=api_key_id, error=str(exc))
+        errors.append("Unable to rotate API key. Please try again.")
+        return await _render_api_keys_dashboard(
+            request,
+            current_user,
+            **filters,
+            status_message=None,
+            errors=errors,
+        )
+    metadata = {
+        "rotated_from": api_key_id,
+        "retired_previous": retire_previous,
+    }
+    await audit_service.log_action(
+        action="api_keys.rotate",
+        user_id=current_user.get("id"),
+        entity_type="api_key",
+        entity_id=row["id"],
+        previous_value=None,
+        new_value={
+            "description": final_description,
+            "expiry_date": final_expiry.isoformat() if isinstance(final_expiry, date) else None,
+        },
+        metadata=metadata,
+        request=request,
+    )
+    if retire_previous:
+        retirement_date = date.today()
+        await api_key_repo.update_api_key_expiry(api_key_id, retirement_date)
+        await audit_service.log_action(
+            action="api_keys.retire",
+            user_id=current_user.get("id"),
+            entity_type="api_key",
+            entity_id=api_key_id,
+            previous_value={
+                "description": existing.get("description"),
+                "expiry_date": existing.get("expiry_date").isoformat()
+                if isinstance(existing.get("expiry_date"), date)
+                else None,
+                "key_preview": mask_api_key(existing.get("key_prefix")),
+            },
+            new_value={"expiry_date": retirement_date.isoformat()},
+            metadata={"rotated_to": row["id"]},
+            request=request,
+        )
+    new_api_key = {
+        "id": row["id"],
+        "value": raw_key,
+        "key_preview": mask_api_key(row.get("key_prefix")),
+        "description": row.get("description"),
+        "expiry_iso": (
+            datetime.combine(row.get("expiry_date"), time.min, tzinfo=timezone.utc).isoformat()
+            if row.get("expiry_date")
+            else None
+        ),
+        "rotated_from": api_key_id,
+    }
+    status_message = (
+        "API key rotated. Copy the replacement key below and distribute it to integrated services."
+    )
+    return await _render_api_keys_dashboard(
+        request,
+        current_user,
+        **filters,
+        status_message=status_message,
+        errors=None,
+        new_api_key=new_api_key,
+    )
+
+
+@app.post("/admin/api-keys/delete", response_class=HTMLResponse)
+async def admin_delete_api_key_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    filters = _extract_api_key_filters(form)
+    errors: list[str] = []
+    api_key_id_raw = form.get("api_key_id")
+    try:
+        api_key_id = int(api_key_id_raw)
+    except (TypeError, ValueError):
+        errors.append("Invalid API key identifier supplied for deletion.")
+        return await _render_api_keys_dashboard(
+            request,
+            current_user,
+            **filters,
+            status_message=None,
+            errors=errors,
+        )
+    existing = await api_key_repo.get_api_key_with_usage(api_key_id)
+    if not existing:
+        errors.append("API key not found or already deleted.")
+        return await _render_api_keys_dashboard(
+            request,
+            current_user,
+            **filters,
+            status_message=None,
+            errors=errors,
+        )
+    await api_key_repo.delete_api_key(api_key_id)
+    await audit_service.log_action(
+        action="api_keys.delete",
+        user_id=current_user.get("id"),
+        entity_type="api_key",
+        entity_id=api_key_id,
+        previous_value={
+            "description": existing.get("description"),
+            "expiry_date": existing.get("expiry_date").isoformat()
+            if isinstance(existing.get("expiry_date"), date)
+            else None,
+            "key_preview": mask_api_key(existing.get("key_prefix")),
+        },
+        request=request,
+    )
+    status_message = f"API key {mask_api_key(existing.get('key_prefix'))} has been revoked."
+    return await _render_api_keys_dashboard(
+        request,
+        current_user,
+        **filters,
+        status_message=status_message,
+        errors=None,
+        new_api_key=None,
+    )
+
+
 @app.get("/admin/roles", response_class=HTMLResponse)
 async def admin_roles(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
@@ -1965,6 +2606,34 @@ async def admin_shop_page(
         "show_archived": show_archived,
     }
     return await _render_template("admin/shop.html", request, current_user, extra=extra)
+
+
+@app.post(
+    "/shop/admin/product/import",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Import a shop product from the stock feed",
+    tags=["Shop"],
+)
+async def admin_import_shop_product(
+    request: Request,
+    vendor_sku: str = Form(...),
+):
+    """Import a single product by vendor SKU using the stock feed."""
+
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    cleaned_vendor_sku = vendor_sku.strip()
+    if not cleaned_vendor_sku:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vendor SKU cannot be empty",
+        )
+
+    await products_service.import_product_by_vendor_sku(cleaned_vendor_sku)
+
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post(

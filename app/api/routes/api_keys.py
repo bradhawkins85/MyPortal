@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.dependencies.auth import require_super_admin
@@ -10,6 +12,7 @@ from app.schemas.api_keys import (
     ApiKeyCreateResponse,
     ApiKeyDetailResponse,
     ApiKeyResponse,
+    ApiKeyRotateRequest,
 )
 from app.security.api_keys import mask_api_key
 from app.services import audit as audit_service
@@ -118,3 +121,60 @@ async def delete_api_key(
         request=request,
     )
     return None
+
+
+@router.post("/{api_key_id}/rotate", response_model=ApiKeyCreateResponse)
+async def rotate_api_key(
+    api_key_id: int,
+    payload: ApiKeyRotateRequest,
+    request: Request,
+    _: None = Depends(require_database),
+    user: dict = Depends(require_super_admin),
+) -> ApiKeyCreateResponse:
+    existing = await api_key_repo.get_api_key_with_usage(api_key_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
+    new_description = payload.description if payload.description is not None else existing.get("description")
+    new_expiry = payload.expiry_date if payload.expiry_date is not None else existing.get("expiry_date")
+    raw_key, new_row = await api_key_repo.create_api_key(
+        description=new_description,
+        expiry_date=new_expiry,
+    )
+    formatted = _format_response(new_row).model_dump()
+    metadata = {
+        "rotated_from": api_key_id,
+        "retired_previous": bool(payload.retire_previous),
+    }
+    await audit_service.log_action(
+        action="api_keys.rotate",
+        user_id=user.get("id"),
+        entity_type="api_key",
+        entity_id=new_row["id"],
+        previous_value=None,
+        new_value={
+            "description": new_description,
+            "expiry_date": new_expiry.isoformat() if isinstance(new_expiry, date) else None,
+        },
+        metadata=metadata,
+        request=request,
+    )
+    if payload.retire_previous:
+        retirement_date = date.today()
+        await api_key_repo.update_api_key_expiry(api_key_id, retirement_date)
+        await audit_service.log_action(
+            action="api_keys.retire",
+            user_id=user.get("id"),
+            entity_type="api_key",
+            entity_id=api_key_id,
+            previous_value={
+                "description": existing.get("description"),
+                "expiry_date": existing.get("expiry_date").isoformat()
+                if isinstance(existing.get("expiry_date"), date)
+                else None,
+                "key_preview": mask_api_key(existing.get("key_prefix")),
+            },
+            new_value={"expiry_date": retirement_date.isoformat()},
+            metadata={"rotated_to": new_row["id"]},
+            request=request,
+        )
+    return ApiKeyCreateResponse(api_key=raw_key, **formatted)

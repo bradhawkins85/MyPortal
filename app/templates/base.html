@@ -112,6 +112,17 @@ H8zm0 4v2h8v-2H8z"/></svg>
               <span class="menu__label">Staff</span>
             </a>
           </li>
+          {% set is_company_admin = membership and membership.get('is_admin') %}
+          {% if is_company_admin and not is_super_admin %}
+          <li class="menu__item">
+            <a href="/admin/companies" {% if current_path.startswith('/admin/companies') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M4 3h16a1 1 0 0 1 1 1v17h-6v-6h-6v6H3V4a1 1 0 0 1 1-1zm7 17v-4h2v4h3v-6h2V5H6v9h2v6z"/></svg>
+              </span>
+              <span class="menu__label">Company admin</span>
+            </a>
+          </li>
+          {% endif %}
           <li class="menu__item">
             <a
               href="/docs"
@@ -129,6 +140,14 @@ H8zm0 4v2h8v-2H8z"/></svg>
           {% if is_super_admin %}
             <li class="menu__divider" role="presentation"></li>
             <li class="menu__heading" role="presentation">Administration</li>
+            <li class="menu__item">
+              <a href="/admin/companies" {% if current_path.startswith('/admin/companies') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M4 3h16a1 1 0 0 1 1 1v17h-6v-6h-6v6H3V4a1 1 0 0 1 1-1zm7 17v-4h2v4h3v-6h2V5H6v9h2v6z"/></svg>
+                </span>
+                <span class="menu__label">Companies</span>
+              </a>
+            </li>
             <li class="menu__item">
               <a href="/admin/memberships" {% if current_path.startswith('/admin/memberships') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
@@ -151,6 +170,14 @@ H8zm0 4v2h8v-2H8z"/></svg>
                   <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h9l5 5v15H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm8 7h4.5L14 4.5V9z"/></svg>
                 </span>
                 <span class="menu__label">Forms admin</span>
+              </a>
+            </li>
+            <li class="menu__item">
+              <a href="/admin/api-keys" {% if current_path.startswith('/admin/api-keys') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M7 10a5 5 0 0 1 9.58-2.15l4.47 4.47a1 1 0 0 1 0 1.41l-1.42 1.42a1 1 0 0 1-1.41 0l-.62-.62-1.41 1.41a1 1 0 0 1-1.41 0l-.59-.59-.59.59a1 1 0 0 1-1.41 0l-.88-.88A5 5 0 0 1 7 10zm5-3a3 3 0 1 0 2.85 4H16a1 1 0 0 1 .7.29l.91.91 1.42-1.42-1.56-1.56A1 1 0 0 1 18 9h.59l-1.28-1.28A5 5 0 0 0 12 7z"/></svg>
+                </span>
+                <span class="menu__label">API keys</span>
               </a>
             </li>
             <li class="menu__item">
