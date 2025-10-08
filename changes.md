@@ -1,3 +1,4 @@
+- 2025-10-08, 12:41 UTC, Fix, Updated API documentation links to open in a new tab with secure attributes for consistent navigation
 - 2025-10-11, 09:30 UTC, Fix, Added server-rendered CSRF tokens across portal forms so submissions succeed even without client-side scripts
 - 2025-10-08, 12:22 UTC, Fix, Removed the product description textarea from the shop admin add product form and refreshed helper copy
 - 2025-10-11, 10:30 UTC, Fix, Restored legacy shop product image loading by securing nested upload path handling
