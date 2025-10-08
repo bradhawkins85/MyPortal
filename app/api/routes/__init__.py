@@ -1,4 +1,5 @@
 from . import (
+    api_keys,
     audit_logs,
     auth,
     companies,
@@ -8,12 +9,14 @@ from . import (
     m365,
     notifications,
     ports,
+    scheduler,
     roles,
     staff,
     users,
 )
 
 __all__ = [
+    "api_keys",
     "audit_logs",
     "auth",
     "companies",
@@ -22,6 +25,7 @@ __all__ = [
     "m365",
     "notifications",
     "ports",
+    "scheduler",
     "memberships",
     "roles",
     "staff",
