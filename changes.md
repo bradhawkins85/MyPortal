@@ -1,3 +1,4 @@
+- 2025-10-08, 13:23 UTC, Feature, Restored company management console with invitations, permissions, and admin UI parity
 - 2025-10-08, 13:01 UTC, Feature, Redesigned shop catalogue layout with sidebar category navigation and removed vendor SKUs from the customer view
 - 2025-10-08, 12:51 UTC, Fix, Restored shop product creation with validated uploads and database persistence to resolve Not Found errors
 - 2025-10-08, 12:41 UTC, Fix, Updated API documentation links to open in a new tab with secure attributes for consistent navigation
