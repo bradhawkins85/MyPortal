@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import AnyHttpUrl, AliasChoices, BaseModel, Field
+from pydantic import AnyHttpUrl, AliasChoices, BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -68,6 +68,22 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("OPNFORM_BASE_URL", "OPNFORM_URL"),
     )
+
+    @field_validator(
+        "syncro_webhook_url",
+        "verify_webhook_url",
+        "portal_url",
+        "licenses_webhook_url",
+        "opnform_base_url",
+        mode="before",
+    )
+    @classmethod
+    def _empty_string_to_none(cls, value: AnyHttpUrl | None) -> AnyHttpUrl | None:  # type: ignore[override]
+        """Coerce blank environment variables to ``None`` so optional URLs stay optional."""
+
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return value
 
     model_config = SettingsConfigDict(
         env_file=(Path(__file__).resolve().parent.parent.parent / ".env"),
