@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.services import staff_importer
+from app.services import m365 as m365_service
 
 
 class SchedulerService:
@@ -74,6 +75,10 @@ class SchedulerService:
                 company_id = task.get("company_id")
                 if company_id:
                     await staff_importer.import_contacts_for_company(int(company_id))
+            elif command == "sync_o365":
+                company_id = task.get("company_id")
+                if company_id:
+                    await m365_service.sync_company_licenses(int(company_id))
             else:
                 log_info(
                     "Scheduled task has no handler",
