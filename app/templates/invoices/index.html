@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+
+{% block title %}Invoices{% endblock %}
+
+{% block header_actions %}
+  <div class="header-actions">
+    <label class="visually-hidden" for="invoice-search">Search invoices</label>
+    <input
+      type="search"
+      id="invoice-search"
+      class="input"
+      placeholder="Search invoices"
+      aria-label="Search invoices"
+      data-table-filter="invoice-table"
+    />
+    <label class="visually-hidden" for="invoice-status-filter">Filter by status</label>
+    <select id="invoice-status-filter" class="input" aria-label="Filter by status">
+      <option value="">All statuses</option>
+      {% for status in status_options %}
+        <option value="{{ status }}">{{ status|replace('_', ' ')|title }}</option>
+      {% endfor %}
+    </select>
+  </div>
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Company invoices</h2>
+        <p class="card__subtitle">
+          Track billing history, payment status, and due dates for your organisation.
+        </p>
+      </div>
+      {% if company %}
+      <div class="card__controls">
+        <span class="tag">{{ company.name }}</span>
+      </div>
+      {% endif %}
+    </header>
+    <div class="invoice-summary">
+      <div class="invoice-summary__item">
+        <span class="invoice-summary__label">Total billed</span>
+        <span class="invoice-summary__value" data-invoice-total data-currency-format="{{ total_amount_display }}">{{ total_amount_display }}</span>
+      </div>
+      <div class="invoice-summary__item">
+        <span class="invoice-summary__label">Paid invoices</span>
+        <span class="invoice-summary__value" data-invoice-paid>{{ paid_count }}</span>
+      </div>
+      <div class="invoice-summary__item">
+        <span class="invoice-summary__label">Open invoices</span>
+        <span class="invoice-summary__value invoice-summary__value--warning" data-invoice-open>{{ unpaid_count }}</span>
+      </div>
+    </div>
+    {% if has_invoices %}
+    <div class="table-wrapper">
+      <table class="table" id="invoice-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string">Invoice #</th>
+            <th scope="col" data-sort="number">Amount</th>
+            <th scope="col" data-sort="date">Due date</th>
+            <th scope="col" data-sort="string">Status</th>
+            {% if can_delete_invoices %}<th scope="col" class="table__actions">Actions</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for invoice in invoices %}
+          <tr data-status="{{ invoice.status_slug }}"{% if invoice.is_overdue %} class="invoice-row--overdue"{% endif %}>
+            <td data-label="Invoice number">{{ invoice.invoice_number }}</td>
+            <td data-label="Amount" data-value="{{ invoice.amount }}">{{ invoice.amount_display }}</td>
+            <td data-label="Due date" data-value="{{ invoice.due_sort }}" data-utc="{{ invoice.due_iso }}">
+              {% if invoice.due_display %}
+                {{ invoice.due_display }}
+              {% else %}
+                <span class="text-muted">No due date</span>
+              {% endif %}
+            </td>
+            <td data-label="Status" data-value="{{ invoice.status_slug }}">
+              {% if invoice.status_slug %}
+                <span class="status {{ invoice.status_class }}">{{ invoice.status_display }}</span>
+              {% else %}
+                <span class="text-muted">No status</span>
+              {% endif %}
+            </td>
+            {% if can_delete_invoices %}
+            <td class="table__actions">
+              <button type="button" class="button button--danger button--small" data-invoice-delete="{{ invoice.id }}">
+                Delete
+              </button>
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <h3 class="empty-state__title">No invoices yet</h3>
+      <p class="empty-state__subtitle">
+        When invoices are issued they will appear here with payment status and due dates.
+      </p>
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/tables.js" defer></script>
+<script>
+  (function () {
+    function updateSummary() {
+      const totalEl = document.querySelector('[data-invoice-total]');
+      const paidEl = document.querySelector('[data-invoice-paid]');
+      const openEl = document.querySelector('[data-invoice-open]');
+      const table = document.getElementById('invoice-table');
+      if (!totalEl && !paidEl && !openEl) {
+        return;
+      }
+      if (!table) {
+        if (totalEl) totalEl.textContent = '$0.00';
+        if (paidEl) paidEl.textContent = '0';
+        if (openEl) openEl.textContent = '0';
+        return;
+      }
+      const rows = Array.from(table.querySelectorAll('tbody tr'));
+      const visibleRows = rows.filter((row) => row.style.display !== 'none');
+      const formatSample = totalEl?.getAttribute('data-currency-format') || '$0.00';
+      const match = formatSample.match(/([^0-9-]*)([-0-9.,]+)(.*)/);
+      const prefix = match ? match[1] : '';
+      const suffix = match ? match[3] : '';
+      if (!visibleRows.length) {
+        const formattedZero = `${prefix}${Number(0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${suffix}`;
+        if (totalEl) {
+          totalEl.textContent = formattedZero;
+          totalEl.setAttribute('data-currency-format', formattedZero);
+        }
+        if (paidEl) paidEl.textContent = '0';
+        if (openEl) openEl.textContent = '0';
+        return;
+      }
+      let total = 0;
+      let paid = 0;
+      visibleRows.forEach((row) => {
+        const amountCell = row.querySelector('td[data-value]');
+        if (amountCell) {
+          const value = parseFloat(amountCell.getAttribute('data-value') || '0');
+          if (!Number.isNaN(value)) total += value;
+        }
+        const status = (row.getAttribute('data-status') || '').toLowerCase();
+        if (status === 'paid') {
+          paid += 1;
+        }
+      });
+      if (totalEl) {
+        const formattedTotal = `${prefix}${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${suffix}`;
+        totalEl.textContent = formattedTotal;
+        totalEl.setAttribute('data-currency-format', formattedTotal);
+      }
+      if (paidEl) paidEl.textContent = String(paid);
+      if (openEl) openEl.textContent = String(visibleRows.length - paid);
+    }
+
+    function applyStatusFilter() {
+      const table = document.getElementById('invoice-table');
+      const filter = document.getElementById('invoice-status-filter');
+      if (!table || !filter) return;
+      const selected = filter.value.trim().toLowerCase();
+      table.querySelectorAll('tbody tr').forEach((row) => {
+        const status = (row.getAttribute('data-status') || '').toLowerCase();
+        const matches = !selected || status === selected;
+        row.style.display = matches ? '' : 'none';
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const filter = document.getElementById('invoice-status-filter');
+      if (filter) {
+        filter.addEventListener('change', () => {
+          applyStatusFilter();
+          updateSummary();
+        });
+      }
+      const searchInput = document.querySelector('[data-table-filter="invoice-table"]');
+      if (searchInput) {
+        searchInput.addEventListener('input', () => {
+          window.setTimeout(updateSummary, 0);
+        });
+      }
+      applyStatusFilter();
+      updateSummary();
+
+      document.querySelectorAll('[data-invoice-delete]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const invoiceId = button.getAttribute('data-invoice-delete');
+          if (!invoiceId) return;
+          if (!window.confirm('Delete invoice?')) return;
+          try {
+            const response = await fetch(`/api/invoices/${invoiceId}`, { method: 'DELETE' });
+            if (!response.ok) {
+              throw new Error('Failed to delete invoice');
+            }
+            const row = button.closest('tr');
+            if (row) {
+              row.remove();
+            }
+            const table = document.getElementById('invoice-table');
+            if (table && !table.querySelector('tbody tr')) {
+              const wrapper = table.closest('.table-wrapper');
+              const container = wrapper?.parentElement;
+              if (wrapper) {
+                wrapper.remove();
+              }
+              const emptyState = document.createElement('div');
+              emptyState.className = 'empty-state';
+              emptyState.innerHTML = `
+                <h3 class="empty-state__title">No invoices yet</h3>
+                <p class="empty-state__subtitle">
+                  When invoices are issued they will appear here with payment status and due dates.
+                </p>
+              `;
+              container?.appendChild(emptyState);
+            }
+            updateSummary();
+          } catch (error) {
+            console.error(error);
+            window.alert('Unable to delete invoice. Please try again.');
+          }
+        });
+      });
+    });
+  })();
+</script>
+{% endblock %}
