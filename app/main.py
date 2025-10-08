@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 from datetime import datetime, time, timedelta, timezone
-
 from typing import Any
+from urllib.parse import parse_qs
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Request, status, Form
+from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -290,8 +291,6 @@ async def index(request: Request):
 @app.post("/switch-company", response_class=RedirectResponse)
 async def switch_company(
     request: Request,
-    company_id: int = Form(..., alias="companyId"),
-    return_url: str | None = Form(None, alias="returnUrl"),
 ):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -299,6 +298,48 @@ async def switch_company(
     session = await session_manager.load_session(request)
     if not session:
         return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    company_id: int | None = None
+    return_url: str | None = None
+
+    raw_content_type = request.headers.get("content-type", "")
+    content_type = raw_content_type.split(";", 1)[0].strip().lower()
+
+    data: dict[str, Any] = {}
+    body_bytes = await request.body()
+
+    if body_bytes:
+        try:
+            if content_type == "application/json":
+                payload = json.loads(body_bytes)
+                if isinstance(payload, dict):
+                    data = payload
+            else:
+                form = parse_qs(body_bytes.decode())
+                data = {key: values[0] for key, values in form.items() if values}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            data = {}
+
+    if not data:
+        try:
+            form_data = await request.form()
+            data = dict(form_data)
+        except Exception:  # pragma: no cover - fallback for unexpected payloads
+            data = {}
+
+    company_id_raw = data.get("companyId") or data.get("company_id")
+    if company_id_raw is not None:
+        try:
+            company_id = int(company_id_raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier")
+
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="companyId is required")
+
+    return_url_raw = data.get("returnUrl") or data.get("return_url")
+    if isinstance(return_url_raw, str):
+        return_url = return_url_raw
 
     companies = await user_company_repo.list_companies_for_user(user["id"])
     request.state.available_companies = companies
