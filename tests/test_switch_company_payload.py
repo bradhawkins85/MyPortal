@@ -123,6 +123,27 @@ async def test_falls_back_when_json_header_contains_form_body() -> None:
     assert data["returnUrl"] == "/staff"
 
 
+@pytest.mark.anyio("asyncio")
+async def test_parses_multipart_payload_when_header_incorrect() -> None:
+    boundary = "------WebKitFormBoundary"
+    body = (
+        f"{boundary}\r\n"
+        "Content-Disposition: form-data; name=\"companyId\"\r\n\r\n"
+        "42\r\n"
+        f"{boundary}\r\n"
+        "Content-Disposition: form-data; name=\"_csrf\"\r\n\r\n"
+        "token\r\n"
+        f"{boundary}--\r\n"
+    ).encode("utf-8")
+
+    request = _build_request(body=body, headers={"content-type": "application/json"})
+
+    data = await _extract_switch_company_payload(request)
+
+    assert data["companyId"] == "42"
+    assert data["_csrf"] == "token"
+
+
 def test_first_non_blank_prioritises_non_empty_values() -> None:
     body_data = {"companyId": "  ", "company_id": None}
     query_params = {"company_id": "99", "returnUrl": "/dashboard"}
