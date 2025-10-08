@@ -16,6 +16,11 @@ async def get_user_by_id(user_id: int) -> Optional[dict[str, Any]]:
     return row
 
 
+async def count_users() -> int:
+    row = await db.fetch_one("SELECT COUNT(*) AS count FROM users")
+    return int(row["count"]) if row else 0
+
+
 async def list_users() -> List[dict[str, Any]]:
     rows = await db.fetch_all("SELECT * FROM users ORDER BY id DESC")
     return list(rows)
@@ -29,14 +34,23 @@ async def create_user(
     last_name: str | None = None,
     mobile_phone: str | None = None,
     company_id: int | None = None,
+    is_super_admin: bool = False,
 ) -> dict[str, Any]:
     password_hash = hash_password(password)
     await db.execute(
         """
-        INSERT INTO users (email, password_hash, first_name, last_name, mobile_phone, company_id)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO users (email, password_hash, first_name, last_name, mobile_phone, company_id, is_super_admin)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
-        (email, password_hash, first_name, last_name, mobile_phone, company_id),
+        (
+            email,
+            password_hash,
+            first_name,
+            last_name,
+            mobile_phone,
+            company_id,
+            1 if is_super_admin else 0,
+        ),
     )
     row = await get_user_by_email(email)
     if not row:
@@ -62,3 +76,11 @@ async def update_user(user_id: int, **updates: Any) -> dict[str, Any]:
 
 async def delete_user(user_id: int) -> None:
     await db.execute("DELETE FROM users WHERE id = %s", (user_id,))
+
+
+async def set_user_password(user_id: int, password: str) -> None:
+    password_hash = hash_password(password)
+    await db.execute(
+        "UPDATE users SET password_hash = %s, force_password_change = 0 WHERE id = %s",
+        (password_hash, user_id),
+    )

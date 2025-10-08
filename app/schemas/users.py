@@ -23,6 +23,7 @@ class UserUpdate(BaseModel):
     last_name: Optional[str] = None
     mobile_phone: Optional[str] = None
     company_id: Optional[int] = None
+    is_super_admin: Optional[bool] = None
 
 
 class UserResponse(UserBase):
@@ -30,6 +31,7 @@ class UserResponse(UserBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     force_password_change: Optional[int] = None
+    is_super_admin: bool = False
 
     class Config:
         from_attributes = True
