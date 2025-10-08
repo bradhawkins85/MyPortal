@@ -21,6 +21,7 @@ from itsdangerous import BadSignature, URLSafeSerializer
 from starlette.datastructures import FormData
 
 from app.api.routes import (
+    api_keys,
     audit_logs,
     auth,
     companies,
@@ -93,6 +94,10 @@ tags_metadata = [
         "description": "Staff directory management, Syncro contact synchronisation, and verification workflows.",
     },
     {"name": "Audit Logs", "description": "Structured audit trail of privileged actions."},
+    {
+        "name": "API Keys",
+        "description": "Super-admin management of API credentials with usage telemetry.",
+    },
     {"name": "Ports", "description": "Port catalogue, document storage, and pricing workflow APIs."},
     {"name": "Licenses", "description": "Software license catalogue, assignments, and ordering workflows."},
     {
@@ -157,6 +162,7 @@ app.include_router(ports.router)
 app.include_router(notifications.router)
 app.include_router(staff_api.router)
 app.include_router(audit_logs.router)
+app.include_router(api_keys.router)
 app.include_router(scheduler_api.router)
 
 
