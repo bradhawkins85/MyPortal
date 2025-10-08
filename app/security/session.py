@@ -22,6 +22,7 @@ class SessionData:
     last_seen_at: datetime
     ip_address: str | None
     user_agent: str | None
+    active_company_id: int | None = None
     pending_totp_secret: str | None = None
 
 
@@ -35,7 +36,13 @@ class SessionManager:
     def _is_secure(self) -> bool:
         return self._settings.environment.lower() == "production"
 
-    async def create_session(self, user_id: int, request: Request) -> SessionData:
+    async def create_session(
+        self,
+        user_id: int,
+        request: Request,
+        *,
+        active_company_id: int | None = None,
+    ) -> SessionData:
         now = datetime.utcnow()
         expires_at = now + self.session_ttl
         session_token = secrets_token()
@@ -48,6 +55,7 @@ class SessionManager:
         user_agent = request.headers.get("user-agent")
         record = await auth_repo.create_session(
             user_id=user_id,
+            active_company_id=active_company_id,
             session_token=session_token,
             csrf_token=csrf_token,
             created_at=now,
@@ -89,6 +97,7 @@ class SessionManager:
         session.expires_at = now + self.session_ttl
         session.last_seen_at = now
         request.state.session = session
+        request.state.active_company_id = session.active_company_id
         return session
 
     async def refresh_csrf(self, session: SessionData) -> SessionData:
@@ -108,6 +117,10 @@ class SessionManager:
 
     async def revoke_session(self, session: SessionData) -> None:
         await auth_repo.deactivate_session(session.id)
+
+    async def set_active_company(self, session: SessionData, company_id: int | None) -> None:
+        await auth_repo.update_session(session.id, active_company_id=company_id)
+        session.active_company_id = company_id
 
     def apply_session_cookies(self, response: Response, session: SessionData) -> None:
         max_age = int(self.session_ttl.total_seconds())
@@ -147,6 +160,11 @@ class SessionManager:
             last_seen_at=ensure_datetime(record.get("last_seen_at")),
             ip_address=record.get("ip_address"),
             user_agent=record.get("user_agent"),
+            active_company_id=(
+                int(record["active_company_id"])
+                if record.get("active_company_id") is not None
+                else None
+            ),
             pending_totp_secret=pending_secret,
         )
 

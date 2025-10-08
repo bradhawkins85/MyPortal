@@ -10,6 +10,7 @@ from app.security.encryption import decrypt_secret, encrypt_secret
 async def create_session(
     *,
     user_id: int,
+    active_company_id: int | None,
     session_token: str,
     csrf_token: str,
     created_at: datetime,
@@ -23,6 +24,7 @@ async def create_session(
         """
         INSERT INTO user_sessions (
             user_id,
+            active_company_id,
             session_token,
             csrf_token,
             created_at,
@@ -31,10 +33,11 @@ async def create_session(
             ip_address,
             user_agent,
             pending_totp_secret
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             user_id,
+            active_company_id,
             session_token,
             csrf_token,
             created_at,
@@ -66,6 +69,7 @@ async def update_session(
     csrf_token: str | None = None,
     pending_totp_secret: Any = _SENTINEL,
     is_active: Optional[bool] = None,
+    active_company_id: Any = _SENTINEL,
 ) -> None:
     updates: list[str] = []
     params: list[Any] = []
@@ -84,6 +88,9 @@ async def update_session(
     if is_active is not None:
         updates.append("is_active = %s")
         params.append(1 if is_active else 0)
+    if active_company_id is not _SENTINEL:
+        updates.append("active_company_id = %s")
+        params.append(active_company_id)
     if not updates:
         return
     params.append(session_id)
