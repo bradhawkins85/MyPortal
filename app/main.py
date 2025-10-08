@@ -8,10 +8,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from app.api.routes import companies, users
+from app.api.routes import auth, companies, users
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
 from app.core.logging import configure_logging, log_info
+from app.security.csrf import CSRFMiddleware
+from app.security.rate_limiter import RateLimiterMiddleware, SimpleRateLimiter
 
 configure_logging()
 settings = get_settings()
@@ -26,9 +28,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+general_rate_limiter = SimpleRateLimiter(limit=300, window_seconds=900)
+app.add_middleware(
+    RateLimiterMiddleware,
+    rate_limiter=general_rate_limiter,
+    exempt_paths=("/docs", "/openapi.json", "/static"),
+)
+
+app.add_middleware(CSRFMiddleware)
+
 templates = Jinja2Templates(directory=str(templates_config.template_path))
 app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
 
+app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(companies.router)
 
