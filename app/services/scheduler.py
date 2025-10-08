@@ -11,6 +11,7 @@ from app.core.logging import log_error, log_info
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.services import staff_importer
 from app.services import m365 as m365_service
+from app.services import products as products_service
 from app.services import webhook_monitor
 
 
@@ -104,6 +105,8 @@ class SchedulerService:
                 company_id = task.get("company_id")
                 if company_id:
                     await m365_service.sync_company_licenses(int(company_id))
+            elif command == "update_products":
+                await products_service.update_products_from_feed()
             else:
                 status = "skipped"
                 details = "No handler registered for command"

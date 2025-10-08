@@ -340,6 +340,46 @@
         } catch (error) {
           alert(`Unable to remove membership: ${error.message}`);
           button.disabled = false;
+  function bindApiKeyCopyButtons() {
+    document.querySelectorAll('[data-copy-api-key]').forEach((button) => {
+      const value = button.getAttribute('data-copy-api-key');
+      if (!value) {
+        return;
+      }
+      button.addEventListener('click', async () => {
+        const originalText = button.textContent;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(value);
+          } else {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = value;
+            input.setAttribute('aria-hidden', 'true');
+            input.style.position = 'absolute';
+            input.style.left = '-1000px';
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand('copy');
+            document.body.removeChild(input);
+          }
+          button.textContent = 'Copied';
+          setTimeout(() => {
+            button.textContent = originalText;
+          }, 2000);
+        } catch (error) {
+          alert('Unable to copy API key. Please copy it manually.');
+        }
+      });
+    });
+  }
+
+  function bindConfirmationButtons() {
+    document.querySelectorAll('[data-confirm]').forEach((element) => {
+      element.addEventListener('click', (event) => {
+        const message = element.getAttribute('data-confirm') || 'Are you sure?';
+        if (!window.confirm(message)) {
+          event.preventDefault();
         }
       });
     });
@@ -349,5 +389,7 @@
     bindRoleForm();
     bindMembershipForms();
     bindCompanyAssignmentControls();
+    bindApiKeyCopyButtons();
+    bindConfirmationButtons();
   });
 })();
