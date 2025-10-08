@@ -8,7 +8,7 @@ from app.repositories import staff as staff_repo
 from app.schemas.staff import StaffCreate, StaffResponse, StaffUpdate
 
 
-router = APIRouter(prefix="/staff", tags=["Staff"])
+router = APIRouter(prefix="/api/staff", tags=["Staff"])
 
 
 @router.get("", response_model=list[StaffResponse])
