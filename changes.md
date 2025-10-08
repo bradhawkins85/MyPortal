@@ -1,3 +1,4 @@
+- 2025-10-08, 12:22 UTC, Fix, Removed the product description textarea from the shop admin add product form and refreshed helper copy
 - 2025-10-08, 12:20 UTC, Fix, Embedded CSRF tokens into Shop admin templates and base helpers to restore product management submissions
 - 2025-10-08, 12:17 UTC, Change, Updated the customer forms portal route to /myforms with navigation updates and a legacy redirect
 - 2025-10-08, 12:12 UTC, Fix, Removed product description input from the shop admin creation form per request
