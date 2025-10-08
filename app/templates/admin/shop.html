@@ -56,7 +56,7 @@
     <header class="card__header card__header--stacked">
       <div>
         <h2 class="card__title">Add product</h2>
-        <p class="card__subtitle">Create catalogue items with rich descriptions, pricing, and stock levels.</p>
+        <p class="card__subtitle">Create catalogue items with pricing, imagery, and stock levels.</p>
       </div>
     </header>
     <form action="/shop/admin/product" method="post" enctype="multipart/form-data" class="form-grid">
@@ -71,10 +71,6 @@
       <div class="form-field">
         <label class="form-label" for="product-vendor-sku">Vendor SKU</label>
         <input class="form-input" id="product-vendor-sku" name="vendor_sku" required />
-      </div>
-      <div class="form-field form-field--wide">
-        <label class="form-label" for="product-description">Description</label>
-        <textarea class="form-input form-input--textarea" id="product-description" name="description"></textarea>
       </div>
       <div class="form-field">
         <label class="form-label" for="product-price">Price</label>
