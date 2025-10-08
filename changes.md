@@ -44,5 +44,6 @@
 - 2025-10-08, 06:49 UTC, Fix, Restored shop admin and catalogue views to load categories and products from the database with VIP pricing and company restrictions
 - 2025-10-09, 18:00 UTC, Feature, Added port catalogue data models, secure document uploads, pricing workflow approvals, notification APIs, and refreshed Swagger documentation
 - 2025-10-08, 07:28 UTC, Feature, Rebuilt staff data models, Syncro import client, scheduled sync runner, and management UI with API parity and permissions
+- 2025-10-09, 21:15 UTC, Feature, Restored license management UI, Microsoft 365 sync services, OAuth callbacks, and admin credential workflows for parity with the legacy portal
 - 2025-10-08, 10:14 UTC, Fix, Allowed company switching endpoint to accept JSON and form payloads while validating memberships
 - 2025-10-08, 10:19 UTC, Fix, Hardened company switching payload parsing to support form, JSON, and query parameters with updated documentation
