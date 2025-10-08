@@ -62,3 +62,4 @@
 - 2025-10-08, 10:19 UTC, Fix, Hardened company switching payload parsing to support form, JSON, and query parameters with updated documentation
 - 2025-10-08, 10:32 UTC, Fix, Added resilient switch-company payload parsing fallback for raw form bodies and undocumented clients
 - 2025-10-10, 12:00 UTC, Feature, Added persistent scheduler management APIs, webhook retry monitoring UI, and admin automation controls with database migrations
+- 2025-10-10, 12:45 UTC, Fix, Corrected scheduler monitoring migration defaults and enforced UTC MySQL sessions to restore startup

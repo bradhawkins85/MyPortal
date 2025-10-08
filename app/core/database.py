@@ -28,6 +28,7 @@ class Database:
             minsize=1,
             maxsize=10,
             pool_recycle=600,
+            init_command="SET time_zone = '+00:00'",
         )
 
     async def disconnect(self) -> None:
@@ -73,6 +74,7 @@ class Database:
             user=self._settings.database_user,
             password=self._settings.database_password,
             autocommit=True,
+            init_command="SET time_zone = '+00:00'",
         )
         async with temp_conn.cursor() as cursor:
             await cursor.execute(
