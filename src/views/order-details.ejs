@@ -14,6 +14,7 @@
         <% if (notes) { %><p>Notes: <%= notes %></p><% } %>
         <% if (isSuperAdmin) { %>
           <form action="/orders/<%= orderNumber %>/shipping" method="post">
+            <%- include('partials/csrf-field') %>
             <label>Shipping Status:
               <input type="text" name="shippingStatus" value="<%= shippingStatus %>">
             </label>

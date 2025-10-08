@@ -26,18 +26,21 @@
               <td><%= hidden ? 'Hidden' : (imported ? 'Imported' : 'Not Imported') %></td>
               <td>
                 <form method="post" action="/admin/syncro/import" style="display:inline">
+                  <%- include('partials/csrf-field') %>
                   <input type="hidden" name="customerId" value="<%= c.id %>">
                   <input type="hidden" name="showHidden" value="<%= showHidden ? 1 : 0 %>">
                   <button type="submit"><%= imported ? 'Update' : 'Import' %></button>
                 </form>
                 <% if (hidden) { %>
                 <form method="post" action="/admin/syncro/unhide" style="display:inline">
+                  <%- include('partials/csrf-field') %>
                   <input type="hidden" name="customerId" value="<%= c.id %>">
                   <input type="hidden" name="showHidden" value="<%= showHidden ? 1 : 0 %>">
                   <button type="submit">Unhide</button>
                 </form>
                 <% } else { %>
                 <form method="post" action="/admin/syncro/hide" style="display:inline">
+                  <%- include('partials/csrf-field') %>
                   <input type="hidden" name="customerId" value="<%= c.id %>">
                   <input type="hidden" name="showHidden" value="<%= showHidden ? 1 : 0 %>">
                   <button type="submit">Hide</button>

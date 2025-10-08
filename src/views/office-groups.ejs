@@ -10,6 +10,7 @@
       <section>
         <h2>Add Group</h2>
         <form action="/office-groups" method="post">
+          <%- include('partials/csrf-field') %>
           <input type="text" name="name" placeholder="Group Name" required>
           <button type="submit">Add</button>
         </form>
@@ -30,6 +31,7 @@
                   <button type="button" data-open-group-modal="<%= g.id %>">Edit</button>
                   <% if (isSuperAdmin) { %>
                     <form action="/office-groups/<%= g.id %>/delete" method="post" style="display:inline;">
+                      <%- include('partials/csrf-field') %>
                       <button type="submit">Delete</button>
                     </form>
                   <% } %>
@@ -45,6 +47,7 @@
           <div style="background:#fff; margin:10% auto; padding:20px; width:400px;">
             <h3>Edit Group Members</h3>
             <form id="groupMembersForm" method="post">
+              <%- include('partials/csrf-field') %>
               <table>
                 <thead>
                   <tr><th>Name</th><th>Email</th><th>Add</th></tr>
