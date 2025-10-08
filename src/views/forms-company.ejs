@@ -17,6 +17,7 @@
         </form>
         <% if (selectedFormId) { %>
           <form action="/myforms/company" method="post">
+            <%- include('partials/csrf-field') %>
             <input type="hidden" name="formId" value="<%= selectedFormId %>">
             <% users.forEach(function(u){ %>
               <label><input type="checkbox" name="userIds" value="<%= u.user_id %>" <%= permissions.includes(u.user_id) ? 'checked' : '' %>> <%= u.email %></label><br>
