@@ -2739,9 +2739,7 @@ app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
   ]);
   const current = companies.find((c) => c.company_id === req.session.companyId);
   const isVip = current?.is_vip === 1;
-  const filtered = products.filter(
-    (p) => p.name !== p.sku && (showOutOfStock || p.stock > 0)
-  );
+  const filtered = products.filter((p) => showOutOfStock || p.stock > 0);
   const adjusted = filtered.map((p) => ({
     ...p,
     price: isVip && p.vip_price !== null ? p.vip_price : p.price,
