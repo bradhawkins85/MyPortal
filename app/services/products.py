@@ -3,11 +3,38 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlparse
+from uuid import uuid4
+
+import aiofiles
+import httpx
 
 from app.core.logging import log_error, log_info
 from app.repositories import shop as shop_repo
 from app.repositories import stock_feed as stock_feed_repo
+
+
+class _ImageTooLargeError(Exception):
+    """Raised when a downloaded product image exceeds the permitted size."""
+
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_PRIVATE_UPLOADS_PATH = _PROJECT_ROOT / "private_uploads"
+_SHOP_UPLOADS_PATH = _PRIVATE_UPLOADS_PATH / "shop"
+_MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MB
+_ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+_IMAGE_CONTENT_TYPE_MAP = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/pjpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
+
+_PRIVATE_UPLOADS_PATH.mkdir(parents=True, exist_ok=True)
+_SHOP_UPLOADS_PATH.mkdir(parents=True, exist_ok=True)
 
 
 def _to_decimal(value: Any, *, default: Decimal | None = None) -> Decimal | None:
@@ -74,6 +101,82 @@ def _normalise_name(feed_name: str, product: Mapping[str, Any] | None) -> str:
     return feed_name or existing_name or existing_sku or ""
 
 
+async def _download_product_image(image_url: str) -> str | None:
+    """Download a product image from the stock feed into the private uploads dir."""
+
+    candidate = image_url.strip()
+    if not candidate:
+        return None
+
+    parsed = urlparse(candidate)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        log_error("Rejected non-HTTP product image URL from feed", url=candidate)
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            async with client.stream("GET", candidate, follow_redirects=True) as response:
+                if response.status_code != httpx.codes.OK:
+                    log_error(
+                        "Failed to download product image from feed",
+                        url=candidate,
+                        status_code=response.status_code,
+                    )
+                    return None
+
+                content_type_header = response.headers.get("Content-Type", "")
+                content_type = content_type_header.split(";", 1)[0].strip().lower()
+                suffix = Path(parsed.path or "").suffix.lower()
+                if suffix not in _ALLOWED_IMAGE_EXTENSIONS:
+                    suffix = _IMAGE_CONTENT_TYPE_MAP.get(content_type, suffix)
+                if suffix not in _ALLOWED_IMAGE_EXTENSIONS:
+                    log_error(
+                        "Unsupported product image type from feed",
+                        url=candidate,
+                        content_type=content_type or "unknown",
+                    )
+                    return None
+
+                stored_name = f"{uuid4().hex}{suffix}"
+                destination = _SHOP_UPLOADS_PATH / stored_name
+                total_size = 0
+
+                try:
+                    async with aiofiles.open(destination, "wb") as buffer:
+                        async for chunk in response.aiter_bytes(1024 * 1024):
+                            if not chunk:
+                                continue
+                            total_size += len(chunk)
+                            if total_size > _MAX_IMAGE_SIZE:
+                                raise _ImageTooLargeError
+                            await buffer.write(chunk)
+                except _ImageTooLargeError:
+                    destination.unlink(missing_ok=True)
+                    log_error(
+                        "Feed product image exceeds maximum size",
+                        url=candidate,
+                        limit=_MAX_IMAGE_SIZE,
+                    )
+                    return None
+                except Exception as exc:  # pragma: no cover - defensive guard
+                    destination.unlink(missing_ok=True)
+                    log_error(
+                        "Failed to persist downloaded product image",
+                        url=candidate,
+                        error=str(exc),
+                    )
+                    return None
+
+                return f"/uploads/shop/{stored_name}"
+    except httpx.HTTPError as exc:
+        log_error(
+            "Error downloading product image from feed",
+            url=candidate,
+            error=str(exc),
+        )
+        return None
+
+
 async def _process_feed_item(
     item: Mapping[str, Any],
     existing_product: Mapping[str, Any] | None,
@@ -89,18 +192,31 @@ async def _process_feed_item(
     feed_name = str(item.get("product_name") or "").strip()
     description = str(item.get("product_name2") or "").strip() or None
 
-    price = _to_decimal(
-        current_product.get("price") if current_product else item.get("rrp"),
-        default=Decimal("0"),
+    rrp = _to_decimal(item.get("rrp"))
+    existing_price = (
+        _to_decimal(current_product.get("price")) if current_product else None
     )
-    if price is None:
-        price = Decimal("0")
-    vip_price = _to_decimal(
-        current_product.get("vip_price") if current_product else None,
-        default=price,
+    price: Decimal | None = None
+    if existing_price is not None and existing_price > 0:
+        price = existing_price
+    elif rrp is not None and rrp > 0:
+        price = rrp
+    else:
+        price = existing_price or rrp or Decimal("0")
+
+    existing_vip_price = (
+        _to_decimal(current_product.get("vip_price")) if current_product else None
     )
-    if vip_price is None:
+    vip_price: Decimal | None = None
+    if existing_vip_price is not None and existing_vip_price > 0:
+        vip_price = existing_vip_price
+    elif rrp is not None and rrp > 0:
+        vip_price = rrp
+    else:
         vip_price = price
+
+    if vip_price is None:
+        vip_price = Decimal("0")
 
     category_id: int | None = None
     category_name = str(item.get("category_name") or "").strip()
@@ -143,12 +259,24 @@ async def _process_feed_item(
     if not name:
         name = code
 
+    existing_image_url = (
+        str(current_product.get("image_url") or "").strip()
+        if current_product
+        else ""
+    )
+    feed_image_url = str(item.get("image_url") or "").strip()
+    image_url: str | None = None
+    if existing_image_url:
+        image_url = None
+    elif feed_image_url:
+        image_url = await _download_product_image(feed_image_url)
+
     await shop_repo.upsert_product_from_feed(
         name=name[:255],
         sku=code,
         vendor_sku=code,
         description=description,
-        image_url=None,
+        image_url=image_url,
         price=price,
         vip_price=vip_price,
         stock=stock_total,
@@ -167,6 +295,51 @@ async def _process_feed_item(
         manufacturer=manufacturer,
     )
     return True
+
+
+async def import_product_by_vendor_sku(vendor_sku: str) -> bool:
+    """Import a single product from the stock feed by vendor SKU."""
+
+    cleaned_vendor_sku = vendor_sku.strip()
+    if not cleaned_vendor_sku:
+        return False
+
+    item = await stock_feed_repo.get_item_by_sku(cleaned_vendor_sku)
+    if not item:
+        log_info(
+            "Stock feed item not found for vendor SKU import",
+            vendor_sku=cleaned_vendor_sku,
+        )
+        return False
+
+    existing_product = await shop_repo.get_product_by_sku(
+        cleaned_vendor_sku, include_archived=True
+    )
+
+    try:
+        processed = await _process_feed_item(item, existing_product)
+    except Exception as exc:
+        log_error(
+            "Failed to import product from stock feed",
+            vendor_sku=cleaned_vendor_sku,
+            error=str(exc),
+        )
+        raise
+
+    if processed:
+        existing_id = None
+        if existing_product and "id" in existing_product:
+            try:
+                existing_id = int(existing_product["id"])
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                existing_id = None
+        log_info(
+            "Imported product from stock feed",
+            vendor_sku=cleaned_vendor_sku,
+            existing_product_id=existing_id,
+        )
+
+    return processed
 
 
 async def update_products_from_feed() -> None:
