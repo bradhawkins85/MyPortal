@@ -18,8 +18,31 @@ There are no default login credentials; the first visit will prompt you to regis
 - VIP pricing for companies with special product rates
 - Shop admin interface to archive products and view archived items
 - Order details include product image, SKU and description
+- Port catalogue with searchable metadata, secure document uploads, and lifecycle tracking
+- Pricing workflow approvals with notification feed and audit-friendly status changes
 - Automated CSRF protection on authenticated state-changing requests
 - Super admin access to the OpnForm builder for creating and editing forms
+
+## Port Catalogue & Pricing Workflows
+
+The portal now exposes a dedicated port catalogue that allows super administrators
+to maintain structured metadata (name, country, timezone, region, geographic
+coordinates) for each port. Authenticated users can search and filter the
+catalogue via the `/ports` API while super administrators can create, update,
+and archive entries. Each port supports secure document uploads—files are
+sanitised, size-limited to 15&nbsp;MB, stored under `app/static/uploads`, and
+served through the `/static/uploads/...` namespace. Metadata about the
+uploader, upload time, and file characteristics is recorded alongside the
+database entry.
+
+Pricing operations are handled through workflow-oriented endpoints that allow
+teams to draft, submit, approve, or reject rate cards for each port. Every
+transition captures the actor, timestamps (stored in UTC), currency, and
+effective dates so audit requirements are met. Approval and rejection actions
+automatically create notifications that appear in the `/notifications` feed,
+ensuring requesters are alerted as statuses change. The interactive Swagger UI
+lists the full set of CRUD routes and supported query parameters for filtering
+and sorting.
 
 ## Template Variables for External Apps
 
@@ -115,12 +138,14 @@ Azure Active Directory and grant it the required Graph permissions.
 
 ## File Storage
 
-Static assets located under `src/public` are served directly and are intended
-to be publicly accessible. User-uploaded files and other sensitive assets are
-stored in the `private_uploads` directory outside of the public tree. These
-files are only available through the `/uploads/:filename` route, which now
-requires authentication. Generating a signed URL can be used to grant
-temporary access if public sharing is needed.
+Static assets located under `app/static` are served directly. Port documents and
+other uploads are written to `app/static/uploads`, grouped by port identifier,
+with sanitised filenames and a 15&nbsp;MB size cap. The upload API requires an
+authenticated session and records metadata about the uploader, original file
+name, content type, and size so administrators can audit stored files. Because
+files live under the static directory they are subject to existing theme and
+branding controls; access controls should still be enforced via the API layer
+when linking to documents.
 
 ## CSRF Protection
 
