@@ -344,7 +344,12 @@ body {
 
 .layout__content {
   flex: 1;
-  padding: 2rem;
+  --layout-content-padding-top: 2rem;
+  --layout-content-padding-inline: 2rem;
+  --layout-content-padding-bottom: 2rem;
+  padding: var(--layout-content-padding-top)
+    var(--layout-content-padding-inline)
+    var(--layout-content-padding-bottom);
   overflow-y: auto;
 }
 
@@ -613,12 +618,12 @@ body {
   display: grid;
   grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
   gap: 2rem;
-  align-items: flex-start;
+  align-items: start;
 }
 
 .shop-layout__sidebar {
   position: sticky;
-  top: 5.5rem;
+  top: 0;
   align-self: start;
 }
 
@@ -698,6 +703,7 @@ body {
 
   .shop-layout__sidebar {
     position: static;
+    top: auto;
   }
 
   .shop-toolbar {

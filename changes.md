@@ -1,3 +1,5 @@
+- 2025-10-11, 14:05 UTC, Fix, Locked the shop category sidebar to the scroll container top so it no longer drifts when many products load
+- 2025-10-08, 13:09 UTC, Fix, Ensured the shop category sidebar remains top-aligned when product listings extend the page
 - 2025-10-08, 13:01 UTC, Feature, Redesigned shop catalogue layout with sidebar category navigation and removed vendor SKUs from the customer view
 - 2025-10-08, 12:51 UTC, Fix, Restored shop product creation with validated uploads and database persistence to resolve Not Found errors
 - 2025-10-08, 12:41 UTC, Fix, Updated API documentation links to open in a new tab with secure attributes for consistent navigation
