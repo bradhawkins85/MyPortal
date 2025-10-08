@@ -25,6 +25,7 @@ from app.api.routes import (
     auth,
     companies,
     licenses as licenses_api,
+    forms as forms_api,
     memberships,
     m365 as m365_api,
     notifications,
@@ -41,6 +42,7 @@ from app.repositories import auth as auth_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import licenses as license_repo
+from app.repositories import forms as forms_repo
 from app.repositories import m365 as m365_repo
 from app.repositories import roles as role_repo
 from app.repositories import shop as shop_repo
@@ -54,11 +56,28 @@ from app.security.session import session_manager
 from app.services.scheduler import scheduler_service
 from app.services import staff_importer
 from app.services import m365 as m365_service
+from app.services import template_variables
+from app.services.opnform import (
+    OpnformValidationError,
+    extract_allowed_host,
+    normalize_opnform_embed_code,
+    normalize_opnform_form_url,
+)
 
 configure_logging()
 settings = get_settings()
 templates_config = get_templates_config()
 oauth_state_serializer = URLSafeSerializer(settings.secret_key, salt="m365-oauth")
+OPNFORM_ALLOWED_HOST = extract_allowed_host(
+    str(settings.opnform_base_url) if settings.opnform_base_url else None
+)
+
+
+def _opnform_base_url() -> str | None:
+    if settings.opnform_base_url:
+        base = str(settings.opnform_base_url)
+        return base if base.endswith("/") else f"{base}/"
+    return "/myforms/"
 tags_metadata = [
     {"name": "Auth", "description": "Authentication, registration, and session management."},
     {"name": "Users", "description": "User administration, profile management, and self-service endpoints."},
@@ -72,6 +91,10 @@ tags_metadata = [
     {"name": "Audit Logs", "description": "Structured audit trail of privileged actions."},
     {"name": "Ports", "description": "Port catalogue, document storage, and pricing workflow APIs."},
     {"name": "Licenses", "description": "Software license catalogue, assignments, and ordering workflows."},
+    {
+        "name": "Forms",
+        "description": "OpnForm publishing, company assignments, and secure embedding endpoints.",
+    },
     {"name": "Office365", "description": "Microsoft 365 credential management and synchronisation APIs."},
     {"name": "Notifications", "description": "System-wide and user-specific notification feeds."},
 ]
@@ -109,6 +132,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(companies.router)
 app.include_router(licenses_api.router)
+app.include_router(forms_api.router)
 app.include_router(roles.router)
 app.include_router(memberships.router)
 app.include_router(m365_api.router)
@@ -875,10 +899,75 @@ async def forms_page(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
+
+    active_company_id = getattr(request.state, "active_company_id", None)
+    active_company = None
+    if active_company_id is not None:
+        try:
+            active_company = await company_repo.get_company_by_id(int(active_company_id))
+        except (TypeError, ValueError):
+            active_company = None
+
+    portal_base = str(settings.portal_url) if settings.portal_url else str(request.base_url).rstrip("/")
+    login_url = str(request.url_for("login_page"))
+
+    replacements = template_variables.build_template_replacement_map(
+        template_variables.TemplateContext(
+            user=template_variables.TemplateContextUser(
+                id=user.get("id"),
+                email=user.get("email"),
+                first_name=user.get("first_name"),
+                last_name=user.get("last_name"),
+            ),
+            company=template_variables.TemplateContextCompany(
+                id=int(active_company_id) if active_company_id is not None else None,
+                name=(active_company or {}).get("name"),
+                syncro_customer_id=(active_company or {}).get("syncro_company_id"),
+            ),
+            portal=template_variables.TemplateContextPortal(
+                base_url=portal_base,
+                login_url=login_url,
+            ),
+        )
+    )
+
+    raw_forms = await forms_repo.list_forms_for_user(user["id"])
+    hydrated_forms: list[dict[str, Any]] = []
+    for form in raw_forms:
+        iframe_url = template_variables.apply_template_variables(form.get("url", ""), replacements)
+        embed_html: str | None = None
+        embed_code = form.get("embed_code")
+        if embed_code:
+            try:
+                normalized = normalize_opnform_embed_code(embed_code, allowed_host=OPNFORM_ALLOWED_HOST)
+                embed_html = template_variables.apply_template_variables(
+                    normalized.sanitized_embed_code,
+                    replacements,
+                )
+                iframe_url = template_variables.apply_template_variables(
+                    normalized.form_url,
+                    replacements,
+                )
+            except OpnformValidationError as exc:
+                log_error(
+                    "Failed to normalise OpnForm embed for rendering",
+                    form_id=form.get("id"),
+                    error=str(exc),
+                )
+        hydrated_forms.append(
+            {
+                "id": form.get("id"),
+                "name": form.get("name"),
+                "description": form.get("description"),
+                "iframe_url": iframe_url,
+                "embed_html": embed_html,
+            }
+        )
+
     extra = {
         "title": "Forms",
-        "forms": [],
-        "opnform_base_url": settings.opnform_base_url,
+        "forms": hydrated_forms,
+        "opnform_base_url": _opnform_base_url(),
     }
     return await _render_template("forms/index.html", request, user, extra=extra)
 
@@ -1415,12 +1504,95 @@ async def admin_forms_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
+    forms = await forms_repo.list_forms()
     extra = {
         "title": "Forms admin",
-        "forms": [],
-        "opnform_base_url": settings.opnform_base_url,
+        "forms": forms,
+        "opnform_base_url": _opnform_base_url(),
     }
     return await _render_template("admin/forms.html", request, current_user, extra=extra)
+
+
+@app.post("/myforms/admin")
+async def admin_create_form(
+    request: Request,
+    name: str = Form(...),
+    url: str = Form(...),
+    description: str = Form(""),
+):
+    _, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    cleaned_name = name.strip()
+    if not cleaned_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form name cannot be empty")
+    try:
+        normalized_url = normalize_opnform_form_url(url, allowed_host=OPNFORM_ALLOWED_HOST)
+    except OpnformValidationError as exc:
+        log_error("Invalid OpnForm URL supplied", error=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    await forms_repo.create_form(
+        name=cleaned_name,
+        url=normalized_url,
+        embed_code=None,
+        description=description.strip() or None,
+    )
+    return RedirectResponse(url="/admin/forms", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/myforms/admin/edit")
+async def admin_edit_form(
+    request: Request,
+    id: str = Form(...),
+    name: str = Form(...),
+    url: str = Form(...),
+    description: str = Form(""),
+):
+    _, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    try:
+        form_id = int(id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid form identifier")
+    existing = await forms_repo.get_form(form_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
+    cleaned_name = name.strip()
+    if not cleaned_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Form name cannot be empty")
+    try:
+        normalized_url = normalize_opnform_form_url(url, allowed_host=OPNFORM_ALLOWED_HOST)
+    except OpnformValidationError as exc:
+        log_error("Invalid OpnForm URL during update", form_id=form_id, error=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    await forms_repo.update_form(
+        form_id,
+        name=cleaned_name,
+        url=normalized_url,
+        embed_code=existing.get("embed_code"),
+        description=description.strip() or None,
+    )
+    return RedirectResponse(url="/admin/forms", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/myforms/admin/delete")
+async def admin_delete_form(
+    request: Request,
+    id: str = Form(...),
+):
+    _, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    try:
+        form_id = int(id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid form identifier")
+    existing = await forms_repo.get_form(form_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
+    await forms_repo.delete_form(form_id)
+    return RedirectResponse(url="/admin/forms", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get("/admin/shop", response_class=HTMLResponse)
