@@ -1,3 +1,4 @@
+- 2025-10-08, 13:06 UTC, Fix, Added stock feed product update handler so scheduled Update Products runs refresh inventory data
 - 2025-10-08, 13:09 UTC, Fix, Ensured the shop category sidebar remains top-aligned when product listings extend the page
 - 2025-10-08, 13:01 UTC, Feature, Redesigned shop catalogue layout with sidebar category navigation and removed vendor SKUs from the customer view
 - 2025-10-08, 12:51 UTC, Fix, Restored shop product creation with validated uploads and database persistence to resolve Not Found errors

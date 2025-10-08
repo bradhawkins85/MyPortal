@@ -68,6 +68,11 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
     return [_normalise_product(row) for row in rows]
 
 
+async def list_all_products(include_archived: bool = False) -> list[dict[str, Any]]:
+    filters = ProductFilters(include_archived=include_archived)
+    return await list_products(filters)
+
+
 async def list_product_restrictions() -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """
@@ -112,6 +117,25 @@ async def get_product_by_id(product_id: int) -> dict[str, Any] | None:
     return _normalise_product(row) if row else None
 
 
+async def get_product_by_sku(
+    sku: str,
+    *,
+    include_archived: bool = False,
+) -> dict[str, Any] | None:
+    sql = [
+        "SELECT p.*, c.name AS category_name",
+        "FROM shop_products AS p",
+        "LEFT JOIN shop_categories AS c ON c.id = p.category_id",
+        "WHERE p.sku = %s",
+    ]
+    params: list[Any] = [sku]
+    if not include_archived:
+        sql.append("AND p.archived = 0")
+    sql.append("LIMIT 1")
+    row = await db.fetch_one(" ".join(sql), tuple(params))
+    return _normalise_product(row) if row else None
+
+
 async def create_product(
     *,
     name: str,
@@ -149,6 +173,107 @@ async def create_product(
     if not product:
         raise RuntimeError("Failed to create product")
     return product
+
+
+async def get_category_by_name(name: str) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT id, name FROM shop_categories WHERE name = %s",
+        (name,),
+    )
+    if not row:
+        return None
+    return {"id": int(row["id"]), "name": row["name"]}
+
+
+async def create_category(name: str) -> int:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                "INSERT INTO shop_categories (name) VALUES (%s)",
+                (name,),
+            )
+            category_id = int(cursor.lastrowid)
+    return category_id
+
+
+async def upsert_product_from_feed(
+    *,
+    name: str,
+    sku: str,
+    vendor_sku: str,
+    description: str | None,
+    image_url: str | None,
+    price: Decimal,
+    vip_price: Decimal,
+    stock: int,
+    category_id: int | None,
+    stock_nsw: int,
+    stock_qld: int,
+    stock_vic: int,
+    stock_sa: int,
+    buy_price: Decimal | None,
+    weight: Decimal | None,
+    length: Decimal | None,
+    width: Decimal | None,
+    height: Decimal | None,
+    stock_at: date | None,
+    warranty_length: str | None,
+    manufacturer: str | None,
+) -> None:
+    await db.execute(
+        """
+        INSERT INTO shop_products
+            (name, sku, vendor_sku, description, image_url, price, vip_price, stock,
+             category_id, stock_nsw, stock_qld, stock_vic, stock_sa, buy_price,
+             weight, length, width, height, stock_at, warranty_length, manufacturer)
+        VALUES
+            (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            name = VALUES(name),
+            sku = VALUES(sku),
+            description = VALUES(description),
+            image_url = IFNULL(VALUES(image_url), image_url),
+            price = VALUES(price),
+            vip_price = VALUES(vip_price),
+            stock = VALUES(stock),
+            category_id = VALUES(category_id),
+            stock_nsw = VALUES(stock_nsw),
+            stock_qld = VALUES(stock_qld),
+            stock_vic = VALUES(stock_vic),
+            stock_sa = VALUES(stock_sa),
+            buy_price = VALUES(buy_price),
+            weight = VALUES(weight),
+            length = VALUES(length),
+            width = VALUES(width),
+            height = VALUES(height),
+            stock_at = VALUES(stock_at),
+            warranty_length = VALUES(warranty_length),
+            manufacturer = VALUES(manufacturer)
+        """,
+        (
+            name,
+            sku,
+            vendor_sku,
+            description,
+            image_url,
+            price,
+            vip_price,
+            stock,
+            category_id,
+            stock_nsw,
+            stock_qld,
+            stock_vic,
+            stock_sa,
+            buy_price,
+            weight,
+            length,
+            width,
+            height,
+            stock_at,
+            warranty_length,
+            manufacturer,
+        ),
+    )
 
 
 def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
