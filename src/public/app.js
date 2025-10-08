@@ -170,7 +170,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const companySwitcher = document.getElementById('company-switcher');
     if (companySwitcher) {
       companySwitcher.addEventListener('change', () => {
-        companySwitcher.form?.submit();
+        const form = companySwitcher.form;
+        if (!form) return;
+        const selected = companySwitcher.value;
+        if (!selected) return;
+        let hidden = form.querySelector('input[data-company-switcher-hidden="true"]');
+        if (!hidden) {
+          hidden = document.createElement('input');
+          hidden.type = 'hidden';
+          hidden.name = 'companyId';
+          hidden.setAttribute('data-company-switcher-hidden', 'true');
+          form.appendChild(hidden);
+        }
+        hidden.value = selected;
+        form.submit();
       });
     }
   });
