@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block sidebar_menu %}
+  {{ super() }}
+  <li class="menu__item">
+    <a href="/shop" aria-current="page">
+      <span class="menu__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M4 7h16l-1.5 12.5A2 2 0 0 1 16.52 21H7.48a2 2 0 0 1-1.98-1.5zM6 3h12a1 1 0 0 1 1 1v2H5V4a1 1 0 0 1 1-1z"/></svg>
+      </span>
+      <span class="menu__label">Shop</span>
+    </a>
+  </li>
+  <li class="menu__item">
+    <a href="/forms">
+      <span class="menu__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h9l5 5v15H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm8 7h4.5L14 4.5V9z"/></svg>
+      </span>
+      <span class="menu__label">Forms</span>
+    </a>
+  </li>
+  <li class="menu__item">
+    <a href="/staff">
+      <span class="menu__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-3.31 0-8 1.66-8 5v1h16v-1c0-3.34-4.69-5-8-5z"/></svg>
+      </span>
+      <span class="menu__label">Staff</span>
+    </a>
+  </li>
+{% endblock %}
+
+{% block header_actions %}
+  <a class="button button--ghost" href="/cart">View cart</a>
+{% endblock %}
+
+{% block content %}
+<div class="page-grid">
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Catalogue filters</h2>
+        <p class="card__subtitle">Narrow the product list by category, availability, or keyword.</p>
+      </div>
+    </header>
+    {% if cart_error %}
+      <div class="alert alert--error" role="alert">{{ cart_error }}</div>
+    {% endif %}
+    <form class="filters" method="get" data-auto-submit>
+      <div class="filters__group">
+        <label class="form-label" for="shop-category">Category</label>
+        <select class="form-input" id="shop-category" name="category" data-submit-on-change>
+          <option value="">All categories</option>
+          {% for category in categories %}
+            <option value="{{ category.id }}" {% if current_category and current_category == category.id %}selected{% endif %}>
+              {{ category.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="filters__group">
+        <label class="form-label" for="shop-search">Search products</label>
+        <input
+          class="form-input"
+          id="shop-search"
+          name="q"
+          type="search"
+          value="{{ search_term | default('') }}"
+          placeholder="Search by name, SKU, or vendor"
+        />
+      </div>
+      <div class="filters__group filters__group--checkbox">
+        <label class="checkbox">
+          <input type="checkbox" name="showOutOfStock" value="1" {% if show_out_of_stock %}checked{% endif %} data-submit-on-change />
+          <span>Show out of stock items</span>
+        </label>
+      </div>
+    </form>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Available products</h2>
+        <p class="card__subtitle">Add items directly to your cart or review detailed specifications.</p>
+      </div>
+      <div class="card__controls">
+        <input
+          type="search"
+          class="form-input card__control"
+          placeholder="Quick filter products"
+          aria-label="Filter products"
+          data-table-filter="shop-table"
+        />
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table" id="shop-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col">Image</th>
+            <th scope="col" data-sort="string">Name</th>
+            <th scope="col" data-sort="string">SKU</th>
+            <th scope="col" data-sort="string">Vendor SKU</th>
+            <th scope="col" data-sort="number">Price</th>
+            <th scope="col" data-sort="number">Stock</th>
+            <th scope="col" class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for product in products %}
+            <tr data-product-id="{{ product.id }}" data-stock="{{ product.stock }}">
+              <td data-label="Image">
+                {% if product.image_url %}
+                  <button type="button" class="link-button" data-image-preview data-image-url="{{ product.image_url }}">
+                    <img src="{{ product.image_url }}" alt="" class="product-thumb" loading="lazy" />
+                  </button>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="Name">{{ product.name }}</td>
+              <td data-label="SKU">{{ product.sku }}</td>
+              <td data-label="Vendor SKU">{{ product.vendor_sku or '—' }}</td>
+              <td data-label="Price" data-value="{{ product.price }}">${{ '%.2f'|format(product.price) }}</td>
+              <td data-label="Stock" data-value="{{ product.stock }}">
+                <span class="badge {% if product.stock == 0 %}badge--danger{% elif product.stock < 5 %}badge--warning{% else %}badge--success{% endif %}">
+                  {{ product.stock }}
+                </span>
+              </td>
+              <td class="table__actions">
+                <div class="table__action-buttons">
+                  <button type="button" class="button button--ghost" data-product-details="{{ product.id }}">Details</button>
+                  {% if product.stock > 0 %}
+                  <form action="/cart/add" method="post" class="inline-form">
+                      <input type="hidden" name="productId" value="{{ product.id }}" />
+                      <label class="visually-hidden" for="quantity-{{ product.id }}">Quantity for {{ product.name }}</label>
+                      <input
+                        class="form-input form-input--sm"
+                        id="quantity-{{ product.id }}"
+                        type="number"
+                        name="quantity"
+                        min="1"
+                        max="{{ product.stock }}"
+                        value="1"
+                      />
+                      <button type="submit" class="button">Add to cart</button>
+                    </form>
+                  {% else %}
+                    <span class="badge badge--muted">Out of stock</span>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="7" class="table__empty">No products are currently available.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<div class="modal" id="product-image-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close image preview</span>
+      &times;
+    </button>
+    <img src="" alt="Selected product image" id="product-image-preview" />
+  </div>
+</div>
+
+<div class="modal" id="product-details-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close product details</span>
+      &times;
+    </button>
+    <div id="product-details-body" class="modal__body"></div>
+  </div>
+</div>
+
+<script type="application/json" id="shop-products-data">{{ products | tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/shop.js" defer></script>
+{% endblock %}
