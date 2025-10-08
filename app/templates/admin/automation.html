@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Scheduled tasks</h2>
+        <p class="card__subtitle">Create, monitor, and control background automation jobs.</p>
+      </div>
+      <input
+        type="search"
+        class="form-input"
+        placeholder="Filter tasks"
+        aria-label="Filter scheduled tasks"
+        data-table-filter="tasks-table"
+      />
+    </header>
+    <div class="table-wrapper">
+      <table class="table" id="tasks-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string">Name</th>
+            <th scope="col" data-sort="string">Command</th>
+            <th scope="col" data-sort="number">Company</th>
+            <th scope="col" data-sort="string">Cron</th>
+            <th scope="col" data-sort="string">Active</th>
+            <th scope="col" data-sort="date">Last run</th>
+            <th scope="col" data-sort="string">Status</th>
+            <th scope="col" class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for task in tasks %}
+            <tr data-task='{{ task | tojson }}'>
+              <td data-label="Name">{{ task.name }}</td>
+              <td data-label="Command">{{ task.command }}</td>
+              <td data-label="Company" data-value="{{ task.company_id or 0 }}">
+                {{ task.company_id if task.company_id else 'All companies' }}
+              </td>
+              <td data-label="Cron">{{ task.cron }}</td>
+              <td data-label="Active">
+                <span class="tag {{ 'tag--success' if task.active else 'tag--muted' }}">{{ 'Yes' if task.active else 'No' }}</span>
+              </td>
+              <td data-label="Last run" data-value="{{ task.last_run_iso or '' }}">
+                {% if task.last_run_iso %}
+                  <span data-utc="{{ task.last_run_iso }}"></span>
+                {% else %}
+                  <span class="text-muted">Never</span>
+                {% endif %}
+              </td>
+              <td data-label="Status">{{ task.last_status or '—' }}</td>
+              <td class="table__actions">
+                <div class="table__action-buttons">
+                  <button type="button" class="button button--ghost" data-task-edit>Edit</button>
+                  <button type="button" class="button button--ghost" data-task-toggle>
+                    {{ 'Disable' if task.active else 'Enable' }}
+                  </button>
+                  <button type="button" class="button button--ghost" data-task-run>Run now</button>
+                  <button type="button" class="button button--danger" data-task-delete>Delete</button>
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="8" class="table__empty">No tasks configured yet.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Task editor</h2>
+        <p class="card__subtitle">All schedules use UTC and respect rate limits configured on integrations.</p>
+      </div>
+    </header>
+    <form id="scheduled-task-form" class="form" autocomplete="off">
+      <input type="hidden" name="task_id" id="task-id" />
+      <div class="form-field">
+        <label class="form-label" for="task-name">Task name</label>
+        <input class="form-input" id="task-name" name="name" required maxlength="255" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="task-command">Command</label>
+        <select class="form-input" id="task-command" name="command" required>
+          {% for option in command_options %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="task-company">Company ID</label>
+        <input
+          class="form-input"
+          id="task-company"
+          name="companyId"
+          type="number"
+          min="1"
+          placeholder="Leave blank for all companies"
+        />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="task-cron">Cron expression</label>
+        <input
+          class="form-input"
+          id="task-cron"
+          name="cron"
+          required
+          placeholder="0 2 * * *"
+          pattern="^[^\s]+(\s+[^\s]+){4,5}$"
+        />
+        <p class="form-help">Crontab syntax in UTC. Use five fields for minute through weekday.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="task-description">Description</label>
+        <textarea class="form-input form-input--textarea" id="task-description" name="description" rows="3"></textarea>
+      </div>
+      <div class="form-field form-field--inline">
+        <label class="form-label" for="task-max-retries">Max retries</label>
+        <input class="form-input" id="task-max-retries" name="maxRetries" type="number" min="0" value="0" />
+      </div>
+      <div class="form-field form-field--inline">
+        <label class="form-label" for="task-backoff">Retry backoff (seconds)</label>
+        <input class="form-input" id="task-backoff" name="retryBackoffSeconds" type="number" min="30" value="300" />
+      </div>
+      <div class="form-field form-field--checkbox">
+        <label class="form-checkbox">
+          <input type="checkbox" id="task-active" name="active" checked />
+          <span>Task active</span>
+        </label>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Save task</button>
+        <button type="button" class="button button--ghost" data-task-reset>Clear form</button>
+      </div>
+    </form>
+  </section>
+</div>
+
+<section class="card card--panel">
+  <header class="card__header">
+    <div>
+      <h2 class="card__title">Recent task executions</h2>
+      <p class="card__subtitle">Track the latest automation runs with UTC timestamps converted to local time in your browser.</p>
+    </div>
+    <input
+      type="search"
+      class="form-input"
+      placeholder="Filter executions"
+      aria-label="Filter scheduled task runs"
+      data-table-filter="runs-table"
+    />
+  </header>
+  <div class="table-wrapper">
+    <table class="table" id="runs-table" data-table>
+      <thead>
+        <tr>
+          <th scope="col" data-sort="string">Task</th>
+          <th scope="col" data-sort="string">Status</th>
+          <th scope="col" data-sort="date">Started</th>
+          <th scope="col" data-sort="date">Finished</th>
+          <th scope="col" data-sort="number">Duration (ms)</th>
+          <th scope="col" data-sort="string">Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in runs %}
+          <tr>
+            <td data-label="Task">{{ run.task_name }}</td>
+            <td data-label="Status">{{ run.status }}</td>
+            <td data-label="Started" data-value="{{ run.started_iso or '' }}">
+              {% if run.started_iso %}
+                <span data-utc="{{ run.started_iso }}"></span>
+              {% else %}
+                <span class="text-muted">Unknown</span>
+              {% endif %}
+            </td>
+            <td data-label="Finished" data-value="{{ run.finished_iso or '' }}">
+              {% if run.finished_iso %}
+                <span data-utc="{{ run.finished_iso }}"></span>
+              {% else %}
+                <span class="text-muted">Pending</span>
+              {% endif %}
+            </td>
+            <td data-label="Duration" data-value="{{ run.duration_ms or 0 }}">{{ run.duration_ms or '—' }}</td>
+            <td data-label="Details">{{ run.details or '—' }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="6" class="table__empty">No automation runs recorded yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card card--panel">
+  <header class="card__header">
+    <div>
+      <h2 class="card__title">Webhook delivery queue</h2>
+      <p class="card__subtitle">Monitor outbound webhook calls, retry failures, and review delivery history.</p>
+    </div>
+    <input
+      type="search"
+      class="form-input"
+      placeholder="Filter webhook events"
+      aria-label="Filter webhook events"
+      data-table-filter="webhooks-table"
+    />
+  </header>
+  <div class="table-wrapper">
+    <table class="table" id="webhooks-table" data-table>
+      <thead>
+        <tr>
+          <th scope="col" data-sort="string">Name</th>
+          <th scope="col" data-sort="string">Target</th>
+          <th scope="col" data-sort="string">Status</th>
+          <th scope="col" data-sort="number">Attempts</th>
+          <th scope="col" data-sort="date">Next attempt</th>
+          <th scope="col" data-sort="string">Last error</th>
+          <th scope="col" data-sort="date">Updated</th>
+          <th scope="col" class="table__actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in events %}
+          <tr data-event-id="{{ event.id }}">
+            <td data-label="Name">{{ event.name }}</td>
+            <td data-label="Target">{{ event.target_url }}</td>
+            <td data-label="Status">{{ event.status }}</td>
+            <td data-label="Attempts" data-value="{{ event.attempt_count }}">
+              {{ event.attempt_count }}/{{ event.max_attempts }}
+            </td>
+            <td data-label="Next attempt" data-value="{{ event.next_attempt_iso or '' }}">
+              {% if event.next_attempt_iso %}
+                <span data-utc="{{ event.next_attempt_iso }}"></span>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+            <td data-label="Last error">{{ event.last_error or '—' }}</td>
+            <td data-label="Updated" data-value="{{ event.updated_iso or '' }}">
+              {% if event.updated_iso %}
+                <span data-utc="{{ event.updated_iso }}"></span>
+              {% endif %}
+            </td>
+            <td class="table__actions">
+              <div class="table__action-buttons">
+                <button
+                  type="button"
+                  class="button button--ghost"
+                  data-webhook-retry
+                  {% if event.status == 'succeeded' %}disabled{% endif %}
+                >Retry</button>
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="8" class="table__empty">No webhook activity recorded.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/automation.js" defer></script>
+{% endblock %}
