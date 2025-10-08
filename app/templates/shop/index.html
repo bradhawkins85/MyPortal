@@ -5,56 +5,86 @@
 {% endblock %}
 
 {% block content %}
-<div class="page-grid">
-  <section class="card card--panel">
+{% macro shop_query(category_id=None) -%}
+  {%- set ns = namespace(params=[]) -%}
+  {%- if category_id is not none -%}
+    {%- set ns.params = ns.params + ['category=' ~ category_id] -%}
+  {%- endif -%}
+  {%- if search_term -%}
+    {%- set ns.params = ns.params + ['q=' ~ (search_term | urlencode)] -%}
+  {%- endif -%}
+  {%- if show_out_of_stock -%}
+    {%- set ns.params = ns.params + ['showOutOfStock=1'] -%}
+  {%- endif -%}
+  {%- if ns.params -%}?{{ ns.params | join('&') }}{%- endif -%}
+{%- endmacro %}
+
+{% if cart_error %}
+  <div class="alert alert--error" role="alert">{{ cart_error }}</div>
+{% endif %}
+
+<div class="shop-layout">
+  <aside class="card card--panel shop-layout__sidebar">
     <header class="card__header card__header--stacked">
       <div>
-        <h2 class="card__title">Catalogue filters</h2>
-        <p class="card__subtitle">Narrow the product list by category, availability, or keyword.</p>
+        <h2 class="card__title">Categories</h2>
+        <p class="card__subtitle">Choose a catalogue section to focus the product list.</p>
       </div>
     </header>
-    {% if cart_error %}
-      <div class="alert alert--error" role="alert">{{ cart_error }}</div>
-    {% endif %}
-    <form class="filters" method="get" data-auto-submit>
-      <div class="filters__group">
-        <label class="form-label" for="shop-category">Category</label>
-        <select class="form-input" id="shop-category" name="category" data-submit-on-change>
-          <option value="">All categories</option>
-          {% for category in categories %}
-            <option value="{{ category.id }}" {% if current_category and current_category == category.id %}selected{% endif %}>
-              {{ category.name }}
-            </option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="filters__group">
-        <label class="form-label" for="shop-search">Search products</label>
-        <input
-          class="form-input"
-          id="shop-search"
-          name="q"
-          type="search"
-          value="{{ search_term | default('') }}"
-          placeholder="Search by name, SKU, or vendor"
-        />
-      </div>
-      <div class="filters__group filters__group--checkbox">
-        <label class="checkbox">
-          <input type="checkbox" name="showOutOfStock" value="1" {% if show_out_of_stock %}checked{% endif %} data-submit-on-change />
-          <span>Show out of stock items</span>
-        </label>
-      </div>
-    </form>
-  </section>
+    <nav class="shop-categories" aria-label="Product categories">
+      <a
+        class="shop-categories__link {% if not current_category %}is-active{% endif %}"
+        href="{{ request.url_for('shop_page') }}{{ shop_query() }}"
+        {% if not current_category %}aria-current="page"{% endif %}
+      >
+        <span class="shop-categories__icon" aria-hidden="true"></span>
+        <span>All products</span>
+      </a>
+      {% for category in categories %}
+        <a
+          class="shop-categories__link {% if current_category and current_category == category.id %}is-active{% endif %}"
+          href="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}"
+          {% if current_category and current_category == category.id %}aria-current="page"{% endif %}
+        >
+          <span class="shop-categories__icon" aria-hidden="true"></span>
+          <span>{{ category.name }}</span>
+        </a>
+      {% endfor %}
+    </nav>
+  </aside>
 
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
+  <section class="card card--panel shop-layout__content">
+    <header class="card__header">
       <div>
         <h2 class="card__title">Available products</h2>
         <p class="card__subtitle">Add items directly to your cart or review detailed specifications.</p>
       </div>
-      <div class="card__controls">
+      <div class="card__controls shop-toolbar">
+        <form class="shop-toolbar__form" method="get">
+          {% if current_category %}
+            <input type="hidden" name="category" value="{{ current_category }}" />
+          {% endif %}
+          <label class="visually-hidden" for="shop-search">Search products</label>
+          <input
+            class="form-input shop-toolbar__search"
+            id="shop-search"
+            name="q"
+            type="search"
+            value="{{ search_term | default('') }}"
+            placeholder="Search by name or SKU"
+          />
+          <label class="checkbox shop-toolbar__checkbox">
+            <input
+              type="checkbox"
+              name="showOutOfStock"
+              value="1"
+              {% if show_out_of_stock %}checked{% endif %}
+              data-submit-on-change
+            />
+            <span>Show out of stock</span>
+          </label>
+          <button type="submit" class="button">Search</button>
+        </form>
         <input
           type="search"
           class="form-input card__control"
@@ -71,7 +101,6 @@
             <th scope="col">Image</th>
             <th scope="col" data-sort="string">Name</th>
             <th scope="col" data-sort="string">SKU</th>
-            <th scope="col" data-sort="string">Vendor SKU</th>
             <th scope="col" data-sort="number">Price</th>
             <th scope="col" data-sort="number">Stock</th>
             <th scope="col" class="table__actions">Actions</th>
@@ -91,7 +120,6 @@
               </td>
               <td data-label="Name">{{ product.name }}</td>
               <td data-label="SKU">{{ product.sku }}</td>
-              <td data-label="Vendor SKU">{{ product.vendor_sku or '—' }}</td>
               <td data-label="Price" data-value="{{ product.price }}">${{ '%.2f'|format(product.price) }}</td>
               <td data-label="Stock" data-value="{{ product.stock }}">
                 <span class="badge {% if product.stock == 0 %}badge--danger{% elif product.stock < 5 %}badge--warning{% else %}badge--success{% endif %}">
@@ -125,7 +153,7 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="7" class="table__empty">No products are currently available.</td>
+              <td colspan="6" class="table__empty">No products are currently available.</td>
             </tr>
           {% endfor %}
         </tbody>
