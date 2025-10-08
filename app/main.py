@@ -30,6 +30,7 @@ from app.api.routes import (
     m365 as m365_api,
     notifications,
     ports,
+    scheduler as scheduler_api,
     roles,
     staff as staff_api,
     users,
@@ -46,7 +47,9 @@ from app.repositories import forms as forms_repo
 from app.repositories import m365 as m365_repo
 from app.repositories import roles as role_repo
 from app.repositories import shop as shop_repo
+from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import staff as staff_repo
+from app.repositories import webhook_events as webhook_events_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.security.csrf import CSRFMiddleware
@@ -57,6 +60,7 @@ from app.services.scheduler import scheduler_service
 from app.services import staff_importer
 from app.services import m365 as m365_service
 from app.services import template_variables
+from app.services import webhook_monitor
 from app.services.opnform import (
     OpnformValidationError,
     extract_allowed_host,
@@ -153,6 +157,7 @@ app.include_router(ports.router)
 app.include_router(notifications.router)
 app.include_router(staff_api.router)
 app.include_router(audit_logs.router)
+app.include_router(scheduler_api.router)
 
 
 async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
@@ -350,20 +355,17 @@ async def _send_license_webhook(
         "Content-Type": "application/json",
     }
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            response = await client.post(
-                str(settings.licenses_webhook_url),
-                json=payload,
-                headers=headers,
-            )
-        if response.status_code >= 400:
-            log_error(
-                "License webhook responded with error",
-                status=response.status_code,
-                body=response.text,
-            )
-    except httpx.HTTPError as exc:  # pragma: no cover - network failure logging
-        log_error("Failed to call license webhook", error=str(exc))
+        await webhook_monitor.enqueue_event(
+            name="license-change",
+            target_url=str(settings.licenses_webhook_url),
+            payload=payload,
+            headers=headers,
+            max_attempts=5,
+            backoff_seconds=300,
+            attempt_immediately=True,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to enqueue license webhook", error=str(exc))
 
 
 async def _load_staff_context(
@@ -1319,9 +1321,9 @@ async def verify_staff_member(staff_id: int, request: Request):
         admin_name=admin_name or None,
     )
 
-    status_code = None
     settings = get_settings()
     staff_company = await company_repo.get_company_by_id(staff.get("company_id"))
+    event_record: dict[str, Any] | None = None
     if settings.verify_webhook_url:
         headers = {"Content-Type": "application/json"}
         if settings.verify_api_key:
@@ -1333,14 +1335,25 @@ async def verify_staff_member(staff_id: int, request: Request):
             "companyName": staff_company.get("name") if staff_company else "",
         }
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.post(str(settings.verify_webhook_url), json=payload, headers=headers)
-            status_code = response.status_code
-        except httpx.HTTPError as exc:
+            event_record = await webhook_monitor.enqueue_event(
+                name="staff-verification",
+                target_url=str(settings.verify_webhook_url),
+                payload=payload,
+                headers=headers,
+                max_attempts=5,
+                backoff_seconds=180,
+                attempt_immediately=True,
+            )
+        except Exception as exc:
             log_error("Verify webhook failed", staff_id=staff_id, error=str(exc))
 
+    status_code = int(event_record.get("response_status")) if event_record and event_record.get("response_status") is not None else None
+    success = True
+    if event_record:
+        success = event_record.get("status") == "succeeded"
+
     return JSONResponse({
-        "success": status_code == status.HTTP_202_ACCEPTED if status_code else True,
+        "success": success,
         "status": status_code,
         "code": code,
     })
@@ -1437,6 +1450,59 @@ async def admin_roles(request: Request):
         "roles": roles_list,
     }
     return await _render_template("admin/roles.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/automation", response_class=HTMLResponse)
+async def admin_automation(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    tasks = await scheduled_tasks_repo.list_tasks()
+    runs = await scheduled_tasks_repo.list_recent_runs(limit=25)
+    events = await webhook_events_repo.list_events(limit=50)
+    prepared_tasks: list[dict[str, Any]] = []
+    for task in tasks:
+        prepared_tasks.append(
+            {
+                **task,
+                "last_run_iso": _to_iso(task.get("last_run_at")),
+            }
+        )
+    prepared_runs: list[dict[str, Any]] = []
+    for run in runs:
+        prepared_runs.append(
+            {
+                **run,
+                "started_iso": _to_iso(run.get("started_at")),
+                "finished_iso": _to_iso(run.get("finished_at")),
+            }
+        )
+    prepared_events: list[dict[str, Any]] = []
+    for event in events:
+        prepared_events.append(
+            {
+                **event,
+                "created_iso": _to_iso(event.get("created_at")),
+                "updated_iso": _to_iso(event.get("updated_at")),
+                "next_attempt_iso": _to_iso(event.get("next_attempt_at")),
+            }
+        )
+    command_options = [
+        {"value": "sync_staff", "label": "Sync staff directory"},
+        {"value": "sync_o365", "label": "Sync Microsoft 365 licenses"},
+    ]
+    existing_commands = {task.get("command") for task in tasks if task.get("command")}
+    for command in sorted(existing_commands):
+        if command and command not in {option["value"] for option in command_options}:
+            command_options.append({"value": str(command), "label": str(command)})
+    extra = {
+        "title": "Automation & monitoring",
+        "tasks": prepared_tasks,
+        "runs": prepared_runs,
+        "events": prepared_events,
+        "command_options": command_options,
+    }
+    return await _render_template("admin/automation.html", request, current_user, extra=extra)
 
 
 @app.get("/admin/memberships", response_class=HTMLResponse)
