@@ -1,3 +1,4 @@
+- 2025-10-08, 13:42 UTC, Fix, Restored /admin/companies administration dashboard with user provisioning and permission controls
 - 2025-10-15, 09:20 UTC, Fix, Removed an extra Jinja endif in base.html so the dashboard template renders without 500 errors
 - 2025-10-15, 11:45 UTC, Fix, Restored shop product deletion via FastAPI with secure file cleanup and redirect handling
 - 2025-10-14, 11:55 UTC, Fix, Filtered zero-priced products from the shop catalogue so customers only see priced items
