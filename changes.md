@@ -1,3 +1,4 @@
+- 2025-10-11, 14:05 UTC, Fix, Locked the shop category sidebar to the scroll container top so it no longer drifts when many products load
 - 2025-10-08, 13:09 UTC, Feature, Added admin UI for inline API key rotation with cross-service audit correlation dashboards and secure copy workflows
 - 2025-10-08, 13:06 UTC, Fix, Added stock feed product update handler so scheduled Update Products runs refresh inventory data
 - 2025-10-08, 13:09 UTC, Fix, Ensured the shop category sidebar remains top-aligned when product listings extend the page
