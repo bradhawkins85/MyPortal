@@ -935,7 +935,7 @@ async def shop_page(
     return await _render_template("shop/index.html", request, user, extra=extra)
 
 
-@app.get("/forms", response_class=HTMLResponse)
+@app.get("/myforms", response_class=HTMLResponse)
 async def forms_page(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -1011,6 +1011,12 @@ async def forms_page(request: Request):
         "opnform_base_url": _opnform_base_url(),
     }
     return await _render_template("forms/index.html", request, user, extra=extra)
+
+
+@app.get("/forms", include_in_schema=False)
+async def legacy_forms_redirect() -> RedirectResponse:
+    """Maintain compatibility for legacy bookmarks under /forms."""
+    return RedirectResponse(url="/myforms", status_code=status.HTTP_308_PERMANENT_REDIRECT)
 
 
 @app.get("/staff", response_class=HTMLResponse)
