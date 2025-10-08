@@ -19,6 +19,7 @@ dependencies = [
     "aiofiles",
     "jinja2",
     "itsdangerous",
+    "pyotp",
     "apscheduler",
     "httpx",
     "loguru",

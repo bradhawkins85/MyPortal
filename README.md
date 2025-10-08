@@ -6,7 +6,9 @@ There are no default login credentials; the first visit will prompt you to regis
 
 ## Features
 
-- Session-based authentication for multiple users
+- Session-based authentication with secure cookies and sliding expiration
+- Built-in rate limiting, CSRF protection, and password reset flows
+- Optional TOTP multi-factor authentication with QR-code provisioning
 - Business information summary tab to confirm the logged-in company
 - Licenses tab showing license name, SKU, count, allocated staff, expiry date and contract term
 - First-time visit redirects to a registration page when no users exist
@@ -14,7 +16,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - VIP pricing for companies with special product rates
 - Shop admin interface to archive products and view archived items
 - Order details include product image, SKU and description
-- CSRF protection on authenticated state-changing requests
+- Automated CSRF protection on authenticated state-changing requests
 - Super admin access to the OpnForm builder for creating and editing forms
 
 ## Template Variables for External Apps
@@ -71,6 +73,21 @@ gracefully fall back to an empty string.
 6. Access `http://localhost:8000` for the responsive portal UI or `http://localhost:8000/docs` for the interactive Swagger UI covering every API endpoint.
 7. The first visit will redirect the login flow to the registration page if no users exist, ensuring the first account becomes the super administrator.
 
+## Authentication API
+
+All authentication routes are documented in the interactive Swagger UI and summarised below:
+
+- `POST /auth/register` – Creates the first super administrator when no users exist and issues a session cookie.
+- `POST /auth/login` – Authenticates credentials (and optional TOTP code) to establish a session and CSRF token.
+- `POST /auth/logout` – Revokes the active session and clears authentication cookies.
+- `GET /auth/session` – Returns the current session metadata and user profile.
+- `POST /auth/password/forgot` – Generates a time-bound password reset token and triggers the outbound notification pipeline.
+- `POST /auth/password/reset` – Validates the token and updates the user password with bcrypt hashing.
+- `GET /auth/totp` – Lists active TOTP authenticators for the current user.
+- `POST /auth/totp/setup` – Generates a pending TOTP secret and provisioning URI for enrolment.
+- `POST /auth/totp/verify` – Confirms the authenticator code and persists it for future logins.
+- `DELETE /auth/totp/{id}` – Removes an existing authenticator.
+
 ## Office 365 Sync
 
 To enable Microsoft 365 license synchronization, register an application in
@@ -105,10 +122,11 @@ temporary access if public sharing is needed.
 
 ## CSRF Protection
 
-Authenticated POST, PUT and DELETE routes require a CSRF token. Tokens are
-automatically embedded in forms rendered by the server. For custom forms or
-JavaScript requests, read the token from the `csrf-token` meta tag and include
-it as the `_csrf` form field or the `CSRF-Token` header.
+Authenticated POST, PUT, PATCH, and DELETE routes require a CSRF token. After
+login the API sets a `myportal_session_csrf` cookie containing a random token
+that must be echoed back via the `X-CSRF-Token` header (or `_csrf` form field)
+on mutating requests. The cookie is readable by client-side JavaScript so that
+single-page enhancements can propagate the header automatically.
 
 ## Deployment
 
