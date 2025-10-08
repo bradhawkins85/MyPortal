@@ -5,13 +5,13 @@ from datetime import datetime, timezone
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, status, Query
+from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app.api.routes import audit_logs, auth, companies, memberships, roles, users
+from app.api.routes import audit_logs, auth, companies, memberships, notifications, ports, roles, users
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
 from app.core.logging import configure_logging, log_error, log_info
@@ -28,7 +28,25 @@ from app.security.session import session_manager
 configure_logging()
 settings = get_settings()
 templates_config = get_templates_config()
-app = FastAPI(title=settings.app_name, docs_url=settings.swagger_ui_url)
+tags_metadata = [
+    {"name": "Auth", "description": "Authentication, registration, and session management."},
+    {"name": "Users", "description": "User administration, profile management, and self-service endpoints."},
+    {"name": "Companies", "description": "Company catalogue and membership management."},
+    {"name": "Roles", "description": "Role definitions and access controls."},
+    {"name": "Memberships", "description": "Company membership workflows with approval tracking."},
+    {"name": "Audit Logs", "description": "Structured audit trail of privileged actions."},
+    {"name": "Ports", "description": "Port catalogue, document storage, and pricing workflow APIs."},
+    {"name": "Notifications", "description": "System-wide and user-specific notification feeds."},
+]
+app = FastAPI(
+    title=settings.app_name,
+    description=(
+        "Customer portal API exposing authentication, company administration, port catalogue, "
+        "and pricing workflow capabilities."
+    ),
+    docs_url=settings.swagger_ui_url,
+    openapi_tags=tags_metadata,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -55,6 +73,8 @@ app.include_router(users.router)
 app.include_router(companies.router)
 app.include_router(roles.router)
 app.include_router(memberships.router)
+app.include_router(ports.router)
+app.include_router(notifications.router)
 app.include_router(audit_logs.router)
 
 
