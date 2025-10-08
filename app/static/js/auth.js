@@ -120,6 +120,14 @@ class AuthForm {
       payload[key] = trimmed;
     }
 
+    const totpInput = this.form.querySelector('input[name="totp_code"]');
+    if (totpInput) {
+      const raw = totpInput.value;
+      if (typeof raw === 'string' && raw.trim()) {
+        payload.totp_code = raw.trim().replace(/\s+/g, '');
+      }
+    }
+
     return payload;
   }
 
