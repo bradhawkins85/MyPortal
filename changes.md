@@ -1,5 +1,6 @@
 - 2025-10-11, 09:30 UTC, Fix, Added server-rendered CSRF tokens across portal forms so submissions succeed even without client-side scripts
 - 2025-10-08, 12:22 UTC, Fix, Removed the product description textarea from the shop admin add product form and refreshed helper copy
+- 2025-10-08, 12:34 UTC, Fix, Added multipart fallback parsing for mislabelled switch-company submissions so company switching succeeds for FormData clients
 - 2025-10-08, 12:20 UTC, Fix, Embedded CSRF tokens into Shop admin templates and base helpers to restore product management submissions
 - 2025-10-08, 12:17 UTC, Change, Updated the customer forms portal route to /myforms with navigation updates and a legacy redirect
 - 2025-10-08, 12:12 UTC, Fix, Removed product description input from the shop admin creation form per request
