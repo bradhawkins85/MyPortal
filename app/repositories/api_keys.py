@@ -139,6 +139,13 @@ async def delete_api_key(api_key_id: int) -> None:
     await db.execute("DELETE FROM api_keys WHERE id = %s", (api_key_id,))
 
 
+async def update_api_key_expiry(api_key_id: int, expiry_date: date | None) -> None:
+    await db.execute(
+        "UPDATE api_keys SET expiry_date = %s WHERE id = %s",
+        (expiry_date, api_key_id),
+    )
+
+
 async def get_api_key_record(api_key_value: str) -> dict[str, Any] | None:
     hashed = hash_api_key(api_key_value)
     row = await db.fetch_one(
