@@ -46,3 +46,4 @@
 - 2025-10-08, 07:28 UTC, Feature, Rebuilt staff data models, Syncro import client, scheduled sync runner, and management UI with API parity and permissions
 - 2025-10-08, 10:14 UTC, Fix, Allowed company switching endpoint to accept JSON and form payloads while validating memberships
 - 2025-10-08, 10:19 UTC, Fix, Hardened company switching payload parsing to support form, JSON, and query parameters with updated documentation
+- 2025-10-08, 10:32 UTC, Fix, Added resilient switch-company payload parsing fallback for raw form bodies and undocumented clients

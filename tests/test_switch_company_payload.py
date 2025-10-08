@@ -78,6 +78,37 @@ async def test_extracts_form_payload_even_after_prior_reads() -> None:
     assert data["_csrf"] == "test-token"
 
 
+@pytest.mark.anyio("asyncio")
+async def test_extracts_form_payload_when_parser_missing() -> None:
+    body = "companyId=11&returnUrl=%2Fstaff".encode("utf-8")
+    request = _build_request(
+        body=body,
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+
+    async def failing_form():  # type: ignore[return-value]
+        raise RuntimeError("parser unavailable")
+
+    request.form = failing_form  # type: ignore[assignment]
+
+    data = await _extract_switch_company_payload(request)
+
+    assert data["companyId"] == "11"
+    assert data["returnUrl"] == "/staff"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_extracts_json_payload_when_header_missing() -> None:
+    request = _build_request(
+        body=json.dumps({"companyId": 21, "returnUrl": "/dashboard"}).encode("utf-8"),
+    )
+
+    data = await _extract_switch_company_payload(request)
+
+    assert data["companyId"] == 21
+    assert data["returnUrl"] == "/dashboard"
+
+
 def test_first_non_blank_prioritises_non_empty_values() -> None:
     body_data = {"companyId": "  ", "company_id": None}
     query_params = {"company_id": "99", "returnUrl": "/dashboard"}
