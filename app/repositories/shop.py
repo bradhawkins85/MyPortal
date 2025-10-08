@@ -5,6 +5,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+import aiomysql
+
 from app.core.database import db
 
 
@@ -85,6 +87,68 @@ async def list_product_restrictions() -> list[dict[str, Any]]:
             }
         )
     return restrictions
+
+
+async def get_category(category_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT id, name FROM shop_categories WHERE id = %s",
+        (category_id,),
+    )
+    if not row:
+        return None
+    return {"id": int(row["id"]), "name": row["name"]}
+
+
+async def get_product_by_id(product_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        """
+        SELECT p.*, c.name AS category_name
+        FROM shop_products AS p
+        LEFT JOIN shop_categories AS c ON c.id = p.category_id
+        WHERE p.id = %s
+        """,
+        (product_id,),
+    )
+    return _normalise_product(row) if row else None
+
+
+async def create_product(
+    *,
+    name: str,
+    sku: str,
+    vendor_sku: str,
+    price: Decimal,
+    stock: int,
+    description: str | None = None,
+    vip_price: Decimal | None = None,
+    category_id: int | None = None,
+    image_url: str | None = None,
+) -> dict[str, Any]:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                """
+                INSERT INTO shop_products
+                    (name, sku, vendor_sku, description, image_url, price, vip_price, stock, category_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    name,
+                    sku,
+                    vendor_sku,
+                    description,
+                    image_url,
+                    price,
+                    vip_price,
+                    stock,
+                    category_id,
+                ),
+            )
+            product_id = int(cursor.lastrowid)
+    product = await get_product_by_id(product_id)
+    if not product:
+        raise RuntimeError("Failed to create product")
+    return product
 
 
 def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
