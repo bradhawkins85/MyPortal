@@ -10,7 +10,9 @@
       </div>
     </header>
     <form action="/shop/admin/category" method="post" class="form-grid">
-      {% include "partials/csrf.html" %}
+      {% if csrf_token %}
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+      {% endif %}
       <div class="form-field form-field--wide">
         <label class="form-label" for="category-name">Category name</label>
         <input class="form-input" id="category-name" name="name" required />
@@ -24,7 +26,9 @@
         <li class="category-list__item">
           <span>{{ category.name }}</span>
           <form action="/shop/admin/category/{{ category.id }}/delete" method="post" class="inline-form" data-confirm="Delete this category?">
-            {% include "partials/csrf.html" %}
+            {% if csrf_token %}
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+            {% endif %}
             <button type="submit" class="button button--danger">Delete</button>
           </form>
         </li>
@@ -42,7 +46,9 @@
       </div>
     </header>
     <form action="/shop/admin/product/import" method="post" class="form-grid">
-      {% include "partials/csrf.html" %}
+      {% if csrf_token %}
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+      {% endif %}
       <div class="form-field">
         <label class="form-label" for="import-vendor-sku">Vendor SKU</label>
         <input class="form-input" id="import-vendor-sku" name="vendor_sku" required />
@@ -59,11 +65,13 @@
     <header class="card__header card__header--stacked">
       <div>
         <h2 class="card__title">Add product</h2>
-        <p class="card__subtitle">Create catalogue items with rich descriptions, pricing, and stock levels.</p>
+        <p class="card__subtitle">Create catalogue items with pricing, imagery, and stock levels.</p>
       </div>
     </header>
     <form action="/shop/admin/product" method="post" enctype="multipart/form-data" class="form-grid">
-      {% include "partials/csrf.html" %}
+      {% if csrf_token %}
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+      {% endif %}
       <div class="form-field">
         <label class="form-label" for="product-name">Name</label>
         <input class="form-input" id="product-name" name="name" required />
@@ -75,10 +83,6 @@
       <div class="form-field">
         <label class="form-label" for="product-vendor-sku">Vendor SKU</label>
         <input class="form-input" id="product-vendor-sku" name="vendor_sku" required />
-      </div>
-      <div class="form-field form-field--wide">
-        <label class="form-label" for="product-description">Description</label>
-        <textarea class="form-input form-input--textarea" id="product-description" name="description"></textarea>
       </div>
       <div class="form-field">
         <label class="form-label" for="product-price">Price</label>
@@ -178,11 +182,15 @@
                 <div class="table__action-buttons">
                   <button type="button" class="button button--ghost" data-product-edit="{{ product.id }}">Edit</button>
                   <form action="/shop/admin/product/{{ product.id }}/{{ 'unarchive' if product.archived else 'archive' }}" method="post" class="inline-form">
-                    {% include "partials/csrf.html" %}
+                    {% if csrf_token %}
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                    {% endif %}
                     <button type="submit" class="button button--ghost">{{ 'Unarchive' if product.archived else 'Archive' }}</button>
                   </form>
                   <form action="/shop/admin/product/{{ product.id }}/delete" method="post" class="inline-form" data-confirm="Delete this product?">
-                    {% include "partials/csrf.html" %}
+                    {% if csrf_token %}
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                    {% endif %}
                     <button type="submit" class="button button--danger">Delete</button>
                   </form>
                   <button type="button" class="button button--ghost" data-product-visibility="{{ product.id }}">Visibility</button>
@@ -208,7 +216,9 @@
     </button>
     <h2 class="modal__title">Edit product</h2>
     <form id="product-edit-form" method="post" enctype="multipart/form-data" class="form-grid">
-      {% include "partials/csrf.html" %}
+      {% if csrf_token %}
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+      {% endif %}
       <input type="hidden" id="edit-product-id" />
       <div class="form-field">
         <label class="form-label" for="edit-product-name">Name</label>
@@ -268,7 +278,9 @@
     </button>
     <h2 class="modal__title">Product visibility</h2>
     <form id="product-visibility-form" method="post" class="form-grid">
-      {% include "partials/csrf.html" %}
+      {% if csrf_token %}
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+      {% endif %}
       <div class="visibility-grid">
         {% for company in all_companies %}
           <label class="checkbox visibility-grid__item">

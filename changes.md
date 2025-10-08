@@ -1,4 +1,7 @@
 - 2025-10-11, 09:30 UTC, Fix, Added server-rendered CSRF tokens across portal forms so submissions succeed even without client-side scripts
+- 2025-10-08, 12:22 UTC, Fix, Removed the product description textarea from the shop admin add product form and refreshed helper copy
+- 2025-10-08, 12:20 UTC, Fix, Embedded CSRF tokens into Shop admin templates and base helpers to restore product management submissions
+- 2025-10-08, 12:17 UTC, Change, Updated the customer forms portal route to /myforms with navigation updates and a legacy redirect
 - 2025-10-08, 12:12 UTC, Fix, Removed product description input from the shop admin creation form per request
 - 2025-10-08, 12:10 UTC, Fix, Stored imported shop images in the secure uploads directory and enforced validation to resolve 404s
 - 2025-10-10, 16:05 UTC, Fix, Namespaced the forms API under /api/forms so the customer UI renders instead of JSON responses
@@ -8,6 +11,7 @@
 - 2025-10-10, 04:45 UTC, Fix, Routed staff API under /api to restore the staff management UI rendering on the Python portal
 - 2025-10-10, 13:45 UTC, Fix, Corrected scheduler monitoring migration defaults to remain MariaDB-compatible while storing UTC timestamps
 - 2025-10-08, 11:20 UTC, Feature, Added hashed API key management endpoints with usage telemetry, audit logging, and admin reporting
+- 2025-10-11, 09:00 UTC, Fix, Restored authenticated legacy uploads route in FastAPI to eliminate shop image 404 errors
 - 2025-10-10, 04:30 UTC, Fix, Mounted legacy uploads directory in FastAPI so shop product images load successfully
 - 2025-10-08, 11:08 UTC, Fix, Allowed switch-company requests with incorrect JSON headers to fall back to form parsing so company switching succeeds
 - 2025-10-10, 03:15 UTC, Fix, Prevented switch-company payload parsing from failing after CSRF middleware consumes the request body stream
