@@ -1,4 +1,5 @@
 - 2025-10-08, 11:20 UTC, Feature, Added hashed API key management endpoints with usage telemetry, audit logging, and admin reporting
+- 2025-10-10, 04:30 UTC, Fix, Mounted legacy uploads directory in FastAPI so shop product images load successfully
 - 2025-10-08, 11:08 UTC, Fix, Allowed switch-company requests with incorrect JSON headers to fall back to form parsing so company switching succeeds
 - 2025-10-10, 03:15 UTC, Fix, Prevented switch-company payload parsing from failing after CSRF middleware consumes the request body stream
 - 2025-10-08, 10:55 UTC, Fix, Hardened active company session migration for legacy MySQL compatibility so company switching succeeds
@@ -56,3 +57,4 @@
 - 2025-10-08, 10:14 UTC, Fix, Allowed company switching endpoint to accept JSON and form payloads while validating memberships
 - 2025-10-08, 10:19 UTC, Fix, Hardened company switching payload parsing to support form, JSON, and query parameters with updated documentation
 - 2025-10-08, 10:32 UTC, Fix, Added resilient switch-company payload parsing fallback for raw form bodies and undocumented clients
+- 2025-10-10, 12:00 UTC, Feature, Added persistent scheduler management APIs, webhook retry monitoring UI, and admin automation controls with database migrations
