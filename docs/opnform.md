@@ -109,6 +109,15 @@ integrations always generate consistent links.
    OpnForm in an iframe, so the upstream host must permit embedding from your
    MyPortal origin.
 
+## 5. API endpoints
+
+The customer portal exposes a REST collection of published forms at
+`/api/forms`. Authenticated users receive only the forms assigned to them,
+while super admins can enumerate all records or filter by company. The
+endpoints are documented in the integrated Swagger UI (`/docs`) and respect the
+same authentication, rate limiting, and CSRF protections as the rest of the
+API.
+
 Troubleshooting tips:
 
 - If the builder fails to load, review the nginx logs (`/var/log/nginx/error.log`)
