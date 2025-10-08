@@ -126,7 +126,20 @@ app.add_middleware(
 app.add_middleware(CSRFMiddleware)
 
 templates = Jinja2Templates(directory=str(templates_config.template_path))
+
+# Ensure product and document uploads remain web-accessible with the same
+# paths used by the legacy Node.js implementation.  The uploads directory is
+# created on startup so FastAPI's static file handler can serve cached product
+# images without returning 404 responses.
+_uploads_path = templates_config.static_path / "uploads"
+_uploads_path.mkdir(parents=True, exist_ok=True)
+
 app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
+app.mount(
+    "/uploads",
+    StaticFiles(directory=str(_uploads_path), check_dir=False),
+    name="uploads",
+)
 
 app.include_router(auth.router)
 app.include_router(users.router)
