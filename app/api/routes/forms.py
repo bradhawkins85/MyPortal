@@ -21,7 +21,7 @@ from app.services.opnform import (
 from app.core.config import get_settings
 
 
-router = APIRouter(prefix="/forms", tags=["Forms"])
+router = APIRouter(prefix="/api/forms", tags=["Forms"])
 
 settings = get_settings()
 OPNFORM_ALLOWED_HOST = extract_allowed_host(str(settings.opnform_base_url) if settings.opnform_base_url else None)
