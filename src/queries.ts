@@ -166,6 +166,16 @@ export interface ProductCompanyRestriction {
   company_name: string;
 }
 
+export interface NotificationRecord {
+  id: number;
+  user_id: number | null;
+  event_type: string;
+  message: string;
+  metadata: Record<string, unknown> | null;
+  created_at: Date;
+  read_at: Date | null;
+}
+
 export interface OrderItem {
   id: number;
   order_number: string;
@@ -196,6 +206,68 @@ export interface OrderSummary {
   po_number: string | null;
   consignment_id: string | null;
   eta: Date | null;
+}
+
+function parseNotification(row: RowDataPacket): NotificationRecord {
+  let metadata: Record<string, unknown> | null = null;
+  if (row.metadata) {
+    try {
+      metadata = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+    } catch (err) {
+      metadata = null;
+    }
+  }
+  return {
+    id: row.id,
+    user_id: row.user_id ?? null,
+    event_type: row.event_type,
+    message: row.message,
+    metadata,
+    created_at: new Date(row.created_at),
+    read_at: row.read_at ? new Date(row.read_at) : null,
+  };
+}
+
+export async function getNotificationsForUser(
+  userId: number
+): Promise<NotificationRecord[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT id, user_id, event_type, message, metadata, created_at, read_at
+     FROM notifications
+     WHERE user_id = ? OR user_id IS NULL
+     ORDER BY created_at DESC
+     LIMIT 200`,
+    [userId]
+  );
+  return rows.map(parseNotification);
+}
+
+export async function getNotificationById(
+  notificationId: number
+): Promise<NotificationRecord | null> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT id, user_id, event_type, message, metadata, created_at, read_at
+     FROM notifications
+     WHERE id = ?
+     LIMIT 1`,
+    [notificationId]
+  );
+  if (rows.length === 0) {
+    return null;
+  }
+  return parseNotification(rows[0]);
+}
+
+export async function markNotificationRead(
+  notificationId: number
+): Promise<boolean> {
+  const [result] = await pool.query<ResultSetHeader>(
+    `UPDATE notifications
+     SET read_at = UTC_TIMESTAMP()
+     WHERE id = ? AND read_at IS NULL`,
+    [notificationId]
+  );
+  return result.affectedRows > 0;
 }
 
 export interface Asset {
