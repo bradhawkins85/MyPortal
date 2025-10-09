@@ -104,16 +104,31 @@ async def get_category(category_id: int) -> dict[str, Any] | None:
     return {"id": int(row["id"]), "name": row["name"]}
 
 
-async def get_product_by_id(product_id: int) -> dict[str, Any] | None:
-    row = await db.fetch_one(
-        """
-        SELECT p.*, c.name AS category_name
-        FROM shop_products AS p
-        LEFT JOIN shop_categories AS c ON c.id = p.category_id
-        WHERE p.id = %s
-        """,
-        (product_id,),
-    )
+async def get_product_by_id(
+    product_id: int,
+    *,
+    include_archived: bool = False,
+    company_id: int | None = None,
+) -> dict[str, Any] | None:
+    query = [
+        "SELECT p.*, c.name AS category_name",
+        "FROM shop_products AS p",
+        "LEFT JOIN shop_categories AS c ON c.id = p.category_id",
+    ]
+    params: list[Any] = []
+    if company_id is not None:
+        query.append(
+            "LEFT JOIN shop_product_exclusions AS e ON e.product_id = p.id AND e.company_id = %s"
+        )
+        params.append(company_id)
+    query.append("WHERE p.id = %s")
+    params.append(product_id)
+    if not include_archived:
+        query.append("AND p.archived = 0")
+    if company_id is not None:
+        query.append("AND e.product_id IS NULL")
+    sql = " ".join(query)
+    row = await db.fetch_one(sql, tuple(params))
     return _normalise_product(row) if row else None
 
 
@@ -183,6 +198,67 @@ async def delete_product(product_id: int) -> bool:
                 (product_id,),
             )
             return cursor.rowcount > 0
+
+
+async def create_order(
+    *,
+    user_id: int,
+    company_id: int,
+    product_id: int,
+    quantity: int,
+    order_number: str,
+    status: str,
+    po_number: str | None,
+) -> tuple[int | None, int | None]:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await conn.begin()
+            try:
+                await cursor.execute(
+                    "SELECT stock FROM shop_products WHERE id = %s FOR UPDATE",
+                    (product_id,),
+                )
+                row = await cursor.fetchone()
+                previous_stock: int | None = None
+                new_stock: int | None = None
+                if row and row.get("stock") is not None:
+                    previous_stock = int(row["stock"])
+                    if previous_stock < quantity:
+                        raise ValueError("Insufficient stock available for this product")
+                    new_stock = previous_stock - quantity
+                await cursor.execute(
+                    """
+                    INSERT INTO shop_orders (
+                        user_id,
+                        company_id,
+                        product_id,
+                        quantity,
+                        order_number,
+                        status,
+                        notes,
+                        po_number
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        user_id,
+                        company_id,
+                        product_id,
+                        quantity,
+                        order_number,
+                        status,
+                        None,
+                        po_number,
+                    ),
+                )
+                await cursor.execute(
+                    "UPDATE shop_products SET stock = stock - %s WHERE id = %s",
+                    (quantity, product_id),
+                )
+                await conn.commit()
+                return previous_stock, new_stock
+            except Exception:
+                await conn.rollback()
+                raise
 
 
 async def get_category_by_name(name: str) -> dict[str, Any] | None:
