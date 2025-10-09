@@ -1,3 +1,4 @@
+- 2025-10-17, 12:30 UTC, Fix, Added a global form confirmation handler and removed the missing forms_admin.js reference to resolve admin script 404s
 - 2025-10-09, 11:28 UTC, Fix, Expanded the Companies dashboard card to span the full grid width for clearer management access
 - 2025-10-09, 11:21 UTC, Fix, Restored scheduled task modals by eagerly binding UI handlers and reading CSRF tokens from meta fallback
 - 2025-10-09, 11:25 UTC, Fix, Expanded the API credentials administration card to full width for improved visibility
