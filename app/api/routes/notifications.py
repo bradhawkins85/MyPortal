@@ -6,14 +6,16 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dependencies.auth import get_current_user
+from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.database import require_database
 from app.repositories import notifications as notifications_repo
 from app.schemas.notifications import (
     NotificationAcknowledgeRequest,
+    NotificationCreate,
     NotificationResponse,
 )
 
-router = APIRouter(prefix="/notifications", tags=["Notifications"])
+router = APIRouter(prefix="/api/notifications", tags=["Notifications"])
 
 
 @router.get(
@@ -85,6 +87,29 @@ async def list_notifications(
         offset=offset,
     )
     return records
+
+
+@router.post(
+    "",
+    response_model=NotificationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a notification",
+    response_description="The newly created notification resource.",
+)
+async def create_notification(
+    payload: NotificationCreate,
+    _: None = Depends(require_database),
+    _current_user: dict = Depends(require_super_admin),
+):
+    """Create a notification entry for an individual or all users."""
+
+    record = await notifications_repo.create_notification(
+        event_type=payload.event_type,
+        message=payload.message,
+        user_id=payload.user_id,
+        metadata=payload.metadata or {},
+    )
+    return record
 
 
 @router.post(

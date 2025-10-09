@@ -69,6 +69,9 @@
       this.filterInputValue = '';
       this.page = 0;
       this.pageSize = 0;
+      const maxPageSizeAttr = table.getAttribute('data-page-size-max');
+      const parsedMax = maxPageSizeAttr ? Number.parseInt(maxPageSizeAttr, 10) : NaN;
+      this.maxPageSize = Number.isNaN(parsedMax) || parsedMax <= 0 ? null : parsedMax;
       this.rowHeight = 0;
       this.paginationElement = table.id
         ? document.querySelector(`[data-pagination="${table.id}"]`)
@@ -381,13 +384,17 @@
       const paginationHeight = this.paginationElement.getBoundingClientRect().height || 0;
       const rowHeight = this.measureRowHeight();
       if (!rowHeight) {
-        this.pageSize = this.pageSize || 10;
+        const fallback = this.pageSize || 10;
+        this.pageSize = this.maxPageSize
+          ? Math.min(fallback, this.maxPageSize)
+          : fallback;
         return;
       }
       const extraSpacing = 24;
       const usable = availableHeight - headerHeight - paginationHeight - extraSpacing;
       const proposed = Math.floor(usable / rowHeight);
-      this.pageSize = Math.max(1, Number.isFinite(proposed) && proposed > 0 ? proposed : 1);
+      const computed = Math.max(1, Number.isFinite(proposed) && proposed > 0 ? proposed : 1);
+      this.pageSize = this.maxPageSize ? Math.min(computed, this.maxPageSize) : computed;
     }
 
     handleResize() {
