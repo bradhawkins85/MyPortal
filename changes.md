@@ -1,4 +1,7 @@
 - 2025-10-09, 13:18 UTC, Fix, Allowed Run Now scheduled tasks to execute in the background without redirecting to the update progress message
+- 2025-10-20, 14:15 UTC, Feature, Added viewport-aware pagination to the scheduled tasks table so automation rows scale with the available space
+- 2025-10-09, 22:00 UTC, Feature, Added super-admin notification creation endpoint with Swagger docs, README updates, and regression tests
+- 2025-10-20, 13:30 UTC, Feature, Delivered a consolidated dashboard overview with compact padding and webhook health summaries for faster triage
 - 2025-10-09, 13:09 UTC, Fix, Namespaced the notifications API under /api so the dashboard renders HTML instead of returning JSON arrays
 - 2025-10-09, 13:09 UTC, Fix, Restored customer shop pagination with capped page sizes and navigation controls to prevent sprawling product lists
 - 2025-10-09, 12:59 UTC, Fix, Prevented shop pagination from exceeding the viewport when recalculating rows while scrolled
