@@ -163,6 +163,9 @@ import {
   getOrderPoNumber,
   getUsersMobilePhones,
   isUserSubscribedToOrder,
+  getNotificationsForUser,
+  getNotificationById,
+  markNotificationRead,
   upsertAsset,
   upsertInvoice,
   getAllApps,
@@ -211,6 +214,7 @@ import {
   Staff,
   OfficeGroupWithMembers,
   EmailTemplate,
+  NotificationRecord,
 } from './queries';
 import { runMigrations } from './db';
 import { logInfo, logError } from './logger';
@@ -1459,6 +1463,7 @@ const swaggerSpec = swaggerJSDoc({
       { name: 'Assets' },
       { name: 'Invoices' },
       { name: 'Shop' },
+      { name: 'Notifications' },
     ],
     components: {
       securitySchemes: {
@@ -2948,6 +2953,66 @@ app.post('/cart/place-order', ensureAuth, ensureShopAccess, async (req, res) => 
   res.redirect('/cart');
 });
 
+app.get('/notifications', ensureAuth, async (req, res) => {
+  const userId = req.session.userId!;
+  const notifications = await getNotificationsForUser(userId);
+  const companies = await getCompaniesForUser(userId);
+  const current = companies.find((c) => c.company_id === req.session.companyId);
+  const unreadCount = notifications.filter((n) => !n.read_at).length;
+
+  res.render('notifications', {
+    notifications,
+    unreadCount,
+    companies,
+    currentCompanyId: req.session.companyId,
+    isAdmin: Number(req.session.userId) === 1 || (current?.is_admin ?? 0),
+    canManageLicenses: current?.can_manage_licenses ?? 0,
+    canManageStaff: current?.staff_permission ? 1 : 0,
+    staffPermission: current?.staff_permission ?? 0,
+    canManageOfficeGroups: current?.can_manage_office_groups ?? 0,
+    canManageAssets: current?.can_manage_assets ?? 0,
+    canManageInvoices: current?.can_manage_invoices ?? 0,
+    canOrderLicenses: current?.can_order_licenses ?? 0,
+    canAccessShop: current?.can_access_shop ?? 0,
+  });
+});
+
+app.post('/notifications/:notificationId/read', ensureAuth, async (req, res) => {
+  const notificationId = parseInt(req.params.notificationId, 10);
+  const wantsJson = (req.headers.accept || '').includes('application/json');
+  if (Number.isNaN(notificationId)) {
+    if (wantsJson) {
+      return res.status(400).json({ error: 'Invalid notification id' });
+    }
+    return res.redirect('/notifications');
+  }
+
+  const notification = await getNotificationById(notificationId);
+  if (!notification) {
+    if (wantsJson) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+    return res.redirect('/notifications');
+  }
+
+  const isSuperAdmin = Number(req.session.userId) === 1;
+  const ownsNotification = notification.user_id === Number(req.session.userId);
+  const canAcknowledge = ownsNotification || (isSuperAdmin && notification.user_id === null);
+
+  if (!canAcknowledge) {
+    if (wantsJson) {
+      return res.status(403).json({ error: 'Not permitted to update this notification' });
+    }
+    return res.redirect('/notifications');
+  }
+
+  const updated = await markNotificationRead(notificationId);
+  if (wantsJson) {
+    return res.json({ success: updated });
+  }
+  res.redirect('/notifications');
+});
+
 app.get('/orders', ensureAuth, ensureShopAccess, async (req, res) => {
   const orders = req.session.companyId
     ? await getOrderSummariesByCompany(req.session.companyId)
@@ -4387,6 +4452,101 @@ api.use(async (req, res, next) => {
   const ip = (req.headers['cf-connecting-ip'] as string) || req.ip || '';
   await recordApiKeyUsage(record.id, ip);
   next();
+});
+
+/**
+ * @openapi
+ * /api/notifications:
+ *   get:
+ *     tags:
+ *       - Notifications
+ *     summary: List notifications for a user
+ *     parameters:
+ *       - in: query
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Array of notifications for the requested user
+ */
+api.get('/notifications', async (req, res) => {
+  const userIdParam = req.query.userId;
+  if (!userIdParam) {
+    return res.status(400).json({ error: 'userId query parameter is required' });
+  }
+  const userId = parseInt(userIdParam as string, 10);
+  if (Number.isNaN(userId)) {
+    return res.status(400).json({ error: 'userId must be an integer' });
+  }
+  const notifications = await getNotificationsForUser(userId);
+  res.json(
+    notifications.map((notification: NotificationRecord) => ({
+      id: notification.id,
+      userId: notification.user_id,
+      eventType: notification.event_type,
+      message: notification.message,
+      metadata: notification.metadata,
+      createdAt: notification.created_at.toISOString(),
+      readAt: notification.read_at ? notification.read_at.toISOString() : null,
+    }))
+  );
+});
+
+/**
+ * @openapi
+ * /api/notifications/{notificationId}/read:
+ *   post:
+ *     tags:
+ *       - Notifications
+ *     summary: Mark a notification as read
+ *     parameters:
+ *       - in: path
+ *         name: notificationId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               userId:
+ *                 type: integer
+ *               allowGlobal:
+ *                 type: boolean
+ *                 description: Set to true when acknowledging a global notification as a super administrator
+ *             required:
+ *               - userId
+ *     responses:
+ *       200:
+ *         description: Notification read state updated
+ */
+api.post('/notifications/:notificationId/read', async (req, res) => {
+  const notificationId = parseInt(req.params.notificationId, 10);
+  if (Number.isNaN(notificationId)) {
+    return res.status(400).json({ error: 'notificationId must be an integer' });
+  }
+  const { userId, allowGlobal } = req.body as { userId?: number; allowGlobal?: boolean };
+  if (!userId && userId !== 0) {
+    return res.status(400).json({ error: 'userId is required' });
+  }
+  const notification = await getNotificationById(notificationId);
+  if (!notification) {
+    return res.status(404).json({ error: 'Notification not found' });
+  }
+  if (notification.user_id !== userId) {
+    if (!(notification.user_id === null && allowGlobal)) {
+      return res
+        .status(403)
+        .json({ error: 'Not permitted to update this notification for the specified user' });
+    }
+  }
+  const updated = await markNotificationRead(notificationId);
+  res.json({ success: updated });
 });
 
 /**
