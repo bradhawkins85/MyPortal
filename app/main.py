@@ -1903,7 +1903,6 @@ async def staff_page(
         "title": "Staff",
         "is_super_admin": is_super_admin,
         "is_admin": is_admin,
-        "syncro_company_id": company.get("syncro_company_id") if company else None,
         "staff_permission": staff_permission,
         "departments": departments,
         "staff_members": staff_members,

@@ -304,6 +304,48 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.staff-form-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.staff-form-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.22), transparent 55%);
+  pointer-events: none;
+}
+
+.staff-form-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.staff-form {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  width: 100%;
+}
+
+.staff-form .form-field,
+.staff-form .form-field--checkbox {
+  margin: 0;
+}
+
+.staff-form__actions {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
+
+@media (max-width: 720px) {
+  .staff-form {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 640px) {
   .auth-card {
     padding: 1.75rem;
