@@ -2,10 +2,10 @@
 <html>
   <%- include('partials/head', { title: 'Office Groups' }) %>
 <body>
-  <div class="app-container">
-    <%- include('partials/sidebar') %>
-    <div class="content">
-      <h1>Office Groups</h1>
+  <%- include('partials/app-shell-start', {
+        pageTitle: 'Office Groups',
+        pageSubtitle: 'Organize staff by location'
+      }) %>
       <% if (isSuperAdmin) { %>
       <section>
         <h2>Add Group</h2>
@@ -68,8 +68,7 @@
           </div>
         </div>
       </section>
-    </div>
-  </div>
+  <%- include('partials/app-shell-end') %>
   <script>
     const officeGroupsData = <%- JSON.stringify(officeGroups) %>;
 
