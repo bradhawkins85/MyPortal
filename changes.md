@@ -1,3 +1,4 @@
+- 2025-10-09, 11:44 UTC, Feature, Added inline role selection to company memberships so administrators can reassign members without leaving the table
 - 2025-10-09, 11:31 UTC, Change, Retired the /admin/memberships page and synced company assignments with active company membership records
 - 2025-10-09, 11:34 UTC, Fix, Expanded the Companies administration card to occupy the full grid width for consistent layout
 - 2025-10-09, 11:28 UTC, Fix, Expanded the Companies dashboard card to span the full grid width for clearer management access

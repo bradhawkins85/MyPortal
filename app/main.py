@@ -56,6 +56,7 @@ from app.repositories import audit_logs as audit_repo
 from app.repositories import api_keys as api_key_repo
 from app.repositories import auth as auth_repo
 from app.repositories import companies as company_repo
+from app.repositories import company_memberships as membership_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import licenses as license_repo
 from app.repositories import forms as forms_repo
@@ -1024,6 +1025,22 @@ async def _render_companies_dashboard(
     else:
         assignments = []
 
+    role_rows = await role_repo.list_roles()
+    role_options: list[dict[str, Any]] = []
+    for record in role_rows:
+        role_id = record.get("id")
+        name = (record.get("name") or "").strip()
+        if role_id is None or not name:
+            continue
+        role_options.append(
+            {
+                "id": int(role_id),
+                "name": name,
+                "description": (record.get("description") or "").strip(),
+                "is_system": bool(record.get("is_system")),
+            }
+        )
+
     user_options: list[dict[str, Any]] = []
     if is_super_admin:
         raw_users = await user_repo.list_users()
@@ -1041,6 +1058,7 @@ async def _render_companies_dashboard(
         "assignments": assignments,
         "permission_columns": _COMPANY_PERMISSION_COLUMNS,
         "staff_permission_options": _STAFF_PERMISSION_OPTIONS,
+        "role_options": role_options,
         "is_super_admin": is_super_admin,
         "success_message": success_message,
         "error_message": error_message,
@@ -2577,6 +2595,62 @@ async def admin_update_staff_permission(company_id: int, user_id: int, request: 
         permission=permission_value,
     )
     return JSONResponse({"success": True})
+
+
+@app.post("/admin/companies/assignment/{company_id}/{user_id}/role")
+async def admin_update_membership_role(company_id: int, user_id: int, request: Request):
+    current_user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    await _ensure_company_permission(
+        request,
+        current_user,
+        company_id,
+        require_admin=True,
+    )
+    form = await request.form()
+    role_raw = form.get("roleId") or form.get("role_id")
+    try:
+        role_id = int(role_raw) if role_raw is not None else None
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role selection")
+    if role_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select a role for the membership")
+
+    membership = await membership_repo.get_membership_by_company_user(company_id, user_id)
+    if not membership:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found")
+    membership_id = membership.get("id")
+    if membership_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership identifier missing")
+
+    existing_role_id = membership.get("role_id")
+    if existing_role_id == role_id:
+        return JSONResponse({"success": True})
+
+    role_record = await role_repo.get_role_by_id(role_id)
+    if not role_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+
+    updated = await membership_repo.update_membership(int(membership_id), role_id=role_id)
+
+    await audit_service.log_action(
+        action="membership.role_changed",
+        user_id=current_user.get("id"),
+        entity_type="company_membership",
+        entity_id=int(membership_id),
+        previous_value={"role_id": existing_role_id},
+        new_value={"role_id": role_id},
+        request=request,
+    )
+
+    return JSONResponse(
+        {
+            "success": True,
+            "role_id": role_id,
+            "role_name": updated.get("role_name"),
+        }
+    )
 
 
 @app.post("/admin/companies/assignment/{company_id}/{user_id}/remove")
