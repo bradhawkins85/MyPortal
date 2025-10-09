@@ -287,22 +287,5 @@
       });
     });
 
-    const importButton = container.querySelector('[data-import-syncro]');
-    if (importButton && flags && flags.syncroCompanyId) {
-      importButton.addEventListener('click', async () => {
-        if (!confirm('Import contacts from Syncro now?')) {
-          return;
-        }
-        try {
-          await requestJson('/admin/syncro/import-contacts', {
-            method: 'POST',
-            body: JSON.stringify({ syncroCompanyId: flags.syncroCompanyId }),
-          });
-          window.location.reload();
-        } catch (error) {
-          alert(`Unable to import contacts: ${error.message}`);
-        }
-      });
-    }
   });
 })();

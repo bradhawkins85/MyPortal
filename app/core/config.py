@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     licenses_webhook_api_key: str | None = Field(
         default=None, validation_alias="LICENSES_WEBHOOK_API_KEY"
     )
+    shop_webhook_url: AnyHttpUrl | None = Field(
+        default=None, validation_alias="SHOP_WEBHOOK_URL"
+    )
+    shop_webhook_api_key: str | None = Field(
+        default=None, validation_alias="SHOP_WEBHOOK_API_KEY"
+    )
     m365_admin_client_id: str | None = Field(
         default=None, validation_alias="M365_ADMIN_CLIENT_ID"
     )
@@ -77,6 +83,7 @@ class Settings(BaseSettings):
         "verify_webhook_url",
         "portal_url",
         "licenses_webhook_url",
+        "shop_webhook_url",
         "opnform_base_url",
         "stock_feed_url",
         mode="before",

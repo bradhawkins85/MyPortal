@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block header_actions %}
+  <a class="button button--ghost" href="{{ request.url_for('shop_page') }}">Continue shopping</a>
+{% endblock %}
+
+{% block content %}
+<section class="card card--panel cart-card">
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title">Cart</h2>
+      <p class="card__subtitle">Review quantities, remove items, and submit a purchase order.</p>
+    </div>
+    {% if cart_items %}
+    <div class="card__controls">
+      <input
+        type="search"
+        class="form-input card__control"
+        placeholder="Filter cart"
+        aria-label="Filter cart items"
+        data-table-filter="cart-table"
+      />
+    </div>
+    {% endif %}
+  </header>
+
+  {% if order_message %}
+    <div class="alert alert--info" role="alert">{{ order_message }}</div>
+  {% endif %}
+
+  {% if cart_items %}
+    <form action="{{ request.url_for('cart_remove_items') }}" method="post" class="cart-remove-form">
+      {% include "partials/csrf.html" %}
+      <div class="table-wrapper">
+        <table class="table" id="cart-table" data-table>
+          <thead>
+            <tr>
+              <th scope="col">Remove</th>
+              <th scope="col">Image</th>
+              <th scope="col" data-sort="string">Name</th>
+              <th scope="col" data-sort="string">SKU</th>
+              <th scope="col" data-sort="string">Description</th>
+              <th scope="col" data-sort="number">Unit price</th>
+              <th scope="col" data-sort="number">Quantity</th>
+              <th scope="col" data-sort="number">Line total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in cart_items %}
+              <tr>
+                <td data-label="Remove">
+                  <label class="checkbox checkbox--table">
+                    <input type="checkbox" name="remove" value="{{ item.product_id }}" />
+                    <span class="visually-hidden">Remove {{ item.product_name }}</span>
+                  </label>
+                </td>
+                <td data-label="Image" class="cart-table__image">
+                  {% if item.product_image_url %}
+                    <img src="{{ item.product_image_url }}" alt="" class="product-thumb" loading="lazy" />
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+                <td data-label="Name">{{ item.product_name }}</td>
+                <td data-label="SKU">{{ item.product_sku }}</td>
+                <td data-label="Description">
+                  {% if item.product_description %}
+                    {{ item.product_description.replace('\n', '<br />') | safe }}
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+                <td data-label="Unit price" data-value="{{ item.unit_price }}">${{ '%.2f'|format(item.unit_price) }}</td>
+                <td data-label="Quantity" data-value="{{ item.quantity }}">{{ item.quantity }}</td>
+                <td data-label="Line total" data-value="{{ item.line_total }}">${{ '%.2f'|format(item.line_total) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="form-actions form-actions--inline">
+        <button type="submit" class="button button--ghost">Remove selected</button>
+      </div>
+    </form>
+
+    <form action="{{ request.url_for('cart_place_order') }}" method="post" class="cart-checkout form-grid">
+      {% include "partials/csrf.html" %}
+      <div class="cart-summary">
+        <dl class="cart-summary__totals">
+          <div>
+            <dt>Total</dt>
+            <dd>${{ '%.2f'|format(cart_total) }}</dd>
+          </div>
+        </dl>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="cart-po-number">PO number</label>
+        <input
+          class="form-input"
+          id="cart-po-number"
+          name="poNumber"
+          maxlength="100"
+          placeholder="Optional purchase order reference"
+        />
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Place order</button>
+      </div>
+    </form>
+  {% else %}
+    <p class="text-muted">Your cart is empty.</p>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+{% endblock %}
