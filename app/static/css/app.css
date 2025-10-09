@@ -1834,8 +1834,10 @@ body {
   border-radius: 1rem;
   padding: 2rem;
   position: relative;
-  width: min(640px, 90vw);
-  max-height: 90vh;
+  width: 75vw;
+  max-width: 75vw;
+  height: 75vh;
+  max-height: 75vh;
   overflow-y: auto;
   border: 1px solid rgba(148, 163, 184, 0.25);
   box-shadow: 0 24px 50px -20px rgba(15, 23, 42, 0.85);
