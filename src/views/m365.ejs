@@ -2,37 +2,29 @@
 <html>
   <%- include('partials/head', { title: 'Office 365 Connection' }) %>
 <body>
-  <div class="app-container">
-    <%- include('partials/sidebar') %>
-    <div class="content">
-      <div class="page-header">
-        <h1>Office 365 Connection</h1>
-        <% if (credential) { %>
-          <div class="header-actions">
-            <a href="/m365/connect" class="authorize-link">Authorize</a>
-          </div>
+  <% const headerActions = credential ? '<a href="/m365/connect" class="authorize-link">Authorize</a>' : ''; %>
+  <%- include('partials/app-shell-start', {
+        pageTitle: 'Office 365 Connection',
+        pageSubtitle: 'Manage Microsoft 365 integration',
+        headerActions
+      }) %>
+      <% if (error) { %>
+        <div class="alert alert-error"><%= error %></div>
+      <% } %>
+      <% if (!credential) { %>
+        <p>No Office 365 credentials configured.</p>
+        <% if (typeof isSuperAdmin !== 'undefined' && isSuperAdmin) { %>
+          <p><a href="/m365/admin">Manage credentials in the Office 365 admin page.</a></p>
         <% } %>
-      </div>
-      <div class="page-body">
-        <% if (error) { %>
-          <div class="alert alert-error"><%= error %></div>
-        <% } %>
-        <% if (!credential) { %>
-          <p>No Office 365 credentials configured.</p>
-          <% if (typeof isSuperAdmin !== 'undefined' && isSuperAdmin) { %>
-            <p><a href="/m365/admin">Manage credentials in the Office 365 admin page.</a></p>
-          <% } %>
+      <% } else { %>
+        <p><strong>Tenant ID:</strong> <%= credential.tenant_id %></p>
+        <p><strong>Client ID:</strong> <%= credential.client_id %></p>
+        <% if (credential.refresh_token || credential.access_token) { %>
+          <p>Connected. Token expires at <%= credential.token_expires_at ? new Date(credential.token_expires_at).toLocaleString() : 'unknown' %></p>
         <% } else { %>
-          <p><strong>Tenant ID:</strong> <%= credential.tenant_id %></p>
-          <p><strong>Client ID:</strong> <%= credential.client_id %></p>
-          <% if (credential.refresh_token || credential.access_token) { %>
-            <p>Connected. Token expires at <%= credential.token_expires_at ? new Date(credential.token_expires_at).toLocaleString() : 'unknown' %></p>
-          <% } else { %>
-            <p>Not authorized with Microsoft 365.</p>
-          <% } %>
+          <p>Not authorized with Microsoft 365.</p>
         <% } %>
-      </div>
-    </div>
-  </div>
+      <% } %>
+  <%- include('partials/app-shell-end') %>
 </body>
 </html>
