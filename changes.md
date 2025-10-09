@@ -1,3 +1,4 @@
+- 2025-10-09, 11:21 UTC, Fix, Restored scheduled task modals by eagerly binding UI handlers and reading CSRF tokens from meta fallback
 - 2025-10-16, 09:55 UTC, Fix, Restored Syncro asset scheduled sync with importer service and repository upsert handling
 - 2025-10-16, 08:45 UTC, Fix, Added a secure system update scheduler handler that runs update.sh with locking and output auditing
 - 2025-10-09, 06:01 UTC, Fix, Seeded the MyPortal System Update scheduled task so the automation runs on its daily cron
