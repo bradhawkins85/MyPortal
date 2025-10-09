@@ -12,6 +12,11 @@ def _normalise_company(row: dict[str, Any]) -> dict[str, Any]:
     return normalised
 
 
+async def count_companies() -> int:
+    row = await db.fetch_one("SELECT COUNT(*) AS count FROM companies")
+    return int(row["count"]) if row else 0
+
+
 async def get_company_by_id(company_id: int) -> Optional[dict[str, Any]]:
     row = await db.fetch_one("SELECT * FROM companies WHERE id = %s", (company_id,))
     return _normalise_company(row) if row else None
