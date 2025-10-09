@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     smtp_user: str | None = Field(default=None, validation_alias="SMTP_USER")
     smtp_password: str | None = Field(default=None, validation_alias="SMTP_PASS")
     smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_SECURE")
+    stock_feed_url: AnyHttpUrl | None = Field(
+        default=None, validation_alias="STOCK_FEED_URL"
+    )
     syncro_webhook_url: AnyHttpUrl | None = Field(
         default=None, validation_alias="SYNCRO_WEBHOOK_URL"
     )
@@ -82,6 +85,7 @@ class Settings(BaseSettings):
         "licenses_webhook_url",
         "shop_webhook_url",
         "opnform_base_url",
+        "stock_feed_url",
         mode="before",
     )
     @classmethod
