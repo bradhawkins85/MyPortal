@@ -85,6 +85,13 @@
       this.resizeObserver = null;
       this.resizeFrame = null;
       this.handleResize = this.handleResize.bind(this);
+      this.externalRefreshListener = () => {
+        this.refreshRows();
+      };
+
+      if (this.table) {
+        this.table.addEventListener('table:rows-updated', this.externalRefreshListener);
+      }
 
       this.updateFilterState();
       if (this.paginationElement) {
@@ -178,10 +185,25 @@
       if (!this.tbody) {
         return;
       }
+      const filteredRows = this.getFilteredRows();
+      const totalFiltered = filteredRows.length;
+
       if (!this.paginationElement) {
         this.rows.forEach((row) => {
           const hidden = row.dataset.filterHidden === 'true';
           row.style.display = hidden ? 'none' : '';
+        });
+        const visibleCount = this.rows.reduce((count, row) => (
+          row.dataset.filterHidden === 'true' ? count : count + 1
+        ), 0);
+        this.dispatchRenderEvent({
+          filteredCount: totalFiltered,
+          visibleCount,
+          totalPages: 1,
+          page: 0,
+          pageSize: totalFiltered || 0,
+          startDisplay: totalFiltered > 0 ? 1 : 0,
+          endDisplay: totalFiltered,
         });
         return;
       }
@@ -190,15 +212,21 @@
         this.recalculatePageSize();
       }
 
-      const filteredRows = this.getFilteredRows();
-      const totalFiltered = filteredRows.length;
-
       if (totalFiltered === 0) {
         this.rows.forEach((row) => {
           const hidden = row.dataset.filterHidden === 'true';
           row.style.display = hidden ? 'none' : '';
         });
         this.updatePaginationControls(0, 1, 0, 0);
+        this.dispatchRenderEvent({
+          filteredCount: 0,
+          visibleCount: 0,
+          totalPages: 1,
+          page: 0,
+          pageSize: this.pageSize,
+          startDisplay: 0,
+          endDisplay: 0,
+        });
         return;
       }
 
@@ -224,7 +252,26 @@
 
       const displayStart = Math.min(totalFiltered, startIndex + 1);
       const displayEnd = Math.min(totalFiltered, endIndex);
+      const visibleCount = Math.max(0, Math.min(this.pageSize, totalFiltered - startIndex));
       this.updatePaginationControls(totalFiltered, totalPages, displayStart, displayEnd);
+      this.dispatchRenderEvent({
+        filteredCount: totalFiltered,
+        visibleCount,
+        totalPages,
+        page: this.page,
+        pageSize: this.pageSize,
+        startDisplay: displayStart,
+        endDisplay: displayEnd,
+      });
+    }
+
+    dispatchRenderEvent(detail) {
+      if (!this.table || typeof window.CustomEvent !== 'function') {
+        return;
+      }
+      this.table.dispatchEvent(new CustomEvent('table:render', {
+        detail,
+      }));
     }
 
     updatePaginationControls(totalFiltered, totalPages, startDisplay, endDisplay) {
