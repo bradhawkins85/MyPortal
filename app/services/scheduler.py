@@ -13,6 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
+from app.services import asset_importer
 from app.services import staff_importer
 from app.services import m365 as m365_service
 from app.services import products as products_service
@@ -124,6 +125,10 @@ class SchedulerService:
                 company_id = task.get("company_id")
                 if company_id:
                     await staff_importer.import_contacts_for_company(int(company_id))
+            elif command == "sync_assets":
+                company_id = task.get("company_id")
+                if company_id:
+                    await asset_importer.import_assets_for_company(int(company_id))
             elif command == "sync_o365":
                 company_id = task.get("company_id")
                 if company_id:
