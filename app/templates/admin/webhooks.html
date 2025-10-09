@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card card--panel">
+  <header class="card__header card__header--actions">
+    <div>
+      <h2 class="card__title">Webhook delivery queue</h2>
+      <p class="card__subtitle">
+        Monitor outbound webhook calls, retry failures, and inspect delivery attempts per integration.
+      </p>
+    </div>
+    <div class="card__controls">
+      <input
+        type="search"
+        class="form-input"
+        placeholder="Filter webhook events"
+        aria-label="Filter webhook events"
+        data-table-filter="webhooks-table"
+      />
+    </div>
+  </header>
+  <div class="table-wrapper">
+    <table class="table" id="webhooks-table" data-table>
+      <thead>
+        <tr>
+          <th scope="col" data-sort="string">Name</th>
+          <th scope="col" data-sort="string">Target</th>
+          <th scope="col" data-sort="string">Status</th>
+          <th scope="col" data-sort="number">Attempts</th>
+          <th scope="col" data-sort="date">Next attempt</th>
+          <th scope="col" data-sort="string">Last error</th>
+          <th scope="col" data-sort="date">Updated</th>
+          <th scope="col" class="table__actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in events %}
+          <tr data-event='{{ event | tojson }}'>
+            <td data-label="Name">{{ event.name }}</td>
+            <td data-label="Target">{{ event.target_url }}</td>
+            <td data-label="Status">{{ event.status }}</td>
+            <td data-label="Attempts" data-value="{{ event.attempt_count }}">
+              {{ event.attempt_count }}/{{ event.max_attempts }}
+            </td>
+            <td data-label="Next attempt" data-value="{{ event.next_attempt_iso or '' }}">
+              {% if event.next_attempt_iso %}
+                <span data-utc="{{ event.next_attempt_iso }}"></span>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+            <td data-label="Last error">{{ event.last_error or '—' }}</td>
+            <td data-label="Updated" data-value="{{ event.updated_iso or '' }}">
+              {% if event.updated_iso %}
+                <span data-utc="{{ event.updated_iso }}"></span>
+              {% endif %}
+            </td>
+            <td class="table__actions">
+              <div class="table__action-buttons">
+                <button type="button" class="button button--ghost" data-webhook-attempts>View attempts</button>
+                <button
+                  type="button"
+                  class="button button--ghost"
+                  data-webhook-retry
+                  {% if event.status == 'succeeded' %}disabled{% endif %}
+                >Retry</button>
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="8" class="table__empty">No webhook activity recorded.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="modal" id="webhook-attempts-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close webhook attempts</span>
+    </button>
+    <h2 class="modal__title" id="webhook-attempts-title">Webhook attempts</h2>
+    <div class="modal__body">
+      <p id="webhook-attempts-description" class="modal__subtitle text-muted">
+        Review the latest delivery attempts for the selected webhook event.
+      </p>
+      <div class="modal__controls">
+        <input
+          type="search"
+          class="form-input"
+          placeholder="Filter attempts"
+          aria-label="Filter webhook attempts"
+          data-table-filter="webhook-attempts-table"
+        />
+      </div>
+      <div class="table-wrapper">
+        <table class="table" id="webhook-attempts-table" data-table>
+          <thead>
+            <tr>
+              <th scope="col" data-sort="date">Attempted</th>
+              <th scope="col" data-sort="number">Status</th>
+              <th scope="col" data-sort="number">Duration (ms)</th>
+              <th scope="col" data-sort="string">Response</th>
+              <th scope="col" data-sort="string">Error</th>
+            </tr>
+          </thead>
+          <tbody id="webhook-attempts-body">
+            <tr>
+              <td colspan="5" class="table__empty" id="webhook-attempts-empty">Select a webhook event to inspect its attempts.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/webhooks.js" defer></script>
+{% endblock %}
