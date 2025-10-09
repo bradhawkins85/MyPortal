@@ -1,3 +1,4 @@
+- 2025-10-09, 11:31 UTC, Change, Retired the /admin/memberships page and synced company assignments with active company membership records
 - 2025-10-17, 08:15 UTC, Fix, Positioned the cross-service audit correlations card below API credentials for consistent admin layout
 - 2025-10-09, 11:16 UTC, Change, Moved company creation into a modal trigger on the Companies dashboard and removed legacy user provisioning forms
 - 2025-10-16, 09:55 UTC, Fix, Restored Syncro asset scheduled sync with importer service and repository upsert handling
