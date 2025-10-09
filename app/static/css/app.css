@@ -135,6 +135,20 @@ body {
   font-weight: 500;
 }
 
+.menu__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.5rem;
+  padding: 0 0.5rem;
+  min-width: 1.5rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #f8fafc;
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
 .button,
 .button-link {
   border-radius: 0.75rem;
@@ -302,6 +316,48 @@ body {
   display: grid;
   gap: 1.5rem;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.staff-form-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.staff-form-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.22), transparent 55%);
+  pointer-events: none;
+}
+
+.staff-form-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.staff-form {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  width: 100%;
+}
+
+.staff-form .form-field,
+.staff-form .form-field--checkbox {
+  margin: 0;
+}
+
+.staff-form__actions {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
+
+@media (max-width: 720px) {
+  .staff-form {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {
@@ -945,6 +1001,155 @@ body {
   margin: 0;
 }
 
+.cart-card .table-wrapper {
+  margin-bottom: 1rem;
+}
+
+.cart-checkout {
+  margin-top: 1.5rem;
+  gap: 1.5rem;
+  align-items: flex-end;
+}
+
+.cart-summary {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cart-summary__totals {
+  display: flex;
+  gap: 2rem;
+  margin: 0;
+}
+
+.cart-summary__totals dt {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.cart-summary__totals dd {
+  margin: 0;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.cart-table__image img {
+  max-width: 60px;
+  border-radius: 0.75rem;
+}
+
+.orders-summary {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 1.5rem;
+}
+
+.orders-summary__panel {
+  padding: 1.5rem;
+  border-radius: 1rem;
+  background: rgba(148, 163, 184, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.orders-summary__panel--total {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.3), rgba(59, 130, 246, 0.25));
+  box-shadow: inset 0 0 0 1px rgba(191, 219, 254, 0.3);
+}
+
+.orders-summary__heading {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(226, 232, 240, 0.9);
+  font-weight: 600;
+}
+
+.orders-summary__count {
+  font-size: 2.75rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.orders-summary__meta {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.75);
+}
+
+.orders-summary__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.orders-summary__item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.orders-summary__label {
+  font-weight: 500;
+}
+
+.orders-summary__value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.orders-summary__percentage {
+  color: rgba(226, 232, 240, 0.7);
+  font-size: 0.85rem;
+  margin-left: 0.35rem;
+}
+
+.orders-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.orders-toolbar__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.orders-toolbar__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 160px;
+}
+
+.orders-toolbar__actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.orders-toolbar__search {
+  min-width: 220px;
+}
+
+.checkbox--table {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.checkbox--table input {
+  margin: 0;
+}
+
 @media (max-width: 1024px) {
   .shop-layout {
     grid-template-columns: 1fr;
@@ -962,6 +1167,28 @@ body {
 
   .shop-toolbar__form {
     width: 100%;
+  }
+
+  .orders-toolbar {
+    align-items: stretch;
+  }
+
+  .orders-toolbar__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .orders-toolbar__search {
+    width: 100%;
+  }
+
+  .cart-checkout {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .cart-summary {
+    justify-content: flex-start;
   }
 }
 

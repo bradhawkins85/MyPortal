@@ -2,14 +2,19 @@
 <html>
   <%- include('partials/head', { title: 'Business Info' }) %>
 <body>
-  <div class="app-container">
-    <%- include('partials/sidebar') %>
-    <div class="content">
-      <h1>Business Information</h1>
+  <%- include('partials/app-shell-start', {
+        pageTitle: 'Business Information',
+        pageSubtitle: company ? company.name : null
+      }) %>
       <% if (company) { %>
-        <p>Name: <%= company.name %></p>
         <% if (company.address) { %>
-          <p>Address: <%= company.address %></p>
+          <p><strong>Address:</strong> <%= company.address %></p>
+        <% } %>
+        <% if (!company.address) { %>
+          <p><strong>Name:</strong> <%= company.name %></p>
+        <% } %>
+        <% if (company.address) { %>
+          <p><strong>Name:</strong> <%= company.name %></p>
         <% } %>
         <div class="stats">
           <% if (canManageStaff || isSuperAdmin) { %>
@@ -50,7 +55,6 @@
         </table>
         <% } %>
       <% } %>
-    </div>
-  </div>
+  <%- include('partials/app-shell-end') %>
 </body>
 </html>
