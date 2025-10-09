@@ -170,7 +170,7 @@
   }
 
   async function markNotification(notificationId) {
-    const response = await fetch(`/notifications/${notificationId}/read`, {
+    const response = await fetch(`/api/notifications/${notificationId}/read`, {
       method: 'POST',
       credentials: 'same-origin',
       headers: {
@@ -186,7 +186,7 @@
   }
 
   async function acknowledgeNotifications(ids) {
-    const response = await fetch('/notifications/acknowledge', {
+    const response = await fetch('/api/notifications/acknowledge', {
       method: 'POST',
       credentials: 'same-origin',
       headers: {

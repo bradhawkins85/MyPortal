@@ -21,6 +21,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - Order details include product image, SKU and description
 - Port catalogue with searchable metadata, secure document uploads, and lifecycle tracking
 - Pricing workflow approvals with notification feed and audit-friendly status changes
+- Super administrators can publish portal alerts with the `/api/notifications` API for targeted or global announcements
 - Automated CSRF protection on authenticated state-changing requests
 - Super admin access to the OpnForm builder for creating and editing forms
 - Automation dashboard with persistent scheduler management, webhook retry monitoring, and admin controls
@@ -45,6 +46,17 @@ automatically create notifications that appear in the `/notifications` feed,
 ensuring requesters are alerted as statuses change. The interactive Swagger UI
 lists the full set of CRUD routes and supported query parameters for filtering
 and sorting.
+
+## Notifications API
+
+Authenticated users can review their notification feed at `/notifications` or via
+`GET /api/notifications`, filtering by event type, read status, search terms,
+and time ranges. Super administrators may now create notifications directly via
+`POST /api/notifications`, supplying an `event_type`, human readable `message`,
+optional `user_id` recipient, and structured metadata payload. When `user_id`
+is omitted the notification is treated as a broadcast for every user. Newly
+created notifications are surfaced immediately in the UI and through the
+Swagger UI to support automated integrations and operational tooling.
 
 ## Template Variables for External Apps
 
