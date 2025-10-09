@@ -2,10 +2,10 @@
 <html>
   <%- include('partials/head', { title: 'Cart' }) %>
 <body>
-  <div class="app-container">
-    <%- include('partials/sidebar') %>
-    <div class="content">
-      <h1>Cart</h1>
+  <%- include('partials/app-shell-start', {
+        pageTitle: 'Cart',
+        pageSubtitle: 'Review items before checkout'
+      }) %>
       <% if (orderMessage) { %>
         <p><%= orderMessage %></p>
       <% } %>
@@ -49,7 +49,6 @@
           <button type="submit">Place Order</button>
         </form>
       <% } %>
-    </div>
-  </div>
+  <%- include('partials/app-shell-end') %>
 </body>
 </html>

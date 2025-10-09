@@ -2,10 +2,10 @@
 <html>
   <%- include('partials/head', { title: 'Audit Logs' }) %>
   <body>
-    <div class="app-container">
-      <%- include('partials/sidebar') %>
-      <div class="content">
-        <h1>Audit Logs</h1>
+    <%- include('partials/app-shell-start', {
+          pageTitle: 'Audit Logs',
+          pageSubtitle: 'System activity across the portal'
+        }) %>
         <% if (isSuperAdmin) { %>
           <form method="get">
             <label>Company:
@@ -51,8 +51,7 @@
             <% }); %>
           </tbody>
         </table>
-      </div>
-    </div>
+    <%- include('partials/app-shell-end') %>
     <script>
       document.querySelectorAll('.created-at').forEach(function(td){
         var date = new Date(td.dataset.createdAt);
