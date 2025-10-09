@@ -1,3 +1,4 @@
+- 2025-10-09, 13:16 UTC, Fix, Limited the Available products catalogue to display a maximum of five items per page for consistent pagination
 - 2025-10-09, 13:09 UTC, Fix, Restored customer shop pagination with capped page sizes and navigation controls to prevent sprawling product lists
 - 2025-10-09, 12:59 UTC, Fix, Prevented shop pagination from exceeding the viewport when recalculating rows while scrolled
 - 2025-10-20, 11:45 UTC, Fix, Split upgrade automation into pull-only upgrade.sh and restart.sh for dependency reinstalls and service restarts
