@@ -6,51 +6,67 @@
         pageTitle: 'Licenses',
         pageSubtitle: 'Track availability and usage'
       }) %>
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>SKU</th>
-            <th>Count</th>
-            <th>Allocated</th>
-            <th>Expiry</th>
-            <th>Contract Term</th>
-            <% if (canOrderLicenses || isSuperAdmin) { %><th>Actions</th><% } %>
-          </tr>
-        </thead>
-        <tbody>
-        <% licenses.forEach(function(lic) { %>
-          <tr>
-            <td><%= lic.display_name %></td>
-            <td><%= lic.platform %></td>
-            <td><%= lic.count %></td>
-            <td><a href="#" class="allocated-link" data-license-id="<%= lic.id %>"><%= lic.allocated %></a></td>
-            <td><%= lic.expiry_date %></td>
-            <td><%= lic.contract_term %></td>
-            <% if (canOrderLicenses || isSuperAdmin) { %>
-              <td>
-                <% if (isSuperAdmin) { %>
-                  <button
-                    class="edit-btn"
-                    data-license-id="<%= lic.id %>"
-                    data-name="<%= lic.name %>"
-                    data-sku="<%= lic.platform %>"
-                    data-count="<%= lic.count %>"
-                    data-expiry-date="<%= lic.expiry_date ? new Date(lic.expiry_date).toISOString().split('T')[0] : '' %>"
-                    data-contract-term="<%= lic.contract_term %>"
-                  >Edit</button>
-                  <button class="delete-btn" data-license-id="<%= lic.id %>">Delete</button>
+      <section class="table-card">
+        <header class="table-card-header">
+          <div>
+            <h2 class="table-card-title">Software licenses</h2>
+            <p class="table-card-subtitle">Review allocation and contract details for the selected company.</p>
+          </div>
+        </header>
+        <div class="viewport-table-wrapper">
+          <table
+            class="data-table"
+            data-viewport-pagination="true"
+            data-viewport-min-rows="5"
+            data-viewport-max-rows="50"
+          >
+            <caption class="visually-hidden">Software license allocations and contract information.</caption>
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">SKU</th>
+                <th scope="col">Count</th>
+                <th scope="col">Allocated</th>
+                <th scope="col">Expiry</th>
+                <th scope="col">Contract Term</th>
+                <% if (canOrderLicenses || isSuperAdmin) { %><th scope="col">Actions</th><% } %>
+              </tr>
+            </thead>
+            <tbody>
+            <% licenses.forEach(function(lic) { %>
+              <tr>
+                <td><%= lic.display_name %></td>
+                <td><%= lic.platform %></td>
+                <td><%= lic.count %></td>
+                <td><a href="#" class="allocated-link" data-license-id="<%= lic.id %>"><%= lic.allocated %></a></td>
+                <td><%= lic.expiry_date %></td>
+                <td><%= lic.contract_term %></td>
+                <% if (canOrderLicenses || isSuperAdmin) { %>
+                  <td>
+                    <% if (isSuperAdmin) { %>
+                      <button
+                        class="edit-btn"
+                        data-license-id="<%= lic.id %>"
+                        data-name="<%= lic.name %>"
+                        data-sku="<%= lic.platform %>"
+                        data-count="<%= lic.count %>"
+                        data-expiry-date="<%= lic.expiry_date ? new Date(lic.expiry_date).toISOString().split('T')[0] : '' %>"
+                        data-contract-term="<%= lic.contract_term %>"
+                      >Edit</button>
+                      <button class="delete-btn" data-license-id="<%= lic.id %>">Delete</button>
+                    <% } %>
+                    <% if (canOrderLicenses) { %>
+                      <button class="order-btn" data-license-id="<%= lic.id %>">Order More</button>
+                      <button class="remove-btn" data-license-id="<%= lic.id %>">Request Removal</button>
+                    <% } %>
+                  </td>
                 <% } %>
-                <% if (canOrderLicenses) { %>
-                  <button class="order-btn" data-license-id="<%= lic.id %>">Order More</button>
-                  <button class="remove-btn" data-license-id="<%= lic.id %>">Request Removal</button>
-                <% } %>
-              </td>
-            <% } %>
-          </tr>
-        <% }); %>
-        </tbody>
-      </table>
+              </tr>
+            <% }); %>
+            </tbody>
+          </table>
+        </div>
+      </section>
   <%- include('partials/app-shell-end') %>
 
   <div id="allocated-modal" class="modal" style="display:none;">
