@@ -1,3 +1,4 @@
+- 2025-10-18, 10:45 UTC, Feature, Added an orders dashboard with analytics, filtering, and navigation to restore customer order history in the new app
 - 2025-10-09, 12:01 UTC, Fix, Removed the Description column from the Cart table to streamline checkout review
 - 2025-10-09, 11:52 UTC, Fix, Removed the Syncro import card from the Staff view and restyled the Add Staff form to span the full content width
 - 2025-10-18, 09:05 UTC, Feature, Added customer cart support with persistent checkout, webhook retries, and Discord stock notifications for shop orders
