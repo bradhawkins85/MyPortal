@@ -75,6 +75,26 @@
       </tbody>
     </table>
   </div>
+  <div class="table-pagination" data-pagination="webhooks-table">
+    <div class="table-pagination__group">
+      <button
+        type="button"
+        class="button button--ghost table-pagination__button"
+        data-page-prev
+        disabled
+      >
+        Previous
+      </button>
+      <button
+        type="button"
+        class="button button--ghost table-pagination__button"
+        data-page-next
+      >
+        Next
+      </button>
+    </div>
+    <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+  </div>
 </section>
 
 <div class="modal" id="webhook-attempts-modal" role="dialog" aria-modal="true" hidden>
