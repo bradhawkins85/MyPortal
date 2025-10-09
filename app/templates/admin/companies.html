@@ -1,22 +1,13 @@
 {% extends "base.html" %}
 
 {% block content %}
-  {% if error_message or success_message or temporary_password %}
+  {% if error_message or success_message %}
     <div class="stacked" style="margin-bottom: 1.5rem; gap: 1rem;">
       {% if success_message %}
         <div class="alert" role="status">{{ success_message }}</div>
       {% endif %}
       {% if error_message %}
         <div class="alert alert--error" role="alert">{{ error_message }}</div>
-      {% endif %}
-      {% if temporary_password %}
-        <div class="alert" role="status">
-          <p class="stacked" style="gap: 0.5rem; margin: 0;">
-            <strong>Temporary password generated for {{ invited_email }}</strong>
-            <span>Share this secret securely with the recipient. They will be prompted to change it at first login.</span>
-            <code style="word-break: break-word;">{{ temporary_password }}</code>
-          </p>
-        </div>
       {% endif %}
     </div>
   {% endif %}
@@ -25,49 +16,28 @@
     {% if is_super_admin %}
       <section class="card card--panel">
         <header class="card__header">
-          <div>
-            <h2 class="card__title">Add a company</h2>
-            <p class="card__subtitle">Create a new customer record with optional Syncro and Xero identifiers.</p>
-          </div>
-        </header>
-        <form action="/admin/companies" method="post" class="form" autocomplete="off">
-          <div class="form-field">
-            <label class="form-label" for="company-name">Company name</label>
-            <input id="company-name" name="name" class="form-input" required maxlength="255" />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="company-syncro">Syncro company ID</label>
-            <input id="company-syncro" name="syncroCompanyId" class="form-input" maxlength="255" />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="company-xero">Xero ID</label>
-            <input id="company-xero" name="xeroId" class="form-input" maxlength="255" />
-          </div>
-          <div class="form-field form-field--checkbox">
-            <label class="checkbox" for="company-vip">
-              <input id="company-vip" type="checkbox" name="isVip" value="1" />
-              <span>VIP pricing</span>
-            </label>
-          </div>
-          <div class="form-actions">
-            <button type="submit" class="button">Create company</button>
-          </div>
-        </form>
-      </section>
-
-      <section class="card card--panel">
-        <header class="card__header card__header--stacked">
-          <div>
+          <div class="stacked">
             <h2 class="card__title">Companies</h2>
             <p class="card__subtitle">Update identifiers and VIP status for existing customers.</p>
           </div>
-          <input
-            type="search"
-            class="form-input"
-            placeholder="Filter companies"
-            aria-label="Filter companies"
-            data-table-filter="companies-table"
-          />
+          <div class="card__controls">
+            <input
+              type="search"
+              class="form-input card__control"
+              placeholder="Filter companies"
+              aria-label="Filter companies"
+              data-table-filter="companies-table"
+            />
+            <button
+              type="button"
+              class="button"
+              data-add-company-modal-open
+              aria-haspopup="dialog"
+              aria-controls="add-company-modal"
+            >
+              Add Company
+            </button>
+          </div>
         </header>
         <div class="table-wrapper">
           <table class="table" id="companies-table" data-table>
@@ -139,119 +109,48 @@
           </table>
         </div>
       </section>
-    {% endif %}
-
-    <section class="card card--panel">
-      <header class="card__header">
-        <div>
-          <h2 class="card__title">User provisioning</h2>
-          <p class="card__subtitle">Create or invite users with access to the selected company.</p>
-        </div>
-      </header>
-      <div class="stacked" style="gap: 2rem;">
-        <form action="/admin/companies/users/create" method="post" class="form" autocomplete="off">
-          <h3 class="form-title">Create user with chosen password</h3>
-          {% if is_super_admin %}
+      <div
+        class="modal"
+        id="add-company-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-company-title"
+        aria-hidden="true"
+        hidden
+      >
+        <div class="modal__content" role="document">
+          <button type="button" class="modal__close" data-modal-close>
+            <span class="visually-hidden">Close add company form</span>
+            &times;
+          </button>
+          <h2 class="modal__title" id="add-company-title">Add a company</h2>
+          <p class="modal__subtitle">Create a new customer record with optional Syncro and Xero identifiers.</p>
+          <form action="/admin/companies" method="post" class="form" autocomplete="off">
             <div class="form-field">
-              <label class="form-label" for="create-company">Company</label>
-              <select id="create-company" name="companyId" class="form-input" required>
-                <option value="">Select company</option>
-                {% for company in managed_companies %}
-                  <option value="{{ company.id }}" {% if company.id == selected_company_id %}selected{% endif %}>
-                    {{ company.name }}
-                  </option>
-                {% endfor %}
-              </select>
-            </div>
-          {% else %}
-            <input type="hidden" name="companyId" value="{{ selected_company_id or '' }}" />
-          {% endif %}
-          <div class="form-field">
-            <label class="form-label" for="create-email">Email address</label>
-            <input id="create-email" name="email" type="email" class="form-input" required maxlength="255" />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="create-password">Temporary password</label>
-            <input id="create-password" name="password" type="password" class="form-input" required minlength="8" maxlength="255" />
-            <p class="form-help">Users are required to change this password on first login.</p>
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="create-first-name">First name</label>
-            <input id="create-first-name" name="firstName" class="form-input" maxlength="255" />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="create-last-name">Last name</label>
-            <input id="create-last-name" name="lastName" class="form-input" maxlength="255" />
-          </div>
-          <div class="form-actions">
-            <button type="submit" class="button">Create user</button>
-          </div>
-        </form>
-
-        <form action="/admin/companies/users/invite" method="post" class="form" autocomplete="off">
-          <h3 class="form-title">Invite user with generated password</h3>
-          {% if is_super_admin %}
-            <div class="form-field">
-              <label class="form-label" for="invite-company">Company</label>
-              <select id="invite-company" name="companyId" class="form-input" required>
-                <option value="">Select company</option>
-                {% for company in managed_companies %}
-                  <option value="{{ company.id }}" {% if company.id == selected_company_id %}selected{% endif %}>
-                    {{ company.name }}
-                  </option>
-                {% endfor %}
-              </select>
-            </div>
-          {% else %}
-            <input type="hidden" name="companyId" value="{{ selected_company_id or '' }}" />
-          {% endif %}
-          <div class="form-field">
-            <label class="form-label" for="invite-email">Email address</label>
-            <input id="invite-email" name="email" type="email" class="form-input" required maxlength="255" />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="invite-first-name">First name</label>
-            <input id="invite-first-name" name="firstName" class="form-input" maxlength="255" />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="invite-last-name">Last name</label>
-            <input id="invite-last-name" name="lastName" class="form-input" maxlength="255" />
-          </div>
-          <div class="form-actions">
-            <button type="submit" class="button">Generate invitation</button>
-          </div>
-        </form>
-
-        {% if is_super_admin %}
-          <form action="/admin/companies/assign" method="post" class="form" autocomplete="off">
-            <h3 class="form-title">Assign existing user</h3>
-            <div class="form-field">
-              <label class="form-label" for="assign-user">User</label>
-              <select id="assign-user" name="userId" class="form-input" required>
-                <option value="">Select user</option>
-                {% for user_option in user_options %}
-                  <option value="{{ user_option.id }}">{{ user_option.email }}</option>
-                {% endfor %}
-              </select>
+              <label class="form-label" for="company-name">Company name</label>
+              <input id="company-name" name="name" class="form-input" required maxlength="255" />
             </div>
             <div class="form-field">
-              <label class="form-label" for="assign-company">Company</label>
-              <select id="assign-company" name="companyId" class="form-input" required>
-                <option value="">Select company</option>
-                {% for company in managed_companies %}
-                  <option value="{{ company.id }}" {% if company.id == selected_company_id %}selected{% endif %}>
-                    {{ company.name }}
-                  </option>
-                {% endfor %}
-              </select>
+              <label class="form-label" for="company-syncro">Syncro company ID</label>
+              <input id="company-syncro" name="syncroCompanyId" class="form-input" maxlength="255" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="company-xero">Xero ID</label>
+              <input id="company-xero" name="xeroId" class="form-input" maxlength="255" />
+            </div>
+            <div class="form-field form-field--checkbox">
+              <label class="checkbox" for="company-vip">
+                <input id="company-vip" type="checkbox" name="isVip" value="1" />
+                <span>VIP pricing</span>
+              </label>
             </div>
             <div class="form-actions">
-              <button type="submit" class="button">Assign user</button>
+              <button type="submit" class="button">Create company</button>
             </div>
           </form>
-        {% endif %}
+        </div>
       </div>
-    </section>
+    {% endif %}
 
     <section class="card card--panel admin-grid__full">
       <header class="card__header card__header--stacked">
