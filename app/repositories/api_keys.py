@@ -8,9 +8,25 @@ from app.core.database import db
 from app.security.api_keys import GeneratedApiKey, generate_api_key, hash_api_key
 
 
-def _to_utc(dt: datetime | None) -> datetime | None:
+def _to_utc(dt: datetime | str | None) -> datetime | None:
+    """Normalise database datetime values to timezone-aware UTC datetimes."""
+
     if dt is None:
         return None
+
+    if isinstance(dt, str):
+        value = dt.strip()
+        if not value:
+            return None
+        # Support common database string formats (e.g. MySQL "YYYY-mm-dd HH:MM:SS")
+        # and ISO-8601 with "Z" suffixes by normalising to Python's ISO format.
+        if value.endswith("Z"):
+            value = f"{value[:-1]}+00:00"
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError as exc:  # pragma: no cover - defensive guard
+            raise ValueError(f"Unable to parse datetime value '{dt}'") from exc
+
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
