@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 
 {% block header_actions %}
-  <a class="button button--ghost" href="/cart">View cart</a>
+  <a class="button button--ghost" href="/cart">
+    View cart{% if cart_summary.total_quantity %} ({{ cart_summary.total_quantity }}){% endif %}
+  </a>
 {% endblock %}
 
 {% block content %}
