@@ -1,3 +1,4 @@
+- 2025-10-19, 07:15 UTC, Fix, Routed the system update scheduler task through scripts/upgrade.sh for consistent upgrade automation
 - 2025-10-09, 12:17 UTC, Feature, Introduced a notifications dashboard with filtering, sorting, and read-state tracking across the UI and API
 - 2025-10-09, 12:18 UTC, Fix, Accepted camelCase membership payload fields so API updates persist when saving company membership roles
 - 2025-10-18, 10:45 UTC, Feature, Added an orders dashboard with analytics, filtering, and navigation to restore customer order history in the new app
