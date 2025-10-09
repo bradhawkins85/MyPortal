@@ -85,7 +85,13 @@ async def list_api_keys_with_usage(
         FROM api_keys AS ak
         LEFT JOIN api_key_usage AS aku ON ak.id = aku.api_key_id
         {where}
-        GROUP BY ak.id
+        GROUP BY
+            ak.id,
+            ak.description,
+            ak.expiry_date,
+            ak.created_at,
+            ak.last_used_at,
+            ak.key_prefix
         ORDER BY {column} {direction}, ak.id ASC
     """
     rows = await db.fetch_all(sql, tuple(params))
@@ -120,7 +126,13 @@ async def get_api_key_with_usage(api_key_id: int) -> dict[str, Any] | None:
         FROM api_keys AS ak
         LEFT JOIN api_key_usage AS aku ON ak.id = aku.api_key_id
         WHERE ak.id = %s
-        GROUP BY ak.id
+        GROUP BY
+            ak.id,
+            ak.description,
+            ak.expiry_date,
+            ak.created_at,
+            ak.last_used_at,
+            ak.key_prefix
         """,
         (api_key_id,),
     )
