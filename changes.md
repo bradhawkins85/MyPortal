@@ -1,3 +1,4 @@
+- 2025-10-09, 13:18 UTC, Fix, Allowed Run Now scheduled tasks to execute in the background without redirecting to the update progress message
 - 2025-10-09, 13:14 UTC, Feature, Added viewport-aware pagination to the software licenses table so row counts follow the available space
 - 2025-10-21, 13:20 UTC, Feature, Added viewport-aware pagination to the asset inventory with dynamic counts and table refresh hooks
 - 2025-10-09, 13:16 UTC, Fix, Limited the Available products catalogue to display a maximum of five items per page for consistent pagination
