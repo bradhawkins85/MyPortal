@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Mapping
@@ -10,7 +10,10 @@ from uuid import uuid4
 
 import aiofiles
 import httpx
+from email.utils import parsedate_to_datetime
+from xml.etree import ElementTree as ET
 
+from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import shop as shop_repo
 from app.repositories import stock_feed as stock_feed_repo
@@ -84,6 +87,14 @@ def _parse_stock_date(value: Any) -> date | None:
                     return datetime.strptime(trimmed, fmt).date()
                 except ValueError:
                     continue
+            try:
+                parsed = parsedate_to_datetime(candidate)
+            except (TypeError, ValueError, IndexError):
+                parsed = None
+            if parsed:
+                if parsed.tzinfo is not None:
+                    parsed = parsed.astimezone(timezone.utc)
+                return parsed.date()
     return None
 
 
@@ -175,6 +186,170 @@ async def _download_product_image(image_url: str) -> str | None:
             error=str(exc),
         )
         return None
+
+
+def _strip_xml_tag(name: str) -> str:
+    if "}" in name:
+        return name.split("}", 1)[1]
+    return name
+
+
+def _get_feed_value(element: ET.Element, *names: str) -> str | None:
+    """Retrieve a child or attribute value from a stock feed XML element."""
+
+    if not names:
+        return None
+    lookup = {name.lower() for name in names}
+
+    for attr_name, attr_value in element.attrib.items():
+        if attr_name.lower() in lookup:
+            candidate = (attr_value or "").strip()
+            if candidate:
+                return candidate
+
+    for child in element:
+        child_name = _strip_xml_tag(child.tag).lower()
+        if child_name in lookup:
+            text = (child.text or "").strip()
+            if text:
+                return text
+    return None
+
+
+def _coerce_feed_int(value: Any) -> int:
+    decimal_value = _to_decimal(value, default=None)
+    if decimal_value is not None:
+        try:
+            return int(decimal_value)
+        except (ValueError, ArithmeticError):
+            return 0
+    try:
+        candidate = str(value).strip()
+    except Exception:
+        return 0
+    if not candidate:
+        return 0
+    try:
+        return int(candidate)
+    except ValueError:
+        try:
+            return int(float(candidate))
+        except (TypeError, ValueError):
+            return 0
+
+
+def _parse_feed_item(element: ET.Element) -> dict[str, Any] | None:
+    sku = _get_feed_value(element, "StockCode", "stockcode", "stock_code", "sku")
+    if not sku:
+        return None
+
+    sku_cleaned = sku.strip()
+    if not sku_cleaned:
+        return None
+
+    def _optional_text(value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    product_name = _get_feed_value(element, "ProductName", "product_name") or ""
+    product_name2 = _optional_text(
+        _get_feed_value(element, "ProductName2", "product_name2")
+    )
+    category_name = _optional_text(
+        _get_feed_value(element, "CategoryName", "category_name")
+    )
+    warranty_length = _optional_text(
+        _get_feed_value(element, "WarrantyLength", "warranty_length")
+    )
+    manufacturer = _optional_text(
+        _get_feed_value(element, "Manufacturer", "manufacturer")
+    )
+    image_url = _optional_text(
+        _get_feed_value(element, "ImageUrl", "image_url")
+    )
+
+    pub_date_raw = _get_feed_value(element, "pubDate", "pub_date")
+    pub_date = _parse_stock_date(pub_date_raw)
+
+    return {
+        "sku": sku_cleaned,
+        "product_name": product_name,
+        "product_name2": product_name2,
+        "rrp": _to_decimal(_get_feed_value(element, "RRP", "rrp")),
+        "category_name": category_name,
+        "on_hand_nsw": _coerce_feed_int(
+            _get_feed_value(element, "OnHandChanelNsw", "on_hand_nsw")
+        ),
+        "on_hand_qld": _coerce_feed_int(
+            _get_feed_value(element, "OnHandChanelQld", "on_hand_qld")
+        ),
+        "on_hand_vic": _coerce_feed_int(
+            _get_feed_value(element, "OnHandChanelVic", "on_hand_vic")
+        ),
+        "on_hand_sa": _coerce_feed_int(
+            _get_feed_value(element, "OnHandChanelSa", "on_hand_sa")
+        ),
+        "dbp": _to_decimal(_get_feed_value(element, "DBP", "dbp")),
+        "weight": _to_decimal(_get_feed_value(element, "Weight", "weight")),
+        "length": _to_decimal(_get_feed_value(element, "Length", "length")),
+        "width": _to_decimal(_get_feed_value(element, "Width", "width")),
+        "height": _to_decimal(_get_feed_value(element, "Height", "height")),
+        "pub_date": pub_date,
+        "warranty_length": warranty_length,
+        "manufacturer": manufacturer,
+        "image_url": image_url,
+    }
+
+
+def _parse_stock_feed_xml(payload: str) -> list[dict[str, Any]]:
+    try:
+        root = ET.fromstring(payload)
+    except ET.ParseError as exc:
+        raise ValueError("Invalid stock feed XML") from exc
+
+    items: list[dict[str, Any]] = []
+    for element in root.iter():
+        if _strip_xml_tag(element.tag).lower() == "item":
+            parsed = _parse_feed_item(element)
+            if parsed:
+                items.append(parsed)
+
+    if not items and _strip_xml_tag(root.tag).lower() == "items":
+        for element in root:
+            parsed = _parse_feed_item(element)
+            if parsed:
+                items.append(parsed)
+
+    return items
+
+
+async def update_stock_feed() -> int:
+    """Download the stock feed and persist it for later product updates."""
+
+    settings = get_settings()
+    url = getattr(settings, "stock_feed_url", None)
+    if not url:
+        raise ValueError("STOCK_FEED_URL is not configured")
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(str(url), follow_redirects=True)
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        log_error("Failed to download stock feed", url=str(url), error=str(exc))
+        raise
+
+    try:
+        items = _parse_stock_feed_xml(response.text)
+    except ValueError as exc:
+        log_error("Failed to parse stock feed", error=str(exc))
+        raise
+
+    await stock_feed_repo.replace_feed(items)
+    log_info("Stock feed updated", item_count=len(items))
+    return len(items)
 
 
 async def _process_feed_item(
