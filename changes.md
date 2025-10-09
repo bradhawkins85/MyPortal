@@ -1,9 +1,13 @@
 - 2025-10-09, 12:59 UTC, Fix, Prevented shop pagination from exceeding the viewport when recalculating rows while scrolled
+- 2025-10-20, 11:45 UTC, Fix, Split upgrade automation into pull-only upgrade.sh and restart.sh for dependency reinstalls and service restarts
+- 2025-10-09, 12:38 UTC, Feature, Delivered a notifications dashboard with filtering, bulk acknowledgement, Swagger-documented API enhancements, and navigation badge updates
+- 2025-10-19, 10:20 UTC, Feature, Collapsed the shop admin category manager by default with a persisted toggle so the grid stays tidy while remaining easy to access
 - 2025-10-09, 12:48 UTC, Fix, Removed shop toolbar search and stock toggle controls from the customer catalogue view
 - 2025-10-20, 10:00 UTC, Fix, Purged stray ~myportal pip metadata during upgrades so dependency installs stop warning about invalid distributions
 - 2025-10-09, 12:37 UTC, Fix, Added responsive pagination to the shop product table that adapts row counts to the viewport height for readability
 - 2025-10-19, 09:45 UTC, Feature, Added pagination to shop category lists showing five entries per page to keep the admin UI manageable
 # Change Log
+- 2025-10-19, 09:45 UTC, Feature, Added an asset inventory dashboard with summary analytics, column preferences, and secure deletion workflows for super admins
 - 2025-10-19, 09:45 UTC, Fix, Hardened upgrade automation to locate python3 when python is absent so system updates no longer fail
 - 2025-10-19, 08:30 UTC, Fix, Ensured the system upgrade automation reuses the managed virtual environment before reinstalling dependencies
 - 2025-10-18, 11:30 UTC, Fix, Restored the Orders navigation link by initialising membership context before evaluating shop permissions in the base template
@@ -128,3 +132,4 @@
 - 2025-10-09, 05:40 UTC, Fix, Restored admin API key dashboard by aligning API key usage queries with ONLY_FULL_GROUP_BY SQL mode to prevent runtime errors
 - 2025-10-09, 11:09 UTC, Feature, Moved scheduler editing into modal workflows, added per-task run history popups, and created a dedicated webhook delivery monitoring page
 - 2025-10-09, 11:36 UTC, Fix, Removed the SKU column from the software licenses table to simplify the display per request
+- 2025-10-09, 12:53 UTC, Fix, Hardened system update cleanup to skip inaccessible user site-packages paths and avoid permission failures
