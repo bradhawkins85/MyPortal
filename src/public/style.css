@@ -117,6 +117,34 @@ table th {
   text-align: left;
 }
 
+.category-list {
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.category-list li {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid #eee;
+}
+
+.category-pagination {
+  display: none;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.category-pagination button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.category-page-info {
+  font-weight: 600;
+}
+
 .app-shell,
 .app-container {
   display: grid;
