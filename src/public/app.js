@@ -94,17 +94,129 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof DataTable !== 'undefined') {
       DataTable.defaults.pageLength = 5;
       DataTable.defaults.lengthMenu = [5, 10, 25, 50, 100];
-      function initDataTable(table) {
+
+      const viewportAwareTables = new Map();
+
+      const parsePositiveInt = (value) => {
+        if (!value) return null;
+        const parsed = parseInt(value, 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+      };
+
+      const getViewportConfig = (table) => {
+        const minRows = parsePositiveInt(table.dataset.viewportMinRows) ?? 5;
+        const maxRowsCandidate = parsePositiveInt(table.dataset.viewportMaxRows);
+        const step = parsePositiveInt(table.dataset.viewportStep) ?? 5;
+        const maxRows = maxRowsCandidate && maxRowsCandidate >= minRows ? maxRowsCandidate : null;
+        return { minRows, maxRows, step };
+      };
+
+      const calculateViewportPageLength = (table, config) => {
+        const { minRows, maxRows, step } = config;
+        const container = table.closest('.page-body');
+        const tableRect = table.getBoundingClientRect();
+        let availableHeight = window.innerHeight - tableRect.top - 160;
+        if (container) {
+          const containerRect = container.getBoundingClientRect();
+          availableHeight = containerRect.bottom - tableRect.top - 48;
+        }
+
+        if (!Number.isFinite(availableHeight) || availableHeight <= 0) {
+          const fallbackRows = maxRows ?? minRows;
+          availableHeight = fallbackRows * 48;
+        }
+
+        const sampleRow = table.querySelector('tbody tr') || table.querySelector('thead tr');
+        const rowHeight = sampleRow?.getBoundingClientRect().height || 48;
+        let computed = Math.floor(availableHeight / rowHeight);
+
+        if (!Number.isFinite(computed) || computed <= 0) {
+          computed = minRows;
+        }
+
+        computed = Math.max(minRows, computed);
+
+        if (step > 1) {
+          computed = Math.floor(computed / step) * step;
+        }
+
+        if (computed < minRows) {
+          computed = minRows;
+        }
+
+        if (maxRows) {
+          computed = Math.min(computed, maxRows);
+        }
+
+        return computed;
+      };
+
+      const buildLengthMenu = (config, baseLength) => {
+        const { minRows, maxRows, step } = config;
+        const values = new Set();
+        const defaultUpper = minRows + step * 10;
+        const upperBound = maxRows ?? Math.max(baseLength + step * 2, defaultUpper);
+
+        for (let value = minRows; value <= upperBound; value += step) {
+          values.add(value);
+        }
+
+        [5, 10, 25, 50, 100].forEach((preset) => {
+          if (!maxRows || preset <= maxRows) {
+            const adjusted = Math.max(minRows, Math.floor(preset / step) * step);
+            values.add(adjusted);
+          }
+        });
+
+        values.add(baseLength);
+        if (maxRows) {
+          values.add(maxRows);
+        }
+
+        return Array.from(values)
+          .filter((val) => Number.isFinite(val) && val > 0)
+          .sort((a, b) => a - b);
+      };
+
+      const updateViewportTable = (table) => {
+        const entry = viewportAwareTables.get(table);
+        if (!entry) return;
+        const { dt, config } = entry;
+        const desiredLength = calculateViewportPageLength(table, config);
+        if (!Number.isFinite(desiredLength) || desiredLength <= 0) return;
+        if (dt.page.len() !== desiredLength) {
+          dt.page.len(desiredLength).draw(false);
+        }
+      };
+
+      const initDataTable = (table) => {
         if (table.dataset.datatableInitialized) return;
-        new DataTable(table);
-        table.dataset.datatableInitialized = 'true';
-      }
+        const isViewportAware = table.dataset.viewportPagination === 'true';
+        if (isViewportAware) {
+          const config = getViewportConfig(table);
+          const initialLength = calculateViewportPageLength(table, config);
+          const lengthMenu = buildLengthMenu(config, initialLength);
+          const dt = new DataTable(table, {
+            pageLength: initialLength,
+            lengthMenu,
+          });
+          viewportAwareTables.set(table, { dt, config });
+          table.dataset.datatableInitialized = 'true';
+          queueMicrotask(() => updateViewportTable(table));
+          dt.on('draw', () => updateViewportTable(table));
+        } else {
+          new DataTable(table);
+          table.dataset.datatableInitialized = 'true';
+        }
+      };
 
-      function adjustDataTables() {
-        DataTable.tables({ visible: true, api: true }).columns.adjust();
-      }
+      const adjustDataTables = () => {
+        const api = DataTable.tables({ visible: true, api: true });
+        api.columns.adjust();
+        viewportAwareTables.forEach((_, table) => updateViewportTable(table));
+      };
 
-      function initVisibleTables() {
+      const initVisibleTables = () => {
         document.querySelectorAll('table').forEach((table) => {
           if (
             !table.closest('#cron-generator-container') &&
@@ -114,7 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         });
         adjustDataTables();
-      }
+      };
 
       initVisibleTables();
       setTimeout(initVisibleTables, 0);

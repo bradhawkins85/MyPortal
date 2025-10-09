@@ -69,6 +69,9 @@
       this.filterInputValue = '';
       this.page = 0;
       this.pageSize = 0;
+      const maxPageSizeAttr = table.getAttribute('data-page-size-max');
+      const parsedMax = maxPageSizeAttr ? Number.parseInt(maxPageSizeAttr, 10) : NaN;
+      this.maxPageSize = Number.isNaN(parsedMax) || parsedMax <= 0 ? null : parsedMax;
       this.rowHeight = 0;
       this.paginationElement = table.id
         ? document.querySelector(`[data-pagination="${table.id}"]`)
@@ -85,6 +88,13 @@
       this.resizeObserver = null;
       this.resizeFrame = null;
       this.handleResize = this.handleResize.bind(this);
+      this.externalRefreshListener = () => {
+        this.refreshRows();
+      };
+
+      if (this.table) {
+        this.table.addEventListener('table:rows-updated', this.externalRefreshListener);
+      }
 
       this.updateFilterState();
       if (this.paginationElement) {
@@ -178,10 +188,25 @@
       if (!this.tbody) {
         return;
       }
+      const filteredRows = this.getFilteredRows();
+      const totalFiltered = filteredRows.length;
+
       if (!this.paginationElement) {
         this.rows.forEach((row) => {
           const hidden = row.dataset.filterHidden === 'true';
           row.style.display = hidden ? 'none' : '';
+        });
+        const visibleCount = this.rows.reduce((count, row) => (
+          row.dataset.filterHidden === 'true' ? count : count + 1
+        ), 0);
+        this.dispatchRenderEvent({
+          filteredCount: totalFiltered,
+          visibleCount,
+          totalPages: 1,
+          page: 0,
+          pageSize: totalFiltered || 0,
+          startDisplay: totalFiltered > 0 ? 1 : 0,
+          endDisplay: totalFiltered,
         });
         return;
       }
@@ -190,15 +215,21 @@
         this.recalculatePageSize();
       }
 
-      const filteredRows = this.getFilteredRows();
-      const totalFiltered = filteredRows.length;
-
       if (totalFiltered === 0) {
         this.rows.forEach((row) => {
           const hidden = row.dataset.filterHidden === 'true';
           row.style.display = hidden ? 'none' : '';
         });
         this.updatePaginationControls(0, 1, 0, 0);
+        this.dispatchRenderEvent({
+          filteredCount: 0,
+          visibleCount: 0,
+          totalPages: 1,
+          page: 0,
+          pageSize: this.pageSize,
+          startDisplay: 0,
+          endDisplay: 0,
+        });
         return;
       }
 
@@ -224,7 +255,26 @@
 
       const displayStart = Math.min(totalFiltered, startIndex + 1);
       const displayEnd = Math.min(totalFiltered, endIndex);
+      const visibleCount = Math.max(0, Math.min(this.pageSize, totalFiltered - startIndex));
       this.updatePaginationControls(totalFiltered, totalPages, displayStart, displayEnd);
+      this.dispatchRenderEvent({
+        filteredCount: totalFiltered,
+        visibleCount,
+        totalPages,
+        page: this.page,
+        pageSize: this.pageSize,
+        startDisplay: displayStart,
+        endDisplay: displayEnd,
+      });
+    }
+
+    dispatchRenderEvent(detail) {
+      if (!this.table || typeof window.CustomEvent !== 'function') {
+        return;
+      }
+      this.table.dispatchEvent(new CustomEvent('table:render', {
+        detail,
+      }));
     }
 
     updatePaginationControls(totalFiltered, totalPages, startDisplay, endDisplay) {
@@ -334,13 +384,17 @@
       const paginationHeight = this.paginationElement.getBoundingClientRect().height || 0;
       const rowHeight = this.measureRowHeight();
       if (!rowHeight) {
-        this.pageSize = this.pageSize || 10;
+        const fallback = this.pageSize || 10;
+        this.pageSize = this.maxPageSize
+          ? Math.min(fallback, this.maxPageSize)
+          : fallback;
         return;
       }
       const extraSpacing = 24;
       const usable = availableHeight - headerHeight - paginationHeight - extraSpacing;
       const proposed = Math.floor(usable / rowHeight);
-      this.pageSize = Math.max(1, Number.isFinite(proposed) && proposed > 0 ? proposed : 1);
+      const computed = Math.max(1, Number.isFinite(proposed) && proposed > 0 ? proposed : 1);
+      this.pageSize = this.maxPageSize ? Math.min(computed, this.maxPageSize) : computed;
     }
 
     handleResize() {
