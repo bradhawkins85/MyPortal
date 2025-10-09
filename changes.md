@@ -1,4 +1,8 @@
 - 2025-10-09, 11:31 UTC, Change, Retired the /admin/memberships page and synced company assignments with active company membership records
+- 2025-10-09, 11:34 UTC, Fix, Expanded the Companies administration card to occupy the full grid width for consistent layout
+- 2025-10-09, 11:28 UTC, Fix, Expanded the Companies dashboard card to span the full grid width for clearer management access
+- 2025-10-09, 11:21 UTC, Fix, Restored scheduled task modals by eagerly binding UI handlers and reading CSRF tokens from meta fallback
+- 2025-10-09, 11:25 UTC, Fix, Expanded the API credentials administration card to full width for improved visibility
 - 2025-10-17, 08:15 UTC, Fix, Positioned the cross-service audit correlations card below API credentials for consistent admin layout
 - 2025-10-09, 11:16 UTC, Change, Moved company creation into a modal trigger on the Companies dashboard and removed legacy user provisioning forms
 - 2025-10-16, 09:55 UTC, Fix, Restored Syncro asset scheduled sync with importer service and repository upsert handling
