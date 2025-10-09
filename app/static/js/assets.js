@@ -31,14 +31,21 @@
     });
   }
 
-  function updateVisibleCount(table) {
+  function updateVisibleCount(table, detail) {
     const totalElement = document.querySelector('[data-asset-total]');
     if (!totalElement || !table) {
       return;
     }
-    const rows = Array.from(table.querySelectorAll('tbody tr'));
-    const visibleRows = rows.filter((row) => row.style.display !== 'none');
-    totalElement.textContent = String(visibleRows.length);
+    let count = null;
+    if (detail && typeof detail.filteredCount === 'number' && !Number.isNaN(detail.filteredCount)) {
+      count = detail.filteredCount;
+    }
+    if (count === null) {
+      const rows = Array.from(table.querySelectorAll('tbody tr'));
+      const visibleRows = rows.filter((row) => row.style.display !== 'none');
+      count = visibleRows.length;
+    }
+    totalElement.textContent = String(count);
   }
 
   function initialiseColumnControls(table) {
@@ -150,6 +157,9 @@
           if (row) {
             row.remove();
           }
+          if (table) {
+            table.dispatchEvent(new CustomEvent('table:rows-updated'));
+          }
           updateVisibleCount(table);
         } catch (error) {
           console.error('Failed to delete asset', error);
@@ -167,6 +177,12 @@
     initialiseColumnControls(table);
     initialiseDeletion(table);
     updateVisibleCount(table);
+
+    if (table) {
+      table.addEventListener('table:render', (event) => {
+        updateVisibleCount(table, event.detail || {});
+      });
+    }
 
     if (searchInput) {
       searchInput.addEventListener('input', () => {
