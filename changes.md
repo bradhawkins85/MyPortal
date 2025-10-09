@@ -145,4 +145,5 @@
 - 2025-10-09, 11:36 UTC, Fix, Removed the SKU column from the software licenses table to simplify the display per request
 - 2025-10-09, 12:53 UTC, Fix, Hardened system update cleanup to skip inaccessible user site-packages paths and avoid permission failures
 - 2025-10-09, 13:15 UTC, Feature, Added viewport-aware pagination controls to the webhook delivery queue for responsive monitoring
+- 2025-10-09, 23:30 UTC, Fix, Removed leftover patch markers from dashboard template to restore valid Jinja block structure
 - 2025-10-09, 23:32 UTC, Fix, Resized all modal popups to occupy 75% of the viewport for consistent layout compliance
