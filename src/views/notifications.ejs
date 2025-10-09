@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+  <%- include('partials/head', { title: 'Notifications' }) %>
+  <body>
+    <%- include('partials/app-shell-start', {
+          pageTitle: 'Notifications',
+          pageSubtitle: 'Review workflow updates, approvals, and automated alerts'
+        }) %>
+      <div class="notifications-summary">
+        <div class="summary-card">
+          <span class="summary-label">Total notifications</span>
+          <span class="summary-value"><%= notifications.length %></span>
+        </div>
+        <div class="summary-card">
+          <span class="summary-label">Unread</span>
+          <span class="summary-value" id="unread-count"><%= unreadCount %></span>
+        </div>
+      </div>
+      <div class="notifications-controls">
+        <label for="notification-filter" class="sr-only">Filter notifications</label>
+        <input
+          type="search"
+          id="notification-filter"
+          placeholder="Filter by message or type"
+          autocomplete="off"
+        >
+        <label for="notification-status-filter" class="sr-only">Filter by status</label>
+        <select id="notification-status-filter">
+          <option value="all" selected>All statuses</option>
+          <option value="unread">Unread</option>
+          <option value="read">Read</option>
+        </select>
+      </div>
+      <% if (notifications.length === 0) { %>
+        <p class="empty-state">You're all caught up—no notifications to display.</p>
+      <% } else { %>
+        <table id="notifications-table" class="data-table">
+          <thead>
+            <tr>
+              <th scope="col" data-sort-key="eventType">Type</th>
+              <th scope="col" data-sort-key="message">Message</th>
+              <th scope="col" data-sort-key="createdAt">Created</th>
+              <th scope="col" data-sort-key="status">Status</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% notifications.forEach(function(notification) { %>
+              <tr
+                data-notification-id="<%= notification.id %>"
+                data-created-at="<%= notification.created_at.toISOString() %>"
+                data-read-at="<%= notification.read_at ? notification.read_at.toISOString() : '' %>"
+                data-status="<%= notification.read_at ? 'read' : 'unread' %>"
+              >
+                <td class="event-type"><%= notification.event_type %></td>
+                <td class="message"><%= notification.message %></td>
+                <td class="created-cell"></td>
+                <td class="status-cell"><%= notification.read_at ? 'Read' : 'Unread' %></td>
+                <td>
+                  <% if (!notification.read_at) { %>
+                    <form
+                      class="mark-read-form"
+                      action="/notifications/<%= notification.id %>/read"
+                      method="post"
+                    >
+                      <%- include('partials/csrf-field') %>
+                      <button type="submit" class="mark-read-button">Mark as read</button>
+                    </form>
+                  <% } else { %>
+                    <span aria-hidden="true">—</span>
+                  <% } %>
+                </td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      <% } %>
+      <script>
+        (function () {
+          const table = document.getElementById('notifications-table');
+          const unreadCounter = document.getElementById('unread-count');
+          if (!table) {
+            return;
+          }
+
+          const tbody = table.querySelector('tbody');
+          const rows = Array.from(tbody.querySelectorAll('tr'));
+          const filterInput = document.getElementById('notification-filter');
+          const statusFilter = document.getElementById('notification-status-filter');
+          const headers = Array.from(table.querySelectorAll('th[data-sort-key]'));
+          let sortKey = 'createdAt';
+          let sortAsc = false;
+
+          rows.forEach((row) => {
+            const createdCell = row.querySelector('.created-cell');
+            const iso = row.dataset.createdAt;
+            if (createdCell && iso) {
+              createdCell.textContent = new Date(iso).toLocaleString();
+            }
+          });
+
+          function updateUnreadCounter() {
+            if (!unreadCounter) {
+              return;
+            }
+            const unread = rows.filter((row) => row.dataset.status === 'unread');
+            unreadCounter.textContent = unread.length.toString();
+          }
+
+          function getSortValue(row, key) {
+            switch (key) {
+              case 'eventType':
+                return row.querySelector('.event-type')?.textContent?.toLowerCase() || '';
+              case 'message':
+                return row.querySelector('.message')?.textContent?.toLowerCase() || '';
+              case 'createdAt':
+                return new Date(row.dataset.createdAt || '').getTime();
+              case 'status':
+                return row.dataset.status === 'read' ? 1 : 0;
+              default:
+                return row.textContent?.toLowerCase() || '';
+            }
+          }
+
+          function applyFiltersAndSorting() {
+            const text = (filterInput?.value || '').toLowerCase();
+            const status = statusFilter?.value || 'all';
+            const sorted = rows.slice().sort((a, b) => {
+              const aValue = getSortValue(a, sortKey);
+              const bValue = getSortValue(b, sortKey);
+              if (aValue === bValue) {
+                return 0;
+              }
+              if (typeof aValue === 'number' && typeof bValue === 'number') {
+                return sortAsc ? aValue - bValue : bValue - aValue;
+              }
+              return sortAsc
+                ? String(aValue).localeCompare(String(bValue))
+                : String(bValue).localeCompare(String(aValue));
+            });
+
+            sorted.forEach((row) => {
+              const matchesText = row.textContent?.toLowerCase().includes(text);
+              const matchesStatus = status === 'all' || row.dataset.status === status;
+              row.style.display = matchesText && matchesStatus ? '' : 'none';
+              tbody.appendChild(row);
+            });
+
+            updateUnreadCounter();
+          }
+
+          headers.forEach((header) => {
+            header.addEventListener('click', () => {
+              const key = header.dataset.sortKey;
+              if (!key) {
+                return;
+              }
+              if (sortKey === key) {
+                sortAsc = !sortAsc;
+              } else {
+                sortKey = key;
+                sortAsc = key !== 'createdAt';
+              }
+              applyFiltersAndSorting();
+            });
+          });
+
+          filterInput?.addEventListener('input', () => applyFiltersAndSorting());
+          statusFilter?.addEventListener('change', () => applyFiltersAndSorting());
+
+          rows.forEach((row) => {
+            const form = row.querySelector('.mark-read-form');
+            if (!form) {
+              return;
+            }
+            const csrf = form.querySelector('input[name="_csrf"]').value;
+            const handleSubmit = async (event) => {
+              event.preventDefault();
+              try {
+                const response = await fetch(form.action, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-Token': csrf,
+                  },
+                  body: JSON.stringify({}),
+                });
+                if (!response.ok) {
+                  form.removeEventListener('submit', handleSubmit);
+                  form.submit();
+                  return;
+                }
+                row.dataset.status = 'read';
+                row.dataset.readAt = new Date().toISOString();
+                const statusCell = row.querySelector('.status-cell');
+                if (statusCell) {
+                  statusCell.textContent = 'Read';
+                }
+                form.remove();
+                applyFiltersAndSorting();
+              } catch (error) {
+                form.removeEventListener('submit', handleSubmit);
+                form.submit();
+              }
+            };
+            form.addEventListener('submit', handleSubmit);
+          });
+
+          applyFiltersAndSorting();
+        })();
+      </script>
+    <%- include('partials/app-shell-end') %>
+  </body>
+</html>
