@@ -1,4 +1,7 @@
 - 2025-10-09, 12:37 UTC, Fix, Added responsive pagination to the shop product table that adapts row counts to the viewport height for readability
+- 2025-10-19, 09:45 UTC, Feature, Added pagination to shop category lists showing five entries per page to keep the admin UI manageable
+# Change Log
+- 2025-10-19, 09:45 UTC, Fix, Hardened upgrade automation to locate python3 when python is absent so system updates no longer fail
 - 2025-10-19, 08:30 UTC, Fix, Ensured the system upgrade automation reuses the managed virtual environment before reinstalling dependencies
 - 2025-10-18, 11:30 UTC, Fix, Restored the Orders navigation link by initialising membership context before evaluating shop permissions in the base template
 - 2025-10-19, 07:15 UTC, Fix, Routed the system update scheduler task through scripts/upgrade.sh for consistent upgrade automation
@@ -65,8 +68,6 @@
 - 2025-10-08, 11:08 UTC, Fix, Allowed switch-company requests with incorrect JSON headers to fall back to form parsing so company switching succeeds
 - 2025-10-10, 03:15 UTC, Fix, Prevented switch-company payload parsing from failing after CSRF middleware consumes the request body stream
 - 2025-10-08, 10:55 UTC, Fix, Hardened active company session migration for legacy MySQL compatibility so company switching succeeds
-# Change Log
-
 - 2025-10-08, 10:58 UTC, Feature, Rebuilt forms repositories, assignment APIs, and OpnForm embedding for the Python portal
 - 2025-09-17, 06:44 UTC, Feature, Setup change log file
 - 2025-10-09, 20:50 UTC, Fix, Added missing FastAPI Form import to restore API startup
