@@ -1,3 +1,4 @@
+- 2025-10-09, 13:14 UTC, Feature, Added viewport-aware pagination to the software licenses table so row counts follow the available space
 - 2025-10-09, 12:59 UTC, Fix, Prevented shop pagination from exceeding the viewport when recalculating rows while scrolled
 - 2025-10-20, 11:45 UTC, Fix, Split upgrade automation into pull-only upgrade.sh and restart.sh for dependency reinstalls and service restarts
 - 2025-10-09, 12:38 UTC, Feature, Delivered a notifications dashboard with filtering, bulk acknowledgement, Swagger-documented API enhancements, and navigation badge updates
