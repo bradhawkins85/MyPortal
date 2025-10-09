@@ -28,6 +28,11 @@
           <tr><th>Image</th><th>Name</th><th>SKU</th><th>Price</th><th>Details</th><th>Order</th></tr>
         </thead>
         <tbody>
+          <% if (products.length === 0) { %>
+            <tr>
+              <td colspan="6" class="empty-state">No products match your filters.</td>
+            </tr>
+          <% } %>
           <% products.forEach(function(p){ %>
             <tr>
               <td><% if (p.image_url) { %><img src="<%= p.image_url %>" width="50" alt="" class="product-img"><% } %></td>
@@ -51,6 +56,37 @@
           <% }) %>
         </tbody>
       </table>
+      <% if (typeof pagination !== 'undefined') { %>
+        <div class="product-pagination-summary">
+          <% if (pagination.totalItems > 0) { %>
+            Showing <strong><%= pagination.startItem %></strong> to <strong><%= pagination.endItem %></strong> of
+            <strong><%= pagination.totalItems %></strong> products
+          <% } else { %>
+            No products to display
+          <% } %>
+        </div>
+        <% if (pagination.totalPages > 1) { %>
+          <nav class="product-pagination" aria-label="Product pagination">
+            <a
+              href="/shop?page=<%= Math.max(1, pagination.currentPage - 1) %><%= pagination.querySuffix %>"
+              class="pagination-link<%= pagination.currentPage === 1 ? ' disabled' : '' %>"
+              aria-disabled="<%= pagination.currentPage === 1 ? 'true' : 'false' %>"
+            >Previous</a>
+            <% for (let page = 1; page <= pagination.totalPages; page++) { %>
+              <a
+                href="/shop?page=<%= page %><%= pagination.querySuffix %>"
+                class="pagination-link<%= page === pagination.currentPage ? ' active' : '' %>"
+                <%= page === pagination.currentPage ? 'aria-current="page"' : '' %>
+              ><%= page %></a>
+            <% } %>
+            <a
+              href="/shop?page=<%= Math.min(pagination.totalPages, pagination.currentPage + 1) %><%= pagination.querySuffix %>"
+              class="pagination-link<%= pagination.currentPage === pagination.totalPages ? ' disabled' : '' %>"
+              aria-disabled="<%= pagination.currentPage === pagination.totalPages ? 'true' : 'false' %>"
+            >Next</a>
+          </nav>
+        <% } %>
+      <% } %>
       <div id="image-modal" class="modal" style="display:none;">
         <div class="modal-content">
           <span id="image-close" class="close">&times;</span>
