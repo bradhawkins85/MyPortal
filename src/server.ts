@@ -1029,6 +1029,14 @@ async function createDefaultSystemSchedules() {
   if (!tasks.some((t) => t.command === 'update_products')) {
     await createScheduledTask(null, 'Update Products', 'update_products', getRandomDailyCron());
   }
+  if (!tasks.some((t) => t.command === 'system_update')) {
+    await createScheduledTask(
+      null,
+      'MyPortal System Update',
+      'system_update',
+      getRandomDailyCron()
+    );
+  }
 }
 
 setInterval(() => {
