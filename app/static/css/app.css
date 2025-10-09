@@ -380,6 +380,10 @@ body {
   border: 1px solid rgba(148, 163, 184, 0.1);
 }
 
+.card--full {
+  grid-column: 1 / -1;
+}
+
 .card--panel {
   display: flex;
   flex-direction: column;

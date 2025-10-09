@@ -8,8 +8,17 @@
     return matches ? decodeURIComponent(matches[1]) : '';
   }
 
+  function getMetaContent(name) {
+    const meta = document.querySelector(`meta[name="${name}"]`);
+    return meta ? meta.getAttribute('content') || '' : '';
+  }
+
   function getCsrfToken() {
-    return getCookie('myportal_session_csrf');
+    const cookieToken = getCookie('myportal_session_csrf');
+    if (cookieToken) {
+      return cookieToken;
+    }
+    return getMetaContent('csrf-token');
   }
 
   async function requestJson(url, options) {
@@ -409,7 +418,7 @@
     });
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
+  function initialiseAutomationUI() {
     taskModal = query('task-editor-modal');
     logsModal = query('task-logs-modal');
     bindModalDismissal(taskModal);
@@ -417,5 +426,11 @@
     clearTaskForm();
     bindTaskForm();
     bindTaskActions();
-  });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initialiseAutomationUI);
+  } else {
+    initialiseAutomationUI();
+  }
 })();
