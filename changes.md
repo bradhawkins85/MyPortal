@@ -1,3 +1,4 @@
+- 2025-10-20, 14:15 UTC, Feature, Added viewport-aware pagination to the scheduled tasks table so automation rows scale with the available space
 - 2025-10-09, 22:00 UTC, Feature, Added super-admin notification creation endpoint with Swagger docs, README updates, and regression tests
 - 2025-10-20, 13:30 UTC, Feature, Delivered a consolidated dashboard overview with compact padding and webhook health summaries for faster triage
 - 2025-10-09, 13:09 UTC, Fix, Namespaced the notifications API under /api so the dashboard renders HTML instead of returning JSON arrays
