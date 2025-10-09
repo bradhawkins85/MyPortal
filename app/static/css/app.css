@@ -1012,21 +1012,6 @@ body {
   justify-content: flex-end;
 }
 
-.shop-toolbar__form {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.shop-toolbar__search {
-  min-width: 220px;
-}
-
-.shop-toolbar__checkbox {
-  margin: 0;
-}
-
 .cart-card .table-wrapper {
   margin-bottom: 1rem;
 }
