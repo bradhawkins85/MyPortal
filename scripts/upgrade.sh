@@ -90,8 +90,64 @@ if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
     PYTHON_BIN=""
   fi
 
+  cleanup_invalid_distribution() {
+    local interpreter="$1"
+    if [[ -z "$interpreter" ]]; then
+      return
+    fi
+    "$interpreter" - <<'PY'
+from __future__ import annotations
+
+import shutil
+import site
+import sys
+from pathlib import Path
+
+PROJECT_NAME = "myportal"
+PREFIX = f"~{PROJECT_NAME}"
+
+def iter_site_packages() -> set[Path]:
+    paths: set[Path] = set()
+    for getter in (getattr(site, "getsitepackages", None), getattr(site, "getusersitepackages", None)):
+        if getter is None:
+            continue
+        try:
+            value = getter()
+        except (AttributeError, TypeError):
+            continue
+        if isinstance(value, str):
+            value = [value]
+        for path in value:
+            if path:
+                paths.add(Path(path))
+
+    py_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    paths.add(Path(sys.prefix) / "lib" / py_version / "site-packages")
+    if sys.platform.startswith("win"):
+        paths.add(Path(sys.prefix) / "Lib" / "site-packages")
+
+    return {path for path in paths if path.exists()}
+
+
+for site_path in iter_site_packages():
+    for entry in site_path.iterdir():
+        name = entry.name
+        if not name.lower().startswith(PREFIX):
+            continue
+        try:
+            if entry.is_dir():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+            print(f"Removed stale distribution entry: {entry}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"Failed to remove stale distribution entry {entry}: {exc}", file=sys.stderr)
+PY
+  }
+
   if [[ -n "$PYTHON_BIN" ]]; then
     echo "Using virtual environment interpreter at ${PYTHON_BIN}" >&2
+    cleanup_invalid_distribution "$PYTHON_BIN"
     "$PYTHON_BIN" -m pip install -e "$PROJECT_ROOT"
   else
     echo "Warning: .venv not found, falling back to system python" >&2
@@ -104,6 +160,7 @@ if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
       echo "Error: Unable to locate a python interpreter for dependency installation." >&2
       exit 1
     fi
+    cleanup_invalid_distribution "$PYTHON_FALLBACK"
     "$PYTHON_FALLBACK" -m pip install -e "$PROJECT_ROOT"
   fi
 
