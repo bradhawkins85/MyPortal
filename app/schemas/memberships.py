@@ -3,21 +3,30 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class MembershipBase(BaseModel):
-    role_id: int
+    role_id: int = Field(validation_alias=AliasChoices("role_id", "roleId"))
     status: str = Field(default="active", pattern=r"^(invited|active|suspended)$")
 
 
 class MembershipCreate(MembershipBase):
-    user_id: int
+    user_id: int = Field(validation_alias=AliasChoices("user_id", "userId"))
 
 
 class MembershipUpdate(BaseModel):
-    role_id: Optional[int] = None
-    status: Optional[str] = Field(default=None, pattern=r"^(invited|active|suspended)$")
+    model_config = ConfigDict(populate_by_name=True)
+
+    role_id: Optional[int] = Field(
+        default=None,
+        validation_alias=AliasChoices("role_id", "roleId"),
+    )
+    status: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("status", "status"),
+        pattern=r"^(invited|active|suspended)$",
+    )
 
 
 class MembershipUser(BaseModel):
