@@ -97,6 +97,85 @@ table {
   border-collapse: collapse;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.table-card {
+  background: #faf8ff;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+.table-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.table-card-title {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #4a00e0;
+}
+
+.table-card-subtitle {
+  margin: 0.2rem 0 0;
+  color: #555;
+  font-size: 0.9rem;
+}
+
+.viewport-table-wrapper {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.viewport-table-wrapper .dt-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.viewport-table-wrapper .dt-layout-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.viewport-table-wrapper .dt-layout-table {
+  flex: 1;
+  min-height: 0;
+}
+
+.viewport-table-wrapper .dt-layout-table table {
+  width: 100% !important;
+  margin: 0;
+}
+
+.viewport-table-wrapper .dt-layout-pagination {
+  margin-top: auto;
+}
+
 #api-keys table,
 #companies table,
 #apps table,
