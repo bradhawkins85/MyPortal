@@ -1,3 +1,4 @@
+- 2025-10-09, 12:18 UTC, Fix, Accepted camelCase membership payload fields so API updates persist when saving company membership roles
 - 2025-10-09, 11:44 UTC, Feature, Added inline role selection to company memberships so administrators can reassign members without leaving the table
 - 2025-10-18, 09:00 UTC, Fix, Removed Syncro import controls from the Staff page and expanded the Add Staff form to full width for better usability
 - 2025-10-17, 12:30 UTC, Fix, Added a global form confirmation handler and removed the missing forms_admin.js reference to resolve admin script 404s
