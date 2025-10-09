@@ -1,21 +1,193 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% set overview = overview or {} %}
 <div class="dashboard">
-  <h1>Welcome to {{ app_name }}</h1>
-  <p class="dashboard__lead">
-    The platform has been migrated to Python. Use the navigation to manage users and companies
-    or explore the automatically generated Swagger documentation.
-  </p>
-  <div class="dashboard__grid">
-    <div class="card">
-      <h2>Users</h2>
-      <p>Manage user accounts, security policies, and company assignments.</p>
+  <section class="dashboard__section">
+    <div class="dashboard__section-header">
+      <h1 class="dashboard__title">Consolidated overview</h1>
+      <p class="dashboard__subtitle">
+        Key insights across the portal with compact spacing tailored for fast scanning.
+      </p>
     </div>
-    <div class="card card--full">
-      <h2>Companies</h2>
-      <p>Administer customer records, pricing, and access controls.</p>
+    <div class="dashboard__grid dashboard__grid--summary" role="list">
+      {% for card in overview.cards %}
+      <article class="card summary-card" role="listitem" aria-live="polite">
+        <span class="summary-card__label">{{ card.label }}</span>
+        <span class="summary-card__value">{{ card.formatted or card.value }}</span>
+        {% if card.description %}
+        <span class="summary-card__meta">{{ card.description }}</span>
+        {% endif %}
+      </article>
+      {% else %}
+      <p class="dashboard__empty">Metrics will appear here once activity is recorded.</p>
+      {% endfor %}
     </div>
-  </div>
+  </section>
+
+  <section class="dashboard__section">
+    <div class="dashboard__section-header">
+      <h2 class="dashboard__heading">
+        {% if overview.company %}
+          {{ overview.company.name }}
+        {% else %}
+          Company snapshot
+        {% endif %}
+      </h2>
+      <p class="dashboard__subtitle">
+        {% if overview.company %}
+          Live metrics for the selected company.
+        {% else %}
+          Choose a company from the sidebar to populate this snapshot.
+        {% endif %}
+      </p>
+    </div>
+    {% if overview.company %}
+    <div class="dashboard__grid dashboard__grid--company">
+      <div class="dashboard__column">
+        <div class="dashboard__grid dashboard__grid--metrics" role="list">
+          {% for metric in overview.company.metrics %}
+          <article class="card summary-card summary-card--compact" role="listitem">
+            <span class="summary-card__label">{{ metric.label }}</span>
+            <span class="summary-card__value">{{ metric.formatted or metric.value }}</span>
+            {% if metric.meta %}
+            <span class="summary-card__meta">{{ metric.meta }}</span>
+            {% endif %}
+          </article>
+          {% endfor %}
+        </div>
+        <article class="card status-card">
+          <h3 class="status-card__title">License capacity</h3>
+          <dl class="status-list">
+            <div class="status-list__row">
+              <dt>Total seats</dt>
+              <dd>{{ overview.company.licenses.formatted.total }}</dd>
+            </div>
+            <div class="status-list__row">
+              <dt>Allocated</dt>
+              <dd>{{ overview.company.licenses.formatted.allocated }}</dd>
+            </div>
+            <div class="status-list__row">
+              <dt>Available</dt>
+              <dd>{{ overview.company.licenses.formatted.available }}</dd>
+            </div>
+            <div class="status-list__row">
+              <dt>Utilisation</</div>
+*** End Patch
+PATCH
+cat <<'EOF' > app/templates/dashboard.html
+{% extends "base.html" %}
+
+{% block content %}
+{% set overview = overview or {} %}
+<div class="dashboard">
+  <section class="dashboard__section">
+    <div class="dashboard__section-header">
+      <h1 class="dashboard__title">Consolidated overview</h1>
+      <p class="dashboard__subtitle">
+        Key insights across the portal with compact spacing tailored for fast scanning.
+      </p>
+    </div>
+    <div class="dashboard__grid dashboard__grid--summary" role="list">
+      {% for card in overview.cards %}
+      <article class="card summary-card" role="listitem" aria-live="polite">
+        <span class="summary-card__label">{{ card.label }}</span>
+        <span class="summary-card__value">{{ card.formatted or card.value }}</span>
+        {% if card.description %}
+        <span class="summary-card__meta">{{ card.description }}</span>
+        {% endif %}
+      </article>
+      {% else %}
+      <p class="dashboard__empty">Metrics will appear here once activity is recorded.</p>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="dashboard__section">
+    <div class="dashboard__section-header">
+      <h2 class="dashboard__heading">
+        {% if overview.company %}
+          {{ overview.company.name }}
+        {% else %}
+          Company snapshot
+        {% endif %}
+      </h2>
+      <p class="dashboard__subtitle">
+        {% if overview.company %}
+          Live metrics for the selected company.
+        {% else %}
+          Choose a company from the sidebar to populate this snapshot.
+        {% endif %}
+      </p>
+    </div>
+    {% if overview.company %}
+    <div class="dashboard__grid dashboard__grid--company">
+      <div class="dashboard__column">
+        <div class="dashboard__grid dashboard__grid--metrics" role="list">
+          {% for metric in overview.company.metrics %}
+          <article class="card summary-card summary-card--compact" role="listitem">
+            <span class="summary-card__label">{{ metric.label }}</span>
+            <span class="summary-card__value">{{ metric.formatted or metric.value }}</span>
+            {% if metric.meta %}
+            <span class="summary-card__meta">{{ metric.meta }}</span>
+            {% endif %}
+          </article>
+          {% endfor %}
+        </div>
+        <article class="card status-card">
+          <h3 class="status-card__title">License capacity</h3>
+          <dl class="status-list">
+            <div class="status-list__row">
+              <dt>Total seats</dt>
+              <dd>{{ overview.company.licenses.formatted.total }}</dd>
+            </div>
+            <div class="status-list__row">
+              <dt>Allocated</dt>
+              <dd>{{ overview.company.licenses.formatted.allocated }}</dd>
+            </div>
+            <div class="status-list__row">
+              <dt>Available</dt>
+              <dd>{{ overview.company.licenses.formatted.available }}</dd>
+            </div>
+            <div class="status-list__row">
+              <dt>Utilisation</dt>
+              <dd>{{ overview.company.licenses.formatted.utilisation }}</dd>
+            </div>
+          </dl>
+        </article>
+      </div>
+      <div class="dashboard__column">
+        <article class="card status-card">
+          <h3 class="status-card__title">Asset distribution</h3>
+          <ul class="status-list" role="list">
+            {% for status in overview.company.asset_status %}
+            <li class="status-list__item" role="listitem">
+              <span class="status-list__label">{{ status.label }}</span>
+              <span class="status-list__value">{{ status.formatted }}</span>
+            </li>
+            {% endfor %}
+          </ul>
+        </article>
+        <article class="card status-card">
+          <h3 class="status-card__title">Invoice health</h3>
+          <div class="status-card__highlight">{{ overview.company.financial.open_formatted }}</div>
+          <p class="status-card__meta">
+            {{ overview.company.financial.overdue_formatted }} overdue invoices
+          </p>
+          <ul class="status-list status-list--compact" role="list">
+            {% for status in overview.company.invoice_status %}
+            <li class="status-list__item" role="listitem">
+              <span class="status-list__label">{{ status.label }}</span>
+              <span class="status-list__value">{{ status.formatted }}</span>
+            </li>
+            {% endfor %}
+          </ul>
+        </article>
+      </div>
+    </div>
+    {% else %}
+    <p class="dashboard__empty">No company is active yet. Switch companies to populate the snapshot.</p>
+    {% endif %}
+  </section>
 </div>
 {% endblock %}
