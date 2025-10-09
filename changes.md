@@ -1,3 +1,4 @@
+- 2025-10-09, 13:16 UTC, Fix, Limited the Available products catalogue to display a maximum of five items per page for consistent pagination
 - 2025-10-09, 13:16 UTC, Feature, Added viewport-aware pagination to the staff roster so visible rows adapt to screen height
 - 2025-10-20, 14:15 UTC, Feature, Added viewport-aware pagination to the scheduled tasks table so automation rows scale with the available space
 - 2025-10-09, 22:00 UTC, Feature, Added super-admin notification creation endpoint with Swagger docs, README updates, and regression tests
