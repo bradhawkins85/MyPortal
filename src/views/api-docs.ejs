@@ -2,11 +2,11 @@
 <html>
   <%- include('partials/head', { title: 'API Docs' }) %>
   <body>
-    <div class="app-container">
-      <%- include('partials/sidebar') %>
-      <div class="content">
+    <%- include('partials/app-shell-start', {
+          pageTitle: 'API Documentation',
+          pageSubtitle: 'Interactive Swagger interface'
+        }) %>
         <iframe src="/swagger" class="swagger-frame"></iframe>
-      </div>
-    </div>
+    <%- include('partials/app-shell-end') %>
   </body>
 </html>
