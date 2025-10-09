@@ -183,6 +183,29 @@ table th {
   overflow: hidden;
 }
 
+#add-staff-section {
+  width: 100%;
+}
+
+#add-staff-section form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+
+#add-staff-section form input,
+#add-staff-section form select,
+#add-staff-section form button {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+#add-staff-section form label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .page-header {
   display: flex;
   justify-content: space-between;
