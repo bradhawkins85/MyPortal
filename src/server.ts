@@ -2803,10 +2803,37 @@ app.get('/shop', ensureAuth, ensureShopAccess, async (req, res) => {
     ...p,
     price: isVip && p.vip_price !== null ? p.vip_price : p.price,
   }));
+  const pageParam = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+  const pageSize = 12;
+  const totalItems = adjusted.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const currentPage = Math.min(Math.max(Number.isNaN(pageParam) ? 1 : pageParam, 1), totalPages);
+  const startIndex = (currentPage - 1) * pageSize;
+  const paginatedProducts = adjusted.slice(startIndex, startIndex + pageSize);
+  const startItem = totalItems === 0 ? 0 : startIndex + 1;
+  const endItem = startIndex + paginatedProducts.length;
+  const preservedParams = new URLSearchParams();
+  if (categoryId !== undefined) {
+    preservedParams.set('category', String(categoryId));
+  }
+  if (showOutOfStock) {
+    preservedParams.set('showOutOfStock', '1');
+  }
+  const preservedQuery = preservedParams.toString();
+  const pageQuerySuffix = preservedQuery ? `&${preservedQuery}` : '';
   const error = req.session.cartError;
   req.session.cartError = undefined;
   res.render('shop', {
-    products: adjusted,
+    products: paginatedProducts,
+    pagination: {
+      currentPage,
+      totalPages,
+      totalItems,
+      pageSize,
+      startItem,
+      endItem,
+      querySuffix: pageQuerySuffix,
+    },
     categories,
     currentCategory: categoryId,
     showOutOfStock,
