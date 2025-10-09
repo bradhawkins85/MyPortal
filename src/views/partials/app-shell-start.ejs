@@ -1,0 +1,17 @@
+<div class="app-shell">
+  <%- include('partials/sidebar') %>
+  <div class="main-panel">
+    <header class="page-header">
+      <div class="page-title">
+        <h1><%= pageTitle || 'Overview' %></h1>
+        <% if (pageSubtitle) { %>
+          <p class="page-subtitle"><%= pageSubtitle %></p>
+        <% } %>
+      </div>
+      <% if (typeof headerActions !== 'undefined' && headerActions) { %>
+        <div class="header-actions">
+          <%- headerActions %>
+        </div>
+      <% } %>
+    </header>
+    <section class="page-body">

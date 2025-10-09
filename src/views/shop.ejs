@@ -2,10 +2,10 @@
 <html>
   <%- include('partials/head', { title: 'Shop' }) %>
 <body>
-  <div class="app-container">
-    <%- include('partials/sidebar') %>
-    <div class="content">
-      <h1>Shop</h1>
+  <%- include('partials/app-shell-start', {
+        pageTitle: 'Shop',
+        pageSubtitle: 'Browse and order products'
+      }) %>
       <% if (cartError) { %>
         <p><%= cartError %></p>
       <% } %>
@@ -63,8 +63,7 @@
           <div id="details-content"></div>
         </div>
       </div>
-    </div>
-  </div>
+  <%- include('partials/app-shell-end') %>
   <script>
     document.querySelectorAll('.product-img').forEach(function(img) {
       img.addEventListener('click', function () {
