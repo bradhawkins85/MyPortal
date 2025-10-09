@@ -2,10 +2,10 @@
 <html>
   <%- include('partials/head', { title: 'Invoices' }) %>
 <body>
-  <div class="app-container">
-    <%- include('partials/sidebar') %>
-    <div class="content">
-      <h1>Invoices</h1>
+  <%- include('partials/app-shell-start', {
+        pageTitle: 'Invoices',
+        pageSubtitle: 'Company billing overview'
+      }) %>
       <section>
         <h2>Company Invoices</h2>
         <table>
@@ -27,8 +27,7 @@
           </tbody>
         </table>
       </section>
-    </div>
-  </div>
+  <%- include('partials/app-shell-end') %>
 <% if (isSuperAdmin) { %>
 <script>
   document.querySelectorAll('.delete-btn').forEach(function(btn) {

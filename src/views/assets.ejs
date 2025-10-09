@@ -2,16 +2,10 @@
 <html>
   <%- include('partials/head', { title: 'Assets' }) %>
 <body>
-  <div class="app-container">
-    <%- include('partials/sidebar') %>
-    <div class="content">
-      <div class="page-header">
-        <div class="page-title">
-          <h1>Assets</h1>
-          <p class="page-subtitle">Company Assets</p>
-        </div>
-      </div>
-      <div class="page-body">
+  <%- include('partials/app-shell-start', {
+        pageTitle: 'Assets',
+        pageSubtitle: 'Company Assets'
+      }) %>
         <div class="asset-controls">
           <label for="asset-search" class="search-control">
             <span class="visually-hidden">Search assets</span>
@@ -76,9 +70,7 @@
           </tbody>
           </table>
         </section>
-      </div>
-    </div>
-  </div>
+  <%- include('partials/app-shell-end') %>
   <script>
     const table = document.getElementById('assets-table');
     const searchInput = document.getElementById('asset-search');
