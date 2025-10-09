@@ -292,9 +292,15 @@
         return viewportHeight;
       }
       const bottomPadding = 32;
-      const availableRaw = viewportHeight - rect.top - bottomPadding;
-      const fallback = Math.max(viewportHeight * 0.5, 320);
-      return availableRaw > 0 ? availableRaw : fallback;
+      const safeTop = Math.max(rect.top, 0);
+      const maxAvailable = Math.max(0, viewportHeight - bottomPadding);
+      const availableRaw = viewportHeight - safeTop - bottomPadding;
+      if (availableRaw > 0) {
+        return Math.min(availableRaw, maxAvailable || availableRaw);
+      }
+      const fallbackBase = Math.max(viewportHeight * 0.5, 320);
+      const fallback = maxAvailable > 0 ? Math.min(fallbackBase, maxAvailable) : fallbackBase;
+      return fallback;
     }
 
     measureRowHeight() {
