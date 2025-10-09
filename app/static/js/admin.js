@@ -385,11 +385,117 @@
     });
   }
 
+  function bindAddCompanyModal() {
+    const modal = document.getElementById('add-company-modal');
+    const openButton = document.querySelector('[data-add-company-modal-open]');
+    if (!modal || !openButton) {
+      return;
+    }
+
+    const focusableSelector =
+      'a[href], button:not([disabled]), textarea, input:not([type="hidden"]):not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    let previousActiveElement = null;
+
+    function getFocusableElements() {
+      return Array.from(modal.querySelectorAll(focusableSelector)).filter((element) => {
+        if (element.hasAttribute('disabled')) {
+          return false;
+        }
+        if (element.getAttribute('aria-hidden') === 'true') {
+          return false;
+        }
+        return element.offsetParent !== null;
+      });
+    }
+
+    function focusFirstElement() {
+      const [firstFocusable] = getFocusableElements();
+      if (firstFocusable && typeof firstFocusable.focus === 'function') {
+        firstFocusable.focus();
+      }
+    }
+
+    function handleKeydown(event) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeModal();
+        return;
+      }
+      if (event.key !== 'Tab') {
+        return;
+      }
+
+      const focusable = getFocusableElements();
+      if (!focusable.length) {
+        event.preventDefault();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const activeElement = document.activeElement;
+
+      if (event.shiftKey) {
+        if (activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    function openModal() {
+      previousActiveElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      modal.hidden = false;
+      modal.classList.add('is-visible');
+      modal.setAttribute('aria-hidden', 'false');
+      openButton.setAttribute('aria-expanded', 'true');
+      document.addEventListener('keydown', handleKeydown);
+      focusFirstElement();
+    }
+
+    function closeModal() {
+      modal.classList.remove('is-visible');
+      modal.hidden = true;
+      modal.setAttribute('aria-hidden', 'true');
+      openButton.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('keydown', handleKeydown);
+      if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
+        previousActiveElement.focus();
+      } else {
+        openButton.focus();
+      }
+    }
+
+    openButton.setAttribute('aria-expanded', 'false');
+
+    openButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      openModal();
+    });
+
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) {
+        closeModal();
+      }
+    });
+
+    modal.querySelectorAll('[data-modal-close]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        closeModal();
+      });
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     bindRoleForm();
     bindMembershipForms();
     bindCompanyAssignmentControls();
     bindApiKeyCopyButtons();
     bindConfirmationButtons();
+    bindAddCompanyModal();
   });
 })();
