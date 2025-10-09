@@ -199,10 +199,16 @@ async def list_assignments(company_id: int | None = None) -> List[dict[str, Any]
             u.first_name,
             u.last_name,
             c.name AS company_name,
-            c.is_vip
+            c.is_vip,
+            m.id AS membership_id,
+            m.role_id AS membership_role_id,
+            r.name AS membership_role_name
         FROM user_companies AS uc
         INNER JOIN users AS u ON u.id = uc.user_id
         INNER JOIN companies AS c ON c.id = uc.company_id
+        LEFT JOIN company_memberships AS m
+            ON m.company_id = uc.company_id AND m.user_id = uc.user_id
+        LEFT JOIN roles AS r ON r.id = m.role_id
     """
     params: list[Any] = []
     if company_id is not None:
@@ -217,6 +223,17 @@ async def list_assignments(company_id: int | None = None) -> List[dict[str, Any]
         normalised["first_name"] = row.get("first_name")
         normalised["last_name"] = row.get("last_name")
         normalised["company_name"] = row.get("company_name")
+        normalised["membership_id"] = (
+            int(row["membership_id"])
+            if row.get("membership_id") is not None
+            else None
+        )
+        normalised["membership_role_id"] = (
+            int(row["membership_role_id"])
+            if row.get("membership_role_id") is not None
+            else None
+        )
+        normalised["membership_role_name"] = row.get("membership_role_name")
         if "is_vip" in row and row.get("is_vip") is not None:
             try:
                 normalised["is_vip"] = bool(int(row.get("is_vip")))

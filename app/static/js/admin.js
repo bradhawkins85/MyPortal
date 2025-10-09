@@ -191,6 +191,33 @@
       });
     });
 
+    document.querySelectorAll('[data-membership-role]').forEach((select) => {
+      select.addEventListener('change', async () => {
+        const { companyId, userId } = select.dataset;
+        if (!companyId || !userId) {
+          return;
+        }
+        const previousValue = select.dataset.currentRole || '';
+        const roleId = select.value;
+        if (!roleId) {
+          select.value = previousValue;
+          return;
+        }
+        const formData = new FormData();
+        formData.append('roleId', roleId);
+        select.disabled = true;
+        try {
+          await requestForm(`/admin/companies/assignment/${companyId}/${userId}/role`, formData);
+          select.dataset.currentRole = roleId;
+        } catch (error) {
+          select.value = previousValue;
+          alert(`Unable to update role: ${error.message}`);
+        } finally {
+          select.disabled = false;
+        }
+      });
+    });
+
     document.querySelectorAll('[data-remove-assignment]').forEach((button) => {
       button.addEventListener('click', async () => {
         const { companyId, userId } = button.dataset;
