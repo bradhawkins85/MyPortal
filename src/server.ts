@@ -966,7 +966,7 @@ async function runScheduledTask(id: number) {
       case 'system_update':
         systemUpdateInProgress = true;
         try {
-          await execFileAsync(path.join(__dirname, '..', 'update.sh'));
+          await execFileAsync(path.join(__dirname, '..', 'scripts', 'upgrade.sh'));
         } finally {
           systemUpdateInProgress = false;
         }

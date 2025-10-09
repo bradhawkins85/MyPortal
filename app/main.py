@@ -59,6 +59,7 @@ from app.repositories import api_keys as api_key_repo
 from app.repositories import auth as auth_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
+from app.repositories import assets as asset_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import licenses as license_repo
 from app.repositories import forms as forms_repo
@@ -114,6 +115,10 @@ tags_metadata = [
     {"name": "Companies", "description": "Company catalogue and membership management."},
     {"name": "Roles", "description": "Role definitions and access controls."},
     {"name": "Memberships", "description": "Company membership workflows with approval tracking."},
+    {
+        "name": "Assets",
+        "description": "Device inventory, warranty status, and Syncro asset synchronisation endpoints.",
+    },
     {
         "name": "Staff",
         "description": "Staff directory management, Syncro contact synchronisation, and verification workflows.",
@@ -550,6 +555,25 @@ _NOTIFICATION_READ_OPTIONS: list[tuple[str, str]] = [
 
 _NOTIFICATION_PAGE_SIZES: list[int] = [10, 25, 50, 100]
 
+_ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
+    {"key": "name", "label": "Name", "sort": "string"},
+    {"key": "type", "label": "Type", "sort": "string"},
+    {"key": "serial_number", "label": "Serial number", "sort": "string"},
+    {"key": "status", "label": "Status", "sort": "string"},
+    {"key": "os_name", "label": "OS name", "sort": "string"},
+    {"key": "cpu_name", "label": "CPU", "sort": "string"},
+    {"key": "ram_gb", "label": "RAM (GB)", "sort": "number"},
+    {"key": "hdd_size", "label": "Storage", "sort": "string"},
+    {"key": "last_sync", "label": "Last sync", "sort": "date"},
+    {"key": "motherboard_manufacturer", "label": "Motherboard", "sort": "string"},
+    {"key": "form_factor", "label": "Form factor", "sort": "string"},
+    {"key": "last_user", "label": "Last user", "sort": "string"},
+    {"key": "approx_age", "label": "Approx age", "sort": "number"},
+    {"key": "performance_score", "label": "Performance score", "sort": "number"},
+    {"key": "warranty_status", "label": "Warranty status", "sort": "string"},
+    {"key": "warranty_end_date", "label": "Warranty end", "sort": "date"},
+]
+
 
 def _normalise_api_key_order(order_by: str | None) -> str:
     if not order_by:
@@ -864,6 +888,40 @@ async def _load_license_context(
             company_id,
             RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
         )
+    company = await company_repo.get_company_by_id(company_id)
+    return user, membership, company, company_id, None
+
+
+async def _load_asset_context(
+    request: Request,
+):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return user, None, None, None, redirect
+
+    is_super_admin = bool(user.get("is_super_admin"))
+    company_id_raw = user.get("company_id")
+    if company_id_raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No company associated with the current user",
+        )
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
+
+    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    can_manage_assets = bool(membership and membership.get("can_manage_assets"))
+    if not (is_super_admin or can_manage_assets):
+        return (
+            user,
+            membership,
+            None,
+            company_id,
+            RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
+        )
+
     company = await company_repo.get_company_by_id(company_id)
     return user, membership, company, company_id, None
 
@@ -1373,6 +1431,176 @@ async def index(request: Request):
     if redirect:
         return redirect
     return await _render_template("dashboard.html", request, user)
+
+
+@app.get("/assets", response_class=HTMLResponse, tags=["Assets"])
+async def assets_page(request: Request):
+    user, _membership, company, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+
+    rows = await asset_repo.list_company_assets(company_id)
+
+    def _clean_text(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return str(value)
+        text = str(value).strip()
+        return text or None
+
+    def _format_number(value: Any) -> tuple[str | None, str]:
+        if value is None:
+            return None, ""
+        if isinstance(value, str) and not value.strip():
+            return None, ""
+        try:
+            decimal_value = Decimal(str(value))
+        except (InvalidOperation, ValueError):
+            text = _clean_text(value)
+            return text, text or ""
+        display = format(decimal_value.normalize(), "f")
+        if "." in display:
+            display = display.rstrip("0").rstrip(".")
+        return display or "0", str(decimal_value)
+
+    def _parse_iso(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        else:
+            parsed = parsed.astimezone(timezone.utc)
+        return parsed
+
+    prepared: list[dict[str, Any]] = []
+    today = datetime.now(timezone.utc).date()
+    recent_threshold = datetime.now(timezone.utc) - timedelta(days=30)
+    recent_sync = 0
+    expired_warranty = 0
+    active_warranty = 0
+
+    for row in rows:
+        name = _clean_text(row.get("name")) or "Asset"
+        record: dict[str, Any] = {
+            "id": row.get("id"),
+            "name": name,
+            "type": _clean_text(row.get("type")),
+            "serial_number": _clean_text(row.get("serial_number")),
+            "status": _clean_text(row.get("status")),
+            "os_name": _clean_text(row.get("os_name")),
+            "cpu_name": _clean_text(row.get("cpu_name")),
+            "hdd_size": _clean_text(row.get("hdd_size")),
+            "motherboard_manufacturer": _clean_text(row.get("motherboard_manufacturer")),
+            "form_factor": _clean_text(row.get("form_factor")),
+            "last_user": _clean_text(row.get("last_user")),
+            "warranty_status": _clean_text(row.get("warranty_status")),
+            "syncro_asset_id": _clean_text(row.get("syncro_asset_id")),
+        }
+
+        ram_display, ram_sort = _format_number(row.get("ram_gb"))
+        approx_display, approx_sort = _format_number(row.get("approx_age"))
+        performance_display, performance_sort = _format_number(row.get("performance_score"))
+        record["ram_gb"] = ram_display
+        record["ram_gb_sort"] = ram_sort
+        record["approx_age"] = approx_display
+        record["approx_age_sort"] = approx_sort
+        record["performance_score"] = performance_display
+        record["performance_score_sort"] = performance_sort
+
+        last_sync_iso = _to_iso(row.get("last_sync"))
+        record["last_sync"] = last_sync_iso
+        record["last_sync_iso"] = last_sync_iso
+        record["last_sync_sort"] = last_sync_iso or ""
+
+        if last_sync_iso:
+            parsed_last_sync = _parse_iso(last_sync_iso)
+            if parsed_last_sync and parsed_last_sync >= recent_threshold:
+                recent_sync += 1
+
+        warranty_value = row.get("warranty_end_date")
+        warranty_display: str | None
+        warranty_sort = ""
+        warranty_iso: str | None = None
+        if isinstance(warranty_value, datetime):
+            warranty_date = warranty_value.astimezone(timezone.utc).date()
+            warranty_display = warranty_date.isoformat()
+            warranty_iso = warranty_display
+            warranty_sort = warranty_display
+        elif isinstance(warranty_value, date):
+            warranty_display = warranty_value.isoformat()
+            warranty_iso = warranty_display
+            warranty_sort = warranty_display
+        else:
+            warranty_display = _clean_text(warranty_value)
+            if warranty_display:
+                warranty_sort = warranty_display
+
+        if warranty_iso:
+            try:
+                warranty_date_obj = date.fromisoformat(warranty_iso)
+            except ValueError:
+                warranty_date_obj = None
+            if warranty_date_obj:
+                if warranty_date_obj < today:
+                    expired_warranty += 1
+                else:
+                    active_warranty += 1
+
+        record["warranty_end_date"] = warranty_display
+        record["warranty_end_sort"] = warranty_sort
+        record["warranty_end_iso"] = warranty_iso
+
+        prepared.append(record)
+
+    stats = {
+        "total": len(prepared),
+        "recent_sync": recent_sync,
+        "expired_warranty": expired_warranty,
+        "active_warranty": active_warranty,
+    }
+
+    extra = {
+        "title": "Assets",
+        "assets": prepared,
+        "columns": _ASSET_TABLE_COLUMNS,
+        "company": company,
+        "stats": stats,
+        "has_assets": bool(prepared),
+        "is_super_admin": bool(user.get("is_super_admin")),
+    }
+    return await _render_template("assets/index.html", request, user, extra=extra)
+
+
+@app.delete("/assets/{asset_id}", response_class=JSONResponse, tags=["Assets"])
+async def delete_asset(request: Request, asset_id: int):
+    user, _membership, _, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Asset management access denied")
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+
+    record = await asset_repo.get_asset_by_id(asset_id)
+    if not record or int(record.get("company_id", 0) or 0) != company_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+
+    await asset_repo.delete_asset(asset_id)
+    log_info(
+        "Asset deleted",
+        asset_id=asset_id,
+        company_id=company_id,
+        user_id=user.get("id"),
+    )
+    return JSONResponse({"success": True})
 
 
 @app.get("/licenses", response_class=HTMLResponse)
