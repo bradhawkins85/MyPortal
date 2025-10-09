@@ -1,4 +1,9 @@
 - 2025-10-09, 13:16 UTC, Fix, Limited the Available products catalogue to display a maximum of five items per page for consistent pagination
+- 2025-10-09, 13:16 UTC, Feature, Added viewport-aware pagination to the staff roster so visible rows adapt to screen height
+- 2025-10-20, 14:15 UTC, Feature, Added viewport-aware pagination to the scheduled tasks table so automation rows scale with the available space
+- 2025-10-09, 22:00 UTC, Feature, Added super-admin notification creation endpoint with Swagger docs, README updates, and regression tests
+- 2025-10-20, 13:30 UTC, Feature, Delivered a consolidated dashboard overview with compact padding and webhook health summaries for faster triage
+- 2025-10-09, 13:09 UTC, Fix, Namespaced the notifications API under /api so the dashboard renders HTML instead of returning JSON arrays
 - 2025-10-09, 13:09 UTC, Fix, Restored customer shop pagination with capped page sizes and navigation controls to prevent sprawling product lists
 - 2025-10-09, 12:59 UTC, Fix, Prevented shop pagination from exceeding the viewport when recalculating rows while scrolled
 - 2025-10-20, 11:45 UTC, Fix, Split upgrade automation into pull-only upgrade.sh and restart.sh for dependency reinstalls and service restarts
@@ -135,3 +140,4 @@
 - 2025-10-09, 11:09 UTC, Feature, Moved scheduler editing into modal workflows, added per-task run history popups, and created a dedicated webhook delivery monitoring page
 - 2025-10-09, 11:36 UTC, Fix, Removed the SKU column from the software licenses table to simplify the display per request
 - 2025-10-09, 12:53 UTC, Fix, Hardened system update cleanup to skip inaccessible user site-packages paths and avoid permission failures
+- 2025-10-09, 13:15 UTC, Feature, Added viewport-aware pagination controls to the webhook delivery queue for responsive monitoring
