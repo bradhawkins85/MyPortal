@@ -1,3 +1,4 @@
+- 2025-10-09, 12:37 UTC, Fix, Added responsive pagination to the shop product table that adapts row counts to the viewport height for readability
 - 2025-10-19, 09:45 UTC, Feature, Added pagination to shop category lists showing five entries per page to keep the admin UI manageable
 # Change Log
 - 2025-10-19, 09:45 UTC, Fix, Hardened upgrade automation to locate python3 when python is absent so system updates no longer fail
