@@ -3918,13 +3918,8 @@ app.post('/admin/schedules/:id', ensureAuth, ensureSuperAdmin, async (req, res) 
 
 app.post('/admin/schedules/:id/run', ensureAuth, ensureSuperAdmin, async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const task = await getScheduledTask(id);
   runScheduledTask(id).catch((err) => console.error('Scheduled task failed', err));
-  if (task?.command === 'system_update') {
-    res.render('update-progress');
-  } else {
-    res.redirect('/admin#schedules');
-  }
+  res.redirect('/admin#schedules');
 });
 
 app.get('/admin/system-update-status', ensureAuth, ensureSuperAdmin, (req, res) => {
