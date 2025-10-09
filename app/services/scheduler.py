@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import os
+from asyncio.subprocess import PIPE
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -13,6 +17,25 @@ from app.services import staff_importer
 from app.services import m365 as m365_service
 from app.services import products as products_service
 from app.services import webhook_monitor
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_SYSTEM_UPDATE_LOCK = asyncio.Lock()
+_OUTPUT_PREVIEW_LIMIT = 2000
+
+
+def _truncate_output(payload: str | bytes | None) -> str | None:
+    if payload is None:
+        return None
+    if isinstance(payload, bytes):
+        text = payload.decode("utf-8", errors="replace")
+    else:
+        text = payload
+    text = text.strip()
+    if not text:
+        return None
+    if len(text) <= _OUTPUT_PREVIEW_LIMIT:
+        return text
+    return text[: _OUTPUT_PREVIEW_LIMIT - 1] + "\u2026"
 
 
 class SchedulerService:
@@ -107,6 +130,10 @@ class SchedulerService:
                     await m365_service.sync_company_licenses(int(company_id))
             elif command == "update_products":
                 await products_service.update_products_from_feed()
+            elif command == "system_update":
+                output = await self._run_system_update()
+                if output:
+                    details = output
             else:
                 status = "skipped"
                 details = "No handler registered for command"
@@ -137,6 +164,39 @@ class SchedulerService:
         if not task:
             raise ValueError(f"Task {task_id} not found")
         await self._run_task(task)
+
+    async def _run_system_update(self) -> str | None:
+        script_path = _PROJECT_ROOT / "update.sh"
+        if not script_path.exists():
+            raise FileNotFoundError("System update script not found")
+        if not os.access(script_path, os.X_OK):
+            raise PermissionError("System update script is not executable")
+
+        async with _SYSTEM_UPDATE_LOCK:
+            log_info("Starting system update", script=str(script_path))
+            process = await asyncio.create_subprocess_exec(
+                str(script_path),
+                stdout=PIPE,
+                stderr=PIPE,
+                cwd=str(_PROJECT_ROOT),
+            )
+            stdout, stderr = await process.communicate()
+            stdout_preview = _truncate_output(stdout)
+            stderr_preview = _truncate_output(stderr)
+
+            if stdout_preview:
+                log_info("System update output", preview=stdout_preview)
+            if stderr_preview:
+                log_info("System update stderr", preview=stderr_preview)
+
+            if process.returncode != 0:
+                message = stderr_preview or stdout_preview or "Unknown error"
+                raise RuntimeError(
+                    f"System update script exited with code {process.returncode}: {message}"
+                )
+
+            log_info("System update completed", exit_code=process.returncode)
+            return stdout_preview
 
 
 scheduler_service = SchedulerService()
