@@ -1,3 +1,4 @@
+- 2025-10-17, 12:30 UTC, Fix, Added a global form confirmation handler and removed the missing forms_admin.js reference to resolve admin script 404s
 - 2025-10-09, 11:31 UTC, Change, Retired the /admin/memberships page and synced company assignments with active company membership records
 - 2025-10-09, 11:34 UTC, Fix, Expanded the Companies administration card to occupy the full grid width for consistent layout
 - 2025-10-09, 11:28 UTC, Fix, Expanded the Companies dashboard card to span the full grid width for clearer management access

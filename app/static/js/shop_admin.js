@@ -12,17 +12,6 @@
     }
   }
 
-  function bindConfirmations() {
-    document.querySelectorAll('form[data-confirm]').forEach((form) => {
-      form.addEventListener('submit', (event) => {
-        const message = form.getAttribute('data-confirm') || 'Are you sure?';
-        if (!confirm(message)) {
-          event.preventDefault();
-        }
-      });
-    });
-  }
-
   function submitOnChange(container) {
     container.querySelectorAll('[data-submit-on-change]').forEach((input) => {
       input.addEventListener('change', () => {
@@ -69,7 +58,6 @@
   document.addEventListener('DOMContentLoaded', () => {
     const container = document.body;
     submitOnChange(container);
-    bindConfirmations();
 
     const products = parseJson('admin-products-data', []);
     const restrictions = parseJson('admin-product-restrictions', {});
