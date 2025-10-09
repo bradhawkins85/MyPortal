@@ -64,6 +64,20 @@ def _map_staff_row(row: dict[str, Any]) -> dict[str, Any]:
     return mapped
 
 
+async def count_staff(company_id: int, *, enabled: bool | None = None) -> int:
+    conditions = ["company_id = %s"]
+    params: list[Any] = [company_id]
+    if enabled is not None:
+        conditions.append("enabled = %s")
+        params.append(1 if enabled else 0)
+    where_clause = " AND ".join(conditions)
+    row = await db.fetch_one(
+        f"SELECT COUNT(*) AS count FROM staff WHERE {where_clause}",
+        tuple(params),
+    )
+    return int(row["count"]) if row else 0
+
+
 async def list_staff(
     company_id: int, *, enabled: bool | None = None
 ) -> list[dict[str, Any]]:

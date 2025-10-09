@@ -50,6 +50,14 @@ def _normalise_event(row: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+async def count_events_by_status(status: str) -> int:
+    row = await db.fetch_one(
+        "SELECT COUNT(*) AS count FROM webhook_events WHERE status = %s",
+        (status,),
+    )
+    return int(row["count"]) if row else 0
+
+
 def _normalise_attempt(row: dict[str, Any]) -> dict[str, Any]:
     data = dict(row)
     for key in ("id", "event_id", "attempt_number", "response_status"):
