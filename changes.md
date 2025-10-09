@@ -1,4 +1,7 @@
 - 2025-10-18, 11:30 UTC, Fix, Restored the Orders navigation link by initialising membership context before evaluating shop permissions in the base template
+- 2025-10-19, 07:15 UTC, Fix, Routed the system update scheduler task through scripts/upgrade.sh for consistent upgrade automation
+- 2025-10-09, 12:17 UTC, Feature, Introduced a notifications dashboard with filtering, sorting, and read-state tracking across the UI and API
+- 2025-10-09, 12:18 UTC, Fix, Accepted camelCase membership payload fields so API updates persist when saving company membership roles
 - 2025-10-18, 10:45 UTC, Feature, Added an orders dashboard with analytics, filtering, and navigation to restore customer order history in the new app
 - 2025-10-09, 12:06 UTC, Fix, Ensured the Cart navigation link remains visible whenever items are in the cart regardless of page context
 - 2025-10-09, 12:10 UTC, Fix, Restored stock feed download to fetch the configured XML source and persist items for scheduled product updates
