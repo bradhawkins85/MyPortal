@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -261,6 +261,49 @@ async def create_order(
                 raise
 
 
+async def list_order_summaries(company_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT
+            order_number,
+            MAX(order_date) AS order_date,
+            MAX(status) AS status,
+            MAX(shipping_status) AS shipping_status,
+            MAX(notes) AS notes,
+            MAX(po_number) AS po_number,
+            MAX(consignment_id) AS consignment_id,
+            MAX(eta) AS eta
+        FROM shop_orders
+        WHERE company_id = %s
+        GROUP BY order_number
+        ORDER BY order_date DESC
+        """,
+        (company_id,),
+    )
+    return [_normalise_order_summary(row) for row in rows]
+
+
+async def list_order_items(order_number: str, company_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT
+            o.*, 
+            p.name AS product_name,
+            p.sku,
+            p.description,
+            p.image_url,
+            IF(c.is_vip = 1 AND p.vip_price IS NOT NULL, p.vip_price, p.price) AS price
+        FROM shop_orders AS o
+        INNER JOIN shop_products AS p ON p.id = o.product_id
+        INNER JOIN companies AS c ON c.id = o.company_id
+        WHERE o.order_number = %s AND o.company_id = %s
+        ORDER BY o.id ASC
+        """,
+        (order_number, company_id),
+    )
+    return [_normalise_order_item(row) for row in rows]
+
+
 async def get_category_by_name(name: str) -> dict[str, Any] | None:
     row = await db.fetch_one(
         "SELECT id, name FROM shop_categories WHERE name = %s",
@@ -423,3 +466,66 @@ def _coerce_optional_int(value: Any) -> int | None:
     if value is None:
         return None
     return _coerce_int(value)
+
+
+def _normalise_datetime(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        base = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return base.astimezone(timezone.utc).isoformat()
+    if isinstance(value, date):
+        combined = datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+        return combined.isoformat()
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return text
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed.isoformat()
+
+
+def _normalise_order_summary(row: dict[str, Any]) -> dict[str, Any]:
+    summary = dict(row)
+    summary["order_number"] = str(row.get("order_number") or "").strip()
+    summary["status"] = str(row.get("status") or "").strip()
+    summary["shipping_status"] = str(row.get("shipping_status") or "").strip()
+    summary["notes"] = row.get("notes")
+    summary["po_number"] = row.get("po_number")
+    summary["consignment_id"] = row.get("consignment_id")
+    summary["order_date"] = _normalise_datetime(row.get("order_date"))
+    summary["eta"] = _normalise_datetime(row.get("eta"))
+    return summary
+
+
+def _normalise_order_item(row: dict[str, Any]) -> dict[str, Any]:
+    normalised = dict(row)
+    normalised["id"] = _coerce_optional_int(row.get("id"))
+    normalised["product_id"] = _coerce_optional_int(row.get("product_id"))
+    normalised["quantity"] = _coerce_int(row.get("quantity"), default=0)
+    price = row.get("price")
+    if isinstance(price, Decimal):
+        normalised["price"] = price
+    elif price is None:
+        normalised["price"] = Decimal("0")
+    else:
+        normalised["price"] = Decimal(str(price))
+    normalised["product_name"] = row.get("product_name")
+    normalised["sku"] = row.get("sku")
+    normalised["description"] = row.get("description")
+    normalised["image_url"] = row.get("image_url")
+    normalised["status"] = str(row.get("status") or "").strip()
+    normalised["shipping_status"] = str(row.get("shipping_status") or "").strip()
+    normalised["notes"] = row.get("notes")
+    normalised["po_number"] = row.get("po_number")
+    normalised["consignment_id"] = row.get("consignment_id")
+    normalised["order_number"] = str(row.get("order_number") or "").strip()
+    normalised["order_date"] = _normalise_datetime(row.get("order_date"))
+    normalised["eta"] = _normalise_datetime(row.get("eta"))
+    return normalised
