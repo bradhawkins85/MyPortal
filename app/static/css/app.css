@@ -446,6 +446,12 @@ body {
   gap: 1.5rem;
 }
 
+.card-collapsible {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
 .card__header {
   display: flex;
   justify-content: space-between;
@@ -456,6 +462,62 @@ body {
 .card__header--stacked {
   flex-direction: column;
   align-items: stretch;
+}
+
+.card__header--collapsible {
+  list-style: none;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+}
+
+.card__header--collapsible::-webkit-details-marker {
+  display: none;
+}
+
+.card__header--collapsible:focus-visible {
+  outline: 3px solid rgba(148, 163, 184, 0.35);
+  outline-offset: 2px;
+  border-radius: 0.75rem;
+}
+
+.card__collapsible-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
+}
+
+.card__toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+  color: rgba(226, 232, 240, 0.9);
+  transition: transform 0.2s ease, background 0.2s ease;
+  font-size: 0.9rem;
+}
+
+.card__toggle-icon::before {
+  content: '\25BC';
+}
+
+.card__header--collapsible:hover .card__toggle-icon,
+.card__header--collapsible:focus-visible .card__toggle-icon {
+  background: rgba(148, 163, 184, 0.3);
+}
+
+.card-collapsible[open] .card__toggle-icon {
+  transform: rotate(180deg);
+}
+
+.card-collapsible__content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
 .card__title {
