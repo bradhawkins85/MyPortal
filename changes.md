@@ -1,3 +1,4 @@
+- 2025-10-21, 13:20 UTC, Feature, Added viewport-aware pagination to the asset inventory with dynamic counts and table refresh hooks
 - 2025-10-09, 13:16 UTC, Fix, Limited the Available products catalogue to display a maximum of five items per page for consistent pagination
 - 2025-10-09, 13:16 UTC, Feature, Added viewport-aware pagination to the staff roster so visible rows adapt to screen height
 - 2025-10-20, 14:15 UTC, Feature, Added viewport-aware pagination to the scheduled tasks table so automation rows scale with the available space
