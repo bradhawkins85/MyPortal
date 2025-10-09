@@ -107,3 +107,4 @@
 - 2025-10-10, 12:45 UTC, Fix, Corrected scheduler monitoring migration defaults and enforced UTC MySQL sessions to restore startup
 - 2025-10-09, 05:40 UTC, Fix, Restored admin API key dashboard by aligning API key usage queries with ONLY_FULL_GROUP_BY SQL mode to prevent runtime errors
 - 2025-10-09, 11:09 UTC, Feature, Moved scheduler editing into modal workflows, added per-task run history popups, and created a dedicated webhook delivery monitoring page
+- 2025-10-09, 11:36 UTC, Fix, Removed the SKU column from the software licenses table to simplify the display per request

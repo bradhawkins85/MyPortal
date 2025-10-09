@@ -30,7 +30,6 @@
         <thead>
           <tr>
             <th scope="col" data-sort-key="display_name">Name</th>
-            <th scope="col" data-sort-key="platform">SKU</th>
             <th scope="col" data-sort-key="count">Total</th>
             <th scope="col" data-sort-key="allocated">Allocated</th>
             <th scope="col" data-sort-key="expiry_display">Expiry</th>
@@ -42,7 +41,6 @@
           {% for license in licenses %}
           <tr>
             <td data-column="display_name" data-value="{{ license.display_name or license.name }}">{{ license.display_name or license.name }}</td>
-            <td data-column="platform" data-value="{{ license.platform }}">{{ license.platform }}</td>
             <td data-column="count" data-value="{{ license.count }}">{{ license.count }}</td>
             <td data-column="allocated" data-value="{{ license.allocated }}">
               <button type="button" class="link" data-license-allocated="{{ license.id }}">{{ license.allocated }}</button>
@@ -60,7 +58,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="{% if can_order_licenses %}7{% else %}6{% endif %}" class="text-center">No licenses recorded for this company yet.</td>
+            <td colspan="{% if can_order_licenses %}6{% else %}5{% endif %}" class="text-center">No licenses recorded for this company yet.</td>
           </tr>
           {% endfor %}
         </tbody>
