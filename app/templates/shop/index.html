@@ -62,31 +62,6 @@
         <p class="card__subtitle">Add items directly to your cart or review detailed specifications.</p>
       </div>
       <div class="card__controls shop-toolbar">
-        <form class="shop-toolbar__form" method="get">
-          {% if current_category %}
-            <input type="hidden" name="category" value="{{ current_category }}" />
-          {% endif %}
-          <label class="visually-hidden" for="shop-search">Search products</label>
-          <input
-            class="form-input shop-toolbar__search"
-            id="shop-search"
-            name="q"
-            type="search"
-            value="{{ search_term | default('') }}"
-            placeholder="Search by name or SKU"
-          />
-          <label class="checkbox shop-toolbar__checkbox">
-            <input
-              type="checkbox"
-              name="showOutOfStock"
-              value="1"
-              {% if show_out_of_stock %}checked{% endif %}
-              data-submit-on-change
-            />
-            <span>Show out of stock</span>
-          </label>
-          <button type="submit" class="button">Search</button>
-        </form>
         <input
           type="search"
           class="form-input card__control"
@@ -160,6 +135,26 @@
           {% endfor %}
         </tbody>
       </table>
+    </div>
+    <div class="table-pagination" data-pagination="shop-table">
+      <div class="table-pagination__group">
+        <button
+          type="button"
+          class="button button--ghost table-pagination__button"
+          data-page-prev
+          disabled
+        >
+          Previous
+        </button>
+        <button
+          type="button"
+          class="button button--ghost table-pagination__button"
+          data-page-next
+        >
+          Next
+        </button>
+      </div>
+      <p class="table-pagination__status" data-page-info aria-live="polite"></p>
     </div>
   </section>
 </div>
