@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+
+{% block title %}Notifications{% endblock %}
+
+{% block content %}
+<div class="page-grid">
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Notification feed</h2>
+        <p class="card__subtitle">
+          Monitor recent alerts and acknowledgements across your company, filtering and sorting as needed.
+        </p>
+      </div>
+      <div class="card__controls notification-summary">
+        <span class="tag" data-total-notifications data-label="Total">Total: {{ total_count }}</span>
+        <span class="tag tag--info" data-unread-visible data-label="Unread in view">Unread in view: {{ filtered_unread_count }}</span>
+        <span class="tag tag--muted" data-unread-total data-label="Unread overall">Unread overall: {{ notification_unread_count }}</span>
+        <button type="button" class="button button--ghost" data-notification-mark-selected disabled>Mark selected as read</button>
+      </div>
+    </header>
+
+    <form id="notification-filters" class="filters filters--compact" method="get">
+      <div class="filters__group filters__group--wide">
+        <label for="notifications-search">Search</label>
+        <input
+          type="search"
+          id="notifications-search"
+          name="q"
+          class="input"
+          placeholder="Search notifications"
+          value="{{ filters.query }}"
+        />
+      </div>
+      <div class="filters__group">
+        <label for="notifications-event-type">Event type</label>
+        <select id="notifications-event-type" name="event_type" class="input">
+          <option value="">All event types</option>
+          {% for event_type in event_type_options %}
+            <option value="{{ event_type }}" {% if filters.event_type == event_type %}selected{% endif %}>{{ event_type }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="filters__group">
+        <label for="notifications-read-state">Read state</label>
+        <select id="notifications-read-state" name="read_state" class="input">
+          {% for value, label in read_options %}
+            <option value="{{ value }}" {% if filters.read_state == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="filters__group">
+        <label for="notifications-sort-by">Sort by</label>
+        <select id="notifications-sort-by" name="sort_by" class="input">
+          {% for value, label in sort_options %}
+            <option value="{{ value }}" {% if filters.sort_by == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="filters__group">
+        <label for="notifications-sort-order">Sort order</label>
+        <select id="notifications-sort-order" name="sort_order" class="input">
+          {% for value, label in order_options %}
+            <option value="{{ value }}" {% if filters.sort_order == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="filters__group">
+        <label for="notifications-created-from">Created from</label>
+        <input
+          type="datetime-local"
+          id="notifications-created-from"
+          name="created_from"
+          class="input"
+          value="{{ filters.created_from }}"
+        />
+      </div>
+      <div class="filters__group">
+        <label for="notifications-created-to">Created to</label>
+        <input
+          type="datetime-local"
+          id="notifications-created-to"
+          name="created_to"
+          class="input"
+          value="{{ filters.created_to }}"
+        />
+      </div>
+      <div class="filters__group">
+        <label for="notifications-page-size">Page size</label>
+        <select id="notifications-page-size" name="page_size" class="input">
+          {% for size in page_size_options %}
+            <option value="{{ size }}" {% if filters.page_size == size %}selected{% endif %}>{{ size }} per page</option>
+          {% endfor %}
+        </select>
+      </div>
+      <input type="hidden" name="page" value="{{ filters.page }}" data-notification-page-field />
+      <div class="filters__group filters__group--actions">
+        <button type="submit" class="button button--ghost">Apply filters</button>
+        <button type="button" class="button button--ghost" data-notification-reset {% if not filters_active %}disabled{% endif %}>Reset</button>
+      </div>
+    </form>
+
+    {% if notifications %}
+    <div class="table-wrapper">
+      <table class="table table--notifications" id="notifications-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" class="table__checkbox">
+              <label class="visually-hidden" for="notifications-select-all">Select all notifications</label>
+              <input type="checkbox" id="notifications-select-all" data-notification-select-all />
+            </th>
+            <th scope="col" data-sort="string">Event</th>
+            <th scope="col" data-sort="string">Message</th>
+            <th scope="col" data-sort="date">Created</th>
+            <th scope="col" data-sort="date">Read at</th>
+            <th scope="col" data-sort="string">Status</th>
+            <th scope="col" class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for notification in notifications %}
+          <tr
+            data-notification-row="{{ notification.id }}"
+            data-unread="{{ 1 if notification.is_unread else 0 }}"
+            class="notification-row{% if notification.is_unread %} notification-row--unread{% endif %}"
+          >
+            <td class="table__checkbox">
+              <label class="visually-hidden" for="notification-select-{{ notification.id }}">Select notification {{ notification.id }}</label>
+              <input
+                type="checkbox"
+                id="notification-select-{{ notification.id }}"
+                class="notification-select"
+                data-notification-select
+                value="{{ notification.id }}"
+              />
+            </td>
+            <td data-label="Event" data-value="{{ notification.event_type or '' }}">
+              <span class="notification-event">{{ notification.event_type or 'General' }}</span>
+            </td>
+            <td data-label="Message">
+              <div class="notification-message">{{ notification.message }}</div>
+              {% if notification.metadata_items %}
+              <dl class="notification-metadata">
+                {% for item in notification.metadata_items %}
+                <div class="notification-metadata__item">
+                  <dt>{{ item.key }}</dt>
+                  <dd>{{ item.value }}</dd>
+                </div>
+                {% endfor %}
+              </dl>
+              {% endif %}
+            </td>
+            <td data-label="Created" data-value="{{ notification.created_iso }}">
+              <span data-utc="{{ notification.created_iso }}">{{ notification.created_iso }}</span>
+            </td>
+            <td data-label="Read at" data-value="{{ notification.read_iso or '' }}">
+              {% if notification.read_iso %}
+                <span data-utc="{{ notification.read_iso }}">{{ notification.read_iso }}</span>
+              {% else %}
+                <span class="text-muted">Not read</span>
+              {% endif %}
+            </td>
+            <td data-label="Status" data-value="{{ 'unread' if notification.is_unread else 'read' }}">
+              <span class="{{ notification.status_class }}">{{ notification.status_label }}</span>
+            </td>
+            <td class="table__actions">
+              <div class="table__action-buttons">
+                <button
+                  type="button"
+                  class="button button--ghost button--small"
+                  data-notification-mark="{{ notification.id }}"
+                  {% if not notification.is_unread %}disabled{% endif %}
+                >
+                  {% if notification.is_unread %}Mark as read{% else %}Read{% endif %}
+                </button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="notification-pagination">
+      <div class="notification-pagination__info">
+        {% if pagination.total_count %}
+          Showing {{ pagination.start }} - {{ pagination.end }} of {{ pagination.total_count }} notifications
+        {% else %}
+          No notifications to display
+        {% endif %}
+      </div>
+      <div class="notification-pagination__controls">
+        {% if pagination.has_previous %}
+          <a class="button button--ghost button--small" href="{{ pagination.previous_url }}">Previous</a>
+        {% else %}
+          <span class="button button--ghost button--small button--disabled" aria-disabled="true">Previous</span>
+        {% endif %}
+        <span class="notification-pagination__page">Page {{ pagination.page }} of {{ pagination.total_pages }}</span>
+        {% if pagination.has_next %}
+          <a class="button button--ghost button--small" href="{{ pagination.next_url }}">Next</a>
+        {% else %}
+          <span class="button button--ghost button--small button--disabled" aria-disabled="true">Next</span>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <h3 class="empty-state__title">You're all caught up</h3>
+      <p class="empty-state__subtitle">
+        When new notifications arrive they will appear here for quick review and acknowledgement.
+      </p>
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/notifications.js" defer></script>
+{% endblock %}
