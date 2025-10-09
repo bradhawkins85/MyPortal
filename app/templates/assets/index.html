@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}Assets{% endblock %}
+
+{% block header_actions %}
+  <div class="header-actions">
+    <label class="visually-hidden" for="asset-search">Search assets</label>
+    <input
+      type="search"
+      id="asset-search"
+      class="input"
+      placeholder="Search assets"
+      aria-label="Search assets"
+      data-table-filter="assets-table"
+    />
+  </div>
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Asset inventory</h2>
+        <p class="card__subtitle">
+          Monitor device health, warranty coverage, and recent Syncro activity across your organisation.
+        </p>
+      </div>
+      <div class="card__controls">
+        {% if company %}
+        <span class="tag">{{ company.name }}</span>
+        {% endif %}
+        <div class="asset-columns" data-asset-columns>
+          <button type="button" class="button button--ghost asset-columns__toggle" data-columns-toggle>
+            <span>Columns</span>
+            <span class="asset-columns__chevron" aria-hidden="true">▾</span>
+          </button>
+          <div class="asset-columns__panel" data-columns-panel hidden>
+            <p class="asset-columns__title">Toggle columns</p>
+            <div class="asset-columns__options">
+              {% for column in columns %}
+                <label class="checkbox asset-columns__option">
+                  <input
+                    type="checkbox"
+                    class="asset-column-toggle"
+                    data-column="{{ column.key }}"
+                    {% if column.key == 'name' %}checked disabled{% else %}checked{% endif %}
+                  />
+                  <span>{{ column.label }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+    <div class="asset-summary">
+      <div class="asset-summary__item">
+        <span class="asset-summary__label">Total assets</span>
+        <span class="asset-summary__value" data-asset-total>{{ stats.total }}</span>
+      </div>
+      <div class="asset-summary__item">
+        <span class="asset-summary__label">Synced in last 30 days</span>
+        <span class="asset-summary__value">{{ stats.recent_sync }}</span>
+      </div>
+      <div class="asset-summary__item">
+        <span class="asset-summary__label">Active warranties</span>
+        <span class="asset-summary__value">{{ stats.active_warranty }}</span>
+      </div>
+      <div class="asset-summary__item">
+        <span class="asset-summary__label">Expired warranties</span>
+        <span class="asset-summary__value asset-summary__value--warning">{{ stats.expired_warranty }}</span>
+      </div>
+    </div>
+    {% if has_assets %}
+    <div class="table-wrapper">
+      <table class="table" id="assets-table" data-table>
+        <thead>
+          <tr>
+            {% for column in columns %}
+              <th scope="col" data-column="{{ column.key }}" data-sort="{{ column.sort }}">{{ column.label }}</th>
+            {% endfor %}
+            {% if is_super_admin %}
+              <th scope="col" class="table__actions">Actions</th>
+            {% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for asset in assets %}
+            <tr data-asset-id="{{ asset.id }}">
+              {% for column in columns %}
+                {% set key = column.key %}
+                {% set value = asset.get(key) %}
+                {% if key in ['ram_gb', 'approx_age', 'performance_score'] %}
+                  <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ asset.get(key ~ '_sort', '') }}">
+                    {% if value %}{{ value }}{% else %}<span class="text-muted">—</span>{% endif %}
+                  </td>
+                {% elif key == 'last_sync' %}
+                  <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ asset.get('last_sync_sort', '') }}">
+                    {% if asset.last_sync_iso %}
+                      <span data-utc="{{ asset.last_sync_iso }}">{{ asset.last_sync or asset.last_sync_iso }}</span>
+                    {% else %}
+                      <span class="text-muted">Never</span>
+                    {% endif %}
+                  </td>
+                {% elif key == 'warranty_end_date' %}
+                  <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ asset.get('warranty_end_sort', '') }}">
+                    {% if asset.warranty_end_date %}
+                      {{ asset.warranty_end_date }}
+                    {% else %}
+                      <span class="text-muted">No warranty</span>
+                    {% endif %}
+                  </td>
+                {% else %}
+                  <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ value or '' }}">
+                    {% if value %}{{ value }}{% else %}<span class="text-muted">—</span>{% endif %}
+                  </td>
+                {% endif %}
+              {% endfor %}
+              {% if is_super_admin %}
+                <td class="table__actions">
+                  <button type="button" class="button button--danger button--small asset-delete-button" data-asset-id="{{ asset.id }}">
+                    Delete
+                  </button>
+                </td>
+              {% endif %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <h3 class="empty-state__title">No assets yet</h3>
+      <p class="empty-state__subtitle">
+        Trigger a Syncro import or register hardware manually to populate the asset register.
+      </p>
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/assets.js" defer></script>
+{% endblock %}
