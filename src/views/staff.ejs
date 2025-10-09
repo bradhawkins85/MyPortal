@@ -6,14 +6,8 @@
     <%- include('partials/sidebar') %>
     <div class="content">
       <h1>Staff</h1>
-      <% if (isSuperAdmin && syncroCompanyId) { %>
-      <section>
-        <h2>Import from Syncro</h2>
-        <button id="import-syncro-btn">Import Contacts</button>
-      </section>
-      <% } %>
       <% if (isAdmin) { %>
-      <section>
+      <section id="add-staff-section">
         <h2>Add Staff</h2>
         <form action="/staff" method="post">
           <%- include('partials/csrf-field') %>
@@ -185,7 +179,6 @@
   <script>
     const isSuperAdmin = <%- JSON.stringify(isSuperAdmin) %>;
     const isAdmin = <%- JSON.stringify(isAdmin) %>;
-    const syncroCompanyId = <%- JSON.stringify(syncroCompanyId) %>;
     const editModal = document.getElementById('edit-modal');
     const editForm = document.getElementById('edit-form');
     let editingId = null;
@@ -250,24 +243,6 @@
       });
     });
     <% } %>
-
-    const importBtn = document.getElementById('import-syncro-btn');
-    if (importBtn && syncroCompanyId) {
-      importBtn.addEventListener('click', async function() {
-        if (!confirm('Import contacts from Syncro?')) return;
-        const res = await fetch('/admin/syncro/import-contacts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ syncroCompanyId })
-        });
-        if (res.ok) {
-          location.reload();
-        } else {
-          const text = await res.text();
-          alert(text || 'Failed to import contacts');
-        }
-      });
-    }
 
     document.querySelectorAll('.invite-btn').forEach(function(btn) {
       btn.addEventListener('click', async function() {
