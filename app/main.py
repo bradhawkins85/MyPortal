@@ -2889,26 +2889,11 @@ async def admin_automation(request: Request):
     if redirect:
         return redirect
     tasks = await scheduled_tasks_repo.list_tasks()
-    runs = await scheduled_tasks_repo.list_recent_runs(limit=25)
-    events = await webhook_events_repo.list_events(limit=50)
     prepared_tasks: list[dict[str, Any]] = []
     for task in tasks:
         serialised_task = _serialise_mapping(task)
         serialised_task["last_run_iso"] = _to_iso(task.get("last_run_at"))
         prepared_tasks.append(serialised_task)
-    prepared_runs: list[dict[str, Any]] = []
-    for run in runs:
-        serialised_run = _serialise_mapping(run)
-        serialised_run["started_iso"] = _to_iso(run.get("started_at"))
-        serialised_run["finished_iso"] = _to_iso(run.get("finished_at"))
-        prepared_runs.append(serialised_run)
-    prepared_events: list[dict[str, Any]] = []
-    for event in events:
-        serialised_event = _serialise_mapping(event)
-        serialised_event["created_iso"] = _to_iso(event.get("created_at"))
-        serialised_event["updated_iso"] = _to_iso(event.get("updated_at"))
-        serialised_event["next_attempt_iso"] = _to_iso(event.get("next_attempt_at"))
-        prepared_events.append(serialised_event)
     command_options = [
         {"value": "sync_staff", "label": "Sync staff directory"},
         {"value": "sync_o365", "label": "Sync Microsoft 365 licenses"},
@@ -2920,11 +2905,29 @@ async def admin_automation(request: Request):
     extra = {
         "title": "Automation & monitoring",
         "tasks": prepared_tasks,
-        "runs": prepared_runs,
-        "events": prepared_events,
         "command_options": command_options,
     }
     return await _render_template("admin/automation.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/webhooks", response_class=HTMLResponse)
+async def admin_webhooks(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    events = await webhook_events_repo.list_events(limit=100)
+    prepared_events: list[dict[str, Any]] = []
+    for event in events:
+        serialised_event = _serialise_mapping(event)
+        serialised_event["created_iso"] = _to_iso(event.get("created_at"))
+        serialised_event["updated_iso"] = _to_iso(event.get("updated_at"))
+        serialised_event["next_attempt_iso"] = _to_iso(event.get("next_attempt_at"))
+        prepared_events.append(serialised_event)
+    extra = {
+        "title": "Webhook delivery queue",
+        "events": prepared_events,
+    }
+    return await _render_template("admin/webhooks.html", request, current_user, extra=extra)
 
 
 @app.get("/admin/memberships", response_class=HTMLResponse)
