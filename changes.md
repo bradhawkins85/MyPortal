@@ -1,5 +1,8 @@
 - 2025-10-09, 12:10 UTC, Fix, Restored stock feed download to fetch the configured XML source and persist items for scheduled product updates
 - 2025-10-09, 11:56 UTC, Fix, Routed Update Stock Feed scheduler command to product feed synchronisation handler to resolve missing handler errors
+- 2025-10-09, 12:01 UTC, Fix, Removed the Description column from the Cart table to streamline checkout review
+- 2025-10-09, 11:52 UTC, Fix, Removed the Syncro import card from the Staff view and restyled the Add Staff form to span the full content width
+- 2025-10-18, 09:05 UTC, Feature, Added customer cart support with persistent checkout, webhook retries, and Discord stock notifications for shop orders
 - 2025-10-09, 11:46 UTC, Feature, Consolidated the portal shell with a compact three-panel layout and reduced padding across views
 - 2025-10-09, 11:44 UTC, Feature, Added inline role selection to company memberships so administrators can reassign members without leaving the table
 - 2025-10-18, 09:00 UTC, Fix, Removed Syncro import controls from the Staff page and expanded the Add Staff form to full width for better usability
