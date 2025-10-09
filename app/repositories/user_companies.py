@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any, List, Optional
 
 from app.core.database import db
+from app.repositories import company_memberships as membership_repo
+from app.repositories import roles as role_repo
 
 _BOOLEAN_FIELDS = {
     "can_manage_licenses",
@@ -38,6 +41,47 @@ def _normalise(row: dict[str, Any]) -> dict[str, Any]:
     if "user_id" in normalised and normalised["user_id"] is not None:
         normalised["user_id"] = int(normalised["user_id"])
     return normalised
+
+
+async def _ensure_company_membership(company_id: int, user_id: int) -> None:
+    with suppress(Exception):
+        membership = await membership_repo.get_membership_by_company_user(company_id, user_id)
+        if membership:
+            membership_id = membership.get("id")
+            if membership_id and membership.get("status") != "active":
+                await membership_repo.update_membership(int(membership_id), status="active")
+            return
+
+        default_role = await role_repo.get_role_by_name("Member")
+        role_id = default_role.get("id") if default_role else None
+        if role_id is None:
+            roles = await role_repo.list_roles()
+            for record in roles:
+                candidate_id = record.get("id")
+                if candidate_id is not None:
+                    role_id = candidate_id
+                    break
+        if role_id is None:
+            return
+
+        await membership_repo.create_membership(
+            company_id=company_id,
+            user_id=user_id,
+            role_id=int(role_id),
+            status="active",
+        )
+
+
+async def _suspend_company_membership(company_id: int, user_id: int) -> None:
+    with suppress(Exception):
+        membership = await membership_repo.get_membership_by_company_user(company_id, user_id)
+        if not membership:
+            return
+        membership_id = membership.get("id")
+        if not membership_id:
+            return
+        if membership.get("status") != "suspended":
+            await membership_repo.update_membership(int(membership_id), status="suspended")
 
 
 async def get_user_company(user_id: int, company_id: int) -> Optional[dict[str, Any]]:
@@ -127,6 +171,7 @@ async def assign_user_to_company(
             1 if is_admin else 0,
         ),
     )
+    await _ensure_company_membership(company_id, user_id)
 
 
 async def upsert_user_company(
@@ -218,3 +263,4 @@ async def remove_assignment(*, user_id: int, company_id: int) -> None:
         "DELETE FROM user_companies WHERE user_id = %s AND company_id = %s",
         (user_id, company_id),
     )
+    await _suspend_company_membership(company_id, user_id)
