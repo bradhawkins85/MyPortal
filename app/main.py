@@ -56,7 +56,6 @@ from app.repositories import audit_logs as audit_repo
 from app.repositories import api_keys as api_key_repo
 from app.repositories import auth as auth_repo
 from app.repositories import companies as company_repo
-from app.repositories import company_memberships as membership_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import licenses as license_repo
 from app.repositories import forms as forms_repo
@@ -2928,49 +2927,6 @@ async def admin_webhooks(request: Request):
         "events": prepared_events,
     }
     return await _render_template("admin/webhooks.html", request, current_user, extra=extra)
-
-
-@app.get("/admin/memberships", response_class=HTMLResponse)
-async def admin_memberships(request: Request, company_id: int | None = None):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    companies = await company_repo.list_companies()
-    effective_company_id = company_id
-    selected_company = None
-    memberships: list[dict[str, Any]] = []
-    if not effective_company_id and companies:
-        effective_company_id = companies[0]["id"]
-    if effective_company_id:
-        selected_company = next((c for c in companies if c["id"] == effective_company_id), None)
-        if not selected_company and companies:
-            selected_company = companies[0]
-            effective_company_id = selected_company["id"]
-        if selected_company:
-            memberships = await membership_repo.list_company_memberships(effective_company_id)
-            for record in memberships:
-                record["invited_at_iso"] = _to_iso(record.get("invited_at"))
-                record["joined_at_iso"] = _to_iso(record.get("joined_at"))
-                record["last_seen_at_iso"] = _to_iso(record.get("last_seen_at"))
-    roles_list = await role_repo.list_roles()
-    users = await user_repo.list_users()
-    status_options = [
-        {"value": "invited", "label": "Invited"},
-        {"value": "active", "label": "Active"},
-        {"value": "suspended", "label": "Suspended"},
-    ]
-    extra = {
-        "title": "Company memberships",
-        "companies": companies,
-        "selected_company": selected_company,
-        "selected_company_id": effective_company_id,
-        "memberships": memberships,
-        "roles": roles_list,
-        "users": users,
-        "status_options": status_options,
-    }
-    return await _render_template("admin/memberships.html", request, current_user, extra=extra)
-
 
 @app.get("/admin/audit-logs", response_class=HTMLResponse)
 async def admin_audit_logs(
