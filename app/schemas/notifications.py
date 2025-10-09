@@ -24,3 +24,12 @@ class NotificationCreate(BaseModel):
     message: str
     user_id: Optional[int] = None
     metadata: Optional[dict[str, Any]] = None
+
+
+class NotificationAcknowledgeRequest(BaseModel):
+    notification_ids: list[int] = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="List of notification identifiers to acknowledge.",
+    )

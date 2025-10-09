@@ -53,6 +53,19 @@
               <span class="menu__label">Dashboard</span>
             </a>
           </li>
+          <li class="menu__item">
+            <a href="/notifications" {% if current_path.startswith('/notifications') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2a5 5 0 0 0-5 5v1.09c0 .51-.2 1-.57 1.36L5.2 11.67A2 2 0 0 0 4.62 13.1L5 14h14l.38-1a2 2 0 0 0-.58-2.33l-1.23-1.22A1.93 1.93 0 0 1 16 8.09V7a5 5 0 0 0-4-4.9V2Zm0 20a3 3 0 0 0 3-3H9a3 3 0 0 0 3 3Z"/></svg>
+              </span>
+              <span class="menu__label">
+                Notifications
+                {% if notification_unread_count %}
+                  <span class="menu__badge" data-unread-nav>{{ notification_unread_count }}</span>
+                {% endif %}
+              </span>
+            </a>
+          </li>
           {% set membership = active_membership %}
           {% set is_super_admin = current_user.get('is_super_admin') if current_user else False %}
           {% set can_access_shop = is_super_admin or (membership and membership.get('can_access_shop')) %}
@@ -90,6 +103,17 @@
               <span class="menu__label">Forms</span>
             </a>
           </li>
+          {% set can_manage_assets = is_super_admin or (membership and membership.get('can_manage_assets')) %}
+          {% if can_manage_assets %}
+          <li class="menu__item">
+            <a href="/assets" {% if current_path.startswith('/assets') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M4 6a2 2 0 0 1 2-2h4.18a3 3 0 0 1 5.64 0H20a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm2 0v12h12V6h-2.18a3 3 0 0 1-5.64 0H6zm6-2a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/></svg>
+              </span>
+              <span class="menu__label">Assets</span>
+            </a>
+          </li>
+          {% endif %}
           {% set can_manage_licenses = is_super_admin or (membership and membership.get('can_manage_licenses')) %}
           {% set can_manage_invoices = is_super_admin or (membership and membership.get('can_manage_invoices')) %}
           {% if can_manage_licenses %}

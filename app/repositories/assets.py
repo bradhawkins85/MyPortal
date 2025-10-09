@@ -6,6 +6,49 @@ from typing import Any
 from app.core.database import db
 
 
+async def list_company_assets(company_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT
+            id,
+            company_id,
+            name,
+            type,
+            serial_number,
+            status,
+            os_name,
+            cpu_name,
+            ram_gb,
+            hdd_size,
+            last_sync,
+            motherboard_manufacturer,
+            form_factor,
+            last_user,
+            approx_age,
+            performance_score,
+            warranty_status,
+            warranty_end_date,
+            syncro_asset_id
+        FROM assets
+        WHERE company_id = %s
+        ORDER BY name ASC, id ASC
+        """,
+        (company_id,)
+    )
+    return list(rows or [])
+
+
+async def get_asset_by_id(asset_id: int) -> dict[str, Any] | None:
+    return await db.fetch_one(
+        "SELECT * FROM assets WHERE id = %s",
+        (asset_id,),
+    )
+
+
+async def delete_asset(asset_id: int) -> None:
+    await db.execute("DELETE FROM assets WHERE id = %s", (asset_id,))
+
+
 def _ensure_datetime(value: Any) -> datetime | None:
     if value in (None, ""):
         return None
