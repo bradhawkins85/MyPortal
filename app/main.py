@@ -512,6 +512,260 @@ async def _build_base_context(
     return context
 
 
+async def _build_consolidated_overview(
+    request: Request, user: dict[str, Any]
+) -> dict[str, Any]:
+    session = await session_manager.load_session(request)
+    available_companies = getattr(request.state, "available_companies", None)
+    if available_companies is None:
+        available_companies = await user_company_repo.list_companies_for_user(user["id"])
+        request.state.available_companies = available_companies
+
+    active_company_id = getattr(request.state, "active_company_id", None)
+    if active_company_id is None and session:
+        active_company_id = session.active_company_id
+        request.state.active_company_id = active_company_id
+
+    is_super_admin = bool(user.get("is_super_admin"))
+
+    def _format_int(value: int | None) -> str:
+        if value is None:
+            return "0"
+        return f"{int(value):,}"
+
+    def _format_currency(amount: Decimal | None) -> str:
+        if amount is None:
+            amount = Decimal("0")
+        if not isinstance(amount, Decimal):
+            try:
+                amount = Decimal(str(amount))
+            except (InvalidOperation, ValueError):
+                amount = Decimal("0")
+        try:
+            quantized = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except (InvalidOperation, ValueError):
+            quantized = Decimal("0.00")
+        return f"${quantized:,.2f}"
+
+    cards: list[dict[str, Any]] = []
+
+    total_companies = len(available_companies)
+    total_users: int | None = None
+    if is_super_admin:
+        total_companies = await company_repo.count_companies()
+        total_users = await user_repo.count_users()
+
+    cards.append(
+        {
+            "label": "Companies" if is_super_admin else "My companies",
+            "value": total_companies,
+            "formatted": _format_int(total_companies),
+            "description": (
+                "Organisations across the portal"
+                if is_super_admin
+                else "Companies you can access"
+            ),
+        }
+    )
+
+    if total_users is not None:
+        cards.append(
+            {
+                "label": "Portal users",
+                "value": total_users,
+                "formatted": _format_int(total_users),
+                "description": "Registered accounts",
+            }
+        )
+
+    unread_notifications = 0
+    user_id = user.get("id")
+    if user_id is not None:
+        try:
+            unread_notifications = await notifications_repo.count_notifications(
+                user_id=int(user_id),
+                read_state="unread",
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error("Failed to load consolidated notifications count", error=str(exc))
+
+    cards.append(
+        {
+            "label": "Unread alerts",
+            "value": unread_notifications,
+            "formatted": _format_int(unread_notifications),
+            "description": "Notifications awaiting review",
+        }
+    )
+
+    pending_webhooks = await webhook_events_repo.count_events_by_status("pending")
+    failing_webhooks = await webhook_events_repo.count_events_by_status("failed")
+    in_progress_webhooks = await webhook_events_repo.count_events_by_status("in_progress")
+
+    webhook_notes: list[str] = []
+    if failing_webhooks:
+        webhook_notes.append(f"{_format_int(failing_webhooks)} failing")
+    if in_progress_webhooks:
+        webhook_notes.append(f"{_format_int(in_progress_webhooks)} in progress")
+    if not webhook_notes and pending_webhooks:
+        webhook_notes.append("Queued for retry")
+    if not webhook_notes:
+        webhook_notes.append("All clear")
+
+    cards.append(
+        {
+            "label": "Webhook queue",
+            "value": pending_webhooks,
+            "formatted": _format_int(pending_webhooks),
+            "description": ", ".join(webhook_notes),
+        }
+    )
+
+    company_snapshot: dict[str, Any] | None = None
+    if active_company_id:
+        assets = await asset_repo.list_company_assets(active_company_id)
+        asset_status_counts = Counter(
+            (str(asset.get("status") or "Unspecified").strip() or "Unspecified")
+            for asset in assets
+        )
+
+        staff_total = await staff_repo.count_staff(active_company_id)
+        staff_enabled = await staff_repo.count_staff(active_company_id, enabled=True)
+
+        licenses = await license_repo.list_company_licenses(active_company_id)
+        invoices = await invoice_repo.list_company_invoices(active_company_id)
+
+        license_capacity = sum(int(lic.get("count") or 0) for lic in licenses)
+        license_allocated = sum(int(lic.get("allocated") or 0) for lic in licenses)
+        license_available = max(license_capacity - license_allocated, 0)
+        license_utilisation = (
+            round((license_allocated / license_capacity) * 100)
+            if license_capacity
+            else 0
+        )
+
+        invoice_status_counts = Counter(
+            (str(invoice.get("status") or "Unspecified").strip() or "Unspecified")
+            for invoice in invoices
+        )
+        today = datetime.now(timezone.utc).date()
+        open_amount = Decimal("0")
+        overdue_count = 0
+        for invoice in invoices:
+            amount = invoice.get("amount")
+            status = str(invoice.get("status") or "").strip().lower()
+            if isinstance(amount, Decimal) and status not in {"paid", "void", "cancelled"}:
+                open_amount += amount
+            due_date = invoice.get("due_date")
+            if (
+                due_date
+                and status not in {"paid", "void", "cancelled"}
+                and due_date < today
+            ):
+                overdue_count += 1
+
+        company_name = None
+        for company in available_companies:
+            if company.get("company_id") == active_company_id:
+                company_name = company.get("company_name") or (
+                    f"Company #{active_company_id}"
+                )
+                break
+        if not company_name:
+            company_name = f"Company #{active_company_id}"
+
+        def _format_status_items(counter: Counter[str]) -> list[dict[str, Any]]:
+            items: list[dict[str, Any]] = []
+            for label, count in counter.most_common():
+                if not label:
+                    label = "Unspecified"
+                display_label = label.title() if label.islower() else label
+                items.append(
+                    {
+                        "label": display_label,
+                        "value": count,
+                        "formatted": _format_int(count),
+                    }
+                )
+            if not items:
+                items.append(
+                    {
+                        "label": "No records",
+                        "value": 0,
+                        "formatted": "0",
+                    }
+                )
+            return items
+
+        company_snapshot = {
+            "name": company_name,
+            "metrics": [
+                {
+                    "label": "Staff",
+                    "value": staff_total,
+                    "formatted": _format_int(staff_total),
+                    "meta": (
+                        f"{_format_int(staff_enabled)} active"
+                        if staff_enabled
+                        else "No active staff"
+                    ),
+                },
+                {
+                    "label": "Assets",
+                    "value": len(assets),
+                    "formatted": _format_int(len(assets)),
+                    "meta": (
+                        f"{_format_int(asset_status_counts.get('In use', 0))} in use"
+                        if assets
+                        else "No assets yet"
+                    ),
+                },
+                {
+                    "label": "Licenses",
+                    "value": license_capacity,
+                    "formatted": _format_int(license_capacity),
+                    "meta": f"{_format_int(license_allocated)} allocated",
+                },
+            ],
+            "asset_status": _format_status_items(asset_status_counts),
+            "invoice_status": _format_status_items(invoice_status_counts),
+            "licenses": {
+                "total": license_capacity,
+                "allocated": license_allocated,
+                "available": license_available,
+                "utilisation": license_utilisation,
+                "formatted": {
+                    "total": _format_int(license_capacity),
+                    "allocated": _format_int(license_allocated),
+                    "available": _format_int(license_available),
+                    "utilisation": f"{license_utilisation}%",
+                },
+            },
+            "financial": {
+                "open_amount": open_amount,
+                "open_formatted": _format_currency(open_amount),
+                "overdue": overdue_count,
+                "overdue_formatted": _format_int(overdue_count),
+            },
+        }
+
+    return {
+        "cards": cards,
+        "webhooks": {
+            "pending": pending_webhooks,
+            "failed": failing_webhooks,
+            "in_progress": in_progress_webhooks,
+            "formatted": {
+                "pending": _format_int(pending_webhooks),
+                "failed": _format_int(failing_webhooks),
+                "in_progress": _format_int(in_progress_webhooks),
+            },
+        },
+        "company": company_snapshot,
+        "unread_notifications": unread_notifications,
+    }
+
+
 async def _render_template(
     template_name: str,
     request: Request,
@@ -1430,7 +1684,17 @@ async def index(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
-    return await _render_template("dashboard.html", request, user)
+    overview = await _build_consolidated_overview(request, user)
+    return await _render_template(
+        "dashboard.html",
+        request,
+        user,
+        extra={
+            "title": "Consolidated overview",
+            "overview": overview,
+            "notification_unread_count": overview.get("unread_notifications", 0),
+        },
+    )
 
 
 @app.get("/assets", response_class=HTMLResponse, tags=["Assets"])
