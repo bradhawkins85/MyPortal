@@ -1,3 +1,4 @@
+- 2025-10-09, 12:06 UTC, Fix, Ensured the Cart navigation link remains visible whenever items are in the cart regardless of page context
 - 2025-10-09, 12:10 UTC, Fix, Restored stock feed download to fetch the configured XML source and persist items for scheduled product updates
 - 2025-10-09, 11:56 UTC, Fix, Routed Update Stock Feed scheduler command to product feed synchronisation handler to resolve missing handler errors
 - 2025-10-09, 12:01 UTC, Fix, Removed the Description column from the Cart table to streamline checkout review
