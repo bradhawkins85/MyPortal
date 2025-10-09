@@ -129,6 +129,26 @@
         </tbody>
       </table>
     </div>
+      <div class="table-pagination" data-pagination="assets-table">
+        <div class="table-pagination__group">
+          <button
+            type="button"
+            class="button button--ghost table-pagination__button"
+            data-page-prev
+            disabled
+          >
+            Previous
+          </button>
+          <button
+            type="button"
+            class="button button--ghost table-pagination__button"
+            data-page-next
+          >
+            Next
+          </button>
+        </div>
+        <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+      </div>
     {% else %}
     <div class="empty-state">
       <h3 class="empty-state__title">No assets yet</h3>
