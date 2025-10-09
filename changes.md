@@ -134,3 +134,4 @@
 - 2025-10-09, 11:09 UTC, Feature, Moved scheduler editing into modal workflows, added per-task run history popups, and created a dedicated webhook delivery monitoring page
 - 2025-10-09, 11:36 UTC, Fix, Removed the SKU column from the software licenses table to simplify the display per request
 - 2025-10-09, 12:53 UTC, Fix, Hardened system update cleanup to skip inaccessible user site-packages paths and avoid permission failures
+- 2025-10-09, 13:15 UTC, Feature, Added viewport-aware pagination controls to the webhook delivery queue for responsive monitoring
