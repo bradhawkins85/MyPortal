@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import secrets
 from collections import Counter
 from collections.abc import Iterable, Mapping
@@ -63,6 +64,7 @@ from app.repositories import invoices as invoice_repo
 from app.repositories import licenses as license_repo
 from app.repositories import forms as forms_repo
 from app.repositories import m365 as m365_repo
+from app.repositories import notifications as notifications_repo
 from app.repositories import roles as role_repo
 from app.repositories import shop as shop_repo
 from app.repositories import cart as cart_repo
@@ -343,6 +345,32 @@ def _serialise_for_json(value: Any) -> Any:
     return value
 
 
+def _prepare_notification_metadata(metadata: Any) -> list[dict[str, str]]:
+    if metadata is None:
+        return []
+
+    serialised = _serialise_for_json(metadata)
+
+    if isinstance(serialised, Mapping):
+        items: list[dict[str, str]] = []
+        for key in sorted(serialised.keys(), key=lambda item: str(item)):
+            value = serialised[key]
+            if isinstance(value, Mapping) or (
+                isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray))
+            ):
+                value_text = json.dumps(value, ensure_ascii=False)
+            else:
+                value_text = "" if value is None else str(value)
+            items.append({"key": str(key), "value": value_text})
+        return items
+
+    if isinstance(serialised, Iterable) and not isinstance(serialised, (str, bytes, bytearray)):
+        value_text = json.dumps(serialised, ensure_ascii=False)
+        return [{"key": "items", "value": value_text}]
+
+    return [{"key": "value", "value": "" if serialised is None else str(serialised)}]
+
+
 def _serialise_mapping(record: Mapping[str, Any]) -> dict[str, Any]:
     return {key: _serialise_for_json(value) for key, value in record.items()}
 
@@ -395,6 +423,18 @@ def _parse_bool(value: Any, *, default: bool = False) -> bool:
     if not text:
         return default
     return text in {"1", "true", "t", "yes", "y", "on"}
+
+
+def _parse_int_in_range(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError, AttributeError):
+        return default
+    if parsed < minimum:
+        return minimum
+    if parsed > maximum:
+        return maximum
+    return parsed
 
 
 async def _resolve_initial_company_id(user: dict[str, Any]) -> int | None:
@@ -457,6 +497,18 @@ async def _build_base_context(
         except Exception as exc:  # pragma: no cover - defensive logging
             log_error("Failed to summarise cart", error=str(exc))
     context["cart_summary"] = cart_summary
+    if "notification_unread_count" not in context:
+        unread_count = 0
+        user_id = user.get("id")
+        if user_id is not None:
+            try:
+                unread_count = await notifications_repo.count_notifications(
+                    user_id=int(user_id),
+                    read_state="unread",
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("Failed to count unread notifications", error=str(exc))
+        context["notification_unread_count"] = unread_count
     return context
 
 
@@ -483,6 +535,25 @@ _API_KEY_DIRECTION_CHOICES: list[tuple[str, str]] = [
     ("desc", "Descending"),
     ("asc", "Ascending"),
 ]
+
+_NOTIFICATION_SORT_CHOICES: list[tuple[str, str]] = [
+    ("created_at", "Created date"),
+    ("event_type", "Event type"),
+    ("read_at", "Read date"),
+]
+
+_NOTIFICATION_ORDER_CHOICES: list[tuple[str, str]] = [
+    ("desc", "Newest first"),
+    ("asc", "Oldest first"),
+]
+
+_NOTIFICATION_READ_OPTIONS: list[tuple[str, str]] = [
+    ("all", "All notifications"),
+    ("unread", "Unread only"),
+    ("read", "Read only"),
+]
+
+_NOTIFICATION_PAGE_SIZES: list[int] = [10, 25, 50, 100]
 
 _ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
     {"key": "name", "label": "Name", "sort": "string"},
@@ -2326,6 +2397,180 @@ async def place_order(request: Request) -> RedirectResponse:
         url=f"{request.url_for('cart_page')}?orderMessage={success}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+@app.get("/notifications", response_class=HTMLResponse)
+async def notifications_dashboard(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+
+    params = request.query_params
+    search_term = (params.get("q") or "").strip()
+    read_state = (params.get("read_state") or "all").lower()
+    valid_read_states = {option[0] for option in _NOTIFICATION_READ_OPTIONS}
+    if read_state not in valid_read_states:
+        read_state = "all"
+
+    sort_by = (params.get("sort_by") or "created_at").lower()
+    valid_sort_columns = {option[0] for option in _NOTIFICATION_SORT_CHOICES}
+    if sort_by not in valid_sort_columns:
+        sort_by = "created_at"
+
+    sort_order = (params.get("sort_order") or "desc").lower()
+    if sort_order not in {"asc", "desc"}:
+        sort_order = "desc"
+
+    event_type_filter = (params.get("event_type") or "").strip()
+    created_from_raw = (params.get("created_from") or "").strip()
+    created_to_raw = (params.get("created_to") or "").strip()
+
+    page_size = _parse_int_in_range(params.get("page_size"), default=25, minimum=5, maximum=100)
+    if _NOTIFICATION_PAGE_SIZES:
+        page_size = min(_NOTIFICATION_PAGE_SIZES, key=lambda size: abs(size - page_size))
+    page = _parse_int_in_range(params.get("page"), default=1, minimum=1, maximum=1000)
+
+    created_from_dt = _parse_input_datetime(created_from_raw)
+    created_to_dt = None
+    created_to_candidate = _parse_input_datetime(created_to_raw, assume_midnight=True)
+    if created_to_candidate:
+        if created_to_raw and all(separator not in created_to_raw for separator in ("T", " ")):
+            created_to_dt = created_to_candidate + timedelta(days=1)
+        else:
+            created_to_dt = created_to_candidate
+
+    search_filter = search_term or None
+    event_filters = [event_type_filter] if event_type_filter else None
+    repo_read_state = read_state if read_state in {"unread", "read"} else None
+
+    try:
+        user_id = int(user.get("id"))
+    except (TypeError, ValueError):
+        user_id = None
+
+    total_count = await notifications_repo.count_notifications(
+        user_id=user_id,
+        read_state=repo_read_state,
+        event_types=event_filters,
+        search=search_filter,
+        created_from=created_from_dt,
+        created_to=created_to_dt,
+    )
+
+    total_pages = max(1, math.ceil(total_count / page_size)) if page_size else 1
+    if page > total_pages:
+        page = total_pages
+
+    offset = (page - 1) * page_size
+
+    records = await notifications_repo.list_notifications(
+        user_id=user_id,
+        read_state=repo_read_state,
+        event_types=event_filters,
+        search=search_filter,
+        created_from=created_from_dt,
+        created_to=created_to_dt,
+        sort_by=sort_by,
+        sort_direction=sort_order,
+        limit=page_size,
+        offset=offset,
+    )
+
+    filtered_unread_count = await notifications_repo.count_notifications(
+        user_id=user_id,
+        read_state="unread",
+        event_types=event_filters,
+        search=search_filter,
+        created_from=created_from_dt,
+        created_to=created_to_dt,
+    )
+
+    global_unread_count = await notifications_repo.count_notifications(
+        user_id=user_id,
+        read_state="unread",
+    )
+
+    prepared_notifications: list[dict[str, Any]] = []
+    for record in records:
+        metadata_items = _prepare_notification_metadata(record.get("metadata"))
+        created_iso = _to_iso(record.get("created_at")) or ""
+        read_iso = _to_iso(record.get("read_at")) or ""
+        is_unread = record.get("read_at") is None
+        prepared_notifications.append(
+            {
+                "id": record.get("id"),
+                "event_type": record.get("event_type"),
+                "message": record.get("message"),
+                "metadata_items": metadata_items,
+                "created_iso": created_iso,
+                "read_iso": read_iso,
+                "is_unread": is_unread,
+                "status_label": "Unread" if is_unread else "Read",
+                "status_class": "status status--unread" if is_unread else "status status--read",
+                "metadata_json": json.dumps(
+                    _serialise_for_json(record.get("metadata")),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                if record.get("metadata") is not None
+                else None,
+            }
+        )
+
+    pagination = {
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "total_count": total_count,
+        "start": offset + 1 if total_count else 0,
+        "end": offset + len(prepared_notifications),
+        "has_previous": page > 1,
+        "has_next": page < total_pages,
+        "previous_url": str(request.url.include_query_params(page=page - 1)) if page > 1 else None,
+        "next_url": str(request.url.include_query_params(page=page + 1)) if page < total_pages else None,
+    }
+
+    filters = {
+        "query": search_term,
+        "read_state": read_state,
+        "event_type": event_type_filter,
+        "created_from": created_from_raw,
+        "created_to": created_to_raw,
+        "sort_by": sort_by,
+        "sort_order": sort_order,
+        "page_size": page_size,
+        "page": page,
+    }
+
+    active_filters = any(
+        [
+            bool(search_term),
+            read_state != "all",
+            bool(event_type_filter),
+            bool(created_from_raw),
+            bool(created_to_raw),
+        ]
+    )
+
+    event_type_options = await notifications_repo.list_event_types(user_id=user_id)
+
+    extra = {
+        "title": "Notifications",
+        "notifications": prepared_notifications,
+        "filters": filters,
+        "filters_active": active_filters,
+        "sort_options": _NOTIFICATION_SORT_CHOICES,
+        "order_options": _NOTIFICATION_ORDER_CHOICES,
+        "read_options": _NOTIFICATION_READ_OPTIONS,
+        "event_type_options": event_type_options,
+        "pagination": pagination,
+        "total_count": total_count,
+        "filtered_unread_count": filtered_unread_count,
+        "page_size_options": _NOTIFICATION_PAGE_SIZES,
+        "notification_unread_count": global_unread_count,
+    }
+
+    return await _render_template("notifications/index.html", request, user, extra=extra)
 
 
 @app.get("/myforms", response_class=HTMLResponse)

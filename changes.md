@@ -1,3 +1,4 @@
+- 2025-10-09, 12:38 UTC, Feature, Delivered a notifications dashboard with filtering, bulk acknowledgement, Swagger-documented API enhancements, and navigation badge updates
 - 2025-10-19, 10:20 UTC, Feature, Collapsed the shop admin category manager by default with a persisted toggle so the grid stays tidy while remaining easy to access
 - 2025-10-09, 12:48 UTC, Fix, Removed shop toolbar search and stock toggle controls from the customer catalogue view
 - 2025-10-20, 10:00 UTC, Fix, Purged stray ~myportal pip metadata during upgrades so dependency installs stop warning about invalid distributions
