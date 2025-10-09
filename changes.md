@@ -1,3 +1,5 @@
+- 2025-10-09, 23:26 UTC, Fix, Added stock_feed.xml to .gitignore so generated stock feeds stay out of version control
+- 2025-10-09, 13:18 UTC, Fix, Allowed Run Now scheduled tasks to execute in the background without redirecting to the update progress message
 - 2025-10-09, 13:14 UTC, Feature, Added viewport-aware pagination to the software licenses table so row counts follow the available space
 - 2025-10-21, 13:20 UTC, Feature, Added viewport-aware pagination to the asset inventory with dynamic counts and table refresh hooks
 - 2025-10-09, 13:16 UTC, Fix, Limited the Available products catalogue to display a maximum of five items per page for consistent pagination
@@ -144,3 +146,4 @@
 - 2025-10-09, 12:53 UTC, Fix, Hardened system update cleanup to skip inaccessible user site-packages paths and avoid permission failures
 - 2025-10-09, 13:15 UTC, Feature, Added viewport-aware pagination controls to the webhook delivery queue for responsive monitoring
 - 2025-10-09, 23:30 UTC, Fix, Removed leftover patch markers from dashboard template to restore valid Jinja block structure
+- 2025-10-09, 23:32 UTC, Fix, Resized all modal popups to occupy 75% of the viewport for consistent layout compliance
