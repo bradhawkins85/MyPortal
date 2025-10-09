@@ -4,6 +4,7 @@
 - 2025-10-09, 12:37 UTC, Fix, Added responsive pagination to the shop product table that adapts row counts to the viewport height for readability
 - 2025-10-19, 09:45 UTC, Feature, Added pagination to shop category lists showing five entries per page to keep the admin UI manageable
 # Change Log
+- 2025-10-19, 09:45 UTC, Feature, Added an asset inventory dashboard with summary analytics, column preferences, and secure deletion workflows for super admins
 - 2025-10-19, 09:45 UTC, Fix, Hardened upgrade automation to locate python3 when python is absent so system updates no longer fail
 - 2025-10-19, 08:30 UTC, Fix, Ensured the system upgrade automation reuses the managed virtual environment before reinstalling dependencies
 - 2025-10-18, 11:30 UTC, Fix, Restored the Orders navigation link by initialising membership context before evaluating shop permissions in the base template
