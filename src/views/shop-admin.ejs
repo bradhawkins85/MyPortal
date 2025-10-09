@@ -13,7 +13,7 @@
           <input type="text" name="name" placeholder="Name" required>
           <button type="submit">Add</button>
         </form>
-        <ul>
+        <ul id="categoriesList" class="category-list">
           <% categories.forEach(function(c){ %>
             <li>
               <%= c.name %>
@@ -24,6 +24,80 @@
             </li>
           <% }) %>
         </ul>
+        <div
+          class="category-pagination"
+          id="categoriesPagination"
+          aria-label="Category pagination"
+        >
+          <button type="button" id="categoriesPrev" aria-label="Previous page">Previous</button>
+          <span id="categoriesPageInfo" class="category-page-info" role="status" aria-live="polite"></span>
+          <button type="button" id="categoriesNext" aria-label="Next page">Next</button>
+        </div>
+        <script>
+          document.addEventListener('DOMContentLoaded', function () {
+            const categoriesList = document.getElementById('categoriesList');
+            if (!categoriesList) {
+              return;
+            }
+            const categoryItems = Array.from(categoriesList.querySelectorAll('li'));
+            const paginationContainer = document.getElementById('categoriesPagination');
+            const prevButton = document.getElementById('categoriesPrev');
+            const nextButton = document.getElementById('categoriesNext');
+            const pageInfo = document.getElementById('categoriesPageInfo');
+            const pageSize = 5;
+            const totalPages = Math.max(1, Math.ceil(categoryItems.length / pageSize));
+            let currentPage = 1;
+
+            function renderPage(page) {
+              if (!categoryItems.length) {
+                if (paginationContainer) {
+                  paginationContainer.style.display = 'none';
+                }
+                if (pageInfo) {
+                  pageInfo.textContent = 'No categories available';
+                }
+                if (prevButton) {
+                  prevButton.style.display = 'none';
+                }
+                if (nextButton) {
+                  nextButton.style.display = 'none';
+                }
+                return;
+              }
+
+              const safePage = Math.min(Math.max(page, 1), totalPages);
+              categoryItems.forEach(function (item, index) {
+                const itemPage = Math.floor(index / pageSize) + 1;
+                item.style.display = itemPage === safePage ? 'list-item' : 'none';
+              });
+              if (pageInfo) {
+                pageInfo.textContent = 'Page ' + safePage + ' of ' + totalPages;
+              }
+              if (paginationContainer) {
+                paginationContainer.style.display = 'flex';
+              }
+              const hasMultiplePages = totalPages > 1;
+              if (prevButton) {
+                prevButton.disabled = safePage === 1;
+                prevButton.style.display = hasMultiplePages ? '' : 'none';
+              }
+              if (nextButton) {
+                nextButton.disabled = safePage === totalPages;
+                nextButton.style.display = hasMultiplePages ? '' : 'none';
+              }
+              currentPage = safePage;
+            }
+
+            renderPage(1);
+
+            prevButton?.addEventListener('click', function () {
+              renderPage(currentPage - 1);
+            });
+            nextButton?.addEventListener('click', function () {
+              renderPage(currentPage + 1);
+            });
+          });
+        </script>
       </section>
       <section>
         <h2>Import Product</h2>
