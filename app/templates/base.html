@@ -264,34 +264,54 @@ H8zm0 4v2h8v-2H8z"/></svg>
           };
         }
 
+        document.addEventListener(
+          'submit',
+          (event) => {
+            if (!(event.target instanceof HTMLFormElement)) {
+              return;
+            }
+
+            const formElement = event.target;
+            if (!formElement.hasAttribute('data-confirm')) {
+              return;
+            }
+
+            const message = formElement.getAttribute('data-confirm') || 'Are you sure?';
+            if (!window.confirm(message)) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+            }
+          },
+          true,
+        );
+
         const form = document.querySelector('[data-company-switcher]');
-        if (!form) return;
-        const select = form.querySelector('.company-switcher__select');
-        if (!select) return;
+        const select = form ? form.querySelector('.company-switcher__select') : null;
+        if (form && select) {
+          form.addEventListener('submit', function () {
+            const selected = select.value;
+            if (!selected) {
+              return;
+            }
+            let hidden = form.querySelector('input[data-company-switcher-hidden="true"]');
+            if (!hidden) {
+              hidden = document.createElement('input');
+              hidden.type = 'hidden';
+              hidden.name = 'companyId';
+              hidden.setAttribute('data-company-switcher-hidden', 'true');
+              form.appendChild(hidden);
+            }
+            hidden.value = selected;
+          });
 
-        form.addEventListener('submit', function () {
-          const selected = select.value;
-          if (!selected) {
-            return;
-          }
-          let hidden = form.querySelector('input[data-company-switcher-hidden="true"]');
-          if (!hidden) {
-            hidden = document.createElement('input');
-            hidden.type = 'hidden';
-            hidden.name = 'companyId';
-            hidden.setAttribute('data-company-switcher-hidden', 'true');
-            form.appendChild(hidden);
-          }
-          hidden.value = selected;
-        });
-
-        select.addEventListener('change', function () {
-          if (typeof form.requestSubmit === 'function') {
-            form.requestSubmit();
-          } else {
-            form.submit();
-          }
-        });
+          select.addEventListener('change', function () {
+            if (typeof form.requestSubmit === 'function') {
+              form.requestSubmit();
+            } else {
+              form.submit();
+            }
+          });
+        }
       })();
     </script>
     {% block scripts %}{% endblock %}
