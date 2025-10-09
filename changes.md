@@ -1,3 +1,4 @@
+- 2025-10-09, 11:21 UTC, Fix, Restored scheduled task modals by eagerly binding UI handlers and reading CSRF tokens from meta fallback
 - 2025-10-09, 11:25 UTC, Fix, Expanded the API credentials administration card to full width for improved visibility
 - 2025-10-17, 08:15 UTC, Fix, Positioned the cross-service audit correlations card below API credentials for consistent admin layout
 - 2025-10-09, 11:16 UTC, Change, Moved company creation into a modal trigger on the Companies dashboard and removed legacy user provisioning forms
