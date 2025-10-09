@@ -13,7 +13,7 @@ from app.schemas.notifications import (
     NotificationResponse,
 )
 
-router = APIRouter(prefix="/notifications", tags=["Notifications"])
+router = APIRouter(prefix="/api/notifications", tags=["Notifications"])
 
 
 @router.get(
