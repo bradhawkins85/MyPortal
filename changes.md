@@ -1,3 +1,4 @@
+- 2025-10-09, 12:17 UTC, Feature, Introduced a notifications dashboard with filtering, sorting, and read-state tracking across the UI and API
 - 2025-10-09, 12:10 UTC, Fix, Restored stock feed download to fetch the configured XML source and persist items for scheduled product updates
 - 2025-10-09, 11:56 UTC, Fix, Routed Update Stock Feed scheduler command to product feed synchronisation handler to resolve missing handler errors
 - 2025-10-09, 12:01 UTC, Fix, Removed the Description column from the Cart table to streamline checkout review
