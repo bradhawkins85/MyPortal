@@ -173,7 +173,7 @@ class SchedulerService:
         await self._run_task(task)
 
     async def _run_system_update(self) -> str | None:
-        script_path = _PROJECT_ROOT / "update.sh"
+        script_path = _PROJECT_ROOT / "scripts" / "upgrade.sh"
         if not script_path.exists():
             raise FileNotFoundError("System update script not found")
         if not os.access(script_path, os.X_OK):
