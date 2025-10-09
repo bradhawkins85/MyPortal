@@ -3,21 +3,42 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+VENV_DIR="${PROJECT_ROOT}/.venv"
+
+detect_python_interpreter() {
+  local interpreter=""
+  if [[ -x "${VENV_DIR}/bin/python" ]]; then
+    interpreter="${VENV_DIR}/bin/python"
+  elif [[ -x "${VENV_DIR}/Scripts/python.exe" ]]; then
+    interpreter="${VENV_DIR}/Scripts/python.exe"
+  elif command -v python3 >/dev/null 2>&1; then
+    interpreter=$(command -v python3)
+  elif command -v python >/dev/null 2>&1; then
+    interpreter=$(command -v python)
+  fi
+  printf '%s' "$interpreter"
+}
+
+PYTHON_INTERPRETER=$(detect_python_interpreter)
+
 cd "$PROJECT_ROOT"
 
 # Load GitHub credentials from .env in a safe manner
 if [ -f .env ]; then
-  while IFS=':' read -r key encoded || [ -n "$key" ]; do
-    if [ -z "${key:-}" ]; then
-      continue
-    fi
-    value=$(printf '%s' "$encoded" | base64 --decode)
-    case "$key" in
-      GITHUB_USERNAME) GITHUB_USERNAME="$value" ;;
-      GITHUB_PASSWORD) GITHUB_PASSWORD="$value" ;;
-    esac
-  done < <(
-    python - <<'PY'
+  if [[ -z "$PYTHON_INTERPRETER" ]]; then
+    echo "Warning: Unable to locate a python interpreter to parse .env credentials. Skipping GitHub authentication." >&2
+  else
+    while IFS=':' read -r key encoded || [ -n "$key" ]; do
+      if [ -z "${key:-}" ]; then
+        continue
+      fi
+      value=$(printf '%s' "$encoded" | base64 --decode)
+      case "$key" in
+        GITHUB_USERNAME) GITHUB_USERNAME="$value" ;;
+        GITHUB_PASSWORD) GITHUB_PASSWORD="$value" ;;
+      esac
+    done < <(
+      "$PYTHON_INTERPRETER" - <<'PY'
 import base64
 from pathlib import Path
 
@@ -37,7 +58,8 @@ if env_path.exists():
         encoded = base64.b64encode(value.encode()).decode()
         print(f"{key}:{encoded}")
 PY
-  )
+    )
+  fi
 fi
 
 REMOTE_URL=$(git config --get remote.origin.url || true)
@@ -56,8 +78,11 @@ POST_PULL_HEAD=$(git rev-parse HEAD)
 if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
   echo "Repository updated to $POST_PULL_HEAD. Installing dependencies and restarting service."
 
-  VENV_DIR="${PROJECT_ROOT}/.venv"
-  if [[ -x "${VENV_DIR}/bin/python" ]]; then
+  if [[ -n "$PYTHON_INTERPRETER" && "$PYTHON_INTERPRETER" == "${VENV_DIR}/bin/python" ]]; then
+    PYTHON_BIN="${PYTHON_INTERPRETER}"
+  elif [[ -n "$PYTHON_INTERPRETER" && "$PYTHON_INTERPRETER" == "${VENV_DIR}/Scripts/python.exe" ]]; then
+    PYTHON_BIN="${PYTHON_INTERPRETER}"
+  elif [[ -x "${VENV_DIR}/bin/python" ]]; then
     PYTHON_BIN="${VENV_DIR}/bin/python"
   elif [[ -x "${VENV_DIR}/Scripts/python.exe" ]]; then
     PYTHON_BIN="${VENV_DIR}/Scripts/python.exe"
@@ -70,11 +95,12 @@ if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
     "$PYTHON_BIN" -m pip install -e "$PROJECT_ROOT"
   else
     echo "Warning: .venv not found, falling back to system python" >&2
-    if command -v python3 >/dev/null 2>&1; then
-      PYTHON_FALLBACK="python3"
-    elif command -v python >/dev/null 2>&1; then
-      PYTHON_FALLBACK="python"
+    if [[ -n "$PYTHON_INTERPRETER" ]]; then
+      PYTHON_FALLBACK="$PYTHON_INTERPRETER"
     else
+      PYTHON_FALLBACK=$(detect_python_interpreter)
+    fi
+    if [[ -z "$PYTHON_FALLBACK" ]]; then
       echo "Error: Unable to locate a python interpreter for dependency installation." >&2
       exit 1
     fi
