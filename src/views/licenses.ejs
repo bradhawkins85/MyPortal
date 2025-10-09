@@ -2,10 +2,10 @@
 <html>
   <%- include('partials/head', { title: 'Licenses' }) %>
 <body>
-  <div class="app-container">
-    <%- include('partials/sidebar') %>
-    <div class="content">
-      <h1>Licenses</h1>
+  <%- include('partials/app-shell-start', {
+        pageTitle: 'Licenses',
+        pageSubtitle: 'Track availability and usage'
+      }) %>
       <table>
         <thead>
           <tr>
@@ -51,8 +51,7 @@
         <% }); %>
         </tbody>
       </table>
-    </div>
-  </div>
+  <%- include('partials/app-shell-end') %>
 
   <div id="allocated-modal" class="modal" style="display:none;">
     <div class="modal-content">

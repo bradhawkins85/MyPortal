@@ -53,6 +53,7 @@
               <span class="menu__label">Dashboard</span>
             </a>
           </li>
+          {% set can_access_shop = is_super_admin or (membership and membership.get('can_access_shop')) %}
           <li class="menu__item">
             <a href="/shop" {% if current_path.startswith('/shop') and not current_path.startswith('/shop/admin') %}aria-current="page"{% endif %}>
               <span class="menu__icon" aria-hidden="true">
@@ -61,6 +62,24 @@
               <span class="menu__label">Shop</span>
             </a>
           </li>
+          {% if can_access_shop %}
+          <li class="menu__item">
+            <a href="/cart" {% if current_path.startswith('/cart') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M7 4a1 1 0 0 1 1-1h1.18a3 3 0 0 1 5.64 0H16a1 1 0 0 1 1 1v2h3a1 1 0 0 1 .98 1.2l-1.5 7.5A3 3 0 0 1 16.52 17H7.48a3 3 0 0 1-2.96-2.3L3.02 7.2A1 1 0 0 1 4 6h3V4zm2 0v2h6V4h-6zm-2.52 6.7.98 4.9a1 1 0 0 0 .98.8h9.04a1 1 0 0 0 .98-.8l1.18-5.9H6.48zM9 19a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>
+              </span>
+              <span class="menu__label">Cart{% if cart_summary.total_quantity %}<span class="menu__badge">{{ cart_summary.total_quantity }}</span>{% endif %}</span>
+            </a>
+          </li>
+          <li class="menu__item">
+            <a href="/orders" {% if current_path.startswith('/orders') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M5 3h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm3 4v2h8V7H8zm0 4v2h8v-2H8zm0 4v2h5v-2H8z"/></svg>
+              </span>
+              <span class="menu__label">Orders</span>
+            </a>
+          </li>
+          {% endif %}
           <li class="menu__item">
             <a href="/myforms" {% if current_path.startswith('/myforms') and not current_path.startswith('/admin/forms') %}aria-current="page"{% endif %}>
               <span class="menu__icon" aria-hidden="true">

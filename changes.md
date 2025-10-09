@@ -1,4 +1,12 @@
 - 2025-10-09, 12:18 UTC, Fix, Accepted camelCase membership payload fields so API updates persist when saving company membership roles
+- 2025-10-18, 10:45 UTC, Feature, Added an orders dashboard with analytics, filtering, and navigation to restore customer order history in the new app
+- 2025-10-09, 12:06 UTC, Fix, Ensured the Cart navigation link remains visible whenever items are in the cart regardless of page context
+- 2025-10-09, 12:10 UTC, Fix, Restored stock feed download to fetch the configured XML source and persist items for scheduled product updates
+- 2025-10-09, 11:56 UTC, Fix, Routed Update Stock Feed scheduler command to product feed synchronisation handler to resolve missing handler errors
+- 2025-10-09, 12:01 UTC, Fix, Removed the Description column from the Cart table to streamline checkout review
+- 2025-10-09, 11:52 UTC, Fix, Removed the Syncro import card from the Staff view and restyled the Add Staff form to span the full content width
+- 2025-10-18, 09:05 UTC, Feature, Added customer cart support with persistent checkout, webhook retries, and Discord stock notifications for shop orders
+- 2025-10-09, 11:46 UTC, Feature, Consolidated the portal shell with a compact three-panel layout and reduced padding across views
 - 2025-10-09, 11:44 UTC, Feature, Added inline role selection to company memberships so administrators can reassign members without leaving the table
 - 2025-10-18, 09:00 UTC, Fix, Removed Syncro import controls from the Staff page and expanded the Add Staff form to full width for better usability
 - 2025-10-17, 12:30 UTC, Fix, Added a global form confirmation handler and removed the missing forms_admin.js reference to resolve admin script 404s

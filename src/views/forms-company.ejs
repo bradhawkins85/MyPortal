@@ -2,10 +2,10 @@
 <html>
   <%- include('partials/head', { title: 'Manage Forms' }) %>
 <body>
-  <div class="app-container">
-    <%- include('partials/sidebar') %>
-    <div class="content">
-      <h1>Manage Form Access</h1>
+  <%- include('partials/app-shell-start', {
+        pageTitle: 'Manage Form Access',
+        pageSubtitle: 'Control who can view each form'
+      }) %>
       <% if (forms.length > 0) { %>
         <form action="/myforms/company" method="get">
           <select name="formId" data-submit-on-change>
@@ -28,7 +28,6 @@
       <% } else { %>
         <p>No forms available.</p>
       <% } %>
-    </div>
-  </div>
+  <%- include('partials/app-shell-end') %>
 </body>
 </html>

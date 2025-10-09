@@ -2,15 +2,15 @@
 <html>
   <%- include('partials/head', { title: 'Orders' }) %>
 <body>
-  <div class="app-container">
-    <%- include('partials/sidebar') %>
-    <div class="content">
-      <h1>Orders</h1>
-      <div style="display: flex; gap: 20px;">
-        <div class="chart-container" style="width: 400px; height: 200px;">
+  <%- include('partials/app-shell-start', {
+        pageTitle: 'Orders',
+        pageSubtitle: 'Track purchase and shipping status'
+      }) %>
+      <div class="order-charts">
+        <div class="chart-container">
           <canvas id="statusChart"></canvas>
         </div>
-        <div class="chart-container" style="width: 400px; height: 200px;">
+        <div class="chart-container">
           <canvas id="shippingChart"></canvas>
         </div>
       </div>
@@ -53,8 +53,8 @@
                   </td>
                 <% } %>
               </tr>
-            <% }) %>
-          </tbody>
+          <% }) %>
+        </tbody>
         </table>
       <% } %>
       <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -113,7 +113,6 @@
           });
         });
       </script>
-    </div>
-  </div>
+  <%- include('partials/app-shell-end') %>
 </body>
 </html>

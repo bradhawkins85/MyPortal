@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block header_actions %}
+  <a class="button button--ghost" href="/shop">Browse products</a>
+{% endblock %}
+
+{% block content %}
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Order overview</h2>
+        <p class="card__subtitle">Review recent purchases and fulfilment progress for your active company.</p>
+      </div>
+    </header>
+    {% if orders_total_all == 0 %}
+      <p class="text-muted">No orders have been placed yet. Once you complete a checkout the details will appear here.</p>
+    {% else %}
+      <div class="orders-summary">
+        <div class="orders-summary__panel orders-summary__panel--total">
+          <div class="orders-summary__heading">Total orders</div>
+          <div class="orders-summary__count">{{ orders_total }}</div>
+          {% if filters_active %}
+            <p class="orders-summary__meta">Filtered from {{ orders_total_all }} recorded orders.</p>
+          {% else %}
+            <p class="orders-summary__meta">Tracking {{ orders_total_all }} orders for the selected company.</p>
+          {% endif %}
+        </div>
+        {% if status_summary %}
+          <div class="orders-summary__panel">
+            <div class="orders-summary__heading">Order status</div>
+            <ul class="orders-summary__list">
+              {% for item in status_summary %}
+                <li class="orders-summary__item">
+                  <span class="orders-summary__label">{{ item.label }}</span>
+                  <span class="orders-summary__value">{{ item.count }} <span class="orders-summary__percentage">({{ '%.1f'|format(item.percentage) }}%)</span></span>
+                </li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+        {% if shipping_summary %}
+          <div class="orders-summary__panel">
+            <div class="orders-summary__heading">Shipping status</div>
+            <ul class="orders-summary__list">
+              {% for item in shipping_summary %}
+                <li class="orders-summary__item">
+                  <span class="orders-summary__label">{{ item.label }}</span>
+                  <span class="orders-summary__value">{{ item.count }} <span class="orders-summary__percentage">({{ '%.1f'|format(item.percentage) }}%)</span></span>
+                </li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Order history</h2>
+        <p class="card__subtitle">Search and filter historical orders, including purchase orders and shipping updates.</p>
+      </div>
+      <div class="card__controls orders-toolbar">
+        <form method="get" class="orders-toolbar__form">
+          <div class="orders-toolbar__field">
+            <label class="form-label" for="order-status-filter">Status</label>
+            <select id="order-status-filter" name="status" class="form-input">
+              <option value="">All statuses</option>
+              {% for option in status_options %}
+                <option value="{{ option.value }}" {% if status_filter and status_filter == option.value %}selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="orders-toolbar__field">
+            <label class="form-label" for="order-shipping-filter">Shipping</label>
+            <select id="order-shipping-filter" name="shippingStatus" class="form-input">
+              <option value="">All shipping statuses</option>
+              {% for option in shipping_options %}
+                <option value="{{ option.value }}" {% if shipping_filter and shipping_filter == option.value %}selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="orders-toolbar__actions">
+            <button type="submit" class="button">Apply filters</button>
+            {% if filters_active %}
+              <a href="{{ request.url.path }}" class="button button--ghost">Clear</a>
+            {% endif %}
+          </div>
+        </form>
+        <input
+          type="search"
+          class="form-input orders-toolbar__search"
+          placeholder="Quick filter orders"
+          aria-label="Filter orders"
+          data-table-filter="orders-table"
+        />
+      </div>
+    </header>
+    {% if filters_active and orders_total == 0 %}
+      <div class="alert alert--info" role="status">No orders match the selected filters. Try adjusting the status or shipping options.</div>
+    {% endif %}
+    <div class="table-wrapper">
+      <table class="table" id="orders-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string">Order</th>
+            <th scope="col" data-sort="string">PO Number</th>
+            <th scope="col" data-sort="string">Status</th>
+            <th scope="col" data-sort="string">Shipping</th>
+            <th scope="col" data-sort="date">Placed</th>
+            <th scope="col" data-sort="date">ETA</th>
+            <th scope="col" data-sort="string">Notes</th>
+            {% if current_user and current_user.is_super_admin %}
+              <th scope="col" data-sort="string">Consignment</th>
+            {% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in orders %}
+            <tr data-status="{{ order.status_value }}" data-shipping="{{ order.shipping_status_value }}">
+              <td data-label="Order">{{ order.order_number }}</td>
+              <td data-label="PO Number">{{ order.po_number or '—' }}</td>
+              <td data-label="Status">
+                <span class="badge {{ order.status_badge }}">{{ order.status_label }}</span>
+              </td>
+              <td data-label="Shipping">
+                <span class="badge {{ order.shipping_badge }}">{{ order.shipping_status_label }}</span>
+              </td>
+              <td data-label="Placed" data-value="{{ order.order_date_iso or '' }}">
+                {% if order.order_date_iso %}
+                  <span data-utc="{{ order.order_date_iso }}"></span>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="ETA" data-value="{{ order.eta_iso or '' }}">
+                {% if order.eta_iso %}
+                  <span data-utc="{{ order.eta_iso }}"></span>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="Notes">{{ order.notes or '—' }}</td>
+              {% if current_user and current_user.is_super_admin %}
+                <td data-label="Consignment">{{ order.consignment_id or '—' }}</td>
+              {% endif %}
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="{% if current_user and current_user.is_super_admin %}8{% else %}7{% endif %}" class="table__empty">No orders available.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+{% endblock %}

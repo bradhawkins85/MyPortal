@@ -135,6 +135,8 @@ class SchedulerService:
                     await m365_service.sync_company_licenses(int(company_id))
             elif command == "update_products":
                 await products_service.update_products_from_feed()
+            elif command == "update_stock_feed":
+                await products_service.update_stock_feed()
             elif command == "system_update":
                 output = await self._run_system_update()
                 if output:

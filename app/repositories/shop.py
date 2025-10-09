@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -104,16 +104,31 @@ async def get_category(category_id: int) -> dict[str, Any] | None:
     return {"id": int(row["id"]), "name": row["name"]}
 
 
-async def get_product_by_id(product_id: int) -> dict[str, Any] | None:
-    row = await db.fetch_one(
-        """
-        SELECT p.*, c.name AS category_name
-        FROM shop_products AS p
-        LEFT JOIN shop_categories AS c ON c.id = p.category_id
-        WHERE p.id = %s
-        """,
-        (product_id,),
-    )
+async def get_product_by_id(
+    product_id: int,
+    *,
+    include_archived: bool = False,
+    company_id: int | None = None,
+) -> dict[str, Any] | None:
+    query = [
+        "SELECT p.*, c.name AS category_name",
+        "FROM shop_products AS p",
+        "LEFT JOIN shop_categories AS c ON c.id = p.category_id",
+    ]
+    params: list[Any] = []
+    if company_id is not None:
+        query.append(
+            "LEFT JOIN shop_product_exclusions AS e ON e.product_id = p.id AND e.company_id = %s"
+        )
+        params.append(company_id)
+    query.append("WHERE p.id = %s")
+    params.append(product_id)
+    if not include_archived:
+        query.append("AND p.archived = 0")
+    if company_id is not None:
+        query.append("AND e.product_id IS NULL")
+    sql = " ".join(query)
+    row = await db.fetch_one(sql, tuple(params))
     return _normalise_product(row) if row else None
 
 
@@ -183,6 +198,110 @@ async def delete_product(product_id: int) -> bool:
                 (product_id,),
             )
             return cursor.rowcount > 0
+
+
+async def create_order(
+    *,
+    user_id: int,
+    company_id: int,
+    product_id: int,
+    quantity: int,
+    order_number: str,
+    status: str,
+    po_number: str | None,
+) -> tuple[int | None, int | None]:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await conn.begin()
+            try:
+                await cursor.execute(
+                    "SELECT stock FROM shop_products WHERE id = %s FOR UPDATE",
+                    (product_id,),
+                )
+                row = await cursor.fetchone()
+                previous_stock: int | None = None
+                new_stock: int | None = None
+                if row and row.get("stock") is not None:
+                    previous_stock = int(row["stock"])
+                    if previous_stock < quantity:
+                        raise ValueError("Insufficient stock available for this product")
+                    new_stock = previous_stock - quantity
+                await cursor.execute(
+                    """
+                    INSERT INTO shop_orders (
+                        user_id,
+                        company_id,
+                        product_id,
+                        quantity,
+                        order_number,
+                        status,
+                        notes,
+                        po_number
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        user_id,
+                        company_id,
+                        product_id,
+                        quantity,
+                        order_number,
+                        status,
+                        None,
+                        po_number,
+                    ),
+                )
+                await cursor.execute(
+                    "UPDATE shop_products SET stock = stock - %s WHERE id = %s",
+                    (quantity, product_id),
+                )
+                await conn.commit()
+                return previous_stock, new_stock
+            except Exception:
+                await conn.rollback()
+                raise
+
+
+async def list_order_summaries(company_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT
+            order_number,
+            MAX(order_date) AS order_date,
+            MAX(status) AS status,
+            MAX(shipping_status) AS shipping_status,
+            MAX(notes) AS notes,
+            MAX(po_number) AS po_number,
+            MAX(consignment_id) AS consignment_id,
+            MAX(eta) AS eta
+        FROM shop_orders
+        WHERE company_id = %s
+        GROUP BY order_number
+        ORDER BY order_date DESC
+        """,
+        (company_id,),
+    )
+    return [_normalise_order_summary(row) for row in rows]
+
+
+async def list_order_items(order_number: str, company_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT
+            o.*, 
+            p.name AS product_name,
+            p.sku,
+            p.description,
+            p.image_url,
+            IF(c.is_vip = 1 AND p.vip_price IS NOT NULL, p.vip_price, p.price) AS price
+        FROM shop_orders AS o
+        INNER JOIN shop_products AS p ON p.id = o.product_id
+        INNER JOIN companies AS c ON c.id = o.company_id
+        WHERE o.order_number = %s AND o.company_id = %s
+        ORDER BY o.id ASC
+        """,
+        (order_number, company_id),
+    )
+    return [_normalise_order_item(row) for row in rows]
 
 
 async def get_category_by_name(name: str) -> dict[str, Any] | None:
@@ -347,3 +466,66 @@ def _coerce_optional_int(value: Any) -> int | None:
     if value is None:
         return None
     return _coerce_int(value)
+
+
+def _normalise_datetime(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        base = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return base.astimezone(timezone.utc).isoformat()
+    if isinstance(value, date):
+        combined = datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+        return combined.isoformat()
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return text
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed.isoformat()
+
+
+def _normalise_order_summary(row: dict[str, Any]) -> dict[str, Any]:
+    summary = dict(row)
+    summary["order_number"] = str(row.get("order_number") or "").strip()
+    summary["status"] = str(row.get("status") or "").strip()
+    summary["shipping_status"] = str(row.get("shipping_status") or "").strip()
+    summary["notes"] = row.get("notes")
+    summary["po_number"] = row.get("po_number")
+    summary["consignment_id"] = row.get("consignment_id")
+    summary["order_date"] = _normalise_datetime(row.get("order_date"))
+    summary["eta"] = _normalise_datetime(row.get("eta"))
+    return summary
+
+
+def _normalise_order_item(row: dict[str, Any]) -> dict[str, Any]:
+    normalised = dict(row)
+    normalised["id"] = _coerce_optional_int(row.get("id"))
+    normalised["product_id"] = _coerce_optional_int(row.get("product_id"))
+    normalised["quantity"] = _coerce_int(row.get("quantity"), default=0)
+    price = row.get("price")
+    if isinstance(price, Decimal):
+        normalised["price"] = price
+    elif price is None:
+        normalised["price"] = Decimal("0")
+    else:
+        normalised["price"] = Decimal(str(price))
+    normalised["product_name"] = row.get("product_name")
+    normalised["sku"] = row.get("sku")
+    normalised["description"] = row.get("description")
+    normalised["image_url"] = row.get("image_url")
+    normalised["status"] = str(row.get("status") or "").strip()
+    normalised["shipping_status"] = str(row.get("shipping_status") or "").strip()
+    normalised["notes"] = row.get("notes")
+    normalised["po_number"] = row.get("po_number")
+    normalised["consignment_id"] = row.get("consignment_id")
+    normalised["order_number"] = str(row.get("order_number") or "").strip()
+    normalised["order_date"] = _normalise_datetime(row.get("order_date"))
+    normalised["eta"] = _normalise_datetime(row.get("eta"))
+    return normalised

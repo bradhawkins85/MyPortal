@@ -2,10 +2,10 @@
 <html>
   <%- include('partials/head', { title: 'Syncro Customers' }) %>
   <body>
-    <div class="app-container">
-      <%- include('partials/sidebar') %>
-      <div class="content">
-        <h1>Syncro Customers</h1>
+    <%- include('partials/app-shell-start', {
+          pageTitle: 'Syncro Customers',
+          pageSubtitle: 'Import and visibility controls'
+        }) %>
         <p>
           <a href="/admin/syncro/customers<%= showHidden ? '' : '?showHidden=1' %>">
             <%= showHidden ? 'Hide Hidden Customers' : 'Show Hidden Customers' %>
@@ -52,7 +52,6 @@
           </tbody>
         </table>
         <p><a href="/admin">Back</a></p>
-      </div>
-    </div>
+    <%- include('partials/app-shell-end') %>
   </body>
 </html>

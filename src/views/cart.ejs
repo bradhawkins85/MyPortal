@@ -2,10 +2,10 @@
 <html>
   <%- include('partials/head', { title: 'Cart' }) %>
 <body>
-  <div class="app-container">
-    <%- include('partials/sidebar') %>
-    <div class="content">
-      <h1>Cart</h1>
+  <%- include('partials/app-shell-start', {
+        pageTitle: 'Cart',
+        pageSubtitle: 'Review items before checkout'
+      }) %>
       <% if (orderMessage) { %>
         <p><%= orderMessage %></p>
       <% } %>
@@ -21,7 +21,6 @@
                 <th>Image</th>
                 <th>Name</th>
                 <th>SKU</th>
-                <th>Description</th>
                 <th>Price</th>
                 <th>Quantity</th>
               </tr>
@@ -33,7 +32,6 @@
                   <td><% if (item.imageUrl) { %><img src="<%= item.imageUrl %>" width="50" alt=""><% } %></td>
                   <td><%= item.name %></td>
                   <td><%= item.sku %></td>
-                  <td><%- item.description.replace(/\n/g, '<br>') %></td>
                   <td>$<%= item.price.toFixed(2) %></td>
                   <td><%= item.quantity %></td>
                 </tr>
@@ -49,7 +47,6 @@
           <button type="submit">Place Order</button>
         </form>
       <% } %>
-    </div>
-  </div>
+  <%- include('partials/app-shell-end') %>
 </body>
 </html>
