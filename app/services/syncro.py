@@ -97,3 +97,210 @@ async def get_customer(customer_id: str | int) -> dict[str, Any] | None:
         if isinstance(customer, dict):
             return customer
     return payload if isinstance(payload, dict) else None
+
+
+async def get_assets(customer_id: str | int) -> list[dict[str, Any]]:
+    """Fetch all Syncro assets for a customer, handling pagination."""
+
+    results: list[dict[str, Any]] = []
+    for page in range(1, 101):
+        payload = await _request(
+            "GET",
+            "/customer_assets",
+            params={"customer_id": customer_id, "page": page},
+        )
+        if not payload:
+            break
+        assets = _extract_collection(payload, "assets", "data")
+        if not assets:
+            break
+        results.extend(assets)
+
+        total_pages: int | None = None
+        if isinstance(payload, dict):
+            meta = payload.get("meta")
+            if isinstance(meta, dict) and meta.get("total_pages"):
+                try:
+                    total_pages = int(meta.get("total_pages"))
+                except (TypeError, ValueError):
+                    total_pages = None
+            if total_pages is None:
+                pagination = payload.get("pagination")
+                if isinstance(pagination, dict) and pagination.get("total_pages"):
+                    try:
+                        total_pages = int(pagination.get("total_pages"))
+                    except (TypeError, ValueError):
+                        total_pages = None
+        if total_pages and page >= total_pages:
+            break
+    return results
+
+
+def _parse_numeric_value(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and (value != value):  # NaN check
+            return None
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        digits = ""
+        for ch in text:
+            if ch.isdigit() or ch in {"-", "."}:
+                digits += ch
+            elif digits:
+                break
+        if not digits:
+            return None
+        try:
+            return float(digits)
+        except ValueError:
+            return None
+
+
+def extract_asset_details(asset: dict[str, Any]) -> dict[str, Any]:
+    """Normalise Syncro asset payloads into a consistent schema."""
+
+    props = asset.get("properties") if isinstance(asset, dict) else {}
+    if not isinstance(props, dict):
+        props = {}
+    kabuto = props.get("kabuto_information") if isinstance(props, dict) else {}
+    if not isinstance(kabuto, dict):
+        kabuto = {}
+    general = kabuto.get("general") if isinstance(kabuto, dict) else {}
+    if not isinstance(general, dict):
+        general = {}
+
+    cpu_array = kabuto.get("cpu") if isinstance(kabuto, dict) else []
+    if not isinstance(cpu_array, list):
+        cpu_array = []
+    hdd_array = kabuto.get("hdd") if isinstance(kabuto, dict) else []
+    if not isinstance(hdd_array, list):
+        hdd_array = []
+    ram_array = kabuto.get("ram") if isinstance(kabuto, dict) else []
+    if not isinstance(ram_array, list):
+        ram_array = []
+
+    performance_candidates = [
+        asset.get("performance_score"),
+        props.get("performance_score"),
+        kabuto.get("performance_score"),
+        props.get("Performance Score"),
+    ]
+    performance: float | None = None
+    for candidate in performance_candidates:
+        parsed = _parse_numeric_value(candidate)
+        if parsed is not None:
+            performance = parsed
+            break
+
+    ram_value = (
+        _parse_numeric_value(asset.get("ram_gb"))
+        or _parse_numeric_value(props.get("ram_gb"))
+        or _parse_numeric_value(kabuto.get("ram_gb"))
+    )
+    if ram_value is None and ram_array:
+        first_ram = ram_array[0]
+        if isinstance(first_ram, dict):
+            ram_value = _parse_numeric_value(first_ram.get("size"))
+        else:
+            ram_value = _parse_numeric_value(first_ram)
+
+    hdd_size = asset.get("hdd_size") or props.get("hdd_size")
+    if not hdd_size and hdd_array:
+        first_hdd = hdd_array[0]
+        if isinstance(first_hdd, dict):
+            hdd_size = first_hdd.get("size")
+        else:
+            hdd_size = first_hdd
+    if not hdd_size and isinstance(props.get("hdd"), str):
+        hdd_size = props.get("hdd")
+
+    os_name = (
+        asset.get("os_name")
+        or props.get("os_name")
+        or props.get("os")
+        or (kabuto.get("os", {}).get("name") if isinstance(kabuto.get("os"), dict) else None)
+    )
+
+    cpu_name = asset.get("cpu_name") or props.get("cpu_name")
+    if not cpu_name and cpu_array:
+        first_cpu = cpu_array[0]
+        if isinstance(first_cpu, dict):
+            cpu_name = first_cpu.get("name")
+        else:
+            cpu_name = first_cpu
+
+    last_sync = asset.get("last_sync") or props.get("last_sync") or kabuto.get("last_synced_at")
+
+    motherboard_manufacturer = (
+        asset.get("motherboard_manufacturer")
+        or props.get("motherboard_manufacturer")
+        or (kabuto.get("motherboard", {}).get("manufacturer") if isinstance(kabuto.get("motherboard"), dict) else None)
+    )
+
+    form_factor = (
+        asset.get("form_factor")
+        or props.get("form_factor")
+        or kabuto.get("form_factor")
+        or general.get("form_factor")
+    )
+
+    last_user = asset.get("last_user") or props.get("last_user") or kabuto.get("last_user")
+
+    cpu_age_candidates = [
+        asset.get("cpu_age"),
+        props.get("cpu_age"),
+        kabuto.get("cpu_age"),
+        general.get("cpu_age"),
+        asset.get("CPUAge"),
+        props.get("CPUAge"),
+        kabuto.get("CPUAge"),
+        general.get("CPUAge"),
+        asset.get("CPU Age"),
+        props.get("CPU Age"),
+        kabuto.get("CPU Age"),
+        general.get("CPU Age"),
+        asset.get("approx_age"),
+        props.get("approx_age"),
+        kabuto.get("approx_age"),
+        general.get("approx_age"),
+    ]
+    approx_age: float | None = None
+    for candidate in cpu_age_candidates:
+        parsed = _parse_numeric_value(candidate)
+        if parsed is not None:
+            approx_age = parsed
+            break
+
+    warranty_status = asset.get("warranty_status") or props.get("warranty_status")
+    warranty_end = asset.get("warranty_end_date") or props.get("warranty_end_date")
+
+    return {
+        "id": asset.get("id"),
+        "name": asset.get("name")
+        or props.get("device_name")
+        or general.get("name"),
+        "type": asset.get("type") or props.get("type") or general.get("type"),
+        "serial_number": asset.get("serial_number")
+        or props.get("serial_number")
+        or general.get("serial_number"),
+        "status": asset.get("status") or props.get("status"),
+        "os_name": os_name,
+        "cpu_name": cpu_name,
+        "ram_gb": ram_value,
+        "hdd_size": hdd_size,
+        "last_sync": last_sync,
+        "motherboard_manufacturer": motherboard_manufacturer,
+        "form_factor": form_factor,
+        "last_user": last_user,
+        "cpu_age": approx_age,
+        "performance_score": performance,
+        "warranty_status": warranty_status,
+        "warranty_end_date": warranty_end,
+    }
