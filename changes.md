@@ -1,3 +1,4 @@
+- 2025-10-09, 05:52 UTC, Fix, Normalised string timestamp values from the database to UTC datetimes so the admin API key dashboard loads
 - 2025-10-08, 13:39 UTC, Fix, Normalised Decimal audit metadata before JSON serialisation so the admin API key dashboard renders without errors
 - 2025-10-08, 13:42 UTC, Fix, Restored /admin/companies administration dashboard with user provisioning and permission controls
 - 2025-10-15, 09:20 UTC, Fix, Removed an extra Jinja endif in base.html so the dashboard template renders without 500 errors
