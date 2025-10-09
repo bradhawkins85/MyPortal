@@ -2,10 +2,10 @@
 <html>
   <%- include('partials/head', { title: 'Forms Admin' }) %>
 <body>
-  <div class="app-container">
-    <%- include('partials/sidebar') %>
-    <div class="content">
-      <h1>Forms Admin</h1>
+  <%- include('partials/app-shell-start', {
+        pageTitle: 'Forms Admin',
+        pageSubtitle: 'Curate forms and assignments'
+      }) %>
       <section class="opnform-banner">
         <h2>Build Forms in OpnForm</h2>
         <p>
@@ -63,7 +63,6 @@
           </tbody>
         </table>
       </section>
-    </div>
-  </div>
+  <%- include('partials/app-shell-end') %>
 </body>
 </html>

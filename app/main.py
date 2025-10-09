@@ -63,6 +63,7 @@ from app.repositories import forms as forms_repo
 from app.repositories import m365 as m365_repo
 from app.repositories import roles as role_repo
 from app.repositories import shop as shop_repo
+from app.repositories import cart as cart_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import staff as staff_repo
 from app.repositories import webhook_events as webhook_events_repo
@@ -78,6 +79,7 @@ from app.security.api_keys import mask_api_key
 from app.services import audit as audit_service
 from app.services import m365 as m365_service
 from app.services import products as products_service
+from app.services import shop as shop_service
 from app.services import staff_importer
 from app.services import template_variables
 from app.services import webhook_monitor
@@ -441,6 +443,14 @@ async def _build_base_context(
     }
     if extra:
         context.update(extra)
+
+    cart_summary = {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")}
+    if session:
+        try:
+            cart_summary = await cart_repo.summarise_cart(session.id)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error("Failed to summarise cart", error=str(exc))
+    context["cart_summary"] = cart_summary
     return context
 
 
@@ -884,6 +894,40 @@ async def _load_staff_context(
         )
     company = await company_repo.get_company_by_id(company_id)
     return user, membership, company, staff_permission, company_id, None
+
+
+async def _load_shop_context(
+    request: Request,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None, int | None, RedirectResponse | None]:
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return user, None, None, None, redirect
+
+    is_super_admin = bool(user and user.get("is_super_admin"))
+    company_id_raw = user.get("company_id") if user else None
+    if company_id_raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No company associated with the current user",
+        )
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
+
+    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    can_access_shop = bool(membership and membership.get("can_access_shop"))
+    if not (is_super_admin or can_access_shop):
+        return (
+            user,
+            membership,
+            None,
+            company_id,
+            RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
+        )
+
+    company = await company_repo.get_company_by_id(company_id)
+    return user, membership, company, company_id, None
 
 
 def _companies_redirect(
@@ -1727,6 +1771,222 @@ async def shop_page(
         "cart_error": cart_error,
     }
     return await _render_template("shop/index.html", request, user, extra=extra)
+
+
+@app.post("/cart/add", response_class=RedirectResponse, include_in_schema=False)
+async def add_to_cart(request: Request) -> RedirectResponse:
+    user, membership, company, company_id, redirect = await _load_shop_context(request)
+    if redirect:
+        return redirect
+
+    session = await session_manager.load_session(request)
+    if not session:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    product_id_raw = form.get("productId")
+    quantity_raw = form.get("quantity")
+
+    try:
+        product_id = int(product_id_raw)
+    except (TypeError, ValueError):
+        return RedirectResponse(url=request.url_for("shop_page"), status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        requested_quantity = int(quantity_raw) if quantity_raw is not None else 1
+    except (TypeError, ValueError):
+        requested_quantity = 1
+    if requested_quantity <= 0:
+        requested_quantity = 1
+
+    product = await shop_repo.get_product_by_id(
+        product_id,
+        company_id=company_id,
+    )
+    if not product:
+        return RedirectResponse(url=request.url_for("shop_page"), status_code=status.HTTP_303_SEE_OTHER)
+
+    available_stock = int(product.get("stock") or 0)
+    existing = await cart_repo.get_item(session.id, product_id)
+    existing_quantity = existing.get("quantity") if existing else 0
+    if available_stock <= 0 or existing_quantity + requested_quantity > available_stock:
+        remaining = max(available_stock - existing_quantity, 0)
+        message = quote(f"Cannot add item. Only {remaining} left in stock.")
+        return RedirectResponse(
+            url=f"{request.url_for('shop_page')}?cart_error={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
+    price_source = product.get("price")
+    if is_vip and product.get("vip_price") is not None:
+        price_source = product.get("vip_price")
+    unit_price = Decimal(str(price_source or 0))
+    new_quantity = existing_quantity + requested_quantity
+
+    await cart_repo.upsert_item(
+        session_id=session.id,
+        product_id=product_id,
+        quantity=new_quantity,
+        unit_price=unit_price,
+        name=str(product.get("name") or ""),
+        sku=str(product.get("sku") or ""),
+        vendor_sku=product.get("vendor_sku"),
+        description=product.get("description"),
+        image_url=product.get("image_url"),
+    )
+
+    return RedirectResponse(url=request.url_for("shop_page"), status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/cart", response_class=HTMLResponse, name="cart_page")
+async def view_cart(
+    request: Request,
+    order_message: str | None = Query(None, alias="orderMessage"),
+):
+    user, membership, company, company_id, redirect = await _load_shop_context(request)
+    if redirect:
+        return redirect
+
+    session = await session_manager.load_session(request)
+    if not session:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    items = await cart_repo.list_items(session.id)
+    cart_items: list[dict[str, Any]] = []
+    total = Decimal("0")
+    for item in items:
+        unit_price = item.get("unit_price")
+        if not isinstance(unit_price, Decimal):
+            unit_price = Decimal(str(unit_price or 0))
+        quantity = int(item.get("quantity") or 0)
+        line_total = unit_price * quantity
+        total += line_total
+        hydrated = dict(item)
+        hydrated["unit_price"] = unit_price
+        hydrated["line_total"] = line_total
+        cart_items.append(hydrated)
+
+    extra = {
+        "title": "Cart",
+        "cart_items": cart_items,
+        "cart_total": total,
+        "order_message": order_message,
+    }
+    return await _render_template("shop/cart.html", request, user, extra=extra)
+
+
+@app.post("/cart/remove", response_class=RedirectResponse, name="cart_remove_items", include_in_schema=False)
+async def remove_cart_items(request: Request) -> RedirectResponse:
+    user, membership, company, company_id, redirect = await _load_shop_context(request)
+    if redirect:
+        return redirect
+
+    session = await session_manager.load_session(request)
+    if not session:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    product_ids: list[int] = []
+    if isinstance(form, FormData):
+        raw_values = form.getlist("remove")
+    else:
+        raw_value = form.get("remove")
+        raw_values = raw_value if isinstance(raw_value, list) else [raw_value] if raw_value is not None else []
+    for value in raw_values:
+        try:
+            product_ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    await cart_repo.remove_items(session.id, product_ids)
+    return RedirectResponse(url=request.url_for("cart_page"), status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/cart/place-order", response_class=RedirectResponse, name="cart_place_order", include_in_schema=False)
+async def place_order(request: Request) -> RedirectResponse:
+    user, membership, company, company_id, redirect = await _load_shop_context(request)
+    if redirect:
+        return redirect
+
+    session = await session_manager.load_session(request)
+    if not session:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
+
+    form = await request.form()
+    po_number_raw = form.get("poNumber")
+    po_number = (str(po_number_raw).strip() or None) if po_number_raw is not None else None
+    if po_number and len(po_number) > 100:
+        po_number = po_number[:100]
+
+    items = await cart_repo.list_items(session.id)
+    if not items:
+        return RedirectResponse(url=request.url_for("cart_page"), status_code=status.HTTP_303_SEE_OTHER)
+
+    order_number = "ORD" + "".join(secrets.choice("0123456789") for _ in range(12))
+
+    if settings.shop_webhook_url and settings.shop_webhook_api_key:
+        try:
+            await webhook_monitor.enqueue_event(
+                name="shop-order",
+                target_url=str(settings.shop_webhook_url),
+                payload={
+                    "cart": [
+                        {
+                            "productId": item.get("product_id"),
+                            "quantity": item.get("quantity"),
+                            "price": float(item.get("unit_price", 0)),
+                            "name": item.get("product_name"),
+                            "sku": item.get("product_sku"),
+                            "vendorSku": item.get("product_vendor_sku"),
+                        }
+                        for item in items
+                    ],
+                    "poNumber": po_number,
+                    "orderNumber": order_number,
+                    "companyId": company_id,
+                },
+                headers={
+                    "x-api-key": settings.shop_webhook_api_key,
+                    "Content-Type": "application/json",
+                },
+                max_attempts=5,
+                backoff_seconds=300,
+                attempt_immediately=True,
+            )
+        except Exception as exc:  # pragma: no cover - webhook safety
+            log_error("Failed to enqueue shop webhook", error=str(exc))
+
+    for item in items:
+        try:
+            previous_stock, new_stock = await shop_repo.create_order(
+                user_id=int(user["id"]),
+                company_id=company_id,
+                product_id=int(item.get("product_id")),
+                quantity=int(item.get("quantity")),
+                order_number=order_number,
+                status="pending",
+                po_number=po_number,
+            )
+        except ValueError as exc:
+            message = quote(str(exc))
+            return RedirectResponse(
+                url=f"{request.url_for('cart_page')}?orderMessage={message}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        await shop_service.maybe_send_discord_stock_notification_by_id(
+            int(item.get("product_id")),
+            previous_stock,
+            new_stock,
+        )
+
+    await cart_repo.clear_cart(session.id)
+    success = quote("Your order is being processed.")
+    return RedirectResponse(
+        url=f"{request.url_for('cart_page')}?orderMessage={success}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.get("/myforms", response_class=HTMLResponse)

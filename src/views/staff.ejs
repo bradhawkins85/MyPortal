@@ -2,6 +2,16 @@
 <html>
   <%- include('partials/head', { title: 'Staff' }) %>
 <body>
+  <%- include('partials/app-shell-start', {
+        pageTitle: 'Staff',
+        pageSubtitle: 'Manage employees and onboarding'
+      }) %>
+      <% if (isSuperAdmin && syncroCompanyId) { %>
+      <section>
+        <h2>Import from Syncro</h2>
+        <button id="import-syncro-btn">Import Contacts</button>
+      </section>
+      <% } %>
   <div class="app-container">
     <%- include('partials/sidebar') %>
     <div class="content">
@@ -100,8 +110,7 @@
           </tbody>
         </table>
       </section>
-    </div>
-  </div>
+  <%- include('partials/app-shell-end') %>
   <div id="edit-modal" class="modal" style="display:none;">
     <div class="modal-content">
       <span id="edit-close" class="close">&times;</span>
