@@ -55,7 +55,32 @@ POST_PULL_HEAD=$(git rev-parse HEAD)
 
 if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
   echo "Repository updated to $POST_PULL_HEAD. Installing dependencies and restarting service."
-  pip install -e .
+
+  VENV_DIR="${PROJECT_ROOT}/.venv"
+  if [[ -x "${VENV_DIR}/bin/python" ]]; then
+    PYTHON_BIN="${VENV_DIR}/bin/python"
+  elif [[ -x "${VENV_DIR}/Scripts/python.exe" ]]; then
+    PYTHON_BIN="${VENV_DIR}/Scripts/python.exe"
+  else
+    PYTHON_BIN=""
+  fi
+
+  if [[ -n "$PYTHON_BIN" ]]; then
+    echo "Using virtual environment interpreter at ${PYTHON_BIN}" >&2
+    "$PYTHON_BIN" -m pip install -e "$PROJECT_ROOT"
+  else
+    echo "Warning: .venv not found, falling back to system python" >&2
+    if command -v python3 >/dev/null 2>&1; then
+      PYTHON_FALLBACK="python3"
+    elif command -v python >/dev/null 2>&1; then
+      PYTHON_FALLBACK="python"
+    else
+      echo "Error: Unable to locate a python interpreter for dependency installation." >&2
+      exit 1
+    fi
+    "$PYTHON_FALLBACK" -m pip install -e "$PROJECT_ROOT"
+  fi
+
   systemctl restart myportal.service
 else
   echo "No changes detected from remote. Skipping dependency installation and service restart."

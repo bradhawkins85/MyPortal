@@ -1,3 +1,4 @@
+- 2025-10-19, 08:30 UTC, Fix, Ensured the system upgrade automation reuses the managed virtual environment before reinstalling dependencies
 - 2025-10-18, 11:30 UTC, Fix, Restored the Orders navigation link by initialising membership context before evaluating shop permissions in the base template
 - 2025-10-19, 07:15 UTC, Fix, Routed the system update scheduler task through scripts/upgrade.sh for consistent upgrade automation
 - 2025-10-09, 12:17 UTC, Feature, Introduced a notifications dashboard with filtering, sorting, and read-state tracking across the UI and API
