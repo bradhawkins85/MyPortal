@@ -1,3 +1,4 @@
+- 2025-10-09, 12:59 UTC, Fix, Prevented shop pagination from exceeding the viewport when recalculating rows while scrolled
 - 2025-10-09, 12:48 UTC, Fix, Removed shop toolbar search and stock toggle controls from the customer catalogue view
 - 2025-10-20, 10:00 UTC, Fix, Purged stray ~myportal pip metadata during upgrades so dependency installs stop warning about invalid distributions
 - 2025-10-09, 12:37 UTC, Fix, Added responsive pagination to the shop product table that adapts row counts to the viewport height for readability
