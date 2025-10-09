@@ -1,29 +1,16 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="admin-grid admin-grid--columns">
-  {% if is_super_admin and syncro_company_id %}
-    <section class="card card--panel">
-      <header class="card__header card__header--stacked">
-        <div>
-          <h2 class="card__title">Syncro integration</h2>
-          <p class="card__subtitle">Import contacts from Syncro to seed staff records and verification details.</p>
-        </div>
-        <button type="button" class="button" data-import-syncro>Import contacts</button>
-      </header>
-      <p class="text-muted">The importer retries automatically if Syncro returns a transient error.</p>
-    </section>
-  {% endif %}
-
+<div class="admin-grid">
   {% if is_admin %}
-    <section class="card card--panel">
+    <section class="card card--panel admin-grid__full staff-form-card">
       <header class="card__header card__header--stacked">
         <div>
           <h2 class="card__title">Add staff member</h2>
           <p class="card__subtitle">Capture onboarding details to provision accounts and workflows.</p>
         </div>
       </header>
-      <form action="/staff" method="post" class="form-grid">
+      <form action="/staff" method="post" class="staff-form">
         {% include "partials/csrf.html" %}
         <div class="form-field">
           <label class="form-label" for="staff-first-name">First name</label>
@@ -55,7 +42,7 @@
             <span>Enabled</span>
           </label>
         </div>
-        <div class="form-actions form-actions--inline">
+        <div class="form-actions staff-form__actions">
           <button type="submit" class="button">Add staff</button>
         </div>
       </form>
@@ -275,8 +262,7 @@
 <script type="application/json" id="staff-data">{{ staff_members | tojson }}</script>
 <script type="application/json" id="staff-flags">{{ {
   'isSuperAdmin': is_super_admin,
-  'isAdmin': is_admin,
-  'syncroCompanyId': syncro_company_id
+  'isAdmin': is_admin
 } | tojson }}</script>
 {% endblock %}
 
