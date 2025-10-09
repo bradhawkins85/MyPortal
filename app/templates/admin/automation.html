@@ -3,18 +3,23 @@
 {% block content %}
 <div class="admin-grid">
   <section class="card card--panel">
-    <header class="card__header">
+    <header class="card__header card__header--actions">
       <div>
         <h2 class="card__title">Scheduled tasks</h2>
         <p class="card__subtitle">Create, monitor, and control background automation jobs.</p>
       </div>
-      <input
-        type="search"
-        class="form-input"
-        placeholder="Filter tasks"
-        aria-label="Filter scheduled tasks"
-        data-table-filter="tasks-table"
-      />
+      <div class="card__controls">
+        <input
+          type="search"
+          class="form-input"
+          placeholder="Filter tasks"
+          aria-label="Filter scheduled tasks"
+          data-table-filter="tasks-table"
+        />
+        <button type="button" class="button" data-task-create>
+          New task
+        </button>
+      </div>
     </header>
     <div class="table-wrapper">
       <table class="table" id="tasks-table" data-table>
@@ -57,6 +62,7 @@
                     {{ 'Disable' if task.active else 'Enable' }}
                   </button>
                   <button type="button" class="button button--ghost" data-task-run>Run now</button>
+                  <button type="button" class="button button--ghost" data-task-logs>View logs</button>
                   <button type="button" class="button button--danger" data-task-delete>Delete</button>
                 </div>
               </td>
@@ -70,205 +76,120 @@
       </table>
     </div>
   </section>
-
-  <section class="card card--panel">
-    <header class="card__header">
-      <div>
-        <h2 class="card__title">Task editor</h2>
-        <p class="card__subtitle">All schedules use UTC and respect rate limits configured on integrations.</p>
-      </div>
-    </header>
-    <form id="scheduled-task-form" class="form" autocomplete="off">
-      <input type="hidden" name="task_id" id="task-id" />
-      <div class="form-field">
-        <label class="form-label" for="task-name">Task name</label>
-        <input class="form-input" id="task-name" name="name" required maxlength="255" />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="task-command">Command</label>
-        <select class="form-input" id="task-command" name="command" required>
-          {% for option in command_options %}
-            <option value="{{ option.value }}">{{ option.label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="task-company">Company ID</label>
-        <input
-          class="form-input"
-          id="task-company"
-          name="companyId"
-          type="number"
-          min="1"
-          placeholder="Leave blank for all companies"
-        />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="task-cron">Cron expression</label>
-        <input
-          class="form-input"
-          id="task-cron"
-          name="cron"
-          required
-          placeholder="0 2 * * *"
-          pattern="^[^\s]+(\s+[^\s]+){4,5}$"
-        />
-        <p class="form-help">Crontab syntax in UTC. Use five fields for minute through weekday.</p>
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="task-description">Description</label>
-        <textarea class="form-input form-input--textarea" id="task-description" name="description" rows="3"></textarea>
-      </div>
-      <div class="form-field form-field--inline">
-        <label class="form-label" for="task-max-retries">Max retries</label>
-        <input class="form-input" id="task-max-retries" name="maxRetries" type="number" min="0" value="0" />
-      </div>
-      <div class="form-field form-field--inline">
-        <label class="form-label" for="task-backoff">Retry backoff (seconds)</label>
-        <input class="form-input" id="task-backoff" name="retryBackoffSeconds" type="number" min="30" value="300" />
-      </div>
-      <div class="form-field form-field--checkbox">
-        <label class="form-checkbox">
-          <input type="checkbox" id="task-active" name="active" checked />
-          <span>Task active</span>
-        </label>
-      </div>
-      <div class="form-actions">
-        <button type="submit" class="button">Save task</button>
-        <button type="button" class="button button--ghost" data-task-reset>Clear form</button>
-      </div>
-    </form>
-  </section>
 </div>
 
-<section class="card card--panel">
-  <header class="card__header">
-    <div>
-      <h2 class="card__title">Recent task executions</h2>
-      <p class="card__subtitle">Track the latest automation runs with UTC timestamps converted to local time in your browser.</p>
+<div class="modal" id="task-editor-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close task editor</span>
+    </button>
+    <h2 class="modal__title">Scheduled task</h2>
+    <div class="modal__body">
+      <form id="scheduled-task-form" class="form" autocomplete="off">
+        <input type="hidden" name="task_id" id="task-id" />
+        <div class="form-field">
+          <label class="form-label" for="task-name">Task name</label>
+          <input class="form-input" id="task-name" name="name" required maxlength="255" data-initial-focus />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="task-command">Command</label>
+          <select class="form-input" id="task-command" name="command" required>
+            {% for option in command_options %}
+              <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="task-company">Company ID</label>
+          <input
+            class="form-input"
+            id="task-company"
+            name="companyId"
+            type="number"
+            min="1"
+            placeholder="Leave blank for all companies"
+          />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="task-cron">Cron expression</label>
+          <input
+            class="form-input"
+            id="task-cron"
+            name="cron"
+            required
+            placeholder="0 2 * * *"
+            pattern="^[^\s]+(\s+[^\s]+){4,5}$"
+          />
+          <p class="form-help">Crontab syntax in UTC. Use five fields for minute through weekday.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="task-description">Description</label>
+          <textarea class="form-input form-input--textarea" id="task-description" name="description" rows="3"></textarea>
+        </div>
+        <div class="form-field form-field--inline">
+          <label class="form-label" for="task-max-retries">Max retries</label>
+          <input class="form-input" id="task-max-retries" name="maxRetries" type="number" min="0" value="0" />
+        </div>
+        <div class="form-field form-field--inline">
+          <label class="form-label" for="task-backoff">Retry backoff (seconds)</label>
+          <input class="form-input" id="task-backoff" name="retryBackoffSeconds" type="number" min="30" value="300" />
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="form-checkbox">
+            <input type="checkbox" id="task-active" name="active" checked />
+            <span>Task active</span>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button">Save task</button>
+          <button type="button" class="button button--ghost" data-task-reset>Clear form</button>
+        </div>
+      </form>
     </div>
-    <input
-      type="search"
-      class="form-input"
-      placeholder="Filter executions"
-      aria-label="Filter scheduled task runs"
-      data-table-filter="runs-table"
-    />
-  </header>
-  <div class="table-wrapper">
-    <table class="table" id="runs-table" data-table>
-      <thead>
-        <tr>
-          <th scope="col" data-sort="string">Task</th>
-          <th scope="col" data-sort="string">Status</th>
-          <th scope="col" data-sort="date">Started</th>
-          <th scope="col" data-sort="date">Finished</th>
-          <th scope="col" data-sort="number">Duration (ms)</th>
-          <th scope="col" data-sort="string">Details</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for run in runs %}
-          <tr>
-            <td data-label="Task">{{ run.task_name }}</td>
-            <td data-label="Status">{{ run.status }}</td>
-            <td data-label="Started" data-value="{{ run.started_iso or '' }}">
-              {% if run.started_iso %}
-                <span data-utc="{{ run.started_iso }}"></span>
-              {% else %}
-                <span class="text-muted">Unknown</span>
-              {% endif %}
-            </td>
-            <td data-label="Finished" data-value="{{ run.finished_iso or '' }}">
-              {% if run.finished_iso %}
-                <span data-utc="{{ run.finished_iso }}"></span>
-              {% else %}
-                <span class="text-muted">Pending</span>
-              {% endif %}
-            </td>
-            <td data-label="Duration" data-value="{{ run.duration_ms or 0 }}">{{ run.duration_ms or '—' }}</td>
-            <td data-label="Details">{{ run.details or '—' }}</td>
-          </tr>
-        {% else %}
-          <tr>
-            <td colspan="6" class="table__empty">No automation runs recorded yet.</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
   </div>
-</section>
+</div>
 
-<section class="card card--panel">
-  <header class="card__header">
-    <div>
-      <h2 class="card__title">Webhook delivery queue</h2>
-      <p class="card__subtitle">Monitor outbound webhook calls, retry failures, and review delivery history.</p>
+<div class="modal" id="task-logs-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close task logs</span>
+    </button>
+    <h2 class="modal__title" id="task-logs-title">Task run history</h2>
+    <div class="modal__body">
+      <p id="task-logs-description" class="modal__subtitle text-muted">
+        View the most recent executions for this scheduled task. All timestamps are displayed in your local timezone.
+      </p>
+      <div class="modal__controls">
+        <input
+          type="search"
+          class="form-input"
+          placeholder="Filter runs"
+          aria-label="Filter task runs"
+          data-table-filter="task-logs-table"
+        />
+      </div>
+      <div class="table-wrapper">
+        <table class="table" id="task-logs-table" data-table>
+          <thead>
+            <tr>
+              <th scope="col" data-sort="string">Status</th>
+              <th scope="col" data-sort="date">Started</th>
+              <th scope="col" data-sort="date">Finished</th>
+              <th scope="col" data-sort="number">Duration (ms)</th>
+              <th scope="col" data-sort="string">Details</th>
+            </tr>
+          </thead>
+          <tbody id="task-logs-body">
+            <tr>
+              <td colspan="5" class="table__empty" id="task-logs-empty">Select a task to view its recent runs.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
-    <input
-      type="search"
-      class="form-input"
-      placeholder="Filter webhook events"
-      aria-label="Filter webhook events"
-      data-table-filter="webhooks-table"
-    />
-  </header>
-  <div class="table-wrapper">
-    <table class="table" id="webhooks-table" data-table>
-      <thead>
-        <tr>
-          <th scope="col" data-sort="string">Name</th>
-          <th scope="col" data-sort="string">Target</th>
-          <th scope="col" data-sort="string">Status</th>
-          <th scope="col" data-sort="number">Attempts</th>
-          <th scope="col" data-sort="date">Next attempt</th>
-          <th scope="col" data-sort="string">Last error</th>
-          <th scope="col" data-sort="date">Updated</th>
-          <th scope="col" class="table__actions">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for event in events %}
-          <tr data-event-id="{{ event.id }}">
-            <td data-label="Name">{{ event.name }}</td>
-            <td data-label="Target">{{ event.target_url }}</td>
-            <td data-label="Status">{{ event.status }}</td>
-            <td data-label="Attempts" data-value="{{ event.attempt_count }}">
-              {{ event.attempt_count }}/{{ event.max_attempts }}
-            </td>
-            <td data-label="Next attempt" data-value="{{ event.next_attempt_iso or '' }}">
-              {% if event.next_attempt_iso %}
-                <span data-utc="{{ event.next_attempt_iso }}"></span>
-              {% else %}
-                <span class="text-muted">—</span>
-              {% endif %}
-            </td>
-            <td data-label="Last error">{{ event.last_error or '—' }}</td>
-            <td data-label="Updated" data-value="{{ event.updated_iso or '' }}">
-              {% if event.updated_iso %}
-                <span data-utc="{{ event.updated_iso }}"></span>
-              {% endif %}
-            </td>
-            <td class="table__actions">
-              <div class="table__action-buttons">
-                <button
-                  type="button"
-                  class="button button--ghost"
-                  data-webhook-retry
-                  {% if event.status == 'succeeded' %}disabled{% endif %}
-                >Retry</button>
-              </div>
-            </td>
-          </tr>
-        {% else %}
-          <tr>
-            <td colspan="8" class="table__empty">No webhook activity recorded.</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
   </div>
-</section>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
