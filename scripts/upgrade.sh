@@ -126,11 +126,23 @@ def iter_site_packages() -> set[Path]:
     if sys.platform.startswith("win"):
         paths.add(Path(sys.prefix) / "Lib" / "site-packages")
 
-    return {path for path in paths if path.exists()}
+    valid_paths: set[Path] = set()
+    for path in paths:
+        try:
+            if path.exists():
+                valid_paths.add(path)
+        except PermissionError:
+            print(f"Skipping inaccessible site-packages directory: {path}", file=sys.stderr)
+    return valid_paths
 
 
 for site_path in iter_site_packages():
-    for entry in site_path.iterdir():
+    try:
+        entries = list(site_path.iterdir())
+    except PermissionError as exc:
+        print(f"Skipping inaccessible site-packages directory {site_path}: {exc}", file=sys.stderr)
+        continue
+    for entry in entries:
         name = entry.name
         if not name.lower().startswith(PREFIX):
             continue
