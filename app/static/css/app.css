@@ -1402,13 +1402,15 @@ html[data-compact-mode='true'] body {
   font-size: 0.95rem;
 }
 
-html[data-compact-mode='true'] .layout__sidebar {
-  width: 220px;
-  padding: 0.5rem;
-}
+@media (min-width: 901px) {
+  html[data-compact-mode='true'] .layout__sidebar {
+    width: 220px;
+    padding: 0.5rem;
+  }
 
-html[data-compact-mode='true'] .layout__main {
-  max-width: calc(100vw - 220px);
+  html[data-compact-mode='true'] .layout__main {
+    max-width: calc(100vw - 220px);
+  }
 }
 
 html[data-compact-mode='true'] .brand {
