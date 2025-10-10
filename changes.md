@@ -1,4 +1,5 @@
 - 2025-10-10, 00:10 UTC, Feature, Introduced a persistent compact view toggle with responsive spacing that keeps the layout within viewport bounds
+- 2025-10-10, 00:10 UTC, Fix, Excluded high-capacity licenses (>=10000) from dashboard metrics so totals reflect countable seats
 - 2025-10-09, 23:26 UTC, Fix, Added stock_feed.xml to .gitignore so generated stock feeds stay out of version control
 - 2025-10-09, 13:18 UTC, Fix, Allowed Run Now scheduled tasks to execute in the background without redirecting to the update progress message
 - 2025-10-09, 13:14 UTC, Feature, Added viewport-aware pagination to the software licenses table so row counts follow the available space
