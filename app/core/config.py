@@ -11,8 +11,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables.
 
-    This configuration mirrors the semantics of the legacy Node.js implementation
-    while providing strongly-typed access for the new Python stack.
+    The settings preserve the existing environment variable semantics from prior
+    deployments while providing strongly-typed access for the Python stack.
     """
 
     app_name: str = "MyPortal"

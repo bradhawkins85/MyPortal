@@ -14,5 +14,6 @@ MyPortal is now a Python-first portal that ships exclusively with the FastAPI im
 
 - Development now relies on the Python toolchain outlined in the README and the virtual environment bootstrap script; Node tooling such as `npm install` and `tsc` are no longer part of the workflow.【F:README.md†L91-L112】【F:scripts/bootstrap_venv.py†L1-L120】
 - Database migrations continue to run automatically at startup, and API documentation remains available through the integrated Swagger UI that documents every CRUD endpoint.【F:README.md†L107-L114】【F:app/main.py†L35-L151】
+- Remaining references to the Node.js stack within code comments and configuration docstrings have been retired so the repository messaging reflects the Python-only deployment.【F:app/core/config.py†L12-L19】【F:app/main.py†L175-L182】
 
 The removal of the Node.js codebase eliminates duplication while retaining feature parity inside the Python application, reducing maintenance overhead and simplifying deployment.

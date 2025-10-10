@@ -1,3 +1,4 @@
+- 2025-10-10, 02:50 UTC, Fix, Removed remaining Node.js references from documentation and configuration comments to reflect the Python-only stack
 - 2025-10-10, 02:28 UTC, Change, Retired the legacy Node.js/TypeScript codebase and tooling so only the FastAPI stack remains
 - 2025-10-10, 00:10 UTC, Fix, Excluded high-capacity licenses (>=10000) from dashboard metrics so totals reflect countable seats
 - 2025-10-09, 23:26 UTC, Fix, Added stock_feed.xml to .gitignore so generated stock feeds stay out of version control

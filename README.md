@@ -1,6 +1,6 @@
 # MyPortal
 
-MyPortal is now a Python-first customer portal built with FastAPI, async MySQL access, and Jinja-powered views. The application retains parity with the prior TypeScript experience while embracing a modern Python architecture that is easier to extend, test, and deploy.
+MyPortal is now a Python-first customer portal built with FastAPI, async MySQL access, and Jinja-powered views. The application retains parity with the previous portal experience while embracing a modern Python architecture that is easier to extend, test, and deploy.
 
 There are no default login credentials; the first visit will prompt you to register the initial super administrator. If no user records exist the login flow transparently redirects to the registration screen.
 
