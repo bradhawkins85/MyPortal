@@ -172,8 +172,8 @@ app.add_middleware(CSRFMiddleware)
 
 templates = Jinja2Templates(directory=str(templates_config.template_path))
 
-# Ensure document uploads remain web-accessible with the same paths used by the
-# legacy Node.js implementation.  Product images continue to live in the
+# Ensure document uploads remain web-accessible using the same paths as the
+# previous portal stack.  Product images continue to live in the
 # private ``/uploads`` directory which requires authentication before access.
 _uploads_path = templates_config.static_path / "uploads"
 _uploads_path.mkdir(parents=True, exist_ok=True)
