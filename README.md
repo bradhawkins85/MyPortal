@@ -204,7 +204,7 @@ For a hardened systemd configuration that runs MyPortal as a managed Linux servi
 
 ## Updating from GitHub
 
-The legacy `update.sh` script has been preserved for historical reference, however the recommended approach is to pull changes, update the Python dependencies, and restart the ASGI server:
+Use the Python-focused automation scripts to stay current: `scripts/upgrade.sh` pulls the latest code and `scripts/restart.sh` reinstalls dependencies before restarting the ASGI service. If you prefer to run the steps manually, execute the following commands:
 
 ```bash
 git pull origin main
