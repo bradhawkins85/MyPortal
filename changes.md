@@ -1,3 +1,4 @@
+- 2025-10-10, 03:37 UTC, Fix, Compacted portal spacing with reusable 5px+ padding variables so the UI stays dense yet readable
 - 2025-10-10, 02:50 UTC, Fix, Removed remaining Node.js references from documentation and configuration comments to reflect the Python-only stack
 - 2025-10-10, 02:28 UTC, Change, Retired the legacy Node.js/TypeScript codebase and tooling so only the FastAPI stack remains
 - 2025-10-10, 00:10 UTC, Fix, Excluded high-capacity licenses (>=10000) from dashboard metrics so totals reflect countable seats
