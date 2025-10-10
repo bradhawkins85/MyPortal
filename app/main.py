@@ -635,14 +635,37 @@ async def _build_consolidated_overview(
         licenses = await license_repo.list_company_licenses(active_company_id)
         invoices = await invoice_repo.list_company_invoices(active_company_id)
 
-        license_capacity = sum(int(lic.get("count") or 0) for lic in licenses)
-        license_allocated = sum(int(lic.get("allocated") or 0) for lic in licenses)
+        def _safe_int(value: Any) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return 0
+
+        def _is_countable(license_record: Mapping[str, Any]) -> bool:
+            return _safe_int(license_record.get("count")) < 10000
+
+        counted_licenses = [lic for lic in licenses if _is_countable(lic)]
+        excluded_licenses = [lic for lic in licenses if not _is_countable(lic)]
+
+        license_capacity = sum(_safe_int(lic.get("count")) for lic in counted_licenses)
+        license_allocated = sum(_safe_int(lic.get("allocated")) for lic in counted_licenses)
+        excluded_allocated = sum(_safe_int(lic.get("allocated")) for lic in excluded_licenses)
         license_available = max(license_capacity - license_allocated, 0)
         license_utilisation = (
             round((license_allocated / license_capacity) * 100)
             if license_capacity
             else 0
         )
+
+        license_meta_parts = [f"{_format_int(license_allocated)} allocated"]
+        if excluded_licenses:
+            excluded_count = len(excluded_licenses)
+            excluded_label = "license" if excluded_count == 1 else "licenses"
+            note = f"Excludes {excluded_count} high-capacity {excluded_label}"
+            if excluded_allocated:
+                note += f" ({_format_int(excluded_allocated)} assigned)"
+            license_meta_parts.append(note)
+        license_meta = "; ".join(license_meta_parts)
 
         invoice_status_counts = Counter(
             (str(invoice.get("status") or "Unspecified").strip() or "Unspecified")
@@ -724,7 +747,7 @@ async def _build_consolidated_overview(
                     "label": "Licenses",
                     "value": license_capacity,
                     "formatted": _format_int(license_capacity),
-                    "meta": f"{_format_int(license_allocated)} allocated",
+                    "meta": license_meta,
                 },
             ],
             "asset_status": _format_status_items(asset_status_counts),
