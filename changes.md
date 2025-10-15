@@ -1,3 +1,4 @@
+- 2025-10-15, 13:45 UTC, Fix, Restored sidebar company features for company admins when memberships grant access
 - 2025-10-15, 13:26 UTC, Fix, Prevented blank CSRF headers from blocking company membership saves when the session cookie name is customised
 - 2025-11-25, 11:00 UTC, Feature, Logged SMS notifications as webhook events so delivery follows monitored retry logic
 - 2025-10-15, 13:21 UTC, Fix, Restored shop admin category, product update, archive, and visibility endpoints with validation and logging
