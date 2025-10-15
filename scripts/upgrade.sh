@@ -5,6 +5,24 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 VENV_DIR="${PROJECT_ROOT}/.venv"
 
+prepare_git_environment() {
+  local current_home="${HOME:-}"
+  if [[ -n "$current_home" ]]; then
+    if mkdir -p "$current_home/.config/git" >/dev/null 2>&1; then
+      return
+    fi
+  fi
+
+  local fallback_home="${PROJECT_ROOT}/.cache/git-home"
+  mkdir -p "$fallback_home/.config/git"
+  export HOME="$fallback_home"
+  export XDG_CONFIG_HOME="$fallback_home/.config"
+  export GIT_CONFIG_GLOBAL="$fallback_home/.gitconfig"
+  echo "Redirected Git configuration to ${fallback_home} because the default HOME directory is not writable." >&2
+}
+
+prepare_git_environment
+
 detect_python_interpreter() {
   local interpreter=""
   if [[ -x "${VENV_DIR}/bin/python" ]]; then
