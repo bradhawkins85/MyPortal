@@ -305,6 +305,30 @@ async def _require_super_admin_page(request: Request) -> tuple[dict[str, Any] | 
     return user, None
 
 
+async def _require_administration_access(
+    request: Request,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, RedirectResponse | None]:
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return None, None, redirect
+
+    membership = getattr(request.state, "active_membership", None)
+    if membership is None:
+        active_company_id = getattr(request.state, "active_company_id", None)
+        if active_company_id is not None:
+            try:
+                membership = await user_company_repo.get_user_company(user["id"], int(active_company_id))
+            except Exception:  # pragma: no cover - defensive protection against membership lookup failures
+                membership = None
+            request.state.active_membership = membership
+
+    is_company_admin = bool(membership and membership.get("is_admin"))
+    if not (user.get("is_super_admin") or is_company_admin):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator access required")
+
+    return user, membership, None
+
+
 @app.get("/uploads/{file_path:path}", response_class=FileResponse, include_in_schema=False)
 async def serve_private_upload(file_path: str, request: Request):
     """Serve product images stored in the legacy private uploads directory."""
@@ -3415,6 +3439,43 @@ async def invite_staff_member(staff_id: int, request: Request):
         invited_user_id=created_user["id"],
     )
     return JSONResponse({"success": True})
+
+@app.get("/admin/profile", response_class=HTMLResponse)
+async def admin_profile_page(request: Request):
+    user, membership, redirect = await _require_administration_access(request)
+    if redirect:
+        return redirect
+
+    try:
+        devices = await auth_repo.get_totp_authenticators(user["id"])
+    except Exception:  # pragma: no cover - defensive logging for profile rendering
+        devices = []
+
+    totp_devices: list[dict[str, Any]] = []
+    for device in devices:
+        identifier = device.get("id")
+        if identifier is None:
+            continue
+        name = device.get("name") or "Authenticator"
+        try:
+            identifier = int(identifier)
+        except (TypeError, ValueError):
+            continue
+        totp_devices.append({"id": identifier, "name": name})
+
+    totp_devices.sort(key=lambda entry: entry["name"].lower())
+
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "My profile",
+            "profile_membership": membership,
+            "profile_totp_devices": totp_devices,
+        },
+    )
+    return templates.TemplateResponse("admin/profile.html", context)
+
 
 @app.get("/admin/companies", response_class=HTMLResponse)
 async def admin_companies_page(

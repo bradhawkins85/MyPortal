@@ -80,6 +80,14 @@ class PasswordResetStatus(BaseModel):
     detail: str
 
 
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(
+        min_length=12,
+        description="New password. Must differ from the current password and contain at least 12 characters.",
+    )
+
+
 class TOTPSetupResponse(BaseModel):
     secret: str
     otpauth_url: str
