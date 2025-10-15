@@ -69,6 +69,122 @@
           {% set membership = active_membership %}
           {% set is_super_admin = current_user.get('is_super_admin') if current_user else False %}
           {% set is_company_admin = membership and membership.get('is_admin') %}
+          {% set is_company_admin_only = is_company_admin and not is_super_admin %}
+          {% set can_access_shop = is_super_admin or (membership and membership.get('can_access_shop')) %}
+          <li class="menu__item">
+            <a href="/shop" {% if current_path.startswith('/shop') and not current_path.startswith('/shop/admin') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M4 7h16l-1.5 12.5A2 2 0 0 1 16.52 21H7.48a2 2 0 0 1-1.98-1.5zM6 3h12a1 1 0 0 1 1 1v2H5V4a1 1 0 0 1 1-1z"/></svg>
+              </span>
+              <span class="menu__label">Shop</span>
+            </a>
+          </li>
+          {% if can_access_shop %}
+          <li class="menu__item">
+            <a href="/cart" {% if current_path.startswith('/cart') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M7 4a1 1 0 0 1 1-1h1.18a3 3 0 0 1 5.64 0H16a1 1 0 0 1 1 1v2h3a1 1 0 0 1 .98 1.2l-1.5 7.5A3 3 0 0 1 16.52 17H7.48a3 3 0 0 1-2.96-2.3L3.02 7.2A1 1 0 0 1 4 6h3V4zm2 0v2h6V4h-6zm-2.52 6.7.98 4.9a1 1 0 0 0 .98.8h9.04a1 1 0 0 0 .98-.8l1.18-5.9H6.48zM9 19a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>
+              </span>
+              <span class="menu__label">Cart{% if cart_summary.total_quantity %}<span class="menu__badge">{{ cart_summary.total_quantity }}</span>{% endif %}</span>
+            </a>
+          </li>
+          <li class="menu__item">
+            <a href="/orders" {% if current_path.startswith('/orders') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M5 3h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm3 4v2h8V7H8zm0 4v2h8v-2H8zm0 4v2h5v-2H8z"/></svg>
+              </span>
+              <span class="menu__label">Orders</span>
+            </a>
+          </li>
+          {% endif %}
+          <li class="menu__item">
+            <a href="/myforms" {% if current_path.startswith('/myforms') and not current_path.startswith('/admin/forms') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h9l5 5v15H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm8 7h4.5L14 4.5V9z"/></svg>
+              </span>
+              <span class="menu__label">Forms</span>
+            </a>
+          </li>
+          {% set can_manage_assets = is_super_admin or (membership and membership.get('can_manage_assets')) %}
+          {% if can_manage_assets %}
+          <li class="menu__item">
+            <a href="/assets" {% if current_path.startswith('/assets') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M4 6a2 2 0 0 1 2-2h4.18a3 3 0 0 1 5.64 0H20a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm2 0v12h12V6h-2.18a3 3 0 0 1-5.64 0H6zm6-2a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/></svg>
+              </span>
+              <span class="menu__label">Assets</span>
+            </a>
+          </li>
+          {% endif %}
+          {% set can_manage_licenses = is_super_admin or (membership and membership.get('can_manage_licenses')) %}
+          {% set can_manage_invoices = is_super_admin or (membership and membership.get('can_manage_invoices')) %}
+          {% if can_manage_licenses %}
+          <li class="menu__item">
+            <a href="/licenses" {% if current_path.startswith('/licenses') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h12a1 1 0 0 1 1 1v18l-7-3-7 3V3a1 1 0 0 1 1-1zm2 4v2h8V6
+H8zm0 4v2h8v-2H8z"/></svg>
+              </span>
+              <span class="menu__label">Licenses</span>
+            </a>
+          </li>
+          {% endif %}
+          {% if can_manage_invoices %}
+          <li class="menu__item">
+            <a href="/invoices" {% if current_path.startswith('/invoices') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M6 3h12a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm3 4v2h6V7H9zm0 4v2h6v-2H9zm0 4v2h6v-2H9z"/></svg>
+              </span>
+              <span class="menu__label">Invoices</span>
+            </a>
+          </li>
+          {% endif %}
+          {% if not is_company_admin_only %}
+          <li class="menu__item">
+            <a href="/m365" {% if current_path.startswith('/m365') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M3 5a2 2 0 0 1 2-2h6l4 4h6a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a
+2 2 0 0 1-2-2V5zm9 10 5-3-5-3v6zm-7 0h5v-6H5v6z"/></svg>
+              </span>
+              <span class="menu__label">Office 365</span>
+            </a>
+          </li>
+          {% endif %}
+          <li class="menu__item">
+            <a href="/staff" {% if current_path.startswith('/staff') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-3.31 0-8 1.66-8 5v1h16v-1c0-3.34-4.69-5-8-5z"/></svg>
+              </span>
+              <span class="menu__label">Staff</span>
+            </a>
+          </li>
+          {% if is_company_admin_only %}
+          <li class="menu__item">
+            <a href="/admin/companies" {% if current_path.startswith('/admin/companies') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M4 3h16a1 1 0 0 1 1 1v17h-6v-6h-6v6H3V4a1 1 0 0 1 1-1zm7 17v-4h2v4h3v-6h2V5H6v9h2v6z"/></svg>
+              </span>
+              <span class="menu__label">Company admin</span>
+            </a>
+          </li>
+          {% endif %}
+          {% if not is_company_admin_only %}
+          <li class="menu__item">
+            <a
+              href="/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              {% if current_path.startswith('/docs') %}aria-current="page"{% endif %}
+            >
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm8 6V4.5L18.5 9H14z"/></svg>
+              </span>
+              <span class="menu__label">API Docs</span>
+            </a>
+          </li>
+          {% endif %}
+          {% set is_super_admin = current_user.get('is_super_admin') if current_user is defined and current_user else False %}
+          {% if is_super_admin %}
           {% set has_admin_access = is_super_admin or is_company_admin %}
           {% if has_admin_access %}
             <li class="menu__divider" role="presentation"></li>
