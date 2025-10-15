@@ -72,7 +72,6 @@
           </li>
           {% if is_super_admin %}
             <li class="menu__divider" role="presentation"></li>
-            <li class="menu__heading" role="presentation">Super admin</li>
             <li class="menu__item">
               <a href="/shop" {% if current_path.startswith('/shop') and not current_path.startswith('/admin/shop') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
