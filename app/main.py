@@ -1331,8 +1331,11 @@ async def _load_staff_context(
     return user, membership, company, staff_permission, company_id, None
 
 
-async def _load_shop_context(
+async def _load_company_section_context(
     request: Request,
+    *,
+    permission_field: str,
+    allow_super_admin_without_company: bool = False,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None, int | None, RedirectResponse | None]:
     user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -1341,6 +1344,8 @@ async def _load_shop_context(
     is_super_admin = bool(user and user.get("is_super_admin"))
     company_id_raw = user.get("company_id") if user else None
     if company_id_raw is None:
+        if is_super_admin and allow_super_admin_without_company:
+            return user, None, None, None, None
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No company associated with the current user",
@@ -1351,8 +1356,8 @@ async def _load_shop_context(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
 
     membership = await user_company_repo.get_user_company(user["id"], company_id)
-    can_access_shop = bool(membership and membership.get("can_access_shop"))
-    if not (is_super_admin or can_access_shop):
+    has_permission = bool(membership and membership.get(permission_field))
+    if not (is_super_admin or has_permission):
         return (
             user,
             membership,
@@ -1392,12 +1397,15 @@ def _companies_redirect(
 
 
 _COMPANY_PERMISSION_COLUMNS: list[dict[str, str]] = [
-    {"field": "can_manage_licenses", "label": "Licenses"},
-    {"field": "can_manage_office_groups", "label": "Office groups"},
-    {"field": "can_manage_assets", "label": "Assets"},
-    {"field": "can_manage_invoices", "label": "Invoices"},
-    {"field": "can_order_licenses", "label": "Order licenses"},
     {"field": "can_access_shop", "label": "Shop"},
+    {"field": "can_access_cart", "label": "Cart"},
+    {"field": "can_access_orders", "label": "Orders"},
+    {"field": "can_access_forms", "label": "Forms"},
+    {"field": "can_manage_assets", "label": "Assets"},
+    {"field": "can_manage_licenses", "label": "Licenses"},
+    {"field": "can_manage_invoices", "label": "Invoices"},
+    {"field": "can_manage_office_groups", "label": "Office groups"},
+    {"field": "can_order_licenses", "label": "Order licenses"},
     {"field": "is_admin", "label": "Company admin"},
 ]
 
@@ -2322,17 +2330,20 @@ async def shop_page(
     q: str | None = None,
     cart_error: str | None = None,
 ):
-    user, redirect = await _require_authenticated_user(request)
+    (
+        user,
+        _membership,
+        company,
+        company_id,
+        redirect,
+    ) = await _load_company_section_context(
+        request,
+        permission_field="can_access_shop",
+    )
     if redirect:
         return redirect
     search_term = (q or "").strip()
     effective_search = search_term or None
-
-    company_id_raw = user.get("company_id")
-    try:
-        company_id = int(company_id_raw) if company_id_raw is not None else None
-    except (TypeError, ValueError):
-        company_id = None
 
     category_id = category if category and category > 0 else None
 
@@ -2345,15 +2356,9 @@ async def shop_page(
 
     categories_task = asyncio.create_task(shop_repo.list_categories())
     products_task = asyncio.create_task(shop_repo.list_products(filters))
-    company_task = (
-        asyncio.create_task(company_repo.get_company_by_id(company_id))
-        if company_id is not None
-        else None
-    )
 
     categories = await categories_task
     products = await products_task
-    company = await company_task if company_task else None
 
     if not show_out_of_stock:
         products = [product for product in products if product.get("stock", 0) > 0]
@@ -2390,7 +2395,16 @@ async def shop_page(
 
 @app.post("/cart/add", response_class=RedirectResponse, include_in_schema=False)
 async def add_to_cart(request: Request) -> RedirectResponse:
-    user, membership, company, company_id, redirect = await _load_shop_context(request)
+    (
+        user,
+        membership,
+        company,
+        company_id,
+        redirect,
+    ) = await _load_company_section_context(
+        request,
+        permission_field="can_access_cart",
+    )
     if redirect:
         return redirect
 
@@ -2459,7 +2473,16 @@ async def view_cart(
     request: Request,
     order_message: str | None = Query(None, alias="orderMessage"),
 ):
-    user, membership, company, company_id, redirect = await _load_shop_context(request)
+    (
+        user,
+        membership,
+        company,
+        company_id,
+        redirect,
+    ) = await _load_company_section_context(
+        request,
+        permission_field="can_access_cart",
+    )
     if redirect:
         return redirect
 
@@ -2524,7 +2547,16 @@ async def orders_page(
     status_filter: str | None = Query(None, alias="status"),
     shipping_filter: str | None = Query(None, alias="shippingStatus"),
 ):
-    user, membership, company, company_id, redirect = await _load_shop_context(request)
+    (
+        user,
+        membership,
+        company,
+        company_id,
+        redirect,
+    ) = await _load_company_section_context(
+        request,
+        permission_field="can_access_orders",
+    )
     if redirect:
         return redirect
 
@@ -2603,7 +2635,16 @@ async def orders_page(
 
 @app.post("/cart/remove", response_class=RedirectResponse, name="cart_remove_items", include_in_schema=False)
 async def remove_cart_items(request: Request) -> RedirectResponse:
-    user, membership, company, company_id, redirect = await _load_shop_context(request)
+    (
+        user,
+        membership,
+        company,
+        company_id,
+        redirect,
+    ) = await _load_company_section_context(
+        request,
+        permission_field="can_access_cart",
+    )
     if redirect:
         return redirect
 
@@ -2629,7 +2670,16 @@ async def remove_cart_items(request: Request) -> RedirectResponse:
 
 @app.post("/cart/place-order", response_class=RedirectResponse, name="cart_place_order", include_in_schema=False)
 async def place_order(request: Request) -> RedirectResponse:
-    user, membership, company, company_id, redirect = await _load_shop_context(request)
+    (
+        user,
+        membership,
+        company,
+        company_id,
+        redirect,
+    ) = await _load_company_section_context(
+        request,
+        permission_field="can_access_cart",
+    )
     if redirect:
         return redirect
 
@@ -2936,17 +2986,30 @@ async def notification_settings_page(request: Request):
 
 @app.get("/myforms", response_class=HTMLResponse)
 async def forms_page(request: Request):
-    user, redirect = await _require_authenticated_user(request)
+    (
+        user,
+        _membership,
+        company,
+        company_id,
+        redirect,
+    ) = await _load_company_section_context(
+        request,
+        permission_field="can_access_forms",
+        allow_super_admin_without_company=True,
+    )
     if redirect:
         return redirect
 
-    active_company_id = getattr(request.state, "active_company_id", None)
-    active_company = None
-    if active_company_id is not None:
-        try:
-            active_company = await company_repo.get_company_by_id(int(active_company_id))
-        except (TypeError, ValueError):
-            active_company = None
+    active_company_id = company_id
+    active_company = company
+    if active_company is None:
+        fallback_company_id = getattr(request.state, "active_company_id", None)
+        if fallback_company_id is not None:
+            try:
+                active_company = await company_repo.get_company_by_id(int(fallback_company_id))
+                active_company_id = int(fallback_company_id)
+            except (TypeError, ValueError):
+                active_company = None
 
     portal_base = str(settings.portal_url) if settings.portal_url else str(request.base_url).rstrip("/")
     login_url = str(request.url_for("login_page"))
