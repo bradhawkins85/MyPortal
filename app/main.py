@@ -239,22 +239,9 @@ app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), n
 
 @app.get(PROTECTED_OPENAPI_PATH, include_in_schema=False)
 async def authenticated_openapi_schema(
-    request: Request,
-    session: SessionData = Depends(get_current_session),
+    _: SessionData = Depends(get_current_session),
 ) -> JSONResponse:
     """Return the OpenAPI schema for authenticated users only."""
-
-    user = await user_repo.get_user_by_id(session.user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-
-    request.state.active_company_id = getattr(request.state, "active_company_id", session.active_company_id)
-    membership = await _resolve_active_membership(request, user)
-    if _is_company_admin_only(user, membership):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Company administrators cannot access API documentation.",
-        )
 
     return JSONResponse(app.openapi())
 
@@ -263,18 +250,12 @@ async def authenticated_openapi_schema(
 async def authenticated_swagger_ui(request: Request) -> Response:
     """Render the Swagger UI after verifying the user session."""
 
-    user, redirect = await _require_authenticated_user(request)
-    if redirect:
+    session = await session_manager.load_session(request)
+    if not session:
         next_target = quote(SWAGGER_UI_PATH, safe="/")
         login_url = f"/login?next={next_target}"
-        return RedirectResponse(url=login_url, status_code=status.HTTP_303_SEE_OTHER)
-
-    membership = await _resolve_active_membership(request, user)
-    if _is_company_admin_only(user, membership):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Company administrators cannot access API documentation.",
-        )
+        redirect = RedirectResponse(url=login_url, status_code=status.HTTP_303_SEE_OTHER)
+        return redirect
 
     return get_swagger_ui_html(
         openapi_url=PROTECTED_OPENAPI_PATH,
@@ -557,41 +538,6 @@ async def _build_base_context(
                 log_error("Failed to count unread notifications", error=str(exc))
         context["notification_unread_count"] = unread_count
     return context
-
-
-async def _resolve_active_membership(
-    request: Request,
-    user: Mapping[str, Any] | None,
-) -> Mapping[str, Any] | None:
-    membership = getattr(request.state, "active_membership", None)
-    if membership is not None:
-        return membership
-
-    if not user or user.get("id") is None:
-        return None
-
-    active_company_id = getattr(request.state, "active_company_id", None)
-    if active_company_id is None:
-        session = await session_manager.load_session(request)
-        if session:
-            active_company_id = session.active_company_id
-            request.state.active_company_id = active_company_id
-
-    if active_company_id is None:
-        return None
-
-    membership = await user_company_repo.get_user_company(int(user["id"]), int(active_company_id))
-    request.state.active_membership = membership
-    return membership
-
-
-def _is_company_admin_only(
-    user: Mapping[str, Any] | None,
-    membership: Mapping[str, Any] | None,
-) -> bool:
-    if not membership or not membership.get("is_admin"):
-        return False
-    return not bool(user and user.get("is_super_admin"))
 
 
 async def _build_consolidated_overview(
@@ -2211,11 +2157,6 @@ async def m365_page(request: Request, error: str | None = None):
     user, membership, company, company_id, redirect = await _load_license_context(request)
     if redirect:
         return redirect
-    if _is_company_admin_only(user, membership):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Company administrators cannot access Microsoft 365 tools.",
-        )
     credentials = await m365_service.get_credentials(company_id)
     credential_view = None
     if credentials:
@@ -2255,11 +2196,6 @@ async def save_m365_credentials(
     user, membership, _, company_id, redirect = await _load_license_context(request)
     if redirect:
         return redirect
-    if _is_company_admin_only(user, membership):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Company administrators cannot access Microsoft 365 tools.",
-        )
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     await m365_service.upsert_credentials(
@@ -2277,11 +2213,6 @@ async def delete_m365_credentials(request: Request):
     user, membership, _, company_id, redirect = await _load_license_context(request)
     if redirect:
         return redirect
-    if _is_company_admin_only(user, membership):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Company administrators cannot access Microsoft 365 tools.",
-        )
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     await m365_service.delete_credentials(company_id)
@@ -2294,11 +2225,6 @@ async def sync_m365(request: Request):
     user, membership, _, company_id, redirect = await _load_license_context(request)
     if redirect:
         return redirect
-    if _is_company_admin_only(user, membership):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Company administrators cannot access Microsoft 365 tools.",
-        )
     try:
         await m365_service.sync_company_licenses(company_id)
     except m365_service.M365Error as exc:
@@ -2312,11 +2238,6 @@ async def m365_connect(request: Request):
     user, membership, _, company_id, redirect = await _load_license_context(request)
     if redirect:
         return redirect
-    if _is_company_admin_only(user, membership):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Company administrators cannot access Microsoft 365 tools.",
-        )
     credentials = await m365_service.get_credentials(company_id)
     if not credentials:
         return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
