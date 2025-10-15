@@ -19,6 +19,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - VIP pricing for companies with special product rates
 - Shop admin interface to archive products and view archived items
 - Order details include product image, SKU and description
+- Customisable shipping status notifications with per-channel delivery preferences
 - Port catalogue with searchable metadata, secure document uploads, and lifecycle tracking
 - Pricing workflow approvals with notification feed and audit-friendly status changes
 - Super administrators can publish portal alerts with the `/api/notifications` API for targeted or global announcements
@@ -62,7 +63,9 @@ Each user can tailor how those events are delivered from `/notifications/setting
 or programmatically through `GET`/`PUT /api/notifications/preferences`. The
 preferences API returns the merged catalogue of known event types and delivery
 channels (in-app feed, email, SMS) while updates persist the full set of
-choices in a single request.
+choices in a single request. Default events now include shipping status updates
+(`shop.shipping_status_updated`) so customers can follow fulfilment progress
+alongside billing, port, and webhook alerts.
 
 ## Template Variables for External Apps
 
