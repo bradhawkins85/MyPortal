@@ -8,6 +8,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from html import escape
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode
@@ -83,6 +84,7 @@ from app.api.dependencies.auth import get_current_session
 from app.services.scheduler import scheduler_service
 from app.security.api_keys import mask_api_key
 from app.services import audit as audit_service
+from app.services import email as email_service
 from app.services import m365 as m365_service
 from app.services import products as products_service
 from app.services import shop as shop_service
@@ -3409,6 +3411,55 @@ async def invite_staff_member(staff_id: int, request: Request):
         token=token,
         expires_at=expires_at,
     )
+    base_url = str(settings.portal_url).rstrip("/") if settings.portal_url else None
+    reset_path = f"/reset-password?token={token}"
+    reset_link = f"{base_url}{reset_path}" if base_url else reset_path
+    inviter_email = user.get("email") or settings.smtp_user or None
+    staff_name = staff.get("first_name") or staff.get("last_name") or "there"
+    company_name = (company or {}).get("name") if company else None
+    company_phrase = f" for {company_name}" if company_name else ""
+    company_phrase_html = f" for {escape(company_name)}" if company_name else ""
+    text_body = (
+        f"Hello {staff_name},\n\n"
+        f"You've been invited to access {settings.app_name}{company_phrase}. "
+        f"Use the link below to set your password and activate your account:\n\n"
+        f"{reset_link}\n\n"
+        "The link expires in one hour. If you were not expecting this invitation you can ignore this email."
+    )
+    html_body = (
+        f"<p>Hello {escape(staff_name)},</p>"
+        f"<p>You've been invited to access {escape(settings.app_name)}{company_phrase_html}.</p>"
+        f"<p><a href=\"{escape(reset_link)}\">Set your password and activate your account</a></p>"
+        "<p>The link expires in one hour. If you were not expecting this invitation you can ignore this email.</p>"
+    )
+    try:
+        sent = await email_service.send_email(
+            subject=f"You're invited to {settings.app_name}",
+            recipients=[staff["email"]],
+            text_body=text_body,
+            html_body=html_body,
+            reply_to=inviter_email,
+        )
+        if not sent:
+            log_info(
+                "Staff invitation email skipped due to SMTP configuration",
+                staff_id=staff_id,
+                invited_user_id=created_user["id"],
+            )
+        else:
+            log_info(
+                "Staff invitation email sent",
+                staff_id=staff_id,
+                invited_user_id=created_user["id"],
+            )
+    except email_service.EmailDispatchError as exc:  # pragma: no cover - logged for diagnostics
+        log_error(
+            "Failed to send staff invitation email",
+            staff_id=staff_id,
+            invited_user_id=created_user["id"],
+            error=str(exc),
+        )
+
     log_info(
         "Staff invitation generated",
         staff_id=staff_id,

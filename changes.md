@@ -1,3 +1,4 @@
+- 2025-10-15, 12:21 UTC, Fix, Enabled SMTP-backed email delivery for password resets, staff invitations, and notification alerts
 - 2025-10-15, 12:18 UTC, Feature, Added Fail2ban-aware authentication logging with sample filter/jail configs and documentation
 - 2025-10-15, 12:16 UTC, Feature, Added forms admin assignment controls so OpnForm experiences can be scoped to specific companies and users
 - 2025-10-23, 12:00 UTC, Fix, Removed legacy port notification defaults from preference options to keep event lists focused on active services
