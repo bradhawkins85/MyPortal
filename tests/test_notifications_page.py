@@ -1,11 +1,14 @@
 from datetime import datetime, timezone
 
+from datetime import datetime, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.core.database import db
 from app.main import app, notifications_repo, scheduler_service
+from app.repositories import notification_preferences as preferences_repo
 
 
 @pytest.fixture(autouse=True)
@@ -93,3 +96,31 @@ def test_notifications_page_returns_html(patched_dependencies):
     assert "text/html" in response.headers.get("content-type", "")
     assert "Notification feed" in response.text
     assert "Mark selected as read" in response.text
+
+
+def test_notification_settings_page_returns_html(monkeypatch, patched_dependencies):
+    async def fake_list_preferences(user_id):
+        return [
+            {
+                "event_type": "general",
+                "channel_in_app": True,
+                "channel_email": False,
+                "channel_sms": False,
+            },
+            {
+                "event_type": "custom.event",
+                "channel_in_app": False,
+                "channel_email": True,
+                "channel_sms": False,
+            },
+        ]
+
+    monkeypatch.setattr(preferences_repo, "list_preferences", fake_list_preferences)
+
+    with TestClient(app) as client:
+        response = client.get("/notifications/settings")
+
+    assert response.status_code == 200
+    assert "Delivery preferences" in response.text
+    assert "custom.event" in response.text
+    assert "Back to feed" in response.text
