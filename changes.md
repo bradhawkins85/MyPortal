@@ -1,3 +1,4 @@
+- 2025-10-15, 12:18 UTC, Feature, Added Fail2ban-aware authentication logging with sample filter/jail configs and documentation
 - 2025-10-23, 12:00 UTC, Fix, Removed legacy port notification defaults from preference options to keep event lists focused on active services
 - 2025-10-15, 11:59 UTC, Feature, Added shipping status notification event defaults so users can subscribe to fulfilment updates across UI and API
 - 2025-10-10, 03:54 UTC, Fix, Removed the five item page cap from the shop catalogue so pagination now follows viewport measurements

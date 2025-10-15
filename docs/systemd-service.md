@@ -139,6 +139,8 @@ seconds; adjust `RestartSec` as needed for your environment.
   terminates TLS and sets secure headers.
 - Configure a dedicated firewall rule to limit inbound traffic to port
   8000 (or whichever port you expose via the reverse proxy).
+- Define `FAIL2BAN_LOG_PATH` in `/etc/myportal.env` and install the bundled
+  Fail2ban filter/jail to automatically ban brute force login attempts.
 - Use `tmpfiles.d` to rotate Loguru output if you configure file-based
   logging.
 - Integrate with your monitoring stack to alert on repeated restarts or
