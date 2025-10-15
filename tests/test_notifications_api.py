@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,6 +11,7 @@ from app.api.dependencies import auth as auth_dependencies
 from app.api.dependencies import database as database_dependencies
 from app.core.database import db
 from app.main import app, notifications_repo, scheduler_service
+from app.repositories import notification_preferences as preferences_repo
 from app.security.session import SessionData, session_manager
 
 
@@ -140,3 +143,98 @@ def test_create_notification_returns_created_record(monkeypatch, active_session)
     assert data["message"] == created["message"]
     assert data["user_id"] == created["user_id"]
     assert data["metadata"] == created["metadata"]
+
+
+def test_list_notification_preferences_merges_defaults(monkeypatch, active_session):
+    async def fake_list_preferences(user_id):
+        assert user_id == active_session.user_id
+        return []
+
+    async def fake_list_event_types(user_id):
+        assert user_id == active_session.user_id
+        return ["custom.event"]
+
+    monkeypatch.setattr(preferences_repo, "list_preferences", fake_list_preferences)
+    monkeypatch.setattr(notifications_repo, "list_event_types", fake_list_event_types)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/notifications/preferences")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    data = response.json()
+    assert any(item["event_type"] == "general" for item in data)
+    assert any(item["event_type"] == "custom.event" for item in data)
+
+
+def test_update_notification_preferences_persists_changes(monkeypatch, active_session):
+    received = {}
+
+    async def fake_upsert_preferences(user_id, preferences):
+        received["user_id"] = user_id
+        received["preferences"] = preferences
+        return [
+            {
+                "event_type": "general",
+                "channel_in_app": True,
+                "channel_email": False,
+                "channel_sms": False,
+            },
+            {
+                "event_type": "custom.event",
+                "channel_in_app": False,
+                "channel_email": True,
+                "channel_sms": False,
+            },
+        ]
+
+    async def fake_list_event_types(user_id):
+        return []
+
+    monkeypatch.setattr(preferences_repo, "upsert_preferences", fake_upsert_preferences)
+    monkeypatch.setattr(notifications_repo, "list_event_types", fake_list_event_types)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+    }
+
+    payload = {
+        "preferences": [
+            {
+                "event_type": "custom.event",
+                "channel_in_app": False,
+                "channel_email": True,
+                "channel_sms": False,
+            }
+        ]
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.put(
+                "/api/notifications/preferences",
+                json=payload,
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert received["user_id"] == active_session.user_id
+    assert received["preferences"] == payload["preferences"]
+    data = response.json()
+    assert any(item["event_type"] == "general" for item in data)
+    assert any(
+        item["event_type"] == "custom.event" and not item["channel_in_app"] and item["channel_email"]
+        for item in data
+    )
