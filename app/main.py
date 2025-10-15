@@ -8,6 +8,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from html import escape
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode
@@ -83,6 +84,7 @@ from app.api.dependencies.auth import get_current_session
 from app.services.scheduler import scheduler_service
 from app.security.api_keys import mask_api_key
 from app.services import audit as audit_service
+from app.services import email as email_service
 from app.services import m365 as m365_service
 from app.services import products as products_service
 from app.services import shop as shop_service
@@ -3433,6 +3435,55 @@ async def invite_staff_member(staff_id: int, request: Request):
         token=token,
         expires_at=expires_at,
     )
+    base_url = str(settings.portal_url).rstrip("/") if settings.portal_url else None
+    reset_path = f"/reset-password?token={token}"
+    reset_link = f"{base_url}{reset_path}" if base_url else reset_path
+    inviter_email = user.get("email") or settings.smtp_user or None
+    staff_name = staff.get("first_name") or staff.get("last_name") or "there"
+    company_name = (company or {}).get("name") if company else None
+    company_phrase = f" for {company_name}" if company_name else ""
+    company_phrase_html = f" for {escape(company_name)}" if company_name else ""
+    text_body = (
+        f"Hello {staff_name},\n\n"
+        f"You've been invited to access {settings.app_name}{company_phrase}. "
+        f"Use the link below to set your password and activate your account:\n\n"
+        f"{reset_link}\n\n"
+        "The link expires in one hour. If you were not expecting this invitation you can ignore this email."
+    )
+    html_body = (
+        f"<p>Hello {escape(staff_name)},</p>"
+        f"<p>You've been invited to access {escape(settings.app_name)}{company_phrase_html}.</p>"
+        f"<p><a href=\"{escape(reset_link)}\">Set your password and activate your account</a></p>"
+        "<p>The link expires in one hour. If you were not expecting this invitation you can ignore this email.</p>"
+    )
+    try:
+        sent = await email_service.send_email(
+            subject=f"You're invited to {settings.app_name}",
+            recipients=[staff["email"]],
+            text_body=text_body,
+            html_body=html_body,
+            reply_to=inviter_email,
+        )
+        if not sent:
+            log_info(
+                "Staff invitation email skipped due to SMTP configuration",
+                staff_id=staff_id,
+                invited_user_id=created_user["id"],
+            )
+        else:
+            log_info(
+                "Staff invitation email sent",
+                staff_id=staff_id,
+                invited_user_id=created_user["id"],
+            )
+    except email_service.EmailDispatchError as exc:  # pragma: no cover - logged for diagnostics
+        log_error(
+            "Failed to send staff invitation email",
+            staff_id=staff_id,
+            invited_user_id=created_user["id"],
+            error=str(exc),
+        )
+
     log_info(
         "Staff invitation generated",
         staff_id=staff_id,
@@ -4279,11 +4330,114 @@ async def admin_forms_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    forms = await forms_repo.list_forms()
+    forms_task = asyncio.create_task(forms_repo.list_forms())
+    companies_task = asyncio.create_task(company_repo.list_companies())
+    assignments_task = asyncio.create_task(user_company_repo.list_assignments())
+    permissions_task = asyncio.create_task(forms_repo.list_permission_entries())
+
+    forms, companies, assignments, permission_entries = await asyncio.gather(
+        forms_task,
+        companies_task,
+        assignments_task,
+        permissions_task,
+    )
+
+    company_lookup: dict[int, dict[str, Any]] = {}
+    for company in companies:
+        company_id = int(company.get("id")) if company.get("id") is not None else None
+        if company_id is None:
+            continue
+        company_lookup[company_id] = {
+            "id": company_id,
+            "name": company.get("name", "Unnamed company"),
+            "users": [],
+        }
+
+    seen_assignments: set[tuple[int, int]] = set()
+    for record in assignments:
+        company_id = record.get("company_id")
+        user_id = record.get("user_id")
+        if company_id is None or user_id is None:
+            continue
+        company_entry = company_lookup.get(int(company_id))
+        if not company_entry:
+            continue
+        key = (int(company_id), int(user_id))
+        if key in seen_assignments:
+            continue
+        seen_assignments.add(key)
+
+        first_name = (record.get("first_name") or "").strip()
+        last_name = (record.get("last_name") or "").strip()
+        full_name_parts = [part for part in (first_name, last_name) if part]
+        full_name = " ".join(full_name_parts)
+        email = (record.get("email") or "").strip()
+        label: str
+        if full_name and email:
+            label = f"{full_name} ({email})"
+        elif full_name:
+            label = full_name
+        elif email:
+            label = email
+        else:
+            label = f"User {user_id}"
+
+        company_entry["users"].append(
+            {
+                "id": int(user_id),
+                "label": label,
+                "email": email,
+                "name": full_name,
+            }
+        )
+
+    for company in company_lookup.values():
+        company["users"].sort(key=lambda item: item.get("label", "").lower())
+
+    company_user_options = sorted(company_lookup.values(), key=lambda item: item.get("name", ""))
+
+    permissions_map: dict[int, dict[int, set[int]]] = {}
+    for entry in permission_entries:
+        form_id = entry.get("form_id")
+        company_id = entry.get("company_id")
+        user_id = entry.get("user_id")
+        if form_id is None or company_id is None or user_id is None:
+            continue
+        form_map = permissions_map.setdefault(int(form_id), {})
+        user_set = form_map.setdefault(int(company_id), set())
+        user_set.add(int(user_id))
+
+    permissions_json: dict[str, dict[str, list[int]]] = {}
+    for form_id, company_map in permissions_map.items():
+        json_companies: dict[str, list[int]] = {}
+        for company_id, user_ids in company_map.items():
+            json_companies[str(company_id)] = sorted(user_ids)
+        permissions_json[str(form_id)] = json_companies
+
+    form_assignment_summary: dict[int, dict[str, int]] = {}
+    for form in forms:
+        form_id = form.get("id")
+        if form_id is None:
+            continue
+        company_map = permissions_map.get(int(form_id), {})
+        company_count = 0
+        user_count = 0
+        for users in company_map.values():
+            if users:
+                company_count += 1
+                user_count += len(users)
+        form_assignment_summary[int(form_id)] = {
+            "companies": company_count,
+            "users": user_count,
+        }
+
     extra = {
         "title": "Forms admin",
         "forms": forms,
         "opnform_base_url": _opnform_base_url(),
+        "company_user_options": company_user_options,
+        "form_permissions_map": permissions_json,
+        "form_assignment_summary": form_assignment_summary,
     }
     return await _render_template("admin/forms.html", request, current_user, extra=extra)
 

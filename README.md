@@ -121,6 +121,10 @@ gracefully fall back to an empty string.
 6. Access `http://localhost:8000` for the responsive portal UI. After signing in, visit `http://localhost:8000/docs` for the interactive Swagger UI covering every API endpoint.
 7. The first visit will redirect the login flow to the registration page if no users exist, ensuring the first account becomes the super administrator.
 
+## Fail2ban Support
+
+Set the optional `FAIL2BAN_LOG_PATH` variable in your `.env` file to mirror authentication events to a dedicated log file. When configured, MyPortal records structured messages such as `AUTH LOGIN FAIL email=user@example.com ip=203.0.113.10 reason=invalid_credentials`, which align with the sample filter at `deploy/fail2ban/myportal-auth.conf`. Pair the filter with the example jail configuration in `deploy/fail2ban/myportal-auth.local`, updating the `logpath` to match your environment. After copying both files into `/etc/fail2ban/{filter.d,jail.d}/`, restart the Fail2ban service so repeated login failures from the same IP are automatically banned.
+
 ## Authentication API
 
 All authentication routes are documented in the interactive Swagger UI and summarised below:

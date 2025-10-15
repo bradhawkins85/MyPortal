@@ -1,4 +1,8 @@
 - 2025-10-30, 09:00 UTC, Feature, Added an Administration My Profile console with password rotation, TOTP management, and SMS contact updates
+- 2025-10-15, 12:21 UTC, Fix, Enabled SMTP-backed email delivery for password resets, staff invitations, and notification alerts
+- 2025-10-15, 12:18 UTC, Feature, Added Fail2ban-aware authentication logging with sample filter/jail configs and documentation
+- 2025-10-15, 12:16 UTC, Feature, Added forms admin assignment controls so OpnForm experiences can be scoped to specific companies and users
+- 2025-10-23, 12:00 UTC, Fix, Removed legacy port notification defaults from preference options to keep event lists focused on active services
 - 2025-10-15, 11:59 UTC, Feature, Added shipping status notification event defaults so users can subscribe to fulfilment updates across UI and API
 - 2025-10-10, 03:54 UTC, Fix, Removed the five item page cap from the shop catalogue so pagination now follows viewport measurements
 - 2025-10-22, 09:30 UTC, Feature, Added configurable notification delivery settings with API-backed preferences, UI controls, and persistence tests
