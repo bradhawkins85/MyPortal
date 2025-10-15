@@ -17,9 +17,117 @@ from app.schemas.notifications import (
     NotificationPreferenceResponse,
     NotificationPreferenceUpdateRequest,
     NotificationResponse,
+    NotificationSummaryResponse,
 )
 
 router = APIRouter(prefix="/api/notifications", tags=["Notifications"])
+
+
+@router.get(
+    "/summary",
+    response_model=NotificationSummaryResponse,
+    summary="Summarise notifications",
+    response_description="Aggregate counts for notifications matching the provided filters.",
+)
+async def summarise_notifications(
+    unread_only: bool = Query(
+        default=False,
+        description="Deprecated. Use read_state=unread instead.",
+        deprecated=True,
+    ),
+    read_state: Literal["all", "unread", "read"] = Query(
+        default="all",
+        description="Read state to filter by when calculating the total count.",
+    ),
+    event_types: list[str] | None = Query(
+        default=None,
+        alias="event_type",
+        description="Filter by one or more event types.",
+    ),
+    search: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description="Full-text search across notification messages and metadata.",
+    ),
+    created_from: datetime | None = Query(
+        default=None,
+        description="Return notifications created on or after this ISO 8601 timestamp.",
+    ),
+    created_to: datetime | None = Query(
+        default=None,
+        description=(
+            "Return notifications created before this ISO 8601 timestamp. "
+            "Provide a date with time 00:00 to include the entire day."
+        ),
+    ),
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        user_id = int(current_user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User session is invalid")
+
+    selected_read_state = read_state
+    if unread_only and read_state == "all":
+        selected_read_state = "unread"
+
+    repo_read_state: str | None = selected_read_state if selected_read_state in {"unread", "read"} else None
+    search_filter = search.strip() if search else None
+
+    total_count = await notifications_repo.count_notifications(
+        user_id=user_id,
+        read_state=repo_read_state,
+        event_types=event_types,
+        search=search_filter,
+        created_from=created_from,
+        created_to=created_to,
+    )
+
+    filtered_unread_count = await notifications_repo.count_notifications(
+        user_id=user_id,
+        read_state="unread",
+        event_types=event_types,
+        search=search_filter,
+        created_from=created_from,
+        created_to=created_to,
+    )
+
+    global_unread_count = await notifications_repo.count_notifications(
+        user_id=user_id,
+        read_state="unread",
+    )
+
+    return NotificationSummaryResponse(
+        total_count=total_count,
+        filtered_unread_count=filtered_unread_count,
+        global_unread_count=global_unread_count,
+    )
+
+
+@router.get(
+    "/event-types",
+    response_model=list[str],
+    summary="List notification event types",
+    response_description="All known notification event types available to the authenticated user.",
+)
+async def list_notification_event_types(
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        user_id = int(current_user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User session is invalid")
+
+    stored_preferences = await preferences_repo.list_preferences(user_id)
+    merged = merge_event_types(
+        DEFAULT_NOTIFICATION_EVENT_TYPES,
+        [preference.get("event_type") for preference in stored_preferences],
+        await notifications_repo.list_event_types(user_id=user_id),
+    )
+    return merged
 
 
 @router.get(

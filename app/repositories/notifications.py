@@ -145,23 +145,42 @@ async def create_notification(
         "user_id": user_id,
         "metadata": _serialise_metadata(metadata),
     }
-    await db.execute(
-        """
-        INSERT INTO notifications (event_type, message, user_id, metadata)
-        VALUES (%(event_type)s, %(message)s, %(user_id)s, %(metadata)s)
-        """,
-        payload,
-    )
-    row = await db.fetch_one(
-        """
-        SELECT id, user_id, event_type, message, metadata, created_at, read_at
-        FROM notifications
-        WHERE event_type = %(event_type)s AND message = %(message)s
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1
-        """,
-        payload,
-    )
+    inserted_id: int | None = None
+    async with db.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                INSERT INTO notifications (event_type, message, user_id, metadata)
+                VALUES (%(event_type)s, %(message)s, %(user_id)s, %(metadata)s)
+                """,
+                payload,
+            )
+            try:
+                inserted_id = int(cursor.lastrowid)
+            except (TypeError, ValueError):  # pragma: no cover - defensive fallback
+                inserted_id = None
+
+    if inserted_id:
+        row = await db.fetch_one(
+            """
+            SELECT id, user_id, event_type, message, metadata, created_at, read_at
+            FROM notifications
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (inserted_id,),
+        )
+    else:  # pragma: no cover - unlikely branch for legacy drivers without lastrowid
+        row = await db.fetch_one(
+            """
+            SELECT id, user_id, event_type, message, metadata, created_at, read_at
+            FROM notifications
+            WHERE event_type = %(event_type)s AND message = %(message)s
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            payload,
+        )
     if not row:
         raise RuntimeError("Failed to persist notification")
     row["metadata"] = _deserialise_metadata(row.get("metadata"))
