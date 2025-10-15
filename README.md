@@ -112,7 +112,7 @@ gracefully fall back to an empty string.
    python -m pip install --upgrade pip
    pip install -e .
    ```
-4. Copy `.env.example` to `.env` and update the MySQL credentials. Define strong values for `SESSION_SECRET` and `TOTP_ENCRYPTION_KEY`. Optional settings such as Redis, SMTP, and Azure Graph credentials mirror the legacy environment variables.
+4. Copy `.env.example` to `.env` and update the MySQL credentials. Define strong values for `SESSION_SECRET` and `TOTP_ENCRYPTION_KEY`. Optional settings such as Redis, SMTP, and Azure Graph credentials mirror the legacy environment variables. Configure `SMS_ENDPOINT` and `SMS_AUTH` when enabling outbound SMS notifications so the portal can relay messages to your gateway securely.
 5. Start the development server:
    ```bash
    uvicorn app.main:app --reload

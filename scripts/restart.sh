@@ -103,4 +103,17 @@ echo "Using python interpreter at ${PYTHON_BIN}" >&2
 cleanup_invalid_distribution "$PYTHON_BIN"
 "$PYTHON_BIN" -m pip install -e "$PROJECT_ROOT"
 
-systemctl restart myportal.service
+restart_service() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "systemctl not available on this host; skipping service restart." >&2
+    return
+  fi
+
+  if ! systemctl restart myportal.service; then
+    local exit_code=$?
+    echo "Warning: Unable to restart myportal.service automatically (exit code ${exit_code})." >&2
+    echo "Run 'sudo systemctl restart myportal.service' or review service permissions and logs." >&2
+  fi
+}
+
+restart_service
