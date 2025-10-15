@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from datetime import datetime, timedelta, timezone
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -239,3 +237,204 @@ def test_update_notification_preferences_persists_changes(monkeypatch, active_se
         item["event_type"] == "custom.event" and not item["channel_in_app"] and item["channel_email"]
         for item in data
     )
+
+
+def test_mark_notification_read_denies_other_users(monkeypatch, active_session):
+    calls = {"mark": False}
+
+    async def fake_get_notification(notification_id):
+        return _make_notification_record(id=notification_id, user_id=999)
+
+    async def fake_mark_read(notification_id):
+        calls["mark"] = True
+        return {}
+
+    monkeypatch.setattr(notifications_repo, "get_notification", fake_get_notification)
+    monkeypatch.setattr(notifications_repo, "mark_read", fake_mark_read)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/notifications/77/read",
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert calls["mark"] is False
+
+
+def test_mark_notification_read_returns_updated_record(monkeypatch, active_session):
+    async def fake_get_notification(notification_id):
+        return _make_notification_record(id=notification_id, user_id=active_session.user_id)
+
+    updated = _make_notification_record(
+        id=77,
+        user_id=active_session.user_id,
+        read_at=datetime(2025, 1, 1, 12, 30, tzinfo=timezone.utc),
+    )
+
+    async def fake_mark_read(notification_id):
+        assert notification_id == 77
+        return updated
+
+    monkeypatch.setattr(notifications_repo, "get_notification", fake_get_notification)
+    monkeypatch.setattr(notifications_repo, "mark_read", fake_mark_read)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/notifications/77/read",
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == 77
+    assert data["read_at"] is not None
+
+
+def test_acknowledge_notifications_returns_unique_updates(monkeypatch, active_session):
+    calls: dict[str, object] = {"checked": []}
+
+    async def fake_get_notification(notification_id):
+        calls["checked"].append(notification_id)
+        return _make_notification_record(id=notification_id, user_id=active_session.user_id)
+
+    async def fake_mark_read_bulk(notification_ids):
+        calls["marked"] = list(notification_ids)
+        return [
+            _make_notification_record(
+                id=identifier,
+                user_id=active_session.user_id,
+                read_at=datetime(2025, 1, 1, 12, 45, tzinfo=timezone.utc),
+            )
+            for identifier in notification_ids
+        ]
+
+    monkeypatch.setattr(notifications_repo, "get_notification", fake_get_notification)
+    monkeypatch.setattr(notifications_repo, "mark_read_bulk", fake_mark_read_bulk)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+    }
+
+    payload = {"notification_ids": [10, 10, 12]}
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/notifications/acknowledge",
+                json=payload,
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    assert calls["checked"] == [10, 12]
+    assert calls["marked"] == [10, 12]
+
+
+def test_notification_summary_returns_counts(monkeypatch, active_session):
+    calls: list[dict] = []
+
+    async def fake_count_notifications(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("read_state") == "unread" and kwargs.get("event_types"):
+            return 4
+        if kwargs.get("read_state") == "unread":
+            return 7
+        return 11
+
+    monkeypatch.setattr(notifications_repo, "count_notifications", fake_count_notifications)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/notifications/summary",
+                params=[("event_type", "system"), ("search", "invoice late ")],
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data == {
+        "total_count": 11,
+        "filtered_unread_count": 4,
+        "global_unread_count": 7,
+    }
+    assert calls[0]["read_state"] is None
+    assert calls[0]["event_types"] == ["system"]
+
+
+def test_event_types_endpoint_merges_sources(monkeypatch, active_session):
+    async def fake_list_preferences(user_id):
+        assert user_id == active_session.user_id
+        return [
+            {
+                "event_type": "custom.event",
+                "channel_in_app": True,
+                "channel_email": False,
+                "channel_sms": False,
+            },
+            {
+                "event_type": "general",
+                "channel_in_app": True,
+                "channel_email": False,
+                "channel_sms": False,
+            },
+        ]
+
+    async def fake_list_event_types(user_id):
+        assert user_id == active_session.user_id
+        return ["db.recorded"]
+
+    monkeypatch.setattr(preferences_repo, "list_preferences", fake_list_preferences)
+    monkeypatch.setattr(notifications_repo, "list_event_types", fake_list_event_types)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/notifications/event-types")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "custom.event" in data
+    assert "db.recorded" in data
+    assert "general" in data
+    assert "billing.invoice_overdue" in data
+    assert len(data) == len(set(data))
