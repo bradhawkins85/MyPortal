@@ -76,6 +76,7 @@ POST_PULL_HEAD=$(git rev-parse HEAD)
 
 if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
   echo "Repository updated to $POST_PULL_HEAD. Run scripts/restart.sh to reinstall dependencies and restart the service."
+  ./scripts/restart.sh
 else
   echo "No changes detected from remote."
 fi

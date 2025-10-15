@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div
+  class="admin-grid admin-grid--columns"
+  id="profile-root"
+  data-user-id="{{ current_user.id }}"
+  data-totp-devices='{{ profile_totp_devices | tojson | safe }}'
+>
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Account security</h2>
+        <p class="card__subtitle">
+          Update your password and manage multi-factor authenticators. New passwords must contain at least 12 characters and differ from your current password.
+        </p>
+      </div>
+    </header>
+    <div class="card__body card__body--stacked">
+      <form class="form" id="password-form" autocomplete="off">
+        <fieldset class="form__fieldset">
+          <legend class="form__legend">Change password</legend>
+          <div class="alert alert--info" data-password-success hidden role="status"></div>
+          <div class="alert alert--error" data-password-error hidden role="alert"></div>
+          <div class="form-field">
+            <label class="form-label" for="current-password">Current password</label>
+            <input class="form-input" type="password" id="current-password" name="currentPassword" autocomplete="current-password" required />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="new-password">New password</label>
+            <input class="form-input" type="password" id="new-password" name="newPassword" autocomplete="new-password" minlength="12" required />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="confirm-password">Confirm new password</label>
+            <input class="form-input" type="password" id="confirm-password" name="confirmPassword" autocomplete="new-password" minlength="12" required />
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="button">Update password</button>
+          </div>
+        </fieldset>
+      </form>
+      <section class="divider"></section>
+      <div data-totp>
+        <h3 class="card__subtitle">Authenticator apps</h3>
+        <p class="text-muted">
+          Register an authenticator to protect sign-ins. You can remove unused devices after confirming your new authenticator works.
+        </p>
+        <div class="table-toolbar">
+          <input type="search" class="form-input" placeholder="Filter authenticators" aria-label="Filter authenticators" data-table-filter="totp-table" />
+          <button type="button" class="button" data-totp-add>Set up new authenticator</button>
+        </div>
+        <div class="table-wrapper">
+          <table class="table" id="totp-table" data-table>
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string">Name</th>
+                <th scope="col" class="table__actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody data-totp-body>
+              <tr class="table__empty" data-totp-empty>
+                <td colspan="2">No authenticators registered yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div data-totp-setup hidden>
+          <h4 class="card__subtitle">Scan the provisioning details</h4>
+          <p class="text-muted">
+            Open your authenticator app and add a new account. You can paste the setup link into compatible desktop authenticator applications or enter the secret manually.
+          </p>
+          <div class="form-grid">
+            <div class="form-field">
+              <label class="form-label" for="totp-secret">Secret</label>
+              <div class="inline-form inline-form--stacked">
+                <input class="form-input" id="totp-secret" name="totpSecret" readonly />
+                <button type="button" class="button button--ghost" data-copy-target="totp-secret">Copy</button>
+              </div>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="totp-link">Setup link</label>
+              <div class="inline-form inline-form--stacked">
+                <input class="form-input" id="totp-link" name="totpLink" readonly />
+                <button type="button" class="button button--ghost" data-copy-target="totp-link">Copy</button>
+              </div>
+            </div>
+          </div>
+          <form class="form" id="totp-verify-form">
+            <div class="alert alert--info" data-totp-success hidden role="status"></div>
+            <div class="alert alert--error" data-totp-error hidden role="alert"></div>
+            <div class="form-field">
+              <label class="form-label" for="totp-name">Device name</label>
+              <input class="form-input" id="totp-name" name="totpName" maxlength="100" placeholder="e.g. Work phone" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="totp-code">Authenticator code</label>
+              <input class="form-input" id="totp-code" name="totpCode" inputmode="numeric" pattern="[0-9]*" required />
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="button">Verify and enable</button>
+              <button type="button" class="button button--ghost" data-totp-cancel>Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Notification contact</h2>
+        <p class="card__subtitle">
+          Provide a mobile number for SMS alerts. Numbers are stored in E.164 format for secure delivery.
+        </p>
+      </div>
+    </header>
+    <div class="card__body">
+      <form class="form" id="mobile-form">
+        <div class="alert alert--info" data-mobile-success hidden role="status"></div>
+        <div class="alert alert--error" data-mobile-error hidden role="alert"></div>
+        <div class="form-field">
+          <label class="form-label" for="mobile-number">Mobile number</label>
+          <input
+            class="form-input"
+            type="tel"
+            id="mobile-number"
+            name="mobileNumber"
+            value="{{ current_user.mobile_phone or '' }}"
+            placeholder="+441234567890"
+          />
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button">Save number</button>
+        </div>
+      </form>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/profile.js" defer></script>
+{% endblock %}

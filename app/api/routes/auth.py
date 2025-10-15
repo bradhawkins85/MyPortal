@@ -20,6 +20,7 @@ from app.repositories import user_companies as user_company_repo
 from app.schemas.auth import (
     LoginRequest,
     LoginResponse,
+    PasswordChangeRequest,
     PasswordResetConfirm,
     PasswordResetRequest,
     PasswordResetStatus,
@@ -313,6 +314,29 @@ async def password_reset(
     await user_repo.set_user_password(record["user_id"], payload.password)
     await auth_repo.mark_password_reset_token_used(payload.token)
     return PasswordResetStatus(detail="Password reset successful.")
+
+
+@router.post(
+    "/password/change",
+    response_model=PasswordResetStatus,
+    summary="Change the authenticated user's password",
+)
+async def change_password(
+    payload: PasswordChangeRequest,
+    current_user: dict = Depends(get_current_user),
+) -> PasswordResetStatus:
+    stored_hash = current_user.get("password_hash")
+    if not stored_hash or not verify_password(payload.current_password, stored_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+
+    if payload.current_password == payload.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from the current password",
+        )
+
+    await user_repo.set_user_password(current_user["id"], payload.new_password)
+    return PasswordResetStatus(detail="Password updated successfully.")
 
 
 @router.get(
