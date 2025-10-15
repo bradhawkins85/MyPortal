@@ -1,3 +1,4 @@
+- 2025-10-10, 03:54 UTC, Fix, Removed the five item page cap from the shop catalogue so pagination now follows viewport measurements
 - 2025-10-22, 09:30 UTC, Feature, Added configurable notification delivery settings with API-backed preferences, UI controls, and persistence tests
 - 2025-10-10, 03:37 UTC, Fix, Compacted portal spacing with reusable 5px+ padding variables so the UI stays dense yet readable
 - 2025-10-10, 02:50 UTC, Fix, Removed remaining Node.js references from documentation and configuration comments to reflect the Python-only stack
