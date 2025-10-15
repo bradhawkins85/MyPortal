@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from app.api.dependencies.auth import get_current_session, get_current_user
 from app.api.dependencies.database import require_database
 from app.core.config import get_settings
+from app.core.logging import log_error, log_info
 from app.repositories import auth as auth_repo
 from app.repositories import users as user_repo
 from app.repositories import user_companies as user_company_repo
@@ -73,6 +74,39 @@ async def _determine_active_company_id(user: dict[str, Any]) -> int | None:
     return None
 
 
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    client = request.client
+    if client and client.host:
+        return client.host
+    return "unknown"
+
+
+def _user_agent(request: Request) -> str:
+    return request.headers.get("user-agent", "unknown")
+
+
+def _log_login_failure(request: Request, email: str, reason: str) -> None:
+    normalized_email = str(email or "").lower()
+    ip = _client_ip(request)
+    log_error(
+        f"AUTH LOGIN FAIL email={normalized_email} ip={ip} reason={reason}",
+        user_agent=_user_agent(request),
+    )
+
+
+def _log_login_success(request: Request, user: dict[str, Any]) -> None:
+    email = str(user.get("email", "")).lower()
+    ip = _client_ip(request)
+    user_id = user.get("id")
+    log_info(
+        f"AUTH LOGIN SUCCESS email={email} user_id={user_id} ip={ip}",
+        user_agent=_user_agent(request),
+    )
+
+
 @router.post(
     "/register",
     response_model=LoginResponse,
@@ -129,15 +163,18 @@ async def login(
         identifier, window_seconds=LOGIN_RATE_LIMIT_WINDOW, max_attempts=LOGIN_RATE_LIMIT_ATTEMPTS
     )
     if not allowed:
+        _log_login_failure(request, payload.email, "rate_limited")
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many login attempts")
 
     user = await user_repo.get_user_by_email(payload.email)
     if not user or not verify_password(payload.password, user["password_hash"]):
+        _log_login_failure(request, payload.email, "invalid_credentials")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     totp_devices = await auth_repo.get_totp_authenticators(user["id"])
     if totp_devices:
         if not payload.totp_code:
+            _log_login_failure(request, payload.email, "totp_required")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="TOTP code required")
         verified = False
         for device in totp_devices:
@@ -146,6 +183,7 @@ async def login(
                 verified = True
                 break
         if not verified:
+            _log_login_failure(request, payload.email, "invalid_totp")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid TOTP code")
 
     await auth_repo.clear_login_attempts(identifier)
@@ -159,6 +197,7 @@ async def login(
     response_model = _build_login_response(user, session)
     response = JSONResponse(content=response_model.model_dump(mode="json"))
     session_manager.apply_session_cookies(response, session)
+    _log_login_success(request, user)
     return response
 
 
