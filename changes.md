@@ -1,3 +1,5 @@
+- 2025-11-24, 10:45 UTC, Feature, Expanded role documentation with detailed permission descriptions on the Roles administration page
+- 2025-10-15, 13:09 UTC, Feature, Documented the Roles administration menu with guidance on secure privilege management
 - 2025-11-24, 10:00 UTC, Fix, Removed the Super admin sidebar heading to keep navigation compact for privileged users
 - 2025-10-31, 09:15 UTC, Feature, Added super-admin controls to grant or block company admin access to shop, cart, order, and form sections
 - 2025-10-15, 12:55 UTC, Fix, Hardened system update automation to use a writable Git config home and tolerate missing service restart permissions
