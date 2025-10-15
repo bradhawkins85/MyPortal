@@ -17,6 +17,7 @@ DEFAULT_NOTIFICATION_EVENT_TYPES: list[str] = [
     "port.pricing.rejected",
     "shop.order_submitted",
     "shop.order_cancelled",
+    "shop.shipping_status_updated",
     "webhook.failed",
     "webhook.retried",
 ]
