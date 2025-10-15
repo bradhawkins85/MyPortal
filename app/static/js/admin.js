@@ -10,14 +10,19 @@
   }
 
   async function requestJson(url, options) {
+    const config = options || {};
+    const csrfToken = getCsrfToken();
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(config.headers || {}),
+    };
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
     const response = await fetch(url, {
       credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': getCsrfToken(),
-        ...(options.headers || {}),
-      },
-      ...options,
+      headers,
+      ...config,
     });
     if (!response.ok) {
       let detail = `${response.status} ${response.statusText}`;
@@ -37,13 +42,16 @@
   }
 
   async function requestForm(url, formData) {
+    const csrfToken = getCsrfToken();
+    const headers = {};
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
     const response = await fetch(url, {
       method: 'POST',
       body: formData,
       credentials: 'same-origin',
-      headers: {
-        'X-CSRF-Token': getCsrfToken(),
-      },
+      headers,
     });
     if (!response.ok) {
       let detail = `${response.status} ${response.statusText}`;
