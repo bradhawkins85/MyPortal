@@ -33,3 +33,23 @@ class NotificationAcknowledgeRequest(BaseModel):
         max_length=200,
         description="List of notification identifiers to acknowledge.",
     )
+
+
+class NotificationPreference(BaseModel):
+    event_type: str = Field(..., max_length=100)
+    channel_in_app: bool = Field(True, description="Store notifications in the in-app feed")
+    channel_email: bool = Field(False, description="Deliver notifications via email")
+    channel_sms: bool = Field(False, description="Deliver notifications via SMS")
+
+
+class NotificationPreferenceResponse(NotificationPreference):
+    class Config:
+        from_attributes = True
+
+
+class NotificationPreferenceUpdateRequest(BaseModel):
+    preferences: list[NotificationPreference] = Field(
+        default_factory=list,
+        max_length=100,
+        description="Complete set of notification preferences to persist for the current user.",
+    )
