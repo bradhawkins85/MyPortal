@@ -48,6 +48,8 @@ class Settings(BaseSettings):
         default=None, validation_alias="VERIFY_WEBHOOK_URL"
     )
     verify_api_key: str | None = Field(default=None, validation_alias="VERIFY_API_KEY")
+    sms_endpoint: AnyHttpUrl | None = Field(default=None, validation_alias="SMS_ENDPOINT")
+    sms_auth: str | None = Field(default=None, validation_alias="SMS_AUTH")
     portal_url: AnyHttpUrl | None = Field(default=None, validation_alias="PORTAL_URL")
     azure_client_id: str | None = Field(default=None, validation_alias="AZURE_CLIENT_ID")
     azure_client_secret: str | None = Field(default=None, validation_alias="AZURE_CLIENT_SECRET")
@@ -88,6 +90,7 @@ class Settings(BaseSettings):
         "portal_url",
         "licenses_webhook_url",
         "shop_webhook_url",
+        "sms_endpoint",
         "opnform_base_url",
         "stock_feed_url",
         mode="before",
