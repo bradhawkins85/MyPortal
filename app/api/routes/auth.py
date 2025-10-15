@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import secrets
 from datetime import datetime, timedelta
+from html import escape
 from typing import Any
 
 import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
+from loguru import logger
 
 from app.api.dependencies.auth import get_current_session, get_current_user
 from app.api.dependencies.database import require_database
 from app.core.config import get_settings
+from app.core.logging import log_error, log_info
 from app.repositories import auth as auth_repo
 from app.repositories import users as user_repo
 from app.repositories import user_companies as user_company_repo
@@ -32,6 +35,7 @@ from app.schemas.auth import (
 from app.schemas.users import UserResponse
 from app.security.passwords import verify_password
 from app.security.session import SessionData, ensure_datetime, session_manager
+from app.services import email as email_service
 
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -72,6 +76,39 @@ async def _determine_active_company_id(user: dict[str, Any]) -> int | None:
     if companies:
         return int(companies[0].get("company_id"))
     return None
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    client = request.client
+    if client and client.host:
+        return client.host
+    return "unknown"
+
+
+def _user_agent(request: Request) -> str:
+    return request.headers.get("user-agent", "unknown")
+
+
+def _log_login_failure(request: Request, email: str, reason: str) -> None:
+    normalized_email = str(email or "").lower()
+    ip = _client_ip(request)
+    log_error(
+        f"AUTH LOGIN FAIL email={normalized_email} ip={ip} reason={reason}",
+        user_agent=_user_agent(request),
+    )
+
+
+def _log_login_success(request: Request, user: dict[str, Any]) -> None:
+    email = str(user.get("email", "")).lower()
+    ip = _client_ip(request)
+    user_id = user.get("id")
+    log_info(
+        f"AUTH LOGIN SUCCESS email={email} user_id={user_id} ip={ip}",
+        user_agent=_user_agent(request),
+    )
 
 
 @router.post(
@@ -130,15 +167,18 @@ async def login(
         identifier, window_seconds=LOGIN_RATE_LIMIT_WINDOW, max_attempts=LOGIN_RATE_LIMIT_ATTEMPTS
     )
     if not allowed:
+        _log_login_failure(request, payload.email, "rate_limited")
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many login attempts")
 
     user = await user_repo.get_user_by_email(payload.email)
     if not user or not verify_password(payload.password, user["password_hash"]):
+        _log_login_failure(request, payload.email, "invalid_credentials")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     totp_devices = await auth_repo.get_totp_authenticators(user["id"])
     if totp_devices:
         if not payload.totp_code:
+            _log_login_failure(request, payload.email, "totp_required")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="TOTP code required")
         verified = False
         for device in totp_devices:
@@ -147,6 +187,7 @@ async def login(
                 verified = True
                 break
         if not verified:
+            _log_login_failure(request, payload.email, "invalid_totp")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid TOTP code")
 
     await auth_repo.clear_login_attempts(identifier)
@@ -160,6 +201,7 @@ async def login(
     response_model = _build_login_response(user, session)
     response = JSONResponse(content=response_model.model_dump(mode="json"))
     session_manager.apply_session_cookies(response, session)
+    _log_login_success(request, user)
     return response
 
 
@@ -209,7 +251,44 @@ async def password_forgot(
         user_id=user["id"], token=token, expires_at=expires_at
     )
 
-    # The email dispatch mirrors the legacy behaviour but is handled asynchronously by the worker service.
+    base_url = str(settings.portal_url).rstrip("/") if settings.portal_url else None
+    reset_path = f"/reset-password?token={token}"
+    reset_link = f"{base_url}{reset_path}" if base_url else reset_path
+    display_name = escape(user.get("first_name") or user.get("email") or "there")
+    text_body = (
+        f"Hello {user.get('first_name') or 'there'},\n\n"
+        f"We received a request to reset your {settings.app_name} password. "
+        f"Use the link below to choose a new password:\n\n"
+        f"{reset_link}\n\n"
+        f"If the link does not work, use the following token when prompted: {token}\n\n"
+        "If you did not request a reset you can ignore this email."
+    )
+    html_body = (
+        f"<p>Hello {display_name},</p>"
+        f"<p>We received a request to reset your {escape(settings.app_name)} password.</p>"
+        f"<p><a href=\"{escape(reset_link)}\">Reset your password</a></p>"
+        f"<p>If the link does not work, use this token when prompted: <code>{escape(token)}</code></p>"
+        "<p>If you did not request a reset you can ignore this email.</p>"
+    )
+    try:
+        sent = await email_service.send_email(
+            subject=f"Reset your {settings.app_name} password",
+            recipients=[user["email"]],
+            text_body=text_body,
+            html_body=html_body,
+        )
+        if not sent:
+            logger.warning(
+                "Password reset email skipped because SMTP is not configured",
+                user_id=user["id"],
+            )
+    except email_service.EmailDispatchError as exc:  # pragma: no cover - log and continue
+        logger.error(
+            "Failed to dispatch password reset email",
+            user_id=user["id"],
+            error=str(exc),
+        )
+
     return PasswordResetStatus(detail="If the email is registered, reset instructions have been sent.")
 
 

@@ -1,0 +1,9 @@
+[myportal-auth]
+enabled = true
+filter = myportal-auth
+logpath = /var/log/myportal/auth.log
+backend = auto
+maxretry = 5
+findtime = 300
+bantime = 3600
+

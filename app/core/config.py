@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from pydantic import AnyHttpUrl, AliasChoices, BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     opnform_base_url: AnyHttpUrl | None = Field(
         default=None,
         validation_alias=AliasChoices("OPNFORM_BASE_URL", "OPNFORM_URL"),
+    )
+    fail2ban_log_path: Path | None = Field(
+        default=None,
+        validation_alias="FAIL2BAN_LOG_PATH",
     )
 
     @field_validator(
