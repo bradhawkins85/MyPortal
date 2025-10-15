@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import secrets
 from datetime import datetime, timedelta
+from html import escape
 from typing import Any
 
 import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
+from loguru import logger
 
 from app.api.dependencies.auth import get_current_session, get_current_user
 from app.api.dependencies.database import require_database
@@ -32,6 +34,7 @@ from app.schemas.auth import (
 from app.schemas.users import UserResponse
 from app.security.passwords import verify_password
 from app.security.session import SessionData, ensure_datetime, session_manager
+from app.services import email as email_service
 
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -247,7 +250,44 @@ async def password_forgot(
         user_id=user["id"], token=token, expires_at=expires_at
     )
 
-    # The email dispatch mirrors the legacy behaviour but is handled asynchronously by the worker service.
+    base_url = str(settings.portal_url).rstrip("/") if settings.portal_url else None
+    reset_path = f"/reset-password?token={token}"
+    reset_link = f"{base_url}{reset_path}" if base_url else reset_path
+    display_name = escape(user.get("first_name") or user.get("email") or "there")
+    text_body = (
+        f"Hello {user.get('first_name') or 'there'},\n\n"
+        f"We received a request to reset your {settings.app_name} password. "
+        f"Use the link below to choose a new password:\n\n"
+        f"{reset_link}\n\n"
+        f"If the link does not work, use the following token when prompted: {token}\n\n"
+        "If you did not request a reset you can ignore this email."
+    )
+    html_body = (
+        f"<p>Hello {display_name},</p>"
+        f"<p>We received a request to reset your {escape(settings.app_name)} password.</p>"
+        f"<p><a href=\"{escape(reset_link)}\">Reset your password</a></p>"
+        f"<p>If the link does not work, use this token when prompted: <code>{escape(token)}</code></p>"
+        "<p>If you did not request a reset you can ignore this email.</p>"
+    )
+    try:
+        sent = await email_service.send_email(
+            subject=f"Reset your {settings.app_name} password",
+            recipients=[user["email"]],
+            text_body=text_body,
+            html_body=html_body,
+        )
+        if not sent:
+            logger.warning(
+                "Password reset email skipped because SMTP is not configured",
+                user_id=user["id"],
+            )
+    except email_service.EmailDispatchError as exc:  # pragma: no cover - log and continue
+        logger.error(
+            "Failed to dispatch password reset email",
+            user_id=user["id"],
+            error=str(exc),
+        )
+
     return PasswordResetStatus(detail="If the email is registered, reset instructions have been sent.")
 
 
