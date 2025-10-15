@@ -1,3 +1,4 @@
+- 2025-11-25, 11:00 UTC, Feature, Logged SMS notifications as webhook events so delivery follows monitored retry logic
 - 2025-10-15, 13:21 UTC, Fix, Restored shop admin category, product update, archive, and visibility endpoints with validation and logging
 - 2025-11-24, 10:45 UTC, Feature, Expanded role documentation with detailed permission descriptions on the Roles administration page
 - 2025-10-15, 13:09 UTC, Feature, Documented the Roles administration menu with guidance on secure privilege management
