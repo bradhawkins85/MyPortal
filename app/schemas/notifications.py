@@ -53,3 +53,17 @@ class NotificationPreferenceUpdateRequest(BaseModel):
         max_length=100,
         description="Complete set of notification preferences to persist for the current user.",
     )
+
+
+class NotificationSummaryResponse(BaseModel):
+    total_count: int = Field(0, ge=0, description="Total notifications that match the supplied filters.")
+    filtered_unread_count: int = Field(
+        0,
+        ge=0,
+        description="Unread notifications that match the supplied filters.",
+    )
+    global_unread_count: int = Field(
+        0,
+        ge=0,
+        description="All unread notifications for the authenticated user regardless of filters.",
+    )
