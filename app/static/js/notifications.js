@@ -22,6 +22,7 @@
     filtersForm: '#notification-filters',
     resetButton: '[data-notification-reset]',
     pageField: '[data-notification-page-field]',
+    totalCount: '[data-total-notifications]',
     unreadVisible: '[data-unread-visible]',
     unreadTotal: '[data-unread-total]',
     navBadge: '[data-unread-nav]',
@@ -78,6 +79,80 @@
     if (navBadge) {
       navBadge.remove();
     }
+  }
+
+  const summaryFieldMap = {
+    q: 'search',
+    search: 'search',
+    read_state: 'read_state',
+    event_type: 'event_type',
+    created_from: 'created_from',
+    created_to: 'created_to',
+  };
+
+  function buildSummaryParams() {
+    const params = new URLSearchParams();
+    const form = document.querySelector(notificationSelectors.filtersForm);
+    if (!form) {
+      return params;
+    }
+    const formData = new FormData(form);
+    formData.forEach((value, key) => {
+      if (!(key in summaryFieldMap)) {
+        return;
+      }
+      const mappedKey = summaryFieldMap[key];
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (trimmed) {
+          params.append(mappedKey, trimmed);
+        }
+        return;
+      }
+      if (value !== null && typeof value !== 'undefined') {
+        params.append(mappedKey, String(value));
+      }
+    });
+    return params;
+  }
+
+  function applySummary(summary) {
+    if (!summary || typeof summary !== 'object') {
+      return;
+    }
+    updateCount(
+      document.querySelector(notificationSelectors.totalCount),
+      Number.isFinite(summary.total_count) ? Number(summary.total_count) : 0
+    );
+    updateCount(
+      document.querySelector(notificationSelectors.unreadVisible),
+      Number.isFinite(summary.filtered_unread_count)
+        ? Number(summary.filtered_unread_count)
+        : 0
+    );
+    updateCount(
+      document.querySelector(notificationSelectors.unreadTotal),
+      Number.isFinite(summary.global_unread_count) ? Number(summary.global_unread_count) : 0
+    );
+    updateNavUnread(
+      Number.isFinite(summary.global_unread_count) ? Number(summary.global_unread_count) : 0
+    );
+  }
+
+  async function refreshNotificationSummary() {
+    const params = buildSummaryParams();
+    const query = params.toString();
+    const response = await fetch(`/api/notifications/summary${query ? `?${query}` : ''}`, {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) {
+      throw new Error('Failed to refresh notification summary');
+    }
+    const data = await response.json();
+    applySummary(data);
+    return data;
   }
 
   function formatLocalTime(isoValue) {
@@ -153,20 +228,6 @@
     }
 
     return wasUnread && !isUnread;
-  }
-
-  function adjustUnreadCounts({ filteredDelta = 0, globalDelta = 0 }) {
-    if (filteredDelta) {
-      const visibleCounter = document.querySelector(notificationSelectors.unreadVisible);
-      const nextValue = parseCount(visibleCounter) + filteredDelta;
-      updateCount(visibleCounter, nextValue);
-    }
-    if (globalDelta) {
-      const totalCounter = document.querySelector(notificationSelectors.unreadTotal);
-      const nextValue = parseCount(totalCounter) + globalDelta;
-      updateCount(totalCounter, nextValue);
-      updateNavUnread(Math.max(0, nextValue));
-    }
   }
 
   async function markNotification(notificationId) {
@@ -265,7 +326,11 @@
           const record = await markNotification(notificationId);
           const changed = applyNotificationUpdate(record);
           if (changed) {
-            adjustUnreadCounts({ filteredDelta: -1, globalDelta: -1 });
+            try {
+              await refreshNotificationSummary();
+            } catch (summaryError) {
+              console.warn(summaryError);
+            }
           }
         } catch (error) {
           button.disabled = false;
@@ -309,7 +374,11 @@
           }
         });
         if (changes) {
-          adjustUnreadCounts({ filteredDelta: -changes, globalDelta: -changes });
+          try {
+            await refreshNotificationSummary();
+          } catch (summaryError) {
+            console.warn(summaryError);
+          }
         }
       } catch (error) {
         window.alert(error.message || 'Unable to acknowledge notifications');
