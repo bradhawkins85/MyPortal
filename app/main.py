@@ -4218,11 +4218,114 @@ async def admin_forms_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    forms = await forms_repo.list_forms()
+    forms_task = asyncio.create_task(forms_repo.list_forms())
+    companies_task = asyncio.create_task(company_repo.list_companies())
+    assignments_task = asyncio.create_task(user_company_repo.list_assignments())
+    permissions_task = asyncio.create_task(forms_repo.list_permission_entries())
+
+    forms, companies, assignments, permission_entries = await asyncio.gather(
+        forms_task,
+        companies_task,
+        assignments_task,
+        permissions_task,
+    )
+
+    company_lookup: dict[int, dict[str, Any]] = {}
+    for company in companies:
+        company_id = int(company.get("id")) if company.get("id") is not None else None
+        if company_id is None:
+            continue
+        company_lookup[company_id] = {
+            "id": company_id,
+            "name": company.get("name", "Unnamed company"),
+            "users": [],
+        }
+
+    seen_assignments: set[tuple[int, int]] = set()
+    for record in assignments:
+        company_id = record.get("company_id")
+        user_id = record.get("user_id")
+        if company_id is None or user_id is None:
+            continue
+        company_entry = company_lookup.get(int(company_id))
+        if not company_entry:
+            continue
+        key = (int(company_id), int(user_id))
+        if key in seen_assignments:
+            continue
+        seen_assignments.add(key)
+
+        first_name = (record.get("first_name") or "").strip()
+        last_name = (record.get("last_name") or "").strip()
+        full_name_parts = [part for part in (first_name, last_name) if part]
+        full_name = " ".join(full_name_parts)
+        email = (record.get("email") or "").strip()
+        label: str
+        if full_name and email:
+            label = f"{full_name} ({email})"
+        elif full_name:
+            label = full_name
+        elif email:
+            label = email
+        else:
+            label = f"User {user_id}"
+
+        company_entry["users"].append(
+            {
+                "id": int(user_id),
+                "label": label,
+                "email": email,
+                "name": full_name,
+            }
+        )
+
+    for company in company_lookup.values():
+        company["users"].sort(key=lambda item: item.get("label", "").lower())
+
+    company_user_options = sorted(company_lookup.values(), key=lambda item: item.get("name", ""))
+
+    permissions_map: dict[int, dict[int, set[int]]] = {}
+    for entry in permission_entries:
+        form_id = entry.get("form_id")
+        company_id = entry.get("company_id")
+        user_id = entry.get("user_id")
+        if form_id is None or company_id is None or user_id is None:
+            continue
+        form_map = permissions_map.setdefault(int(form_id), {})
+        user_set = form_map.setdefault(int(company_id), set())
+        user_set.add(int(user_id))
+
+    permissions_json: dict[str, dict[str, list[int]]] = {}
+    for form_id, company_map in permissions_map.items():
+        json_companies: dict[str, list[int]] = {}
+        for company_id, user_ids in company_map.items():
+            json_companies[str(company_id)] = sorted(user_ids)
+        permissions_json[str(form_id)] = json_companies
+
+    form_assignment_summary: dict[int, dict[str, int]] = {}
+    for form in forms:
+        form_id = form.get("id")
+        if form_id is None:
+            continue
+        company_map = permissions_map.get(int(form_id), {})
+        company_count = 0
+        user_count = 0
+        for users in company_map.values():
+            if users:
+                company_count += 1
+                user_count += len(users)
+        form_assignment_summary[int(form_id)] = {
+            "companies": company_count,
+            "users": user_count,
+        }
+
     extra = {
         "title": "Forms admin",
         "forms": forms,
         "opnform_base_url": _opnform_base_url(),
+        "company_user_options": company_user_options,
+        "form_permissions_map": permissions_json,
+        "form_assignment_summary": form_assignment_summary,
     }
     return await _render_template("admin/forms.html", request, current_user, extra=extra)
 

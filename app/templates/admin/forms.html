@@ -6,13 +6,13 @@
     <header class="card__header card__header--stacked">
       <div>
         <h2 class="card__title">Build with OpnForm</h2>
-        <p class="card__subtitle">Design forms in OpnForm and surface them instantly within the customer portal.</p>
+        <p class="card__subtitle">Design forms in OpnForm and manage granular visibility directly from the portal.</p>
       </div>
       {% if opnform_base_url %}
         <a class="button" href="{{ opnform_base_url }}" target="_blank" rel="noopener">Open OpnForm</a>
       {% endif %}
     </header>
-    <p class="text-muted">Published forms appear automatically and can be assigned to users or companies from here.</p>
+    <p class="text-muted">New forms stay private until you assign them to specific companies and users below.</p>
   </section>
 
   <section class="card card--panel">
@@ -104,10 +104,98 @@
       </table>
     </div>
   </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Assign form access</h2>
+        <p class="card__subtitle">Choose which companies can view each form and select the users within those companies.</p>
+      </div>
+    </header>
+    {% if company_user_options %}
+      <div class="forms-admin__accordion">
+        {% for form in forms %}
+          {% set summary = form_assignment_summary.get(form.id) or {'companies': 0, 'users': 0} %}
+          <details class="forms-admin__panel" data-form-assignment data-form-id="{{ form.id }}">
+            <summary class="forms-admin__summary">
+              <div class="forms-admin__summary-text">
+                <h3 class="forms-admin__summary-title">{{ form.name }}</h3>
+                {% if form.description %}
+                  <p class="forms-admin__summary-description">{{ form.description }}</p>
+                {% endif %}
+              </div>
+              <div class="forms-admin__stats">
+                <span class="forms-admin__stat">
+                  <span class="forms-admin__stat-label">Companies</span>
+                  <span class="forms-admin__stat-value" data-assignment-companies>{{ summary.companies }}</span>
+                </span>
+                <span class="forms-admin__stat">
+                  <span class="forms-admin__stat-label">Users</span>
+                  <span class="forms-admin__stat-value" data-assignment-users>{{ summary.users }}</span>
+                </span>
+              </div>
+            </summary>
+            <div class="forms-admin__body">
+              <p class="text-muted forms-admin__intro">
+                Grant access by selecting members for each company. Changes apply immediately after saving.
+              </p>
+              <div class="forms-admin__companies">
+                {% for company in company_user_options %}
+                  <section class="forms-admin__company" data-company-id="{{ company.id }}">
+                    <header class="forms-admin__company-header">
+                      <div>
+                        <h4 class="forms-admin__company-name">{{ company.name }}</h4>
+                        <p class="forms-admin__company-meta">
+                          {{ company.users|length }}
+                          {% if company.users|length == 1 %}
+                            eligible user
+                          {% else %}
+                            eligible users
+                          {% endif %}
+                        </p>
+                      </div>
+                      <span class="forms-admin__stat forms-admin__stat--compact">
+                        <span class="forms-admin__stat-label">Selected</span>
+                        <span class="forms-admin__stat-value" data-selected-count>0</span>
+                      </span>
+                    </header>
+                    {% if company.users %}
+                      <div class="forms-admin__users">
+                        {% for user in company.users %}
+                          <label class="checkbox forms-admin__user">
+                            <input type="checkbox" value="{{ user.id }}" data-user-checkbox />
+                            <span>{{ user.label }}</span>
+                          </label>
+                        {% endfor %}
+                      </div>
+                    {% else %}
+                      <p class="forms-admin__empty">No eligible users are assigned to this company.</p>
+                    {% endif %}
+                    <div class="forms-admin__actions">
+                      <button type="button" class="button button--ghost" data-save-permissions>Save access</button>
+                      <button type="button" class="button button--danger" data-clear-permissions>Clear</button>
+                    </div>
+                    <p class="form-help forms-admin__status" role="status" aria-live="polite" data-status></p>
+                  </section>
+                {% endfor %}
+              </div>
+            </div>
+          </details>
+        {% else %}
+          <p class="forms-admin__empty">Add a form above to begin assigning access.</p>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="text-muted">Create company memberships before assigning forms so eligible users appear here.</p>
+    {% endif %}
+  </section>
 </div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script src="/static/js/tables.js" defer></script>
+  <script type="application/json" id="forms-admin-permissions">{{ form_permissions_map | tojson }}</script>
+  <script type="application/json" id="forms-admin-companies">{{ company_user_options | tojson }}</script>
+  <script src="/static/js/forms_admin.js" defer></script>
 {% endblock %}
