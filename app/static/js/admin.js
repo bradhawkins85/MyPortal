@@ -5,7 +5,16 @@
     return matches ? decodeURIComponent(matches[1]) : '';
   }
 
+  function getMetaContent(name) {
+    const meta = document.querySelector(`meta[name="${name}"]`);
+    return meta ? meta.getAttribute('content') || '' : '';
+  }
+
   function getCsrfToken() {
+    const metaToken = getMetaContent('csrf-token');
+    if (metaToken) {
+      return metaToken;
+    }
     return getCookie('myportal_session_csrf');
   }
 
