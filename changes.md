@@ -169,3 +169,4 @@
 - 2025-10-09, 13:15 UTC, Feature, Added viewport-aware pagination controls to the webhook delivery queue for responsive monitoring
 - 2025-10-09, 23:30 UTC, Fix, Removed leftover patch markers from dashboard template to restore valid Jinja block structure
 - 2025-10-09, 23:32 UTC, Fix, Resized all modal popups to occupy 75% of the viewport for consistent layout compliance
+- 2025-10-10, 13:45 UTC, Fix, Restored notification API actions with summary counts, event-type catalogues, repository insert reliability, and UI refresh
