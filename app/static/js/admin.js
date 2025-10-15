@@ -254,7 +254,14 @@
           }
         } catch (error) {
           alert(`Unable to remove membership: ${error.message}`);
+        } finally {
           button.disabled = false;
+        }
+      });
+    });
+
+  }
+
   function bindApiKeyCopyButtons() {
     document.querySelectorAll('[data-copy-api-key]').forEach((button) => {
       const value = button.getAttribute('data-copy-api-key');
