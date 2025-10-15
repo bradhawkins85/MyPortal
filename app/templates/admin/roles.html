@@ -104,6 +104,64 @@
       <p class="form-hint">System roles cannot be deleted and their names are fixed to retain portal integrity.</p>
     </form>
   </section>
+
+  <section class="card card--panel">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Roles administration menu</h2>
+        <p class="card__subtitle">Understand how the administration menu supports secure, least-privilege access control.</p>
+      </div>
+    </header>
+    <div class="card__body card__body--stacked">
+      <p>
+        The Roles administration menu is the central hub for defining reusable permission sets that can be applied to any
+        company membership. Super administrators can review every existing role in the table above, inspect its granted
+        permissions, and revoke obsolete definitions while retaining system-protected defaults that safeguard mandatory
+        access policies.
+      </p>
+      <p>
+        When you open the menu from the navigation sidebar, two panels are always available: the catalogue of existing
+        roles and the management form for updates. Use the search filter to quickly locate a role, select <strong>Edit</strong>
+        to populate the form, and provide a comma-separated list of permission keys when creating or refining roles. All
+        changes take effect immediately across the portal to keep member privileges aligned with the latest security
+        requirements.
+      </p>
+      <p>
+        System roles are identified in the table and are intentionally immutable to preserve baseline security for
+        critical workflows. Custom roles, however, can be updated or deleted as your governance model evolves. Regularly
+        review the menu to confirm roles still match business needs, and document significant adjustments in your
+        compliance records.
+      </p>
+      <h3>Assignable permissions</h3>
+      <p>
+        Roles can draw from the following permission catalogue. Combine only the capabilities required for each persona to
+        maintain least-privilege access.
+      </p>
+      <dl class="definition-list">
+        <div class="definition-list__item">
+          <dt><code>company.manage</code></dt>
+          <dd>Grant authority to configure company profiles, contact details, and operational settings.</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt><code>membership.manage</code></dt>
+          <dd>Allow administrators to invite, approve, suspend, or reassign company members.</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt><code>billing.manage</code></dt>
+          <dd>Enable access to subscription, invoicing, and payment method management workflows.</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt><code>audit.view</code></dt>
+          <dd>Provide read-only visibility into security and activity audit trails.</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt><code>portal.access</code></dt>
+          <dd>Permit authenticated users to sign in and use the general portal experience.</dd>
+        </div>
+      </dl>
+      <p class="text-muted">New permissions will be documented here as they become available.</p>
+    </div>
+  </section>
 </div>
 {% endblock %}
 
