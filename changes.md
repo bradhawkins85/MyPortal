@@ -173,3 +173,4 @@
 - 2025-10-09, 23:30 UTC, Fix, Removed leftover patch markers from dashboard template to restore valid Jinja block structure
 - 2025-10-09, 23:32 UTC, Fix, Resized all modal popups to occupy 75% of the viewport for consistent layout compliance
 - 2025-10-10, 13:45 UTC, Fix, Restored notification API actions with summary counts, event-type catalogues, repository insert reliability, and UI refresh
+- 2025-10-15, 23:36 UTC, Fix, Restored admin membership removal handler closures to resolve admin.js syntax error
