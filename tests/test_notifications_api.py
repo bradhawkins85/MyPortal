@@ -173,6 +173,7 @@ def test_list_notification_preferences_merges_defaults(monkeypatch, active_sessi
     data = response.json()
     assert any(item["event_type"] == "general" for item in data)
     assert any(item["event_type"] == "custom.event" for item in data)
+    assert any(item["event_type"] == "shop.shipping_status_updated" for item in data)
 
 
 def test_update_notification_preferences_persists_changes(monkeypatch, active_session):
