@@ -1,3 +1,4 @@
+- 2025-10-15, 12:53 UTC, Fix, Restored the full super admin sidebar with shop, cart, orders, forms, assets, licenses, invoices, and staff links
 - 2025-10-30, 10:15 UTC, Feature, Added configurable SMS notification delivery with secure gateway integration and tests
 - 2025-10-30, 09:00 UTC, Feature, Added an Administration My Profile console with password rotation, TOTP management, and SMS contact updates
 - 2025-10-15, 12:21 UTC, Fix, Enabled SMTP-backed email delivery for password resets, staff invitations, and notification alerts
