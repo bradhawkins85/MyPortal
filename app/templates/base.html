@@ -45,9 +45,19 @@
         <ul class="menu">
           {% block sidebar_menu %}
           {% set current_path = request.url.path if request is defined else '' %}
-          {% set membership = active_membership %}
+          {% set membership = active_membership or {} %}
           {% set is_super_admin = current_user.get('is_super_admin') if current_user else False %}
-          {% set is_company_admin = membership and membership.get('is_admin') %}
+          {% set staff_permission = membership.get('staff_permission', 0) or 0 %}
+          {% set can_access_shop = is_super_admin or membership.get('can_access_shop') %}
+          {% set can_access_cart = is_super_admin or membership.get('can_access_cart') %}
+          {% set can_access_orders = is_super_admin or membership.get('can_access_orders') %}
+          {% set can_access_forms = is_super_admin or membership.get('can_access_forms') %}
+          {% set can_manage_assets = is_super_admin or membership.get('can_manage_assets') %}
+          {% set can_manage_licenses = is_super_admin or membership.get('can_manage_licenses') %}
+          {% set can_manage_invoices = is_super_admin or membership.get('can_manage_invoices') %}
+          {% set can_manage_staff = is_super_admin or membership.get('can_manage_staff') or (staff_permission > 0) %}
+          {% set has_company_section = can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_invoices or can_manage_staff %}
+          {% set is_company_admin = membership.get('is_admin') %}
           {% set has_admin_access = is_super_admin or is_company_admin %}
           <li class="menu__item">
             <a href="/" {% if current_path == '/' %}aria-current="page"{% endif %}>
@@ -70,8 +80,10 @@
               </span>
             </a>
           </li>
-          {% if is_super_admin %}
+          {% if has_company_section %}
             <li class="menu__divider" role="presentation"></li>
+          {% endif %}
+          {% if can_access_shop %}
             <li class="menu__item">
               <a href="/shop" {% if current_path.startswith('/shop') and not current_path.startswith('/admin/shop') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
@@ -80,6 +92,8 @@
                 <span class="menu__label">Shop</span>
               </a>
             </li>
+          {% endif %}
+          {% if can_access_cart %}
             <li class="menu__item">
               <a href="/cart" {% if current_path.startswith('/cart') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
@@ -88,6 +102,8 @@
                 <span class="menu__label">Cart</span>
               </a>
             </li>
+          {% endif %}
+          {% if can_access_orders %}
             <li class="menu__item">
               <a href="/orders" {% if current_path.startswith('/orders') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
@@ -96,6 +112,8 @@
                 <span class="menu__label">Orders</span>
               </a>
             </li>
+          {% endif %}
+          {% if can_access_forms %}
             <li class="menu__item">
               <a href="/forms" {% if current_path.startswith('/forms') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
@@ -104,6 +122,8 @@
                 <span class="menu__label">Forms</span>
               </a>
             </li>
+          {% endif %}
+          {% if can_manage_assets %}
             <li class="menu__item">
               <a href="/assets" {% if current_path.startswith('/assets') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
@@ -112,6 +132,8 @@
                 <span class="menu__label">Assets</span>
               </a>
             </li>
+          {% endif %}
+          {% if can_manage_licenses %}
             <li class="menu__item">
               <a href="/licenses" {% if current_path.startswith('/licenses') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
@@ -120,6 +142,8 @@
                 <span class="menu__label">Licenses</span>
               </a>
             </li>
+          {% endif %}
+          {% if can_manage_invoices %}
             <li class="menu__item">
               <a href="/invoices" {% if current_path.startswith('/invoices') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
@@ -128,6 +152,8 @@
                 <span class="menu__label">Invoices</span>
               </a>
             </li>
+          {% endif %}
+          {% if can_manage_staff %}
             <li class="menu__item">
               <a href="/staff" {% if current_path.startswith('/staff') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
