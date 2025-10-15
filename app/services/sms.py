@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Sequence
 
-import httpx
 from loguru import logger
 
 from app.core.config import get_settings
+from app.services import webhook_monitor
 
 
 class SMSDispatchError(Exception):
@@ -77,18 +77,41 @@ async def send_sms(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(str(endpoint), json=payload, headers=headers)
-    except httpx.HTTPError as exc:  # pragma: no cover - surface via caller
-        raise SMSDispatchError("Failed to dispatch SMS notification") from exc
+        event = await webhook_monitor.enqueue_event(
+            name="sms.dispatch",
+            target_url=str(endpoint),
+            payload=payload,
+            headers=headers,
+            max_attempts=3,
+            backoff_seconds=max(1, int(timeout)) * 30,
+            attempt_immediately=True,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        raise SMSDispatchError("Failed to enqueue SMS notification event") from exc
 
-    if not 200 <= response.status_code < 300:
-        raise SMSDispatchError(f"Unexpected SMS gateway response: HTTP {response.status_code}")
+    if not event or not event.get("id"):
+        raise SMSDispatchError("SMS notification event was not created")
 
+    status = str(event.get("status") or "").lower()
+    last_error = event.get("last_error")
+
+    if status == "failed" or last_error:
+        raise SMSDispatchError(last_error or "SMS webhook delivery failed")
+
+    if status == "succeeded":
+        logger.info(
+            "SMS notification dispatched",
+            endpoint=str(endpoint),
+            recipient_count=len(recipients),
+        )
+        return True
+
+    # Pending or in-progress statuses mean the webhook monitor will continue retrying.
     logger.info(
-        "SMS notification dispatched",
+        "SMS notification enqueued for delivery",
         endpoint=str(endpoint),
         recipient_count=len(recipients),
+        status=status or "pending",
     )
     return True
 
