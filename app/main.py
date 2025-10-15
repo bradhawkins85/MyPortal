@@ -64,7 +64,9 @@ from app.repositories import invoices as invoice_repo
 from app.repositories import licenses as license_repo
 from app.repositories import forms as forms_repo
 from app.repositories import m365 as m365_repo
+from app.core.notifications import DEFAULT_NOTIFICATION_EVENT_TYPES, merge_event_types
 from app.repositories import notifications as notifications_repo
+from app.repositories import notification_preferences as notification_preferences_repo
 from app.repositories import roles as role_repo
 from app.repositories import shop as shop_repo
 from app.repositories import cart as cart_repo
@@ -2858,6 +2860,52 @@ async def notifications_dashboard(request: Request):
     }
 
     return await _render_template("notifications/index.html", request, user, extra=extra)
+
+
+@app.get("/notifications/settings", response_class=HTMLResponse)
+async def notification_settings_page(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+
+    try:
+        user_id = int(user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User session invalid")
+
+    stored_preferences = await notification_preferences_repo.list_preferences(user_id)
+    event_types = merge_event_types(
+        DEFAULT_NOTIFICATION_EVENT_TYPES,
+        [preference.get("event_type") for preference in stored_preferences],
+        await notifications_repo.list_event_types(user_id=user_id),
+    )
+
+    mapped = {pref.get("event_type"): pref for pref in stored_preferences if pref.get("event_type")}
+    preferences: list[dict[str, Any]] = []
+    for event_type in event_types:
+        pref = mapped.get(event_type) or {}
+        preferences.append(
+            {
+                "event_type": event_type,
+                "channel_in_app": bool(pref.get("channel_in_app", True)),
+                "channel_email": bool(pref.get("channel_email", False)),
+                "channel_sms": bool(pref.get("channel_sms", False)),
+            }
+        )
+
+    extra = {
+        "title": "Notification settings",
+        "preferences": preferences,
+        "preferences_endpoint": "/api/notifications/preferences",
+        "channel_descriptions": {
+            "channel_in_app": "Store notifications in the in-app feed",
+            "channel_email": "Email the notification to your primary address",
+            "channel_sms": "Send a text message to your mobile number",
+        },
+        "default_event_types": set(DEFAULT_NOTIFICATION_EVENT_TYPES),
+    }
+
+    return await _render_template("notifications/settings.html", request, user, extra=extra)
 
 
 @app.get("/myforms", response_class=HTMLResponse)

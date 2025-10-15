@@ -8,10 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.api.dependencies.auth import get_current_user
 from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.database import require_database
+from app.core.notifications import DEFAULT_NOTIFICATION_EVENT_TYPES, merge_event_types
 from app.repositories import notifications as notifications_repo
+from app.repositories import notification_preferences as preferences_repo
 from app.schemas.notifications import (
     NotificationAcknowledgeRequest,
     NotificationCreate,
+    NotificationPreferenceResponse,
+    NotificationPreferenceUpdateRequest,
     NotificationResponse,
 )
 
@@ -168,3 +172,86 @@ async def acknowledge_notifications(
 
     updated = await notifications_repo.mark_read_bulk(unique_ids)
     return updated
+
+
+@router.get(
+    "/preferences",
+    response_model=list[NotificationPreferenceResponse],
+    summary="List notification preferences",
+    response_description="Notification delivery preferences for the authenticated user.",
+)
+async def list_notification_preferences(
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        user_id = int(current_user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User session is invalid")
+
+    stored_preferences = await preferences_repo.list_preferences(user_id)
+    event_types = merge_event_types(
+        DEFAULT_NOTIFICATION_EVENT_TYPES,
+        [preference.get("event_type") for preference in stored_preferences],
+        await notifications_repo.list_event_types(user_id=user_id),
+    )
+
+    mapped = {pref.get("event_type"): pref for pref in stored_preferences if pref.get("event_type")}
+    results: list[NotificationPreferenceResponse] = []
+    for event_type in event_types:
+        pref = mapped.get(event_type)
+        if pref:
+            results.append(NotificationPreferenceResponse(**pref))
+            continue
+        results.append(
+            NotificationPreferenceResponse(
+                event_type=event_type,
+                channel_in_app=True,
+                channel_email=False,
+                channel_sms=False,
+            )
+        )
+    return results
+
+
+@router.put(
+    "/preferences",
+    response_model=list[NotificationPreferenceResponse],
+    summary="Update notification preferences",
+    response_description="The persisted preferences after applying the update.",
+)
+async def update_notification_preferences(
+    payload: NotificationPreferenceUpdateRequest,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        user_id = int(current_user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User session is invalid")
+
+    updated = await preferences_repo.upsert_preferences(
+        user_id,
+        [preference.model_dump() for preference in payload.preferences],
+    )
+    mapped = {pref.get("event_type"): pref for pref in updated if pref.get("event_type")}
+    event_types = merge_event_types(
+        DEFAULT_NOTIFICATION_EVENT_TYPES,
+        mapped.keys(),
+        await notifications_repo.list_event_types(user_id=user_id),
+    )
+    results: list[NotificationPreferenceResponse] = []
+    for event_type in event_types:
+        pref = mapped.get(event_type)
+        if pref:
+            results.append(NotificationPreferenceResponse(**pref))
+        else:
+            results.append(
+                NotificationPreferenceResponse(
+                    event_type=event_type,
+                    channel_in_app=True,
+                    channel_email=False,
+                    channel_sms=False,
+                )
+            )
+    return results

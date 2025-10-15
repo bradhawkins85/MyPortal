@@ -1820,6 +1820,22 @@ body {
   color: #bbf7d0;
 }
 
+.notification-preference__event {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.notification-preference__name {
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.notification-preference__hint {
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+}
+
 .modal {
   position: fixed;
   inset: 0;

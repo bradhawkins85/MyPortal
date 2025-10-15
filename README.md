@@ -58,6 +58,12 @@ is omitted the notification is treated as a broadcast for every user. Newly
 created notifications are surfaced immediately in the UI and through the
 Swagger UI to support automated integrations and operational tooling.
 
+Each user can tailor how those events are delivered from `/notifications/settings`
+or programmatically through `GET`/`PUT /api/notifications/preferences`. The
+preferences API returns the merged catalogue of known event types and delivery
+channels (in-app feed, email, SMS) while updates persist the full set of
+choices in a single request.
+
 ## Template Variables for External Apps
 
 MyPortal exposes a curated set of template variables that can be embedded in
