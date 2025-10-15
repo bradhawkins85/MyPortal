@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Iterable
 
 import aiomysql
 
@@ -323,6 +323,98 @@ async def create_category(name: str) -> int:
             )
             category_id = int(cursor.lastrowid)
     return category_id
+
+
+async def delete_category(category_id: int) -> bool:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                "DELETE FROM shop_categories WHERE id = %s",
+                (category_id,),
+            )
+            return cursor.rowcount > 0
+
+
+async def update_product(
+    product_id: int,
+    *,
+    name: str,
+    sku: str,
+    vendor_sku: str,
+    description: str | None,
+    price: Decimal,
+    stock: int,
+    vip_price: Decimal | None,
+    category_id: int | None,
+    image_url: str | None,
+) -> dict[str, Any] | None:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                """
+                UPDATE shop_products
+                SET
+                    name = %s,
+                    sku = %s,
+                    vendor_sku = %s,
+                    description = %s,
+                    image_url = %s,
+                    price = %s,
+                    vip_price = %s,
+                    stock = %s,
+                    category_id = %s
+                WHERE id = %s
+                """,
+                (
+                    name,
+                    sku,
+                    vendor_sku,
+                    description,
+                    image_url,
+                    price,
+                    vip_price,
+                    stock,
+                    category_id,
+                    product_id,
+                ),
+            )
+    return await get_product_by_id(product_id, include_archived=True)
+
+
+async def set_product_archived(product_id: int, *, archived: bool) -> bool:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                "UPDATE shop_products SET archived = %s WHERE id = %s",
+                (1 if archived else 0, product_id),
+            )
+            return cursor.rowcount > 0
+
+
+async def replace_product_exclusions(
+    product_id: int,
+    excluded_company_ids: Iterable[int],
+) -> None:
+    ids = sorted({int(company_id) for company_id in excluded_company_ids})
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await conn.begin()
+            try:
+                await cursor.execute(
+                    "DELETE FROM shop_product_exclusions WHERE product_id = %s",
+                    (product_id,),
+                )
+                if ids:
+                    values = [(product_id, company_id) for company_id in ids]
+                    await cursor.executemany(
+                        "INSERT INTO shop_product_exclusions (product_id, company_id) VALUES (%s, %s)",
+                        values,
+                    )
+            except Exception:
+                await conn.rollback()
+                raise
+            else:
+                await conn.commit()
 
 
 async def upsert_product_from_feed(
