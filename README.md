@@ -135,6 +135,7 @@ All authentication routes are documented in the interactive Swagger UI and summa
 - `GET /auth/session` – Returns the current session metadata and user profile.
 - `POST /auth/password/forgot` – Generates a time-bound password reset token and triggers the outbound notification pipeline.
 - `POST /auth/password/reset` – Validates the token and updates the user password with bcrypt hashing.
+- `POST /auth/password/change` – Allows an authenticated user to rotate their password after validating the current credential.
 - `GET /auth/totp` – Lists active TOTP authenticators for the current user.
 - `POST /auth/totp/setup` – Generates a pending TOTP secret and provisioning URI for enrolment.
 - `POST /auth/totp/verify` – Confirms the authenticator code and persists it for future logins.
