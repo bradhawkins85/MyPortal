@@ -11,7 +11,12 @@ from app.core.config import get_settings
 from app.security.session import SessionManager, session_manager
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-DEFAULT_EXEMPT_PREFIXES = ("/auth/login", "/auth/register", "/auth/password")
+DEFAULT_EXEMPT_PREFIXES = (
+    "/auth/login",
+    "/auth/register",
+    "/auth/password/forgot",
+    "/auth/password/reset",
+)
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):
