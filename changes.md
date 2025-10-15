@@ -1,3 +1,4 @@
+- 2025-10-15, 12:44 UTC, Fix, Restricted Office 365 and Swagger UI access for company admins by hiding navigation links and enforcing server-side checks
 - 2025-10-30, 09:00 UTC, Feature, Added an Administration My Profile console with password rotation, TOTP management, and SMS contact updates
 - 2025-10-15, 12:21 UTC, Fix, Enabled SMTP-backed email delivery for password resets, staff invitations, and notification alerts
 - 2025-10-15, 12:18 UTC, Feature, Added Fail2ban-aware authentication logging with sample filter/jail configs and documentation
