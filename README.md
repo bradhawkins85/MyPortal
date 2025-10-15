@@ -67,6 +67,15 @@ choices in a single request. Default events now include shipping status updates
 (`shop.shipping_status_updated`) so customers can follow fulfilment progress
 alongside billing, port, and webhook alerts.
 
+Supporting endpoints expose aggregated counts and merged event type catalogues
+for richer clients:
+
+- `GET /api/notifications/summary` – Returns the total notifications and unread
+  counts matching the supplied filters alongside the global unread tally.
+- `GET /api/notifications/event-types` – Provides the distinct notification
+  event types available to the authenticated user by combining defaults,
+  preferences, and recorded history.
+
 ## Template Variables for External Apps
 
 MyPortal exposes a curated set of template variables that can be embedded in

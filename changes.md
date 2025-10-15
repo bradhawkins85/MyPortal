@@ -1,4 +1,5 @@
 - 2025-11-26, 09:00 UTC, Fix, Expanded dashboard padding and responsive spacing so overview cards and status lists no longer overlap on compact screens
+- 2025-10-15, 13:44 UTC, Fix, Allowed company membership permission toggles to send CSRF tokens from the page meta tag when the session cookie name is customised
 - 2025-10-15, 13:26 UTC, Fix, Prevented blank CSRF headers from blocking company membership saves when the session cookie name is customised
 - 2025-11-25, 11:00 UTC, Feature, Logged SMS notifications as webhook events so delivery follows monitored retry logic
 - 2025-10-15, 13:21 UTC, Fix, Restored shop admin category, product update, archive, and visibility endpoints with validation and logging
@@ -170,3 +171,4 @@
 - 2025-10-09, 13:15 UTC, Feature, Added viewport-aware pagination controls to the webhook delivery queue for responsive monitoring
 - 2025-10-09, 23:30 UTC, Fix, Removed leftover patch markers from dashboard template to restore valid Jinja block structure
 - 2025-10-09, 23:32 UTC, Fix, Resized all modal popups to occupy 75% of the viewport for consistent layout compliance
+- 2025-10-10, 13:45 UTC, Fix, Restored notification API actions with summary counts, event-type catalogues, repository insert reliability, and UI refresh
