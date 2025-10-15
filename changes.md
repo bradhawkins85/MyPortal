@@ -1,3 +1,4 @@
+- 2025-11-26, 09:00 UTC, Fix, Expanded dashboard padding and responsive spacing so overview cards and status lists no longer overlap on compact screens
 - 2025-10-15, 13:26 UTC, Fix, Prevented blank CSRF headers from blocking company membership saves when the session cookie name is customised
 - 2025-11-25, 11:00 UTC, Feature, Logged SMS notifications as webhook events so delivery follows monitored retry logic
 - 2025-10-15, 13:21 UTC, Fix, Restored shop admin category, product update, archive, and visibility endpoints with validation and logging
