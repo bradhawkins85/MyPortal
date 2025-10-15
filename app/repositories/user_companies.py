@@ -15,6 +15,9 @@ _BOOLEAN_FIELDS = {
     "can_manage_office_groups",
     "can_order_licenses",
     "can_access_shop",
+    "can_access_cart",
+    "can_access_orders",
+    "can_access_forms",
     "is_admin",
 }
 
@@ -25,6 +28,9 @@ _PERMISSION_FIELDS = {
     "can_manage_invoices",
     "can_order_licenses",
     "can_access_shop",
+    "can_access_cart",
+    "can_access_orders",
+    "can_access_forms",
     "is_admin",
 }
 
@@ -125,6 +131,9 @@ async def assign_user_to_company(
     can_manage_invoices: bool = False,
     can_order_licenses: bool = False,
     can_access_shop: bool = False,
+    can_access_cart: bool = False,
+    can_access_orders: bool = False,
+    can_access_forms: bool = False,
     is_admin: bool = False,
 ) -> None:
     staff_permission_value = max(0, int(staff_permission))
@@ -144,8 +153,11 @@ async def assign_user_to_company(
             can_manage_invoices,
             can_order_licenses,
             can_access_shop,
+            can_access_cart,
+            can_access_orders,
+            can_access_forms,
             is_admin
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             can_manage_licenses = VALUES(can_manage_licenses),
             can_manage_staff = VALUES(can_manage_staff),
@@ -155,6 +167,9 @@ async def assign_user_to_company(
             can_manage_invoices = VALUES(can_manage_invoices),
             can_order_licenses = VALUES(can_order_licenses),
             can_access_shop = VALUES(can_access_shop),
+            can_access_cart = VALUES(can_access_cart),
+            can_access_orders = VALUES(can_access_orders),
+            can_access_forms = VALUES(can_access_forms),
             is_admin = VALUES(is_admin)
         """,
         (
@@ -168,6 +183,9 @@ async def assign_user_to_company(
             1 if can_manage_invoices else 0,
             1 if can_order_licenses else 0,
             1 if can_access_shop else 0,
+            1 if can_access_cart else 0,
+            1 if can_access_orders else 0,
+            1 if can_access_forms else 0,
             1 if is_admin else 0,
         ),
     )
