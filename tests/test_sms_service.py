@@ -9,26 +9,15 @@ from app.services import sms as sms_service
 def test_send_sms_success(monkeypatch):
     captured: dict[str, object] = {}
 
-    class DummyResponse:
-        def __init__(self, status_code: int = 200, text: str = "OK") -> None:
-            self.status_code = status_code
-            self.text = text
+    async def fake_enqueue_event(**kwargs):
+        captured["event"] = kwargs
+        return {
+            "id": 10,
+            "status": "succeeded",
+            "attempt_count": 1,
+        }
 
-    class DummyClient:
-        def __init__(self, *args, **kwargs) -> None:
-            captured["timeout"] = kwargs.get("timeout") or (args[0] if args else None)
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):  # type: ignore[override]
-            return False
-
-        async def post(self, url: str, json: dict, headers: dict):
-            captured["request"] = {"url": url, "json": json, "headers": headers}
-            return DummyResponse()
-
-    monkeypatch.setattr(sms_service.httpx, "AsyncClient", DummyClient)
+    monkeypatch.setattr(sms_service.webhook_monitor, "enqueue_event", fake_enqueue_event)
     monkeypatch.setattr(
         sms_service,
         "get_settings",
@@ -40,12 +29,12 @@ def test_send_sms_success(monkeypatch):
     )
 
     assert result is True
-    request = captured["request"]
-    assert request["url"] == "http://example.com/message"
-    assert request["json"]["textMessage"]["text"] == "Hello"
-    assert request["json"]["phoneNumbers"] == ["+123"]
-    assert request["headers"]["Authorization"] == "Basic dGVzdA=="
-    assert captured["timeout"] == 10.0
+    event = captured["event"]
+    assert event["target_url"] == "http://example.com/message"
+    assert event["payload"]["textMessage"]["text"] == "Hello"
+    assert event["payload"]["phoneNumbers"] == ["+123"]
+    assert event["headers"]["Authorization"] == "Basic dGVzdA=="
+    assert event["backoff_seconds"] == 300
 
 
 def test_send_sms_skips_without_endpoint(monkeypatch):
@@ -63,25 +52,15 @@ def test_send_sms_skips_without_endpoint(monkeypatch):
 
 
 def test_send_sms_raises_on_bad_status(monkeypatch):
-    class DummyResponse:
-        def __init__(self, status_code: int) -> None:
-            self.status_code = status_code
-            self.text = "Error"
+    async def fake_enqueue_event(**kwargs):
+        return {
+            "id": 44,
+            "status": "pending",
+            "last_error": "HTTP 500",
+            "attempt_count": 1,
+        }
 
-    class DummyClient:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):  # type: ignore[override]
-            return False
-
-        async def post(self, url: str, json: dict, headers: dict):
-            return DummyResponse(500)
-
-    monkeypatch.setattr(sms_service.httpx, "AsyncClient", DummyClient)
+    monkeypatch.setattr(sms_service.webhook_monitor, "enqueue_event", fake_enqueue_event)
     monkeypatch.setattr(
         sms_service,
         "get_settings",

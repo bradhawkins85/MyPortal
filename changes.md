@@ -1,4 +1,9 @@
 - 2025-10-15, 13:26 UTC, Fix, Prevented blank CSRF headers from blocking company membership saves when the session cookie name is customised
+- 2025-11-25, 11:00 UTC, Feature, Logged SMS notifications as webhook events so delivery follows monitored retry logic
+- 2025-10-15, 13:21 UTC, Fix, Restored shop admin category, product update, archive, and visibility endpoints with validation and logging
+- 2025-11-24, 10:45 UTC, Feature, Expanded role documentation with detailed permission descriptions on the Roles administration page
+- 2025-10-15, 13:09 UTC, Feature, Documented the Roles administration menu with guidance on secure privilege management
+- 2025-11-24, 10:00 UTC, Fix, Removed the Super admin sidebar heading to keep navigation compact for privileged users
 - 2025-10-31, 09:15 UTC, Feature, Added super-admin controls to grant or block company admin access to shop, cart, order, and form sections
 - 2025-10-15, 12:55 UTC, Fix, Hardened system update automation to use a writable Git config home and tolerate missing service restart permissions
 - 2025-10-15, 12:53 UTC, Fix, Restored the full super admin sidebar with shop, cart, orders, forms, assets, licenses, invoices, and staff links

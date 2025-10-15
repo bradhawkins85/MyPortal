@@ -4624,6 +4624,69 @@ async def admin_shop_page(
 
 
 @app.post(
+    "/shop/admin/category",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Create a shop category",
+    tags=["Shop"],
+)
+async def admin_create_shop_category(
+    request: Request,
+    name: str = Form(...),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    cleaned_name = name.strip()
+    if not cleaned_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category name cannot be empty")
+
+    try:
+        category_id = await shop_repo.create_category(cleaned_name)
+    except aiomysql.IntegrityError as exc:
+        if exc.args and exc.args[0] == 1062:
+            detail = "A category with that name already exists."
+        else:
+            detail = "Unable to create category."
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
+
+    log_info(
+        "Shop category created",
+        category_id=category_id,
+        name=cleaned_name,
+        created_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
+    "/shop/admin/category/{category_id}/delete",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Delete a shop category",
+    tags=["Shop"],
+)
+async def admin_delete_shop_category(request: Request, category_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    category = await shop_repo.get_category(category_id)
+    if not category:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+
+    deleted = await shop_repo.delete_category(category_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+
+    log_info(
+        "Shop category deleted",
+        category_id=category_id,
+        deleted_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
     "/shop/admin/product/import",
     status_code=status.HTTP_303_SEE_OTHER,
     summary="Import a shop product from the stock feed",
@@ -4759,6 +4822,242 @@ async def admin_create_shop_product(
         sku=product["sku"],
         vendor_sku=product["vendor_sku"],
         created_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
+    "/shop/admin/product/{product_id}",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Update a shop product",
+    tags=["Shop"],
+)
+async def admin_update_shop_product(
+    request: Request,
+    product_id: int,
+    name: str = Form(...),
+    sku: str = Form(...),
+    vendor_sku: str = Form(...),
+    description: str | None = Form(default=None),
+    price: str = Form(...),
+    stock: str = Form(...),
+    vip_price: str | None = Form(default=None),
+    category_id: str | None = Form(default=None),
+    image: UploadFile | None = File(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    product = await shop_repo.get_product_by_id(product_id, include_archived=True)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    cleaned_name = name.strip()
+    if not cleaned_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Product name cannot be empty")
+
+    cleaned_sku = sku.strip()
+    if not cleaned_sku:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SKU cannot be empty")
+
+    cleaned_vendor_sku = vendor_sku.strip()
+    if not cleaned_vendor_sku:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vendor SKU cannot be empty")
+
+    description_value = description.strip() if description else None
+
+    try:
+        price_decimal = Decimal(price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (TypeError, InvalidOperation):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Price must be a valid number")
+    if price_decimal < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Price must be at least zero")
+
+    try:
+        stock_int = int(stock)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stock must be a whole number")
+    if stock_int < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stock must be at least zero")
+
+    vip_decimal: Decimal | None = None
+    if vip_price not in (None, ""):
+        try:
+            vip_decimal = Decimal(vip_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except (TypeError, InvalidOperation):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="VIP price must be a valid number")
+        if vip_decimal < 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="VIP price must be at least zero")
+
+    category_value: int | None = None
+    if category_id:
+        try:
+            category_value = int(category_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid category selection")
+        category = await shop_repo.get_category(category_value)
+        if not category:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected category does not exist")
+
+    previous_image_url = product.get("image_url")
+    image_url = previous_image_url
+    stored_path: Path | None = None
+    if image is not None:
+        if image.filename:
+            image_url, stored_path = await store_product_image(
+                upload=image,
+                uploads_root=_private_uploads_path,
+                max_size=5 * 1024 * 1024,
+            )
+        else:
+            await image.close()
+
+    try:
+        updated = await shop_repo.update_product(
+            product_id,
+            name=cleaned_name,
+            sku=cleaned_sku,
+            vendor_sku=cleaned_vendor_sku,
+            description=description_value,
+            price=price_decimal,
+            stock=stock_int,
+            vip_price=vip_decimal,
+            category_id=category_value,
+            image_url=image_url,
+        )
+    except aiomysql.IntegrityError as exc:
+        if stored_path:
+            stored_path.unlink(missing_ok=True)
+        if exc.args and exc.args[0] == 1062:
+            detail = "A product with that SKU or vendor SKU already exists."
+        else:
+            detail = "Unable to update product."
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
+    except Exception:
+        if stored_path:
+            stored_path.unlink(missing_ok=True)
+        raise
+
+    if not updated:
+        if stored_path:
+            stored_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    if stored_path and previous_image_url and previous_image_url != updated.get("image_url"):
+        try:
+            delete_stored_file(previous_image_url, _private_uploads_path)
+        except HTTPException as exc:
+            log_error(
+                "Failed to remove replaced product image",
+                product_id=product_id,
+                error=str(exc),
+            )
+        except OSError as exc:
+            log_error(
+                "Failed to remove replaced product image",
+                product_id=product_id,
+                error=str(exc),
+            )
+
+    log_info(
+        "Shop product updated",
+        product_id=product_id,
+        updated_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+
+async def _handle_shop_product_archive(
+    request: Request,
+    product_id: int,
+    *,
+    archived: bool,
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    product = await shop_repo.get_product_by_id(product_id, include_archived=True)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    if bool(product.get("archived")) == archived:
+        return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+    updated = await shop_repo.set_product_archived(product_id, archived=archived)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    log_info(
+        "Shop product archived" if archived else "Shop product unarchived",
+        product_id=product_id,
+        updated_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
+    "/shop/admin/product/{product_id}/archive",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Archive a shop product",
+    tags=["Shop"],
+)
+async def admin_archive_shop_product(request: Request, product_id: int):
+    return await _handle_shop_product_archive(request, product_id, archived=True)
+
+
+@app.post(
+    "/shop/admin/product/{product_id}/unarchive",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Unarchive a shop product",
+    tags=["Shop"],
+)
+async def admin_unarchive_shop_product(request: Request, product_id: int):
+    return await _handle_shop_product_archive(request, product_id, archived=False)
+
+
+@app.post(
+    "/shop/admin/product/{product_id}/visibility",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Update shop product visibility",
+    tags=["Shop"],
+)
+async def admin_update_shop_product_visibility(
+    request: Request,
+    product_id: int,
+    excluded: list[str] = Form(default=[]),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    product = await shop_repo.get_product_by_id(product_id, include_archived=True)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    excluded_ids: set[int] = set()
+    for value in excluded:
+        if value in (None, ""):
+            continue
+        try:
+            company_id = int(value)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company selection")
+        excluded_ids.add(company_id)
+
+    for company_id in excluded_ids:
+        company = await company_repo.get_company_by_id(company_id)
+        if not company:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected company does not exist")
+
+    await shop_repo.replace_product_exclusions(product_id, excluded_ids)
+
+    log_info(
+        "Shop product visibility updated",
+        product_id=product_id,
+        excluded_companies=sorted(excluded_ids),
+        updated_by=current_user["id"] if current_user else None,
     )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
