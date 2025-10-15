@@ -1,8 +1,66 @@
 import asyncio
-import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from app.repositories import notifications as notifications_repo
+
+
+def test_create_notification_returns_inserted_record(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeCursor:
+        def __init__(self) -> None:
+            self.lastrowid = 101
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, sql, params):
+            captured['insert_sql'] = sql.strip()
+            captured['insert_params'] = params
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+    @asynccontextmanager
+    async def fake_acquire():
+        yield FakeConnection()
+
+    async def fake_fetch_one(sql, params):
+        captured.setdefault('fetch_calls', []).append((sql.strip(), params))
+        if isinstance(params, tuple) and params and params[0] == 101:
+            return {
+                'id': 101,
+                'user_id': 5,
+                'event_type': 'system',
+                'message': 'Hello',
+                'metadata': '{"source": "api"}',
+                'created_at': datetime.now(timezone.utc),
+                'read_at': None,
+            }
+        return None
+
+    monkeypatch.setattr(notifications_repo.db, 'acquire', fake_acquire)
+    monkeypatch.setattr(notifications_repo.db, 'fetch_one', fake_fetch_one)
+
+    record = asyncio.run(
+        notifications_repo.create_notification(
+            event_type='system',
+            message='Hello',
+            user_id=5,
+            metadata={'source': 'api'},
+        )
+    )
+
+    assert record['id'] == 101
+    assert record['user_id'] == 5
+    assert record['metadata'] == {'source': 'api'}
+    assert captured['insert_params']['metadata'] == '{"source": "api"}'
+    assert captured['fetch_calls'][0][1] == (101,)
 
 
 def test_list_notifications_applies_filters(monkeypatch):
