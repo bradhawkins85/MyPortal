@@ -504,6 +504,28 @@ async def _build_base_context(
         membership = await user_company_repo.get_user_company(user["id"], int(active_company_id))
         request.state.active_membership = membership
 
+    membership_data = membership or {}
+    is_super_admin = bool(user.get("is_super_admin"))
+    staff_permission_level = int(membership_data.get("staff_permission") or 0)
+
+    def _has_permission(flag: str) -> bool:
+        return bool(membership_data.get(flag))
+
+    permission_flags = {
+        "can_access_shop": is_super_admin or _has_permission("can_access_shop"),
+        "can_access_cart": is_super_admin or _has_permission("can_access_cart"),
+        "can_access_orders": is_super_admin or _has_permission("can_access_orders"),
+        "can_access_forms": is_super_admin or _has_permission("can_access_forms"),
+        "can_manage_assets": is_super_admin or _has_permission("can_manage_assets"),
+        "can_manage_licenses": is_super_admin or _has_permission("can_manage_licenses"),
+        "can_manage_invoices": is_super_admin or _has_permission("can_manage_invoices"),
+        "can_manage_staff": (
+            is_super_admin
+            or _has_permission("can_manage_staff")
+            or staff_permission_level > 0
+        ),
+    }
+
     context: dict[str, Any] = {
         "request": request,
         "app_name": settings.app_name,
@@ -514,7 +536,11 @@ async def _build_base_context(
         "active_company_id": active_company_id,
         "active_membership": membership,
         "csrf_token": session.csrf_token if session else None,
+        "staff_permission": staff_permission_level,
+        "is_super_admin": is_super_admin,
+        "is_company_admin": is_super_admin or bool(membership_data.get("is_admin")),
     }
+    context.update(permission_flags)
     if extra:
         context.update(extra)
 

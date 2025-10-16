@@ -1,9 +1,12 @@
+from datetime import datetime, timedelta
+from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
 from starlette.requests import Request
 
 from app import main
+from app.security.session import SessionData
 
 
 async def _dummy_receive() -> dict[str, object]:
@@ -77,3 +80,55 @@ async def test_load_company_section_super_admin_without_company(monkeypatch):
     assert membership is None
     assert company is None
     assert company_id is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_build_base_context_includes_cart_permission(monkeypatch):
+    request = _make_request()
+    session = SessionData(
+        id=1,
+        user_id=5,
+        session_token="token",
+        csrf_token="csrf",
+        created_at=datetime.utcnow(),
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+        last_seen_at=datetime.utcnow(),
+        ip_address="127.0.0.1",
+        user_agent="pytest",
+        active_company_id=7,
+    )
+
+    async def fake_load_session(req):
+        req.state.session = session
+        req.state.active_company_id = session.active_company_id
+        return session
+
+    monkeypatch.setattr(main.session_manager, "load_session", fake_load_session)
+    monkeypatch.setattr(
+        main.user_company_repo,
+        "list_companies_for_user",
+        AsyncMock(return_value=[{"company_id": 7, "company_name": "Example"}]),
+    )
+    membership = {
+        "company_id": 7,
+        "can_access_cart": True,
+        "can_access_shop": True,
+        "staff_permission": 0,
+    }
+    monkeypatch.setattr(main.user_company_repo, "get_user_company", AsyncMock(return_value=membership))
+    monkeypatch.setattr(
+        main.cart_repo,
+        "summarise_cart",
+        AsyncMock(return_value={"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")}),
+    )
+    monkeypatch.setattr(
+        main.notifications_repo,
+        "count_notifications",
+        AsyncMock(return_value=0),
+    )
+
+    user = {"id": 5, "email": "user@example.com", "is_super_admin": False}
+    context = await main._build_base_context(request, user)
+
+    assert context["can_access_cart"] is True
+    assert context["can_access_shop"] is True
