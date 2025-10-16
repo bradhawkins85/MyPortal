@@ -1,3 +1,4 @@
+- 2025-10-16, 00:08 UTC, Fix, Hid cart quantity and submission controls on the shop page when membership lacks cart permissions
 - 2025-10-15, 23:46 UTC, Fix, Prevented dashboard summary cards from overlapping their meta text by expanding spacing and line heights
 - 2025-10-15, 13:45 UTC, Fix, Restored sidebar company features for company admins when memberships grant access
 - 2025-11-26, 09:00 UTC, Fix, Expanded dashboard padding and responsive spacing so overview cards and status lists no longer overlap on compact screens
