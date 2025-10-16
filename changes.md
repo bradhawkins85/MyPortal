@@ -1,3 +1,4 @@
+- 2025-10-16, 08:13 UTC, Fix, Restored add-to-cart controls by exposing cart permissions in shared context so authorised users can shop
 - 2025-10-16, 00:08 UTC, Fix, Hid cart quantity and submission controls on the shop page when membership lacks cart permissions
 - 2025-10-15, 23:46 UTC, Fix, Prevented dashboard summary cards from overlapping their meta text by expanding spacing and line heights
 - 2025-10-15, 13:45 UTC, Fix, Restored sidebar company features for company admins when memberships grant access
