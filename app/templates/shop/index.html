@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 
+{% set cart_allowed = (can_access_cart | default(false)) %}
+{% if not cart_allowed %}
+  {% set cart_allowed = (current_user and current_user.get('is_super_admin')) or (active_membership and active_membership.get('can_access_cart')) %}
+{% endif %}
+
 {% block header_actions %}
-  {% if can_access_cart %}
+  {% if cart_allowed %}
     <a class="button button--ghost" href="/cart">
       View cart{% if cart_summary.total_quantity %} ({{ cart_summary.total_quantity }}){% endif %}
     </a>
@@ -109,7 +114,7 @@
                 <div class="table__action-buttons">
                   <button type="button" class="button button--ghost" data-product-details="{{ product.id }}">Details</button>
                   {% if product.stock > 0 %}
-                    {% if can_access_cart %}
+                    {% if cart_allowed %}
                       <form action="/cart/add" method="post" class="inline-form">
                         {% include "partials/csrf.html" %}
                         <input type="hidden" name="productId" value="{{ product.id }}" />

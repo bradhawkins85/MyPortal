@@ -46,16 +46,16 @@
           {% block sidebar_menu %}
           {% set current_path = request.url.path if request is defined else '' %}
           {% set membership = active_membership or {} %}
-          {% set is_super_admin = current_user.get('is_super_admin') if current_user else False %}
-          {% set staff_permission = membership.get('staff_permission', 0) or 0 %}
-          {% set can_access_shop = is_super_admin or membership.get('can_access_shop') %}
-          {% set can_access_cart = is_super_admin or membership.get('can_access_cart') %}
-          {% set can_access_orders = is_super_admin or membership.get('can_access_orders') %}
-          {% set can_access_forms = is_super_admin or membership.get('can_access_forms') %}
-          {% set can_manage_assets = is_super_admin or membership.get('can_manage_assets') %}
-          {% set can_manage_licenses = is_super_admin or membership.get('can_manage_licenses') %}
-          {% set can_manage_invoices = is_super_admin or membership.get('can_manage_invoices') %}
-          {% set can_manage_staff = is_super_admin or membership.get('can_manage_staff') or (staff_permission > 0) %}
+          {% set is_super_admin = is_super_admin | default(current_user.get('is_super_admin') if current_user else False) %}
+          {% set staff_permission = staff_permission | default(membership.get('staff_permission', 0) or 0) %}
+          {% set can_access_shop = (can_access_shop | default(false)) or is_super_admin or membership.get('can_access_shop') %}
+          {% set can_access_cart = (can_access_cart | default(false)) or is_super_admin or membership.get('can_access_cart') %}
+          {% set can_access_orders = (can_access_orders | default(false)) or is_super_admin or membership.get('can_access_orders') %}
+          {% set can_access_forms = (can_access_forms | default(false)) or is_super_admin or membership.get('can_access_forms') %}
+          {% set can_manage_assets = (can_manage_assets | default(false)) or is_super_admin or membership.get('can_manage_assets') %}
+          {% set can_manage_licenses = (can_manage_licenses | default(false)) or is_super_admin or membership.get('can_manage_licenses') %}
+          {% set can_manage_invoices = (can_manage_invoices | default(false)) or is_super_admin or membership.get('can_manage_invoices') %}
+          {% set can_manage_staff = (can_manage_staff | default(false)) or is_super_admin or membership.get('can_manage_staff') or (staff_permission > 0) %}
           {% set has_company_section = can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_invoices or can_manage_staff %}
           {% set is_company_admin = membership.get('is_admin') %}
           {% set has_admin_access = is_super_admin or is_company_admin %}
