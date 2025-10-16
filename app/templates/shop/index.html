@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 
 {% block header_actions %}
-  <a class="button button--ghost" href="/cart">
-    View cart{% if cart_summary.total_quantity %} ({{ cart_summary.total_quantity }}){% endif %}
-  </a>
+  {% if can_access_cart %}
+    <a class="button button--ghost" href="/cart">
+      View cart{% if cart_summary.total_quantity %} ({{ cart_summary.total_quantity }}){% endif %}
+    </a>
+  {% endif %}
 {% endblock %}
 
 {% block content %}
@@ -107,21 +109,25 @@
                 <div class="table__action-buttons">
                   <button type="button" class="button button--ghost" data-product-details="{{ product.id }}">Details</button>
                   {% if product.stock > 0 %}
-                  <form action="/cart/add" method="post" class="inline-form">
-                      {% include "partials/csrf.html" %}
-                      <input type="hidden" name="productId" value="{{ product.id }}" />
-                      <label class="visually-hidden" for="quantity-{{ product.id }}">Quantity for {{ product.name }}</label>
-                      <input
-                        class="form-input form-input--sm"
-                        id="quantity-{{ product.id }}"
-                        type="number"
-                        name="quantity"
-                        min="1"
-                        max="{{ product.stock }}"
-                        value="1"
-                      />
-                      <button type="submit" class="button">Add to cart</button>
-                    </form>
+                    {% if can_access_cart %}
+                      <form action="/cart/add" method="post" class="inline-form">
+                        {% include "partials/csrf.html" %}
+                        <input type="hidden" name="productId" value="{{ product.id }}" />
+                        <label class="visually-hidden" for="quantity-{{ product.id }}">Quantity for {{ product.name }}</label>
+                        <input
+                          class="form-input form-input--sm"
+                          id="quantity-{{ product.id }}"
+                          type="number"
+                          name="quantity"
+                          min="1"
+                          max="{{ product.stock }}"
+                          value="1"
+                        />
+                        <button type="submit" class="button">Add to cart</button>
+                      </form>
+                    {% else %}
+                      <span class="badge badge--muted">Cart access required</span>
+                    {% endif %}
                   {% else %}
                     <span class="badge badge--muted">Out of stock</span>
                   {% endif %}
