@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% set scope_labels = {
+  "anonymous": "Public",
+  "user": "Specific users",
+  "company": "Company members",
+  "company_admin": "Company admins",
+  "super_admin": "Super admins"
+} %}
+
+{% block title %}{{ kb_article.title }} · Knowledge base{% endblock %}
+
+{% block content %}
+<div class="knowledge-base knowledge-base--article">
+  <article class="card card--panel knowledge-base__article" data-knowledge-base-article>
+    <header class="card__header card__header--stacked">
+      <div>
+        <h1 class="card__title">{{ kb_article.title }}</h1>
+        {% if kb_article.summary %}
+          <p class="card__subtitle">{{ kb_article.summary }}</p>
+        {% endif %}
+      </div>
+      <div class="knowledge-base__tags">
+        <span class="tag tag--muted">{{ scope_labels.get(kb_article.permission_scope, kb_article.permission_scope|title) }}</span>
+        {% if not kb_article.is_published %}
+          <span class="tag tag--warning">Draft</span>
+        {% endif %}
+      </div>
+    </header>
+    <div class="card__body knowledge-base__body" data-knowledge-base-article-body>
+      {% if kb_article.sections %}
+        {% for section in kb_article.sections %}
+          <section class="knowledge-base__section" data-knowledge-base-section>
+            {% if section.heading %}
+              <h2 class="knowledge-base__section-heading">{{ section.heading }}</h2>
+            {% endif %}
+            <div class="knowledge-base__section-content">
+              {{ section.content | safe }}
+            </div>
+          </section>
+        {% endfor %}
+      {% else %}
+        {{ kb_article.content | safe }}
+      {% endif %}
+    </div>
+  </article>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/js/knowledge_base.js" defer></script>
+{% endblock %}
