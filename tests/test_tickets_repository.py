@@ -3,6 +3,9 @@ import pytest
 from app.repositories import tickets
 
 
+from datetime import datetime, timezone
+
+
 class _DummyTicketDB:
     def __init__(self, fetched_row):
         self.insert_sql: str | None = None
@@ -20,6 +23,24 @@ class _DummyTicketDB:
         self.fetch_sql = sql.strip()
         self.fetch_params = params
         return self._fetched_row
+
+
+class _UpdateTicketDB:
+    def __init__(self, row):
+        self.execute_sql = None
+        self.execute_params = None
+        self.fetch_sql = None
+        self.fetch_params = None
+        self._row = row
+
+    async def execute(self, sql, params):
+        self.execute_sql = sql.strip()
+        self.execute_params = params
+
+    async def fetch_one(self, sql, params):
+        self.fetch_sql = sql.strip()
+        self.fetch_params = params
+        return self._row
 
 
 @pytest.fixture
@@ -144,3 +165,78 @@ async def test_create_reply_falls_back_when_fetch_missing(monkeypatch):
     assert record["author_id"] is None
     assert record["body"] == "Internal"
     assert record["is_internal"] == 1
+
+
+@pytest.mark.anyio
+async def test_get_ticket_by_external_reference(monkeypatch):
+    sample_row = {
+        "id": 7,
+        "company_id": None,
+        "requester_id": None,
+        "assigned_user_id": None,
+        "subject": "Example",
+        "description": None,
+        "status": "open",
+        "priority": "normal",
+        "category": None,
+        "module_slug": None,
+        "external_reference": "SYNC-1",
+        "ai_summary": None,
+        "ai_summary_status": None,
+        "ai_summary_model": None,
+        "ai_resolution_state": None,
+        "ai_summary_updated_at": None,
+        "ai_tags": "[\"sample\"]",
+        "ai_tags_status": None,
+        "ai_tags_model": None,
+        "ai_tags_updated_at": None,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+        "closed_at": None,
+    }
+    dummy_db = _UpdateTicketDB(sample_row)
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    record = await tickets.get_ticket_by_external_reference("SYNC-1")
+
+    assert record is not None
+    assert record["id"] == 7
+    assert record["ai_tags"] == ["sample"]
+
+
+@pytest.mark.anyio
+async def test_update_ticket_allows_updated_at_override(monkeypatch):
+    sample_row = {
+        "id": 1,
+        "company_id": None,
+        "requester_id": None,
+        "assigned_user_id": None,
+        "subject": "Existing",
+        "description": None,
+        "status": "open",
+        "priority": "normal",
+        "category": None,
+        "module_slug": None,
+        "external_reference": None,
+        "ai_summary": None,
+        "ai_summary_status": None,
+        "ai_summary_model": None,
+        "ai_resolution_state": None,
+        "ai_summary_updated_at": None,
+        "ai_tags": None,
+        "ai_tags_status": None,
+        "ai_tags_model": None,
+        "ai_tags_updated_at": None,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+        "closed_at": None,
+    }
+    dummy_db = _UpdateTicketDB(sample_row)
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    override = datetime(2025, 1, 5, 12, 0, tzinfo=timezone.utc)
+    await tickets.update_ticket(1, status="resolved", updated_at=override)
+
+    assert dummy_db.execute_sql.startswith("UPDATE tickets SET")
+    assert dummy_db.execute_params[-1] == 1
+    assert dummy_db.execute_params[-2] == override

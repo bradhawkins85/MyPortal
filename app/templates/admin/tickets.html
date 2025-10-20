@@ -139,6 +139,63 @@
           <input type="search" class="form-input" placeholder="Filter tickets" aria-label="Filter tickets" data-table-filter="tickets-table" />
         </div>
 
+        <div class="alert-stack" data-syncro-ticket-import-status hidden></div>
+
+        <article class="card card--panel">
+          <header class="card__header">
+            <div>
+              <h2 class="card__title">Syncro ticket import</h2>
+              <p class="card__subtitle">
+                Import tickets from Syncro individually, by range, or across the entire account. Requests are throttled to honour
+                the 180&nbsp;requests per minute limit and processed 25 results per page.
+              </p>
+            </div>
+          </header>
+          <div class="management__body management__body--cards">
+            <form class="card__form" data-syncro-ticket-import data-mode="single">
+              <div>
+                <h3 class="card__title">Single ticket</h3>
+                <p class="card__subtitle text-muted">Fetch a specific Syncro ticket by its numeric identifier.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="syncro-ticket-id">Syncro ticket ID</label>
+                <input id="syncro-ticket-id" name="ticketId" class="form-input" type="number" min="1" step="1" required />
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button button--primary">Import ticket</button>
+              </div>
+            </form>
+            <form class="card__form" data-syncro-ticket-import data-mode="range">
+              <div>
+                <h3 class="card__title">Range import</h3>
+                <p class="card__subtitle text-muted">Pull a consecutive span of Syncro ticket IDs and upsert them into MyPortal.</p>
+              </div>
+              <div class="form-grid">
+                <div class="form-field">
+                  <label class="form-label" for="syncro-ticket-start">Start ID</label>
+                  <input id="syncro-ticket-start" name="startId" class="form-input" type="number" min="1" step="1" required />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="syncro-ticket-end">End ID</label>
+                  <input id="syncro-ticket-end" name="endId" class="form-input" type="number" min="1" step="1" required />
+                </div>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button">Import range</button>
+              </div>
+            </form>
+            <form class="card__form" data-syncro-ticket-import data-mode="all">
+              <div>
+                <h3 class="card__title">Import all tickets</h3>
+                <p class="card__subtitle text-muted">Walk the Syncro pagination to synchronise every available ticket.</p>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button button--ghost">Import all tickets</button>
+              </div>
+            </form>
+          </div>
+        </article>
+
         <div class="table-wrapper">
           <table class="table" id="tickets-table" data-table>
             <thead>
