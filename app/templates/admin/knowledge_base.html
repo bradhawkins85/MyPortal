@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% set scope_labels = {
+  "anonymous": "Public",
+  "user": "Specific users",
+  "company": "Company members",
+  "company_admin": "Company admins",
+  "super_admin": "Super admins"
+} %}
+
+{% block header_actions %}
+  <button type="button" class="button" data-kb-new-article>
+    <span class="button__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2a4 4 0 0 1 4 4v2h1.5a2.5 2.5 0 0 1 0 5H16v1h1.5a2.5 2.5 0 0 1 0 5H16v1a4 4 0 0 1-8 0v-1H6.5a2.5 2.5 0 0 1 0-5H8v-1H6.5a2.5 2.5 0 0 1 0-5H8V6a4 4 0 0 1 4-4zm-1 6V6a1 1 0 0 1 2 0v2h2a1 1 0 0 1 0 2h-2v3h2a1 1 0 0 1 0 2h-2v2a1 1 0 0 1-2 0v-2H9a1 1 0 0 1 0-2h2V8H9a1 1 0 0 1 0-2z"/></svg>
+    </span>
+    <span class="button__label">New article</span>
+  </button>
+{% endblock %}
+
+{% block content %}
+<div class="kb-admin">
+  <div class="kb-admin__grid">
+    <section class="card card--panel kb-admin__panel">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Knowledge base catalogue</h2>
+          <p class="card__subtitle">Review published and draft articles, filter entries, and select one to edit permissions.</p>
+        </div>
+        <div class="card__controls">
+          <input
+            type="search"
+            class="form-input"
+            placeholder="Filter articles"
+            aria-label="Filter articles"
+            data-table-filter="kb-admin-table"
+          />
+        </div>
+      </header>
+      <div class="table-wrapper table-wrapper--short">
+        <table class="table table--compact" id="kb-admin-table" data-table>
+          <thead>
+            <tr>
+              <th scope="col" data-sort="string">Title</th>
+              <th scope="col" data-sort="string">Scope</th>
+              <th scope="col" data-sort="string">Status</th>
+              <th scope="col" data-sort="date">Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for article in kb_articles %}
+            <tr
+              data-kb-row
+              data-kb-article-id="{{ article.id }}"
+              data-kb-article-slug="{{ article.slug }}"
+              data-kb-permission-scope="{{ article.permission_scope }}"
+              data-kb-is-published="{{ 'true' if article.is_published else 'false' }}"
+              data-kb-updated="{{ article.updated_at_iso or '' }}"
+            >
+              <td data-label="Title">
+                <button type="button" class="kb-admin__link" data-kb-select>
+                  <span class="kb-admin__title">{{ article.title }}</span>
+                  {% if article.summary %}
+                    <span class="kb-admin__summary">{{ article.summary }}</span>
+                  {% endif %}
+                </button>
+              </td>
+              <td data-label="Scope" data-value="{{ article.permission_scope }}">
+                <span class="tag">{{ scope_labels.get(article.permission_scope, article.permission_scope|title) }}</span>
+              </td>
+              <td data-label="Status" data-value="{{ 'Published' if article.is_published else 'Draft' }}">
+                {% if article.is_published %}
+                  <span class="status status--success">Published</span>
+                {% else %}
+                  <span class="status status--warning">Draft</span>
+                {% endif %}
+              </td>
+              <td data-label="Updated" data-value="{{ article.updated_at_iso or '' }}">
+                <span data-utc="{{ article.updated_at_iso or '' }}">{{ article.updated_at_iso or '—' }}</span>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="4" class="table__empty">No knowledge base articles are available yet.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card card--panel kb-admin__panel" data-kb-editor>
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title" data-kb-editor-title>Compose article</h2>
+          <p class="card__subtitle">Draft new knowledge base entries or update existing content with granular visibility controls.</p>
+        </div>
+        <div class="card__controls">
+          <label class="switch">
+            <input type="checkbox" id="kb-article-published" />
+            <span class="switch__label">Published</span>
+          </label>
+        </div>
+      </header>
+      <form id="kb-article-form" class="form-grid form-grid--vertical" autocomplete="off">
+        <input type="hidden" id="kb-article-id" />
+        <div class="form-field">
+          <label class="form-label" for="kb-article-slug">Slug</label>
+          <input class="form-input" id="kb-article-slug" name="slug" required minlength="1" maxlength="191" />
+          <p class="form-help">Use a unique, URL-friendly slug. Existing links update automatically after saving changes.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="kb-article-title">Title</label>
+          <input class="form-input" id="kb-article-title" name="title" required maxlength="255" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="kb-article-summary">Summary</label>
+          <textarea class="form-input form-input--textarea" id="kb-article-summary" name="summary" rows="3" maxlength="2000"></textarea>
+          <p class="form-help">Summaries appear beside article titles and improve search relevance.</p>
+        </div>
+        <div class="form-field form-field--wide">
+          <label class="form-label" for="kb-article-content">Content</label>
+          <textarea class="form-input form-input--textarea kb-admin__content" id="kb-article-content" name="content" rows="14" required></textarea>
+          <p class="form-help">Markdown-converted HTML is supported. Content is stored securely in the database and rendered on demand.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="kb-article-scope">Permission scope</label>
+          <select class="form-input" id="kb-article-scope" name="permission_scope">
+            <option value="anonymous">Public</option>
+            <option value="user">Specific users</option>
+            <option value="company">Company members</option>
+            <option value="company_admin">Company admins</option>
+            <option value="super_admin">Super admins</option>
+          </select>
+          <p class="form-help kb-admin__scope-help" data-kb-scope-help>Public articles are visible to anyone with the URL.</p>
+        </div>
+        <div class="form-field" data-kb-user-select hidden>
+          <label class="form-label" for="kb-article-users">Allow specific users</label>
+          <select class="form-input" id="kb-article-users" name="allowed_user_ids" multiple size="6"></select>
+          <p class="form-help">Hold Ctrl (Windows) or Command (macOS) to select multiple users. Leave empty to revoke access.</p>
+        </div>
+        <div class="form-field" data-kb-company-select hidden>
+          <label class="form-label" for="kb-article-companies">Allow specific companies</label>
+          <select class="form-input" id="kb-article-companies" name="allowed_company_ids" multiple size="6"></select>
+          <p class="form-help" data-kb-company-help>Leave empty to grant access to every company membership within the selected scope.</p>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button" data-kb-save>Save article</button>
+          <button type="button" class="button button--ghost" data-kb-reset>Reset</button>
+          <button type="button" class="button button--danger" data-kb-delete hidden>Delete</button>
+        </div>
+        <p class="form-help kb-admin__status" role="status" aria-live="polite" data-kb-status></p>
+      </form>
+    </section>
+
+    <section class="card card--panel kb-admin__panel">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Preview &amp; metadata</h2>
+          <p class="card__subtitle">Inspect the rendered article, confirm scopes, and verify timestamps before publishing.</p>
+        </div>
+        <div class="kb-admin__meta" data-kb-preview-meta></div>
+      </header>
+      <div class="card__body kb-admin__preview" data-kb-preview>
+        <p class="text-muted">Select an article to preview its rendered content. Newly created articles appear here after saving.</p>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script type="application/json" id="kb-admin-articles">{{ kb_articles | tojson }}</script>
+  <script type="application/json" id="kb-admin-user-options">{{ kb_user_options | tojson }}</script>
+  <script type="application/json" id="kb-admin-company-options">{{ kb_company_options | tojson }}</script>
+  <script src="/static/js/knowledge_base_admin.js" defer></script>
+{% endblock %}

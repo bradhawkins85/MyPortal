@@ -119,6 +119,19 @@ systemctl status myportal.service
 journalctl -u myportal.service -f
 ```
 
+If you run updates via `scripts/upgrade.sh` or the scheduler's `system_update`
+task, the restart helper honours two environment variables defined in
+`.env`:
+
+- `SYSTEMD_SERVICE_NAME` overrides the default `myportal` unit name.
+- `APP_RESTART_COMMAND` executes a custom restart command (for example,
+  `sudo systemctl restart myportal.service`) before falling back to the
+  standard `systemctl` invocations.
+
+When none of the restart strategies succeed, the helper now exits with a
+non-zero status so scheduled updates surface actionable errors instead of
+silently continuing without restarting the application.
+
 When deploying updates, pull the latest code, reinstall dependencies if
 needed, and reload the service:
 

@@ -1,4 +1,9 @@
 - 2025-12-03, 10:15 UTC, Fix, Reconnected automation repository queries before writes so creating automations no longer fails when the database pool is cold
+- 2025-10-20, 11:02 UTC, Feature, Enabled editable ticket metadata in a dedicated left-column form with validation for status, priority, requester, assignee, company, category, and external reference fields
+- 2025-10-20, 21:10 UTC, Fix, Serialised knowledge base admin context timestamps before embedding JSON so the admin console loads without datetime errors
+- 2025-12-02, 10:15 UTC, Feature, Added super-admin knowledge base composer with granular permission assignments, inline preview, and CRUD workflow integration
+- 2025-12-01, 09:15 UTC, Fix, Restored knowledge base search by including the CSRF token header in fetch submissions
+- 2025-12-02, 14:30 UTC, Feature, Added ticket detail workspace with standalone status management and threaded reply history
 - 2025-12-02, 14:32 UTC, Fix, Prevented duplicate membership permission lookups when deriving helpdesk technician access without a database pool
 - 2025-12-02, 14:30 UTC, Fix, Guarded optional task company field lookups in automation.js so action builders initialise on page load
 - 2025-12-01, 09:05 UTC, Fix, Ensured automation inserts reuse their connection so creation succeeds without 500 errors
@@ -161,6 +166,7 @@
 - 2025-09-18, 08:30 UTC, Feature, Rebuilt the MyPortal backend and UI in Python with FastAPI, async MySQL access, and responsive 3-panel theming
 - 2025-09-18, 09:05 UTC, Fix, Replaced binary image assets with SVG icons to unblock PR creation and retain themeable layout
 - 2025-10-07, 11:53 UTC, Fix, Added a virtual environment bootstrap script and README guidance to bypass externally managed pip install failures
+- 2025-10-16, 09:45 UTC, Fix, Hardened the restart automation to respect environment overrides and fail fast when system updates cannot restart the service
 - 2025-10-07, 12:00 UTC, Fix, Allowed extra environment variables in Python settings loader to restore API startup
 - 2025-10-07, 12:10 UTC, Fix, Switched configuration fields to validation aliases so startup accepts secret and database env vars
 - 2025-10-07, 12:19 UTC, Feature, Added secure upgrade automation script for pulling updates and restarting services
