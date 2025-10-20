@@ -1,3 +1,4 @@
+- 2025-10-20, 07:53 UTC, Feature, Replaced the integration module enable checkbox with a themed toggle switch for clearer status control
 - 2025-10-20, 08:20 UTC, Fix, Ensured ticket creation reuses insert connections so watcher setup no longer triggers 500 errors
 - 2025-10-20, 07:49 UTC, Feature, Moved integration module diagnostics actions into each module card with inline testing controls and refreshed layout spacing
 - 2025-11-27, 11:00 UTC, Feature, Added admin navigation entries for tickets, ticket automations, and modules while retaining the scheduler automation tools
