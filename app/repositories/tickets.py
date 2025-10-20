@@ -23,7 +23,7 @@ def _normalise_ticket(row: dict[str, Any]) -> TicketRecord:
     for key in ("id", "company_id", "requester_id", "assigned_user_id"):
         if key in record and record[key] is not None:
             record[key] = int(record[key])
-    for key in ("created_at", "updated_at", "closed_at"):
+    for key in ("created_at", "updated_at", "closed_at", "ai_summary_updated_at"):
         record[key] = _make_aware(record.get(key))
     return record
 
@@ -94,6 +94,11 @@ async def create_ticket(
         "category": category,
         "module_slug": module_slug,
         "external_reference": external_reference,
+        "ai_summary": None,
+        "ai_summary_status": None,
+        "ai_summary_model": None,
+        "ai_resolution_state": None,
+        "ai_summary_updated_at": None,
         "created_at": None,
         "updated_at": None,
         "closed_at": None,
