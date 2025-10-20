@@ -5,7 +5,7 @@ import json
 import math
 import secrets
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from html import escape
@@ -121,6 +121,21 @@ def _opnform_base_url() -> str | None:
         base = str(settings.opnform_base_url)
         return base if base.endswith("/") else f"{base}/"
     return "/myforms/"
+
+
+def _serialise_for_json(value: Any) -> Any:
+    """Convert mappings and sequences to JSON-safe primitives for templates."""
+
+    if isinstance(value, datetime):
+        target = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return target.astimezone(timezone.utc).isoformat()
+    if isinstance(value, (date, time)):
+        return value.isoformat()
+    if isinstance(value, Mapping):
+        return {key: _serialise_for_json(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_serialise_for_json(item) for item in value]
+    return value
 tags_metadata = [
     {"name": "Auth", "description": "Authentication, registration, and session management."},
     {"name": "Users", "description": "User administration, profile management, and self-service endpoints."},
@@ -5387,13 +5402,14 @@ async def _render_automations_dashboard(
     status_counts = Counter((automation.get("status") or "inactive").lower() for automation in automations)
     kind_counts = Counter((automation.get("kind") or "scheduled").lower() for automation in automations)
     modules = await modules_service.list_modules()
+    modules_payload = _serialise_for_json(modules)
     extra = {
         "title": "Automation orchestration",
         "automations": automations,
         "automation_status_counts": status_counts,
         "automation_kind_counts": kind_counts,
         "automation_filters": {"status": status_filter, "kind": kind_filter},
-        "automation_modules": modules,
+        "automation_modules": modules_payload,
         "automation_trigger_options": automations_service.list_trigger_events(),
         "success_message": success_message,
         "error_message": error_message,

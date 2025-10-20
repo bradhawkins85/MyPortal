@@ -1,3 +1,4 @@
+- 2025-10-21, 20:45 UTC, Fix, Converted automation module context data to JSON-safe timestamps so the ticket automation admin page renders without template errors
 - 2025-11-29, 10:30 UTC, Feature, Added ticket automation trigger selector with multi-action builder and event-driven schedule hiding improvements
 - 2025-10-20, 10:55 UTC, Fix, Normalised automation schedule timestamps before database insertion so creating active automations no longer triggers MySQL timezone errors
 - 2025-11-29, 10:00 UTC, Fix, Restricted ticket assignment options to helpdesk technicians with active role permissions
