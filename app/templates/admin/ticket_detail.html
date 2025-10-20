@@ -13,51 +13,6 @@
   {% endif %}
 
   <div class="management" data-layout>
-    <aside class="management__sidebar">
-      <h2 class="management__heading">Ticket controls</h2>
-      <p class="management__intro">Update the ticket status and review who is watching the thread.</p>
-      <form action="/admin/tickets/{{ ticket.id }}/status" method="post" class="form management__form">
-        {% if csrf_token %}
-          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-        {% endif %}
-        <input type="hidden" name="returnUrl" value="{{ ticket_return_url }}" />
-        <div class="form-field">
-          <label class="form-label" for="ticket-status-detail">Status</label>
-          <select id="ticket-status-detail" name="status" class="form-input">
-            {% for status_option in ticket_available_statuses %}
-              <option value="{{ status_option }}" {% if status_option == (ticket.status or 'open') %}selected{% endif %}>{{ status_option.replace('_', ' ') }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-actions">
-          <button type="submit" class="button button--primary">Update status</button>
-        </div>
-      </form>
-
-      <section class="card card--panel">
-        <header class="card__header">
-          <h3 class="card__title">Watchers</h3>
-        </header>
-        <div class="card__body">
-          {% if ticket_watchers %}
-            <ul class="list">
-              {% for watcher in ticket_watchers %}
-                {% set watcher_user = watcher.user %}
-                <li class="list__item">
-                  <strong>{{ watcher_user.email if watcher_user else 'User #' ~ watcher.user_id }}</strong>
-                  {% if watcher.created_at %}
-                    <div class="list__meta">Watching since {{ watcher.created_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</div>
-                  {% endif %}
-                </li>
-              {% endfor %}
-            </ul>
-          {% else %}
-            <p class="card__empty">No watchers are subscribed to this ticket.</p>
-          {% endif %}
-        </div>
-      </section>
-    </aside>
-
     <section class="management__content">
       <header class="management__header">
         <div>
@@ -185,6 +140,26 @@
                 <div class="definition-list__item">
                   <dt>Updated</dt>
                   <dd>{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</dd>
+                </div>
+                <div class="definition-list__item">
+                  <dt>Watchers</dt>
+                  <dd>
+                    {% if ticket_watchers %}
+                      <ul class="list">
+                        {% for watcher in ticket_watchers %}
+                          {% set watcher_user = watcher.user %}
+                          <li class="list__item">
+                            <strong>{{ watcher_user.email if watcher_user else 'User #' ~ watcher.user_id }}</strong>
+                            {% if watcher.created_at %}
+                              <div class="list__meta">Watching since {{ watcher.created_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</div>
+                            {% endif %}
+                          </li>
+                        {% endfor %}
+                      </ul>
+                    {% else %}
+                      <span class="card__empty">No watchers are subscribed to this ticket.</span>
+                    {% endif %}
+                  </dd>
                 </div>
               </dl>
             </div>
