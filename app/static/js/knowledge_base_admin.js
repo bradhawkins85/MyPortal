@@ -45,8 +45,6 @@
   const companyHelp = form.querySelector('[data-kb-company-help]');
   const deleteButton = form.querySelector('[data-kb-delete]');
   const resetButton = form.querySelector('[data-kb-reset]');
-  const previewContainer = document.querySelector('[data-kb-preview]');
-  const previewMeta = document.querySelector('[data-kb-preview-meta]');
   const sectionsContainer = document.querySelector('[data-kb-sections]');
   const addSectionButton = document.querySelector('[data-kb-add-section]');
 
@@ -70,17 +68,6 @@
     company_admin: 'Only company administrators in the selected companies can view the article. Leaving the list empty allows any company administrator.',
     super_admin: 'Only super administrators can read this article.',
   };
-
-  function formatLocal(iso) {
-    if (!iso) {
-      return '';
-    }
-    const date = new Date(iso);
-    if (Number.isNaN(date.getTime())) {
-      return '';
-    }
-    return date.toLocaleString();
-  }
 
   function setStatus(message, tone) {
     if (!statusElement) {
@@ -491,18 +478,6 @@
     }
   }
 
-  function ensurePreviewMatchesForm() {
-    if (!previewContainer) {
-      return;
-    }
-    const sections = collectSectionsFromDom();
-    if (sections.length === 0) {
-      previewContainer.innerHTML = '<p class="text-muted">Add rich text sections to preview the article.</p>';
-      return;
-    }
-    previewContainer.innerHTML = composeSectionsHtml(sections);
-  }
-
   function moveSection(section, offset) {
     if (!sectionsContainer) {
       return;
@@ -611,20 +586,6 @@
     }
   }
 
-  const previewEmptyMessage =
-    formMode === 'create'
-      ? 'Compose sections to preview the article content here.'
-      : 'Select an article to preview its rendered content. Newly created articles appear here after saving.';
-
-  function resetPreview() {
-    if (previewContainer) {
-      previewContainer.innerHTML = `<p class="text-muted">${previewEmptyMessage}</p>`;
-    }
-    if (previewMeta) {
-      previewMeta.innerHTML = '';
-    }
-  }
-
   function resetForm() {
     state.activeSlug = null;
     state.activeId = null;
@@ -647,7 +608,6 @@
       editorTitle.textContent = 'Compose article';
     }
     highlightRow(null);
-    resetPreview();
   }
 
   async function loadArticle(slug) {
@@ -711,58 +671,6 @@
       editorTitle.textContent = `Edit “${article.title || article.slug}”`;
     }
     highlightRow(article.slug);
-    updatePreview(article);
-  }
-
-  function updatePreview(article) {
-    if (!previewContainer || !article) {
-      return;
-    }
-    const tags = [];
-    const scopeLabelText = (() => {
-      switch (article.permission_scope) {
-        case 'anonymous':
-          return 'Public';
-        case 'user':
-          return 'Specific users';
-        case 'company':
-          return 'Company members';
-        case 'company_admin':
-          return 'Company admins';
-        case 'super_admin':
-          return 'Super admins';
-        default:
-          return article.permission_scope;
-      }
-    })();
-    tags.push(`<span class="tag">${scopeLabelText}</span>`);
-    if (!article.is_published) {
-      tags.push('<span class="tag tag--warning">Draft</span>');
-    }
-    const aiTags = Array.isArray(article.ai_tags) ? article.ai_tags : [];
-    const aiTagBadges = aiTags
-      .slice(0, 10)
-      .map((tag) => `<span class="tag tag--info">${escapeHtml(String(tag))}</span>`);
-    if (previewMeta) {
-      const timestamps = [];
-      if (article.updated_at) {
-        timestamps.push(`<span class="kb-admin__timestamp">Updated ${formatLocal(article.updated_at)}</span>`);
-      }
-      if (article.published_at) {
-        timestamps.push(`<span class="kb-admin__timestamp">Published ${formatLocal(article.published_at)}</span>`);
-      }
-      previewMeta.innerHTML = `
-        <div class="kb-admin__tags">${tags.join(' ')}</div>
-        ${aiTagBadges.length ? `<div class="kb-admin__ai-tags" aria-label="AI generated tags">${aiTagBadges.join(' ')}</div>` : ''}
-        ${timestamps.length ? `<div class="kb-admin__timestamps">${timestamps.join('')}</div>` : ''}
-      `;
-    }
-    if (Array.isArray(article.sections) && article.sections.length > 0) {
-      previewContainer.innerHTML = composeSectionsHtml(article.sections);
-    } else {
-      previewContainer.innerHTML =
-        article.content || '<p class="text-muted">No content recorded for this article.</p>';
-    }
   }
 
   function getPayloadFromForm() {
@@ -939,7 +847,6 @@
           } else {
             document.execCommand(command, false, value);
           }
-          ensurePreviewMatchesForm();
         }
         return;
       }
@@ -950,10 +857,8 @@
       }
       if (event.target.closest('[data-kb-section-up]')) {
         moveSection(section, -1);
-        ensurePreviewMatchesForm();
       } else if (event.target.closest('[data-kb-section-down]')) {
         moveSection(section, 1);
-        ensurePreviewMatchesForm();
       } else if (event.target.closest('[data-kb-section-delete]')) {
         const editor = section.querySelector('[data-kb-section-editor]');
         destroySectionEditor(editor);
@@ -961,24 +866,14 @@
         if (!sectionsContainer.querySelector('[data-kb-section]')) {
           renderSections([]);
         }
-        ensurePreviewMatchesForm();
       }
     });
 
-    sectionsContainer.addEventListener('input', (event) => {
-      if (
-        event.target.matches('[data-kb-section-heading]') ||
-        event.target.closest('[data-kb-section-editor]')
-      ) {
-        ensurePreviewMatchesForm();
-      }
-    });
   }
 
   if (addSectionButton) {
     addSectionButton.addEventListener('click', () => {
       addSection({ heading: '', content: '<p><br></p>' });
-      ensurePreviewMatchesForm();
     });
   }
 
@@ -1037,7 +932,5 @@
     if (firstSlug) {
       loadArticle(firstSlug);
     }
-  } else {
-    resetPreview();
   }
 })();
