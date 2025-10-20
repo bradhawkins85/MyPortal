@@ -1,7 +1,10 @@
-from datetime import datetime
-from typing import Any, Optional
+from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from datetime import datetime
+from enum import Enum
+from typing import Optional
+
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 class TicketBase(BaseModel):
@@ -106,3 +109,53 @@ class TicketSearchFilters(BaseModel):
 
 class TicketWatcherUpdate(BaseModel):
     user_ids: list[int] = Field(default_factory=list)
+
+
+class SyncroTicketImportMode(str, Enum):
+    SINGLE = "single"
+    RANGE = "range"
+    ALL = "all"
+
+
+class SyncroTicketImportRequest(BaseModel):
+    mode: SyncroTicketImportMode
+    ticket_id: Optional[int] = Field(
+        default=None,
+        alias="ticketId",
+        validation_alias=AliasChoices("ticketId", "ticket_id"),
+        ge=1,
+    )
+    start_id: Optional[int] = Field(
+        default=None,
+        alias="startId",
+        validation_alias=AliasChoices("startId", "start_id"),
+        ge=1,
+    )
+    end_id: Optional[int] = Field(
+        default=None,
+        alias="endId",
+        validation_alias=AliasChoices("endId", "end_id"),
+        ge=1,
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="after")
+    def _validate_mode(self) -> "SyncroTicketImportRequest":
+        if self.mode is SyncroTicketImportMode.SINGLE:
+            if self.ticket_id is None:
+                raise ValueError("ticketId is required when mode is 'single'")
+        elif self.mode is SyncroTicketImportMode.RANGE:
+            if self.start_id is None or self.end_id is None:
+                raise ValueError("startId and endId are required when mode is 'range'")
+            if self.end_id < self.start_id:
+                raise ValueError("endId must be greater than or equal to startId")
+        return self
+
+
+class SyncroTicketImportSummary(BaseModel):
+    mode: SyncroTicketImportMode
+    fetched: int = Field(default=0, ge=0)
+    created: int = Field(default=0, ge=0)
+    updated: int = Field(default=0, ge=0)
+    skipped: int = Field(default=0, ge=0)

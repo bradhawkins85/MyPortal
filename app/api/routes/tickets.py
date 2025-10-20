@@ -12,6 +12,8 @@ from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
 from app.repositories import tickets as tickets_repo
 from app.schemas.tickets import (
+    SyncroTicketImportRequest,
+    SyncroTicketImportSummary,
     TicketCreate,
     TicketDetail,
     TicketListResponse,
@@ -24,7 +26,7 @@ from app.schemas.tickets import (
     TicketWatcherUpdate,
 )
 from app.security.session import SessionData
-from app.services import tickets as tickets_service
+from app.services import ticket_importer, tickets as tickets_service
 
 HELPDESK_PERMISSION_KEY = "helpdesk.technician"
 
@@ -202,6 +204,27 @@ async def delete_ticket(ticket_id: int, current_user: dict = Depends(require_sup
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     await tickets_repo.delete_ticket(ticket_id)
+
+
+@router.post(
+    "/import/syncro",
+    response_model=SyncroTicketImportSummary,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def import_syncro_tickets_endpoint(
+    payload: SyncroTicketImportRequest,
+    current_user: dict = Depends(require_super_admin),
+) -> SyncroTicketImportSummary:
+    try:
+        summary = await ticket_importer.import_from_request(
+            mode=payload.mode.value,
+            ticket_id=payload.ticket_id,
+            start_id=payload.start_id,
+            end_id=payload.end_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return SyncroTicketImportSummary(**summary.as_dict())
 
 
 @router.post("/{ticket_id}/replies", response_model=TicketReplyResponse, status_code=status.HTTP_201_CREATED)

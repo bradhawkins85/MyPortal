@@ -257,11 +257,22 @@ async def get_ticket(ticket_id: int) -> TicketRecord | None:
     return _normalise_ticket(row) if row else None
 
 
+async def get_ticket_by_external_reference(external_reference: str) -> TicketRecord | None:
+    row = await db.fetch_one(
+        "SELECT * FROM tickets WHERE external_reference = %s",
+        (external_reference,),
+    )
+    return _normalise_ticket(row) if row else None
+
+
 async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     if not fields:
         return await get_ticket(ticket_id)
     assignments: list[str] = []
     params: list[Any] = []
+    override_updated_at = None
+    if "updated_at" in fields:
+        override_updated_at = fields.pop("updated_at")
     for key, value in fields.items():
         if key == "ai_tags":
             assignments.append(f"{key} = %s")
@@ -269,7 +280,11 @@ async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
             continue
         assignments.append(f"{key} = %s")
         params.append(value)
-    assignments.append("updated_at = UTC_TIMESTAMP(6)")
+    if override_updated_at is not None:
+        assignments.append("updated_at = %s")
+        params.append(override_updated_at)
+    else:
+        assignments.append("updated_at = UTC_TIMESTAMP(6)")
     query = f"UPDATE tickets SET {', '.join(assignments)} WHERE id = %s"
     params.append(ticket_id)
     await db.execute(query, tuple(params))

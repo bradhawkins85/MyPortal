@@ -79,6 +79,89 @@
     return response.status !== 204 ? response.json() : null;
   }
 
+  function bindSyncroTicketImportForms() {
+    const forms = document.querySelectorAll('[data-syncro-ticket-import]');
+    if (!forms.length) {
+      return;
+    }
+
+    const statusRegion = document.querySelector('[data-syncro-ticket-import-status]');
+
+    const renderStatus = (message, isError) => {
+      if (!statusRegion) {
+        if (message) {
+          alert(message);
+        }
+        return;
+      }
+      statusRegion.innerHTML = '';
+      if (!message) {
+        statusRegion.hidden = true;
+        return;
+      }
+      const alertBox = document.createElement('div');
+      alertBox.className = isError ? 'alert alert--error' : 'alert';
+      alertBox.setAttribute('role', isError ? 'alert' : 'status');
+      alertBox.textContent = message;
+      statusRegion.appendChild(alertBox);
+      statusRegion.hidden = false;
+    };
+
+    forms.forEach((form) => {
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const mode = form.getAttribute('data-mode') || 'single';
+        const submitButton = form.querySelector('button[type="submit"]');
+        if (submitButton) {
+          submitButton.disabled = true;
+        }
+        const payload = { mode };
+        const formData = new FormData(form);
+
+        const parseInteger = (value, errorMessage) => {
+          const parsed = Number(value);
+          if (!Number.isInteger(parsed) || parsed <= 0) {
+            throw new Error(errorMessage);
+          }
+          return parsed;
+        };
+
+        try {
+          if (mode === 'single') {
+            payload.ticketId = parseInteger(formData.get('ticketId'), 'Enter a valid Syncro ticket ID.');
+          } else if (mode === 'range') {
+            payload.startId = parseInteger(formData.get('startId'), 'Enter a valid starting ticket ID.');
+            payload.endId = parseInteger(formData.get('endId'), 'Enter a valid ending ticket ID.');
+            if (payload.endId < payload.startId) {
+              throw new Error('End ticket ID must be greater than or equal to the start ID.');
+            }
+          }
+
+          renderStatus('Import in progress…', false);
+          const response = await requestJson('/admin/syncro/import-tickets', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+          const fetched = Number(response?.fetched ?? 0);
+          const created = Number(response?.created ?? 0);
+          const updated = Number(response?.updated ?? 0);
+          const skipped = Number(response?.skipped ?? 0);
+          renderStatus(
+            `Imported ${fetched} ticket${fetched === 1 ? '' : 's'} (created ${created}, updated ${updated}, skipped ${skipped}).`,
+            false,
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unable to import tickets.';
+          renderStatus(message, true);
+        } finally {
+          if (submitButton) {
+            submitButton.disabled = false;
+          }
+        }
+      });
+    });
+  }
+
   function parsePermissions(value) {
     return value
       .split(',')
@@ -413,6 +496,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
+    bindSyncroTicketImportForms();
     bindRoleForm();
     bindCompanyAssignmentControls();
     bindApiKeyCopyButtons();
