@@ -1,9 +1,9 @@
 -- Create ticketing tables
 CREATE TABLE IF NOT EXISTS tickets (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    company_id BIGINT UNSIGNED NULL,
-    requester_id BIGINT UNSIGNED NULL,
-    assigned_user_id BIGINT UNSIGNED NULL,
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    company_id INT NULL,
+    requester_id INT NULL,
+    assigned_user_id INT NULL,
     subject VARCHAR(255) NOT NULL,
     description TEXT NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'open',
@@ -25,9 +25,9 @@ CREATE TABLE IF NOT EXISTS tickets (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS ticket_replies (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    ticket_id BIGINT UNSIGNED NOT NULL,
-    author_id BIGINT UNSIGNED NULL,
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ticket_id INT NOT NULL,
+    author_id INT NULL,
     body TEXT NOT NULL,
     is_internal TINYINT(1) NOT NULL DEFAULT 0,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -38,9 +38,9 @@ CREATE TABLE IF NOT EXISTS ticket_replies (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS ticket_watchers (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    ticket_id BIGINT UNSIGNED NOT NULL,
-    user_id BIGINT UNSIGNED NOT NULL,
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ticket_id INT NOT NULL,
+    user_id INT NOT NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     UNIQUE KEY uq_ticket_watchers_ticket_user (ticket_id, user_id),
     CONSTRAINT fk_ticket_watchers_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS ticket_watchers (
 
 -- Automation orchestration tables
 CREATE TABLE IF NOT EXISTS automations (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     description TEXT NULL,
     kind VARCHAR(32) NOT NULL,
@@ -71,8 +71,8 @@ CREATE TABLE IF NOT EXISTS automations (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS automation_runs (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    automation_id BIGINT UNSIGNED NOT NULL,
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    automation_id INT NOT NULL,
     status VARCHAR(32) NOT NULL,
     started_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     finished_at DATETIME(6) NULL,
@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS automation_runs (
 
 -- Integration module catalogue
 CREATE TABLE IF NOT EXISTS integration_modules (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    id INT AUTO_INCREMENT PRIMARY KEY,
     slug VARCHAR(64) NOT NULL UNIQUE,
     name VARCHAR(255) NOT NULL,
     description TEXT NULL,
