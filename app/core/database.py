@@ -56,6 +56,15 @@ class Database:
             async with conn.cursor() as cursor:
                 await cursor.execute(sql, params)
 
+    async def execute_returning_lastrowid(
+        self, sql: str, params: tuple | dict | None = None
+    ) -> int:
+        async with self.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(sql, params)
+                last_row_id = cursor.lastrowid
+        return int(last_row_id) if last_row_id is not None else 0
+
     async def fetch_one(self, sql: str, params: tuple | dict | None = None):
         async with self.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cursor:
