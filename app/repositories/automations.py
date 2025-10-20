@@ -82,7 +82,7 @@ async def create_automation(
     status: str,
     next_run_at: datetime | None,
 ) -> AutomationRecord:
-    await db.execute(
+    automation_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO automations
             (name, description, kind, cadence, cron_expression, trigger_event, trigger_filters, action_module, action_payload, status, next_run_at)
@@ -102,8 +102,27 @@ async def create_automation(
             _prepare_for_storage(next_run_at),
         ),
     )
-    row = await db.fetch_one("SELECT * FROM automations WHERE id = LAST_INSERT_ID()")
-    return _normalise_automation(row) if row else {}
+    row = await db.fetch_one("SELECT * FROM automations WHERE id = %s", (automation_id,))
+    if not row:
+        row = {
+            "id": automation_id,
+            "name": name,
+            "description": description,
+            "kind": kind,
+            "cadence": cadence,
+            "cron_expression": cron_expression,
+            "trigger_event": trigger_event,
+            "trigger_filters": trigger_filters,
+            "action_module": action_module,
+            "action_payload": action_payload,
+            "status": status,
+            "next_run_at": next_run_at,
+            "last_run_at": None,
+            "last_error": None,
+            "created_at": None,
+            "updated_at": None,
+        }
+    return _normalise_automation(row)
 
 
 async def get_automation(automation_id: int) -> AutomationRecord | None:
@@ -177,7 +196,7 @@ async def record_run(
     result_payload: Any,
     error_message: str | None,
 ) -> AutomationRunRecord:
-    await db.execute(
+    run_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO automation_runs
             (automation_id, status, started_at, finished_at, duration_ms, result_payload, error_message)
@@ -193,8 +212,19 @@ async def record_run(
             error_message,
         ),
     )
-    row = await db.fetch_one("SELECT * FROM automation_runs WHERE id = LAST_INSERT_ID()")
-    return _normalise_run(row) if row else {}
+    row = await db.fetch_one("SELECT * FROM automation_runs WHERE id = %s", (run_id,))
+    if not row:
+        row = {
+            "id": run_id,
+            "automation_id": automation_id,
+            "status": status,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "duration_ms": duration_ms,
+            "result_payload": result_payload,
+            "error_message": error_message,
+        }
+    return _normalise_run(row)
 
 
 async def list_runs(automation_id: int, *, limit: int = 50) -> list[AutomationRunRecord]:
