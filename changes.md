@@ -1,3 +1,4 @@
+- 2025-12-08, 10:10 UTC, Fix, Removed AI tag status and badges from the admin ticket detail view to declutter the edit page
 - 2025-10-20, 12:25 UTC, Fix, Allowed super admins to be assigned to tickets by recognising their global permission during assignee validation
 - 2025-10-20, 12:20 UTC, Fix, Removed the knowledge base admin preview pane from the article editor per request
 - 2025-12-07, 09:15 UTC, Fix, Restricted ticket requester selection to enabled staff for the linked company and blocked assignments without a company
