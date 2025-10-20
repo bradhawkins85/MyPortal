@@ -1,3 +1,4 @@
+- 2025-12-03, 10:15 UTC, Fix, Reconnected automation repository queries before writes so creating automations no longer fails when the database pool is cold
 - 2025-12-02, 14:32 UTC, Fix, Prevented duplicate membership permission lookups when deriving helpdesk technician access without a database pool
 - 2025-12-02, 14:30 UTC, Fix, Guarded optional task company field lookups in automation.js so action builders initialise on page load
 - 2025-12-01, 09:05 UTC, Fix, Ensured automation inserts reuse their connection so creation succeeds without 500 errors
