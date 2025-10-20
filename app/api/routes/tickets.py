@@ -23,6 +23,7 @@ from app.schemas.tickets import (
     TicketWatcherUpdate,
 )
 from app.security.session import SessionData
+from app.services import tickets as tickets_service
 
 HELPDESK_PERMISSION_KEY = "helpdesk.technician"
 
@@ -145,6 +146,7 @@ async def create_ticket(
         external_reference=external_reference,
     )
     await tickets_repo.add_watcher(ticket["id"], session.user_id)
+    await tickets_service.refresh_ticket_ai_summary(ticket["id"])
     return await _build_ticket_detail(ticket["id"], current_user)
 
 
@@ -165,6 +167,7 @@ async def update_ticket(
     fields = payload.model_dump(exclude_unset=True)
     if fields:
         await tickets_repo.update_ticket(ticket_id, **fields)
+    await tickets_service.refresh_ticket_ai_summary(ticket_id)
     return await _build_ticket_detail(ticket_id, current_user)
 
 
@@ -195,7 +198,10 @@ async def add_reply(
         body=payload.body,
         is_internal=payload.is_internal if has_helpdesk_access else False,
     )
-    ticket_response = TicketResponse(**ticket)
+    await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    updated_ticket = await tickets_repo.get_ticket(ticket_id)
+    ticket_payload = updated_ticket or ticket
+    ticket_response = TicketResponse(**ticket_payload)
     return TicketReplyResponse(ticket=ticket_response, reply=TicketReply(**reply))
 
 
