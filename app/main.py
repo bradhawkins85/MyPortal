@@ -39,17 +39,20 @@ from app.api.routes import (
     api_keys,
     audit_logs,
     auth,
+    automations as automations_api,
     companies,
-    licenses as licenses_api,
     forms as forms_api,
     invoices as invoices_api,
+    licenses as licenses_api,
     memberships,
     m365 as m365_api,
+    modules as modules_api,
     notifications,
     ports,
     scheduler as scheduler_api,
     roles,
     staff as staff_api,
+    tickets as tickets_api,
     users,
 )
 from app.core.config import get_settings, get_templates_config
@@ -73,6 +76,9 @@ from app.repositories import shop as shop_repo
 from app.repositories import cart as cart_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import staff as staff_repo
+from app.repositories import tickets as tickets_repo
+from app.repositories import automations as automations_repo
+from app.repositories import integration_modules as integration_modules_repo
 from app.repositories import webhook_events as webhook_events_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
@@ -84,8 +90,10 @@ from app.api.dependencies.auth import get_current_session
 from app.services.scheduler import scheduler_service
 from app.security.api_keys import mask_api_key
 from app.services import audit as audit_service
+from app.services import automations as automations_service
 from app.services import email as email_service
 from app.services import m365 as m365_service
+from app.services import modules as modules_service
 from app.services import products as products_service
 from app.services import shop as shop_service
 from app.services import staff_importer
@@ -142,6 +150,18 @@ tags_metadata = [
     {"name": "Office365", "description": "Microsoft 365 credential management and synchronisation APIs."},
     {"name": "Notifications", "description": "System-wide and user-specific notification feeds."},
     {"name": "Shop", "description": "Product catalogue management and visibility controls."},
+    {
+        "name": "Tickets",
+        "description": "Ticketing workspace with replies, watchers, and module-aligned categorisation.",
+    },
+    {
+        "name": "Automations",
+        "description": "Workflow automations combining scheduling, event triggers, and module actions.",
+    },
+    {
+        "name": "Integration Modules",
+        "description": "Manage external module credentials for Ollama, SMTP, TacticalRMM, and ntfy.",
+    },
 ]
 app = FastAPI(
     title=settings.app_name,
@@ -278,6 +298,9 @@ app.include_router(invoices_api.router)
 app.include_router(audit_logs.router)
 app.include_router(api_keys.router)
 app.include_router(scheduler_api.router)
+app.include_router(tickets_api.router)
+app.include_router(automations_api.router)
+app.include_router(modules_api.router)
 
 
 async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
@@ -1589,6 +1612,8 @@ async def _render_companies_dashboard(
 async def on_startup() -> None:
     await db.connect()
     await db.run_migrations()
+    await modules_service.ensure_default_modules()
+    await automations_service.refresh_all_schedules()
     await scheduler_service.start()
     log_info("Application started", environment=settings.environment)
 
@@ -5130,6 +5155,429 @@ async def admin_delete_shop_product(request: Request, product_id: int):
         deleted_by=current_user.get("id") if current_user else None,
     )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+
+async def _render_tickets_dashboard(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    status_filter: str | None = None,
+    module_filter: str | None = None,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    tickets = await tickets_repo.list_tickets(
+        status=status_filter,
+        module_slug=module_filter,
+        limit=200,
+    )
+    total = await tickets_repo.count_tickets(
+        status=status_filter,
+        module_slug=module_filter,
+    )
+    status_counts = Counter((ticket.get("status") or "open").lower() for ticket in tickets)
+    available_statuses = sorted(
+        {"open", "in_progress", "pending", "resolved", "closed", *status_counts.keys()}
+    )
+    modules = await modules_service.list_modules()
+    companies = await company_repo.list_companies()
+    company_lookup: dict[int, dict[str, Any]] = {}
+    for company in companies:
+        identifier = company.get("id")
+        if identifier is None:
+            continue
+        try:
+            company_lookup[int(identifier)] = company
+        except (TypeError, ValueError):
+            continue
+    users_list = await user_repo.list_users()
+    user_lookup: dict[int, dict[str, Any]] = {}
+    for record in users_list:
+        identifier = record.get("id")
+        if identifier is None:
+            continue
+        try:
+            user_lookup[int(identifier)] = record
+        except (TypeError, ValueError):
+            continue
+    extra = {
+        "title": "Ticketing workspace",
+        "tickets": tickets,
+        "ticket_total": total,
+        "ticket_status_counts": status_counts,
+        "ticket_available_statuses": available_statuses,
+        "ticket_filters": {"status": status_filter, "module": module_filter},
+        "ticket_modules": modules,
+        "ticket_company_options": companies,
+        "ticket_user_options": users_list,
+        "ticket_company_lookup": company_lookup,
+        "ticket_user_lookup": user_lookup,
+        "success_message": success_message,
+        "error_message": error_message,
+    }
+    response = await _render_template("admin/tickets.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
+
+
+@app.get("/admin/tickets", response_class=HTMLResponse)
+async def admin_tickets_page(
+    request: Request,
+    status: str | None = Query(default=None),
+    module: str | None = Query(default=None),
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _render_tickets_dashboard(
+        request,
+        current_user,
+        status_filter=status,
+        module_filter=module,
+        success_message=_sanitize_message(success),
+        error_message=_sanitize_message(error),
+    )
+
+
+@app.post("/admin/tickets", response_class=HTMLResponse)
+async def admin_create_ticket(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    subject = str(form.get("subject", "")).strip()
+    description = (str(form.get("description", "")).strip() or None)
+    priority = (str(form.get("priority", "")).strip() or "normal")
+    module_slug = (str(form.get("moduleSlug", "")).strip() or None)
+    status_value = (str(form.get("status", "")).strip() or "open")
+    company_raw = form.get("companyId")
+    assigned_raw = form.get("assignedUserId")
+    try:
+        company_id = int(company_raw) if company_raw else None
+    except (TypeError, ValueError):
+        company_id = None
+    try:
+        assigned_user_id = int(assigned_raw) if assigned_raw else None
+    except (TypeError, ValueError):
+        assigned_user_id = None
+    if not subject:
+        return await _render_tickets_dashboard(
+            request,
+            current_user,
+            error_message="Enter a ticket subject.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        created = await tickets_repo.create_ticket(
+            subject=subject,
+            description=description,
+            requester_id=current_user.get("id"),
+            company_id=company_id,
+            assigned_user_id=assigned_user_id,
+            priority=priority,
+            status=status_value,
+            category=str(form.get("category", "")).strip() or None,
+            module_slug=module_slug,
+            external_reference=str(form.get("externalReference", "")).strip() or None,
+        )
+        await tickets_repo.add_watcher(created["id"], current_user.get("id"))
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to create ticket", error=str(exc))
+        return await _render_tickets_dashboard(
+            request,
+            current_user,
+            error_message="Unable to create ticket. Please try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    return RedirectResponse(
+        url="/admin/tickets?success=" + quote("Ticket created."),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/tickets/{ticket_id}/status", response_class=HTMLResponse)
+async def admin_update_ticket_status(ticket_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    status_value = str(form.get("status", "")).strip()
+    if not status_value:
+        return await _render_tickets_dashboard(
+            request,
+            current_user,
+            error_message="Select a status to apply.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    await tickets_repo.set_ticket_status(ticket_id, status_value)
+    return RedirectResponse(
+        url="/admin/tickets?success=" + quote(f"Ticket {ticket_id} updated."),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+async def _render_automations_dashboard(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    status_filter: str | None = None,
+    kind_filter: str | None = None,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    automations = await automations_repo.list_automations(
+        status=status_filter,
+        kind=kind_filter,
+        limit=200,
+    )
+    status_counts = Counter((automation.get("status") or "inactive").lower() for automation in automations)
+    kind_counts = Counter((automation.get("kind") or "scheduled").lower() for automation in automations)
+    modules = await modules_service.list_modules()
+    extra = {
+        "title": "Automation orchestration",
+        "automations": automations,
+        "automation_status_counts": status_counts,
+        "automation_kind_counts": kind_counts,
+        "automation_filters": {"status": status_filter, "kind": kind_filter},
+        "automation_modules": modules,
+        "success_message": success_message,
+        "error_message": error_message,
+    }
+    response = await _render_template("admin/automations.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
+
+
+@app.get("/admin/automations", response_class=HTMLResponse)
+async def admin_automations_page(
+    request: Request,
+    status: str | None = Query(default=None),
+    kind: str | None = Query(default=None),
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _render_automations_dashboard(
+        request,
+        current_user,
+        status_filter=status,
+        kind_filter=kind,
+        success_message=_sanitize_message(success),
+        error_message=_sanitize_message(error),
+    )
+
+
+@app.post("/admin/automations", response_class=HTMLResponse)
+async def admin_create_automation(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    name = str(form.get("name", "")).strip()
+    kind = (str(form.get("kind", "")).strip() or "scheduled")
+    status_value = (str(form.get("status", "")).strip() or "inactive")
+    cadence = str(form.get("cadence", "")).strip() or None
+    cron_expression = str(form.get("cronExpression", "")).strip() or None
+    action_module = str(form.get("actionModule", "")).strip() or None
+    trigger_event = str(form.get("triggerEvent", "")).strip() or None
+    trigger_filters_raw = str(form.get("triggerFilters", "")).strip() or None
+    action_payload_raw = str(form.get("actionPayload", "")).strip() or None
+    if not name:
+        return await _render_automations_dashboard(
+            request,
+            current_user,
+            error_message="Enter an automation name.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        trigger_filters = json.loads(trigger_filters_raw) if trigger_filters_raw else None
+    except json.JSONDecodeError:
+        return await _render_automations_dashboard(
+            request,
+            current_user,
+            error_message="Trigger filters must be valid JSON.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        action_payload = json.loads(action_payload_raw) if action_payload_raw else None
+    except json.JSONDecodeError:
+        return await _render_automations_dashboard(
+            request,
+            current_user,
+            error_message="Action payload must be valid JSON.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    data = {
+        "name": name,
+        "description": str(form.get("description", "")).strip() or None,
+        "kind": kind,
+        "cadence": cadence,
+        "cron_expression": cron_expression,
+        "trigger_event": trigger_event,
+        "trigger_filters": trigger_filters,
+        "action_module": action_module,
+        "action_payload": action_payload,
+        "status": status_value,
+    }
+    next_run = None
+    if status_value == "active":
+        next_run = automations_service.calculate_next_run(data)
+    try:
+        record = await automation_repo.create_automation(next_run_at=next_run, **data)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to create automation", error=str(exc))
+        return await _render_automations_dashboard(
+            request,
+            current_user,
+            error_message="Unable to create automation. Please try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    if record and record.get("status") == "active":
+        await automations_service.refresh_schedule(int(record["id"]))
+    return RedirectResponse(
+        url="/admin/automations?success=" + quote("Automation created."),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/automations/{automation_id}/status", response_class=HTMLResponse)
+async def admin_update_automation_status(automation_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    status_value = str(form.get("status", "")).strip()
+    if status_value not in {"active", "inactive"}:
+        return await _render_automations_dashboard(
+            request,
+            current_user,
+            error_message="Select a valid automation status.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    automation = await automation_repo.get_automation(automation_id)
+    if not automation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+    await automation_repo.update_automation(automation_id, status=status_value)
+    await automations_service.refresh_schedule(automation_id)
+    return RedirectResponse(
+        url="/admin/automations?success=" + quote(f"Automation {automation_id} updated."),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/automations/{automation_id}/execute", response_class=HTMLResponse)
+async def admin_execute_automation(automation_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    try:
+        result = await automations_service.execute_now(automation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    message = f"Automation {automation_id} executed with status {result.get('status')}."
+    return RedirectResponse(
+        url="/admin/automations?success=" + quote(message),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+async def _render_modules_dashboard(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    modules = await modules_service.list_modules()
+    extra = {
+        "title": "Integration modules",
+        "modules": modules,
+        "success_message": success_message,
+        "error_message": error_message,
+    }
+    response = await _render_template("admin/modules.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
+
+
+@app.get("/admin/modules", response_class=HTMLResponse)
+async def admin_modules_page(
+    request: Request,
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _render_modules_dashboard(
+        request,
+        current_user,
+        success_message=_sanitize_message(success),
+        error_message=_sanitize_message(error),
+    )
+
+
+@app.post("/admin/modules/{slug}", response_class=HTMLResponse)
+async def admin_update_module(slug: str, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    enabled = form.get("enabled") == "on"
+    settings: dict[str, Any] = {}
+    for key, value in form.multi_items():
+        if not key.startswith("settings."):
+            continue
+        field = key.split(".", 1)[1]
+        if field in settings:
+            existing = settings[field]
+            if isinstance(existing, list):
+                existing.append(value)
+            else:
+                settings[field] = [existing, value]
+        else:
+            settings[field] = value
+    try:
+        await modules_service.update_module(slug, enabled=enabled, settings=settings)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to update integration module", slug=slug, error=str(exc))
+        return await _render_modules_dashboard(
+            request,
+            current_user,
+            error_message="Unable to update module configuration. Please verify the settings.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    return RedirectResponse(
+        url=f"/admin/modules?success=" + quote(f"Module {slug} updated."),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/modules/{slug}/test", response_class=HTMLResponse)
+async def admin_test_module(slug: str, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    result = await modules_service.test_module(slug)
+    if result.get("status") == "error":
+        return RedirectResponse(
+            url=f"/admin/modules?error=" + quote(result.get("error") or "Module test failed."),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    return RedirectResponse(
+        url=f"/admin/modules?success=" + quote("Module test succeeded."),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.get("/login", response_class=HTMLResponse)

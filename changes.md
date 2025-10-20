@@ -1,3 +1,5 @@
+- 2025-10-20, 06:29 UTC, Fix, Guarded module catalog and automation schedule refresh when the database is offline so startup and tests proceed without MySQL
+- 2025-10-20, 06:09 UTC, Feature, Integrated ticketing, automations, and integration module management from TacticalDesk with admin dashboards and API endpoints
 - 2025-10-16, 08:13 UTC, Fix, Restored add-to-cart controls by exposing cart permissions in shared context so authorised users can shop
 - 2025-10-16, 00:08 UTC, Fix, Hid cart quantity and submission controls on the shop page when membership lacks cart permissions
 - 2025-10-15, 23:46 UTC, Fix, Prevented dashboard summary cards from overlapping their meta text by expanding spacing and line heights

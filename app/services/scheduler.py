@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.services import asset_importer
+from app.services import automations as automations_service
 from app.services import staff_importer
 from app.services import m365 as m365_service
 from app.services import products as products_service
@@ -93,6 +94,16 @@ class SchedulerService:
                 "interval",
                 seconds=60,
                 id="webhook-monitor",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
+        if not self._scheduler.get_job("automation-runner"):
+            self._scheduler.add_job(
+                automations_service.process_due_automations,
+                "interval",
+                seconds=60,
+                id="automation-runner",
                 replace_existing=True,
                 coalesce=True,
                 max_instances=1,

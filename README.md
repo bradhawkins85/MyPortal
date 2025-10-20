@@ -26,6 +26,9 @@ There are no default login credentials; the first visit will prompt you to regis
 - Automated CSRF protection on authenticated state-changing requests
 - Super admin access to the OpnForm builder for creating and editing forms
 - Automation dashboard with persistent scheduler management, webhook retry monitoring, and admin controls
+- Ticketing workspace with replies, watchers, and module-aligned categorisation surfaced through API and admin UI
+- Automation builder covering scheduled and event-driven workflows with Ollama, SMTP, TacticalRMM, and ntfy integrations
+- Integration module catalogue to manage external credentials, run diagnostics, and ensure webhook retries remain observable
 
 ## Port Catalogue & Pricing Workflows
 
