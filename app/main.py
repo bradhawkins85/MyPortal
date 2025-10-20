@@ -46,6 +46,7 @@ from app.api.routes import (
     licenses as licenses_api,
     memberships,
     m365 as m365_api,
+    mcp as mcp_api,
     modules as modules_api,
     notifications,
     ports,
@@ -175,7 +176,11 @@ tags_metadata = [
     },
     {
         "name": "Integration Modules",
-        "description": "Manage external module credentials for Ollama, SMTP, TacticalRMM, and ntfy.",
+        "description": "Manage external module credentials for Ollama, SMTP, TacticalRMM, ntfy, and ChatGPT MCP.",
+    },
+    {
+        "name": "ChatGPT MCP",
+        "description": "Expose secure Model Context Protocol tooling for ChatGPT ticket triage and updates.",
     },
 ]
 app = FastAPI(
@@ -316,6 +321,7 @@ app.include_router(scheduler_api.router)
 app.include_router(tickets_api.router)
 app.include_router(automations_api.router)
 app.include_router(modules_api.router)
+app.include_router(mcp_api.router)
 
 HELPDESK_PERMISSION_KEY = "helpdesk.technician"
 
