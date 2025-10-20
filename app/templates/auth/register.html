@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
-{% set title = "Create super administrator" %}
+{% set is_first = is_first_user | default(False) %}
+{% set title = "Create super administrator" if is_first else "Create your account" %}
 
 {% block sidebar_menu %}
 <li class="menu__item">
@@ -28,9 +29,19 @@
 {% block content %}
 <div class="auth-card">
   <header class="auth-card__header">
-    <h1 class="auth-card__title">Create the first account</h1>
+    <h1 class="auth-card__title">
+      {% if is_first %}
+        Create the first account
+      {% else %}
+        Create your account
+      {% endif %}
+    </h1>
     <p class="auth-card__subtitle">
-      Set up the super administrator who will manage users, companies, and security settings for {{ app_name }}.
+      {% if is_first %}
+        Set up the super administrator who will manage users, companies, and security settings for {{ app_name }}.
+      {% else %}
+        Sign up to raise tickets, track your own requests, and reply to public updates from the support team.
+      {% endif %}
     </p>
   </header>
   <form
@@ -117,6 +128,7 @@
           />
         </div>
       </div>
+      {% if is_first %}
       <div class="form-field">
         <label class="form-label" for="register-company">Company ID (optional)</label>
         <div class="form-input-wrapper">
@@ -131,8 +143,13 @@
           />
         </div>
       </div>
+      {% endif %}
     </div>
+    {% if is_first %}
     <p class="form-help">You can associate the super administrator with a company now or later from the admin area.</p>
+    {% else %}
+    <p class="form-help">After signing in you'll be able to submit tickets and follow your own conversations with the team.</p>
+    {% endif %}
     <div class="form-error" role="alert" data-auth-error hidden></div>
     <div class="form-actions">
       <button type="submit" class="button" data-auth-submit>Create account</button>

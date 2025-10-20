@@ -5616,14 +5616,14 @@ async def register_page(request: Request):
         log_error("Failed to determine user count during registration", error=str(exc))
         user_count = 1
 
-    if user_count > 0:
-        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    is_first_user = user_count == 0
 
     context = {
         "request": request,
         "app_name": settings.app_name,
         "current_year": datetime.utcnow().year,
-        "title": "Create super administrator",
+        "title": "Create super administrator" if is_first_user else "Create your account",
+        "is_first_user": is_first_user,
     }
     return templates.TemplateResponse("auth/register.html", context)
 

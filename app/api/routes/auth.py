@@ -115,7 +115,7 @@ def _log_login_success(request: Request, user: dict[str, Any]) -> None:
     "/register",
     response_model=LoginResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Register the initial super administrator",
+    summary="Register a new account",
 )
 async def register(
     payload: RegistrationRequest,
@@ -123,8 +123,11 @@ async def register(
     _: None = Depends(require_database),
 ) -> Response:
     existing_users = await user_repo.count_users()
-    if existing_users > 0:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is closed")
+    is_first_user = existing_users == 0
+
+    existing_user = await user_repo.get_user_by_email(payload.email)
+    if existing_user:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
     created = await user_repo.create_user(
         email=payload.email,
@@ -132,8 +135,8 @@ async def register(
         first_name=payload.first_name,
         last_name=payload.last_name,
         mobile_phone=payload.mobile_phone,
-        company_id=payload.company_id,
-        is_super_admin=True,
+        company_id=payload.company_id if is_first_user else None,
+        is_super_admin=is_first_user,
     )
 
     active_company_id = await _determine_active_company_id(created)
@@ -143,7 +146,10 @@ async def register(
     if active_company_id is not None:
         created["company_id"] = active_company_id
     response_model = _build_login_response(created, session)
-    response = JSONResponse(content=response_model.model_dump(mode="json"))
+    response = JSONResponse(
+        content=response_model.model_dump(mode="json"),
+        status_code=status.HTTP_201_CREATED,
+    )
     session_manager.apply_session_cookies(response, session)
     return response
 
