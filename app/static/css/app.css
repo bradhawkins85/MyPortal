@@ -2635,6 +2635,157 @@ body {
   overflow: auto;
 }
 
+.kb-admin {
+  display: block;
+}
+
+.kb-admin__grid {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.1fr) minmax(0, 0.9fr);
+  align-items: flex-start;
+}
+
+.kb-admin__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.kb-admin__link {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.kb-admin__link:focus,
+.kb-admin__link:hover {
+  text-decoration: underline;
+}
+
+.kb-admin__title {
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.kb-admin__summary {
+  font-size: 0.85rem;
+  color: rgba(226, 232, 240, 0.75);
+}
+
+.kb-admin__row--active {
+  background: rgba(37, 99, 235, 0.18);
+}
+
+.kb-admin__row--active .kb-admin__title {
+  color: #dbeafe;
+}
+
+.kb-admin__content {
+  min-height: 12rem;
+}
+
+.kb-admin__scope-help {
+  color: rgba(226, 232, 240, 0.8);
+}
+
+.kb-admin__status {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.kb-admin__status--error {
+  color: #fca5a5;
+}
+
+.kb-admin__status--success {
+  color: #bbf7d0;
+}
+
+.kb-admin__preview {
+  min-height: 18rem;
+  max-height: 32rem;
+  overflow: auto;
+  line-height: 1.6;
+}
+
+.kb-admin__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.kb-admin__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.kb-admin__timestamps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: rgba(148, 163, 184, 0.85);
+}
+
+.kb-admin__timestamp {
+  display: block;
+}
+
+.button__icon {
+  display: inline-flex;
+  margin-right: 0.5rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.button__icon svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+}
+
+.button__label {
+  display: inline-flex;
+  align-items: center;
+}
+
+@media (max-width: 1280px) {
+  .kb-admin__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 960px) {
+  .kb-admin__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .kb-admin__meta {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .kb-admin__tags {
+    justify-content: flex-start;
+  }
+}
+
 .header-search {
   display: flex;
   align-items: center;
