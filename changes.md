@@ -1,4 +1,4 @@
-- 2025-11-27, 11:00 UTC, Feature, Exposed ticketing, automation, and module management dashboards in the admin navigation with direct access links
+- 2025-11-27, 11:00 UTC, Feature, Added admin navigation entries for tickets, ticket automations, and modules while retaining the scheduler automation tools
 - 2025-10-20, 06:59 UTC, Fix, Aligned ticketing migration key types with existing INT identifiers so startup migrations succeed on MySQL
 - 2025-10-20, 06:29 UTC, Fix, Guarded module catalog and automation schedule refresh when the database is offline so startup and tests proceed without MySQL
 - 2025-10-20, 06:09 UTC, Feature, Integrated ticketing, automations, and integration module management from TacticalDesk with admin dashboards and API endpoints
