@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if success_message or error_message %}
+    <div class="alert-stack">
+      {% if success_message %}
+        <div class="alert" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="management" data-layout>
+    <aside class="management__sidebar">
+      <h2 class="management__heading">Create automation</h2>
+      <p class="management__intro">Blend scheduled cadences with module-driven actions. Cron expressions override cadence when provided.</p>
+      <form action="/admin/automations" method="post" class="form management__form">
+        {% if csrf_token %}
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <div class="form-field">
+          <label class="form-label" for="automation-name">Name</label>
+          <input id="automation-name" name="name" class="form-input" maxlength="255" required />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="automation-description">Description</label>
+          <textarea id="automation-description" name="description" class="form-input" rows="3" placeholder="Explain the business outcome"></textarea>
+        </div>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="automation-kind">Kind</label>
+            <select id="automation-kind" name="kind" class="form-input">
+              <option value="scheduled">Scheduled</option>
+              <option value="event">Event</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="automation-status">Status</label>
+            <select id="automation-status" name="status" class="form-input">
+              <option value="inactive" selected>Inactive</option>
+              <option value="active">Active</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="automation-cadence">Cadence</label>
+            <select id="automation-cadence" name="cadence" class="form-input">
+              <option value="">Custom</option>
+              <option value="hourly">Hourly</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="automation-cron">Cron expression</label>
+            <input id="automation-cron" name="cronExpression" class="form-input" placeholder="0 0 * * *" />
+          </div>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="automation-module">Action module</label>
+          <select id="automation-module" name="actionModule" class="form-input">
+            <option value="">No module</option>
+            {% for module in automation_modules %}
+              <option value="{{ module.slug }}">{{ module.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="automation-trigger">Trigger event</label>
+          <input id="automation-trigger" name="triggerEvent" class="form-input" maxlength="128" placeholder="tickets.created, webhook.delivered" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="automation-filters">Trigger filters (JSON)</label>
+          <textarea id="automation-filters" name="triggerFilters" class="form-input" rows="3" placeholder='{"match": {"status": "open"}}'></textarea>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="automation-payload">Action payload (JSON)</label>
+          <textarea id="automation-payload" name="actionPayload" class="form-input" rows="4" placeholder='{"message": "Alert"}'></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">Save automation</button>
+        </div>
+      </form>
+    </aside>
+
+    <section class="management__content">
+      <header class="management__header">
+        <div>
+          <h1 class="management__title">Automation orchestration</h1>
+          <p class="management__subtitle">Review schedules, trigger conditions, and module connectivity for every automation workflow.</p>
+        </div>
+        <form method="get" class="management__filters">
+          <label class="visually-hidden" for="automation-filter-status">Status</label>
+          <select id="automation-filter-status" name="status" class="form-input">
+            <option value="">All statuses</option>
+            <option value="active" {% if automation_filters.status == 'active' %}selected{% endif %}>Active</option>
+            <option value="inactive" {% if automation_filters.status == 'inactive' %}selected{% endif %}>Inactive</option>
+          </select>
+          <label class="visually-hidden" for="automation-filter-kind">Kind</label>
+          <select id="automation-filter-kind" name="kind" class="form-input">
+            <option value="">All kinds</option>
+            <option value="scheduled" {% if automation_filters.kind == 'scheduled' %}selected{% endif %}>Scheduled</option>
+            <option value="event" {% if automation_filters.kind == 'event' %}selected{% endif %}>Event</option>
+          </select>
+          <button type="submit" class="button">Apply filters</button>
+        </form>
+      </header>
+
+      <div class="management__body">
+        <div class="management__stats">
+          <article class="stat-card">
+            <h3 class="stat-card__title">Active</h3>
+            <p class="stat-card__value">{{ automation_status_counts.get('active', 0) }}</p>
+          </article>
+          <article class="stat-card">
+            <h3 class="stat-card__title">Inactive</h3>
+            <p class="stat-card__value">{{ automation_status_counts.get('inactive', 0) }}</p>
+          </article>
+          <article class="stat-card">
+            <h3 class="stat-card__title">Scheduled</h3>
+            <p class="stat-card__value">{{ automation_kind_counts.get('scheduled', 0) }}</p>
+          </article>
+          <article class="stat-card">
+            <h3 class="stat-card__title">Event driven</h3>
+            <p class="stat-card__value">{{ automation_kind_counts.get('event', 0) }}</p>
+          </article>
+        </div>
+
+        <div class="management__toolbar">
+          <input type="search" class="form-input" placeholder="Filter automations" aria-label="Filter automations" data-table-filter="automations-table" />
+        </div>
+
+        <div class="table-wrapper">
+          <table class="table" id="automations-table" data-table>
+            <thead>
+              <tr>
+                <th scope="col" data-sort="int">ID</th>
+                <th scope="col" data-sort="string">Name</th>
+                <th scope="col" data-sort="string">Kind</th>
+                <th scope="col" data-sort="string">Schedule</th>
+                <th scope="col" data-sort="string">Module</th>
+                <th scope="col" data-sort="string">Status</th>
+                <th scope="col" data-sort="string">Next run</th>
+                <th scope="col" data-sort="string">Last run</th>
+                <th scope="col" class="table__actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if automations %}
+                {% for automation in automations %}
+                  <tr>
+                    <td data-label="ID">{{ automation.id }}</td>
+                    <td data-label="Name">{{ automation.name }}</td>
+                    <td data-label="Kind">{{ automation.kind }}</td>
+                    <td data-label="Schedule">
+                      {% if automation.cron_expression %}
+                        {{ automation.cron_expression }}
+                      {% elif automation.cadence %}
+                        {{ automation.cadence }}
+                      {% else %}
+                        —
+                      {% endif %}
+                    </td>
+                    <td data-label="Module">{{ automation.action_module or '—' }}</td>
+                    <td data-label="Status">{{ automation.status }}</td>
+                    <td data-label="Next run">{{ automation.next_run_at.astimezone().strftime('%Y-%m-%d %H:%M') if automation.next_run_at else '—' }}</td>
+                    <td data-label="Last run">{{ automation.last_run_at.astimezone().strftime('%Y-%m-%d %H:%M') if automation.last_run_at else '—' }}</td>
+                    <td class="table__actions">
+                      <form action="/admin/automations/{{ automation.id }}/status" method="post" class="inline-form">
+                        {% if csrf_token %}
+                          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                        {% endif %}
+                        <label class="visually-hidden" for="automation-status-{{ automation.id }}">Status</label>
+                        <select id="automation-status-{{ automation.id }}" name="status" class="form-input form-input--compact">
+                          <option value="active" {% if automation.status == 'active' %}selected{% endif %}>Active</option>
+                          <option value="inactive" {% if automation.status != 'active' %}selected{% endif %}>Inactive</option>
+                        </select>
+                        <button type="submit" class="button button--ghost">Update</button>
+                      </form>
+                      <form action="/admin/automations/{{ automation.id }}/execute" method="post" class="inline-form">
+                        {% if csrf_token %}
+                          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                        {% endif %}
+                        <button type="submit" class="button button--ghost">Run now</button>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="9" class="table__empty">No automations configured.</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
