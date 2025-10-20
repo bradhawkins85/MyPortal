@@ -1,3 +1,4 @@
+- 2025-12-01, 09:15 UTC, Fix, Restored knowledge base search by including the CSRF token header in fetch submissions
 - 2025-12-01, 09:05 UTC, Fix, Ensured automation inserts reuse their connection so creation succeeds without 500 errors
 - 2025-12-01, 09:00 UTC, Feature, Added knowledge base module with scoped permissions, Ollama-backed search, and portal UI integration
 - 2025-10-21, 20:45 UTC, Fix, Converted automation module context data to JSON-safe timestamps so the ticket automation admin page renders without template errors
