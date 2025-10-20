@@ -181,3 +181,18 @@ async def test_list_users_with_permission_includes_super_admin(monkeypatch):
             "is_super_admin": True,
         }
     ]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_user_has_permission_allows_super_admin(monkeypatch):
+    list_mock = AsyncMock(return_value=[])
+    monkeypatch.setattr(membership_repo, "list_memberships_for_user", list_mock)
+
+    user_mock = AsyncMock(return_value={"id": 3, "is_super_admin": 1})
+    monkeypatch.setattr(membership_repo.user_repo, "get_user_by_id", user_mock)
+
+    result = await membership_repo.user_has_permission(3, "helpdesk.technician")
+
+    assert result is True
+    list_mock.assert_awaited_once_with(3, status="active")
+    user_mock.assert_awaited_once_with(3)
