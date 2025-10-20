@@ -1,3 +1,4 @@
+- 2025-10-20, 11:59 UTC, Feature, Reworked knowledge base portal layout to list articles and moved article reading to dedicated views
 - 2025-12-06, 15:45 UTC, Feature, Enabled drag-to-resize handles for knowledge base editor images with live preview updates
 - 2025-10-20, 12:04 UTC, Feature, Added automatic Ollama-generated AI tags to knowledge base articles with admin previews and public badges
 - 2025-12-06, 12:30 UTC, Feature, Added Ollama-driven ticket tagging with UI badges, API fields, and resilient fallbacks for 5-10 issue labels
