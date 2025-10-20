@@ -17,7 +17,7 @@
       <header class="management__header">
         <div>
           <h1 class="management__title">Integration modules</h1>
-          <p class="management__subtitle">Synchronise credentials and delivery endpoints for Ollama, SMTP, TacticalRMM, and ntfy.</p>
+          <p class="management__subtitle">Synchronise credentials and delivery endpoints for Syncro, Ollama, SMTP, TacticalRMM, ntfy, and ChatGPT.</p>
         </div>
       </header>
 
@@ -54,7 +54,22 @@
                 </label>
               </div>
 
-              {% if module.slug == 'ollama' %}
+              {% if module.slug == 'syncro' %}
+                <div class="form-field">
+                  <label class="form-label" for="syncro-base-url">Base URL</label>
+                  <input id="syncro-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="https://example.syncromsp.com" />
+                  <p class="form-help">Enter the Syncro tenant base URL without the trailing <code>/api/v1</code>.</p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="syncro-api-key">API key</label>
+                  <input id="syncro-api-key" name="settings.api_key" class="form-input" type="password" autocomplete="off" placeholder="Enter a new API key" />
+                  <p class="form-help">Keys are stored securely. Leave blank to keep the existing value.</p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="syncro-rate-limit">Rate limit (requests per minute)</label>
+                  <input id="syncro-rate-limit" name="settings.rate_limit_per_minute" class="form-input" type="number" min="1" max="600" value="{{ settings.rate_limit_per_minute or 180 }}" />
+                </div>
+              {% elif module.slug == 'ollama' %}
                 <div class="form-field">
                   <label class="form-label" for="ollama-base-url">Base URL</label>
                   <input id="ollama-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="http://127.0.0.1:11434" />

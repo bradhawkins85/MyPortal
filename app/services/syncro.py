@@ -9,6 +9,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
+from app.repositories import integration_modules as module_repo
 
 
 class SyncroConfigurationError(RuntimeError):
@@ -19,15 +20,99 @@ class SyncroAPIError(RuntimeError):
     """Raised when Syncro responds with an error status."""
 
 
-def _get_base_url() -> str:
-    settings = get_settings()
-    base = settings.syncro_webhook_url
-    if not base:
-        raise SyncroConfigurationError("SYNCRO_WEBHOOK_URL is not configured")
-    url = str(base).rstrip("/")
+_MODULE_SETTINGS_CACHE: dict[str, Any] | None = None
+_MODULE_SETTINGS_EXPIRY: float = 0.0
+_MODULE_SETTINGS_LOCK = asyncio.Lock()
+_RATE_LIMITER_CACHE: tuple[int, "AsyncRateLimiter"] | None = None
+_RATE_LIMITER_LOCK = asyncio.Lock()
+
+
+def _normalise_base_url(base: str) -> str:
+    url = str(base or "").strip().rstrip("/")
+    if not url:
+        return ""
     if not url.endswith("/api/v1"):
         url = f"{url}/api/v1"
     return url
+
+
+def _coerce_rate_limit(value: Any) -> int:
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return 180
+    return limit if limit > 0 else 180
+
+
+async def _load_module_settings() -> dict[str, Any] | None:
+    global _MODULE_SETTINGS_CACHE, _MODULE_SETTINGS_EXPIRY
+    now = monotonic()
+    if _MODULE_SETTINGS_CACHE is not None and now < _MODULE_SETTINGS_EXPIRY:
+        return _MODULE_SETTINGS_CACHE
+    async with _MODULE_SETTINGS_LOCK:
+        now = monotonic()
+        if _MODULE_SETTINGS_CACHE is not None and now < _MODULE_SETTINGS_EXPIRY:
+            return _MODULE_SETTINGS_CACHE
+        try:
+            module = await module_repo.get_module("syncro")
+        except RuntimeError as exc:  # pragma: no cover - database may be unavailable during tests
+            log_error("Unable to load Syncro module configuration", error=str(exc))
+            module = None
+        if not module:
+            _MODULE_SETTINGS_CACHE = None
+        else:
+            settings_payload = module.get("settings") or {}
+            _MODULE_SETTINGS_CACHE = {
+                "enabled": bool(module.get("enabled")),
+                "base_url": str(settings_payload.get("base_url") or "").strip(),
+                "api_key": str(settings_payload.get("api_key") or "").strip(),
+                "rate_limit_per_minute": _coerce_rate_limit(settings_payload.get("rate_limit_per_minute")),
+            }
+        _MODULE_SETTINGS_EXPIRY = now + 30.0
+    return _MODULE_SETTINGS_CACHE
+
+
+async def _get_effective_settings() -> dict[str, Any]:
+    module_settings = await _load_module_settings()
+    if module_settings and not module_settings.get("enabled"):
+        raise SyncroConfigurationError("Syncro module is disabled")
+    settings = get_settings()
+    base_url = _normalise_base_url(
+        module_settings.get("base_url") if module_settings else settings.syncro_webhook_url or ""
+    )
+    if not base_url:
+        raise SyncroConfigurationError("Syncro base URL is not configured")
+    api_key = str(module_settings.get("api_key") if module_settings else "").strip()
+    if not api_key:
+        api_key = str(settings.syncro_api_key or "").strip()
+    rate_limit = (
+        module_settings.get("rate_limit_per_minute")
+        if module_settings
+        else 180
+    )
+    return {
+        "base_url": base_url,
+        "api_key": api_key or None,
+        "rate_limit_per_minute": _coerce_rate_limit(rate_limit),
+    }
+
+
+async def _get_or_create_rate_limiter(limit: int) -> "AsyncRateLimiter":
+    global _RATE_LIMITER_CACHE
+    async with _RATE_LIMITER_LOCK:
+        if _RATE_LIMITER_CACHE and _RATE_LIMITER_CACHE[0] == limit:
+            return _RATE_LIMITER_CACHE[1]
+        limiter = AsyncRateLimiter(limit=limit, interval=60.0)
+        _RATE_LIMITER_CACHE = (limit, limiter)
+        return limiter
+
+
+async def get_rate_limiter() -> "AsyncRateLimiter":
+    module_settings = await _load_module_settings()
+    if module_settings and not module_settings.get("enabled"):
+        raise SyncroConfigurationError("Syncro module is disabled")
+    limit = _coerce_rate_limit((module_settings or {}).get("rate_limit_per_minute"))
+    return await _get_or_create_rate_limiter(limit)
 
 
 class AsyncRateLimiter:
@@ -68,14 +153,14 @@ async def _request(
     timeout: float = 15.0,
     rate_limiter: AsyncRateLimiter | None = None,
 ) -> Any:
-    if rate_limiter is not None:
-        await rate_limiter.acquire()
-    base_url = _get_base_url()
+    settings = await _get_effective_settings()
+    limiter = rate_limiter or await _get_or_create_rate_limiter(settings["rate_limit_per_minute"])
+    await limiter.acquire()
+    base_url = settings["base_url"]
     url = f"{base_url}{path if path.startswith('/') else f'/{path}'}"
     headers: dict[str, str] = {}
-    settings = get_settings()
-    if settings.syncro_api_key:
-        headers["Authorization"] = f"Bearer {settings.syncro_api_key}"
+    if settings.get("api_key"):
+        headers["Authorization"] = f"Bearer {settings['api_key']}"
     log_info("Calling Syncro API", url=url, method=method)
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:

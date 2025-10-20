@@ -702,6 +702,16 @@ async def _build_base_context(
         ),
     }
 
+    module_lookup = getattr(request.state, "module_lookup", None)
+    if module_lookup is None:
+        try:
+            module_list = await modules_service.list_modules()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error("Failed to load integration modules for context", error=str(exc))
+            module_list = []
+        module_lookup = {module.get("slug"): module for module in module_list if module.get("slug")}
+        request.state.module_lookup = module_lookup
+
     context: dict[str, Any] = {
         "request": request,
         "app_name": settings.app_name,
@@ -716,6 +726,8 @@ async def _build_base_context(
         "is_super_admin": is_super_admin,
         "is_helpdesk_technician": is_helpdesk_technician,
         "is_company_admin": is_super_admin or bool(membership_data.get("is_admin")),
+        "integration_modules": module_lookup,
+        "syncro_module_enabled": bool((module_lookup or {}).get("syncro", {}).get("enabled")),
     }
     context.update(permission_flags)
     if extra:
@@ -741,6 +753,14 @@ async def _build_base_context(
                 log_error("Failed to count unread notifications", error=str(exc))
         context["notification_unread_count"] = unread_count
     return context
+
+
+async def _load_syncro_module() -> dict[str, Any] | None:
+    try:
+        return await modules_service.get_module("syncro", redact=False)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to load Syncro module configuration", error=str(exc))
+        return None
 
 
 async def _build_public_context(
@@ -4343,6 +4363,9 @@ async def import_syncro_contacts(request: Request):
     ) = await _load_staff_context(request, require_super_admin=True)
     if redirect:
         return redirect
+    module = await _load_syncro_module()
+    if not module or not module.get("enabled"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Syncro module is disabled")
     payload = await request.json()
     syncro_company_id = payload.get("syncroCompanyId") or payload.get("syncro_company_id")
     if not syncro_company_id:
@@ -4361,6 +4384,9 @@ async def import_syncro_tickets(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
+    module = await _load_syncro_module()
+    if not module or not module.get("enabled"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Syncro module is disabled")
     payload = await request.json()
     try:
         import_request = SyncroTicketImportRequest.model_validate(payload)
@@ -5627,6 +5653,46 @@ async def _render_tickets_dashboard(
     return response
 
 
+async def _render_syncro_ticket_import(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    module = await _load_syncro_module()
+    if not module or not module.get("enabled"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Syncro ticket import is not available")
+    settings_payload = module.get("settings") or {}
+    base_url = str(settings_payload.get("base_url") or "").strip()
+    api_key_present = bool(str(settings_payload.get("api_key") or "").strip())
+    env_base_url = str(settings.syncro_webhook_url or "").strip()
+    env_api_key = str(settings.syncro_api_key or "").strip()
+    effective_base_url = (base_url or env_base_url).rstrip("/")
+    rate_limit = _parse_int_in_range(
+        settings_payload.get("rate_limit_per_minute"),
+        default=180,
+        minimum=1,
+        maximum=600,
+    )
+    extra = {
+        "title": "Syncro ticket import",
+        "success_message": success_message,
+        "error_message": error_message,
+        "syncro_module": {
+            "enabled": True,
+            "base_url": base_url,
+            "effective_base_url": effective_base_url,
+            "has_api_key": api_key_present or bool(env_api_key),
+            "rate_limit_per_minute": rate_limit,
+        },
+    }
+    response = await _render_template("admin/syncro_ticket_import.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
+
+
 async def _render_ticket_detail(
     request: Request,
     user: dict[str, Any],
@@ -5788,6 +5854,23 @@ async def admin_tickets_page(
         current_user,
         status_filter=status,
         module_filter=module,
+        success_message=_sanitize_message(success),
+        error_message=_sanitize_message(error),
+    )
+
+
+@app.get("/admin/tickets/syncro-import", response_class=HTMLResponse)
+async def admin_syncro_ticket_import_page(
+    request: Request,
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    return await _render_syncro_ticket_import(
+        request,
+        current_user,
         success_message=_sanitize_message(success),
         error_message=_sanitize_message(error),
     )

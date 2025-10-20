@@ -128,6 +128,17 @@ def _default_chatgpt_settings() -> dict[str, Any]:
 
 DEFAULT_MODULES: list[dict[str, Any]] = [
     {
+        "slug": "syncro",
+        "name": "Syncro",
+        "description": "Synchronise tickets and contacts from SyncroMSP.",
+        "icon": "🧾",
+        "settings": {
+            "base_url": "",
+            "api_key": "",
+            "rate_limit_per_minute": 180,
+        },
+    },
+    {
         "slug": "ollama",
         "name": "Ollama",
         "description": "Generate ticket summaries using an on-prem Ollama model.",
@@ -205,6 +216,23 @@ def _coerce_settings(
                 "subject_prefix": str(merged.get("subject_prefix", "")).strip(),
             }
         )
+    elif slug == "syncro":
+        base_url = str(merged.get("base_url") or "").strip().rstrip("/")
+        api_key_override = payload.get("api_key") if payload else None
+        if api_key_override is None:
+            api_key = str(merged.get("api_key") or "").strip()
+        else:
+            api_key = str(api_key_override or "").strip()
+            if not api_key and existing_settings and existing_settings.get("api_key"):
+                api_key = str(existing_settings.get("api_key") or "").strip()
+        rate_limit = _coerce_int(merged.get("rate_limit_per_minute"), minimum=1, maximum=600) or 180
+        merged.update(
+            {
+                "base_url": base_url,
+                "api_key": api_key,
+                "rate_limit_per_minute": rate_limit,
+            }
+        )
     elif slug == "tacticalrmm":
         merged.update(
             {
@@ -254,12 +282,15 @@ def _coerce_settings(
 
 
 def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
-    if module.get("slug") != "chatgpt-mcp":
+    slug = module.get("slug")
+    if slug not in {"chatgpt-mcp", "syncro"}:
         return module
     redacted = dict(module)
     settings = dict(redacted.get("settings") or {})
-    if settings.get("shared_secret_hash"):
+    if slug == "chatgpt-mcp" and settings.get("shared_secret_hash"):
         settings["shared_secret_hash"] = "********"
+    if slug == "syncro" and settings.get("api_key"):
+        settings["api_key"] = "********"
     redacted["settings"] = settings
     return redacted
 
@@ -307,6 +338,13 @@ async def list_modules() -> list[dict[str, Any]]:
     return [_redact_module_settings(module) for module in modules]
 
 
+async def get_module(slug: str, *, redact: bool = True) -> dict[str, Any] | None:
+    module = await module_repo.get_module(slug)
+    if not module:
+        return None
+    return _redact_module_settings(module) if redact else module
+
+
 async def update_module(
     slug: str,
     *,
@@ -335,6 +373,7 @@ async def trigger_module(slug: str, payload: Mapping[str, Any] | None = None) ->
             parsed = None
         settings = _coerce_settings(slug, parsed)
     handler = {
+        "syncro": _validate_syncro,
         "ollama": _invoke_ollama,
         "smtp": _invoke_smtp,
         "tacticalrmm": _invoke_tacticalrmm,
@@ -456,6 +495,20 @@ async def _invoke_chatgpt_mcp(settings: Mapping[str, Any], payload: Mapping[str,
         "allowed_actions": allowed_actions,
         "allow_ticket_updates": allow_updates,
         "max_results": max_results,
+    }
+
+
+async def _validate_syncro(settings: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+    base_url = str(settings.get("base_url") or "").strip()
+    api_key = str(settings.get("api_key") or "").strip()
+    rate_limit = _coerce_int(settings.get("rate_limit_per_minute"), minimum=1, maximum=600) or 180
+    if not base_url:
+        raise ValueError("Syncro base URL is not configured")
+    return {
+        "status": "ok",
+        "base_url": base_url,
+        "has_api_key": bool(api_key),
+        "rate_limit_per_minute": rate_limit,
     }
 
 

@@ -36,7 +36,7 @@ There are no default login credentials; the first visit will prompt you to regis
 
 ## Syncro Ticket Importer
 
-Super administrators can synchronise Syncro tickets into MyPortal directly from **Admin → Tickets**. The import console offers
+Super administrators can synchronise Syncro tickets into MyPortal directly from **Admin → Syncro ticket import** once the Syncro integration module is enabled. The import console offers
 three modes:
 
 - **Single ticket** – supply a Syncro ticket ID for one-off imports or re-syncs.
