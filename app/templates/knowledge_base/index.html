@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% set scope_labels = {
+  "anonymous": "Public",
+  "user": "Specific users",
+  "company": "Company members",
+  "company_admin": "Company admins",
+  "super_admin": "Super admins"
+} %}
+
+{% block title %}Knowledge base{% endblock %}
+
+{% block header_actions %}
+  <form id="knowledge-base-search-form" class="header-search" data-knowledge-base-search>
+    <label for="knowledge-base-search" class="visually-hidden">Search knowledge base</label>
+    <input
+      type="search"
+      id="knowledge-base-search"
+      name="query"
+      class="input input--compact"
+      placeholder="Search knowledge base"
+      autocomplete="off"
+      required
+    />
+    <button type="submit" class="button button--ghost">Search</button>
+  </form>
+{% endblock %}
+
+{% block content %}
+<div class="knowledge-base">
+  <aside class="knowledge-base__sidebar card card--panel">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Articles</h2>
+        <p class="card__subtitle">Browse curated documentation with scoped visibility.</p>
+      </div>
+    </header>
+    <div class="knowledge-base__filters">
+      <label for="knowledge-base-filter" class="visually-hidden">Filter articles</label>
+      <input
+        type="search"
+        id="knowledge-base-filter"
+        class="input"
+        placeholder="Filter articles"
+        data-table-filter="knowledge-base-table"
+        autocomplete="off"
+      />
+    </div>
+    {% if kb_articles %}
+    <div class="table-wrapper table-wrapper--short">
+      <table class="table table--compact" id="knowledge-base-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string">Title</th>
+            <th scope="col" data-sort="string">Scope</th>
+            <th scope="col" data-sort="string">Status</th>
+            <th scope="col" data-sort="date">Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for article in kb_articles %}
+          <tr
+            data-article-row
+            data-article-slug="{{ article.slug }}"
+            class="knowledge-base__row{% if article.slug == kb_active_slug %} knowledge-base__row--active{% endif %}"
+          >
+            <td data-label="Title">
+              <a href="/knowledge-base?slug={{ article.slug }}" class="knowledge-base__link">{{ article.title }}</a>
+              {% if article.summary %}
+                <p class="knowledge-base__summary">{{ article.summary }}</p>
+              {% endif %}
+            </td>
+            <td data-label="Scope" data-value="{{ article.permission_scope }}">
+              <span class="tag">{{ scope_labels.get(article.permission_scope, article.permission_scope|title) }}</span>
+            </td>
+            <td data-label="Status" data-value="{{ 'Published' if article.is_published else 'Draft' }}">
+              {% if article.is_published %}
+                <span class="status status--success">Published</span>
+              {% else %}
+                <span class="status status--warning">Draft</span>
+              {% endif %}
+            </td>
+            <td data-label="Updated" data-value="{{ article.updated_at_iso or '' }}">
+              <span data-utc="{{ article.updated_at_iso or '' }}">{{ article.updated_at_iso or '—' }}</span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="knowledge-base__empty">No knowledge base articles are available yet.</p>
+    {% endif %}
+  </aside>
+
+  <section class="knowledge-base__content">
+    <article class="card card--panel knowledge-base__article" data-knowledge-base-article>
+      {% if kb_active_article %}
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">{{ kb_active_article.title }}</h2>
+          {% if kb_active_article.summary %}
+            <p class="card__subtitle">{{ kb_active_article.summary }}</p>
+          {% endif %}
+        </div>
+        <div class="knowledge-base__tags">
+          <span class="tag tag--muted">{{ scope_labels.get(kb_active_article.permission_scope, kb_active_article.permission_scope|title) }}</span>
+          {% if not kb_active_article.is_published %}
+            <span class="tag tag--warning">Draft</span>
+          {% endif %}
+        </div>
+      </header>
+      <div class="card__body knowledge-base__body" data-knowledge-base-article-body>
+        {{ kb_active_article.content | safe }}
+      </div>
+      {% else %}
+      <div class="card__body knowledge-base__body knowledge-base__body--empty">
+        <p>Select an article to view its content.</p>
+      </div>
+      {% endif %}
+    </article>
+
+    <section class="card card--panel knowledge-base__results" data-knowledge-base-results hidden>
+      <header class="card__header">
+        <div>
+          <h3 class="card__title">Search results</h3>
+          <p class="card__subtitle">Articles matched locally before Ollama refinement.</p>
+        </div>
+      </header>
+      <div class="card__body" data-knowledge-base-results-body>
+        <p class="knowledge-base__empty">No matching articles were found.</p>
+      </div>
+    </section>
+
+    <section class="card card--panel knowledge-base__ollama" data-knowledge-base-ollama hidden>
+      <header class="card__header">
+        <div>
+          <h3 class="card__title">Ollama insight</h3>
+          <p class="card__subtitle">Summaries generated from the enabled Ollama integration.</p>
+        </div>
+        <div class="knowledge-base__ollama-status" data-knowledge-base-ollama-status></div>
+      </header>
+      <div class="card__body" data-knowledge-base-ollama-body>
+        <p class="knowledge-base__empty">No Ollama summary available.</p>
+      </div>
+    </section>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/knowledge_base.js" defer></script>
+{% endblock %}
+

@@ -24,6 +24,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - Port catalogue with searchable metadata, secure document uploads, and lifecycle tracking
 - Pricing workflow approvals with notification feed and audit-friendly status changes
 - Super administrators can publish portal alerts with the `/api/notifications` API for targeted or global announcements
+- Knowledge base with permission-scoped articles, granular visibility controls, and Ollama-backed natural language search
 - Automated CSRF protection on authenticated state-changing requests
 - Super admin access to the OpnForm builder for creating and editing forms
 - Automation dashboard with persistent scheduler management, webhook retry monitoring, and admin controls
