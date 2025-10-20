@@ -5569,7 +5569,13 @@ async def admin_update_module(slug: str, request: Request):
     if redirect:
         return redirect
     form = await request.form()
-    enabled = form.get("enabled") == "on"
+    raw_enabled = form.get("enabled")
+    enabled = False
+    if raw_enabled is not None:
+        if isinstance(raw_enabled, str):
+            enabled = raw_enabled.strip().lower() not in {"", "0", "false", "off"}
+        else:
+            enabled = bool(raw_enabled)
     settings: dict[str, Any] = {}
     for key, value in form.multi_items():
         if not key.startswith("settings."):
