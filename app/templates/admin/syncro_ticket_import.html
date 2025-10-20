@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if success_message or error_message %}
+    <div class="alert-stack">
+      {% if success_message %}
+        <div class="alert" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% set module = syncro_module or {} %}
+  {% set base_url = module.base_url or '' %}
+  {% set effective_base_url = module.effective_base_url or '' %}
+  {% set has_api_key = module.has_api_key %}
+  {% set rate_limit = module.rate_limit_per_minute or 180 %}
+  {% set is_configured = effective_base_url and has_api_key %}
+
+  <div class="management management--single" data-layout>
+    <section class="management__content">
+      <header class="management__header">
+        <div>
+          <h1 class="management__title">Syncro ticket import</h1>
+          <p class="management__subtitle">
+            Pull Syncro tickets directly into the helpdesk. Imports honour the configured rate limit and require the Syncro module to be enabled.
+          </p>
+        </div>
+        <div class="management__header-actions">
+          <dl class="definition-list">
+            <div class="definition-list__item">
+              <dt class="definition-list__label">Base URL</dt>
+              <dd class="definition-list__value">{{ effective_base_url or 'Not configured' }}</dd>
+            </div>
+            <div class="definition-list__item">
+              <dt class="definition-list__label">API key</dt>
+              <dd class="definition-list__value">{{ 'Configured' if has_api_key else 'Missing' }}</dd>
+            </div>
+            <div class="definition-list__item">
+              <dt class="definition-list__label">Rate limit</dt>
+              <dd class="definition-list__value">{{ rate_limit }} requests/minute</dd>
+            </div>
+          </dl>
+        </div>
+      </header>
+
+      <div class="management__body management__body--stacked">
+        <div class="alert-stack" data-syncro-ticket-import-status hidden></div>
+
+        {% if not is_configured %}
+          <div class="alert alert--error" role="alert">
+            Configure the Syncro module with a base URL and API key before running imports.
+            <a href="/admin/modules" class="alert__link">Open module settings</a>
+          </div>
+        {% endif %}
+
+        <article class="card card--panel">
+          <header class="card__header">
+            <div>
+              <h2 class="card__title">Import Syncro tickets</h2>
+              <p class="card__subtitle">
+                Choose a single ticket, an ID range, or the full account sync. Requests respect the module rate limit of {{ rate_limit }} per minute.
+              </p>
+            </div>
+          </header>
+          <div class="management__body management__body--cards">
+            <form class="card__form" data-syncro-ticket-import data-mode="single">
+              <div>
+                <h3 class="card__title">Single ticket</h3>
+                <p class="card__subtitle text-muted">Import one ticket by its Syncro identifier.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="syncro-ticket-id">Syncro ticket ID</label>
+                <input id="syncro-ticket-id" name="ticketId" class="form-input" type="number" min="1" step="1" required {% if not is_configured %}disabled{% endif %} />
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button button--primary" {% if not is_configured %}disabled{% endif %}>Import ticket</button>
+              </div>
+            </form>
+            <form class="card__form" data-syncro-ticket-import data-mode="range">
+              <div>
+                <h3 class="card__title">Range import</h3>
+                <p class="card__subtitle text-muted">Synchronise a sequential block of ticket IDs.</p>
+              </div>
+              <div class="form-grid">
+                <div class="form-field">
+                  <label class="form-label" for="syncro-ticket-start">Start ID</label>
+                  <input id="syncro-ticket-start" name="startId" class="form-input" type="number" min="1" step="1" required {% if not is_configured %}disabled{% endif %} />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="syncro-ticket-end">End ID</label>
+                  <input id="syncro-ticket-end" name="endId" class="form-input" type="number" min="1" step="1" required {% if not is_configured %}disabled{% endif %} />
+                </div>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button" {% if not is_configured %}disabled{% endif %}>Import range</button>
+              </div>
+            </form>
+            <form class="card__form" data-syncro-ticket-import data-mode="all">
+              <div>
+                <h3 class="card__title">Full account import</h3>
+                <p class="card__subtitle text-muted">Iterate through all Syncro tickets using paginated requests.</p>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button button--ghost" {% if not is_configured %}disabled{% endif %}>Import all tickets</button>
+              </div>
+            </form>
+          </div>
+        </article>
+      </div>
+    </section>
+  </div>
+{% endblock %}

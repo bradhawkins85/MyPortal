@@ -14,9 +14,6 @@ _ALLOWED_STATUSES = {"open", "in_progress", "pending", "resolved", "closed"}
 _DEFAULT_PRIORITY = "normal"
 _DEFAULT_STATUS = "open"
 
-_DEFAULT_RATE_LIMITER = syncro.AsyncRateLimiter(limit=180, interval=60.0)
-
-
 @dataclass(slots=True)
 class TicketImportSummary:
     mode: str
@@ -237,7 +234,7 @@ async def import_ticket_by_id(
     *,
     rate_limiter: syncro.AsyncRateLimiter | None = None,
 ) -> TicketImportSummary:
-    limiter = rate_limiter or _DEFAULT_RATE_LIMITER
+    limiter = rate_limiter or await syncro.get_rate_limiter()
     summary = TicketImportSummary(mode="single")
     log_info("Starting Syncro ticket import", mode="single", ticket_id=ticket_id)
     ticket = await syncro.get_ticket(ticket_id, rate_limiter=limiter)
@@ -265,7 +262,7 @@ async def import_ticket_range(
     *,
     rate_limiter: syncro.AsyncRateLimiter | None = None,
 ) -> TicketImportSummary:
-    limiter = rate_limiter or _DEFAULT_RATE_LIMITER
+    limiter = rate_limiter or await syncro.get_rate_limiter()
     summary = TicketImportSummary(mode="range")
     log_info("Starting Syncro ticket import", mode="range", start_id=start_id, end_id=end_id)
     for identifier in range(start_id, end_id + 1):
@@ -305,7 +302,7 @@ async def import_all_tickets(
     *,
     rate_limiter: syncro.AsyncRateLimiter | None = None,
 ) -> TicketImportSummary:
-    limiter = rate_limiter or _DEFAULT_RATE_LIMITER
+    limiter = rate_limiter or await syncro.get_rate_limiter()
     summary = TicketImportSummary(mode="all")
     log_info("Starting Syncro ticket import", mode="all")
     page = 1
