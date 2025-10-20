@@ -1,3 +1,4 @@
+- 2025-10-20, 11:59 UTC, Feature, Reworked knowledge base portal layout to list articles and moved article reading to dedicated views
 - 2025-12-06, 10:00 UTC, Feature, Added Ollama-powered ticket AI summaries with resolution insights and admin workspace display
 - 2025-12-06, 08:30 UTC, Fix, Expanded the upgrade cleanup to purge truncated ~myportal metadata directories so pip stops warning about invalid distributions during installs
 - 2025-10-20, 11:41 UTC, Fix, Split knowledge base article sections into a dedicated panel separate from article metadata in the admin editor
