@@ -1,0 +1,377 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Iterable, Mapping
+
+from app.core.logging import log_error
+from app.repositories import knowledge_base as kb_repo
+from app.repositories import user_companies as user_company_repo
+from app.services import modules as modules_service
+
+PermissionScope = str
+
+
+@dataclass(slots=True)
+class ArticleAccessContext:
+    user: Mapping[str, Any] | None
+    user_id: int | None
+    is_super_admin: bool
+    memberships: dict[int, Mapping[str, Any]]
+
+
+def _isoformat(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat()
+
+
+def _normalise_ids(values: Iterable[int]) -> list[int]:
+    normalised: list[int] = []
+    for value in values:
+        try:
+            normalised.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(normalised))
+
+
+async def build_access_context(user: Mapping[str, Any] | None) -> ArticleAccessContext:
+    if not user:
+        return ArticleAccessContext(user=None, user_id=None, is_super_admin=False, memberships={})
+    try:
+        user_id = int(user.get("id"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        user_id = None
+    memberships: dict[int, Mapping[str, Any]] = {}
+    if user_id is not None:
+        try:
+            membership_rows = await user_company_repo.list_companies_for_user(user_id)
+        except Exception as exc:  # pragma: no cover - defensive
+            log_error("Failed to list company memberships for knowledge base", error=str(exc))
+            membership_rows = []
+        for membership in membership_rows:
+            company_id = membership.get("company_id")
+            try:
+                company_id_int = int(company_id)
+            except (TypeError, ValueError):
+                continue
+            memberships[company_id_int] = membership
+    is_super_admin = bool(user.get("is_super_admin"))
+    return ArticleAccessContext(
+        user=user,
+        user_id=user_id,
+        is_super_admin=is_super_admin,
+        memberships=memberships,
+    )
+
+
+def _article_visible(article: Mapping[str, Any], context: ArticleAccessContext) -> bool:
+    scope = str(article.get("permission_scope") or "anonymous")
+    if scope == "anonymous":
+        return True
+    if context.is_super_admin:
+        return True
+    if context.user_id is None:
+        return False
+    if scope == "super_admin":
+        return context.is_super_admin
+    if scope == "user":
+        allowed = _normalise_ids(article.get("allowed_user_ids", []))
+        return context.user_id in allowed
+    if scope == "company":
+        companies = _normalise_ids(article.get("company_ids", []))
+        if not companies:
+            return bool(context.memberships)
+        return any(company_id in context.memberships for company_id in companies)
+    if scope == "company_admin":
+        admin_companies = _normalise_ids(article.get("company_admin_ids", []))
+        if admin_companies:
+            return any(
+                company_id in context.memberships and bool(context.memberships[company_id].get("is_admin"))
+                for company_id in admin_companies
+            )
+        return any(bool(membership.get("is_admin")) for membership in context.memberships.values())
+    return False
+
+
+def _serialise_article(
+    article: Mapping[str, Any],
+    *,
+    include_content: bool,
+    include_permissions: bool,
+) -> dict[str, Any]:
+    base = {
+        "id": int(article.get("id")),
+        "slug": str(article.get("slug")),
+        "title": str(article.get("title")),
+        "summary": article.get("summary"),
+        "permission_scope": str(article.get("permission_scope")),
+        "is_published": bool(article.get("is_published")),
+        "updated_at": article.get("updated_at_utc"),
+        "updated_at_iso": _isoformat(article.get("updated_at_utc")),
+        "published_at": article.get("published_at_utc"),
+        "published_at_iso": _isoformat(article.get("published_at_utc")),
+        "allowed_user_ids": [],
+        "allowed_company_ids": [],
+        "company_admin_ids": [],
+        "created_by": article.get("created_by"),
+        "created_at": article.get("created_at_utc"),
+        "created_at_iso": _isoformat(article.get("created_at_utc")),
+    }
+    if include_content:
+        base["content"] = article.get("content")
+    if include_permissions:
+        base.update(
+            {
+                "allowed_user_ids": _normalise_ids(article.get("allowed_user_ids", [])),
+                "allowed_company_ids": _normalise_ids(article.get("company_ids", [])),
+                "company_admin_ids": _normalise_ids(article.get("company_admin_ids", [])),
+            }
+        )
+    return base
+
+
+async def list_articles_for_context(
+    context: ArticleAccessContext,
+    *,
+    include_unpublished: bool = False,
+    include_permissions: bool = False,
+) -> list[dict[str, Any]]:
+    articles = await kb_repo.list_articles(include_unpublished=include_unpublished)
+    visible: list[dict[str, Any]] = []
+    for article in articles:
+        if include_unpublished or article.get("is_published"):
+            if _article_visible(article, context) or include_permissions:
+                visible.append(
+                    _serialise_article(
+                        article,
+                        include_content=False,
+                        include_permissions=include_permissions,
+                    )
+                )
+        elif include_permissions and context.is_super_admin:
+            visible.append(
+                _serialise_article(
+                    article,
+                    include_content=False,
+                    include_permissions=True,
+                )
+            )
+    return visible
+
+
+async def get_article_by_slug_for_context(
+    slug: str,
+    context: ArticleAccessContext,
+    *,
+    include_unpublished: bool = False,
+    include_permissions: bool = False,
+) -> dict[str, Any] | None:
+    article = await kb_repo.get_article_by_slug(slug)
+    if not article:
+        return None
+    if not include_unpublished and not article.get("is_published") and not context.is_super_admin:
+        return None
+    if not _article_visible(article, context) and not (include_permissions and context.is_super_admin):
+        return None
+    return _serialise_article(
+        article,
+        include_content=True,
+        include_permissions=include_permissions,
+    )
+
+
+async def create_article(
+    payload: Mapping[str, Any],
+    *,
+    author_id: int | None,
+) -> dict[str, Any]:
+    permission_scope = str(payload.get("permission_scope") or "anonymous")
+    is_published = bool(payload.get("is_published", False))
+    now = datetime.now(timezone.utc)
+    published_at = now if is_published else None
+    created = await kb_repo.create_article(
+        slug=str(payload.get("slug")),
+        title=str(payload.get("title")),
+        summary=payload.get("summary"),
+        content=str(payload.get("content")),
+        permission_scope=permission_scope,
+        is_published=is_published,
+        published_at=published_at,
+        created_by=author_id,
+    )
+    await _sync_relations(created["id"], permission_scope, payload)
+    refreshed = await kb_repo.get_article_by_id(created["id"])
+    if not refreshed:
+        raise RuntimeError("Failed to load knowledge base article after creation")
+    return refreshed
+
+
+async def update_article(article_id: int, payload: Mapping[str, Any]) -> dict[str, Any]:
+    current = await kb_repo.get_article_by_id(article_id)
+    if not current:
+        raise ValueError("Article not found")
+    updates: dict[str, Any] = {}
+    if "slug" in payload:
+        updates["slug"] = payload.get("slug")
+    if "title" in payload:
+        updates["title"] = payload.get("title")
+    if "summary" in payload:
+        updates["summary"] = payload.get("summary")
+    if "content" in payload:
+        updates["content"] = payload.get("content")
+    if "permission_scope" in payload:
+        updates["permission_scope"] = payload.get("permission_scope")
+    published_flag = payload.get("is_published")
+    if published_flag is not None:
+        updates["is_published"] = bool(published_flag)
+        updates["published_at"] = datetime.now(timezone.utc) if updates["is_published"] else None
+    if updates:
+        current = await kb_repo.update_article(article_id, **updates)
+    permission_scope = str(current.get("permission_scope"))
+    await _sync_relations(article_id, permission_scope, payload)
+    refreshed = await kb_repo.get_article_by_id(article_id)
+    if not refreshed:
+        raise RuntimeError("Failed to refresh article after update")
+    return refreshed
+
+
+async def delete_article(article_id: int) -> None:
+    await kb_repo.delete_article(article_id)
+
+
+async def _sync_relations(article_id: int, permission_scope: str, payload: Mapping[str, Any]) -> None:
+    allowed_users = payload.get("allowed_user_ids") or []
+    allowed_companies = payload.get("allowed_company_ids") or []
+    await kb_repo.replace_article_users(article_id, allowed_users if permission_scope == "user" else [])
+    if permission_scope == "company":
+        await kb_repo.replace_article_companies(article_id, allowed_companies, require_admin=False)
+        await kb_repo.replace_article_companies(article_id, [], require_admin=True)
+    elif permission_scope == "company_admin":
+        await kb_repo.replace_article_companies(article_id, allowed_companies, require_admin=True)
+        await kb_repo.replace_article_companies(article_id, [], require_admin=False)
+    else:
+        await kb_repo.replace_article_companies(article_id, [], require_admin=False)
+        await kb_repo.replace_article_companies(article_id, [], require_admin=True)
+
+
+def _build_excerpt(content: str, query: str, summary: str | None) -> str | None:
+    lowered = content.lower()
+    query_lower = query.lower()
+    index = lowered.find(query_lower)
+    if index == -1:
+        source = summary or content
+        if not source:
+            return None
+        return source[:240].strip()
+    start = max(0, index - 160)
+    end = min(len(content), index + 160)
+    excerpt = content[start:end].strip()
+    if start > 0:
+        excerpt = "…" + excerpt
+    if end < len(content):
+        excerpt = excerpt + "…"
+    return excerpt
+
+
+def _render_prompt(query: str, articles: list[Mapping[str, Any]]) -> str:
+    lines = [
+        "You are an assistant helping users navigate a knowledge base.",
+        "Summarise the relevant articles for the query below.",
+        "Always cite article slugs in your response.",
+        "",
+        f"Query: {query}",
+        "",
+        "Articles:",
+    ]
+    for article in articles:
+        content = str(article.get("content") or "")
+        snippet = content[:1000]
+        lines.extend(
+            [
+                f"- Title: {article.get('title')}",
+                f"  Slug: {article.get('slug')}",
+                f"  Summary: {article.get('summary') or 'N/A'}",
+                "  Content snippet:",
+                f"  {snippet}",
+                "",
+            ]
+        )
+    lines.append("Provide a concise answer with bullet points when appropriate.")
+    return "\n".join(lines)
+
+
+async def search_articles(query: str, context: ArticleAccessContext, *, limit: int = 8) -> dict[str, Any]:
+    candidates = await kb_repo.list_articles(include_unpublished=context.is_super_admin)
+    visible: list[dict[str, Any]] = []
+    lowered = query.lower()
+    for article in candidates:
+        if not article.get("is_published") and not context.is_super_admin:
+            continue
+        if not _article_visible(article, context):
+            continue
+        content = str(article.get("content") or "")
+        summary = article.get("summary") or ""
+        haystack = " ".join([article.get("title") or "", summary, content]).lower()
+        if lowered in haystack:
+            visible.append(article)
+    if not visible:
+        # fall back to most recent visible articles when no text match is found
+        for article in candidates:
+            if len(visible) >= limit:
+                break
+            if not article.get("is_published") and not context.is_super_admin:
+                continue
+            if _article_visible(article, context):
+                visible.append(article)
+    visible = visible[:limit]
+    results: list[dict[str, Any]] = []
+    for article in visible:
+        content = str(article.get("content") or "")
+        summary = article.get("summary")
+        results.append(
+            {
+                "id": int(article.get("id")),
+                "slug": str(article.get("slug")),
+                "title": str(article.get("title")),
+                "summary": summary,
+                "excerpt": _build_excerpt(content, query, summary),
+                "updated_at_iso": _isoformat(article.get("updated_at_utc")),
+            }
+        )
+    ollama_status = "skipped"
+    ollama_model: str | None = None
+    ollama_summary: str | None = None
+    if results:
+        prompt_articles = visible[: min(3, len(visible))]
+        prompt = _render_prompt(query, prompt_articles)
+        try:
+            response = await modules_service.trigger_module("ollama", {"prompt": prompt})
+        except Exception as exc:  # pragma: no cover - network interaction
+            log_error("Knowledge base Ollama search failed", error=str(exc))
+            ollama_status = "error"
+            ollama_summary = None
+        else:
+            ollama_status = str(response.get("status") or "unknown")
+            ollama_model = response.get("model")
+            payload = response.get("response")
+            if isinstance(payload, Mapping):
+                ollama_summary = payload.get("response") or payload.get("message")
+                if not ollama_model:
+                    model_candidate = payload.get("model")
+                    if isinstance(model_candidate, str):
+                        ollama_model = model_candidate
+            elif isinstance(payload, str):
+                ollama_summary = payload
+    return {
+        "results": results,
+        "ollama_status": ollama_status,
+        "ollama_model": ollama_model,
+        "ollama_summary": ollama_summary,
+    }
+

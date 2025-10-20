@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, Request, status
 
 from app.repositories import company_memberships as membership_repo
+from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.security.session import SessionData, session_manager
 
@@ -47,3 +48,22 @@ async def require_helpdesk_technician(current_user: dict = Depends(get_current_u
             detail="Helpdesk technician privileges required",
         )
     return current_user
+
+
+async def get_optional_user(request: Request) -> dict | None:
+    session = await session_manager.load_session(request)
+    if not session:
+        return None
+    request.state.session = session
+    user = await user_repo.get_user_by_id(session.user_id)
+    if not user:
+        return None
+    request.state.active_company_id = session.active_company_id
+    if session.active_company_id is not None:
+        try:
+            membership = await user_company_repo.get_user_company(user["id"], int(session.active_company_id))
+        except Exception:  # pragma: no cover - defensive
+            membership = None
+        if membership is not None:
+            request.state.active_membership = membership
+    return user
