@@ -1,3 +1,4 @@
+- 2025-11-29, 12:30 UTC, Feature, Added ChatGPT MCP integration module with secure ticket tools and JSON-RPC endpoint for ChatGPT
 - 2025-10-20, 09:05 UTC, Fix, Treated integration module enable submissions as truthy when checkboxes send numeric values so toggles persist
 - 2025-11-28, 09:30 UTC, Feature, Added helpdesk.technician role permission with constrained ticket workspace access for non-super-admin technicians
 - 2025-10-20, 08:07 UTC, Feature, Enabled public self-service registration with requester-scoped ticket access and public-only replies for non-admin users
