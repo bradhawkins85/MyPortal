@@ -46,6 +46,10 @@ async def test_create_ticket_returns_inserted_record(monkeypatch):
         "ai_summary_model": None,
         "ai_resolution_state": None,
         "ai_summary_updated_at": None,
+        "ai_tags": "[\"printer\", \"hardware\"]",
+        "ai_tags_status": "succeeded",
+        "ai_tags_model": "llama3",
+        "ai_tags_updated_at": None,
         "created_at": None,
         "updated_at": None,
         "closed_at": None,
@@ -67,6 +71,7 @@ async def test_create_ticket_returns_inserted_record(monkeypatch):
     )
 
     assert record["id"] == 42
+    assert record["ai_tags"] == ["printer", "hardware"]
     assert dummy_db.fetch_sql == "SELECT * FROM tickets WHERE id = %s"
     assert dummy_db.fetch_params == (42,)
 
@@ -94,6 +99,7 @@ async def test_create_ticket_falls_back_when_fetch_missing(monkeypatch):
     assert record["assigned_user_id"] == 11
     assert record["priority"] == "urgent"
     assert record["ai_summary"] is None
+    assert record["ai_tags"] == []
 
 
 @pytest.mark.anyio

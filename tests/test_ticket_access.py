@@ -330,6 +330,23 @@ def test_non_admin_reply_forces_public_visibility(monkeypatch, active_session):
         fake_has_helpdesk_permission,
     )
 
+    async def fake_refresh_summary(ticket_id: int):
+        assert ticket_id == ticket["id"]
+
+    async def fake_refresh_tags(ticket_id: int):
+        assert ticket_id == ticket["id"]
+
+    monkeypatch.setattr(
+        tickets_routes.tickets_service,
+        "refresh_ticket_ai_summary",
+        fake_refresh_summary,
+    )
+    monkeypatch.setattr(
+        tickets_routes.tickets_service,
+        "refresh_ticket_ai_tags",
+        fake_refresh_tags,
+    )
+
     app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
         "id": active_session.user_id,
         "email": "user@example.com",
@@ -602,6 +619,23 @@ def test_helpdesk_reply_preserves_internal_flag(monkeypatch, active_session):
         tickets_routes,
         "_has_helpdesk_permission",
         fake_has_helpdesk_permission,
+    )
+
+    async def fake_refresh_summary(ticket_id: int):
+        assert ticket_id == ticket["id"]
+
+    async def fake_refresh_tags(ticket_id: int):
+        assert ticket_id == ticket["id"]
+
+    monkeypatch.setattr(
+        tickets_routes.tickets_service,
+        "refresh_ticket_ai_summary",
+        fake_refresh_summary,
+    )
+    monkeypatch.setattr(
+        tickets_routes.tickets_service,
+        "refresh_ticket_ai_tags",
+        fake_refresh_tags,
     )
 
     app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
