@@ -1,11 +1,62 @@
 from __future__ import annotations
 
+import json
+import re
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from app.core.database import db
 
 TicketRecord = dict[str, Any]
+
+
+def _deserialise_tags(value: Any) -> list[str]:
+    if value is None or value == "":
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parts = [segment.strip() for segment in re.split(r"[,\n;]+", text) if segment.strip()]
+            return parts
+        if isinstance(parsed, list):
+            return [str(item).strip() for item in parsed if str(item).strip()]
+        if isinstance(parsed, str):
+            single = parsed.strip()
+            return [single] if single else []
+        if isinstance(parsed, dict):
+            candidate = parsed.get("tags") or parsed.get("keywords")
+            if candidate:
+                return _deserialise_tags(candidate)
+    return []
+
+
+def _serialise_tags(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        return json.dumps([cleaned], ensure_ascii=False)
+    iterable: Iterable[Any]
+    if isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray)):
+        iterable = value
+    else:
+        return None
+    tags: list[str] = []
+    for item in iterable:
+        text = str(item).strip()
+        if not text:
+            continue
+        if text not in tags:
+            tags.append(text)
+    return json.dumps(tags, ensure_ascii=False) if tags else None
 
 
 def _make_aware(value: Any) -> datetime | None:
@@ -25,6 +76,8 @@ def _normalise_ticket(row: dict[str, Any]) -> TicketRecord:
             record[key] = int(record[key])
     for key in ("created_at", "updated_at", "closed_at", "ai_summary_updated_at"):
         record[key] = _make_aware(record.get(key))
+    record["ai_tags"] = _deserialise_tags(record.get("ai_tags"))
+    record["ai_tags_updated_at"] = _make_aware(record.get("ai_tags_updated_at"))
     return record
 
 
@@ -99,6 +152,10 @@ async def create_ticket(
         "ai_summary_model": None,
         "ai_resolution_state": None,
         "ai_summary_updated_at": None,
+        "ai_tags": [],
+        "ai_tags_status": None,
+        "ai_tags_model": None,
+        "ai_tags_updated_at": None,
         "created_at": None,
         "updated_at": None,
         "closed_at": None,
@@ -206,6 +263,10 @@ async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     assignments: list[str] = []
     params: list[Any] = []
     for key, value in fields.items():
+        if key == "ai_tags":
+            assignments.append(f"{key} = %s")
+            params.append(_serialise_tags(value))
+            continue
         assignments.append(f"{key} = %s")
         params.append(value)
     assignments.append("updated_at = UTC_TIMESTAMP(6)")
