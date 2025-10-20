@@ -48,6 +48,19 @@
   const sectionsContainer = document.querySelector('[data-kb-sections]');
   const addSectionButton = document.querySelector('[data-kb-add-section]');
 
+  const editorObservers = new WeakMap();
+  const imageResize = {
+    overlay: null,
+    handle: null,
+    activeImage: null,
+    activeEditor: null,
+    pointerId: null,
+    startWidth: 0,
+    startX: 0,
+    maxWidth: Infinity,
+    minWidth: 32,
+  };
+
   const scopeHelpMessages = {
     anonymous: 'Public articles are visible to anyone with the URL.',
     user: 'Only the selected users may view this article. Leaving the list empty revokes access.',
@@ -126,6 +139,9 @@
     if (!sectionsContainer) {
       return;
     }
+    sectionsContainer.querySelectorAll('[data-kb-section-editor]').forEach((existingEditor) => {
+      destroySectionEditor(existingEditor);
+    });
     sectionsContainer.innerHTML = '';
     if (!sections || sections.length === 0) {
       const empty = document.createElement('p');
@@ -200,6 +216,7 @@
     editor.contentEditable = 'true';
     editor.dataset.kbSectionEditor = 'true';
     editor.innerHTML = section && section.content ? section.content : '<p><br></p>';
+    initialiseSectionEditor(editor);
 
     const controls = document.createElement('div');
     controls.className = 'kb-admin__section-controls';
@@ -231,6 +248,218 @@
     wrapper.appendChild(editor);
     wrapper.appendChild(controls);
     return wrapper;
+  }
+
+  function ensureImageOverlay() {
+    if (imageResize.overlay) {
+      return imageResize.overlay;
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'kb-admin__image-overlay';
+    overlay.hidden = true;
+    overlay.setAttribute('aria-hidden', 'true');
+    const handle = document.createElement('button');
+    handle.type = 'button';
+    handle.className = 'kb-admin__image-overlay-handle';
+    handle.setAttribute('aria-label', 'Resize image');
+    handle.tabIndex = -1;
+    overlay.appendChild(handle);
+    document.body.appendChild(overlay);
+    imageResize.overlay = overlay;
+    imageResize.handle = handle;
+
+    handle.addEventListener('pointerdown', startResizeSession);
+    handle.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+
+    return overlay;
+  }
+
+  function hideImageOverlay() {
+    if (imageResize.overlay) {
+      imageResize.overlay.hidden = true;
+      imageResize.overlay.style.left = '';
+      imageResize.overlay.style.top = '';
+      imageResize.overlay.style.width = '';
+      imageResize.overlay.style.height = '';
+    }
+    imageResize.activeImage = null;
+    imageResize.activeEditor = null;
+    imageResize.pointerId = null;
+  }
+
+  function positionImageOverlay() {
+    if (!imageResize.overlay || imageResize.overlay.hidden || !imageResize.activeImage) {
+      return;
+    }
+    const image = imageResize.activeImage;
+    if (!document.body.contains(image)) {
+      hideImageOverlay();
+      return;
+    }
+    const rect = image.getBoundingClientRect();
+    const overlay = ensureImageOverlay();
+    overlay.style.width = `${rect.width}px`;
+    overlay.style.height = `${rect.height}px`;
+    overlay.style.left = `${Math.round(window.scrollX + rect.left)}px`;
+    overlay.style.top = `${Math.round(window.scrollY + rect.top)}px`;
+    overlay.hidden = false;
+  }
+
+  function showImageOverlay(editor, image) {
+    if (!editor || !image) {
+      return;
+    }
+    ensureImageOverlay();
+    imageResize.activeImage = image;
+    imageResize.activeEditor = editor;
+    positionImageOverlay();
+  }
+
+  function endResizeSession(shouldUpdatePreview) {
+    document.removeEventListener('pointermove', handleResizePointerMove);
+    document.removeEventListener('pointerup', handleResizePointerUp);
+    document.removeEventListener('pointercancel', handleResizePointerCancel);
+    imageResize.pointerId = null;
+    if (imageResize.activeImage) {
+      positionImageOverlay();
+    }
+    if (shouldUpdatePreview) {
+      ensurePreviewMatchesForm();
+    }
+  }
+
+  function startResizeSession(event) {
+    if (!imageResize.activeImage || !imageResize.activeEditor) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const image = imageResize.activeImage;
+    const editor = imageResize.activeEditor;
+    if (!editor.contains(image)) {
+      return;
+    }
+    const imageRect = image.getBoundingClientRect();
+    const editorRect = editor.getBoundingClientRect();
+    imageResize.pointerId = event.pointerId;
+    imageResize.startWidth = imageRect.width;
+    imageResize.startX = event.clientX;
+    const availableWidth = Math.max(32, editorRect.right - imageRect.left - 16);
+    const naturalWidth = image.naturalWidth || Infinity;
+    imageResize.maxWidth = Math.max(32, Math.min(availableWidth, naturalWidth));
+    const proposedMin = Math.max(32, Math.min(48, imageRect.width));
+    imageResize.minWidth = Math.min(proposedMin, imageResize.maxWidth);
+    image.style.height = 'auto';
+    document.addEventListener('pointermove', handleResizePointerMove);
+    document.addEventListener('pointerup', handleResizePointerUp);
+    document.addEventListener('pointercancel', handleResizePointerCancel);
+  }
+
+  function handleResizePointerMove(event) {
+    if (imageResize.pointerId != null && event.pointerId !== imageResize.pointerId) {
+      return;
+    }
+    const image = imageResize.activeImage;
+    if (!image) {
+      return;
+    }
+    event.preventDefault();
+    const deltaX = event.clientX - imageResize.startX;
+    let width = imageResize.startWidth + deltaX;
+    width = Math.max(imageResize.minWidth, Math.min(imageResize.maxWidth, width));
+    image.style.width = `${Math.round(width)}px`;
+    image.style.maxWidth = '100%';
+    positionImageOverlay();
+  }
+
+  function handleResizePointerUp(event) {
+    if (imageResize.pointerId != null && event.pointerId !== imageResize.pointerId) {
+      return;
+    }
+    endResizeSession(true);
+  }
+
+  function handleResizePointerCancel(event) {
+    if (imageResize.pointerId != null && event.pointerId !== imageResize.pointerId) {
+      return;
+    }
+    endResizeSession(false);
+  }
+
+  function decorateEditorImages(editor) {
+    if (!editor) {
+      return;
+    }
+    editor.querySelectorAll('img').forEach((image) => {
+      if (image.dataset.kbImageDecorated === 'true') {
+        return;
+      }
+      image.dataset.kbImageDecorated = 'true';
+      image.setAttribute('draggable', 'false');
+      if (!image.style.maxWidth) {
+        image.style.maxWidth = '100%';
+      }
+      image.style.height = image.style.height || 'auto';
+      if ('loading' in image && !image.loading) {
+        image.loading = 'lazy';
+      }
+      image.addEventListener('load', () => {
+        if (imageResize.activeImage === image) {
+          positionImageOverlay();
+        }
+      });
+    });
+  }
+
+  function initialiseSectionEditor(editor) {
+    if (!editor || editor.dataset.kbEditorReady === 'true') {
+      return;
+    }
+    editor.dataset.kbEditorReady = 'true';
+    decorateEditorImages(editor);
+    editor.addEventListener('click', (event) => {
+      const targetImage = event.target.closest('img');
+      if (targetImage && editor.contains(targetImage)) {
+        showImageOverlay(editor, targetImage);
+      } else if (imageResize.activeEditor === editor) {
+        hideImageOverlay();
+      }
+    });
+    editor.addEventListener('input', () => {
+      decorateEditorImages(editor);
+    });
+    editor.addEventListener('paste', () => {
+      window.requestAnimationFrame(() => {
+        decorateEditorImages(editor);
+      });
+    });
+    const observer = new MutationObserver(() => {
+      decorateEditorImages(editor);
+      if (imageResize.activeImage && !editor.contains(imageResize.activeImage)) {
+        hideImageOverlay();
+      } else {
+        positionImageOverlay();
+      }
+    });
+    observer.observe(editor, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'src'] });
+    editorObservers.set(editor, observer);
+  }
+
+  function destroySectionEditor(editor) {
+    if (!editor) {
+      return;
+    }
+    const observer = editorObservers.get(editor);
+    if (observer) {
+      observer.disconnect();
+      editorObservers.delete(editor);
+    }
+    if (imageResize.activeEditor === editor) {
+      hideImageOverlay();
+    }
   }
 
   function addSection(section) {
@@ -631,6 +860,8 @@
       } else if (event.target.closest('[data-kb-section-down]')) {
         moveSection(section, 1);
       } else if (event.target.closest('[data-kb-section-delete]')) {
+        const editor = section.querySelector('[data-kb-section-editor]');
+        destroySectionEditor(editor);
         section.remove();
         if (!sectionsContainer.querySelector('[data-kb-section]')) {
           renderSections([]);
@@ -645,6 +876,41 @@
       addSection({ heading: '', content: '<p><br></p>' });
     });
   }
+
+  window.addEventListener('resize', () => {
+    positionImageOverlay();
+  });
+
+  window.addEventListener(
+    'scroll',
+    () => {
+      positionImageOverlay();
+    },
+    true,
+  );
+
+  document.addEventListener('pointerdown', (event) => {
+    if (!imageResize.overlay || imageResize.overlay.hidden) {
+      return;
+    }
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      hideImageOverlay();
+      return;
+    }
+    if (imageResize.handle && imageResize.handle.contains(target)) {
+      return;
+    }
+    const imageTarget = target.closest('img');
+    if (imageTarget && imageResize.activeEditor && imageResize.activeEditor.contains(imageTarget)) {
+      return;
+    }
+    const editorTarget = target.closest('[data-kb-section-editor]');
+    if (editorTarget === imageResize.activeEditor) {
+      return;
+    }
+    hideImageOverlay();
+  });
 
   // Initialise select options for blank state.
   renderUserOptions([]);
