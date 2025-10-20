@@ -160,6 +160,19 @@ def test_non_admin_ticket_listing_scoped_to_requester(monkeypatch):
     monkeypatch.setattr(tickets_routes.tickets_repo, "list_tickets", fake_list_tickets)
     monkeypatch.setattr(tickets_routes.tickets_repo, "count_tickets", fake_count_tickets)
 
+    permission_calls: dict[str, bool] = {}
+
+    async def fake_has_helpdesk_permission(current_user: dict) -> bool:
+        permission_calls["called"] = True
+        return False
+
+    monkeypatch.setattr(
+        tickets_routes,
+        "_has_helpdesk_permission",
+        fake_has_helpdesk_permission,
+    )
+    assert tickets_routes._has_helpdesk_permission is fake_has_helpdesk_permission
+
     app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
         "id": 5,
         "email": "user@example.com",
@@ -182,6 +195,7 @@ def test_non_admin_ticket_listing_scoped_to_requester(monkeypatch):
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
+    assert permission_calls.get("called") is True
     assert captured["list"]["requester_id"] == 5
     assert captured["list"]["company_id"] is None
     assert captured["list"]["assigned_user_id"] is None
@@ -223,6 +237,26 @@ def test_non_admin_cannot_view_other_ticket(monkeypatch):
     monkeypatch.setattr(tickets_routes.tickets_repo, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(tickets_routes.tickets_repo, "list_replies", fake_list_replies)
     monkeypatch.setattr(tickets_routes.tickets_repo, "list_watchers", fake_list_watchers)
+
+    async def fake_has_helpdesk_permission(current_user: dict) -> bool:
+        assert current_user["id"] == 5
+        return False
+
+    monkeypatch.setattr(
+        tickets_routes,
+        "_has_helpdesk_permission",
+        fake_has_helpdesk_permission,
+    )
+
+    async def fake_has_helpdesk_permission(current_user: dict) -> bool:
+        assert current_user["id"] == 5
+        return False
+
+    monkeypatch.setattr(
+        tickets_routes,
+        "_has_helpdesk_permission",
+        fake_has_helpdesk_permission,
+    )
 
     app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
         "id": 5,
@@ -279,6 +313,16 @@ def test_non_admin_reply_forces_public_visibility(monkeypatch, active_session):
     monkeypatch.setattr(tickets_routes.tickets_repo, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(tickets_routes.tickets_repo, "create_reply", fake_create_reply)
     monkeypatch.setattr(session_manager, "load_session", fake_load_session)
+
+    async def fake_has_helpdesk_permission(current_user: dict) -> bool:
+        assert current_user["id"] == active_session.user_id
+        return False
+
+    monkeypatch.setattr(
+        tickets_routes,
+        "_has_helpdesk_permission",
+        fake_has_helpdesk_permission,
+    )
 
     app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
         "id": active_session.user_id,
@@ -363,3 +407,215 @@ def test_ticket_detail_filters_private_replies_for_requester(monkeypatch):
     assert body["watchers"] == []
     assert len(body["replies"]) == 1
     assert body["replies"][0]["body"] == "Public reply"
+
+
+def test_helpdesk_ticket_listing_allows_global_filters(monkeypatch):
+    now = datetime(2025, 1, 6, 9, 0, tzinfo=timezone.utc)
+    captured: dict[str, dict] = {}
+
+    async def fake_list_tickets(**kwargs):
+        captured["list"] = kwargs
+        return [
+            {
+                "id": 33,
+                "subject": "Escalated issue",
+                "description": "",
+                "status": "open",
+                "priority": "high",
+                "category": "Incident",
+                "module_slug": "billing",
+                "company_id": 123,
+                "requester_id": 42,
+                "assigned_user_id": 8,
+                "external_reference": "RMM-1",
+                "created_at": now,
+                "updated_at": now,
+                "closed_at": None,
+            }
+        ]
+
+    async def fake_count_tickets(**kwargs):
+        captured["count"] = kwargs
+        return 1
+
+    async def fake_has_helpdesk_permission(current_user: dict) -> bool:
+        assert current_user["id"] == 5
+        return True
+
+    monkeypatch.setattr(tickets_routes.tickets_repo, "list_tickets", fake_list_tickets)
+    monkeypatch.setattr(tickets_routes.tickets_repo, "count_tickets", fake_count_tickets)
+    monkeypatch.setattr(
+        tickets_routes,
+        "_has_helpdesk_permission",
+        fake_has_helpdesk_permission,
+    )
+
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": 5,
+        "email": "helpdesk@example.com",
+        "is_super_admin": False,
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/tickets",
+                params={
+                    "company_id": 123,
+                    "assigned_user_id": 8,
+                    "module_slug": "billing",
+                    "status": "open",
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert captured["list"]["company_id"] == 123
+    assert captured["list"]["assigned_user_id"] == 8
+    assert captured["list"]["module_slug"] == "billing"
+    assert captured["list"]["requester_id"] is None
+    assert captured["count"]["company_id"] == 123
+
+
+def test_helpdesk_can_view_other_ticket(monkeypatch):
+    now = datetime(2025, 1, 6, 11, 0, tzinfo=timezone.utc)
+    captured: dict[str, object] = {}
+
+    async def fake_get_ticket(ticket_id: int):
+        return {
+            "id": ticket_id,
+            "subject": "Customer outage",
+            "description": "",
+            "status": "open",
+            "priority": "high",
+            "category": "Incident",
+            "module_slug": None,
+            "company_id": 99,
+            "requester_id": 77,
+            "assigned_user_id": 12,
+            "external_reference": None,
+            "created_at": now,
+            "updated_at": now,
+            "closed_at": None,
+        }
+
+    async def fake_list_replies(ticket_id: int, *, include_internal: bool = True):
+        captured["include_internal"] = include_internal
+        return []
+
+    async def fake_list_watchers(ticket_id: int):
+        captured["watchers"] = True
+        return [
+            {
+                "id": 1,
+                "ticket_id": ticket_id,
+                "user_id": 12,
+                "created_at": now,
+            }
+        ]
+
+    async def fake_has_helpdesk_permission(current_user: dict) -> bool:
+        assert current_user["id"] == 5
+        return True
+
+    monkeypatch.setattr(tickets_routes.tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(tickets_routes.tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(tickets_routes.tickets_repo, "list_watchers", fake_list_watchers)
+    monkeypatch.setattr(
+        tickets_routes,
+        "_has_helpdesk_permission",
+        fake_has_helpdesk_permission,
+    )
+
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": 5,
+        "email": "helpdesk@example.com",
+        "is_super_admin": False,
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/tickets/44")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert captured.get("include_internal") is True
+    assert captured.get("watchers") is True
+    assert len(body["watchers"]) == 1
+    assert body["watchers"][0]["user_id"] == 12
+
+
+def test_helpdesk_reply_preserves_internal_flag(monkeypatch, active_session):
+    now = datetime(2025, 1, 6, 12, 0, tzinfo=timezone.utc)
+    ticket = {
+        "id": 78,
+        "subject": "Escalation",
+        "description": "",
+        "status": "open",
+        "priority": "normal",
+        "category": None,
+        "module_slug": None,
+        "company_id": None,
+        "requester_id": 99,
+        "assigned_user_id": None,
+        "external_reference": None,
+        "created_at": now,
+        "updated_at": now,
+        "closed_at": None,
+    }
+
+    async def fake_get_ticket(ticket_id: int):
+        assert ticket_id == ticket["id"]
+        return ticket
+
+    async def fake_create_reply(**kwargs):
+        assert kwargs["is_internal"] is True
+        return {
+            "id": 91,
+            "ticket_id": ticket["id"],
+            "author_id": active_session.user_id,
+            "body": kwargs["body"],
+            "is_internal": True,
+            "created_at": now,
+        }
+
+    async def fake_load_session(request, *, allow_inactive: bool = False):
+        return active_session
+
+    async def fake_has_helpdesk_permission(current_user: dict) -> bool:
+        assert current_user["id"] == active_session.user_id
+        return True
+
+    monkeypatch.setattr(tickets_routes.tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(tickets_routes.tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(session_manager, "load_session", fake_load_session)
+    monkeypatch.setattr(
+        tickets_routes,
+        "_has_helpdesk_permission",
+        fake_has_helpdesk_permission,
+    )
+
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "helpdesk@example.com",
+        "is_super_admin": False,
+    }
+    app.dependency_overrides[auth_dependencies.get_current_session] = lambda: active_session
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/tickets/{ticket['id']}/replies",
+                json={"body": "Internal note", "is_internal": True},
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["reply"]["is_internal"] is True
+    assert payload["ticket"]["id"] == ticket["id"]
