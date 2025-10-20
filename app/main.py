@@ -43,6 +43,7 @@ from app.api.routes import (
     companies,
     forms as forms_api,
     invoices as invoices_api,
+    knowledge_base as knowledge_base_api,
     licenses as licenses_api,
     memberships,
     m365 as m365_api,
@@ -92,6 +93,7 @@ from app.security.api_keys import mask_api_key
 from app.services import audit as audit_service
 from app.services import automations as automations_service
 from app.services import email as email_service
+from app.services import knowledge_base as knowledge_base_service
 from app.services import m365 as m365_service
 from app.services import modules as modules_service
 from app.services import products as products_service
@@ -149,6 +151,10 @@ tags_metadata = [
     },
     {"name": "Office365", "description": "Microsoft 365 credential management and synchronisation APIs."},
     {"name": "Notifications", "description": "System-wide and user-specific notification feeds."},
+    {
+        "name": "Knowledge Base",
+        "description": "Permission-scoped articles with Ollama-assisted semantic search.",
+    },
     {"name": "Shop", "description": "Product catalogue management and visibility controls."},
     {
         "name": "Tickets",
@@ -288,6 +294,7 @@ app.include_router(users.router)
 app.include_router(companies.router)
 app.include_router(licenses_api.router)
 app.include_router(forms_api.router)
+app.include_router(knowledge_base_api.router)
 app.include_router(roles.router)
 app.include_router(memberships.router)
 app.include_router(m365_api.router)
@@ -345,7 +352,11 @@ async def _is_helpdesk_technician(user: Mapping[str, Any], request: Request | No
     except (TypeError, ValueError):
         result = False
     else:
-        result = await membership_repo.user_has_permission(user_id_int, "helpdesk.technician")
+        try:
+            result = await membership_repo.user_has_permission(user_id_int, "helpdesk.technician")
+        except Exception as exc:  # pragma: no cover - defensive fallback for tests without DB
+            log_error("Failed to determine helpdesk technician role", error=str(exc))
+            result = False
     if request is not None:
         request.state.is_helpdesk_technician = bool(result)
     return bool(result)
@@ -623,6 +634,74 @@ async def _build_base_context(
                 log_error("Failed to count unread notifications", error=str(exc))
         context["notification_unread_count"] = unread_count
     return context
+
+
+async def _build_public_context(
+    request: Request,
+    *,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    context: dict[str, Any] = {
+        "request": request,
+        "app_name": settings.app_name,
+        "current_year": datetime.utcnow().year,
+        "current_user": None,
+        "available_companies": [],
+        "active_company": None,
+        "active_company_id": None,
+        "active_membership": None,
+        "csrf_token": None,
+        "staff_permission": 0,
+        "is_super_admin": False,
+        "is_helpdesk_technician": False,
+        "is_company_admin": False,
+        "can_access_shop": False,
+        "can_access_cart": False,
+        "can_access_orders": False,
+        "can_access_forms": False,
+        "can_manage_assets": False,
+        "can_manage_licenses": False,
+        "can_manage_invoices": False,
+        "can_manage_staff": False,
+        "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
+        "notification_unread_count": 0,
+    }
+    if extra:
+        context.update(extra)
+    return context
+
+
+async def _build_portal_context(
+    request: Request,
+    user: dict[str, Any] | None,
+    *,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if user:
+        return await _build_base_context(request, user, extra=extra)
+    return await _build_public_context(request, extra=extra)
+
+
+async def _get_optional_user(
+    request: Request,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    session = await session_manager.load_session(request)
+    if not session:
+        return None, None
+    request.state.session = session
+    user = await user_repo.get_user_by_id(session.user_id)
+    if not user:
+        return None, None
+    request.state.active_company_id = session.active_company_id
+    membership = None
+    if session.active_company_id is not None:
+        try:
+            membership = await user_company_repo.get_user_company(user["id"], int(session.active_company_id))
+        except Exception:  # pragma: no cover - defensive
+            membership = None
+        if membership is not None:
+            request.state.active_membership = membership
+    return user, membership
 
 
 async def _build_consolidated_overview(
@@ -3023,6 +3102,46 @@ async def notifications_dashboard(request: Request):
     }
 
     return await _render_template("notifications/index.html", request, user, extra=extra)
+
+
+@app.get("/knowledge-base", response_class=HTMLResponse, tags=["Knowledge Base"])
+async def knowledge_base_index(request: Request, article: str | None = Query(None, alias="slug")):
+    user, _ = await _get_optional_user(request)
+    access_context = await knowledge_base_service.build_access_context(user)
+    include_unpublished = bool(user and user.get("is_super_admin"))
+    articles = await knowledge_base_service.list_articles_for_context(
+        access_context,
+        include_unpublished=include_unpublished,
+    )
+    active_article = None
+    active_slug = None
+    if article:
+        active_article = await knowledge_base_service.get_article_by_slug_for_context(
+            article,
+            access_context,
+            include_unpublished=include_unpublished,
+            include_permissions=include_unpublished,
+        )
+        if not active_article:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+        active_slug = article
+    elif articles:
+        active_slug = articles[0]["slug"]
+        active_article = await knowledge_base_service.get_article_by_slug_for_context(
+            active_slug,
+            access_context,
+            include_unpublished=include_unpublished,
+            include_permissions=include_unpublished,
+        )
+    extra_context = {
+        "title": "Knowledge base",
+        "kb_articles": articles,
+        "kb_active_article": active_article,
+        "kb_active_slug": active_slug,
+        "kb_is_super_admin": bool(user and user.get("is_super_admin")),
+    }
+    context = await _build_portal_context(request, user, extra=extra_context)
+    return templates.TemplateResponse("knowledge_base/index.html", context)
 
 
 @app.get("/notifications/settings", response_class=HTMLResponse)
