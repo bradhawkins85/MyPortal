@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     database_user: str = Field(validation_alias="DB_USER")
     database_password: str = Field(validation_alias="DB_PASSWORD")
     database_name: str = Field(validation_alias="DB_NAME")
+    migration_lock_timeout: int = Field(
+        default=60, validation_alias="MIGRATION_LOCK_TIMEOUT"
+    )
     redis_url: str | None = Field(default=None, validation_alias="REDIS_URL")
     session_cookie_name: str = Field(
         default="myportal_session",
