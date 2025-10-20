@@ -1,3 +1,4 @@
+- 2025-12-01, 09:05 UTC, Fix, Ensured automation inserts reuse their connection so creation succeeds without 500 errors
 - 2025-10-21, 20:45 UTC, Fix, Converted automation module context data to JSON-safe timestamps so the ticket automation admin page renders without template errors
 - 2025-11-29, 12:30 UTC, Feature, Added ChatGPT MCP integration module with secure ticket tools and JSON-RPC endpoint for ChatGPT
 - 2025-11-30, 12:20 UTC, Fix, Allowed scheduled system updates to restart myportal.service using sudo and user service fallbacks when direct restarts fail
