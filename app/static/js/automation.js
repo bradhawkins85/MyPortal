@@ -141,7 +141,9 @@
     idField.value = task.id || '';
     nameField.value = task.name || '';
     commandField.value = task.command || '';
-    companyField.value = task.company_id || '';
+    if (companyField) {
+      companyField.value = task.company_id || '';
+    }
     cronField.value = task.cron || '';
     descriptionField.value = task.description || '';
     maxRetriesField.value =
