@@ -1,3 +1,4 @@
+- 2025-10-20, 11:24 UTC, Feature, Split the knowledge base admin into a catalogue list with dedicated editor pages for creating and updating articles
 - 2025-10-20, 21:30 UTC, Fix, Guarded startup migrations with MySQL advisory locks so concurrent workers stop raising duplicate index errors
 - 2025-12-04, 09:20 UTC, Fix, Restored ticket detail layout to single-column grid when the sidebar is absent to prevent content squeezing
 - 2025-10-20, 11:13 UTC, Feature, Introduced WYSIWYG knowledge base section editor with ordered multi-section storage and sanitised HTML handling
