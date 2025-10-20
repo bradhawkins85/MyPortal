@@ -15,6 +15,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - Super admin UI for reviewing membership changes and role edits with filtering and sorting controls
 - Sidebar company switcher so administrators can pivot between assigned companies without re-authenticating
 - First-time visit redirects to a registration page when no users exist
+- Self-service registration for additional users grants requester-scoped ticket access with public reply visibility only
 - Basic shop with product SKUs and admin management API
 - VIP pricing for companies with special product rates
 - Shop admin interface to archive products and view archived items
