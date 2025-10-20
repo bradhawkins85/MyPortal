@@ -70,7 +70,12 @@
               </div>
               <div class="form-field">
                 <label class="form-label" for="ticket-requester-detail">Requester</label>
-                <select id="ticket-requester-detail" name="requesterId" class="form-input">
+                <select
+                  id="ticket-requester-detail"
+                  name="requesterId"
+                  class="form-input"
+                  {% if not ticket.company_id %}disabled aria-disabled="true"{% endif %}
+                >
                   <option value="">Not set</option>
                   {% for requester in ticket_requester_options %}
                     <option value="{{ requester.id }}" {% if requester.id == ticket.requester_id %}selected{% endif %}>
@@ -78,6 +83,11 @@
                     </option>
                   {% endfor %}
                 </select>
+                {% if not ticket.company_id %}
+                  <p class="form-help">Link a company before selecting a requester.</p>
+                {% elif not ticket_requester_options %}
+                  <p class="form-help">No enabled staff members are available for the linked company.</p>
+                {% endif %}
               </div>
               <div class="form-field">
                 <label class="form-label" for="ticket-assigned-detail">Assigned to</label>
