@@ -28,10 +28,10 @@
 
 {% block content %}
 <div class="knowledge-base">
-  <aside class="knowledge-base__sidebar card card--panel">
+  <section class="card card--panel knowledge-base__list">
     <header class="card__header">
       <div>
-        <h2 class="card__title">Articles</h2>
+        <h2 class="card__title">Knowledge base articles</h2>
         <p class="card__subtitle">Browse curated documentation with scoped visibility.</p>
       </div>
     </header>
@@ -59,13 +59,9 @@
         </thead>
         <tbody>
           {% for article in kb_articles %}
-          <tr
-            data-article-row
-            data-article-slug="{{ article.slug }}"
-            class="knowledge-base__row{% if article.slug == kb_active_slug %} knowledge-base__row--active{% endif %}"
-          >
+          <tr data-article-row data-article-slug="{{ article.slug }}">
             <td data-label="Title">
-              <a href="/knowledge-base?slug={{ article.slug }}" class="knowledge-base__link">{{ article.title }}</a>
+              <a href="/knowledge-base/articles/{{ article.slug }}" class="knowledge-base__link">{{ article.title }}</a>
               {% if article.summary %}
                 <p class="knowledge-base__summary">{{ article.summary }}</p>
               {% endif %}
@@ -165,6 +161,7 @@
       </div>
     </section>
   </section>
+
 </div>
 {% endblock %}
 
