@@ -4754,7 +4754,14 @@ async def admin_knowledge_base_page(request: Request):
         include_permissions=True,
     )
     serialised_articles = jsonable_encoder(articles)
+    extra = {
+        "title": "Knowledge base admin",
+        "kb_articles": serialised_articles,
+    }
+    return await _render_template("admin/knowledge_base.html", request, current_user, extra=extra)
 
+
+async def _prepare_kb_editor_options() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     users_task = asyncio.create_task(user_repo.list_users())
     companies_task = asyncio.create_task(company_repo.list_companies())
     users, companies = await asyncio.gather(users_task, companies_task)
@@ -4800,14 +4807,54 @@ async def admin_knowledge_base_page(request: Request):
         company_options.append({"id": company_id_int, "name": name})
 
     company_options.sort(key=lambda item: item.get("name", "").lower())
+    return user_options, company_options
 
+
+@app.get("/admin/knowledge-base/new", response_class=HTMLResponse)
+async def admin_new_knowledge_base_article_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    user_options, company_options = await _prepare_kb_editor_options()
     extra = {
-        "title": "Knowledge base admin",
-        "kb_articles": serialised_articles,
+        "title": "New knowledge base article",
+        "kb_initial_article": None,
         "kb_user_options": user_options,
         "kb_company_options": company_options,
+        "kb_form_mode": "create",
+        "kb_catalogue_payload": [],
     }
-    return await _render_template("admin/knowledge_base.html", request, current_user, extra=extra)
+    return await _render_template("admin/knowledge_base_editor.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/knowledge-base/articles/{slug}", response_class=HTMLResponse)
+async def admin_edit_knowledge_base_article_page(request: Request, slug: str):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    access_context = await knowledge_base_service.build_access_context(current_user)
+    article = await knowledge_base_service.get_article_by_slug_for_context(
+        slug,
+        access_context,
+        include_unpublished=True,
+        include_permissions=True,
+    )
+    if not article:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+
+    user_options, company_options = await _prepare_kb_editor_options()
+    serialised_article = jsonable_encoder(article)
+    extra = {
+        "title": f"Edit knowledge base article · {article.get('title') or article.get('slug')}",
+        "kb_initial_article": serialised_article,
+        "kb_user_options": user_options,
+        "kb_company_options": company_options,
+        "kb_form_mode": "edit",
+        "kb_catalogue_payload": [{"slug": serialised_article.get("slug")}],
+    }
+    return await _render_template("admin/knowledge_base_editor.html", request, current_user, extra=extra)
 
 
 @app.post("/myforms/admin")
