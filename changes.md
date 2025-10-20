@@ -1,3 +1,4 @@
+- 2025-12-01, 09:15 UTC, Fix, Restored knowledge base search by including the CSRF token header in fetch submissions
 - 2025-12-02, 14:30 UTC, Feature, Added ticket detail workspace with standalone status management and threaded reply history
 - 2025-12-02, 14:32 UTC, Fix, Prevented duplicate membership permission lookups when deriving helpdesk technician access without a database pool
 - 2025-12-02, 14:30 UTC, Fix, Guarded optional task company field lookups in automation.js so action builders initialise on page load
