@@ -67,6 +67,24 @@ from pathlib import Path
 
 PROJECT_NAME = "myportal"
 PREFIX = f"~{PROJECT_NAME}"
+PREFIX_LOWER = PREFIX.lower()
+PROJECT_NAME_LOWER = PROJECT_NAME.lower()
+
+
+def is_stale_entry(name: str) -> bool:
+    normalised = name.lower()
+    if normalised.startswith(PREFIX_LOWER):
+        return True
+
+    if normalised == "~":
+        return True
+
+    if normalised.startswith("~"):
+        trimmed = normalised.lstrip("~")
+        if trimmed and PROJECT_NAME_LOWER.endswith(trimmed):
+            return True
+
+    return False
 
 def iter_site_packages() -> set[Path]:
     paths: set[Path] = set()
@@ -106,7 +124,7 @@ for site_path in iter_site_packages():
         continue
     for entry in entries:
         name = entry.name
-        if not name.lower().startswith(PREFIX):
+        if not is_stale_entry(name):
             continue
         try:
             if entry.is_dir():
