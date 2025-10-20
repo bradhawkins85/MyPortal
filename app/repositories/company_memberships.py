@@ -153,6 +153,30 @@ async def user_has_permission(user_id: int, permission: str) -> bool:
     return False
 
 
+async def list_users_with_permission(permission: str) -> List[dict[str, Any]]:
+    permission_json = json.dumps(permission)
+    rows = await db.fetch_all(
+        """
+        SELECT DISTINCT
+            u.id,
+            u.email,
+            u.first_name,
+            u.last_name,
+            u.mobile_phone,
+            u.company_id,
+            u.is_super_admin
+        FROM company_memberships AS m
+        INNER JOIN roles AS r ON r.id = m.role_id
+        INNER JOIN users AS u ON u.id = m.user_id
+        WHERE m.status = 'active'
+          AND JSON_CONTAINS(COALESCE(r.permissions, JSON_ARRAY()), %s)
+        ORDER BY u.email
+        """,
+        (permission_json,),
+    )
+    return list(rows)
+
+
 def _normalise_membership(row: dict[str, Any]) -> dict[str, Any]:
     permissions_raw = row.get("permissions")
     permissions: list[str]
