@@ -1,13 +1,19 @@
+import asyncio
 import pytest
 from datetime import datetime, timedelta, timezone
+from typing import Any
+from fastapi import status
+from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from app.api.dependencies import auth as auth_dependencies
 from app.api.dependencies import database as database_dependencies
 from app.api.routes import auth as auth_routes
 from app.api.routes import tickets as tickets_routes
 from app.core.database import db
-from app.main import app, scheduler_service
+from app import main as main_module
+from app.main import HELPDESK_PERMISSION_KEY, app, scheduler_service
 from app.security.session import SessionData, session_manager
 
 
@@ -619,3 +625,62 @@ def test_helpdesk_reply_preserves_internal_flag(monkeypatch, active_session):
     payload = response.json()
     assert payload["reply"]["is_internal"] is True
     assert payload["ticket"]["id"] == ticket["id"]
+
+
+def test_admin_ticket_assign_options_only_include_helpdesk_users(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    async def fake_list_tickets(**kwargs):
+        captured["tickets_kwargs"] = kwargs
+        return []
+
+    async def fake_count_tickets(**kwargs):
+        captured["count_kwargs"] = kwargs
+        return 0
+
+    async def fake_list_modules():
+        return []
+
+    async def fake_list_companies():
+        return []
+
+    async def fake_list_users():
+        return [
+            {"id": 1, "email": "tech@example.com"},
+            {"id": 2, "email": "general@example.com"},
+        ]
+
+    async def fake_list_helpdesk_users(permission: str):
+        captured["permission"] = permission
+        return [{"id": 1, "email": "tech@example.com"}]
+
+    async def fake_render_template(template_name, request, user, *, extra=None):
+        captured["template_name"] = template_name
+        captured["extra"] = extra or {}
+        return HTMLResponse("ok")
+
+    monkeypatch.setattr(main_module.tickets_repo, "list_tickets", fake_list_tickets)
+    monkeypatch.setattr(main_module.tickets_repo, "count_tickets", fake_count_tickets)
+    monkeypatch.setattr(main_module.modules_service, "list_modules", fake_list_modules)
+    monkeypatch.setattr(main_module.company_repo, "list_companies", fake_list_companies)
+    monkeypatch.setattr(main_module.user_repo, "list_users", fake_list_users)
+    monkeypatch.setattr(
+        main_module.membership_repo,
+        "list_users_with_permission",
+        fake_list_helpdesk_users,
+    )
+    monkeypatch.setattr(main_module, "_render_template", fake_render_template)
+
+    request = Request({"type": "http", "app": app, "headers": []})
+    user = {"id": 99, "email": "admin@example.com", "is_super_admin": True}
+
+    response = asyncio.run(main_module._render_tickets_dashboard(request, user))
+
+    assert response.status_code == status.HTTP_200_OK
+    assert captured["permission"] == HELPDESK_PERMISSION_KEY
+    options = captured["extra"].get("ticket_user_options")
+    assert options == [{"id": 1, "email": "tech@example.com"}]
+    lookup = captured["extra"].get("ticket_user_lookup")
+    assert lookup[1]["email"] == "tech@example.com"
+    assert lookup[2]["email"] == "general@example.com"
+    assert captured["template_name"] == "admin/tickets.html"
