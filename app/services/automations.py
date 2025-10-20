@@ -11,6 +11,38 @@ from app.repositories import automations as automation_repo
 from app.services import modules as modules_service
 
 
+TRIGGER_EVENTS: list[dict[str, str]] = [
+    {"value": "tickets.created", "label": "Ticket created"},
+    {"value": "tickets.updated", "label": "Ticket updated"},
+    {"value": "tickets.closed", "label": "Ticket closed"},
+    {"value": "tickets.assigned", "label": "Ticket assigned"},
+    {"value": "webhook.delivered", "label": "Webhook delivered"},
+]
+
+
+def list_trigger_events() -> list[dict[str, str]]:
+    """Return the available automation trigger event options."""
+
+    return [dict(option) for option in TRIGGER_EVENTS]
+
+
+def _normalise_actions(actions: Any) -> list[dict[str, Any]]:
+    normalised: list[dict[str, Any]] = []
+    if not isinstance(actions, list):
+        return normalised
+    for entry in actions:
+        if not isinstance(entry, Mapping):
+            continue
+        module = str(entry.get("module") or "").strip()
+        if not module:
+            continue
+        payload = entry.get("payload")
+        if not isinstance(payload, Mapping):
+            payload = {}
+        normalised.append({"module": module, "payload": dict(payload)})
+    return normalised
+
+
 def calculate_next_run(
     automation: Mapping[str, Any],
     *,
@@ -94,14 +126,44 @@ async def _execute_automation(automation: Mapping[str, Any]) -> dict[str, Any]:
     result_payload: Any = None
     error_message: str | None = None
     payload = automation.get("action_payload")
-    if not isinstance(payload, Mapping):
-        payload = {}
+    actions = _normalise_actions(payload.get("actions")) if isinstance(payload, Mapping) else []
     try:
-        module_slug = automation.get("action_module")
-        if module_slug:
-            result_payload = await modules_service.trigger_module(str(module_slug), payload)
+        if actions:
+            results: list[dict[str, Any]] = []
+            for action in actions:
+                module_slug = action["module"]
+                module_payload = action.get("payload")
+                try:
+                    action_result = await modules_service.trigger_module(
+                        module_slug, module_payload if isinstance(module_payload, Mapping) else {}
+                    )
+                    results.append(
+                        {"module": module_slug, "status": "succeeded", "result": action_result}
+                    )
+                except Exception as exc:  # pragma: no cover - network/runtime guard
+                    status = "failed"
+                    error_message = str(exc)
+                    results.append(
+                        {"module": module_slug, "status": "failed", "error": str(exc)}
+                    )
+                    logger.error(
+                        "Automation execution failed",
+                        automation_id=automation_id,
+                        module=module_slug,
+                        error=str(exc),
+                    )
+                    break
+            if status == "failed" and not error_message:
+                error_message = "One or more trigger actions failed"
+            result_payload = results
         else:
-            result_payload = {"status": "skipped", "reason": "No action module configured"}
+            if not isinstance(payload, Mapping):
+                payload = {}
+            module_slug = automation.get("action_module")
+            if module_slug:
+                result_payload = await modules_service.trigger_module(str(module_slug), payload)
+            else:
+                result_payload = {"status": "skipped", "reason": "No action module configured"}
     except Exception as exc:  # pragma: no cover - network/runtime guard
         status = "failed"
         error_message = str(exc)
