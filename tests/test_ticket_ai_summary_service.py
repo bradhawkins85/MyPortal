@@ -128,3 +128,21 @@ async def test_refresh_ticket_ai_summary_handles_errors(monkeypatch):
     assert captured["ai_summary_status"] == "error"
     assert captured["ai_summary"] is None
     assert captured["ai_resolution_state"] is None
+
+
+def test_extract_summary_fields_from_markdown_block():
+    payload = "```json\n{\"summary\": \"Issue resolved\", \"resolution\": \"Likely Resolved\"}\n```"
+
+    summary, resolution = tickets_service._extract_summary_fields(payload)
+
+    assert summary == "Issue resolved"
+    assert resolution == "Likely Resolved"
+
+
+def test_extract_summary_fields_from_triple_quoted_block():
+    payload = '"""json\n{"summary": "Still working", "resolution": "Likely In Progress"}\n"""'
+
+    summary, resolution = tickets_service._extract_summary_fields(payload)
+
+    assert summary == "Still working"
+    assert resolution == "Likely In Progress"
