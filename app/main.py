@@ -27,6 +27,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -4757,6 +4758,7 @@ async def admin_knowledge_base_page(request: Request):
         include_unpublished=True,
         include_permissions=True,
     )
+    serialised_articles = jsonable_encoder(articles)
 
     users_task = asyncio.create_task(user_repo.list_users())
     companies_task = asyncio.create_task(company_repo.list_companies())
@@ -4806,7 +4808,7 @@ async def admin_knowledge_base_page(request: Request):
 
     extra = {
         "title": "Knowledge base admin",
-        "kb_articles": articles,
+        "kb_articles": serialised_articles,
         "kb_user_options": user_options,
         "kb_company_options": company_options,
     }
