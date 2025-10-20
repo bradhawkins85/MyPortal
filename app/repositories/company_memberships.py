@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from app.core.database import db
 
@@ -54,6 +54,27 @@ async def get_membership_by_company_user(company_id: int, user_id: int) -> Optio
     if not row:
         return None
     return _normalise_membership(row)
+
+
+async def list_memberships_for_user(user_id: int, *, status: str | None = "active") -> List[dict[str, Any]]:
+    filters = ["m.user_id = %s"]
+    params: list[Any] = [user_id]
+    if status is not None:
+        filters.append("m.status = %s")
+        params.append(status)
+    where_clause = " AND ".join(filters)
+    rows = await db.fetch_all(
+        f"""
+        SELECT m.*, u.email AS user_email, u.first_name, u.last_name, r.name AS role_name, r.permissions
+        FROM company_memberships AS m
+        INNER JOIN users AS u ON u.id = m.user_id
+        INNER JOIN roles AS r ON r.id = m.role_id
+        WHERE {where_clause}
+        ORDER BY m.company_id
+        """,
+        tuple(params),
+    )
+    return [_normalise_membership(row) for row in rows]
 
 
 async def create_membership(
@@ -121,6 +142,15 @@ async def update_membership(membership_id: int, **updates: Any) -> dict[str, Any
 
 async def delete_membership(membership_id: int) -> None:
     await db.execute("DELETE FROM company_memberships WHERE id = %s", (membership_id,))
+
+
+async def user_has_permission(user_id: int, permission: str) -> bool:
+    memberships = await list_memberships_for_user(user_id, status="active")
+    for membership in memberships:
+        permissions = membership.get("permissions") or []
+        if permission in permissions:
+            return True
+    return False
 
 
 def _normalise_membership(row: dict[str, Any]) -> dict[str, Any]:
