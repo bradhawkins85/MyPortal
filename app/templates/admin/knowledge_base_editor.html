@@ -33,8 +33,7 @@
 
 {% block content %}
 <div class="kb-admin">
-  <div class="kb-admin__grid">
-    <section class="card card--panel kb-admin__panel" data-kb-editor>
+  <section class="card card--panel kb-admin__panel kb-admin__panel--editor" data-kb-editor>
       <header class="card__header card__header--stacked">
         <div>
           <h2 class="card__title" data-kb-editor-title>{{ editor_heading }}</h2>
@@ -106,21 +105,20 @@
         </div>
         <p class="form-help kb-admin__status" role="status" aria-live="polite" data-kb-status></p>
       </form>
-    </section>
+  </section>
 
-    <section class="card card--panel kb-admin__panel">
-      <header class="card__header card__header--stacked">
-        <div>
-          <h2 class="card__title">Preview &amp; metadata</h2>
-          <p class="card__subtitle">Inspect the rendered article, confirm scopes, and verify timestamps before publishing.</p>
-        </div>
-        <div class="kb-admin__meta" data-kb-preview-meta></div>
-      </header>
-      <div class="card__body kb-admin__preview" data-kb-preview>
-        <p class="text-muted">Compose sections to preview the article content here.</p>
+  <section class="card card--panel kb-admin__panel kb-admin__panel--preview">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Preview &amp; metadata</h2>
+        <p class="card__subtitle">Inspect the rendered article, confirm scopes, and verify timestamps before publishing.</p>
       </div>
-    </section>
-  </div>
+      <div class="kb-admin__meta" data-kb-preview-meta></div>
+    </header>
+    <div class="card__body kb-admin__preview" data-kb-preview>
+      <p class="text-muted">Compose sections to preview the article content here.</p>
+    </div>
+  </section>
 </div>
 {% endblock %}
 
