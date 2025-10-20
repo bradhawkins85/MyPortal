@@ -302,6 +302,8 @@ app.include_router(tickets_api.router)
 app.include_router(automations_api.router)
 app.include_router(modules_api.router)
 
+HELPDESK_PERMISSION_KEY = "helpdesk.technician"
+
 
 async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
     session = await session_manager.load_session(request)
@@ -345,7 +347,9 @@ async def _is_helpdesk_technician(user: Mapping[str, Any], request: Request | No
     except (TypeError, ValueError):
         result = False
     else:
-        result = await membership_repo.user_has_permission(user_id_int, "helpdesk.technician")
+        result = await membership_repo.user_has_permission(
+            user_id_int, HELPDESK_PERMISSION_KEY
+        )
     if request is not None:
         request.state.is_helpdesk_technician = bool(result)
     return bool(result)
@@ -5228,6 +5232,9 @@ async def _render_tickets_dashboard(
         except (TypeError, ValueError):
             continue
     users_list = await user_repo.list_users()
+    technician_users = await membership_repo.list_users_with_permission(
+        HELPDESK_PERMISSION_KEY
+    )
     user_lookup: dict[int, dict[str, Any]] = {}
     for record in users_list:
         identifier = record.get("id")
@@ -5246,7 +5253,7 @@ async def _render_tickets_dashboard(
         "ticket_filters": {"status": status_filter, "module": module_filter},
         "ticket_modules": modules,
         "ticket_company_options": companies,
-        "ticket_user_options": users_list,
+        "ticket_user_options": technician_users,
         "ticket_company_lookup": company_lookup,
         "ticket_user_lookup": user_lookup,
         "success_message": success_message,
