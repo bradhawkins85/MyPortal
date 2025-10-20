@@ -1,4 +1,10 @@
 - 2025-12-01, 09:00 UTC, Feature, Added knowledge base module with scoped permissions, Ollama-backed search, and portal UI integration
+- 2025-10-21, 20:45 UTC, Fix, Converted automation module context data to JSON-safe timestamps so the ticket automation admin page renders without template errors
+- 2025-11-29, 12:30 UTC, Feature, Added ChatGPT MCP integration module with secure ticket tools and JSON-RPC endpoint for ChatGPT
+- 2025-11-30, 12:20 UTC, Fix, Allowed scheduled system updates to restart myportal.service using sudo and user service fallbacks when direct restarts fail
+- 2025-11-29, 10:30 UTC, Feature, Added ticket automation trigger selector with multi-action builder and event-driven schedule hiding improvements
+- 2025-10-20, 10:55 UTC, Fix, Normalised automation schedule timestamps before database insertion so creating active automations no longer triggers MySQL timezone errors
+- 2025-11-29, 10:00 UTC, Fix, Restricted ticket assignment options to helpdesk technicians with active role permissions
 - 2025-10-20, 09:05 UTC, Fix, Treated integration module enable submissions as truthy when checkboxes send numeric values so toggles persist
 - 2025-11-28, 09:30 UTC, Feature, Added helpdesk.technician role permission with constrained ticket workspace access for non-super-admin technicians
 - 2025-10-20, 08:07 UTC, Feature, Enabled public self-service registration with requester-scoped ticket access and public-only replies for non-admin users
