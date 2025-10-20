@@ -147,6 +147,7 @@ async def create_ticket(
     )
     await tickets_repo.add_watcher(ticket["id"], session.user_id)
     await tickets_service.refresh_ticket_ai_summary(ticket["id"])
+    await tickets_service.refresh_ticket_ai_tags(ticket["id"])
     return await _build_ticket_detail(ticket["id"], current_user)
 
 
@@ -168,6 +169,7 @@ async def update_ticket(
     if fields:
         await tickets_repo.update_ticket(ticket_id, **fields)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    await tickets_service.refresh_ticket_ai_tags(ticket_id)
     return await _build_ticket_detail(ticket_id, current_user)
 
 
@@ -199,6 +201,7 @@ async def add_reply(
         is_internal=payload.is_internal if has_helpdesk_access else False,
     )
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    await tickets_service.refresh_ticket_ai_tags(ticket_id)
     updated_ticket = await tickets_repo.get_ticket(ticket_id)
     ticket_payload = updated_ticket or ticket
     ticket_response = TicketResponse(**ticket_payload)
