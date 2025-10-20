@@ -5726,6 +5726,7 @@ async def admin_create_ticket(request: Request):
         )
         await tickets_repo.add_watcher(created["id"], current_user.get("id"))
         await tickets_service.refresh_ticket_ai_summary(created["id"])
+        await tickets_service.refresh_ticket_ai_tags(created["id"])
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create ticket", error=str(exc))
         return await _render_tickets_dashboard(
@@ -5769,6 +5770,7 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     await tickets_repo.set_ticket_status(ticket_id, status_value)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    await tickets_service.refresh_ticket_ai_tags(ticket_id)
     message = quote(f"Ticket {ticket_id} updated.")
     destination = f"/admin/tickets?success={message}"
     if return_url and return_url.startswith("/") and not return_url.startswith("//"):
@@ -5931,6 +5933,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     await tickets_repo.update_ticket(ticket_id, **update_fields)
     await tickets_repo.set_ticket_status(ticket_id, status_value)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    await tickets_service.refresh_ticket_ai_tags(ticket_id)
 
     message = quote("Ticket details updated.")
     destination = f"/admin/tickets/{ticket_id}?success={message}"
@@ -5972,6 +5975,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
         if isinstance(author_id, int):
             await tickets_repo.add_watcher(ticket_id, author_id)
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
+        await tickets_service.refresh_ticket_ai_tags(ticket_id)
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create ticket reply", error=str(exc))
         return await _render_ticket_detail(

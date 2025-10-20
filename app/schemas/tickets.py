@@ -70,6 +70,10 @@ class TicketResponse(TicketBase):
     ai_summary_model: Optional[str] = None
     ai_resolution_state: Optional[str] = None
     ai_summary_updated_at: Optional[datetime] = None
+    ai_tags: Optional[list[str]] = None
+    ai_tags_status: Optional[str] = None
+    ai_tags_model: Optional[str] = None
+    ai_tags_updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
