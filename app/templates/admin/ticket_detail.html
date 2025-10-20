@@ -80,125 +80,187 @@
         </div>
       </header>
 
-      <div class="management__body management__body--stacked">
-        <article class="card card--panel">
-          <header class="card__header">
-            <h2 class="card__title">Ticket details</h2>
-          </header>
-          <div class="card__body">
-            <dl class="definition-list">
-              <div class="definition-list__item">
-                <dt>Status</dt>
-                <dd><span class="badge {{ status_badge_map.get(ticket_status, 'badge--muted') }}">{{ ticket_status.replace('_', ' ').title() }}</span></dd>
-              </div>
-              <div class="definition-list__item">
-                <dt>Priority</dt>
-                <dd>{{ ticket.priority or 'normal' }}</dd>
-              </div>
-              <div class="definition-list__item">
-                <dt>Requester</dt>
-                <dd>{{ ticket_requester.email if ticket_requester else '—' }}</dd>
-              </div>
-              <div class="definition-list__item">
-                <dt>Assigned to</dt>
-                <dd>{{ ticket_assigned_user.email if ticket_assigned_user else '—' }}</dd>
-              </div>
-              <div class="definition-list__item">
-                <dt>Company</dt>
-                <dd>{{ ticket_company.name if ticket_company else (ticket.company_id or '—') }}</dd>
-              </div>
-              <div class="definition-list__item">
-                <dt>Module</dt>
-                <dd>{{ ticket_module.name if ticket_module else (ticket.module_slug or '—') }}</dd>
-              </div>
-              <div class="definition-list__item">
-                <dt>Category</dt>
-                <dd>{{ ticket.category or '—' }}</dd>
-              </div>
-              <div class="definition-list__item">
-                <dt>External reference</dt>
-                <dd>{{ ticket.external_reference or '—' }}</dd>
-              </div>
-              <div class="definition-list__item">
-                <dt>Created</dt>
-                <dd>{{ ticket.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.created_at else '—' }}</dd>
-              </div>
-              <div class="definition-list__item">
-                <dt>Updated</dt>
-                <dd>{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</dd>
-              </div>
-            </dl>
-          </div>
-        </article>
-
-        {% if ticket.description %}
+      <div class="management__body management__body--columns">
+        <div class="management__column management__column--details">
           <article class="card card--panel">
             <header class="card__header">
-              <h2 class="card__title">Description</h2>
+              <h2 class="card__title">Ticket details</h2>
             </header>
-            <div class="card__body">
-              {% set safe_description = (ticket.description | e).replace('\n', '<br />') %}
-              <p>{{ safe_description | safe }}</p>
+            <form action="/admin/tickets/{{ ticket.id }}/details" method="post" class="form card__form">
+              {% if csrf_token %}
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+              {% endif %}
+              <input type="hidden" name="returnUrl" value="{{ ticket_return_url }}" />
+              <div class="form-field">
+                <label class="form-label" for="ticket-status-detail">Status</label>
+                <select id="ticket-status-detail" name="status" class="form-input">
+                  {% for status_option in ticket_available_statuses %}
+                    {% set status_value = status_option.lower() %}
+                    <option value="{{ status_value }}" {% if status_value == ticket_status.lower() %}selected{% endif %}>
+                      {{ status_option.replace('_', ' ') }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ticket-priority-detail">Priority</label>
+                <select id="ticket-priority-detail" name="priority" class="form-input">
+                  {% for priority_option in ticket_priority_options %}
+                    {% set priority_value = priority_option|lower %}
+                    <option value="{{ priority_value }}" {% if priority_value == (ticket.priority or 'normal')|lower %}selected{% endif %}>
+                      {{ priority_option.replace('_', ' ')|title() }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ticket-requester-detail">Requester</label>
+                <select id="ticket-requester-detail" name="requesterId" class="form-input">
+                  <option value="">Not set</option>
+                  {% for requester in ticket_requester_options %}
+                    <option value="{{ requester.id }}" {% if requester.id == ticket.requester_id %}selected{% endif %}>
+                      {{ requester.email }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ticket-assigned-detail">Assigned to</label>
+                <select id="ticket-assigned-detail" name="assignedUserId" class="form-input">
+                  <option value="">Unassigned</option>
+                  {% for user in ticket_user_options %}
+                    <option value="{{ user.id }}" {% if user.id == ticket.assigned_user_id %}selected{% endif %}>
+                      {{ user.email }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ticket-company-detail">Company</label>
+                <select id="ticket-company-detail" name="companyId" class="form-input">
+                  <option value="">Not linked</option>
+                  {% for company_option in ticket_company_options %}
+                    <option value="{{ company_option.id }}" {% if company_option.id == ticket.company_id %}selected{% endif %}>
+                      {{ company_option.name }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ticket-category-detail">Category</label>
+                <input
+                  id="ticket-category-detail"
+                  name="category"
+                  class="form-input"
+                  maxlength="64"
+                  value="{{ ticket.category or '' }}"
+                  placeholder="Networking, onboarding, escalation…"
+                />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ticket-reference-detail">External reference</label>
+                <input
+                  id="ticket-reference-detail"
+                  name="externalReference"
+                  class="form-input"
+                  maxlength="128"
+                  value="{{ ticket.external_reference or '' }}"
+                  placeholder="Syncro ID or external case"
+                />
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button button--primary">Save changes</button>
+              </div>
+            </form>
+            <div class="card__body card__body--meta">
+              <dl class="definition-list">
+                <div class="definition-list__item">
+                  <dt>Module</dt>
+                  <dd>{{ ticket_module.name if ticket_module else (ticket.module_slug or '—') }}</dd>
+                </div>
+                <div class="definition-list__item">
+                  <dt>Created</dt>
+                  <dd>{{ ticket.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.created_at else '—' }}</dd>
+                </div>
+                <div class="definition-list__item">
+                  <dt>Updated</dt>
+                  <dd>{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</dd>
+                </div>
+              </dl>
             </div>
           </article>
-        {% endif %}
+        </div>
 
-        <article class="card card--panel">
-          <header class="card__header">
-            <h2 class="card__title">Add a reply</h2>
-          </header>
-          <form action="/admin/tickets/{{ ticket.id }}/replies" method="post" class="form card__form">
-            {% if csrf_token %}
-              <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-            {% endif %}
-            <div class="form-field">
-              <label class="form-label" for="ticket-reply-body">Reply</label>
-              <textarea id="ticket-reply-body" name="body" class="form-input" rows="4" required></textarea>
-            </div>
-            <div class="form-field form-field--checkbox">
-              <label class="checkbox">
-                <input type="checkbox" name="isInternal" value="true" />
-                <span>Mark as internal note</span>
-              </label>
-            </div>
-            <div class="form-actions">
-              <button type="submit" class="button button--primary">Post reply</button>
-            </div>
-          </form>
-        </article>
-
-        <article class="card card--panel">
-          <header class="card__header">
-            <h2 class="card__title">Conversation history</h2>
-          </header>
-          <div class="card__body">
-            {% if ticket_replies %}
-              <div class="timeline">
-                {% for reply in ticket_replies %}
-                  <article class="timeline__event">
-                    <header class="timeline__header">
-                      <span class="timeline__timestamp">
-                        {{ reply.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.created_at else '—' }}
-                      </span>
-                      <span class="timeline__action">
-                        {{ reply.author.email if reply.author else 'System' }}
-                        {% if reply.is_internal %}
-                          <span class="badge badge--muted">Internal</span>
-                        {% endif %}
-                      </span>
-                    </header>
-                    <div class="timeline__body">
-                      {% set safe_body = (reply.body | e).replace('\n', '<br />') %}
-                      <p>{{ safe_body | safe }}</p>
-                    </div>
-                  </article>
-                {% endfor %}
+        <div class="management__column management__column--content">
+          {% if ticket.description %}
+            <article class="card card--panel">
+              <header class="card__header">
+                <h2 class="card__title">Description</h2>
+              </header>
+              <div class="card__body">
+                {% set safe_description = (ticket.description | e).replace('\n', '<br />') %}
+                <p>{{ safe_description | safe }}</p>
               </div>
-            {% else %}
-              <p class="card__empty">No replies have been posted yet.</p>
-            {% endif %}
-          </div>
-        </article>
+            </article>
+          {% endif %}
+
+          <article class="card card--panel">
+            <header class="card__header">
+              <h2 class="card__title">Add a reply</h2>
+            </header>
+            <form action="/admin/tickets/{{ ticket.id }}/replies" method="post" class="form card__form">
+              {% if csrf_token %}
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+              {% endif %}
+              <div class="form-field">
+                <label class="form-label" for="ticket-reply-body">Reply</label>
+                <textarea id="ticket-reply-body" name="body" class="form-input" rows="4" required></textarea>
+              </div>
+              <div class="form-field form-field--checkbox">
+                <label class="checkbox">
+                  <input type="checkbox" name="isInternal" value="true" />
+                  <span>Mark as internal note</span>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button button--primary">Post reply</button>
+              </div>
+            </form>
+          </article>
+
+          <article class="card card--panel">
+            <header class="card__header">
+              <h2 class="card__title">Conversation history</h2>
+            </header>
+            <div class="card__body">
+              {% if ticket_replies %}
+                <div class="timeline">
+                  {% for reply in ticket_replies %}
+                    <article class="timeline__event">
+                      <header class="timeline__header">
+                        <span class="timeline__timestamp">
+                          {{ reply.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.created_at else '—' }}
+                        </span>
+                        <span class="timeline__action">
+                          {{ reply.author.email if reply.author else 'System' }}
+                          {% if reply.is_internal %}
+                            <span class="badge badge--muted">Internal</span>
+                          {% endif %}
+                        </span>
+                      </header>
+                      <div class="timeline__body">
+                        {% set safe_body = (reply.body | e).replace('\n', '<br />') %}
+                        <p>{{ safe_body | safe }}</p>
+                      </div>
+                    </article>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <p class="card__empty">No replies have been posted yet.</p>
+              {% endif %}
+            </div>
+          </article>
+        </div>
       </div>
     </section>
   </div>

@@ -5561,6 +5561,22 @@ async def _render_ticket_detail(
         {"open", "in_progress", "pending", "resolved", "closed", ticket.get("status") or "open"}
     )
 
+    companies = await company_repo.list_companies()
+    technician_users = await membership_repo.list_users_with_permission(HELPDESK_PERMISSION_KEY)
+    requester_options = await user_repo.list_users()
+
+    default_priorities = ["urgent", "high", "normal", "low"]
+    current_priority = str(ticket.get("priority") or "normal")
+    seen_priorities: set[str] = set()
+    priority_options: list[str] = []
+    for option in [*default_priorities, current_priority]:
+        option_str = str(option)
+        normalised = option_str.lower()
+        if normalised in seen_priorities:
+            continue
+        seen_priorities.add(normalised)
+        priority_options.append(option_str)
+
     extra = {
         "title": f"Ticket #{ticket_id}",
         "ticket": ticket,
@@ -5571,6 +5587,10 @@ async def _render_ticket_detail(
         "ticket_replies": enriched_replies,
         "ticket_watchers": enriched_watchers,
         "ticket_available_statuses": available_statuses,
+        "ticket_company_options": companies,
+        "ticket_user_options": technician_users,
+        "ticket_requester_options": requester_options,
+        "ticket_priority_options": priority_options,
         "ticket_return_url": request.url.path,
         "success_message": success_message,
         "error_message": error_message,
@@ -5709,6 +5729,169 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
     if return_url and return_url.startswith("/") and not return_url.startswith("//"):
         separator = "&" if "?" in return_url else "?"
         destination = f"{return_url}{separator}success={message}"
+    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/admin/tickets/{ticket_id}/details", response_class=HTMLResponse)
+async def admin_update_ticket_details(ticket_id: int, request: Request):
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        return redirect
+
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    form = await request.form()
+
+    def _clean_text(value: Any) -> str:
+        return str(value).strip() if isinstance(value, str) else ""
+
+    status_value = _clean_text(form.get("status")).lower()
+    priority_value = _clean_text(form.get("priority")).lower()
+    requester_raw = form.get("requesterId")
+    assigned_raw = form.get("assignedUserId")
+    company_raw = form.get("companyId")
+    category_value = _clean_text(form.get("category")) or None
+    external_reference = _clean_text(form.get("externalReference")) or None
+    return_url_raw = form.get("returnUrl")
+    return_url = _clean_text(return_url_raw)
+
+    allowed_statuses = {"open", "in_progress", "pending", "resolved", "closed", (ticket.get("status") or "open").lower()}
+    if status_value not in allowed_statuses:
+        return await _render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Select a valid status.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    default_priorities = {"urgent", "high", "normal", "low"}
+    ticket_priority = (ticket.get("priority") or "normal").lower()
+    allowed_priorities = default_priorities | {ticket_priority}
+    if not priority_value:
+        return await _render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Select a priority.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    if priority_value not in allowed_priorities:
+        return await _render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Select a valid priority.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if category_value and len(category_value) > 64:
+        return await _render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Category must be 64 characters or fewer.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if external_reference and len(external_reference) > 128:
+        return await _render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="External reference must be 128 characters or fewer.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    requester_id: int | None = None
+    if requester_raw:
+        try:
+            requester_id = int(requester_raw)
+        except (TypeError, ValueError):
+            return await _render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message="Select a valid requester.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        requester = await user_repo.get_user_by_id(requester_id)
+        if not requester:
+            return await _render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message="Select a valid requester.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+    assigned_user_id: int | None = None
+    if assigned_raw:
+        try:
+            assigned_user_id = int(assigned_raw)
+        except (TypeError, ValueError):
+            return await _render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message="Select a valid assignee.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        has_permission = await membership_repo.user_has_permission(
+            assigned_user_id,
+            HELPDESK_PERMISSION_KEY,
+        )
+        if not has_permission:
+            return await _render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message="Selected user cannot be assigned to tickets.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+    company_id: int | None = None
+    if company_raw:
+        try:
+            company_id = int(company_raw)
+        except (TypeError, ValueError):
+            return await _render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message="Select a valid company.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        company_record = await company_repo.get_company_by_id(company_id)
+        if not company_record:
+            return await _render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message="Select a valid company.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+    update_fields: dict[str, Any] = {
+        "priority": priority_value,
+        "requester_id": requester_id,
+        "assigned_user_id": assigned_user_id,
+        "company_id": company_id,
+        "category": category_value,
+        "external_reference": external_reference,
+    }
+
+    await tickets_repo.update_ticket(ticket_id, **update_fields)
+    await tickets_repo.set_ticket_status(ticket_id, status_value)
+
+    message = quote("Ticket details updated.")
+    destination = f"/admin/tickets/{ticket_id}?success={message}"
+    if return_url and return_url.startswith(f"/admin/tickets/{ticket_id}"):
+        separator = "&" if "?" in return_url else "?"
+        destination = f"{return_url}{separator}success={message}"
+
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
