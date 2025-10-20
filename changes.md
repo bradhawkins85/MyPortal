@@ -1,3 +1,6 @@
+- 2025-12-09, 16:30 UTC, Fix, Replaced PWA PNG icons with SVG sources and updated manifest caching to remove binary assets
+- 2025-12-09, 14:00 UTC, Fix, Allowed controlled service worker activation by removing forced skipWaiting and exposing Service-Worker-Allowed header
+- 2025-12-08, 22:05 UTC, Feature, Enabled installable Progressive Web App support with manifest, service worker caching, and offline fallback
 - 2025-12-08, 09:45 UTC, Feature, Added Syncro ticket importer with admin UI, rate-limited Syncro API client, and documentation
 - 2025-10-20, 12:25 UTC, Fix, Allowed super admins to be assigned to tickets by recognising their global permission during assignee validation
 - 2025-10-20, 12:20 UTC, Fix, Removed the knowledge base admin preview pane from the article editor per request
