@@ -1,3 +1,4 @@
+- 2025-10-20, 12:04 UTC, Feature, Added automatic Ollama-generated AI tags to knowledge base articles with admin previews and public badges
 - 2025-12-06, 12:30 UTC, Feature, Added Ollama-driven ticket tagging with UI badges, API fields, and resilient fallbacks for 5-10 issue labels
 - 2025-10-20, 11:59 UTC, Feature, Reworked knowledge base portal layout to list articles and moved article reading to dedicated views
 - 2025-12-06, 12:25 UTC, Fix, Normalised AI summary parsing to strip Markdown-style code blocks so ticket summaries render as pla

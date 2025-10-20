@@ -42,7 +42,11 @@ _DEFAULT_TAG_FILL = [
 async def refresh_ticket_ai_summary(ticket_id: int) -> None:
     """Refresh the Ollama-generated summary for a ticket if the module is configured."""
 
-    ticket = await tickets_repo.get_ticket(ticket_id)
+    try:
+        ticket = await tickets_repo.get_ticket(ticket_id)
+    except RuntimeError as exc:  # pragma: no cover - defensive for missing database
+        log_error("Ticket AI summary skipped", ticket_id=ticket_id, error=str(exc))
+        return
     if not ticket:
         return
 

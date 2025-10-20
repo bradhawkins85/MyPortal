@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import html
+import json
+import re
 from typing import Any, Iterable, Mapping, Sequence
 
 import bleach
@@ -48,6 +50,8 @@ _ALLOWED_ATTRIBUTES: Mapping[str, Sequence[str]] = {
 }
 
 _ALLOWED_PROTOCOLS: Sequence[str] = ("http", "https", "mailto")
+
+_TAG_JSON_PATTERN = re.compile(r"\[[^\]]*\]")
 
 
 def _sanitise_html(value: str) -> str:
@@ -126,6 +130,131 @@ def _extract_sections_sequence(value: Any) -> list[Mapping[str, Any]]:
                 collected.append(item)
         return collected
     return []
+
+
+def _render_ai_tag_prompt(
+    title: str,
+    summary: str | None,
+    sections: Sequence[Mapping[str, Any]],
+    fallback_content: str,
+) -> str:
+    clean_title = title.strip() or "Untitled article"
+    clean_summary = (summary or "").strip()
+    lines = [
+        "You classify knowledge base articles by topic.",
+        "Generate between 5 and 10 concise tags (1-3 words) describing the main subjects.",
+        "Return only a JSON array of lowercase strings.",
+        "",
+        f"Title: {clean_title}",
+        f"Summary: {clean_summary or '(none provided)'}",
+        "",
+        "Sections:",
+    ]
+    included = 0
+    for section in sections:
+        if included >= 6:
+            break
+        content = section.get("content") or ""
+        text_content = bleach.clean(str(content), tags=[], strip=True)
+        text_content = " ".join(text_content.split())
+        if not text_content:
+            continue
+        heading = section.get("heading") or f"Section {included + 1}"
+        snippet = text_content[:400]
+        lines.append(f"{included + 1}. {heading}: {snippet}")
+        included += 1
+    if included == 0:
+        fallback_text = bleach.clean(str(fallback_content), tags=[], strip=True)
+        fallback_text = " ".join(fallback_text.split())
+        if fallback_text:
+            lines.append(fallback_text[:600])
+    lines.extend([
+        "",
+        'Example output: ["networking", "setup", "security"]',
+    ])
+    return "\n".join(lines)
+
+
+def _parse_ai_tag_text(raw: str) -> list[str]:
+    if not raw:
+        return []
+    text = raw.strip()
+    candidates: list[Any] = []
+
+    def _decode(value: str) -> list[Any] | None:
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(parsed, list):
+            return parsed
+        return None
+
+    decoded = _decode(text)
+    if decoded is None:
+        match = _TAG_JSON_PATTERN.search(text)
+        if match:
+            decoded = _decode(match.group(0))
+    if decoded is None:
+        stripped_lines = [segment.strip(" \t-*#•\u2022") for segment in re.split(r"[,\n;]+", text)]
+        decoded = [segment for segment in stripped_lines if segment]
+    candidates = decoded if decoded is not None else []
+
+    tags: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        if item is None:
+            continue
+        tag = str(item).strip().lower()
+        if not tag:
+            continue
+        tag = re.sub(r"\s+", " ", tag)
+        if tag in seen:
+            continue
+        seen.add(tag)
+        tags.append(tag)
+        if len(tags) >= 10:
+            break
+    return tags
+
+
+async def _generate_article_ai_tags(
+    title: str,
+    summary: str | None,
+    sections: Sequence[Mapping[str, Any]],
+    combined_content: str,
+) -> list[str]:
+    prompt = _render_ai_tag_prompt(title, summary, sections, combined_content)
+    try:
+        response = await modules_service.trigger_module("ollama", {"prompt": prompt})
+    except Exception as exc:  # pragma: no cover - network interaction
+        log_error("Knowledge base AI tag generation failed", error=str(exc))
+        return []
+    status = str(response.get("status") or "").lower()
+    if status == "skipped":
+        return []
+    if status not in {"succeeded", "ok"}:
+        log_error(
+            "Knowledge base AI tag generation returned unexpected status",
+            status=status,
+        )
+        return []
+    payload = response.get("response")
+    text: str | None = None
+    if isinstance(payload, Mapping):
+        text = payload.get("response") or payload.get("message") or payload.get("text")
+    elif isinstance(payload, str):
+        text = payload
+    if not text:
+        message = response.get("message")
+        if isinstance(message, str):
+            text = message
+    if not text:
+        return []
+    tags = _parse_ai_tag_text(text)
+    if not tags:
+        log_error("Knowledge base AI tag parsing yielded no tags")
+    return tags
 
 
 @dataclass(slots=True)
@@ -226,6 +355,7 @@ def _serialise_article(
         "slug": str(article.get("slug")),
         "title": str(article.get("title")),
         "summary": article.get("summary"),
+        "ai_tags": list(article.get("ai_tags") or []),
         "permission_scope": str(article.get("permission_scope")),
         "is_published": bool(article.get("is_published")),
         "updated_at": article.get("updated_at_utc"),
@@ -336,15 +466,19 @@ async def create_article(
     )
     if not combined_content:
         raise ValueError("At least one section with content is required")
+    title_value = str(payload.get("title"))
+    summary_value = payload.get("summary")
+    ai_tags = await _generate_article_ai_tags(title_value, summary_value, prepared_sections, combined_content)
     created = await kb_repo.create_article(
         slug=str(payload.get("slug")),
-        title=str(payload.get("title")),
-        summary=payload.get("summary"),
+        title=title_value,
+        summary=summary_value,
         content=combined_content,
         permission_scope=permission_scope,
         is_published=is_published,
         published_at=published_at,
         created_by=author_id,
+        ai_tags=ai_tags,
     )
     await _sync_relations(created["id"], permission_scope, payload)
     await kb_repo.replace_article_sections(created["id"], prepared_sections)
@@ -384,6 +518,12 @@ async def update_article(article_id: int, payload: Mapping[str, Any]) -> dict[st
     if published_flag is not None:
         updates["is_published"] = bool(published_flag)
         updates["published_at"] = datetime.now(timezone.utc) if updates["is_published"] else None
+    title_for_ai_source = updates.get("title", current.get("title"))
+    title_for_ai = str(title_for_ai_source) if title_for_ai_source is not None else ""
+    summary_for_ai = updates.get("summary") if "summary" in updates else current.get("summary")
+    content_for_ai = updates.get("content", current.get("content") or "")
+    ai_tags = await _generate_article_ai_tags(title_for_ai, summary_for_ai, prepared_sections, str(content_for_ai))
+    updates["ai_tags"] = ai_tags
     if updates:
         current = await kb_repo.update_article(article_id, **updates)
     permission_scope = str(current.get("permission_scope"))
