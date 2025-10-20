@@ -2257,6 +2257,10 @@ body {
   align-items: start;
 }
 
+.management--single {
+  grid-template-columns: 1fr;
+}
+
 @media (max-width: 960px) {
   .management {
     grid-template-columns: 1fr;
@@ -2337,6 +2341,58 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 1.25rem;
+}
+
+.card__header--module {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.card__module-info {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.card__module-icon {
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.card__module-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.card__module-actions .card__badge {
+  align-self: flex-end;
+}
+
+.card__module-test {
+  margin: 0;
+}
+
+.card__module-test .button {
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .card__header--module {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .card__module-actions {
+    align-items: stretch;
+  }
+
+  .card__module-actions .card__badge {
+    align-self: flex-start;
+  }
 }
 
 .management__stats {
