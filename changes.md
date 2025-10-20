@@ -1,3 +1,4 @@
+- 2025-10-20, 11:02 UTC, Feature, Enabled editable ticket metadata in a dedicated left-column form with validation for status, priority, requester, assignee, company, category, and external reference fields
 - 2025-12-02, 10:15 UTC, Feature, Added super-admin knowledge base composer with granular permission assignments, inline preview, and CRUD workflow integration
 - 2025-12-01, 09:15 UTC, Fix, Restored knowledge base search by including the CSRF token header in fetch submissions
 - 2025-12-02, 14:30 UTC, Feature, Added ticket detail workspace with standalone status management and threaded reply history
