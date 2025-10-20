@@ -510,6 +510,10 @@
     if (!article.is_published) {
       tags.push('<span class="tag tag--warning">Draft</span>');
     }
+    const aiTags = Array.isArray(article.ai_tags) ? article.ai_tags : [];
+    const aiTagBadges = aiTags
+      .slice(0, 10)
+      .map((tag) => `<span class="tag tag--info">${escapeHtml(String(tag))}</span>`);
     if (previewMeta) {
       const timestamps = [];
       if (article.updated_at) {
@@ -520,6 +524,7 @@
       }
       previewMeta.innerHTML = `
         <div class="kb-admin__tags">${tags.join(' ')}</div>
+        ${aiTagBadges.length ? `<div class="kb-admin__ai-tags" aria-label="AI generated tags">${aiTagBadges.join(' ')}</div>` : ''}
         ${timestamps.length ? `<div class="kb-admin__timestamps">${timestamps.join('')}</div>` : ''}
       `;
     }

@@ -146,7 +146,10 @@ async def create_ticket(
         external_reference=external_reference,
     )
     await tickets_repo.add_watcher(ticket["id"], session.user_id)
-    await tickets_service.refresh_ticket_ai_summary(ticket["id"])
+    try:
+        await tickets_service.refresh_ticket_ai_summary(ticket["id"])
+    except RuntimeError:
+        pass
     return await _build_ticket_detail(ticket["id"], current_user)
 
 
@@ -167,7 +170,10 @@ async def update_ticket(
     fields = payload.model_dump(exclude_unset=True)
     if fields:
         await tickets_repo.update_ticket(ticket_id, **fields)
-    await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    try:
+        await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    except RuntimeError:
+        pass
     return await _build_ticket_detail(ticket_id, current_user)
 
 
@@ -198,7 +204,10 @@ async def add_reply(
         body=payload.body,
         is_internal=payload.is_internal if has_helpdesk_access else False,
     )
-    await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    try:
+        await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    except RuntimeError:
+        pass
     updated_ticket = await tickets_repo.get_ticket(ticket_id)
     ticket_payload = updated_ticket or ticket
     ticket_response = TicketResponse(**ticket_payload)

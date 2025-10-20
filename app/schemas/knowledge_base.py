@@ -52,6 +52,7 @@ class KnowledgeBaseArticleResponse(BaseModel):
     content: str
     permission_scope: PermissionScope
     is_published: bool
+    ai_tags: list[str]
     allowed_user_ids: list[int]
     allowed_company_ids: list[int]
     company_admin_ids: list[int]
@@ -69,6 +70,7 @@ class KnowledgeBaseArticleListItem(BaseModel):
     summary: str | None
     permission_scope: PermissionScope
     is_published: bool
+    ai_tags: list[str]
     updated_at: datetime | None
     updated_at_iso: str | None
     published_at_iso: str | None
