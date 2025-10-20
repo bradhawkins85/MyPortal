@@ -27,6 +27,7 @@ dependencies = [
     "cryptography",
     "email-validator",
     "python-multipart",
+    "bleach",
 ]
 
 [project.optional-dependencies]

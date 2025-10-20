@@ -29,7 +29,6 @@
   const slugField = document.getElementById('kb-article-slug');
   const titleField = document.getElementById('kb-article-title');
   const summaryField = document.getElementById('kb-article-summary');
-  const contentField = document.getElementById('kb-article-content');
   const scopeField = document.getElementById('kb-article-scope');
   const publishedField = document.getElementById('kb-article-published');
   const idField = document.getElementById('kb-article-id');
@@ -44,6 +43,8 @@
   const newButton = document.querySelector('[data-kb-new-article]');
   const previewContainer = document.querySelector('[data-kb-preview]');
   const previewMeta = document.querySelector('[data-kb-preview-meta]');
+  const sectionsContainer = document.querySelector('[data-kb-sections]');
+  const addSectionButton = document.querySelector('[data-kb-add-section]');
 
   const scopeHelpMessages = {
     anonymous: 'Public articles are visible to anyone with the URL.',
@@ -77,6 +78,216 @@
       statusElement.classList.add('kb-admin__status--error');
     } else if (tone === 'success') {
       statusElement.classList.add('kb-admin__status--success');
+    }
+  }
+
+  function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = value;
+    return div.innerHTML;
+  }
+
+  function composeSectionsHtml(sections) {
+    return sections
+      .map((section, index) => {
+        const heading = section.heading ? `<h2>${escapeHtml(section.heading)}</h2>` : '';
+        return `<section class="kb-article__section" data-section-index="${index + 1}">${heading}${section.content}</section>`;
+      })
+      .join('');
+  }
+
+  function hasMeaningfulContent(html) {
+    if (!html) {
+      return false;
+    }
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    const text = (temp.textContent || '').replace(/\u00a0/g, ' ').trim();
+    if (text) {
+      return true;
+    }
+    return Boolean(temp.querySelector('img, video, audio, iframe, table, code, pre, ul, ol, blockquote'));
+  }
+
+  function collectSectionsFromDom() {
+    if (!sectionsContainer) {
+      return [];
+    }
+    const sections = [];
+    sectionsContainer.querySelectorAll('[data-kb-section]').forEach((section, index) => {
+      const headingField = section.querySelector('[data-kb-section-heading]');
+      const editor = section.querySelector('[data-kb-section-editor]');
+      const heading = headingField ? headingField.value.trim() : '';
+      const content = editor ? editor.innerHTML.trim() : '';
+      if (!hasMeaningfulContent(content)) {
+        return;
+      }
+      sections.push({
+        heading: heading || null,
+        content,
+        position: index + 1,
+      });
+    });
+    return sections;
+  }
+
+  function renderSections(sections) {
+    if (!sectionsContainer) {
+      return;
+    }
+    sectionsContainer.innerHTML = '';
+    if (!sections || sections.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'kb-admin__sections-empty';
+      empty.textContent = 'No sections added yet. Start by creating the introduction.';
+      sectionsContainer.appendChild(empty);
+      return;
+    }
+    sections.forEach((section) => {
+      sectionsContainer.appendChild(createSectionElement(section));
+    });
+  }
+
+  function createToolbarButton(command, label) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'kb-admin__toolbar-button';
+    button.dataset.kbCommand = command;
+    button.setAttribute('aria-label', label);
+    button.innerHTML = label;
+    return button;
+  }
+
+  function createSectionElement(section) {
+    const wrapper = document.createElement('article');
+    wrapper.className = 'kb-admin__section';
+    wrapper.dataset.kbSection = 'true';
+
+    const headingLabel = document.createElement('label');
+    headingLabel.className = 'kb-admin__section-label';
+    headingLabel.textContent = 'Section heading (optional)';
+
+    const headingInput = document.createElement('input');
+    headingInput.type = 'text';
+    headingInput.className = 'form-input';
+    headingInput.placeholder = 'Describe the section';
+    headingInput.value = section && section.heading ? section.heading : '';
+    headingInput.dataset.kbSectionHeading = 'true';
+
+    const headingWrapper = document.createElement('div');
+    headingWrapper.className = 'kb-admin__section-heading-group';
+    headingWrapper.appendChild(headingLabel);
+    headingWrapper.appendChild(headingInput);
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'kb-admin__toolbar';
+    toolbar.setAttribute('role', 'toolbar');
+    toolbar.setAttribute('aria-label', 'Formatting');
+
+    const commands = [
+      { command: 'bold', label: '<strong>B</strong>' },
+      { command: 'italic', label: '<em>I</em>' },
+      { command: 'underline', label: '<span style="text-decoration: underline">U</span>' },
+      { command: 'insertUnorderedList', label: '&bull; List' },
+      { command: 'insertOrderedList', label: '1. List' },
+      { command: 'formatBlock', value: 'blockquote', label: '&ldquo;Quote&rdquo;' },
+      { command: 'createLink', label: 'Link' },
+      { command: 'removeFormat', label: 'Clear' },
+    ];
+
+    commands.forEach((item) => {
+      const button = createToolbarButton(item.command, item.label.replace(/<[^>]*>/g, ''));
+      button.innerHTML = item.label;
+      if (item.value) {
+        button.dataset.kbCommandValue = item.value;
+      }
+      toolbar.appendChild(button);
+    });
+
+    const editor = document.createElement('div');
+    editor.className = 'kb-admin__editor';
+    editor.contentEditable = 'true';
+    editor.dataset.kbSectionEditor = 'true';
+    editor.innerHTML = section && section.content ? section.content : '<p><br></p>';
+
+    const controls = document.createElement('div');
+    controls.className = 'kb-admin__section-controls';
+
+    const moveUp = document.createElement('button');
+    moveUp.type = 'button';
+    moveUp.className = 'button button--ghost';
+    moveUp.dataset.kbSectionUp = 'true';
+    moveUp.innerHTML = '&#8593; Move up';
+
+    const moveDown = document.createElement('button');
+    moveDown.type = 'button';
+    moveDown.className = 'button button--ghost';
+    moveDown.dataset.kbSectionDown = 'true';
+    moveDown.innerHTML = '&#8595; Move down';
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'button button--danger button--ghost';
+    remove.dataset.kbSectionDelete = 'true';
+    remove.textContent = 'Remove';
+
+    controls.appendChild(moveUp);
+    controls.appendChild(moveDown);
+    controls.appendChild(remove);
+
+    wrapper.appendChild(headingWrapper);
+    wrapper.appendChild(toolbar);
+    wrapper.appendChild(editor);
+    wrapper.appendChild(controls);
+    return wrapper;
+  }
+
+  function addSection(section) {
+    if (!sectionsContainer) {
+      return;
+    }
+    const existingEmpty = sectionsContainer.querySelector('.kb-admin__sections-empty');
+    if (existingEmpty) {
+      existingEmpty.remove();
+    }
+    const element = createSectionElement(section || { heading: '', content: '<p><br></p>' });
+    sectionsContainer.appendChild(element);
+    const headingInput = element.querySelector('[data-kb-section-heading]');
+    if (headingInput) {
+      headingInput.focus();
+    }
+  }
+
+  function ensurePreviewMatchesForm() {
+    if (!previewContainer) {
+      return;
+    }
+    const sections = collectSectionsFromDom();
+    if (sections.length === 0) {
+      previewContainer.innerHTML = '<p class="text-muted">Add rich text sections to preview the article.</p>';
+      return;
+    }
+    previewContainer.innerHTML = composeSectionsHtml(sections);
+  }
+
+  function moveSection(section, offset) {
+    if (!sectionsContainer) {
+      return;
+    }
+    const sections = Array.from(sectionsContainer.querySelectorAll('[data-kb-section]'));
+    const index = sections.indexOf(section);
+    if (index === -1) {
+      return;
+    }
+    const target = index + offset;
+    if (target < 0 || target >= sections.length) {
+      return;
+    }
+    if (offset < 0) {
+      sectionsContainer.insertBefore(section, sections[target]);
+    } else {
+      const reference = sections[target].nextSibling;
+      sectionsContainer.insertBefore(section, reference);
     }
   }
 
@@ -183,11 +394,12 @@
     slugField.value = '';
     titleField.value = '';
     summaryField.value = '';
-    contentField.value = '';
     scopeField.value = 'anonymous';
     publishedField.checked = false;
     renderUserOptions([]);
     renderCompanyOptions([]);
+    renderSections([]);
+    addSection({ heading: '', content: '<p><br></p>' });
     updateScopeFields('anonymous');
     setStatus('');
     if (deleteButton) {
@@ -227,7 +439,19 @@
     slugField.value = article.slug || '';
     titleField.value = article.title || '';
     summaryField.value = article.summary || '';
-    contentField.value = article.content || '';
+    if (Array.isArray(article.sections) && article.sections.length > 0) {
+      const sortedSections = article.sections
+        .slice()
+        .sort((a, b) => (a.position || 0) - (b.position || 0));
+      renderSections(sortedSections);
+    } else {
+      renderSections([
+        {
+          heading: article.title || '',
+          content: article.content || '<p><br></p>',
+        },
+      ]);
+    }
     scopeField.value = article.permission_scope || 'anonymous';
     publishedField.checked = Boolean(article.is_published);
 
@@ -290,18 +514,28 @@
         ${timestamps.length ? `<div class="kb-admin__timestamps">${timestamps.join('')}</div>` : ''}
       `;
     }
-    previewContainer.innerHTML = article.content || '<p class="text-muted">No content recorded for this article.</p>';
+    if (Array.isArray(article.sections) && article.sections.length > 0) {
+      previewContainer.innerHTML = composeSectionsHtml(article.sections);
+    } else {
+      previewContainer.innerHTML =
+        article.content || '<p class="text-muted">No content recorded for this article.</p>';
+    }
   }
 
   function getPayloadFromForm() {
     const scope = scopeField.value;
+    const sections = collectSectionsFromDom();
+    if (sections.length === 0) {
+      throw new Error('At least one section with content is required.');
+    }
     const payload = {
       slug: slugField.value.trim(),
       title: titleField.value.trim(),
       summary: summaryField.value.trim() || null,
-      content: contentField.value,
+      content: composeSectionsHtml(sections),
       permission_scope: scope,
       is_published: Boolean(publishedField.checked),
+      sections: sections.map((section) => ({ heading: section.heading, content: section.content })),
     };
     if (scope === 'user') {
       payload.allowed_user_ids = getSelectedValues(userSelect);
@@ -313,7 +547,13 @@
 
   async function submitForm() {
     const articleId = idField.value ? parseInt(idField.value, 10) : null;
-    const payload = getPayloadFromForm();
+    let payload;
+    try {
+      payload = getPayloadFromForm();
+    } catch (error) {
+      setStatus(error.message || 'Unable to read section content.', 'error');
+      return;
+    }
     if (!payload.slug || !payload.title || !payload.content) {
       setStatus('Slug, title, and content are required before saving.', 'error');
       return;
@@ -426,6 +666,82 @@
         return;
       }
       loadArticle(slug);
+    });
+  }
+
+  if (sectionsContainer) {
+    sectionsContainer.addEventListener('click', (event) => {
+      const commandButton = event.target.closest('[data-kb-command]');
+      if (commandButton) {
+        const section = commandButton.closest('[data-kb-section]');
+        const editor = section ? section.querySelector('[data-kb-section-editor]') : null;
+        if (editor) {
+          editor.focus();
+          const command = commandButton.dataset.kbCommand;
+          const value = commandButton.dataset.kbCommandValue || null;
+          if (command === 'createLink') {
+            let url = window.prompt('Enter the link URL (https://example.com)');
+            if (!url) {
+              return;
+            }
+            if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) {
+              url = `https://${url}`;
+            }
+            if (!/^https?:/i.test(url) && !/^mailto:/i.test(url)) {
+              window.alert('Only HTTP, HTTPS, or mailto links are allowed.');
+              return;
+            }
+            document.execCommand('createLink', false, url);
+            const selectorUrl = url.replace(/"/g, '\\"');
+            editor.querySelectorAll(`a[href="${selectorUrl}"]`).forEach((anchor) => {
+              anchor.target = '_blank';
+              anchor.rel = 'noopener';
+            });
+          } else if (command === 'formatBlock') {
+            document.execCommand('formatBlock', false, value || 'p');
+          } else if (command === 'removeFormat') {
+            document.execCommand('removeFormat', false, value);
+          } else {
+            document.execCommand(command, false, value);
+          }
+          ensurePreviewMatchesForm();
+        }
+        return;
+      }
+
+      const section = event.target.closest('[data-kb-section]');
+      if (!section) {
+        return;
+      }
+      if (event.target.closest('[data-kb-section-up]')) {
+        moveSection(section, -1);
+        ensurePreviewMatchesForm();
+      } else if (event.target.closest('[data-kb-section-down]')) {
+        moveSection(section, 1);
+        ensurePreviewMatchesForm();
+      } else if (event.target.closest('[data-kb-section-delete]')) {
+        section.remove();
+        if (!sectionsContainer.querySelector('[data-kb-section]')) {
+          renderSections([]);
+        }
+        ensurePreviewMatchesForm();
+      }
+    });
+
+    sectionsContainer.addEventListener('input', (event) => {
+      if (
+        event.target.matches('[data-kb-section-heading]') ||
+        event.target.closest('[data-kb-section-editor]')
+      ) {
+        ensurePreviewMatchesForm();
+      }
+    });
+  }
+
+  if (addSectionButton) {
+    addSectionButton.addEventListener('click', () => {
+      addSection({ heading: '', content: '<p><br></p>' });
+      ensurePreviewMatchesForm();
     });
   }
 

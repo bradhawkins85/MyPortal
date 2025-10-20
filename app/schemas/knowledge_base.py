@@ -3,19 +3,29 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, constr
+from pydantic import BaseModel, Field, conint, constr
 
 PermissionScope = Literal["anonymous", "user", "company", "company_admin", "super_admin"]
+
+
+class KnowledgeBaseArticleSection(BaseModel):
+    heading: constr(strip_whitespace=True, max_length=255) | None = None
+    content: constr(min_length=1)
+
+
+class KnowledgeBaseArticleSectionResponse(KnowledgeBaseArticleSection):
+    position: conint(ge=1) = 1
 
 
 class KnowledgeBaseArticleBase(BaseModel):
     title: constr(strip_whitespace=True, min_length=1, max_length=255)
     summary: str | None = Field(default=None, max_length=2000)
-    content: str = Field(..., min_length=1)
     permission_scope: PermissionScope = Field(default="anonymous")
     is_published: bool = False
     allowed_user_ids: list[int] = Field(default_factory=list)
     allowed_company_ids: list[int] = Field(default_factory=list)
+    sections: list[KnowledgeBaseArticleSection] = Field(default_factory=list)
+    content: str | None = Field(default=None)
 
 
 class KnowledgeBaseArticleCreate(KnowledgeBaseArticleBase):
@@ -31,6 +41,7 @@ class KnowledgeBaseArticleUpdate(BaseModel):
     is_published: bool | None = None
     allowed_user_ids: list[int] | None = None
     allowed_company_ids: list[int] | None = None
+    sections: list[KnowledgeBaseArticleSection] | None = None
 
 
 class KnowledgeBaseArticleResponse(BaseModel):
@@ -44,6 +55,7 @@ class KnowledgeBaseArticleResponse(BaseModel):
     allowed_user_ids: list[int]
     allowed_company_ids: list[int]
     company_admin_ids: list[int]
+    sections: list[KnowledgeBaseArticleSectionResponse]
     created_by: int | None
     created_at: datetime | None
     updated_at: datetime | None
