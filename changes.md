@@ -163,6 +163,7 @@
 - 2025-09-18, 08:30 UTC, Feature, Rebuilt the MyPortal backend and UI in Python with FastAPI, async MySQL access, and responsive 3-panel theming
 - 2025-09-18, 09:05 UTC, Fix, Replaced binary image assets with SVG icons to unblock PR creation and retain themeable layout
 - 2025-10-07, 11:53 UTC, Fix, Added a virtual environment bootstrap script and README guidance to bypass externally managed pip install failures
+- 2025-10-16, 09:45 UTC, Fix, Hardened the restart automation to respect environment overrides and fail fast when system updates cannot restart the service
 - 2025-10-07, 12:00 UTC, Fix, Allowed extra environment variables in Python settings loader to restore API startup
 - 2025-10-07, 12:10 UTC, Fix, Switched configuration fields to validation aliases so startup accepts secret and database env vars
 - 2025-10-07, 12:19 UTC, Feature, Added secure upgrade automation script for pulling updates and restarting services
