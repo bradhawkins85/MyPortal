@@ -59,7 +59,7 @@ async def create_ticket(
     module_slug: str | None,
     external_reference: str | None,
 ) -> TicketRecord:
-    await db.execute(
+    ticket_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO tickets
             (company_id, requester_id, assigned_user_id, subject, description, status, priority, category, module_slug, external_reference)
@@ -78,8 +78,27 @@ async def create_ticket(
             external_reference,
         ),
     )
-    row = await db.fetch_one("SELECT * FROM tickets WHERE id = LAST_INSERT_ID()")
-    return _normalise_ticket(row) if row else {}
+    if ticket_id:
+        row = await db.fetch_one("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
+        if row:
+            return _normalise_ticket(row)
+    fallback_row: dict[str, Any] = {
+        "id": ticket_id,
+        "company_id": company_id,
+        "requester_id": requester_id,
+        "assigned_user_id": assigned_user_id,
+        "subject": subject,
+        "description": description,
+        "status": status,
+        "priority": priority,
+        "category": category,
+        "module_slug": module_slug,
+        "external_reference": external_reference,
+        "created_at": None,
+        "updated_at": None,
+        "closed_at": None,
+    }
+    return _normalise_ticket(fallback_row)
 
 
 async def list_tickets(
@@ -208,15 +227,26 @@ async def create_reply(
     body: str,
     is_internal: bool = False,
 ) -> TicketRecord:
-    await db.execute(
+    reply_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO ticket_replies (ticket_id, author_id, body, is_internal)
         VALUES (%s, %s, %s, %s)
         """,
         (ticket_id, author_id, body, 1 if is_internal else 0),
     )
-    row = await db.fetch_one("SELECT * FROM ticket_replies WHERE id = LAST_INSERT_ID()")
-    return _normalise_reply(row) if row else {}
+    if reply_id:
+        row = await db.fetch_one("SELECT * FROM ticket_replies WHERE id = %s", (reply_id,))
+        if row:
+            return _normalise_reply(row)
+    fallback_row: dict[str, Any] = {
+        "id": reply_id,
+        "ticket_id": ticket_id,
+        "author_id": author_id,
+        "body": body,
+        "is_internal": 1 if is_internal else 0,
+        "created_at": None,
+    }
+    return _normalise_reply(fallback_row)
 
 
 async def list_replies(ticket_id: int) -> list[TicketRecord]:
