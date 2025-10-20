@@ -751,7 +751,7 @@ async def _build_base_context(
                 )
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("Failed to count unread notifications", error=str(exc))
-    context["notification_unread_count"] = unread_count
+        context["notification_unread_count"] = unread_count
     return context
 
 
