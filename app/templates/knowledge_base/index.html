@@ -109,6 +109,13 @@
             <span class="tag tag--warning">Draft</span>
           {% endif %}
         </div>
+        {% if kb_active_article.ai_tags %}
+        <div class="knowledge-base__ai-tags" aria-label="AI generated tags">
+          {% for tag in kb_active_article.ai_tags %}
+            <span class="tag tag--info">{{ tag }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
       </header>
       <div class="card__body knowledge-base__body" data-knowledge-base-article-body>
         {% if kb_active_article.sections %}
