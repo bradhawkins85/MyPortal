@@ -1,3 +1,4 @@
+- 2025-10-20, 06:59 UTC, Fix, Aligned ticketing migration key types with existing INT identifiers so startup migrations succeed on MySQL
 - 2025-10-20, 06:29 UTC, Fix, Guarded module catalog and automation schedule refresh when the database is offline so startup and tests proceed without MySQL
 - 2025-10-20, 06:09 UTC, Feature, Integrated ticketing, automations, and integration module management from TacticalDesk with admin dashboards and API endpoints
 - 2025-10-16, 08:13 UTC, Fix, Restored add-to-cart controls by exposing cart permissions in shared context so authorised users can shop
