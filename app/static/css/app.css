@@ -2871,6 +2871,39 @@ body {
   outline-offset: 2px;
 }
 
+.kb-admin__editor img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-xs);
+}
+
+.kb-admin__image-overlay {
+  position: absolute;
+  border: 2px solid var(--primary);
+  pointer-events: none;
+  z-index: 2000;
+  border-radius: var(--radius-xs);
+  box-sizing: border-box;
+}
+
+.kb-admin__image-overlay[hidden] {
+  display: none;
+}
+
+.kb-admin__image-overlay-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  border: 2px solid var(--surface-default);
+  background-color: var(--primary);
+  bottom: -9px;
+  right: -9px;
+  cursor: se-resize;
+  pointer-events: auto;
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
 .kb-admin__editor p {
   margin: 0 0 0.75rem;
 }
