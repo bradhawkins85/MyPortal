@@ -1,3 +1,4 @@
+- 2025-10-20, 09:05 UTC, Fix, Treated integration module enable submissions as truthy when checkboxes send numeric values so toggles persist
 - 2025-10-20, 08:07 UTC, Feature, Enabled public self-service registration with requester-scoped ticket access and public-only replies for non-admin users
 - 2025-10-20, 07:53 UTC, Feature, Replaced the integration module enable checkbox with a themed toggle switch for clearer status control
 - 2025-10-20, 08:20 UTC, Fix, Ensured ticket creation reuses insert connections so watcher setup no longer triggers 500 errors
