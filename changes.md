@@ -1,3 +1,4 @@
+- 2025-12-06, 15:45 UTC, Feature, Enabled drag-to-resize handles for knowledge base editor images with live preview updates
 - 2025-10-20, 11:59 UTC, Feature, Reworked knowledge base portal layout to list articles and moved article reading to dedicated views
 - 2025-12-06, 12:25 UTC, Fix, Normalised AI summary parsing to strip Markdown-style code blocks so ticket summaries render as pla
 in text
