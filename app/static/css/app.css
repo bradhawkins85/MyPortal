@@ -2936,6 +2936,12 @@ body {
   justify-content: flex-start;
 }
 
+.kb-admin__ai-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
 .kb-admin__timestamps {
   display: flex;
   flex-direction: column;
@@ -3016,6 +3022,30 @@ body {
   margin: 0.35rem 0 0;
   font-size: 0.85rem;
   color: rgba(226, 232, 240, 0.75);
+}
+
+.knowledge-base__row--active {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.knowledge-base__row--active .knowledge-base__link {
+  font-weight: 600;
+}
+
+.knowledge-base__content {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.knowledge-base__tags,
+.knowledge-base__ai-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-gap-tight);
+}
+
+.knowledge-base__ai-tags {
+  margin-top: var(--space-gap-tight);
 }
 
 .knowledge-base__article .card__body {

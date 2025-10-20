@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import json
 from typing import Any, Iterable, Mapping, Sequence
 
 from app.core.database import db
@@ -38,7 +39,38 @@ def _normalise_article(row: dict[str, Any]) -> dict[str, Any]:
     if permission not in _PERMISSION_SCOPES:
         permission = "anonymous"
     article["permission_scope"] = permission
+    article["ai_tags"] = _normalise_tags(article.get("ai_tags"))
     return article
+
+
+def _normalise_tags(raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, (list, tuple, set)):
+        iterable = raw
+    else:
+        try:
+            decoded = json.loads(raw) if isinstance(raw, (str, bytes, bytearray)) else None
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, (list, tuple, set)):
+            iterable = decoded
+        else:
+            return []
+    normalised: list[str] = []
+    seen: set[str] = set()
+    for item in iterable:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        normalised.append(text)
+    return normalised
 
 
 def _prepare_in_clause(ids: Iterable[int]) -> tuple[str, tuple[int, ...]] | tuple[None, tuple[int, ...]]:
@@ -179,19 +211,21 @@ async def create_article(
     is_published: bool,
     published_at: datetime | None,
     created_by: int | None,
+    ai_tags: Sequence[str] | None,
 ) -> dict[str, Any]:
     if permission_scope not in _PERMISSION_SCOPES:
         permission_scope = "anonymous"
     article_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO knowledge_base_articles (
-            slug, title, summary, content, permission_scope, is_published, published_at, created_by
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            slug, title, summary, ai_tags, content, permission_scope, is_published, published_at, created_by
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             slug,
             title,
             summary,
+            json.dumps(list(ai_tags)) if ai_tags is not None else json.dumps([]),
             content,
             permission_scope,
             1 if is_published else 0,
@@ -220,6 +254,12 @@ async def update_article(article_id: int, **updates: Any) -> dict[str, Any]:
         if column == "is_published":
             columns.append("is_published = %s")
             params.append(1 if value else 0)
+        elif column == "ai_tags":
+            columns.append("ai_tags = %s")
+            if value is None:
+                params.append(json.dumps([]))
+            else:
+                params.append(json.dumps(list(value)))
         else:
             columns.append(f"{column} = %s")
             params.append(value)

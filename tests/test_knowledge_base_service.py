@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -33,6 +34,7 @@ def _article_factory(**overrides):
         ],
         "permission_scope": "anonymous",
         "is_published": True,
+        "ai_tags": ["public"],
         "created_by": 1,
         "created_at": now,
         "updated_at": now,
@@ -121,3 +123,101 @@ async def test_search_articles_returns_ollama_summary(monkeypatch):
     assert result["ollama_status"] == "succeeded"
     assert "guide" in {item["slug"] for item in result["results"]}
     assert "onboarding" in (result["ollama_summary"] or "")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_create_article_generates_ai_tags(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    async def _create_article(**kwargs):
+        captured.update(kwargs)
+        return {"id": 21, "slug": kwargs["slug"]}
+
+    refreshed_article = _article_factory(
+        id=21,
+        slug="vpn-guide",
+        title="VPN Guide",
+        summary="Configure remote access",
+        ai_tags=["vpn", "remote access"],
+    )
+
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "create_article", AsyncMock(side_effect=_create_article))
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_sections", AsyncMock())
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_users", AsyncMock())
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_companies", AsyncMock())
+    monkeypatch.setattr(
+        knowledge_base_service.kb_repo,
+        "get_article_by_id",
+        AsyncMock(return_value=refreshed_article),
+    )
+    monkeypatch.setattr(
+        knowledge_base_service.modules_service,
+        "trigger_module",
+        AsyncMock(
+            return_value={
+                "status": "succeeded",
+                "response": {"response": '["vpn", "remote access", "security"]'},
+            }
+        ),
+    )
+
+    payload = {
+        "slug": "vpn-guide",
+        "title": "VPN Guide",
+        "summary": "Configure remote access",
+        "permission_scope": "anonymous",
+        "is_published": True,
+        "sections": [{"heading": "Overview", "content": "<p>Use the VPN client.</p>"}],
+    }
+
+    article = await knowledge_base_service.create_article(payload, author_id=7)
+
+    assert captured["ai_tags"] == ["vpn", "remote access", "security"]
+    assert article["ai_tags"] == ["vpn", "remote access"]
+    knowledge_base_service.modules_service.trigger_module.assert_awaited_once()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_update_article_refreshes_ai_tags(monkeypatch):
+    current_article = _article_factory(
+        id=31,
+        slug="security-basics",
+        title="Security basics",
+        summary="Initial guidance",
+        ai_tags=["legacy"],
+    )
+
+    updated_article = _article_factory(
+        id=31,
+        slug="security-basics",
+        title="Security fundamentals",
+        summary="Initial guidance",
+        ai_tags=["security", "hardening"],
+    )
+
+    monkeypatch.setattr(
+        knowledge_base_service.kb_repo,
+        "get_article_by_id",
+        AsyncMock(side_effect=[current_article, updated_article]),
+    )
+    update_mock = AsyncMock(return_value=dict(current_article, title="Security fundamentals"))
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "update_article", update_mock)
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_sections", AsyncMock())
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_users", AsyncMock())
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_companies", AsyncMock())
+    monkeypatch.setattr(
+        knowledge_base_service.modules_service,
+        "trigger_module",
+        AsyncMock(return_value={"status": "succeeded", "response": {"response": '["security", "hardening"]'}}),
+    )
+
+    payload = {
+        "title": "Security fundamentals",
+        "sections": [{"heading": "Overview", "content": "<p>Update your systems weekly.</p>"}],
+    }
+
+    article = await knowledge_base_service.update_article(31, payload)
+
+    assert update_mock.await_args.kwargs["ai_tags"] == ["security", "hardening"]
+    assert article["ai_tags"] == ["security", "hardening"]
+    knowledge_base_service.modules_service.trigger_module.assert_awaited_once()
