@@ -1,3 +1,4 @@
+- 2025-12-01, 09:00 UTC, Feature, Added knowledge base module with scoped permissions, Ollama-backed search, and portal UI integration
 - 2025-10-20, 09:05 UTC, Fix, Treated integration module enable submissions as truthy when checkboxes send numeric values so toggles persist
 - 2025-11-28, 09:30 UTC, Feature, Added helpdesk.technician role permission with constrained ticket workspace access for non-super-admin technicians
 - 2025-10-20, 08:07 UTC, Feature, Enabled public self-service registration with requester-scoped ticket access and public-only replies for non-admin users
