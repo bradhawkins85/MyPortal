@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping as MappingABC
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
@@ -266,6 +267,96 @@ def _render_tags_prompt(
         "Return JSON containing a 'tags' array of 5 to 10 unique lowercase kebab-case strings that best describe the ticket."
     )
     return "\n".join(lines)
+def _strip_wrapped_block(text: str) -> str:
+    """Remove common Markdown or triple-quoted wrappers from a response."""
+
+    stripped = text.strip()
+    if not stripped:
+        return stripped
+
+    def _strip_language_preamble(body: str) -> str:
+        body = body.lstrip("\n")
+        if "\n" not in body:
+            return body.strip()
+        first_line, rest = body.split("\n", 1)
+        candidate = first_line.strip()
+        if candidate and not candidate.startswith("{") and not candidate.startswith("["):
+            if all(ch.isalnum() or ch in {"-", "_", "."} for ch in candidate):
+                return rest.strip()
+        return body.strip()
+
+    wrappers: tuple[tuple[str, bool], ...] = (
+        ("```", True),
+        ("~~~", True),
+        ('"""', True),
+        ("'''", True),
+    )
+
+    for fence, remove_language in wrappers:
+        if stripped.startswith(fence) and stripped.endswith(fence) and len(stripped) >= len(fence) * 2:
+            inner = stripped[len(fence) : -len(fence)]
+            inner = inner.strip()
+            if remove_language:
+                inner = _strip_language_preamble(inner)
+            return inner.strip()
+
+    for fence, remove_language in wrappers:
+        start = stripped.find(fence)
+        end = stripped.rfind(fence)
+        if start != -1 and end != -1 and end > start + len(fence):
+            candidate = stripped[start : end + len(fence)]
+            cleaned = _strip_wrapped_block(candidate)
+            if cleaned != candidate.strip():
+                return cleaned
+
+    return stripped
+
+
+def _parse_json_candidate(candidate: str) -> tuple[str | None, str | None] | None:
+    if not candidate:
+        return None
+
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+
+    if isinstance(parsed, MappingABC):
+        summary_candidate = (
+            parsed.get("summary")
+            or parsed.get("analysis")
+            or parsed.get("text")
+        )
+        if isinstance(summary_candidate, str):
+            summary_text = summary_candidate.strip()
+        elif summary_candidate is None:
+            summary_text = None
+        else:
+            summary_text = str(summary_candidate)
+        if isinstance(summary_text, str) and not summary_text:
+            summary_text = None
+        resolution_candidate = (
+            parsed.get("resolution")
+            or parsed.get("resolution_label")
+            or parsed.get("status")
+            or parsed.get("state")
+        )
+        resolution_label = resolution_candidate.strip() if isinstance(resolution_candidate, str) else None
+        if not summary_text:
+            other_items = {
+                key: value
+                for key, value in parsed.items()
+                if key not in {"resolution", "resolution_label", "status", "state"}
+            }
+            if other_items:
+                summary_text = json.dumps(other_items, ensure_ascii=False)
+        return summary_text, resolution_label
+
+    if isinstance(parsed, str):
+        cleaned = parsed.strip()
+        return (cleaned or None, None)
+
+    return candidate, None
 
 
 def _extract_summary_fields(payload: Any) -> tuple[str | None, str | None]:
@@ -292,28 +383,15 @@ def _extract_summary_fields(payload: Any) -> tuple[str | None, str | None]:
     if not text:
         return None, None
 
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        return text, None
+    cleaned = _strip_wrapped_block(text)
 
-    if isinstance(parsed, Mapping):
-        summary_candidate = parsed.get("summary") or parsed.get("analysis") or parsed.get("text")
-        summary_text = (
-            summary_candidate.strip() if isinstance(summary_candidate, str) else str(summary_candidate) if summary_candidate else None
-        )
-        if summary_text:
-            summary_text = summary_text.strip()
-        resolution_candidate = parsed.get("resolution") or parsed.get("resolution_label") or parsed.get("status") or parsed.get("state")
-        resolution_label = resolution_candidate.strip() if isinstance(resolution_candidate, str) else None
-        if not summary_text:
-            other_items = {k: v for k, v in parsed.items() if k not in {"resolution", "resolution_label", "status", "state"}}
-            if other_items:
-                summary_text = json.dumps(other_items, ensure_ascii=False)
-        return summary_text, resolution_label
+    for candidate in (cleaned, text) if cleaned != text else (text,):
+        result = _parse_json_candidate(candidate)
+        if result is not None:
+            return result
 
-    if isinstance(parsed, str):
-        return parsed.strip() or None, None
+    if cleaned != text:
+        return cleaned, None
 
     return text, None
 
