@@ -16,8 +16,9 @@
     {% block extra_head %}{% endblock %}
   </head>
   <body class="theme-default">
-    <div class="layout">
-      <nav class="layout__sidebar">
+    <div class="layout" data-layout>
+      <div class="layout__scrim" data-mobile-nav-scrim aria-hidden="true"></div>
+      <nav class="layout__sidebar" id="primary-navigation" data-sidebar tabindex="-1">
         <div class="brand">
           <img src="/static/logo.svg" alt="{{ app_name }}" class="brand__logo" />
           <span class="brand__name">{{ app_name }}</span>
@@ -303,7 +304,21 @@
       </nav>
       <main class="layout__main">
         <header class="layout__header">
-          <div class="header__title">{{ title | default('Dashboard') }}</div>
+          <div class="header__leading">
+            <button
+              class="layout__mobile-toggle"
+              type="button"
+              aria-expanded="false"
+              aria-controls="primary-navigation"
+              data-mobile-nav-toggle
+            >
+              <span class="sr-only">Toggle navigation</span>
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+                <path d="M3 6.25A1.25 1.25 0 0 1 4.25 5h15.5a1.25 1.25 0 1 1 0 2.5H4.25A1.25 1.25 0 0 1 3 6.25Zm0 5.75A1.25 1.25 0 0 1 4.25 10h15.5a1.25 1.25 0 1 1 0 2.5H4.25A1.25 1.25 0 0 1 3 11.75ZM4.25 15h15.5a1.25 1.25 0 1 1 0 2.5H4.25a1.25 1.25 0 1 1 0-2.5Z" />
+              </svg>
+            </button>
+            <div class="header__title">{{ title | default('Dashboard') }}</div>
+          </div>
           {% block header_actions %}{% endblock %}
         </header>
         <section class="layout__content">
@@ -406,6 +421,122 @@
               form.submit();
             }
           });
+        }
+
+        const layout = document.querySelector('[data-layout]');
+        const sidebar = document.querySelector('[data-sidebar]');
+        const toggleButton = document.querySelector('[data-mobile-nav-toggle]');
+        const scrim = document.querySelector('[data-mobile-nav-scrim]');
+        const mobileMedia = window.matchMedia('(max-width: 1024px)');
+        let lastFocusedTrigger = null;
+
+        const focusFirstSidebarItem = () => {
+          if (!sidebar) {
+            return;
+          }
+          const focusableSelector =
+            'a[href], button:not([disabled]), textarea, input:not([type="hidden"]), select, [tabindex]:not([tabindex="-1"])';
+          const firstFocusable = sidebar.querySelector(focusableSelector);
+          if (firstFocusable instanceof HTMLElement) {
+            firstFocusable.focus({ preventScroll: true });
+          } else {
+            sidebar.focus({ preventScroll: true });
+          }
+        };
+
+        const syncSidebarAria = (isOpen) => {
+          if (!sidebar) {
+            return;
+          }
+          if (mobileMedia.matches) {
+            sidebar.setAttribute('aria-hidden', String(!isOpen));
+            if (!isOpen) {
+              sidebar.setAttribute('inert', '');
+            } else {
+              sidebar.removeAttribute('inert');
+            }
+          } else {
+            sidebar.removeAttribute('aria-hidden');
+            sidebar.removeAttribute('inert');
+          }
+          if (scrim) {
+            scrim.setAttribute('aria-hidden', String(!isOpen));
+          }
+        };
+
+        const closeSidebar = () => {
+          if (!layout || !toggleButton) {
+            return;
+          }
+          layout.classList.remove('layout--sidebar-open');
+          toggleButton.setAttribute('aria-expanded', 'false');
+          syncSidebarAria(false);
+          if (lastFocusedTrigger instanceof HTMLElement) {
+            lastFocusedTrigger.focus({ preventScroll: true });
+            lastFocusedTrigger = null;
+          }
+        };
+
+        const openSidebar = () => {
+          if (!layout || !toggleButton) {
+            return;
+          }
+          layout.classList.add('layout--sidebar-open');
+          toggleButton.setAttribute('aria-expanded', 'true');
+          syncSidebarAria(true);
+          lastFocusedTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          focusFirstSidebarItem();
+        };
+
+        const toggleSidebar = () => {
+          if (!layout) {
+            return;
+          }
+          const isOpen = layout.classList.contains('layout--sidebar-open');
+          if (isOpen) {
+            closeSidebar();
+          } else {
+            openSidebar();
+          }
+        };
+
+        const handleMediaChange = () => {
+          if (!layout || !toggleButton) {
+            return;
+          }
+          if (!mobileMedia.matches) {
+            layout.classList.remove('layout--sidebar-open');
+            toggleButton.setAttribute('aria-expanded', 'false');
+            syncSidebarAria(false);
+            lastFocusedTrigger = null;
+          } else {
+            syncSidebarAria(layout.classList.contains('layout--sidebar-open'));
+          }
+        };
+
+        if (layout && sidebar && toggleButton) {
+          sidebar.setAttribute('tabindex', '-1');
+          toggleButton.addEventListener('click', toggleSidebar);
+          document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && layout.classList.contains('layout--sidebar-open')) {
+              event.preventDefault();
+              closeSidebar();
+            }
+          });
+          if (scrim) {
+            scrim.addEventListener('click', closeSidebar);
+          }
+          sidebar.addEventListener('click', (event) => {
+            if (
+              mobileMedia.matches &&
+              event.target instanceof HTMLElement &&
+              event.target.closest('a, button:not([data-mobile-nav-toggle])')
+            ) {
+              closeSidebar();
+            }
+          });
+          mobileMedia.addEventListener('change', handleMediaChange);
+          handleMediaChange();
         }
       })();
     </script>
