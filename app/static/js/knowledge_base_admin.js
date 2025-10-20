@@ -6,6 +6,9 @@
   }
 
   function parseJson(script, fallback) {
+    if (!script || typeof script.textContent !== 'string') {
+      return fallback;
+    }
     try {
       return JSON.parse(script.textContent || 'null') || fallback;
     } catch (error) {
@@ -17,6 +20,8 @@
   const articles = parseJson(articlesScript, []);
   const userOptions = parseJson(document.getElementById('kb-admin-user-options') || { textContent: '[]' }, []);
   const companyOptions = parseJson(document.getElementById('kb-admin-company-options') || { textContent: '[]' }, []);
+  const initialArticle = parseJson(document.getElementById('kb-admin-active-article'), null);
+  const formMode = (form.dataset && form.dataset.kbMode) || 'edit';
 
   const state = {
     activeSlug: null,
@@ -40,7 +45,6 @@
   const companyHelp = form.querySelector('[data-kb-company-help]');
   const deleteButton = form.querySelector('[data-kb-delete]');
   const resetButton = form.querySelector('[data-kb-reset]');
-  const newButton = document.querySelector('[data-kb-new-article]');
   const previewContainer = document.querySelector('[data-kb-preview]');
   const previewMeta = document.querySelector('[data-kb-preview-meta]');
   const sectionsContainer = document.querySelector('[data-kb-sections]');
@@ -378,9 +382,14 @@
     }
   }
 
+  const previewEmptyMessage =
+    formMode === 'create'
+      ? 'Compose sections to preview the article content here.'
+      : 'Select an article to preview its rendered content. Newly created articles appear here after saving.';
+
   function resetPreview() {
     if (previewContainer) {
-      previewContainer.innerHTML = '<p class="text-muted">Select an article to preview its rendered content. Newly created articles appear here after saving.</p>';
+      previewContainer.innerHTML = `<p class="text-muted">${previewEmptyMessage}</p>`;
     }
     if (previewMeta) {
       previewMeta.innerHTML = '';
@@ -643,14 +652,6 @@
     });
   }
 
-  if (newButton) {
-    newButton.addEventListener('click', () => {
-      resetForm();
-      slugField.focus();
-      setStatus('Ready to compose a new article.');
-    });
-  }
-
   if (table) {
     table.addEventListener('click', (event) => {
       const trigger = event.target.closest('[data-kb-select]');
@@ -750,8 +751,17 @@
   renderCompanyOptions([]);
   updateScopeFields(scopeField.value);
 
-  // Attempt to preselect the first article for convenience.
-  if (!state.activeSlug && articles.length > 0) {
+  if (initialArticle) {
+    populateForm(initialArticle);
+    setStatus('Article loaded. Ready to edit.', 'success');
+  } else if (formMode === 'create') {
+    resetForm();
+    if (slugField) {
+      slugField.focus();
+    }
+    setStatus('Ready to compose a new article.');
+  } else if (!state.activeSlug && articles.length > 0) {
+    // Attempt to preselect the first article for convenience when an editor page is not preloaded.
     const firstSlug = articles[0] && articles[0].slug;
     if (firstSlug) {
       loadArticle(firstSlug);

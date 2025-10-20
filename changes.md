@@ -1,3 +1,4 @@
+- 2025-10-20, 11:24 UTC, Feature, Split the knowledge base admin into a catalogue list with dedicated editor pages for creating and updating articles
 - 2025-10-20, 11:13 UTC, Feature, Introduced WYSIWYG knowledge base section editor with ordered multi-section storage and sanitised HTML handling
 - 2025-12-03, 10:15 UTC, Fix, Reconnected automation repository queries before writes so creating automations no longer fails when the database pool is cold
 - 2025-12-02, 15:00 UTC, Fix, Removed the ticket controls sidebar and placed the watcher list beneath the Updated metadata on the admin ticket detail view
