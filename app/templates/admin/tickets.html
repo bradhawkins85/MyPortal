@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if success_message or error_message %}
+    <div class="alert-stack">
+      {% if success_message %}
+        <div class="alert" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="management" data-layout>
+    <aside class="management__sidebar">
+      <h2 class="management__heading">Quick actions</h2>
+      <p class="management__intro">Create a ticket that can be routed to automation modules or manual analysts.</p>
+      <form action="/admin/tickets" method="post" class="form management__form">
+        {% if csrf_token %}
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <div class="form-field">
+          <label class="form-label" for="ticket-subject">Subject</label>
+          <input id="ticket-subject" name="subject" class="form-input" maxlength="255" required />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="ticket-description">Description</label>
+          <textarea id="ticket-description" name="description" class="form-input" rows="4" placeholder="Include the customer request or diagnostic notes"></textarea>
+        </div>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="ticket-priority">Priority</label>
+            <select id="ticket-priority" name="priority" class="form-input">
+              <option value="urgent">Urgent</option>
+              <option value="high">High</option>
+              <option value="normal" selected>Normal</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="ticket-status">Initial status</label>
+            <select id="ticket-status" name="status" class="form-input">
+              <option value="open" selected>Open</option>
+              <option value="in_progress">In progress</option>
+              <option value="pending">Pending</option>
+              <option value="resolved">Resolved</option>
+              <option value="closed">Closed</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="ticket-module">Module</label>
+          <select id="ticket-module" name="moduleSlug" class="form-input">
+            <option value="">Unassigned</option>
+            {% for module in ticket_modules %}
+              <option value="{{ module.slug }}">{{ module.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="ticket-company">Company</label>
+          <select id="ticket-company" name="companyId" class="form-input">
+            <option value="">Not linked</option>
+            {% for company in ticket_company_options %}
+              <option value="{{ company.id }}">{{ company.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="ticket-assigned">Assign to</label>
+          <select id="ticket-assigned" name="assignedUserId" class="form-input">
+            <option value="">Unassigned</option>
+            {% for user in ticket_user_options %}
+              <option value="{{ user.id }}">{{ user.email }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="ticket-category">Category</label>
+          <input id="ticket-category" name="category" class="form-input" maxlength="64" placeholder="Networking, onboarding, escalation…" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="ticket-reference">External reference</label>
+          <input id="ticket-reference" name="externalReference" class="form-input" maxlength="128" placeholder="Syncro ID or external case" />
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">Create ticket</button>
+        </div>
+      </form>
+    </aside>
+
+    <section class="management__content">
+      <header class="management__header">
+        <div>
+          <h1 class="management__title">Ticketing workspace</h1>
+          <p class="management__subtitle">Monitor service demand, reply queues, and integration outcomes across connected modules.</p>
+        </div>
+        <form method="get" class="management__filters">
+          <label class="visually-hidden" for="ticket-filter-status">Status</label>
+          <select id="ticket-filter-status" name="status" class="form-input">
+            <option value="">All statuses</option>
+            {% for status_option in ticket_available_statuses %}
+              <option value="{{ status_option }}" {% if ticket_filters.status == status_option %}selected{% endif %}>{{ status_option.replace('_', ' ') }}</option>
+            {% endfor %}
+          </select>
+          <label class="visually-hidden" for="ticket-filter-module">Module</label>
+          <select id="ticket-filter-module" name="module" class="form-input">
+            <option value="">All modules</option>
+            {% for module in ticket_modules %}
+              <option value="{{ module.slug }}" {% if ticket_filters.module == module.slug %}selected{% endif %}>{{ module.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="button">Apply filters</button>
+        </form>
+      </header>
+
+      <div class="management__body">
+        <div class="management__stats">
+          <article class="stat-card">
+            <h3 class="stat-card__title">Open tickets</h3>
+            <p class="stat-card__value">{{ ticket_status_counts.get('open', 0) }}</p>
+          </article>
+          <article class="stat-card">
+            <h3 class="stat-card__title">In progress</h3>
+            <p class="stat-card__value">{{ ticket_status_counts.get('in_progress', 0) + ticket_status_counts.get('pending', 0) }}</p>
+          </article>
+          <article class="stat-card">
+            <h3 class="stat-card__title">Resolved</h3>
+            <p class="stat-card__value">{{ ticket_status_counts.get('resolved', 0) + ticket_status_counts.get('closed', 0) }}</p>
+          </article>
+          <article class="stat-card">
+            <h3 class="stat-card__title">Total</h3>
+            <p class="stat-card__value">{{ ticket_total }}</p>
+          </article>
+        </div>
+
+        <div class="management__toolbar">
+          <input type="search" class="form-input" placeholder="Filter tickets" aria-label="Filter tickets" data-table-filter="tickets-table" />
+        </div>
+
+        <div class="table-wrapper">
+          <table class="table" id="tickets-table" data-table>
+            <thead>
+              <tr>
+                <th scope="col" data-sort="int">ID</th>
+                <th scope="col" data-sort="string">Subject</th>
+                <th scope="col" data-sort="string">Status</th>
+                <th scope="col" data-sort="string">Priority</th>
+                <th scope="col" data-sort="string">Module</th>
+                <th scope="col" data-sort="string">Company</th>
+                <th scope="col" data-sort="string">Assigned</th>
+                <th scope="col" data-sort="string">Updated</th>
+                <th scope="col" class="table__actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if tickets %}
+                {% set company_lookup = ticket_company_lookup or {} %}
+                {% set user_lookup = ticket_user_lookup or {} %}
+                {% for ticket in tickets %}
+                  {% set company = company_lookup.get(ticket.company_id) %}
+                  {% set assigned = user_lookup.get(ticket.assigned_user_id) %}
+                  <tr>
+                    <td data-label="ID">{{ ticket.id }}</td>
+                    <td data-label="Subject">{{ ticket.subject }}</td>
+                    <td data-label="Status">{{ ticket.status or 'open' }}</td>
+                    <td data-label="Priority">{{ ticket.priority or 'normal' }}</td>
+                    <td data-label="Module">{{ ticket.module_slug or '—' }}</td>
+                    <td data-label="Company">{{ company.name if company else (ticket.company_id or '—') }}</td>
+                    <td data-label="Assigned">{{ assigned.email if assigned else '—' }}</td>
+                    <td data-label="Updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
+                    <td class="table__actions">
+                      <form action="/admin/tickets/{{ ticket.id }}/status" method="post" class="inline-form">
+                        {% if csrf_token %}
+                          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                        {% endif %}
+                        <label class="visually-hidden" for="ticket-status-{{ ticket.id }}">Status</label>
+                        <select id="ticket-status-{{ ticket.id }}" name="status" class="form-input form-input--compact">
+                          {% for status_option in ticket_available_statuses %}
+                            <option value="{{ status_option }}" {% if status_option == (ticket.status or 'open') %}selected{% endif %}>{{ status_option.replace('_', ' ') }}</option>
+                          {% endfor %}
+                        </select>
+                        <button type="submit" class="button button--ghost">Update</button>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="9" class="table__empty">No tickets found for the selected filters.</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+

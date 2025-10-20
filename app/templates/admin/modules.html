@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if success_message or error_message %}
+    <div class="alert-stack">
+      {% if success_message %}
+        <div class="alert" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="management" data-layout>
+    <aside class="management__sidebar">
+      <h2 class="management__heading">Diagnostics</h2>
+      <p class="management__intro">Trigger self-tests to confirm connectivity for each integration module.</p>
+      <ul class="management__list" role="list">
+        {% for module in modules %}
+          <li class="management__list-item">
+            <form action="/admin/modules/{{ module.slug }}/test" method="post" class="management__test">
+              {% if csrf_token %}
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+              {% endif %}
+              <div class="management__test-info">
+                <span class="management__test-icon" aria-hidden="true">{{ module.icon or '🔌' }}</span>
+                <div>
+                  <strong>{{ module.name }}</strong>
+                  <p class="management__test-description">{{ module.description }}</p>
+                  <p class="management__test-status">Status: {{ 'Enabled' if module.enabled else 'Disabled' }}</p>
+                </div>
+              </div>
+              <button type="submit" class="button button--ghost">Run test</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    </aside>
+
+    <section class="management__content">
+      <header class="management__header">
+        <div>
+          <h1 class="management__title">Integration modules</h1>
+          <p class="management__subtitle">Synchronise credentials and delivery endpoints for Ollama, SMTP, TacticalRMM, and ntfy.</p>
+        </div>
+      </header>
+
+      <div class="management__body management__body--cards">
+        {% for module in modules %}
+          {% set settings = module.settings or {} %}
+          <article class="card card--panel">
+            <header class="card__header">
+              <div>
+                <h2 class="card__title">{{ module.name }}</h2>
+                <p class="card__subtitle">{{ module.description }}</p>
+              </div>
+              <span class="card__badge" aria-label="Module status">{{ 'Enabled' if module.enabled else 'Disabled' }}</span>
+            </header>
+            <form action="/admin/modules/{{ module.slug }}" method="post" class="form card__form">
+              {% if csrf_token %}
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+              {% endif %}
+              <div class="form-field form-field--checkbox">
+                <label class="checkbox">
+                  <input type="checkbox" name="enabled" value="1" {% if module.enabled %}checked{% endif %} />
+                  <span>Module enabled</span>
+                </label>
+              </div>
+
+              {% if module.slug == 'ollama' %}
+                <div class="form-field">
+                  <label class="form-label" for="ollama-base-url">Base URL</label>
+                  <input id="ollama-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="http://127.0.0.1:11434" />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="ollama-model">Model</label>
+                  <input id="ollama-model" name="settings.model" class="form-input" value="{{ settings.model or '' }}" placeholder="llama3" />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="ollama-prompt">Prompt</label>
+                  <textarea id="ollama-prompt" name="settings.prompt" class="form-input" rows="3" placeholder="Override summary instructions">{{ settings.prompt or '' }}</textarea>
+                </div>
+              {% elif module.slug == 'smtp' %}
+                <div class="form-field">
+                  <label class="form-label" for="smtp-from">From address</label>
+                  <input id="smtp-from" name="settings.from_address" class="form-input" value="{{ settings.from_address or '' }}" placeholder="no-reply@example.com" />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="smtp-recipients">Default recipients (comma separated)</label>
+                  <input id="smtp-recipients" name="settings.default_recipients" class="form-input" value="{{ ', '.join(settings.default_recipients) if settings.default_recipients else '' }}" />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="smtp-prefix">Subject prefix</label>
+                  <input id="smtp-prefix" name="settings.subject_prefix" class="form-input" value="{{ settings.subject_prefix or '' }}" />
+                </div>
+              {% elif module.slug == 'tacticalrmm' %}
+                <div class="form-field">
+                  <label class="form-label" for="rmm-base-url">Base URL</label>
+                  <input id="rmm-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="https://rmm.example.com" />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="rmm-api-key">API key</label>
+                  <input id="rmm-api-key" name="settings.api_key" class="form-input" value="{{ settings.api_key or '' }}" />
+                </div>
+                <div class="form-field form-field--checkbox">
+                  <label class="checkbox">
+                    <input type="checkbox" name="settings.verify_ssl" value="true" {% if settings.verify_ssl is not defined or settings.verify_ssl %}checked{% endif %} />
+                    <span>Verify SSL certificates</span>
+                  </label>
+                </div>
+              {% elif module.slug == 'ntfy' %}
+                <div class="form-field">
+                  <label class="form-label" for="ntfy-base-url">Base URL</label>
+                  <input id="ntfy-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="https://ntfy.sh" />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="ntfy-topic">Topic</label>
+                  <input id="ntfy-topic" name="settings.topic" class="form-input" value="{{ settings.topic or '' }}" placeholder="service-alerts" />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="ntfy-token">Auth token</label>
+                  <input id="ntfy-token" name="settings.auth_token" class="form-input" value="{{ settings.auth_token or '' }}" />
+                </div>
+              {% else %}
+                {% for key, value in settings.items() %}
+                  <div class="form-field">
+                    <label class="form-label">{{ key }}</label>
+                    <input class="form-input" name="settings.{{ key }}" value="{{ value }}" />
+                  </div>
+                {% endfor %}
+              {% endif %}
+              <div class="form-actions">
+                <button type="submit" class="button button--primary">Update module</button>
+              </div>
+            </form>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
