@@ -1,3 +1,4 @@
+- 2025-12-03, 10:15 UTC, Fix, Reconnected automation repository queries before writes so creating automations no longer fails when the database pool is cold
 - 2025-12-02, 15:00 UTC, Fix, Removed the ticket controls sidebar and placed the watcher list beneath the Updated metadata on the admin ticket detail view
 - 2025-10-20, 11:02 UTC, Feature, Enabled editable ticket metadata in a dedicated left-column form with validation for status, priority, requester, assignee, company, category, and external reference fields
 - 2025-10-20, 21:10 UTC, Fix, Serialised knowledge base admin context timestamps before embedding JSON so the admin console loads without datetime errors

@@ -4,10 +4,30 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from inspect import isawaitable
+
 from app.core.database import db
 
 AutomationRecord = dict[str, Any]
 AutomationRunRecord = dict[str, Any]
+
+
+async def _ensure_connection() -> None:
+    """Ensure the automation repository has an active database connection."""
+
+    is_connected = getattr(db, "is_connected", None)
+    if callable(is_connected):
+        try:
+            if is_connected():
+                return
+        except Exception:  # pragma: no cover - defensive guard
+            pass
+    connect = getattr(db, "connect", None)
+    if not connect:
+        return
+    result = connect()
+    if isawaitable(result):
+        await result
 
 
 def _serialise(value: Any) -> str | None:
@@ -82,6 +102,7 @@ async def create_automation(
     status: str,
     next_run_at: datetime | None,
 ) -> AutomationRecord:
+    await _ensure_connection()
     automation_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO automations
@@ -126,6 +147,7 @@ async def create_automation(
 
 
 async def get_automation(automation_id: int) -> AutomationRecord | None:
+    await _ensure_connection()
     row = await db.fetch_one(
         "SELECT * FROM automations WHERE id = %s",
         (automation_id,),
@@ -140,6 +162,7 @@ async def list_automations(
     limit: int = 100,
     offset: int = 0,
 ) -> list[AutomationRecord]:
+    await _ensure_connection()
     where: list[str] = []
     params: list[Any] = []
     if status:
@@ -164,6 +187,7 @@ async def list_automations(
 
 
 async def update_automation(automation_id: int, **fields: Any) -> AutomationRecord | None:
+    await _ensure_connection()
     if not fields:
         return await get_automation(automation_id)
     assignments: list[str] = []
@@ -183,6 +207,7 @@ async def update_automation(automation_id: int, **fields: Any) -> AutomationReco
 
 
 async def delete_automation(automation_id: int) -> None:
+    await _ensure_connection()
     await db.execute("DELETE FROM automations WHERE id = %s", (automation_id,))
 
 
@@ -196,6 +221,7 @@ async def record_run(
     result_payload: Any,
     error_message: str | None,
 ) -> AutomationRunRecord:
+    await _ensure_connection()
     run_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO automation_runs
@@ -228,6 +254,7 @@ async def record_run(
 
 
 async def list_runs(automation_id: int, *, limit: int = 50) -> list[AutomationRunRecord]:
+    await _ensure_connection()
     rows = await db.fetch_all(
         """
         SELECT *
@@ -242,6 +269,7 @@ async def list_runs(automation_id: int, *, limit: int = 50) -> list[AutomationRu
 
 
 async def mark_started(automation_id: int) -> None:
+    await _ensure_connection()
     await db.execute(
         """
         UPDATE automations
@@ -253,6 +281,7 @@ async def mark_started(automation_id: int) -> None:
 
 
 async def set_next_run(automation_id: int, next_run_at: datetime | None) -> None:
+    await _ensure_connection()
     await db.execute(
         """
         UPDATE automations
@@ -264,6 +293,7 @@ async def set_next_run(automation_id: int, next_run_at: datetime | None) -> None
 
 
 async def list_due_automations(limit: int = 20) -> list[AutomationRecord]:
+    await _ensure_connection()
     rows = await db.fetch_all(
         """
         SELECT *
@@ -280,6 +310,7 @@ async def list_due_automations(limit: int = 20) -> list[AutomationRecord]:
 
 
 async def set_last_error(automation_id: int, message: str | None) -> None:
+    await _ensure_connection()
     await db.execute(
         """
         UPDATE automations
