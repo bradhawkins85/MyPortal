@@ -330,6 +330,40 @@ async def _require_super_admin_page(request: Request) -> tuple[dict[str, Any] | 
     return user, None
 
 
+async def _is_helpdesk_technician(user: Mapping[str, Any], request: Request | None = None) -> bool:
+    if user.get("is_super_admin"):
+        if request is not None:
+            request.state.is_helpdesk_technician = True
+        return True
+    if request is not None:
+        cached = getattr(request.state, "is_helpdesk_technician", None)
+        if cached is not None:
+            return bool(cached)
+    user_id = user.get("id")
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        result = False
+    else:
+        result = await membership_repo.user_has_permission(user_id_int, "helpdesk.technician")
+    if request is not None:
+        request.state.is_helpdesk_technician = bool(result)
+    return bool(result)
+
+
+async def _require_helpdesk_page(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return None, redirect
+    has_access = await _is_helpdesk_technician(user, request)
+    if not has_access:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Helpdesk technician privileges required",
+        )
+    return user, None
+
+
 async def _require_administration_access(
     request: Request,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, RedirectResponse | None]:
@@ -530,6 +564,7 @@ async def _build_base_context(
     membership_data = membership or {}
     is_super_admin = bool(user.get("is_super_admin"))
     staff_permission_level = int(membership_data.get("staff_permission") or 0)
+    is_helpdesk_technician = await _is_helpdesk_technician(user, request)
 
     def _has_permission(flag: str) -> bool:
         return bool(membership_data.get(flag))
@@ -561,6 +596,7 @@ async def _build_base_context(
         "csrf_token": session.csrf_token if session else None,
         "staff_permission": staff_permission_level,
         "is_super_admin": is_super_admin,
+        "is_helpdesk_technician": is_helpdesk_technician,
         "is_company_admin": is_super_admin or bool(membership_data.get("is_admin")),
     }
     context.update(permission_flags)
@@ -5229,7 +5265,7 @@ async def admin_tickets_page(
     success: str | None = Query(default=None),
     error: str | None = Query(default=None),
 ):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_page(request)
     if redirect:
         return redirect
     return await _render_tickets_dashboard(
@@ -5244,7 +5280,7 @@ async def admin_tickets_page(
 
 @app.post("/admin/tickets", response_class=HTMLResponse)
 async def admin_create_ticket(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_page(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -5300,7 +5336,7 @@ async def admin_create_ticket(request: Request):
 
 @app.post("/admin/tickets/{ticket_id}/status", response_class=HTMLResponse)
 async def admin_update_ticket_status(ticket_id: int, request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_page(request)
     if redirect:
         return redirect
     form = await request.form()
