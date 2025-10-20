@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, List, Optional
 
 from app.core.database import db
+from app.repositories import users as user_repo
 
 _VALID_STATUSES = {"invited", "active", "suspended"}
 
@@ -150,6 +151,9 @@ async def user_has_permission(user_id: int, permission: str) -> bool:
         permissions = membership.get("permissions") or []
         if permission in permissions:
             return True
+    user_record = await user_repo.get_user_by_id(user_id)
+    if user_record and bool(user_record.get("is_super_admin")):
+        return True
     return False
 
 
