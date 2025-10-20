@@ -108,6 +108,44 @@
                   <label class="form-label" for="ntfy-token">Auth token</label>
                   <input id="ntfy-token" name="settings.auth_token" class="form-input" value="{{ settings.auth_token or '' }}" />
                 </div>
+              {% elif module.slug == 'chatgpt-mcp' %}
+                <div class="form-field">
+                  <label class="form-label" for="chatgpt-secret">Shared secret</label>
+                  <input id="chatgpt-secret" name="settings.shared_secret" class="form-input" type="password" autocomplete="off" placeholder="Enter a new shared secret" />
+                  <p class="form-help">Secrets are stored as SHA-256 hashes. Leave blank to keep the existing value.</p>
+                </div>
+                <fieldset class="form-field">
+                  <legend class="form-label">Enabled tools</legend>
+                  <div class="form-field__group form-field__group--stacked">
+                    {% set available_tools = ['listTickets', 'getTicket', 'createTicketReply', 'updateTicket'] %}
+                    {% for tool in available_tools %}
+                      <label class="checkbox">
+                        <input type="checkbox" name="settings.allowed_actions" value="{{ tool }}" {% if settings.allowed_actions and tool in settings.allowed_actions %}checked{% endif %} />
+                        <span>{{ tool }}</span>
+                      </label>
+                    {% endfor %}
+                  </div>
+                </fieldset>
+                <div class="form-field">
+                  <label class="form-label" for="chatgpt-max-results">Maximum tickets returned</label>
+                  <input id="chatgpt-max-results" name="settings.max_results" class="form-input" type="number" min="1" max="200" value="{{ settings.max_results or 50 }}" />
+                </div>
+                <div class="form-field form-field--checkbox">
+                  <label class="toggle">
+                    <input type="checkbox" name="settings.allow_ticket_updates" value="true" {% if settings.allow_ticket_updates %}checked{% endif %} />
+                    <span>Allow ChatGPT to update tickets</span>
+                  </label>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="chatgpt-statuses">Allowed ticket statuses</label>
+                  <input id="chatgpt-statuses" name="settings.allowed_statuses" class="form-input" value="{{ settings.allowed_statuses|join(', ') if settings.allowed_statuses else '' }}" placeholder="open, pending, in_progress" />
+                  <p class="form-help">Comma-separated list used to validate update requests.</p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="chatgpt-system-user">Default reply author (user ID)</label>
+                  <input id="chatgpt-system-user" name="settings.system_user_id" class="form-input" value="{{ settings.system_user_id or '' }}" placeholder="123" />
+                  <p class="form-help">The ticket reply author when ChatGPT posts updates. Override per request by sending author_id.</p>
+                </div>
               {% else %}
                 {% for key, value in settings.items() %}
                   <div class="form-field">
