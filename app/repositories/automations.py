@@ -37,6 +37,14 @@ def _make_aware(value: Any) -> datetime | None:
     return None
 
 
+def _prepare_for_storage(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 def _normalise_automation(row: dict[str, Any]) -> AutomationRecord:
     record = dict(row)
     for key in ("id",):
@@ -91,7 +99,7 @@ async def create_automation(
             action_module,
             _serialise(action_payload),
             status,
-            next_run_at,
+            _prepare_for_storage(next_run_at),
         ),
     )
     row = await db.fetch_one("SELECT * FROM automations WHERE id = LAST_INSERT_ID()")
@@ -178,8 +186,8 @@ async def record_run(
         (
             automation_id,
             status,
-            started_at,
-            finished_at,
+            _prepare_for_storage(started_at),
+            _prepare_for_storage(finished_at),
             duration_ms,
             _serialise(result_payload),
             error_message,
@@ -221,7 +229,7 @@ async def set_next_run(automation_id: int, next_run_at: datetime | None) -> None
         SET next_run_at = %s, updated_at = UTC_TIMESTAMP(6)
         WHERE id = %s
         """,
-        (next_run_at, automation_id),
+        (_prepare_for_storage(next_run_at), automation_id),
     )
 
 
