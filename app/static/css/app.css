@@ -2914,46 +2914,6 @@ body {
   color: #bbf7d0;
 }
 
-.kb-admin__preview {
-  min-height: 18rem;
-  max-height: none;
-  overflow: visible;
-  line-height: 1.6;
-}
-
-.kb-admin__meta {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  align-items: flex-start;
-  text-align: left;
-}
-
-.kb-admin__tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  justify-content: flex-start;
-}
-
-.kb-admin__ai-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.kb-admin__timestamps {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.8rem;
-  color: rgba(148, 163, 184, 0.85);
-}
-
-.kb-admin__timestamp {
-  display: block;
-}
-
 .button__icon {
   display: inline-flex;
   margin-right: 0.5rem;
