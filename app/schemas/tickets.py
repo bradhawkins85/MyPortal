@@ -65,6 +65,11 @@ class TicketResponse(TicketBase):
     created_at: datetime
     updated_at: datetime
     closed_at: Optional[datetime]
+    ai_summary: Optional[str] = None
+    ai_summary_status: Optional[str] = None
+    ai_summary_model: Optional[str] = None
+    ai_resolution_state: Optional[str] = None
+    ai_summary_updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

@@ -1,3 +1,4 @@
+- 2025-12-06, 10:00 UTC, Feature, Added Ollama-powered ticket AI summaries with resolution insights and admin workspace display
 - 2025-12-05, 09:20 UTC, Fix, Restored ticket assignment technician list by filtering active memberships in code and including super admins when populating options
 - 2025-10-20, 11:24 UTC, Feature, Split the knowledge base admin into a catalogue list with dedicated editor pages for creating and updating articles
 - 2025-10-20, 21:30 UTC, Fix, Guarded startup migrations with MySQL advisory locks so concurrent workers stop raising duplicate index errors
