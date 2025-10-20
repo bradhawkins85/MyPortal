@@ -119,6 +119,29 @@ configure_logging()
 settings = get_settings()
 templates_config = get_templates_config()
 oauth_state_serializer = URLSafeSerializer(settings.secret_key, salt="m365-oauth")
+PWA_THEME_COLOR = "#0f172a"
+PWA_BACKGROUND_COLOR = "#0f172a"
+_PWA_SERVICE_WORKER_PATH = templates_config.static_path / "service-worker.js"
+_PWA_ICON_SOURCES = [
+    {
+        "src": "/static/logo.svg",
+        "sizes": "192x192",
+        "type": "image/svg+xml",
+        "purpose": "any",
+    },
+    {
+        "src": "/static/logo.svg",
+        "sizes": "512x512",
+        "type": "image/svg+xml",
+        "purpose": "any",
+    },
+    {
+        "src": "/static/logo.svg",
+        "sizes": "any",
+        "type": "image/svg+xml",
+        "purpose": "any maskable",
+    },
+]
 OPNFORM_ALLOWED_HOST = extract_allowed_host(
     str(settings.opnform_base_url) if settings.opnform_base_url else None
 )
@@ -283,6 +306,56 @@ def _resolve_private_upload(file_path: str) -> Path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
     return candidate
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+async def pwa_manifest() -> JSONResponse:
+    """Expose the Progressive Web App manifest for installable clients."""
+
+    manifest = {
+        "name": settings.app_name,
+        "short_name": settings.app_name[:30],
+        "id": "/",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "display_override": ["standalone", "minimal-ui"],
+        "background_color": PWA_BACKGROUND_COLOR,
+        "theme_color": PWA_THEME_COLOR,
+        "description": f"{settings.app_name} portal with offline support.",
+        "lang": "en",
+        "dir": "ltr",
+        "icons": _PWA_ICON_SOURCES,
+        "shortcuts": [
+            {
+                "name": "Dashboard",
+                "url": "/",
+                "icons": [_PWA_ICON_SOURCES[0]],
+            }
+        ],
+        "categories": ["productivity", "business"],
+    }
+    response = JSONResponse(manifest, media_type="application/manifest+json")
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    return response
+
+
+@app.get("/service-worker.js", include_in_schema=False)
+async def pwa_service_worker() -> FileResponse:
+    """Serve the static service worker with strict caching headers."""
+
+    if not _PWA_SERVICE_WORKER_PATH.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    response = FileResponse(
+        _PWA_SERVICE_WORKER_PATH,
+        media_type="application/javascript",
+        filename="service-worker.js",
+    )
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Service-Worker-Allowed"] = "/"
+    return response
+
 
 
 app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
