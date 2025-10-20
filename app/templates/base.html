@@ -6,6 +6,10 @@
     <title>{{ app_name }} - {{ title | default('Dashboard') }}</title>
     <link rel="stylesheet" href="/static/css/app.css" />
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    <link rel="apple-touch-icon" type="image/svg+xml" href="/static/logo.svg" />
+    <link rel="mask-icon" href="/static/logo.svg" color="#0f172a" />
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <meta name="theme-color" content="#0f172a" />
     {% if csrf_token %}
     <meta name="csrf-token" content="{{ csrf_token }}" />
     {% endif %}
@@ -322,6 +326,7 @@
         </section>
       </main>
     </div>
+    <script src="/static/js/pwa.js" defer></script>
     <script>
       (function () {
         const tokenMeta = document.querySelector('meta[name="csrf-token"]');
