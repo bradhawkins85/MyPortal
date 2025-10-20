@@ -66,6 +66,8 @@ def company_admin_context(monkeypatch):
             "csrf_token": "csrf-token",
             "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": 0},
             "notification_unread_count": 0,
+            "role_permissions": [],
+            "can_access_helpdesk": False,
         }
         if extra:
             context.update(extra)

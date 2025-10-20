@@ -94,6 +94,7 @@ from app.services import automations as automations_service
 from app.services import email as email_service
 from app.services import m365 as m365_service
 from app.services import modules as modules_service
+from app.services import permissions as permissions_service
 from app.services import products as products_service
 from app.services import shop as shop_service
 from app.services import staff_importer
@@ -321,12 +322,50 @@ async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] 
     return user, None
 
 
+async def _load_role_permissions(request: Request, user: dict[str, Any]) -> set[str]:
+    cached = getattr(request.state, "role_permissions", None)
+    if isinstance(cached, set):
+        return cached
+    permissions: set[str] = set()
+    user_id = user.get("id")
+    if user_id is None:
+        request.state.role_permissions = permissions
+        return permissions
+    if user.get("is_super_admin"):
+        request.state.role_permissions = permissions
+        return permissions
+    try:
+        permissions = await permissions_service.collect_role_permissions(int(user_id))
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to resolve role permissions", error=str(exc))
+        permissions = set()
+    request.state.role_permissions = permissions
+    return permissions
+
+
 async def _require_super_admin_page(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return None, redirect
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    return user, None
+
+
+async def _require_helpdesk_technician_page(
+    request: Request,
+) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return None, redirect
+    if user.get("is_super_admin"):
+        return user, None
+    permissions = await _load_role_permissions(request, user)
+    if "helpdesk.technician" not in permissions:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Helpdesk technician privileges required",
+        )
     return user, None
 
 
@@ -530,6 +569,8 @@ async def _build_base_context(
     membership_data = membership or {}
     is_super_admin = bool(user.get("is_super_admin"))
     staff_permission_level = int(membership_data.get("staff_permission") or 0)
+    role_permissions = await _load_role_permissions(request, user)
+    helpdesk_permission = is_super_admin or ("helpdesk.technician" in role_permissions)
 
     def _has_permission(flag: str) -> bool:
         return bool(membership_data.get(flag))
@@ -547,6 +588,7 @@ async def _build_base_context(
             or _has_permission("can_manage_staff")
             or staff_permission_level > 0
         ),
+        "can_access_helpdesk": helpdesk_permission,
     }
 
     context: dict[str, Any] = {
@@ -562,6 +604,8 @@ async def _build_base_context(
         "staff_permission": staff_permission_level,
         "is_super_admin": is_super_admin,
         "is_company_admin": is_super_admin or bool(membership_data.get("is_admin")),
+        "role_permissions": sorted(role_permissions),
+        "can_access_helpdesk": helpdesk_permission,
     }
     context.update(permission_flags)
     if extra:
@@ -3663,7 +3707,7 @@ async def admin_companies_page(
 
 @app.post("/admin/companies", response_class=HTMLResponse)
 async def admin_create_company(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -3703,7 +3747,7 @@ async def admin_create_company(request: Request):
 
 @app.post("/admin/companies/{company_id}", response_class=HTMLResponse)
 async def admin_update_company(company_id: int, request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -3913,7 +3957,7 @@ async def admin_invite_company_user(request: Request):
 
 @app.post("/admin/companies/assign", response_class=HTMLResponse)
 async def admin_assign_user_to_company(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -4059,7 +4103,7 @@ async def admin_update_membership_role(company_id: int, user_id: int, request: R
 
 @app.post("/admin/companies/assignment/{company_id}/{user_id}/remove")
 async def admin_remove_company_assignment(company_id: int, user_id: int, request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     await user_company_repo.remove_assignment(user_id=user_id, company_id=company_id)
@@ -4093,7 +4137,7 @@ async def import_syncro_contacts(request: Request):
 
 @app.get("/admin/api-keys", response_class=HTMLResponse)
 async def admin_api_keys_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     filters = _extract_api_key_filters(request.query_params)
@@ -4102,7 +4146,7 @@ async def admin_api_keys_page(request: Request):
 
 @app.post("/admin/api-keys", response_class=HTMLResponse)
 async def admin_create_api_key_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -4171,7 +4215,7 @@ async def admin_create_api_key_page(request: Request):
 
 @app.post("/admin/api-keys/rotate", response_class=HTMLResponse)
 async def admin_rotate_api_key_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -4293,7 +4337,7 @@ async def admin_rotate_api_key_page(request: Request):
 
 @app.post("/admin/api-keys/delete", response_class=HTMLResponse)
 async def admin_delete_api_key_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -4349,7 +4393,7 @@ async def admin_delete_api_key_page(request: Request):
 
 @app.get("/admin/roles", response_class=HTMLResponse)
 async def admin_roles(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     roles_list = await role_repo.list_roles()
@@ -4362,7 +4406,7 @@ async def admin_roles(request: Request):
 
 @app.get("/admin/automation", response_class=HTMLResponse)
 async def admin_automation(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     tasks = await scheduled_tasks_repo.list_tasks()
@@ -4389,7 +4433,7 @@ async def admin_automation(request: Request):
 
 @app.get("/admin/webhooks", response_class=HTMLResponse)
 async def admin_webhooks(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     events = await webhook_events_repo.list_events(limit=100)
@@ -4414,7 +4458,7 @@ async def admin_audit_logs(
     user_id: int | None = None,
     limit: int = 100,
 ):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     limit = max(1, min(limit, 500))
@@ -4441,7 +4485,7 @@ async def admin_audit_logs(
 
 @app.get("/admin/forms", response_class=HTMLResponse)
 async def admin_forms_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     forms_task = asyncio.create_task(forms_repo.list_forms())
@@ -4563,7 +4607,7 @@ async def admin_create_form(
     url: str = Form(...),
     description: str = Form(""),
 ):
-    _, redirect = await _require_super_admin_page(request)
+    _, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     cleaned_name = name.strip()
@@ -4591,7 +4635,7 @@ async def admin_edit_form(
     url: str = Form(...),
     description: str = Form(""),
 ):
-    _, redirect = await _require_super_admin_page(request)
+    _, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     try:
@@ -4624,7 +4668,7 @@ async def admin_delete_form(
     request: Request,
     id: str = Form(...),
 ):
-    _, redirect = await _require_super_admin_page(request)
+    _, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     try:
@@ -4643,7 +4687,7 @@ async def admin_shop_page(
     request: Request,
     show_archived: bool = Query(False, alias="showArchived"),
 ):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     categories_task = asyncio.create_task(shop_repo.list_categories())
@@ -4684,7 +4728,7 @@ async def admin_create_shop_category(
     request: Request,
     name: str = Form(...),
 ):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
 
@@ -4717,7 +4761,7 @@ async def admin_create_shop_category(
     tags=["Shop"],
 )
 async def admin_delete_shop_category(request: Request, category_id: int):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
 
@@ -4749,7 +4793,7 @@ async def admin_import_shop_product(
 ):
     """Import a single product by vendor SKU using the stock feed."""
 
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
 
@@ -4782,7 +4826,7 @@ async def admin_create_shop_product(
     category_id: str | None = Form(default=None),
     image: UploadFile | None = File(default=None),
 ):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
 
@@ -4896,7 +4940,7 @@ async def admin_update_shop_product(
     category_id: str | None = Form(default=None),
     image: UploadFile | None = File(default=None),
 ):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
 
@@ -5025,7 +5069,7 @@ async def _handle_shop_product_archive(
     *,
     archived: bool,
 ):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
 
@@ -5079,7 +5123,7 @@ async def admin_update_shop_product_visibility(
     product_id: int,
     excluded: list[str] = Form(default=[]),
 ):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
 
@@ -5120,7 +5164,7 @@ async def admin_update_shop_product_visibility(
     tags=["Shop"],
 )
 async def admin_delete_shop_product(request: Request, product_id: int):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
 
@@ -5229,7 +5273,7 @@ async def admin_tickets_page(
     success: str | None = Query(default=None),
     error: str | None = Query(default=None),
 ):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     return await _render_tickets_dashboard(
@@ -5244,7 +5288,7 @@ async def admin_tickets_page(
 
 @app.post("/admin/tickets", response_class=HTMLResponse)
 async def admin_create_ticket(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -5300,7 +5344,7 @@ async def admin_create_ticket(request: Request):
 
 @app.post("/admin/tickets/{ticket_id}/status", response_class=HTMLResponse)
 async def admin_update_ticket_status(ticket_id: int, request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -5363,7 +5407,7 @@ async def admin_automations_page(
     success: str | None = Query(default=None),
     error: str | None = Query(default=None),
 ):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     return await _render_automations_dashboard(
@@ -5378,7 +5422,7 @@ async def admin_automations_page(
 
 @app.post("/admin/automations", response_class=HTMLResponse)
 async def admin_create_automation(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -5451,7 +5495,7 @@ async def admin_create_automation(request: Request):
 
 @app.post("/admin/automations/{automation_id}/status", response_class=HTMLResponse)
 async def admin_update_automation_status(automation_id: int, request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -5476,7 +5520,7 @@ async def admin_update_automation_status(automation_id: int, request: Request):
 
 @app.post("/admin/automations/{automation_id}/execute", response_class=HTMLResponse)
 async def admin_execute_automation(automation_id: int, request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     try:
@@ -5516,7 +5560,7 @@ async def admin_modules_page(
     success: str | None = Query(default=None),
     error: str | None = Query(default=None),
 ):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     return await _render_modules_dashboard(
@@ -5529,7 +5573,7 @@ async def admin_modules_page(
 
 @app.post("/admin/modules/{slug}", response_class=HTMLResponse)
 async def admin_update_module(slug: str, request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -5565,7 +5609,7 @@ async def admin_update_module(slug: str, request: Request):
 
 @app.post("/admin/modules/{slug}/test", response_class=HTMLResponse)
 async def admin_test_module(slug: str, request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    current_user, redirect = await _require_helpdesk_technician_page(request)
     if redirect:
         return redirect
     result = await modules_service.test_module(slug)
