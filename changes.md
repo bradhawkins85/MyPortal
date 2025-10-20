@@ -1,3 +1,4 @@
+- 2025-12-02, 10:15 UTC, Feature, Added super-admin knowledge base composer with granular permission assignments, inline preview, and CRUD workflow integration
 - 2025-12-01, 09:00 UTC, Feature, Added knowledge base module with scoped permissions, Ollama-backed search, and portal UI integration
 - 2025-10-21, 20:45 UTC, Fix, Converted automation module context data to JSON-safe timestamps so the ticket automation admin page renders without template errors
 - 2025-11-29, 12:30 UTC, Feature, Added ChatGPT MCP integration module with secure ticket tools and JSON-RPC endpoint for ChatGPT
