@@ -308,6 +308,8 @@ app.include_router(automations_api.router)
 app.include_router(modules_api.router)
 app.include_router(mcp_api.router)
 
+HELPDESK_PERMISSION_KEY = "helpdesk.technician"
+
 
 async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
     session = await session_manager.load_session(request)
@@ -355,6 +357,9 @@ async def _is_helpdesk_technician(user: Mapping[str, Any], request: Request | No
             result = await membership_repo.user_has_permission(user_id_int, "helpdesk.technician")
         except RuntimeError:
             result = False
+        result = await membership_repo.user_has_permission(
+            user_id_int, HELPDESK_PERMISSION_KEY
+        )
     if request is not None:
         request.state.is_helpdesk_technician = bool(result)
     return bool(result)
@@ -5237,6 +5242,9 @@ async def _render_tickets_dashboard(
         except (TypeError, ValueError):
             continue
     users_list = await user_repo.list_users()
+    technician_users = await membership_repo.list_users_with_permission(
+        HELPDESK_PERMISSION_KEY
+    )
     user_lookup: dict[int, dict[str, Any]] = {}
     for record in users_list:
         identifier = record.get("id")
@@ -5255,7 +5263,7 @@ async def _render_tickets_dashboard(
         "ticket_filters": {"status": status_filter, "module": module_filter},
         "ticket_modules": modules,
         "ticket_company_options": companies,
-        "ticket_user_options": users_list,
+        "ticket_user_options": technician_users,
         "ticket_company_lookup": company_lookup,
         "ticket_user_lookup": user_lookup,
         "success_message": success_message,
@@ -5392,6 +5400,7 @@ async def _render_automations_dashboard(
         "automation_kind_counts": kind_counts,
         "automation_filters": {"status": status_filter, "kind": kind_filter},
         "automation_modules": modules,
+        "automation_trigger_options": automations_service.list_trigger_events(),
         "success_message": success_message,
         "error_message": error_message,
     }
@@ -5461,6 +5470,45 @@ async def admin_create_automation(request: Request):
             error_message="Action payload must be valid JSON.",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
+    normalised_actions: list[dict[str, Any]] = []
+    if isinstance(action_payload, dict) and "actions" in action_payload:
+        actions_value = action_payload.get("actions")
+        if not isinstance(actions_value, list):
+            return await _render_automations_dashboard(
+                request,
+                current_user,
+                error_message="Trigger actions must be provided as a list.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        for index, entry in enumerate(actions_value, start=1):
+            if not isinstance(entry, dict):
+                return await _render_automations_dashboard(
+                    request,
+                    current_user,
+                    error_message=f"Trigger action {index} is invalid.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            module_value = str(entry.get("module") or "").strip()
+            if not module_value:
+                return await _render_automations_dashboard(
+                    request,
+                    current_user,
+                    error_message=f"Select an action module for trigger action {index}.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            payload_value = entry.get("payload") or {}
+            if not isinstance(payload_value, dict):
+                return await _render_automations_dashboard(
+                    request,
+                    current_user,
+                    error_message=f"Trigger action {index} payload must be an object.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            normalised_actions.append({"module": module_value, "payload": payload_value})
+        updated_payload = dict(action_payload)
+        updated_payload["actions"] = normalised_actions
+        action_payload = updated_payload
+        action_module = normalised_actions[0]["module"] if normalised_actions else None
     data = {
         "name": name,
         "description": str(form.get("description", "")).strip() or None,
