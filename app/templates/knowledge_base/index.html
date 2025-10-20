@@ -111,7 +111,20 @@
         </div>
       </header>
       <div class="card__body knowledge-base__body" data-knowledge-base-article-body>
-        {{ kb_active_article.content | safe }}
+        {% if kb_active_article.sections %}
+          {% for section in kb_active_article.sections %}
+            <section class="knowledge-base__section" data-knowledge-base-section>
+              {% if section.heading %}
+                <h3 class="knowledge-base__section-heading">{{ section.heading }}</h3>
+              {% endif %}
+              <div class="knowledge-base__section-content">
+                {{ section.content | safe }}
+              </div>
+            </section>
+          {% endfor %}
+        {% else %}
+          {{ kb_active_article.content | safe }}
+        {% endif %}
       </div>
       {% else %}
       <div class="card__body knowledge-base__body knowledge-base__body--empty">

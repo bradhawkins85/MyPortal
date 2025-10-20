@@ -81,6 +81,7 @@ async def get_article(
         title=article["title"],
         summary=article.get("summary"),
         content=article.get("content", ""),
+        sections=article.get("sections", []),
         permission_scope=article["permission_scope"],
         is_published=article["is_published"],
         allowed_user_ids=article.get("allowed_user_ids", []),
@@ -103,7 +104,10 @@ async def create_article(
         author_id_int = int(author_id)
     except (TypeError, ValueError):
         author_id_int = None
-    created = await kb_service.create_article(payload.dict(), author_id=author_id_int)
+    try:
+        created = await kb_service.create_article(payload.dict(), author_id=author_id_int)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     context = await kb_service.build_access_context(current_user)
     article = await kb_service.get_article_by_slug_for_context(
         created.get("slug"),
@@ -119,6 +123,7 @@ async def create_article(
         title=article["title"],
         summary=article.get("summary"),
         content=article.get("content", ""),
+        sections=article.get("sections", []),
         permission_scope=article["permission_scope"],
         is_published=article["is_published"],
         allowed_user_ids=article.get("allowed_user_ids", []),
@@ -137,7 +142,10 @@ async def update_article(
     payload: KnowledgeBaseArticleUpdate,
     current_user: dict = Depends(require_super_admin),
 ) -> KnowledgeBaseArticleResponse:
-    updated = await kb_service.update_article(article_id, payload.dict(exclude_unset=True))
+    try:
+        updated = await kb_service.update_article(article_id, payload.dict(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     context = await kb_service.build_access_context(current_user)
     article = await kb_service.get_article_by_slug_for_context(
         updated.get("slug"),
@@ -153,6 +161,7 @@ async def update_article(
         title=article["title"],
         summary=article.get("summary"),
         content=article.get("content", ""),
+        sections=article.get("sections", []),
         permission_scope=article["permission_scope"],
         is_published=article["is_published"],
         allowed_user_ids=article.get("allowed_user_ids", []),

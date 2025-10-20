@@ -118,9 +118,19 @@
           <p class="form-help">Summaries appear beside article titles and improve search relevance.</p>
         </div>
         <div class="form-field form-field--wide">
-          <label class="form-label" for="kb-article-content">Content</label>
-          <textarea class="form-input form-input--textarea kb-admin__content" id="kb-article-content" name="content" rows="14" required></textarea>
-          <p class="form-help">Markdown-converted HTML is supported. Content is stored securely in the database and rendered on demand.</p>
+          <div class="kb-admin__sections-header">
+            <label class="form-label" for="kb-article-sections">Sections</label>
+            <button type="button" class="button button--ghost" data-kb-add-section>
+              <span class="button__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M11 5a1 1 0 0 1 2 0v6h6a1 1 0 0 1 0 2h-6v6a1 1 0 0 1-2 0v-6H5a1 1 0 0 1 0-2h6z"/></svg>
+              </span>
+              <span class="button__label">Add section</span>
+            </button>
+          </div>
+          <p class="form-help">Compose rich content in ordered sections. Drag the toolbar buttons to format text, add lists, or insert links. Reorder or delete sections without losing content.</p>
+          <div class="kb-admin__sections" id="kb-article-sections" data-kb-sections>
+            <p class="kb-admin__sections-empty" data-kb-sections-empty>No sections added yet. Start by creating the introduction.</p>
+          </div>
         </div>
         <div class="form-field">
           <label class="form-label" for="kb-article-scope">Permission scope</label>

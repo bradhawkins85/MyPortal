@@ -1,3 +1,4 @@
+- 2025-10-20, 11:13 UTC, Feature, Introduced WYSIWYG knowledge base section editor with ordered multi-section storage and sanitised HTML handling
 - 2025-12-02, 10:15 UTC, Feature, Added super-admin knowledge base composer with granular permission assignments, inline preview, and CRUD workflow integration
 - 2025-12-01, 09:15 UTC, Fix, Restored knowledge base search by including the CSRF token header in fetch submissions
 - 2025-12-02, 14:30 UTC, Feature, Added ticket detail workspace with standalone status management and threaded reply history
