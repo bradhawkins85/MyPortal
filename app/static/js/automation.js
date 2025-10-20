@@ -418,6 +418,265 @@
     });
   }
 
+  function setupTriggerField() {
+    const select = document.querySelector('[data-trigger-select]');
+    const hidden = document.getElementById('automation-trigger');
+    const custom = document.querySelector('[data-trigger-custom]');
+    if (!select || !hidden) {
+      return;
+    }
+
+    const applyValue = () => {
+      const value = select.value;
+      if (value === '__custom__') {
+        if (custom) {
+          custom.hidden = false;
+          custom.setAttribute('required', 'required');
+          hidden.value = (custom.value || '').trim();
+        } else {
+          hidden.value = '';
+        }
+      } else {
+        if (custom) {
+          custom.hidden = true;
+          custom.removeAttribute('required');
+        }
+        hidden.value = value;
+      }
+    };
+
+    select.addEventListener('change', () => {
+      applyValue();
+      if (select.value === '__custom__' && custom) {
+        custom.focus();
+      }
+    });
+
+    if (custom) {
+      custom.addEventListener('input', () => {
+        if (select.value === '__custom__') {
+          hidden.value = (custom.value || '').trim();
+        }
+      });
+    }
+
+    applyValue();
+  }
+
+  function setupScheduleVisibility() {
+    const kindField = document.getElementById('automation-kind');
+    const scheduleFields = document.querySelector('[data-schedule-fields]');
+    if (!kindField || !scheduleFields) {
+      return;
+    }
+
+    const toggleSchedule = () => {
+      scheduleFields.hidden = kindField.value === 'event';
+    };
+
+    kindField.addEventListener('change', toggleSchedule);
+    toggleSchedule();
+  }
+
+  function setupActionBuilder() {
+    const list = document.querySelector('[data-action-list]');
+    const addButton = document.querySelector('[data-action-add]');
+    const payloadField = document.getElementById('automation-actions-data');
+    const moduleField = document.getElementById('automation-action-module-primary');
+    const errorField = document.querySelector('[data-action-error]');
+    if (!list || !addButton || !payloadField || !moduleField) {
+      return;
+    }
+
+    let modules = [];
+    try {
+      modules = JSON.parse(list.dataset.modules || '[]');
+    } catch (error) {
+      modules = [];
+    }
+
+    const moduleOptions = modules
+      .map((entry) => ({
+        value: String(entry.slug || '').trim(),
+        label: String(entry.name || entry.slug || '').trim(),
+      }))
+      .filter((option) => option.value);
+
+    const createModuleSelect = (value) => {
+      const select = document.createElement('select');
+      select.className = 'form-input';
+      select.setAttribute('data-action-module', 'true');
+
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select module';
+      select.appendChild(placeholder);
+
+      moduleOptions.forEach((option) => {
+        const opt = document.createElement('option');
+        opt.value = option.value;
+        opt.textContent = option.label;
+        select.appendChild(opt);
+      });
+
+      if (value) {
+        select.value = value;
+      }
+
+      return select;
+    };
+
+    const serializeActions = () => {
+      const rows = Array.from(list.querySelectorAll('[data-action-row]'));
+      const actions = [];
+      let errorMessage = '';
+
+      rows.forEach((row, index) => {
+        if (errorMessage) {
+          return;
+        }
+        const moduleSelect = row.querySelector('[data-action-module]');
+        const payloadFieldInput = row.querySelector('[data-action-payload]');
+        const moduleValue = moduleSelect ? moduleSelect.value.trim() : '';
+        const payloadText = payloadFieldInput ? payloadFieldInput.value.trim() : '';
+        if (!moduleValue) {
+          errorMessage = 'Select a module for every trigger action.';
+          return;
+        }
+        let payload = {};
+        if (payloadText) {
+          try {
+            const parsed = JSON.parse(payloadText);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+              throw new Error('Invalid payload');
+            }
+            payload = parsed;
+          } catch (error) {
+            errorMessage = `Trigger action ${index + 1} payload must be valid JSON.`;
+            return;
+          }
+        }
+        actions.push({ module: moduleValue, payload });
+      });
+
+      if (errorMessage) {
+        payloadField.value = '';
+        moduleField.value = actions.length ? actions[0].module : '';
+        if (errorField) {
+          errorField.textContent = errorMessage;
+          errorField.hidden = false;
+        }
+        return null;
+      }
+
+      if (!actions.length) {
+        payloadField.value = '';
+        moduleField.value = '';
+        if (errorField) {
+          errorField.hidden = true;
+        }
+        return [];
+      }
+
+      payloadField.value = JSON.stringify({ actions });
+      moduleField.value = actions[0].module;
+      if (errorField) {
+        errorField.hidden = true;
+      }
+      return actions;
+    };
+
+    const updateState = () => {
+      serializeActions();
+    };
+
+    const createActionRow = (action = null) => {
+      const row = document.createElement('div');
+      row.className = 'automation-action';
+      row.setAttribute('data-action-row', 'true');
+
+      const moduleWrapper = document.createElement('div');
+      moduleWrapper.className = 'automation-action__field';
+      const moduleSelect = createModuleSelect(action && action.module ? action.module : '');
+      moduleSelect.addEventListener('change', updateState);
+      moduleWrapper.appendChild(moduleSelect);
+      row.appendChild(moduleWrapper);
+
+      const payloadWrapper = document.createElement('div');
+      payloadWrapper.className = 'automation-action__field';
+      const payloadInput = document.createElement('textarea');
+      payloadInput.className = 'form-input';
+      payloadInput.rows = 2;
+      payloadInput.placeholder = '{}';
+      payloadInput.setAttribute('data-action-payload', 'true');
+      if (action && action.payload) {
+        try {
+          payloadInput.value = JSON.stringify(action.payload, null, 2);
+        } catch (error) {
+          payloadInput.value = '';
+        }
+      }
+      payloadInput.addEventListener('input', updateState);
+      payloadWrapper.appendChild(payloadInput);
+      row.appendChild(payloadWrapper);
+
+      const removeButton = document.createElement('button');
+      removeButton.type = 'button';
+      removeButton.className = 'button button--ghost automation-action__remove';
+      removeButton.textContent = 'Remove';
+      removeButton.addEventListener('click', () => {
+        row.remove();
+        updateState();
+      });
+      row.appendChild(removeButton);
+
+      return row;
+    };
+
+    const addRow = (action = null) => {
+      const row = createActionRow(action);
+      list.appendChild(row);
+      updateState();
+    };
+
+    addButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      addRow();
+    });
+
+    const initialValue = payloadField.value;
+    if (initialValue) {
+      try {
+        const parsed = JSON.parse(initialValue);
+        if (parsed && Array.isArray(parsed.actions)) {
+          parsed.actions.forEach((action) => addRow(action));
+        }
+      } catch (error) {
+        addRow();
+      }
+    }
+
+    if (!list.querySelector('[data-action-row]')) {
+      addRow();
+    }
+
+    const form = list.closest('form');
+    if (form) {
+      form.addEventListener('submit', (event) => {
+        const result = serializeActions();
+        if (result === null) {
+          event.preventDefault();
+        }
+      });
+    }
+  }
+
+  function setupAutomationForm() {
+    setupTriggerField();
+    setupActionBuilder();
+    setupScheduleVisibility();
+  }
+
   function initialiseAutomationUI() {
     taskModal = query('task-editor-modal');
     logsModal = query('task-logs-modal');
@@ -426,6 +685,7 @@
     clearTaskForm();
     bindTaskForm();
     bindTaskActions();
+    setupAutomationForm();
   }
 
   if (document.readyState === 'loading') {
