@@ -1,4 +1,23 @@
 (function () {
+  function getCookie(name) {
+    const pattern = `(?:^|; )${name.replace(/([.$?*|{}()\[\]\\\/\+^])/g, '\\$1')}=([^;]*)`;
+    const matches = document.cookie.match(new RegExp(pattern));
+    return matches ? decodeURIComponent(matches[1]) : '';
+  }
+
+  function getMetaContent(name) {
+    const meta = document.querySelector(`meta[name="${name}"]`);
+    return meta ? meta.getAttribute('content') || '' : '';
+  }
+
+  function getCsrfToken() {
+    const metaToken = getMetaContent('csrf-token');
+    if (metaToken) {
+      return metaToken;
+    }
+    return getCookie('myportal_session_csrf');
+  }
+
   const form = document.querySelector('[data-knowledge-base-search]');
   if (!form) {
     return;
@@ -105,11 +124,17 @@
     }
     inFlightController = new AbortController();
     try {
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+      const csrfToken = getCsrfToken();
+      if (csrfToken) {
+        headers['X-CSRF-Token'] = csrfToken;
+      }
+
       const response = await fetch('/api/knowledge-base/search', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({ query }),
         signal: inFlightController.signal,
       });
