@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timezone
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, List, Sequence
 
 from app.core.database import db
 
@@ -98,6 +98,23 @@ async def list_staff(
         tuple(params),
     )
     return [_map_staff_row(row) for row in rows]
+
+
+async def list_enabled_staff_users(company_id: int) -> List[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT DISTINCT u.*
+        FROM staff AS s
+        INNER JOIN users AS u
+            ON LOWER(u.email) = LOWER(s.email)
+        WHERE s.company_id = %s
+          AND s.enabled = 1
+          AND u.company_id = s.company_id
+        ORDER BY LOWER(u.email), u.id
+        """,
+        (company_id,),
+    )
+    return [dict(row) for row in rows]
 
 
 async def list_all_staff(
