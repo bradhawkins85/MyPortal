@@ -1,3 +1,4 @@
+- 2025-12-08, 10:10 UTC, Fix, Removed AI tag status and badges from the admin ticket detail view to declutter the edit page
 - 2025-12-07, 09:15 UTC, Fix, Restricted ticket requester selection to enabled staff for the linked company and blocked assignments without a company
 - 2025-10-20, 11:59 UTC, Feature, Reworked knowledge base portal layout to list articles and moved article reading to dedicated views
 - 2025-12-06, 15:45 UTC, Feature, Enabled drag-to-resize handles for knowledge base editor images with live preview updates
