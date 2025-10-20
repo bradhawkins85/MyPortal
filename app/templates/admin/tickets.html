@@ -147,10 +147,10 @@
                 <th scope="col" data-sort="string">Subject</th>
                 <th scope="col" data-sort="string">Status</th>
                 <th scope="col" data-sort="string">Priority</th>
-                <th scope="col" data-sort="string">Module</th>
                 <th scope="col" data-sort="string">Company</th>
                 <th scope="col" data-sort="string">Assigned</th>
                 <th scope="col" data-sort="string">Updated</th>
+                <th scope="col">Update status</th>
                 <th scope="col" class="table__actions">Actions</th>
               </tr>
             </thead>
@@ -163,14 +163,26 @@
                   {% set assigned = user_lookup.get(ticket.assigned_user_id) %}
                   <tr>
                     <td data-label="ID">{{ ticket.id }}</td>
-                    <td data-label="Subject">{{ ticket.subject }}</td>
-                    <td data-label="Status">{{ ticket.status or 'open' }}</td>
+                    <td data-label="Subject">
+                      <a href="/admin/tickets/{{ ticket.id }}">{{ ticket.subject }}</a>
+                    </td>
+                    {% set ticket_status = (ticket.status or 'open') %}
+                    {% set status_label = ticket_status.replace('_', ' ').title() %}
+                    {% set status_badge_map = {
+                      'open': 'badge--warning',
+                      'in_progress': 'badge--warning',
+                      'pending': 'badge--warning',
+                      'resolved': 'badge--success',
+                      'closed': 'badge--muted'
+                    } %}
+                    <td data-label="Status">
+                      <span class="badge {{ status_badge_map.get(ticket_status, 'badge--muted') }}">{{ status_label }}</span>
+                    </td>
                     <td data-label="Priority">{{ ticket.priority or 'normal' }}</td>
-                    <td data-label="Module">{{ ticket.module_slug or '—' }}</td>
                     <td data-label="Company">{{ company.name if company else (ticket.company_id or '—') }}</td>
                     <td data-label="Assigned">{{ assigned.email if assigned else '—' }}</td>
                     <td data-label="Updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
-                    <td class="table__actions">
+                    <td data-label="Update status">
                       <form action="/admin/tickets/{{ ticket.id }}/status" method="post" class="inline-form">
                         {% if csrf_token %}
                           <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
@@ -183,6 +195,9 @@
                         </select>
                         <button type="submit" class="button button--ghost">Update</button>
                       </form>
+                    </td>
+                    <td class="table__actions">
+                      <a href="/admin/tickets/{{ ticket.id }}" class="button button--ghost">Open</a>
                     </td>
                   </tr>
                 {% endfor %}
