@@ -109,11 +109,40 @@ restart_service() {
     return
   fi
 
-  if ! systemctl restart myportal.service; then
+  local service_name="myportal.service"
+  local attempts=()
+
+  if systemctl restart "$service_name" >/dev/null 2>&1; then
+    echo "Restarted ${service_name} via systemctl." >&2
+    return
+  else
     local exit_code=$?
-    echo "Warning: Unable to restart myportal.service automatically (exit code ${exit_code})." >&2
-    echo "Run 'sudo systemctl restart myportal.service' or review service permissions and logs." >&2
+    attempts+=("systemctl restart ${service_name} (exit ${exit_code})")
   fi
+
+  if [[ "${EUID:-$(id -u)}" != "0" ]] && command -v sudo >/dev/null 2>&1; then
+    if sudo -n systemctl restart "$service_name" >/dev/null 2>&1; then
+      echo "Restarted ${service_name} via sudo systemctl." >&2
+      return
+    else
+      local exit_code=$?
+      attempts+=("sudo -n systemctl restart ${service_name} (exit ${exit_code})")
+    fi
+  fi
+
+  if systemctl --user restart "$service_name" >/dev/null 2>&1; then
+    echo "Restarted ${service_name} via systemctl --user." >&2
+    return
+  else
+    local exit_code=$?
+    attempts+=("systemctl --user restart ${service_name} (exit ${exit_code})")
+  fi
+
+  echo "Warning: Unable to restart ${service_name} automatically." >&2
+  if ((${#attempts[@]} > 0)); then
+    printf '  Tried: %s\n' "${attempts[@]}" >&2
+  fi
+  echo "Run 'sudo systemctl restart ${service_name}' or review service permissions and logs." >&2
 }
 
 restart_service
