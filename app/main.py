@@ -376,6 +376,12 @@ async def _is_helpdesk_technician(user: Mapping[str, Any], request: Request | No
         result = False
     else:
         try:
+            result = await membership_repo.user_has_permission(
+                user_id_int, HELPDESK_PERMISSION_KEY
+            )
+        except Exception as exc:  # pragma: no cover - defensive fallback for tests without DB
+            log_error("Failed to determine helpdesk technician role", error=str(exc))
+            result = False
             result = await membership_repo.user_has_permission(user_id_int, HELPDESK_PERMISSION_KEY)
             if not result:
                 result = await membership_repo.user_has_permission(user_id_int, "helpdesk.technician")
@@ -4737,6 +4743,74 @@ async def admin_forms_page(request: Request):
         "form_assignment_summary": form_assignment_summary,
     }
     return await _render_template("admin/forms.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/knowledge-base", response_class=HTMLResponse)
+async def admin_knowledge_base_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    access_context = await knowledge_base_service.build_access_context(current_user)
+    articles = await knowledge_base_service.list_articles_for_context(
+        access_context,
+        include_unpublished=True,
+        include_permissions=True,
+    )
+
+    users_task = asyncio.create_task(user_repo.list_users())
+    companies_task = asyncio.create_task(company_repo.list_companies())
+    users, companies = await asyncio.gather(users_task, companies_task)
+
+    user_options: list[dict[str, Any]] = []
+    for user in users:
+        user_id = user.get("id")
+        if user_id is None:
+            continue
+        try:
+            user_id_int = int(user_id)
+        except (TypeError, ValueError):
+            continue
+        first_name = (user.get("first_name") or "").strip()
+        last_name = (user.get("last_name") or "").strip()
+        name_parts = [part for part in (first_name, last_name) if part]
+        full_name = " ".join(name_parts)
+        email = (user.get("email") or "").strip()
+        if full_name and email:
+            label = f"{full_name} ({email})"
+        elif full_name:
+            label = full_name
+        elif email:
+            label = email
+        else:
+            label = f"User {user_id_int}"
+        user_options.append({"id": user_id_int, "label": label})
+
+    user_options.sort(key=lambda item: item.get("label", "").lower())
+
+    company_options: list[dict[str, Any]] = []
+    for company in companies:
+        company_id = company.get("id")
+        if company_id is None:
+            continue
+        try:
+            company_id_int = int(company_id)
+        except (TypeError, ValueError):
+            continue
+        name = (company.get("name") or "").strip()
+        if not name:
+            name = f"Company {company_id_int}"
+        company_options.append({"id": company_id_int, "name": name})
+
+    company_options.sort(key=lambda item: item.get("name", "").lower())
+
+    extra = {
+        "title": "Knowledge base admin",
+        "kb_articles": articles,
+        "kb_user_options": user_options,
+        "kb_company_options": company_options,
+    }
+    return await _render_template("admin/knowledge_base.html", request, current_user, extra=extra)
 
 
 @app.post("/myforms/admin")
