@@ -376,15 +376,15 @@ async def _is_helpdesk_technician(user: Mapping[str, Any], request: Request | No
         result = False
     else:
         try:
-            result = await membership_repo.user_has_permission(user_id_int, "helpdesk.technician")
-        except Exception as exc:  # pragma: no cover - defensive fallback for tests without DB
+            result = await membership_repo.user_has_permission(
+                user_id_int, HELPDESK_PERMISSION_KEY
+            )
+        except RuntimeError as exc:  # pragma: no cover - triggered when DB pool is unavailable in tests
             log_error("Failed to determine helpdesk technician role", error=str(exc))
             result = False
-        except RuntimeError:
+        except Exception as exc:  # pragma: no cover - defensive fallback for unexpected errors
+            log_error("Failed to determine helpdesk technician role", error=str(exc))
             result = False
-        result = await membership_repo.user_has_permission(
-            user_id_int, HELPDESK_PERMISSION_KEY
-        )
     if request is not None:
         request.state.is_helpdesk_technician = bool(result)
     return bool(result)
