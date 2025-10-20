@@ -5576,12 +5576,15 @@ async def _render_ticket_detail(
                 user_lookup[identifier] = record
 
     company: dict[str, Any] | None = None
-    company_id = ticket.get("company_id")
-    if company_id is not None:
+    ticket_company_id: int | None = None
+    company_id_value = ticket.get("company_id")
+    if company_id_value is not None:
         try:
-            company = await company_repo.get_company_by_id(int(company_id))
+            ticket_company_id = int(company_id_value)
         except (TypeError, ValueError):
-            company = None
+            ticket_company_id = None
+        else:
+            company = await company_repo.get_company_by_id(ticket_company_id)
 
     module_info: dict[str, Any] | None = None
     module_slug = ticket.get("module_slug")
@@ -5609,7 +5612,32 @@ async def _render_ticket_detail(
 
     companies = await company_repo.list_companies()
     technician_users = await membership_repo.list_users_with_permission(HELPDESK_PERMISSION_KEY)
-    requester_options = await user_repo.list_users()
+    requester_options: list[dict[str, Any]] = []
+    if ticket_company_id is not None:
+        requester_options = await staff_repo.list_enabled_staff_users(ticket_company_id)
+
+    current_requester_id = ticket.get("requester_id")
+    if isinstance(current_requester_id, int):
+        existing_ids = {
+            int(option.get("id"))
+            for option in requester_options
+            if option.get("id") is not None
+        }
+        if current_requester_id not in existing_ids:
+            current_requester = user_lookup.get(current_requester_id)
+            if current_requester:
+                requester_options.append(current_requester)
+
+        def _requester_sort_key(record: dict[str, Any]) -> tuple[str, int]:
+            email_value = str(record.get("email") or "").lower()
+            identifier = record.get("id")
+            try:
+                identifier_int = int(identifier)
+            except (TypeError, ValueError):
+                identifier_int = 0
+            return email_value, identifier_int
+
+        requester_options.sort(key=_requester_sort_key)
 
     default_priorities = ["urgent", "high", "normal", "low"]
     current_priority = str(ticket.get("priority") or "normal")
@@ -5794,6 +5822,14 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
 
     form = await request.form()
 
+    existing_company_id: int | None = None
+    raw_existing_company = ticket.get("company_id")
+    if raw_existing_company is not None:
+        try:
+            existing_company_id = int(raw_existing_company)
+        except (TypeError, ValueError):
+            existing_company_id = None
+
     def _clean_text(value: Any) -> str:
         return str(value).strip() if isinstance(value, str) else ""
 
@@ -5921,6 +5957,34 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
                 current_user,
                 ticket_id=ticket_id,
                 error_message="Select a valid company.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+    final_company_id = company_id
+    if company_raw is None:
+        final_company_id = existing_company_id
+
+    if requester_id is not None:
+        if final_company_id is None:
+            return await _render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message="Link the ticket to a company before selecting a requester.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        allowed_requesters = await staff_repo.list_enabled_staff_users(final_company_id)
+        allowed_ids = {
+            int(option.get("id"))
+            for option in allowed_requesters
+            if option.get("id") is not None
+        }
+        if requester_id not in allowed_ids:
+            return await _render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message="Select a requester from the linked company's enabled staff list.",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
 
