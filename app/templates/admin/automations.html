@@ -44,7 +44,7 @@
             </select>
           </div>
         </div>
-        <div class="form-grid">
+        <div class="form-grid" data-schedule-fields>
           <div class="form-field">
             <label class="form-label" for="automation-cadence">Cadence</label>
             <select id="automation-cadence" name="cadence" class="form-input">
@@ -61,25 +61,42 @@
           </div>
         </div>
         <div class="form-field">
-          <label class="form-label" for="automation-module">Action module</label>
-          <select id="automation-module" name="actionModule" class="form-input">
-            <option value="">No module</option>
-            {% for module in automation_modules %}
-              <option value="{{ module.slug }}">{{ module.name }}</option>
+          <label class="form-label" for="automation-trigger-select">Trigger event</label>
+          <select id="automation-trigger-select" class="form-input" data-trigger-select>
+            <option value="">Select a trigger</option>
+            {% for trigger in automation_trigger_options %}
+              <option value="{{ trigger.value }}">{{ trigger.label }}</option>
             {% endfor %}
+            <option value="__custom__">Custom event…</option>
           </select>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="automation-trigger">Trigger event</label>
-          <input id="automation-trigger" name="triggerEvent" class="form-input" maxlength="128" placeholder="tickets.created, webhook.delivered" />
+          <input
+            id="automation-trigger-custom"
+            class="form-input"
+            type="text"
+            placeholder="custom.event"
+            data-trigger-custom
+            hidden
+          />
+          <input type="hidden" id="automation-trigger" name="triggerEvent" />
+          <p class="form-help">Choose the event that starts this automation. Select “Custom event…” to enter your own value.</p>
         </div>
         <div class="form-field">
           <label class="form-label" for="automation-filters">Trigger filters (JSON)</label>
           <textarea id="automation-filters" name="triggerFilters" class="form-input" rows="3" placeholder='{"match": {"status": "open"}}'></textarea>
         </div>
-        <div class="form-field">
-          <label class="form-label" for="automation-payload">Action payload (JSON)</label>
-          <textarea id="automation-payload" name="actionPayload" class="form-input" rows="4" placeholder='{"message": "Alert"}'></textarea>
+        <div class="form-field" data-automation-actions>
+          <label class="form-label">Trigger actions</label>
+          <p class="form-help">Add one or more integration modules to run when the automation fires. Payloads are JSON objects delivered to the selected module.</p>
+          <div
+            class="automation-actions"
+            id="automation-actions-list"
+            data-action-list
+            data-modules='{{ automation_modules | tojson }}'
+          ></div>
+          <button type="button" class="button button--ghost" data-action-add>Add action</button>
+          <p class="form-help" data-action-error hidden></p>
+          <input type="hidden" id="automation-action-module-primary" name="actionModule" />
+          <input type="hidden" id="automation-actions-data" name="actionPayload" />
         </div>
         <div class="form-actions">
           <button type="submit" class="button button--primary">Save automation</button>
@@ -165,7 +182,18 @@
                         —
                       {% endif %}
                     </td>
-                    <td data-label="Module">{{ automation.action_module or '—' }}</td>
+                    <td data-label="Module">
+                      {% set trigger_actions = automation.action_payload.get('actions') if automation.action_payload else [] %}
+                      {% if trigger_actions %}
+                        {% if trigger_actions | length == 1 %}
+                          {{ trigger_actions[0].module }}
+                        {% else %}
+                          {{ trigger_actions | length }} actions
+                        {% endif %}
+                      {% else %}
+                        {{ automation.action_module or '—' }}
+                      {% endif %}
+                    </td>
                     <td data-label="Status">{{ automation.status }}</td>
                     <td data-label="Next run">{{ automation.next_run_at.astimezone().strftime('%Y-%m-%d %H:%M') if automation.next_run_at else '—' }}</td>
                     <td data-label="Last run">{{ automation.last_run_at.astimezone().strftime('%Y-%m-%d %H:%M') if automation.last_run_at else '—' }}</td>
@@ -201,5 +229,11 @@
       </div>
     </section>
   </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/automation.js" defer></script>
 {% endblock %}
 

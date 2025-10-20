@@ -321,6 +321,51 @@ body {
   justify-content: flex-end;
 }
 
+.automation-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+}
+
+.automation-action {
+  display: grid;
+  gap: var(--space-gap-tight);
+  padding: var(--space-gap-tight) var(--space-gap-base);
+  border-radius: 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.6);
+}
+
+@media (min-width: 720px) {
+  .automation-action {
+    grid-template-columns: minmax(0, 220px) minmax(0, 1fr) auto;
+    align-items: start;
+  }
+}
+
+.automation-action__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+}
+
+.automation-action__remove {
+  align-self: center;
+  justify-self: end;
+  margin-top: var(--space-gap-tight);
+}
+
+@media (min-width: 720px) {
+  .automation-action__remove {
+    margin-top: 0;
+  }
+}
+
+.form-help--error,
+.form-help[data-action-error]:not([hidden]) {
+  color: #fecaca;
+}
+
 .form-actions--inline {
   justify-content: flex-start;
 }
