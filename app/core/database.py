@@ -15,6 +15,82 @@ class Database:
         self._pool: aiomysql.Pool | None = None
         self._settings = get_settings()
 
+    def _split_sql_statements(self, sql: str) -> list[str]:
+        """Split raw SQL script content into executable statements.
+
+        The migration runner historically split files on semicolons directly,
+        which breaks when statements contain literal semicolons inside quoted
+        strings (for example HTML content or JSON snippets).  This parser keeps
+        track of quote and comment state so delimiters inside literals do not
+        prematurely terminate a statement.
+        """
+
+        statements: list[str] = []
+        statement_chars: list[str] = []
+        in_single_quote = False
+        in_double_quote = False
+        i = 0
+        length = len(sql)
+
+        while i < length:
+            char = sql[i]
+            next_char = sql[i + 1] if i + 1 < length else ""
+
+            if not in_single_quote and not in_double_quote:
+                if char == "-" and next_char == "-":
+                    i += 2
+                    while i < length and sql[i] != "\n":
+                        i += 1
+                    continue
+                if char == "/" and next_char == "*":
+                    i += 2
+                    while i + 1 < length and not (sql[i] == "*" and sql[i + 1] == "/"):
+                        i += 1
+                    i += 2
+                    continue
+
+            if char == "'" and not in_double_quote:
+                statement_chars.append(char)
+                if in_single_quote:
+                    if next_char == "'":
+                        statement_chars.append(next_char)
+                        i += 2
+                        continue
+                    in_single_quote = False
+                else:
+                    in_single_quote = True
+                i += 1
+                continue
+
+            if char == '"' and not in_single_quote:
+                statement_chars.append(char)
+                if in_double_quote:
+                    if next_char == '"':
+                        statement_chars.append(next_char)
+                        i += 2
+                        continue
+                    in_double_quote = False
+                else:
+                    in_double_quote = True
+                i += 1
+                continue
+
+            if char == ";" and not in_single_quote and not in_double_quote:
+                statement = "".join(statement_chars).strip()
+                if statement:
+                    statements.append(statement)
+                statement_chars = []
+                i += 1
+                continue
+
+            statement_chars.append(char)
+            i += 1
+
+        remaining = "".join(statement_chars).strip()
+        if remaining:
+            statements.append(remaining)
+        return statements
+
     async def connect(self) -> None:
         if self._pool:
             return
@@ -140,7 +216,7 @@ class Database:
                     if path.name in applied:
                         continue
                     sql = path.read_text()
-                    statements = [s.strip() for s in sql.split(";") if s.strip()]
+                    statements = self._split_sql_statements(sql)
                     async with conn.cursor() as cursor:
                         for statement in statements:
                             await cursor.execute(statement)
