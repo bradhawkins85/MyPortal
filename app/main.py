@@ -376,15 +376,12 @@ async def _is_helpdesk_technician(user: Mapping[str, Any], request: Request | No
         result = False
     else:
         try:
-            result = await membership_repo.user_has_permission(user_id_int, "helpdesk.technician")
+            result = await membership_repo.user_has_permission(user_id_int, HELPDESK_PERMISSION_KEY)
+            if not result:
+                result = await membership_repo.user_has_permission(user_id_int, "helpdesk.technician")
         except Exception as exc:  # pragma: no cover - defensive fallback for tests without DB
             log_error("Failed to determine helpdesk technician role", error=str(exc))
             result = False
-        except RuntimeError:
-            result = False
-        result = await membership_repo.user_has_permission(
-            user_id_int, HELPDESK_PERMISSION_KEY
-        )
     if request is not None:
         request.state.is_helpdesk_technician = bool(result)
     return bool(result)
@@ -5407,6 +5404,103 @@ async def _render_tickets_dashboard(
     return response
 
 
+async def _render_ticket_detail(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    ticket_id: int,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    replies = await tickets_repo.list_replies(ticket_id)
+    watchers = await tickets_repo.list_watchers(ticket_id)
+
+    related_user_ids: set[int] = set()
+    for key in ("assigned_user_id", "requester_id"):
+        value = ticket.get(key)
+        if value:
+            try:
+                related_user_ids.add(int(value))
+            except (TypeError, ValueError):
+                continue
+    for reply in replies:
+        author_id = reply.get("author_id")
+        if author_id:
+            related_user_ids.add(int(author_id))
+    for watcher in watchers:
+        watcher_user_id = watcher.get("user_id")
+        if watcher_user_id:
+            related_user_ids.add(int(watcher_user_id))
+
+    user_lookup: dict[int, dict[str, Any]] = {}
+    if related_user_ids:
+        lookup_results = await asyncio.gather(
+            *(user_repo.get_user_by_id(user_id) for user_id in related_user_ids)
+        )
+        for record in lookup_results:
+            if record and record.get("id") is not None:
+                try:
+                    identifier = int(record["id"])
+                except (TypeError, ValueError):
+                    continue
+                user_lookup[identifier] = record
+
+    company: dict[str, Any] | None = None
+    company_id = ticket.get("company_id")
+    if company_id is not None:
+        try:
+            company = await company_repo.get_company_by_id(int(company_id))
+        except (TypeError, ValueError):
+            company = None
+
+    module_info: dict[str, Any] | None = None
+    module_slug = ticket.get("module_slug")
+    if module_slug:
+        modules = await modules_service.list_modules()
+        for module in modules:
+            if module.get("slug") == module_slug:
+                module_info = module
+                break
+
+    enriched_replies: list[dict[str, Any]] = []
+    for reply in replies:
+        author_id = reply.get("author_id")
+        author = user_lookup.get(author_id) if author_id else None
+        enriched_replies.append({**reply, "author": author})
+
+    enriched_watchers: list[dict[str, Any]] = []
+    for watcher in watchers:
+        watcher_user = user_lookup.get(watcher.get("user_id"))
+        enriched_watchers.append({**watcher, "user": watcher_user})
+
+    available_statuses = sorted(
+        {"open", "in_progress", "pending", "resolved", "closed", ticket.get("status") or "open"}
+    )
+
+    extra = {
+        "title": f"Ticket #{ticket_id}",
+        "ticket": ticket,
+        "ticket_company": company,
+        "ticket_module": module_info,
+        "ticket_assigned_user": user_lookup.get(ticket.get("assigned_user_id")),
+        "ticket_requester": user_lookup.get(ticket.get("requester_id")),
+        "ticket_replies": enriched_replies,
+        "ticket_watchers": enriched_watchers,
+        "ticket_available_statuses": available_statuses,
+        "ticket_return_url": request.url.path,
+        "success_message": success_message,
+        "error_message": error_message,
+    }
+    response = await _render_template("admin/ticket_detail.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
+
+
 @app.get("/admin/tickets", response_class=HTMLResponse)
 async def admin_tickets_page(
     request: Request,
@@ -5423,6 +5517,25 @@ async def admin_tickets_page(
         current_user,
         status_filter=status,
         module_filter=module,
+        success_message=_sanitize_message(success),
+        error_message=_sanitize_message(error),
+    )
+
+
+@app.get("/admin/tickets/{ticket_id}", response_class=HTMLResponse)
+async def admin_ticket_detail(
+    ticket_id: int,
+    request: Request,
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    return await _render_ticket_detail(
+        request,
+        current_user,
+        ticket_id=ticket_id,
         success_message=_sanitize_message(success),
         error_message=_sanitize_message(error),
     )
@@ -5491,7 +5604,17 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
         return redirect
     form = await request.form()
     status_value = str(form.get("status", "")).strip()
+    return_url_raw = form.get("returnUrl")
+    return_url = str(return_url_raw).strip() if isinstance(return_url_raw, str) else None
     if not status_value:
+        if return_url and return_url.startswith(f"/admin/tickets/{ticket_id}"):
+            return await _render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message="Select a status to apply.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
         return await _render_tickets_dashboard(
             request,
             current_user,
@@ -5502,8 +5625,55 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     await tickets_repo.set_ticket_status(ticket_id, status_value)
+    message = quote(f"Ticket {ticket_id} updated.")
+    destination = f"/admin/tickets?success={message}"
+    if return_url and return_url.startswith("/") and not return_url.startswith("//"):
+        separator = "&" if "?" in return_url else "?"
+        destination = f"{return_url}{separator}success={message}"
+    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/admin/tickets/{ticket_id}/replies", response_class=HTMLResponse)
+async def admin_create_ticket_reply(ticket_id: int, request: Request):
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    body_value = form.get("body", "")
+    body = str(body_value).strip() if isinstance(body_value, str) else ""
+    is_internal = str(form.get("isInternal", "")).lower() in {"1", "true", "on", "yes"}
+    if not body:
+        return await _render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Enter a reply before submitting.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    try:
+        author_id = current_user.get("id")
+        await tickets_repo.create_reply(
+            ticket_id=ticket_id,
+            author_id=author_id if isinstance(author_id, int) else None,
+            body=body,
+            is_internal=is_internal,
+        )
+        if isinstance(author_id, int):
+            await tickets_repo.add_watcher(ticket_id, author_id)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to create ticket reply", error=str(exc))
+        return await _render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Unable to save the reply. Please try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
     return RedirectResponse(
-        url="/admin/tickets?success=" + quote(f"Ticket {ticket_id} updated."),
+        url=f"/admin/tickets/{ticket_id}?success=" + quote("Reply posted."),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
