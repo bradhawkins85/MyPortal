@@ -207,14 +207,16 @@
                   <span class="menu__label">API keys</span>
                 </a>
               </li>
-              <li class="menu__item">
-                <a href="/admin/tickets" {% if current_path.startswith('/admin/tickets') %}aria-current="page"{% endif %}>
-                  <span class="menu__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2.17a.83.83 0 0 1-.83.83 1.5 1.5 0 0 0 0 3 .83.83 0 0 1 .83.83V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2.17A.83.83 0 0 1 4.83 15a1.5 1.5 0 0 0 0-3A.83.83 0 0 1 4 11.17zM9 9v6h6V9z"/></svg>
-                  </span>
-                  <span class="menu__label">Tickets</span>
-                </a>
-              </li>
+              {% if can_access_helpdesk %}
+                <li class="menu__item">
+                  <a href="/admin/tickets" {% if current_path.startswith('/admin/tickets') %}aria-current="page"{% endif %}>
+                    <span class="menu__icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2.17a.83.83 0 0 1-.83.83 1.5 1.5 0 0 0 0 3 .83.83 0 0 1 .83.83V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2.17A.83.83 0 0 1 4.83 15a1.5 1.5 0 0 0 0-3A.83.83 0 0 1 4 11.17zM9 9v6h6V9z"/></svg>
+                    </span>
+                    <span class="menu__label">Tickets</span>
+                  </a>
+                </li>
+              {% endif %}
               <li class="menu__item">
                 <a href="/admin/automations" {% if current_path.startswith('/admin/automations') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
@@ -272,6 +274,16 @@
                   <span class="menu__label">Company admin</span>
                 </a>
               </li>
+              {% if can_access_helpdesk %}
+                <li class="menu__item">
+                  <a href="/admin/tickets" {% if current_path.startswith('/admin/tickets') %}aria-current="page"{% endif %}>
+                    <span class="menu__icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2.17a.83.83 0 0 1-.83.83 1.5 1.5 0 0 0 0 3 .83.83 0 0 1 .83.83V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2.17A.83.83 0 0 1 4.83 15a1.5 1.5 0 0 0 0-3A.83.83 0 0 1 4 11.17zM9 9v6h6V9z"/></svg>
+                    </span>
+                    <span class="menu__label">Tickets</span>
+                  </a>
+                </li>
+              {% endif %}
             {% endif %}
           {% endif %}
           {% endblock %}

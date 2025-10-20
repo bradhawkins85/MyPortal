@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException, Request, status
 
 from app.repositories import users as user_repo
 from app.security.session import SessionData, session_manager
+from app.services import permissions as permissions_service
 
 
 async def get_current_session(request: Request) -> SessionData:
@@ -26,3 +27,12 @@ async def require_super_admin(current_user: dict = Depends(get_current_user)):
     if not current_user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     return current_user
+
+
+async def require_helpdesk_technician(current_user: dict = Depends(get_current_user)):
+    if await permissions_service.user_has_role_permission(current_user, "helpdesk.technician"):
+        return current_user
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Helpdesk technician privileges required",
+    )

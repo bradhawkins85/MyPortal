@@ -9,6 +9,31 @@ from app.core.database import db
 _VALID_STATUSES = {"invited", "active", "suspended"}
 
 
+async def list_memberships_for_user(
+    user_id: int,
+    *,
+    status: str | None = "active",
+) -> list[dict[str, Any]]:
+    """Return membership records for the given user ordered by company and ID."""
+
+    query = (
+        """
+        SELECT m.*, u.email AS user_email, u.first_name, u.last_name, r.name AS role_name, r.permissions
+        FROM company_memberships AS m
+        INNER JOIN users AS u ON u.id = m.user_id
+        INNER JOIN roles AS r ON r.id = m.role_id
+        WHERE m.user_id = %s
+        """
+    )
+    params: list[Any] = [user_id]
+    if status:
+        query += " AND m.status = %s"
+        params.append(status)
+    query += " ORDER BY m.company_id, m.id"
+    rows = await db.fetch_all(query, tuple(params))
+    return [_normalise_membership(row) for row in rows]
+
+
 async def list_company_memberships(company_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """

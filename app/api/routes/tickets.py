@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.dependencies.auth import get_current_session, require_super_admin
+from app.api.dependencies.auth import (
+    get_current_session,
+    require_helpdesk_technician,
+)
 from app.repositories import tickets as tickets_repo
 from app.schemas.tickets import (
     TicketCreate,
@@ -43,7 +46,7 @@ async def list_tickets(
     search: str | None = Query(default=None, min_length=1),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-    current_user: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketListResponse:
     tickets = await tickets_repo.list_tickets(
         status=status_filter,
@@ -71,7 +74,7 @@ async def list_tickets(
 async def create_ticket(
     payload: TicketCreate,
     session: SessionData = Depends(get_current_session),
-    current_user: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketDetail:
     ticket = await tickets_repo.create_ticket(
         subject=payload.subject,
@@ -90,7 +93,9 @@ async def create_ticket(
 
 
 @router.get("/{ticket_id}", response_model=TicketDetail)
-async def get_ticket(ticket_id: int, current_user: dict = Depends(require_super_admin)) -> TicketDetail:
+async def get_ticket(
+    ticket_id: int, current_user: dict = Depends(require_helpdesk_technician)
+) -> TicketDetail:
     return await _build_ticket_detail(ticket_id)
 
 
@@ -98,7 +103,7 @@ async def get_ticket(ticket_id: int, current_user: dict = Depends(require_super_
 async def update_ticket(
     ticket_id: int,
     payload: TicketUpdate,
-    current_user: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketDetail:
     existing = await tickets_repo.get_ticket(ticket_id)
     if not existing:
@@ -110,7 +115,9 @@ async def update_ticket(
 
 
 @router.delete("/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_ticket(ticket_id: int, current_user: dict = Depends(require_super_admin)) -> None:
+async def delete_ticket(
+    ticket_id: int, current_user: dict = Depends(require_helpdesk_technician)
+) -> None:
     existing = await tickets_repo.get_ticket(ticket_id)
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
@@ -122,7 +129,7 @@ async def add_reply(
     ticket_id: int,
     payload: TicketReplyCreate,
     session: SessionData = Depends(get_current_session),
-    current_user: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketReplyResponse:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
@@ -141,7 +148,7 @@ async def add_reply(
 async def update_watchers(
     ticket_id: int,
     payload: TicketWatcherUpdate,
-    current_user: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketDetail:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
