@@ -89,30 +89,6 @@
     {% endif %}
   </section>
 
-  <section class="card card--panel knowledge-base__results" data-knowledge-base-results hidden>
-    <header class="card__header">
-      <div>
-        <h3 class="card__title">Search results</h3>
-        <p class="card__subtitle">Articles matched locally before Ollama refinement.</p>
-      </div>
-    </header>
-    <div class="card__body" data-knowledge-base-results-body>
-      <p class="knowledge-base__empty">No matching articles were found.</p>
-    </div>
-  </section>
-
-  <section class="card card--panel knowledge-base__ollama" data-knowledge-base-ollama hidden>
-    <header class="card__header">
-      <div>
-        <h3 class="card__title">Ollama insight</h3>
-        <p class="card__subtitle">Summaries generated from the enabled Ollama integration.</p>
-      </div>
-      <div class="knowledge-base__ollama-status" data-knowledge-base-ollama-status></div>
-    </header>
-    <div class="card__body" data-knowledge-base-ollama-body>
-      <p class="knowledge-base__empty">No Ollama summary available.</p>
-    </div>
-  </section>
 </div>
 {% endblock %}
 
