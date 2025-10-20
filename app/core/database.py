@@ -100,26 +100,50 @@ class Database:
             logger.warning("No migrations directory found at {path}", path=str(migrations_dir))
             return
 
-        await self.execute(
-            "CREATE TABLE IF NOT EXISTS migrations (name VARCHAR(255) PRIMARY KEY)"
-        )
+        lock_name = f"{self._settings.database_name}_migration_lock"
+        lock_timeout = getattr(self._settings, "migration_lock_timeout", 60)
+        lock_acquired = False
 
-        applied_rows = await self.fetch_all("SELECT name FROM migrations")
-        applied = {row["name"] for row in applied_rows}
-
-        for path in sorted(migrations_dir.glob("*.sql")):
-            if path.name in applied:
-                continue
-            sql = path.read_text()
-            statements = [s.strip() for s in sql.split(";") if s.strip()]
-            async with self.acquire() as conn:
+        async with self.acquire() as conn:
+            try:
                 async with conn.cursor() as cursor:
-                    for statement in statements:
-                        await cursor.execute(statement)
-                    await cursor.execute(
-                        "INSERT INTO migrations (name) VALUES (%s)", (path.name,)
+                    await cursor.execute("SELECT GET_LOCK(%s, %s)", (lock_name, lock_timeout))
+                    result = await cursor.fetchone()
+                lock_acquired = bool(result and result[0] == 1)
+                if not lock_acquired:
+                    logger.error(
+                        "Unable to obtain database migration lock {lock} within {timeout}s",
+                        lock=lock_name,
+                        timeout=lock_timeout,
                     )
-            logger.info("Applied migration {name}", name=path.name)
+                    raise RuntimeError("Could not obtain database migration lock")
+
+                async with conn.cursor() as cursor:
+                    await cursor.execute(
+                        "CREATE TABLE IF NOT EXISTS migrations (name VARCHAR(255) PRIMARY KEY)"
+                    )
+
+                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                    await cursor.execute("SELECT name FROM migrations")
+                    applied_rows = await cursor.fetchall()
+                applied = {row["name"] for row in applied_rows}
+
+                for path in sorted(migrations_dir.glob("*.sql")):
+                    if path.name in applied:
+                        continue
+                    sql = path.read_text()
+                    statements = [s.strip() for s in sql.split(";") if s.strip()]
+                    async with conn.cursor() as cursor:
+                        for statement in statements:
+                            await cursor.execute(statement)
+                        await cursor.execute(
+                            "INSERT INTO migrations (name) VALUES (%s)", (path.name,)
+                        )
+                    logger.info("Applied migration {name}", name=path.name)
+            finally:
+                if lock_acquired:
+                    async with conn.cursor() as cursor:
+                        await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
 
 
 db = Database()
