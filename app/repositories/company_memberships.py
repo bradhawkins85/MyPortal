@@ -154,27 +154,60 @@ async def user_has_permission(user_id: int, permission: str) -> bool:
 
 
 async def list_users_with_permission(permission: str) -> List[dict[str, Any]]:
-    permission_json = json.dumps(permission)
     rows = await db.fetch_all(
         """
-        SELECT DISTINCT
-            u.id,
+        SELECT
+            u.id AS user_id,
             u.email,
             u.first_name,
             u.last_name,
             u.mobile_phone,
             u.company_id,
-            u.is_super_admin
+            u.is_super_admin,
+            r.permissions
         FROM company_memberships AS m
         INNER JOIN roles AS r ON r.id = m.role_id
         INNER JOIN users AS u ON u.id = m.user_id
-        WHERE m.status = 'active'
-          AND JSON_CONTAINS(COALESCE(r.permissions, JSON_ARRAY()), %s)
+        WHERE LOWER(m.status) = 'active'
         ORDER BY u.email
         """,
-        (permission_json,),
     )
-    return list(rows)
+
+    eligible_users: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        permissions_raw = row.get("permissions")
+        if isinstance(permissions_raw, str):
+            try:
+                permissions = json.loads(permissions_raw)
+            except json.JSONDecodeError:
+                permissions = []
+        else:
+            permissions = permissions_raw or []
+
+        is_super_admin = bool(row.get("is_super_admin", 0))
+        if permission not in permissions and not is_super_admin:
+            continue
+
+        try:
+            user_id = int(row.get("user_id"))
+        except (TypeError, ValueError):
+            continue
+
+        eligible_users[user_id] = {
+            "id": user_id,
+            "email": row.get("email"),
+            "first_name": row.get("first_name"),
+            "last_name": row.get("last_name"),
+            "mobile_phone": row.get("mobile_phone"),
+            "company_id": row.get("company_id"),
+            "is_super_admin": is_super_admin,
+        }
+
+    def _sort_key(record: dict[str, Any]) -> tuple[str, int]:
+        email = record.get("email") or ""
+        return (email.lower(), record["id"])
+
+    return sorted(eligible_users.values(), key=_sort_key)
 
 
 def _normalise_membership(row: dict[str, Any]) -> dict[str, Any]:
