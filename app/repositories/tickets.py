@@ -91,6 +91,7 @@ async def list_tickets(
     search: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    requester_id: int | None = None,
 ) -> list[TicketRecord]:
     where: list[str] = []
     params: list[Any] = []
@@ -106,6 +107,9 @@ async def list_tickets(
     if assigned_user_id is not None:
         where.append("assigned_user_id = %s")
         params.append(assigned_user_id)
+    if requester_id is not None:
+        where.append("requester_id = %s")
+        params.append(requester_id)
     if search:
         wildcard = f"%{search.strip()}%"
         where.append(
@@ -134,6 +138,7 @@ async def count_tickets(
     company_id: int | None = None,
     assigned_user_id: int | None = None,
     search: str | None = None,
+    requester_id: int | None = None,
 ) -> int:
     where: list[str] = []
     params: list[Any] = []
@@ -149,6 +154,9 @@ async def count_tickets(
     if assigned_user_id is not None:
         where.append("assigned_user_id = %s")
         params.append(assigned_user_id)
+    if requester_id is not None:
+        where.append("requester_id = %s")
+        params.append(requester_id)
     if search:
         wildcard = f"%{search.strip()}%"
         where.append(
@@ -219,15 +227,19 @@ async def create_reply(
     return _normalise_reply(row) if row else {}
 
 
-async def list_replies(ticket_id: int) -> list[TicketRecord]:
+async def list_replies(ticket_id: int, *, include_internal: bool = True) -> list[TicketRecord]:
+    where = "ticket_id = %s"
+    params: list[Any] = [ticket_id]
+    if not include_internal:
+        where += " AND is_internal = 0"
     rows = await db.fetch_all(
-        """
+        f"""
         SELECT *
         FROM ticket_replies
-        WHERE ticket_id = %s
+        WHERE {where}
         ORDER BY created_at ASC
         """,
-        (ticket_id,),
+        tuple(params),
     )
     return [_normalise_reply(row) for row in rows]
 

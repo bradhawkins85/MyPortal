@@ -1,3 +1,4 @@
+- 2025-10-20, 08:07 UTC, Feature, Enabled public self-service registration with requester-scoped ticket access and public-only replies for non-admin users
 - 2025-10-20, 07:49 UTC, Feature, Moved integration module diagnostics actions into each module card with inline testing controls and refreshed layout spacing
 - 2025-11-27, 11:00 UTC, Feature, Added admin navigation entries for tickets, ticket automations, and modules while retaining the scheduler automation tools
 - 2025-10-20, 06:59 UTC, Fix, Aligned ticketing migration key types with existing INT identifiers so startup migrations succeed on MySQL
