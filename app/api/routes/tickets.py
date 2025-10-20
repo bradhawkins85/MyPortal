@@ -5,8 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.api.dependencies.auth import (
     get_current_session,
     get_current_user,
+    require_helpdesk_technician,
     require_super_admin,
 )
+from app.repositories import company_memberships as membership_repo
 from app.repositories import tickets as tickets_repo
 from app.schemas.tickets import (
     TicketCreate,
@@ -22,23 +24,44 @@ from app.schemas.tickets import (
 )
 from app.security.session import SessionData
 
+HELPDESK_PERMISSION_KEY = "helpdesk.technician"
+
 router = APIRouter(prefix="/api/tickets", tags=["Tickets"])
+
+
+async def _has_helpdesk_permission(current_user: dict) -> bool:
+    if current_user.get("is_super_admin"):
+        return True
+    user_id = current_user.get("id")
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    try:
+        return await membership_repo.user_has_permission(user_id_int, HELPDESK_PERMISSION_KEY)
+    except RuntimeError:
+        return False
 
 
 async def _build_ticket_detail(ticket_id: int, current_user: dict) -> TicketDetail:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    is_super_admin = bool(current_user.get("is_super_admin"))
+    has_helpdesk_access = await _has_helpdesk_permission(current_user)
     requester_id = ticket.get("requester_id")
-    if not is_super_admin and requester_id != current_user.get("id"):
+    current_user_id = current_user.get("id")
+    try:
+        current_user_id_int = int(current_user_id)
+    except (TypeError, ValueError):
+        current_user_id_int = None
+    if not has_helpdesk_access and requester_id != current_user_id_int:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
     replies = await tickets_repo.list_replies(
-        ticket_id, include_internal=is_super_admin
+        ticket_id, include_internal=has_helpdesk_access
     )
     watcher_records = []
-    if is_super_admin:
+    if has_helpdesk_access:
         watcher_records = await tickets_repo.list_watchers(ticket_id)
     return TicketDetail(
         **ticket,
@@ -58,10 +81,13 @@ async def list_tickets(
     offset: int = Query(default=0, ge=0),
     current_user: dict = Depends(get_current_user),
 ) -> TicketListResponse:
-    is_super_admin = bool(current_user.get("is_super_admin"))
+    has_helpdesk_access = await _has_helpdesk_permission(current_user)
     requester_id: int | None = None
-    if not is_super_admin:
-        requester_id = int(current_user["id"])
+    if not has_helpdesk_access:
+        try:
+            requester_id = int(current_user["id"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
         company_id = None
         assigned_user_id = None
         module_slug = None
@@ -95,17 +121,17 @@ async def create_ticket(
     session: SessionData = Depends(get_current_session),
     current_user: dict = Depends(get_current_user),
 ) -> TicketDetail:
-    is_super_admin = bool(current_user.get("is_super_admin"))
+    has_helpdesk_access = await _has_helpdesk_permission(current_user)
     requester_id = session.user_id
-    if is_super_admin and payload.requester_id:
+    if has_helpdesk_access and payload.requester_id:
         requester_id = payload.requester_id
-    company_id = payload.company_id if is_super_admin else current_user.get("company_id")
-    assigned_user_id = payload.assigned_user_id if is_super_admin else None
-    priority = payload.priority if is_super_admin else "normal"
-    status_value = payload.status if is_super_admin else "open"
-    category = payload.category if is_super_admin else None
-    module_slug = payload.module_slug if is_super_admin else None
-    external_reference = payload.external_reference if is_super_admin else None
+    company_id = payload.company_id if has_helpdesk_access else current_user.get("company_id")
+    assigned_user_id = payload.assigned_user_id if has_helpdesk_access else None
+    priority = payload.priority if has_helpdesk_access else "normal"
+    status_value = payload.status if has_helpdesk_access else "open"
+    category = payload.category if has_helpdesk_access else None
+    module_slug = payload.module_slug if has_helpdesk_access else None
+    external_reference = payload.external_reference if has_helpdesk_access else None
     ticket = await tickets_repo.create_ticket(
         subject=payload.subject,
         description=payload.description,
@@ -131,7 +157,7 @@ async def get_ticket(ticket_id: int, current_user: dict = Depends(get_current_us
 async def update_ticket(
     ticket_id: int,
     payload: TicketUpdate,
-    current_user: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketDetail:
     existing = await tickets_repo.get_ticket(ticket_id)
     if not existing:
@@ -160,14 +186,14 @@ async def add_reply(
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    is_super_admin = bool(current_user.get("is_super_admin"))
-    if not is_super_admin and ticket.get("requester_id") != session.user_id:
+    has_helpdesk_access = await _has_helpdesk_permission(current_user)
+    if not has_helpdesk_access and ticket.get("requester_id") != session.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     reply = await tickets_repo.create_reply(
         ticket_id=ticket_id,
         author_id=session.user_id,
         body=payload.body,
-        is_internal=payload.is_internal if is_super_admin else False,
+        is_internal=payload.is_internal if has_helpdesk_access else False,
     )
     ticket_response = TicketResponse(**ticket)
     return TicketReplyResponse(ticket=ticket_response, reply=TicketReply(**reply))
@@ -177,7 +203,7 @@ async def add_reply(
 async def update_watchers(
     ticket_id: int,
     payload: TicketWatcherUpdate,
-    current_user: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketDetail:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:

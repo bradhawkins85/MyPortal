@@ -207,6 +207,8 @@
                   <span class="menu__label">API keys</span>
                 </a>
               </li>
+            {% endif %}
+            {% if is_super_admin or is_helpdesk_technician %}
               <li class="menu__item">
                 <a href="/admin/tickets" {% if current_path.startswith('/admin/tickets') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
@@ -215,6 +217,8 @@
                   <span class="menu__label">Tickets</span>
                 </a>
               </li>
+            {% endif %}
+            {% if is_super_admin %}
               <li class="menu__item">
                 <a href="/admin/automations" {% if current_path.startswith('/admin/automations') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
