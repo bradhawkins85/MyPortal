@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable, Mapping
+import html
+from typing import Any, Iterable, Mapping, Sequence
+
+import bleach
 
 from app.core.logging import log_error
 from app.repositories import knowledge_base as kb_repo
@@ -10,6 +13,119 @@ from app.repositories import user_companies as user_company_repo
 from app.services import modules as modules_service
 
 PermissionScope = str
+
+_ALLOWED_TAGS: Sequence[str] = (
+    "a",
+    "abbr",
+    "blockquote",
+    "code",
+    "em",
+    "strong",
+    "ul",
+    "ol",
+    "li",
+    "p",
+    "pre",
+    "br",
+    "h2",
+    "h3",
+    "h4",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "img",
+)
+
+_ALLOWED_ATTRIBUTES: Mapping[str, Sequence[str]] = {
+    "a": ("href", "title", "target", "rel"),
+    "abbr": ("title",),
+    "img": ("src", "alt", "title"),
+    "th": ("colspan", "rowspan", "scope"),
+    "td": ("colspan", "rowspan", "headers"),
+}
+
+_ALLOWED_PROTOCOLS: Sequence[str] = ("http", "https", "mailto")
+
+
+def _sanitise_html(value: str) -> str:
+    return bleach.clean(
+        value,
+        tags=_ALLOWED_TAGS,
+        attributes=_ALLOWED_ATTRIBUTES,
+        protocols=_ALLOWED_PROTOCOLS,
+        strip=True,
+    )
+
+
+def _combine_sections_html(sections: Sequence[Mapping[str, Any]]) -> str:
+    rendered: list[str] = []
+    for index, section in enumerate(sections, start=1):
+        heading = section.get("heading")
+        content = section.get("content") or ""
+        heading_html = ""
+        if heading:
+            heading_html = f"<h2>{html.escape(str(heading))}</h2>"
+        rendered.append(
+            f'<section class="kb-article__section" data-section-index="{index}">{heading_html}{content}</section>'
+        )
+    return "".join(rendered)
+
+
+def _prepare_sections(
+    sections: Sequence[Mapping[str, Any]] | None,
+    *,
+    fallback_content: str | None,
+    fallback_title: str | None,
+) -> tuple[list[dict[str, Any]], str]:
+    prepared: list[dict[str, Any]] = []
+    if sections:
+        for index, section in enumerate(sections, start=1):
+            content = section.get("content") or ""
+            if not isinstance(content, str):
+                content = str(content)
+            content = _sanitise_html(content)
+            heading = section.get("heading")
+            heading_text = str(heading).strip() if isinstance(heading, str) else ""
+            if heading_text:
+                heading_text = heading_text[:255]
+            else:
+                heading_text = ""
+            prepared.append(
+                {
+                    "heading": heading_text or None,
+                    "content": content,
+                    "position": index,
+                }
+            )
+    if not prepared and fallback_content:
+        content = _sanitise_html(str(fallback_content))
+        heading_text = (fallback_title or "").strip()
+        prepared.append(
+            {
+                "heading": heading_text[:255] or None,
+                "content": content,
+                "position": 1,
+            }
+        )
+    combined = _combine_sections_html(prepared)
+    return prepared, combined
+
+
+def _extract_sections_sequence(value: Any) -> list[Mapping[str, Any]]:
+    if value is None:
+        return []
+    if isinstance(value, Mapping):
+        return [value]
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+        collected: list[Mapping[str, Any]] = []
+        for item in value:
+            if isinstance(item, Mapping):
+                collected.append(item)
+        return collected
+    return []
 
 
 @dataclass(slots=True)
@@ -119,12 +235,29 @@ def _serialise_article(
         "allowed_user_ids": [],
         "allowed_company_ids": [],
         "company_admin_ids": [],
+        "sections": [],
         "created_by": article.get("created_by"),
         "created_at": article.get("created_at_utc"),
         "created_at_iso": _isoformat(article.get("created_at_utc")),
     }
+    sections_payload = article.get("sections") or []
+    serialised_sections: list[dict[str, Any]] = []
+    for index, section in enumerate(sections_payload, start=1):
+        content = section.get("content") or ""
+        heading = section.get("heading")
+        serialised_sections.append(
+            {
+                "position": section.get("position") or index,
+                "heading": heading if isinstance(heading, str) else None,
+                "content": content,
+            }
+        )
+    base["sections"] = serialised_sections
     if include_content:
-        base["content"] = article.get("content")
+        article_content = article.get("content")
+        if not article_content and serialised_sections:
+            article_content = _combine_sections_html(serialised_sections)
+        base["content"] = article_content or ""
     if include_permissions:
         base.update(
             {
@@ -195,17 +328,26 @@ async def create_article(
     is_published = bool(payload.get("is_published", False))
     now = datetime.now(timezone.utc)
     published_at = now if is_published else None
+    sections_input = _extract_sections_sequence(payload.get("sections"))
+    prepared_sections, combined_content = _prepare_sections(
+        sections_input,
+        fallback_content=payload.get("content"),
+        fallback_title=payload.get("title"),
+    )
+    if not combined_content:
+        raise ValueError("At least one section with content is required")
     created = await kb_repo.create_article(
         slug=str(payload.get("slug")),
         title=str(payload.get("title")),
         summary=payload.get("summary"),
-        content=str(payload.get("content")),
+        content=combined_content,
         permission_scope=permission_scope,
         is_published=is_published,
         published_at=published_at,
         created_by=author_id,
     )
     await _sync_relations(created["id"], permission_scope, payload)
+    await kb_repo.replace_article_sections(created["id"], prepared_sections)
     refreshed = await kb_repo.get_article_by_id(created["id"])
     if not refreshed:
         raise RuntimeError("Failed to load knowledge base article after creation")
@@ -223,8 +365,19 @@ async def update_article(article_id: int, payload: Mapping[str, Any]) -> dict[st
         updates["title"] = payload.get("title")
     if "summary" in payload:
         updates["summary"] = payload.get("summary")
-    if "content" in payload:
-        updates["content"] = payload.get("content")
+    sections_update_required = False
+    prepared_sections: list[dict[str, Any]] = _extract_sections_sequence(current.get("sections"))
+    if "sections" in payload or "content" in payload or "title" in payload:
+        sections_payload = payload.get("sections") if "sections" in payload else current.get("sections")
+        prepared_sections, combined_content = _prepare_sections(
+            _extract_sections_sequence(sections_payload),
+            fallback_content=payload.get("content") if "content" in payload else current.get("content"),
+            fallback_title=payload.get("title") if "title" in payload else current.get("title"),
+        )
+        if not combined_content:
+            raise ValueError("At least one section with content is required")
+        updates["content"] = combined_content
+        sections_update_required = True
     if "permission_scope" in payload:
         updates["permission_scope"] = payload.get("permission_scope")
     published_flag = payload.get("is_published")
@@ -235,6 +388,8 @@ async def update_article(article_id: int, payload: Mapping[str, Any]) -> dict[st
         current = await kb_repo.update_article(article_id, **updates)
     permission_scope = str(current.get("permission_scope"))
     await _sync_relations(article_id, permission_scope, payload)
+    if sections_update_required:
+        await kb_repo.replace_article_sections(article_id, prepared_sections)
     refreshed = await kb_repo.get_article_by_id(article_id)
     if not refreshed:
         raise RuntimeError("Failed to refresh article after update")

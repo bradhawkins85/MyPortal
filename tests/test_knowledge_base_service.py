@@ -28,6 +28,9 @@ def _article_factory(**overrides):
         "title": "Public article",
         "summary": "",
         "content": "Public content",
+        "sections": [
+            {"position": 1, "heading": "Overview", "content": "<p>Public content</p>"}
+        ],
         "permission_scope": "anonymous",
         "is_published": True,
         "created_by": 1,
@@ -87,6 +90,7 @@ async def test_get_article_by_slug_respects_user_permissions(monkeypatch):
     article = await knowledge_base_service.get_article_by_slug_for_context("restricted", allowed_context)
     assert article is not None
     assert article["slug"] == "restricted"
+    assert article["sections"]
 
 
 @pytest.mark.anyio("asyncio")

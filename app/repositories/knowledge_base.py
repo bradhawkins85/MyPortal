@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from app.core.database import db
 
@@ -63,6 +63,7 @@ async def _attach_relations(rows: Sequence[dict[str, Any]]) -> list[dict[str, An
     user_map: dict[int, list[int]] = defaultdict(list)
     member_company_map: dict[int, list[int]] = defaultdict(list)
     admin_company_map: dict[int, list[int]] = defaultdict(list)
+    section_map: dict[int, list[dict[str, Any]]] = defaultdict(list)
 
     if placeholders:
         user_rows = await db.fetch_all(
@@ -93,6 +94,30 @@ async def _attach_relations(rows: Sequence[dict[str, Any]]) -> list[dict[str, An
             else:
                 member_company_map[article_id].append(company_id)
 
+        section_rows = await db.fetch_all(
+            f"""
+            SELECT id, article_id, position, heading, content
+            FROM knowledge_base_sections
+            WHERE article_id IN ({placeholders})
+            ORDER BY position ASC, id ASC
+            """,
+            params,
+        )
+        for row in section_rows:
+            try:
+                article_id = int(row.get("article_id"))
+            except (TypeError, ValueError):
+                continue
+            heading = row.get("heading")
+            section_map[article_id].append(
+                {
+                    "id": row.get("id"),
+                    "heading": heading if isinstance(heading, str) else None,
+                    "content": row.get("content") or "",
+                    "position": row.get("position"),
+                }
+            )
+
     enriched: list[dict[str, Any]] = []
     for row in rows:
         article = _normalise_article(row)
@@ -101,10 +126,13 @@ async def _attach_relations(rows: Sequence[dict[str, Any]]) -> list[dict[str, An
             article["allowed_user_ids"] = sorted(set(user_map.get(article_id, [])))
             article["company_ids"] = sorted(set(member_company_map.get(article_id, [])))
             article["company_admin_ids"] = sorted(set(admin_company_map.get(article_id, [])))
+            ordered_sections = section_map.get(article_id, [])
+            article["sections"] = ordered_sections
         else:
             article["allowed_user_ids"] = []
             article["company_ids"] = []
             article["company_admin_ids"] = []
+            article["sections"] = []
         enriched.append(article)
     return enriched
 
@@ -258,5 +286,31 @@ async def replace_article_companies(
             VALUES (%s, %s, %s)
             """,
             (article_id, company_id_int, 1 if require_admin else 0),
+        )
+
+
+async def replace_article_sections(
+    article_id: int, sections: Sequence[Mapping[str, Any]]
+) -> None:
+    await db.execute(
+        "DELETE FROM knowledge_base_sections WHERE article_id = %s",
+        (article_id,),
+    )
+    for index, section in enumerate(sections, start=1):
+        heading = section.get("heading")
+        if heading is not None and not isinstance(heading, str):
+            heading = str(heading)
+        content = section.get("content") or ""
+        position = section.get("position")
+        try:
+            position_int = int(position) if position is not None else index
+        except (TypeError, ValueError):
+            position_int = index
+        await db.execute(
+            """
+            INSERT INTO knowledge_base_sections (article_id, position, heading, content)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (article_id, position_int, heading, content),
         )
 
