@@ -86,9 +86,13 @@ class Database:
             init_command="SET time_zone = '+00:00'",
         )
         async with temp_conn.cursor() as cursor:
-            await cursor.execute(
-                f"CREATE DATABASE IF NOT EXISTS `{self._settings.database_name}`"
-            )
+            await cursor.execute("SET sql_notes = 0")
+            try:
+                await cursor.execute(
+                    f"CREATE DATABASE IF NOT EXISTS `{self._settings.database_name}`"
+                )
+            finally:
+                await cursor.execute("SET sql_notes = 1")
         temp_conn.close()
         wait_closed = getattr(temp_conn, "wait_closed", None)
         if wait_closed:
@@ -119,9 +123,13 @@ class Database:
                     raise RuntimeError("Could not obtain database migration lock")
 
                 async with conn.cursor() as cursor:
-                    await cursor.execute(
-                        "CREATE TABLE IF NOT EXISTS migrations (name VARCHAR(255) PRIMARY KEY)"
-                    )
+                    await cursor.execute("SET sql_notes = 0")
+                    try:
+                        await cursor.execute(
+                            "CREATE TABLE IF NOT EXISTS migrations (name VARCHAR(255) PRIMARY KEY)"
+                        )
+                    finally:
+                        await cursor.execute("SET sql_notes = 1")
 
                 async with conn.cursor(aiomysql.DictCursor) as cursor:
                     await cursor.execute("SELECT name FROM migrations")

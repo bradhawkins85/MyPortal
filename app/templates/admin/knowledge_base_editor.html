@@ -33,8 +33,7 @@
 
 {% block content %}
 <div class="kb-admin">
-  <div class="kb-admin__grid">
-    <section class="card card--panel kb-admin__panel" data-kb-editor>
+  <section class="card card--panel kb-admin__panel kb-admin__panel--editor" data-kb-editor>
       <header class="card__header card__header--stacked">
         <div>
           <h2 class="card__title" data-kb-editor-title>{{ editor_heading }}</h2>
@@ -47,58 +46,72 @@
           </label>
         </div>
       </header>
-      <form id="kb-article-form" class="form-grid form-grid--vertical" autocomplete="off" data-kb-mode="{{ kb_form_mode }}">
+      <form id="kb-article-form" class="kb-admin__form" autocomplete="off" data-kb-mode="{{ kb_form_mode }}">
         <input type="hidden" id="kb-article-id" />
-        <div class="form-field">
-          <label class="form-label" for="kb-article-slug">Slug</label>
-          <input class="form-input" id="kb-article-slug" name="slug" required minlength="1" maxlength="191" />
-          <p class="form-help">Use a unique, URL-friendly slug. Existing links update automatically after saving changes.</p>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="kb-article-title">Title</label>
-          <input class="form-input" id="kb-article-title" name="title" required maxlength="255" />
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="kb-article-summary">Summary</label>
-          <textarea class="form-input form-input--textarea" id="kb-article-summary" name="summary" rows="3" maxlength="2000"></textarea>
-          <p class="form-help">Summaries appear beside article titles and improve search relevance.</p>
-        </div>
-        <div class="form-field form-field--wide">
-          <div class="kb-admin__sections-header">
-            <label class="form-label" for="kb-article-sections">Sections</label>
-            <button type="button" class="button button--ghost" data-kb-add-section>
+        <fieldset class="kb-admin__fieldset">
+          <legend class="kb-admin__fieldset-title">Article details</legend>
+          <div class="kb-admin__fieldset-body">
+            <div class="form-field">
+              <label class="form-label" for="kb-article-slug">Slug</label>
+              <input class="form-input" id="kb-article-slug" name="slug" required minlength="1" maxlength="191" />
+              <p class="form-help">Use a unique, URL-friendly slug. Existing links update automatically after saving changes.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="kb-article-title">Title</label>
+              <input class="form-input" id="kb-article-title" name="title" required maxlength="255" />
+            </div>
+            <div class="form-field form-field--wide">
+              <label class="form-label" for="kb-article-summary">Summary</label>
+              <textarea class="form-input form-input--textarea" id="kb-article-summary" name="summary" rows="3" maxlength="2000"></textarea>
+              <p class="form-help">Summaries appear beside article titles and improve search relevance.</p>
+            </div>
+          </div>
+        </fieldset>
+        <fieldset class="kb-admin__fieldset">
+          <legend class="kb-admin__fieldset-title">Visibility &amp; permissions</legend>
+          <div class="kb-admin__fieldset-body">
+            <div class="form-field">
+              <label class="form-label" for="kb-article-scope">Permission scope</label>
+              <select class="form-input" id="kb-article-scope" name="permission_scope">
+                <option value="anonymous">Public</option>
+                <option value="user">Specific users</option>
+                <option value="company">Company members</option>
+                <option value="company_admin">Company admins</option>
+                <option value="super_admin">Super admins</option>
+              </select>
+              <p class="form-help kb-admin__scope-help" data-kb-scope-help>Public articles are visible to anyone with the URL.</p>
+            </div>
+            <div class="form-field" data-kb-user-select hidden>
+              <label class="form-label" for="kb-article-users">Allow specific users</label>
+              <select class="form-input" id="kb-article-users" name="allowed_user_ids" multiple size="6"></select>
+              <p class="form-help">Hold Ctrl (Windows) or Command (macOS) to select multiple users. Leave empty to revoke access.</p>
+            </div>
+            <div class="form-field" data-kb-company-select hidden>
+              <label class="form-label" for="kb-article-companies">Allow specific companies</label>
+              <select class="form-input" id="kb-article-companies" name="allowed_company_ids" multiple size="6"></select>
+              <p class="form-help" data-kb-company-help>Leave empty to grant access to every company membership within the selected scope.</p>
+            </div>
+          </div>
+        </fieldset>
+        <section class="kb-admin__sections-card" aria-labelledby="kb-article-sections-heading">
+          <header class="kb-admin__sections-header">
+            <div class="kb-admin__sections-title-group">
+              <h3 class="kb-admin__sections-title" id="kb-article-sections-heading">Sections</h3>
+              <p class="form-help kb-admin__sections-help" id="kb-article-sections-help">Compose rich content in ordered sections. Drag the toolbar buttons to format text, add lists, or insert links. Reorder or delete sections without losing content.</p>
+            </div>
+            <button type="button" class="button button--ghost" data-kb-add-section aria-describedby="kb-article-sections-help">
               <span class="button__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" focusable="false"><path d="M11 5a1 1 0 0 1 2 0v6h6a1 1 0 0 1 0 2h-6v6a1 1 0 0 1-2 0v-6H5a1 1 0 0 1 0-2h6z"/></svg>
               </span>
               <span class="button__label">Add section</span>
             </button>
+          </header>
+          <div class="kb-admin__sections-body" aria-describedby="kb-article-sections-help">
+            <div class="kb-admin__sections" id="kb-article-sections" data-kb-sections>
+              <p class="kb-admin__sections-empty" data-kb-sections-empty>No sections added yet. Start by creating the introduction.</p>
+            </div>
           </div>
-          <p class="form-help">Compose rich content in ordered sections. Drag the toolbar buttons to format text, add lists, or insert links. Reorder or delete sections without losing content.</p>
-          <div class="kb-admin__sections" id="kb-article-sections" data-kb-sections>
-            <p class="kb-admin__sections-empty" data-kb-sections-empty>No sections added yet. Start by creating the introduction.</p>
-          </div>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="kb-article-scope">Permission scope</label>
-          <select class="form-input" id="kb-article-scope" name="permission_scope">
-            <option value="anonymous">Public</option>
-            <option value="user">Specific users</option>
-            <option value="company">Company members</option>
-            <option value="company_admin">Company admins</option>
-            <option value="super_admin">Super admins</option>
-          </select>
-          <p class="form-help kb-admin__scope-help" data-kb-scope-help>Public articles are visible to anyone with the URL.</p>
-        </div>
-        <div class="form-field" data-kb-user-select hidden>
-          <label class="form-label" for="kb-article-users">Allow specific users</label>
-          <select class="form-input" id="kb-article-users" name="allowed_user_ids" multiple size="6"></select>
-          <p class="form-help">Hold Ctrl (Windows) or Command (macOS) to select multiple users. Leave empty to revoke access.</p>
-        </div>
-        <div class="form-field" data-kb-company-select hidden>
-          <label class="form-label" for="kb-article-companies">Allow specific companies</label>
-          <select class="form-input" id="kb-article-companies" name="allowed_company_ids" multiple size="6"></select>
-          <p class="form-help" data-kb-company-help>Leave empty to grant access to every company membership within the selected scope.</p>
-        </div>
+        </section>
         <div class="form-actions">
           <button type="submit" class="button" data-kb-save>Save article</button>
           <button type="button" class="button button--ghost" data-kb-reset>Reset</button>
@@ -106,21 +119,20 @@
         </div>
         <p class="form-help kb-admin__status" role="status" aria-live="polite" data-kb-status></p>
       </form>
-    </section>
+  </section>
 
-    <section class="card card--panel kb-admin__panel">
-      <header class="card__header card__header--stacked">
-        <div>
-          <h2 class="card__title">Preview &amp; metadata</h2>
-          <p class="card__subtitle">Inspect the rendered article, confirm scopes, and verify timestamps before publishing.</p>
-        </div>
-        <div class="kb-admin__meta" data-kb-preview-meta></div>
-      </header>
-      <div class="card__body kb-admin__preview" data-kb-preview>
-        <p class="text-muted">Compose sections to preview the article content here.</p>
+  <section class="card card--panel kb-admin__panel kb-admin__panel--preview">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Preview &amp; metadata</h2>
+        <p class="card__subtitle">Inspect the rendered article, confirm scopes, and verify timestamps before publishing.</p>
       </div>
-    </section>
-  </div>
+      <div class="kb-admin__meta" data-kb-preview-meta></div>
+    </header>
+    <div class="card__body kb-admin__preview" data-kb-preview>
+      <p class="text-muted">Compose sections to preview the article content here.</p>
+    </div>
+  </section>
 </div>
 {% endblock %}
 
