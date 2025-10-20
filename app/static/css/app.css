@@ -2988,21 +2988,20 @@ body {
 
 .knowledge-base {
   display: grid;
-  grid-template-columns: minmax(260px, 320px) 1fr;
   gap: 1.5rem;
   align-items: start;
 }
 
-@media (max-width: 960px) {
-  .knowledge-base {
-    grid-template-columns: 1fr;
-  }
-}
-
-.knowledge-base__sidebar {
+.knowledge-base__list {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.knowledge-base--article {
+  max-width: 64rem;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .knowledge-base__filters {

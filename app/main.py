@@ -3137,6 +3137,10 @@ async def notifications_dashboard(request: Request):
 
 @app.get("/knowledge-base", response_class=HTMLResponse, tags=["Knowledge Base"])
 async def knowledge_base_index(request: Request, article: str | None = Query(None, alias="slug")):
+    if article:
+        target = f"/knowledge-base/articles/{quote(article, safe='')}"
+        return RedirectResponse(url=target, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
     user, _ = await _get_optional_user(request)
     access_context = await knowledge_base_service.build_access_context(user)
     include_unpublished = bool(user and user.get("is_super_admin"))
@@ -3144,35 +3148,34 @@ async def knowledge_base_index(request: Request, article: str | None = Query(Non
         access_context,
         include_unpublished=include_unpublished,
     )
-    active_article = None
-    active_slug = None
-    if article:
-        active_article = await knowledge_base_service.get_article_by_slug_for_context(
-            article,
-            access_context,
-            include_unpublished=include_unpublished,
-            include_permissions=include_unpublished,
-        )
-        if not active_article:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
-        active_slug = article
-    elif articles:
-        active_slug = articles[0]["slug"]
-        active_article = await knowledge_base_service.get_article_by_slug_for_context(
-            active_slug,
-            access_context,
-            include_unpublished=include_unpublished,
-            include_permissions=include_unpublished,
-        )
     extra_context = {
         "title": "Knowledge base",
         "kb_articles": articles,
-        "kb_active_article": active_article,
-        "kb_active_slug": active_slug,
-        "kb_is_super_admin": bool(user and user.get("is_super_admin")),
     }
     context = await _build_portal_context(request, user, extra=extra_context)
     return templates.TemplateResponse("knowledge_base/index.html", context)
+
+
+@app.get("/knowledge-base/articles/{slug}", response_class=HTMLResponse, tags=["Knowledge Base"])
+async def knowledge_base_article(request: Request, slug: str):
+    user, _ = await _get_optional_user(request)
+    access_context = await knowledge_base_service.build_access_context(user)
+    include_unpublished = bool(user and user.get("is_super_admin"))
+    article = await knowledge_base_service.get_article_by_slug_for_context(
+        slug,
+        access_context,
+        include_unpublished=include_unpublished,
+        include_permissions=include_unpublished,
+    )
+    if not article:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+    extra_context = {
+        "title": article.get("title") or "Knowledge base",
+        "kb_article": article,
+        "kb_is_super_admin": bool(user and user.get("is_super_admin")),
+    }
+    context = await _build_portal_context(request, user, extra=extra_context)
+    return templates.TemplateResponse("knowledge_base/article.html", context)
 
 
 @app.get("/notifications/settings", response_class=HTMLResponse)
@@ -5726,6 +5729,7 @@ async def admin_create_ticket(request: Request):
         )
         await tickets_repo.add_watcher(created["id"], current_user.get("id"))
         await tickets_service.refresh_ticket_ai_summary(created["id"])
+        await tickets_service.refresh_ticket_ai_tags(created["id"])
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create ticket", error=str(exc))
         return await _render_tickets_dashboard(
@@ -5769,6 +5773,7 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     await tickets_repo.set_ticket_status(ticket_id, status_value)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    await tickets_service.refresh_ticket_ai_tags(ticket_id)
     message = quote(f"Ticket {ticket_id} updated.")
     destination = f"/admin/tickets?success={message}"
     if return_url and return_url.startswith("/") and not return_url.startswith("//"):
@@ -5931,6 +5936,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     await tickets_repo.update_ticket(ticket_id, **update_fields)
     await tickets_repo.set_ticket_status(ticket_id, status_value)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    await tickets_service.refresh_ticket_ai_tags(ticket_id)
 
     message = quote("Ticket details updated.")
     destination = f"/admin/tickets/{ticket_id}?success={message}"
@@ -5972,6 +5978,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
         if isinstance(author_id, int):
             await tickets_repo.add_watcher(ticket_id, author_id)
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
+        await tickets_service.refresh_ticket_ai_tags(ticket_id)
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create ticket reply", error=str(exc))
         return await _render_ticket_detail(

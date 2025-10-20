@@ -150,6 +150,7 @@ async def create_ticket(
         await tickets_service.refresh_ticket_ai_summary(ticket["id"])
     except RuntimeError:
         pass
+    await tickets_service.refresh_ticket_ai_tags(ticket["id"])
     return await _build_ticket_detail(ticket["id"], current_user)
 
 
@@ -174,6 +175,7 @@ async def update_ticket(
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
     except RuntimeError:
         pass
+    await tickets_service.refresh_ticket_ai_tags(ticket_id)
     return await _build_ticket_detail(ticket_id, current_user)
 
 
@@ -208,6 +210,7 @@ async def add_reply(
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
     except RuntimeError:
         pass
+    await tickets_service.refresh_ticket_ai_tags(ticket_id)
     updated_ticket = await tickets_repo.get_ticket(ticket_id)
     ticket_payload = updated_ticket or ticket
     ticket_response = TicketResponse(**ticket_payload)
