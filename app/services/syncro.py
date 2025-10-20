@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+from collections import deque
+from time import monotonic
 from typing import Any
 
 import httpx
@@ -27,6 +30,35 @@ def _get_base_url() -> str:
     return url
 
 
+class AsyncRateLimiter:
+    """Coroutine-friendly token bucket limiting requests per interval."""
+
+    __slots__ = ("_limit", "_interval", "_lock", "_events")
+
+    def __init__(self, limit: int, interval: float) -> None:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        if interval <= 0:
+            raise ValueError("interval must be positive")
+        self._limit = limit
+        self._interval = interval
+        self._lock = asyncio.Lock()
+        self._events: deque[float] = deque()
+
+    async def acquire(self) -> None:
+        while True:
+            async with self._lock:
+                now = monotonic()
+                while self._events and now - self._events[0] >= self._interval:
+                    self._events.popleft()
+                if len(self._events) < self._limit:
+                    self._events.append(now)
+                    return
+                earliest = self._events[0]
+                wait_time = self._interval - (now - earliest)
+            await asyncio.sleep(max(wait_time, 0.05))
+
+
 async def _request(
     method: str,
     path: str,
@@ -34,7 +66,10 @@ async def _request(
     params: dict[str, Any] | None = None,
     json: Any | None = None,
     timeout: float = 15.0,
+    rate_limiter: AsyncRateLimiter | None = None,
 ) -> Any:
+    if rate_limiter is not None:
+        await rate_limiter.acquire()
     base_url = _get_base_url()
     url = f"{base_url}{path if path.startswith('/') else f'/{path}'}"
     headers: dict[str, str] = {}
@@ -134,6 +169,55 @@ async def get_assets(customer_id: str | int) -> list[dict[str, Any]]:
         if total_pages and page >= total_pages:
             break
     return results
+
+
+async def list_tickets(
+    *,
+    page: int = 1,
+    per_page: int = 25,
+    rate_limiter: AsyncRateLimiter | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Fetch a page of Syncro tickets with pagination metadata."""
+
+    params = {"page": page, "per_page": per_page}
+    payload = await _request(
+        "GET",
+        "/tickets",
+        params=params,
+        rate_limiter=rate_limiter,
+    )
+    tickets = _extract_collection(payload, "tickets", "data")
+    meta: dict[str, Any] = {}
+    if isinstance(payload, dict):
+        candidate = payload.get("meta")
+        if isinstance(candidate, dict):
+            meta = dict(candidate)
+        else:
+            candidate = payload.get("pagination")
+            if isinstance(candidate, dict):
+                meta = dict(candidate)
+    return tickets, meta
+
+
+async def get_ticket(
+    ticket_id: str | int,
+    *,
+    rate_limiter: AsyncRateLimiter | None = None,
+) -> dict[str, Any] | None:
+    """Return a single Syncro ticket payload or ``None`` if not found."""
+
+    payload = await _request(
+        "GET",
+        f"/tickets/{ticket_id}",
+        rate_limiter=rate_limiter,
+    )
+    if not payload:
+        return None
+    if isinstance(payload, dict):
+        ticket = payload.get("ticket") if "ticket" in payload else payload
+        if isinstance(ticket, dict):
+            return dict(ticket)
+    return None
 
 
 def _parse_numeric_value(value: Any) -> float | None:

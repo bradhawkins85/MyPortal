@@ -34,6 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.openapi.docs import get_swagger_ui_html
 from itsdangerous import BadSignature, URLSafeSerializer
+from pydantic import ValidationError
 from starlette.datastructures import FormData
 
 from app.api.routes import (
@@ -85,6 +86,7 @@ from app.repositories import integration_modules as integration_modules_repo
 from app.repositories import webhook_events as webhook_events_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
+from app.schemas.tickets import SyncroTicketImportRequest
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import encrypt_secret
 from app.security.rate_limiter import RateLimiterMiddleware, SimpleRateLimiter
@@ -101,6 +103,7 @@ from app.services import modules as modules_service
 from app.services import products as products_service
 from app.services import shop as shop_service
 from app.services import staff_importer
+from app.services import ticket_importer
 from app.services import tickets as tickets_service
 from app.services import template_variables
 from app.services import webhook_monitor
@@ -4278,6 +4281,28 @@ async def import_syncro_contacts(request: Request):
         "updated": summary.updated,
         "skipped": summary.skipped,
     })
+
+
+@app.post("/admin/syncro/import-tickets")
+async def import_syncro_tickets(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    payload = await request.json()
+    try:
+        import_request = SyncroTicketImportRequest.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.errors()) from exc
+    try:
+        summary = await ticket_importer.import_from_request(
+            mode=import_request.mode.value,
+            ticket_id=import_request.ticket_id,
+            start_id=import_request.start_id,
+            end_id=import_request.end_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return JSONResponse(summary.as_dict())
 
 
 @app.get("/admin/api-keys", response_class=HTMLResponse)

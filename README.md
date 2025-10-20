@@ -32,6 +32,34 @@ There are no default login credentials; the first visit will prompt you to regis
 - Automation builder covering scheduled and event-driven workflows with Ollama, SMTP, TacticalRMM, and ntfy integrations
 - Integration module catalogue to manage external credentials, run diagnostics, and ensure webhook retries remain observable
 - ChatGPT MCP module providing secure ticket triage tools and automations to OpenAI ChatGPT via the Model Context Protocol
+- Syncro ticket importer with super admin UI controls, rate limiting, and REST API access for bulk migrations
+
+## Syncro Ticket Importer
+
+Super administrators can synchronise Syncro tickets into MyPortal directly from **Admin → Tickets**. The import console offers
+three modes:
+
+- **Single ticket** – supply a Syncro ticket ID for one-off imports or re-syncs.
+- **Range import** – provide `startId` and `endId` values to sweep a consecutive block of tickets.
+- **Import all tickets** – iterate through the entire Syncro queue using the 25-item pagination window.
+
+Each request observes the Syncro 180 requests-per-minute ceiling and reports how many tickets were created, updated, or skipped
+after upserting into MyPortal.
+
+The same workflow is exposed through the Swagger-documented endpoint `POST /api/tickets/import/syncro`. The request body accepts
+camelCase or snake_case keys:
+
+```json
+{
+  "mode": "range",
+  "startId": 1500,
+  "endId": 1525
+}
+```
+
+Use `"mode": "single"` with `ticketId` for targeted imports or `"mode": "all"` without additional fields to crawl every page.
+The response echoes the mode alongside `fetched`, `created`, `updated`, and `skipped` counters so integrations can audit the
+result.
 
 ## Port Catalogue & Pricing Workflows
 
