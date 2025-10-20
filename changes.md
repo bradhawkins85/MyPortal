@@ -1,3 +1,4 @@
+- 2025-12-09, 10:00 UTC, Feature, Added responsive mobile navigation with hamburger toggle and viewport clamping refinements
 - 2025-12-08, 10:00 UTC, Feature, Seeded super-admin-only knowledge base articles covering operations, system variables, and HTTP POST automation
 - 2025-12-08, 09:45 UTC, Feature, Added Syncro ticket importer with admin UI, rate-limited Syncro API client, and documentation
 - 2025-10-20, 12:25 UTC, Fix, Allowed super admins to be assigned to tickets by recognising their global permission during assignee validation
