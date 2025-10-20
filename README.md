@@ -30,6 +30,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - Ticketing workspace with replies, watchers, and module-aligned categorisation surfaced through API and admin UI
 - Automation builder covering scheduled and event-driven workflows with Ollama, SMTP, TacticalRMM, and ntfy integrations
 - Integration module catalogue to manage external credentials, run diagnostics, and ensure webhook retries remain observable
+- ChatGPT MCP module providing secure ticket triage tools and automations to OpenAI ChatGPT via the Model Context Protocol
 
 ## Port Catalogue & Pricing Workflows
 
@@ -79,6 +80,28 @@ for richer clients:
 - `GET /api/notifications/event-types` – Provides the distinct notification
   event types available to the authenticated user by combining defaults,
   preferences, and recorded history.
+
+## ChatGPT MCP Module
+
+The ChatGPT MCP integration exposes a dedicated `/api/mcp/chatgpt` endpoint so
+ChatGPT can triage tickets, append replies, and (optionally) update ticket
+metadata using the [Model Context Protocol](https://modelcontextprotocol.io/).
+
+1. Visit **Admin → Integration modules → ChatGPT MCP** and generate a strong
+   shared secret. The secret is stored as a SHA-256 hash and must also be
+   configured inside ChatGPT when registering the MCP server.
+2. Select which tools ChatGPT may call. Available tools include `listTickets`,
+   `getTicket`, `createTicketReply`, and `updateTicket`. Disable ticket updates
+   to enforce read-only access.
+3. Set a maximum ticket count (default 50) and, if ChatGPT should post
+   replies, supply a system user ID to attribute those updates to.
+4. From ChatGPT, configure an MCP server pointing at
+   `https://<your-domain>/api/mcp/chatgpt` and present the shared secret via a
+   `Bearer` token. The server responds to `initialize`, `listTools`, and
+   `callTool` JSON-RPC requests.
+
+Refer to `docs/chatgpt-mcp.md` for the complete JSON payload examples,
+per-tool argument schemas, and troubleshooting guidance.
 
 ## Template Variables for External Apps
 
