@@ -57,7 +57,7 @@
         item.className = 'knowledge-base__results-item';
         const link = document.createElement('a');
         link.className = 'knowledge-base__link';
-        link.href = `/knowledge-base?slug=${encodeURIComponent(result.slug)}`;
+        link.href = `/knowledge-base/articles/${encodeURIComponent(result.slug)}`;
         link.textContent = result.title || result.slug;
         item.appendChild(link);
         if (result.excerpt) {
