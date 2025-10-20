@@ -1,5 +1,5 @@
+import json
 from typing import Any
-
 from unittest.mock import AsyncMock
 
 import pytest
@@ -7,6 +7,7 @@ from fastapi import status
 from starlette.requests import Request
 
 from app import main
+from app.repositories import company_memberships as membership_repo
 from app.schemas.memberships import MembershipUpdate
 
 
@@ -103,3 +104,80 @@ def test_membership_update_accepts_camel_case_alias():
     update = MembershipUpdate.model_validate({"roleId": 9})
     assert update.role_id == 9
     assert update.model_dump(exclude_unset=True) == {"role_id": 9}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_list_users_with_permission_filters_and_sorts(monkeypatch):
+    rows = [
+        {
+            "user_id": 5,
+            "email": "tech@example.com",
+            "first_name": "Tech",
+            "last_name": "User",
+            "mobile_phone": None,
+            "company_id": 3,
+            "is_super_admin": 0,
+            "permissions": json.dumps(["helpdesk.technician", "portal.access"]),
+        },
+        {
+            "user_id": 8,
+            "email": "other@example.com",
+            "first_name": "Other",
+            "last_name": "Person",
+            "mobile_phone": None,
+            "company_id": 2,
+            "is_super_admin": 0,
+            "permissions": json.dumps(["portal.access"]),
+        },
+    ]
+
+    fetch_mock = AsyncMock(return_value=rows)
+    monkeypatch.setattr(membership_repo.db, "fetch_all", fetch_mock)
+
+    result = await membership_repo.list_users_with_permission("helpdesk.technician")
+
+    fetch_mock.assert_awaited_once()
+    assert result == [
+        {
+            "id": 5,
+            "email": "tech@example.com",
+            "first_name": "Tech",
+            "last_name": "User",
+            "mobile_phone": None,
+            "company_id": 3,
+            "is_super_admin": False,
+        }
+    ]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_list_users_with_permission_includes_super_admin(monkeypatch):
+    rows = [
+        {
+            "user_id": 9,
+            "email": "admin@example.com",
+            "first_name": "Admin",
+            "last_name": "User",
+            "mobile_phone": "12345",
+            "company_id": 1,
+            "is_super_admin": 1,
+            "permissions": json.dumps(["portal.access"]),
+        }
+    ]
+
+    fetch_mock = AsyncMock(return_value=rows)
+    monkeypatch.setattr(membership_repo.db, "fetch_all", fetch_mock)
+
+    result = await membership_repo.list_users_with_permission("helpdesk.technician")
+
+    assert result == [
+        {
+            "id": 9,
+            "email": "admin@example.com",
+            "first_name": "Admin",
+            "last_name": "User",
+            "mobile_phone": "12345",
+            "company_id": 1,
+            "is_super_admin": True,
+        }
+    ]
