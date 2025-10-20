@@ -9,6 +9,7 @@ from app.api.dependencies.auth import (
     require_super_admin,
 )
 from app.repositories import company_memberships as membership_repo
+from app.repositories import staff as staff_repo
 from app.repositories import tickets as tickets_repo
 from app.schemas.tickets import (
     TicketCreate,
@@ -124,9 +125,25 @@ async def create_ticket(
 ) -> TicketDetail:
     has_helpdesk_access = await _has_helpdesk_permission(current_user)
     requester_id = session.user_id
-    if has_helpdesk_access and payload.requester_id:
-        requester_id = payload.requester_id
     company_id = payload.company_id if has_helpdesk_access else current_user.get("company_id")
+    if has_helpdesk_access and payload.requester_id is not None:
+        if company_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Link the ticket to a company before selecting a requester.",
+            )
+        allowed_requesters = await staff_repo.list_enabled_staff_users(company_id)
+        allowed_ids = {
+            int(option.get("id"))
+            for option in allowed_requesters
+            if option.get("id") is not None
+        }
+        if payload.requester_id not in allowed_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Requester must be an enabled staff member for the linked company.",
+            )
+        requester_id = payload.requester_id
     assigned_user_id = payload.assigned_user_id if has_helpdesk_access else None
     priority = payload.priority if has_helpdesk_access else "normal"
     status_value = payload.status if has_helpdesk_access else "open"

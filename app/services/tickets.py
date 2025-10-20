@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable, Mapping as MappingABC
 import re
-from collections.abc import Mapping as MappingABC
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
+from app.core.database import db
 from app.core.logging import log_error
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
@@ -39,6 +40,16 @@ _DEFAULT_TAG_FILL = [
 ]
 
 
+async def _safely_call(async_fn: Callable[..., Awaitable[Any]], *args, **kwargs):
+    try:
+        return await async_fn(*args, **kwargs)
+    except RuntimeError as error:
+        message = str(error)
+        if "Database pool not initialised" in message or not db.is_connected():
+            return None
+        raise
+
+
 async def refresh_ticket_ai_summary(ticket_id: int) -> None:
     """Refresh the Ollama-generated summary for a ticket if the module is configured."""
 
@@ -50,7 +61,7 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
     if not ticket:
         return
 
-    replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
+    replies = await _safely_call(tickets_repo.list_replies, ticket_id, include_internal=True) or []
     user_lookup: dict[int, Mapping[str, Any]] = {}
     user_ids: set[int] = set()
 
@@ -64,7 +75,7 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
             user_ids.add(author_id)
 
     for identifier in user_ids:
-        record = await user_repo.get_user_by_id(identifier)
+        record = await _safely_call(user_repo.get_user_by_id, identifier)
         if record:
             user_lookup[identifier] = record
 
@@ -74,7 +85,8 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
     try:
         response = await modules_service.trigger_module("ollama", {"prompt": prompt})
     except ValueError:
-        await tickets_repo.update_ticket(
+        await _safely_call(
+            tickets_repo.update_ticket,
             ticket_id,
             ai_summary=None,
             ai_summary_status="skipped",
@@ -85,7 +97,8 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
         return
     except Exception as exc:  # pragma: no cover - network interaction
         log_error("Ticket AI summary failed", ticket_id=ticket_id, error=str(exc))
-        await tickets_repo.update_ticket(
+        await _safely_call(
+            tickets_repo.update_ticket,
             ticket_id,
             ai_summary=None,
             ai_summary_status="error",
@@ -105,7 +118,8 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
     if status_value == "succeeded" and summary_text and not resolution_state:
         resolution_state = "likely_in_progress"
 
-    await tickets_repo.update_ticket(
+    await _safely_call(
+        tickets_repo.update_ticket,
         ticket_id,
         ai_summary=summary_text,
         ai_summary_status=status_value,

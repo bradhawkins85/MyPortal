@@ -70,7 +70,12 @@
               </div>
               <div class="form-field">
                 <label class="form-label" for="ticket-requester-detail">Requester</label>
-                <select id="ticket-requester-detail" name="requesterId" class="form-input">
+                <select
+                  id="ticket-requester-detail"
+                  name="requesterId"
+                  class="form-input"
+                  {% if not ticket.company_id %}disabled aria-disabled="true"{% endif %}
+                >
                   <option value="">Not set</option>
                   {% for requester in ticket_requester_options %}
                     <option value="{{ requester.id }}" {% if requester.id == ticket.requester_id %}selected{% endif %}>
@@ -78,6 +83,11 @@
                     </option>
                   {% endfor %}
                 </select>
+                {% if not ticket.company_id %}
+                  <p class="form-help">Link a company before selecting a requester.</p>
+                {% elif not ticket_requester_options %}
+                  <p class="form-help">No enabled staff members are available for the linked company.</p>
+                {% endif %}
               </div>
               <div class="form-field">
                 <label class="form-label" for="ticket-assigned-detail">Assigned to</label>
@@ -185,6 +195,9 @@
           {% set ai_badge_map = {'succeeded': 'badge--success', 'error': 'badge--danger', 'skipped': 'badge--muted', 'unknown': 'badge--muted'} %}
           {% set resolution_label_map = {'likely_resolved': 'Likely Resolved', 'likely_in_progress': 'Likely In Progress'} %}
           {% set resolution_badge_map = {'likely_resolved': 'badge--success', 'likely_in_progress': 'badge--warning'} %}
+          {% set tag_status_value = ticket.ai_tags_status if ticket.ai_tags_status is not none else 'skipped' %}
+          {% set tag_status_lower = tag_status_value | lower %}
+          {% set tag_status_label = tag_status_lower.replace('_', ' ') | title %}
           {% if ticket.ai_summary or ticket.ai_summary_status %}
             <article class="card card--panel">
               <header class="card__header">
@@ -225,42 +238,34 @@
                 {% else %}
                   <p class="card__empty">AI summary is not currently available.</p>
                 {% endif %}
-              </div>
-            </article>
-          {% endif %}
 
-          {% set tag_status_value = ticket.ai_tags_status if ticket.ai_tags_status is not none else 'skipped' %}
-          {% set tag_status_lower = tag_status_value | lower %}
-          {% set tag_status_label = tag_status_lower.replace('_', ' ') | title %}
-          {% if ticket.ai_tags_status or (ticket.ai_tags is not none and ticket.ai_tags|length > 0) %}
-            <article class="card card--panel">
-              <header class="card__header">
-                <h2 class="card__title">AI Tags</h2>
-                <p class="card__subtitle">
-                  <span class="badge {{ ai_badge_map.get(tag_status_lower, 'badge--warning') }}">{{ tag_status_label }}</span>
-                  {% if ticket.ai_tags_model %}
-                    <span>{{ ticket.ai_tags_model }}</span>
+                {% if ticket.ai_tags_status or (ticket.ai_tags is not none and ticket.ai_tags|length > 0) %}
+                  <section class="divider"></section>
+                  <h3 class="card__subtitle">AI Tags</h3>
+                  <p class="card__subtitle">
+                    <span class="badge {{ ai_badge_map.get(tag_status_lower, 'badge--warning') }}">{{ tag_status_label }}</span>
+                    {% if ticket.ai_tags_model %}
+                      <span>{{ ticket.ai_tags_model }}</span>
+                    {% endif %}
+                    {% if ticket.ai_tags_updated_at %}
+                      <span>Updated {{ ticket.ai_tags_updated_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</span>
+                    {% endif %}
+                  </p>
+                  {% if tag_status_lower == 'succeeded' and ticket.ai_tags %}
+                    <div class="tag-list">
+                      {% for tag in ticket.ai_tags %}
+                        <span class="tag">{{ tag.replace('-', ' ') }}</span>
+                      {% endfor %}
+                    </div>
+                  {% elif tag_status_lower == 'succeeded' %}
+                    <p class="card__empty">Ollama did not return tags for this ticket.</p>
+                  {% elif tag_status_lower == 'skipped' %}
+                    <p class="card__empty">Enable the Ollama integration module to generate tags.</p>
+                  {% elif tag_status_lower == 'error' %}
+                    <p class="card__empty">AI tag generation failed. Check the Ollama module logs.</p>
+                  {% else %}
+                    <p class="card__empty">AI tags are not currently available.</p>
                   {% endif %}
-                  {% if ticket.ai_tags_updated_at %}
-                    <span>Updated {{ ticket.ai_tags_updated_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</span>
-                  {% endif %}
-                </p>
-              </header>
-              <div class="card__body">
-                {% if tag_status_lower == 'succeeded' and ticket.ai_tags %}
-                  <div class="tag-list">
-                    {% for tag in ticket.ai_tags %}
-                      <span class="tag">{{ tag.replace('-', ' ') }}</span>
-                    {% endfor %}
-                  </div>
-                {% elif tag_status_lower == 'succeeded' %}
-                  <p class="card__empty">Ollama did not return tags for this ticket.</p>
-                {% elif tag_status_lower == 'skipped' %}
-                  <p class="card__empty">Enable the Ollama integration module to generate tags.</p>
-                {% elif tag_status_lower == 'error' %}
-                  <p class="card__empty">AI tag generation failed. Check the Ollama module logs.</p>
-                {% else %}
-                  <p class="card__empty">AI tags are not currently available.</p>
                 {% endif %}
               </div>
             </article>

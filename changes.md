@@ -1,4 +1,7 @@
 - 2025-10-20, 12:20 UTC, Fix, Removed the knowledge base admin preview pane from the article editor per request
+- 2025-12-07, 09:15 UTC, Fix, Restricted ticket requester selection to enabled staff for the linked company and blocked assignments without a company
+- 2025-10-20, 11:59 UTC, Feature, Reworked knowledge base portal layout to list articles and moved article reading to dedicated views
+- 2025-12-06, 15:45 UTC, Feature, Enabled drag-to-resize handles for knowledge base editor images with live preview updates
 - 2025-10-20, 12:04 UTC, Feature, Added automatic Ollama-generated AI tags to knowledge base articles with admin previews and public badges
 - 2025-12-06, 12:30 UTC, Feature, Added Ollama-driven ticket tagging with UI badges, API fields, and resilient fallbacks for 5-10 issue labels
 - 2025-10-20, 11:59 UTC, Feature, Reworked knowledge base portal layout to list articles and moved article reading to dedicated views
@@ -222,3 +225,4 @@ in text
 - 2025-10-10, 13:45 UTC, Fix, Restored notification API actions with summary counts, event-type catalogues, repository insert reliability, and UI refresh
 - 2025-10-15, 23:36 UTC, Fix, Restored admin membership removal handler closures to resolve admin.js syntax error
 - 2025-12-07, 09:00 UTC, Fix, Removed knowledge base search results and Ollama insight panels from the portal view to simplify the article list
+- 2025-12-07, 12:45 UTC, Fix, Combined ticket AI tags into the AI summary panel so related insights stay in one place on the admin ticket detail view
