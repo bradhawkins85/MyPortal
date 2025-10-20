@@ -1,4 +1,8 @@
 - 2025-10-20, 11:13 UTC, Feature, Introduced WYSIWYG knowledge base section editor with ordered multi-section storage and sanitised HTML handling
+- 2025-12-03, 10:15 UTC, Fix, Reconnected automation repository queries before writes so creating automations no longer fails when the database pool is cold
+- 2025-12-02, 15:00 UTC, Fix, Removed the ticket controls sidebar and placed the watcher list beneath the Updated metadata on the admin ticket detail view
+- 2025-10-20, 11:02 UTC, Feature, Enabled editable ticket metadata in a dedicated left-column form with validation for status, priority, requester, assignee, company, category, and external reference fields
+- 2025-10-20, 21:10 UTC, Fix, Serialised knowledge base admin context timestamps before embedding JSON so the admin console loads without datetime errors
 - 2025-12-02, 10:15 UTC, Feature, Added super-admin knowledge base composer with granular permission assignments, inline preview, and CRUD workflow integration
 - 2025-12-01, 09:15 UTC, Fix, Restored knowledge base search by including the CSRF token header in fetch submissions
 - 2025-12-02, 14:30 UTC, Feature, Added ticket detail workspace with standalone status management and threaded reply history

@@ -4,13 +4,22 @@ from app.repositories import automations
 
 
 class _DummyAutomationDB:
-    def __init__(self, fetched_row, *, last_insert_id: int = 99):
+    def __init__(self, fetched_row, *, last_insert_id: int = 99, connected: bool = True):
         self.insert_sql: str | None = None
         self.insert_params: tuple | None = None
         self.fetch_sql: str | None = None
         self.fetch_params: tuple | None = None
         self._fetched_row = fetched_row
         self._last_insert_id = last_insert_id
+        self._connected = connected
+        self.connect_calls = 0
+
+    def is_connected(self):  # pragma: no cover - exercised indirectly
+        return self._connected
+
+    async def connect(self):  # pragma: no cover - exercised indirectly
+        self.connect_calls += 1
+        self._connected = True
 
     async def execute_returning_lastrowid(self, sql, params):  # pragma: no cover - interface parity
         self.insert_sql = sql.strip()
@@ -68,6 +77,29 @@ async def test_create_automation_returns_inserted_record(monkeypatch):
     assert record["id"] == 99
     assert dummy_db.fetch_sql == "SELECT * FROM automations WHERE id = %s"
     assert dummy_db.fetch_params == (99,)
+
+
+@pytest.mark.anyio
+async def test_create_automation_reconnects_when_pool_missing(monkeypatch):
+    dummy_db = _DummyAutomationDB(fetched_row=None, last_insert_id=201, connected=False)
+    monkeypatch.setattr(automations, "db", dummy_db)
+
+    record = await automations.create_automation(
+        name="Reconnect automation",
+        description=None,
+        kind="event",
+        cadence=None,
+        cron_expression=None,
+        trigger_event="tickets.created",
+        trigger_filters=None,
+        action_module="webhook",
+        action_payload={"url": "https://example.com"},
+        status="inactive",
+        next_run_at=None,
+    )
+
+    assert record["id"] == 201
+    assert dummy_db.connect_calls == 1
 
 
 @pytest.mark.anyio
