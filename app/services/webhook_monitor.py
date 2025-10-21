@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Mapping
 
 import httpx
 
@@ -9,6 +9,15 @@ from app.core.logging import log_error, log_info
 from app.repositories import webhook_events as webhook_repo
 
 _MAX_BACKOFF_SECONDS = 3600
+_SENSITIVE_HEADERS = {
+    "authorization",
+    "proxy-authorization",
+    "x-api-key",
+    "x-auth-token",
+    "api-key",
+    "x-access-token",
+}
+_SENSITIVE_RESPONSE_HEADERS = {"set-cookie", "set-cookie2"}
 
 
 def _truncate(value: str | None, *, limit: int = 4000) -> str | None:
@@ -17,6 +26,29 @@ def _truncate(value: str | None, *, limit: int = 4000) -> str | None:
     if len(value) <= limit:
         return value
     return value[: limit - 3] + "..."
+
+
+def _redact_headers(headers: Mapping[str, Any] | None, *, sensitive: set[str]) -> dict[str, Any] | None:
+    if not headers:
+        return None
+    result: dict[str, Any] = {}
+    for key, value in headers.items():
+        lower_key = str(key).lower()
+        if lower_key in sensitive:
+            result[str(key)] = "***REDACTED***"
+        else:
+            result[str(key)] = str(value)
+    return result
+
+
+def _prepare_request_body(payload: Any) -> Any:
+    if payload is None:
+        return None
+    if isinstance(payload, bytes):
+        return _truncate(payload.decode(errors="replace"))
+    if isinstance(payload, str):
+        return _truncate(payload)
+    return payload
 
 
 async def enqueue_event(
@@ -86,6 +118,9 @@ async def record_manual_success(
     attempt_number: int,
     response_status: int | None,
     response_body: str | None,
+    request_headers: Mapping[str, Any] | None = None,
+    request_body: Any = None,
+    response_headers: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Persist a successful delivery outcome for an externally handled event."""
 
@@ -96,6 +131,9 @@ async def record_manual_success(
         response_status=response_status,
         response_body=response_body,
         error_message=None,
+        request_headers=_redact_headers(request_headers, sensitive=_SENSITIVE_HEADERS),
+        request_body=_prepare_request_body(request_body),
+        response_headers=_redact_headers(response_headers, sensitive=_SENSITIVE_RESPONSE_HEADERS),
     )
     await webhook_repo.mark_event_completed(
         event_id,
@@ -115,6 +153,9 @@ async def record_manual_failure(
     error_message: str | None,
     response_status: int | None,
     response_body: str | None,
+    request_headers: Mapping[str, Any] | None = None,
+    request_body: Any = None,
+    response_headers: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Persist a failed delivery outcome for an externally handled event."""
 
@@ -125,6 +166,9 @@ async def record_manual_failure(
         response_status=response_status,
         response_body=response_body,
         error_message=error_message,
+        request_headers=_redact_headers(request_headers, sensitive=_SENSITIVE_HEADERS),
+        request_body=_prepare_request_body(request_body),
+        response_headers=_redact_headers(response_headers, sensitive=_SENSITIVE_RESPONSE_HEADERS),
     )
     await webhook_repo.mark_event_failed(
         event_id,
@@ -162,10 +206,13 @@ async def _attempt_event(event: dict[str, Any]) -> None:
     max_attempts = int(event.get("max_attempts") or 1)
     backoff_seconds = int(event.get("backoff_seconds") or 300)
     headers = {str(key): str(value) for key, value in (event.get("headers") or {}).items()}
+    safe_headers = _redact_headers(headers, sensitive=_SENSITIVE_HEADERS)
     payload = event.get("payload")
+    request_body = _prepare_request_body(payload)
     log_info("Delivering webhook", event_id=event_id, attempt=attempt, url=event.get("target_url"))
     response_status: int | None = None
     response_body: str | None = None
+    response_headers: dict[str, Any] | None = None
     error_message: str | None = None
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -176,6 +223,7 @@ async def _attempt_event(event: dict[str, Any]) -> None:
             )
         response_status = response.status_code
         response_body = _truncate(response.text)
+        response_headers = _redact_headers(response.headers, sensitive=_SENSITIVE_RESPONSE_HEADERS)
         success = 200 <= response.status_code < 300
         status_text = "succeeded" if success else "failed"
         await webhook_repo.record_attempt(
@@ -185,6 +233,9 @@ async def _attempt_event(event: dict[str, Any]) -> None:
             response_status=response_status,
             response_body=response_body,
             error_message=None if success else f"HTTP {response.status_code}",
+            request_headers=safe_headers,
+            request_body=request_body,
+            response_headers=response_headers,
         )
         if success:
             await webhook_repo.mark_event_completed(
@@ -205,6 +256,9 @@ async def _attempt_event(event: dict[str, Any]) -> None:
             response_status=response_status,
             response_body=response_body,
             error_message=error_message,
+            request_headers=safe_headers,
+            request_body=request_body,
+            response_headers=response_headers,
         )
 
     if attempt >= max_attempts:

@@ -79,6 +79,9 @@ def _normalise_attempt(row: dict[str, Any]) -> dict[str, Any]:
     for key in ("id", "event_id", "attempt_number", "response_status"):
         if key in data and data[key] is not None:
             data[key] = int(data[key])
+    data["request_headers"] = _deserialise(data.get("request_headers"))
+    data["request_body"] = _deserialise(data.get("request_body"))
+    data["response_headers"] = _deserialise(data.get("response_headers"))
     if data.get("attempted_at"):
         data["attempted_at"] = _make_aware(data["attempted_at"])
     return data
@@ -172,12 +175,25 @@ async def record_attempt(
     response_status: int | None,
     response_body: str | None,
     error_message: str | None,
+    request_headers: dict[str, Any] | None = None,
+    request_body: Any = None,
+    response_headers: dict[str, Any] | None = None,
 ) -> None:
     await db.execute(
         """
         INSERT INTO webhook_event_attempts
-            (event_id, attempt_number, status, response_status, response_body, error_message)
-        VALUES (%s, %s, %s, %s, %s, %s)
+            (
+                event_id,
+                attempt_number,
+                status,
+                response_status,
+                response_body,
+                error_message,
+                request_headers,
+                request_body,
+                response_headers
+            )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             event_id,
@@ -186,6 +202,9 @@ async def record_attempt(
             response_status,
             response_body,
             error_message,
+            _serialise(request_headers),
+            _serialise(request_body),
+            _serialise(response_headers),
         ),
     )
 
