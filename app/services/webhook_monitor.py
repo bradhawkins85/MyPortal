@@ -38,8 +38,10 @@ async def enqueue_event(
         backoff_seconds=backoff_seconds,
     )
     if attempt_immediately and event.get("id"):
+        event_id = int(event["id"])
+        await webhook_repo.mark_in_progress(event_id)
         await _attempt_event(event)
-        refreshed = await webhook_repo.get_event(int(event["id"]))
+        refreshed = await webhook_repo.get_event(event_id)
         if refreshed:
             return refreshed
     return event
