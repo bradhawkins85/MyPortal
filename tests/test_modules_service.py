@@ -201,7 +201,7 @@ def test_invoke_smtp_records_success(monkeypatch):
 
     async def fake_send_email(**kwargs):
         captured_event["email_kwargs"] = kwargs
-        return True
+        return True, {"id": 70, "status": "succeeded"}
 
     monkeypatch.setattr(modules.webhook_monitor, "enqueue_event", fake_enqueue_event)
     monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
@@ -221,6 +221,7 @@ def test_invoke_smtp_records_success(monkeypatch):
     assert result["status"] == "succeeded"
     assert result["recipients"] == ["user@example.com"]
     assert captured_event["attempt_immediately"] is False
+    assert result["email_event_id"] == 70
     assert "email_kwargs" in captured_event
 
 
@@ -259,7 +260,7 @@ def test_invoke_smtp_records_failure(monkeypatch):
         return dict(fake_event_state)
 
     async def fake_send_email(**kwargs):
-        return False
+        return False, None
 
     monkeypatch.setattr(modules.webhook_monitor, "enqueue_event", fake_enqueue_event)
     monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
@@ -278,6 +279,7 @@ def test_invoke_smtp_records_failure(monkeypatch):
     assert result["event_id"] == 9
     assert result["status"] == "failed"
     assert "last_error" in result
+    assert result.get("email_event_id") is None
 
 
 def test_invoke_tacticalrmm_records_success(monkeypatch):

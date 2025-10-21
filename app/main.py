@@ -3856,7 +3856,7 @@ async def invite_staff_member(staff_id: int, request: Request):
         "<p>The link expires in one hour. If you were not expecting this invitation you can ignore this email.</p>"
     )
     try:
-        sent = await email_service.send_email(
+        sent, event_metadata = await email_service.send_email(
             subject=f"You're invited to {settings.app_name}",
             recipients=[staff["email"]],
             text_body=text_body,
@@ -3868,12 +3868,14 @@ async def invite_staff_member(staff_id: int, request: Request):
                 "Staff invitation email skipped due to SMTP configuration",
                 staff_id=staff_id,
                 invited_user_id=created_user["id"],
+                event_id=(event_metadata or {}).get("id") if isinstance(event_metadata, dict) else None,
             )
         else:
             log_info(
                 "Staff invitation email sent",
                 staff_id=staff_id,
                 invited_user_id=created_user["id"],
+                event_id=(event_metadata or {}).get("id") if isinstance(event_metadata, dict) else None,
             )
     except email_service.EmailDispatchError as exc:  # pragma: no cover - logged for diagnostics
         log_error(
@@ -3881,6 +3883,7 @@ async def invite_staff_member(staff_id: int, request: Request):
             staff_id=staff_id,
             invited_user_id=created_user["id"],
             error=str(exc),
+            event_id=(event_metadata or {}).get("id") if "event_metadata" in locals() and isinstance(event_metadata, dict) else None,
         )
 
     log_info(
