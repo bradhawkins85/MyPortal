@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
@@ -41,6 +42,82 @@ def _normalise_actions(actions: Any) -> list[dict[str, Any]]:
             payload = {}
         normalised.append({"module": module, "payload": dict(payload)})
     return normalised
+
+
+def _resolve_context_value(context: Mapping[str, Any] | None, path: str) -> Any:
+    if not context or not path:
+        return None
+    current: Any = context
+    for segment in path.split('.'):
+        if isinstance(current, Mapping):
+            current = current.get(segment)
+        elif isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)):
+            try:
+                index = int(segment)
+            except (TypeError, ValueError):
+                return None
+            if index < 0 or index >= len(current):
+                return None
+            current = current[index]
+        else:
+            return None
+    return current
+
+
+def _value_matches(actual: Any, expected: Any) -> bool:
+    if isinstance(expected, Sequence) and not isinstance(expected, (str, bytes, bytearray)):
+        return any(_value_matches(actual, candidate) for candidate in expected)
+    return actual == expected
+
+
+def _filters_match(filters: Mapping[str, Any] | None, context: Mapping[str, Any] | None) -> bool:
+    if not filters:
+        return True
+    if not isinstance(filters, Mapping):
+        return False
+
+    if "any" in filters:
+        options = filters["any"]
+        if not isinstance(options, Sequence):
+            return False
+        return any(
+            _filters_match(option if isinstance(option, Mapping) else {"match": option}, context)
+            for option in options
+        )
+
+    if "all" in filters:
+        requirements = filters["all"]
+        if not isinstance(requirements, Sequence):
+            return False
+        return all(
+            _filters_match(requirement if isinstance(requirement, Mapping) else {"match": requirement}, context)
+            for requirement in requirements
+        )
+
+    if "not" in filters:
+        return not _filters_match(filters.get("not"), context)
+
+    matchers: Mapping[str, Any] | None
+    if "match" in filters and isinstance(filters["match"], Mapping):
+        matchers = filters["match"]
+    else:
+        matchers = filters
+
+    if not isinstance(matchers, Mapping):
+        return False
+
+    for key, expected in matchers.items():
+        lookup_key = str(key)
+        actual = _resolve_context_value(context, lookup_key)
+        if isinstance(expected, Mapping):
+            if not isinstance(actual, Mapping):
+                return False
+            if not _filters_match(expected, actual):
+                return False
+        else:
+            if not _value_matches(actual, expected):
+                return False
+    return True
 
 
 def calculate_next_run(
@@ -118,7 +195,11 @@ async def refresh_all_schedules() -> None:
         await automation_repo.set_next_run(int(automation["id"]), next_run)
 
 
-async def _execute_automation(automation: Mapping[str, Any]) -> dict[str, Any]:
+async def _execute_automation(
+    automation: Mapping[str, Any],
+    *,
+    context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     automation_id = int(automation.get("id"))
     await automation_repo.mark_started(automation_id)
     started_at = datetime.now(timezone.utc)
@@ -132,10 +213,18 @@ async def _execute_automation(automation: Mapping[str, Any]) -> dict[str, Any]:
             results: list[dict[str, Any]] = []
             for action in actions:
                 module_slug = action["module"]
-                module_payload = action.get("payload")
+                payload_source = action.get("payload")
+                module_payload = (
+                    dict(payload_source)
+                    if isinstance(payload_source, Mapping)
+                    else {}
+                )
+                if context:
+                    module_payload.setdefault("context", context)
                 try:
                     action_result = await modules_service.trigger_module(
-                        module_slug, module_payload if isinstance(module_payload, Mapping) else {}
+                        module_slug,
+                        module_payload,
                     )
                     results.append(
                         {"module": module_slug, "status": "succeeded", "result": action_result}
@@ -161,7 +250,10 @@ async def _execute_automation(automation: Mapping[str, Any]) -> dict[str, Any]:
                 payload = {}
             module_slug = automation.get("action_module")
             if module_slug:
-                result_payload = await modules_service.trigger_module(str(module_slug), payload)
+                module_payload = dict(payload)
+                if context:
+                    module_payload.setdefault("context", context)
+                result_payload = await modules_service.trigger_module(str(module_slug), module_payload)
             else:
                 result_payload = {"status": "skipped", "reason": "No action module configured"}
     except Exception as exc:  # pragma: no cover - network/runtime guard
@@ -211,4 +303,37 @@ async def execute_now(automation_id: int) -> dict[str, Any]:
     if not automation:
         raise ValueError(f"Automation {automation_id} not found")
     return await _execute_automation(automation)
+
+
+async def handle_event(
+    event_name: str,
+    context: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Trigger event-based automations for the supplied event."""
+
+    event_key = str(event_name or "").strip()
+    if not event_key:
+        return []
+
+    try:
+        automations = await automation_repo.list_event_automations(event_key)
+    except RuntimeError as exc:
+        logger.warning(
+            "Failed to load event automations",
+            event=event_key,
+            error=str(exc),
+        )
+        return []
+
+    matched: list[dict[str, Any]] = []
+    for automation in automations:
+        filters = automation.get("trigger_filters")
+        filters_mapping = filters if isinstance(filters, Mapping) else None
+        if not _filters_match(filters_mapping, context):
+            continue
+        execution = await _execute_automation(automation, context=context)
+        execution_with_id = dict(execution)
+        execution_with_id["automation_id"] = int(automation.get("id"))
+        matched.append(execution_with_id)
+    return matched
 
