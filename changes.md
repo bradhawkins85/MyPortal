@@ -1,3 +1,5 @@
+- 2025-12-20, 09:45 UTC, Fix, Corrected automation admin handler to import the automation repository consistently so creation succeeds without runtime errors
+- 2025-12-20, 09:15 UTC, Fix, Corrected automation insert column list to avoid SQL syntax errors when creating ticket automations
 - 2025-12-20, 09:00 UTC, Fix, Restored scheduler task creation responses by fetching the inserted row using the returned task ID
 - 2025-10-21, 11:50 UTC, Fix, Removed automation workspace sidebar so the orchestration view spans the full width per request
 - 2025-12-19, 16:10 UTC, Fix, Removed the AI tag status label entirely from the admin ticket detail view for a leaner tags section
@@ -269,3 +271,5 @@ in text
 - 2025-12-19, 14:05 UTC, Fix, Filtered unhelpful AI-generated tags for tickets and knowledge base content using shared validation helpers
 - 2025-10-21, 11:43 UTC, Feature, Automated Automation & monitoring task creation with company name selection, generated task names, random daily cron defaults, and 12 retry baseline
 - 2025-10-21, 12:06 UTC, Feature, Added a super admin company access console with full company visibility and direct staff permission assignment without invitations
+
+- 2025-10-21, 12:02 UTC, Fix, Removed automation workspace sidebar from automation creation forms per request
