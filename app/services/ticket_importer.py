@@ -375,6 +375,13 @@ async def import_from_request(
     event_id: int | None = None
     using_monitor: bool = False
     target_url = _build_import_target(mode_lower, ticket_id, start_id, end_id)
+    log_info(
+        "Initialising Syncro ticket import workflow",
+        mode=mode_lower,
+        target_url=target_url,
+        payload_keys=sorted(payload.keys()),
+        has_rate_limiter=bool(rate_limiter),
+    )
 
     def _coerce_event_id(raw_id: Any) -> int | None:
         try:
@@ -400,6 +407,12 @@ async def import_from_request(
     else:
         event_id = _coerce_event_id(event.get("id")) if event else None
         using_monitor = event_id is not None
+        log_info(
+            "Syncro ticket import monitor event recorded",
+            mode=mode_lower,
+            event_id=event_id,
+            using_monitor=using_monitor,
+        )
 
     if event_id is None:
         try:
@@ -432,11 +445,32 @@ async def import_from_request(
                     event_id = None
                 else:
                     using_monitor = False
+                    log_info(
+                        "Syncro ticket import fallback event initialised",
+                        mode=mode_lower,
+                        event_id=event_id,
+                    )
+            else:
+                log_error(
+                    "Syncro ticket import fallback event returned without identifier",
+                    mode=mode_lower,
+                )
+    else:
+        log_info(
+            "Syncro ticket import monitor event will track execution",
+            mode=mode_lower,
+            event_id=event_id,
+        )
 
     attempt_number = 1
 
     async def _record_failure(error: Exception) -> None:
         if event_id is None:
+            log_error(
+                "Syncro ticket import failure without event tracking",
+                mode=mode_lower,
+                error=str(error),
+            )
             return
         try:
             if using_monitor:
@@ -469,6 +503,14 @@ async def import_from_request(
                 "Failed to record Syncro ticket import failure",
                 event_id=event_id,
                 error=str(record_exc),
+            )
+        else:
+            log_error(
+                "Syncro ticket import execution failed",
+                mode=mode_lower,
+                event_id=event_id,
+                error=str(error),
+                attempt=attempt_number,
             )
 
     try:
@@ -520,5 +562,13 @@ async def import_from_request(
                 "Failed to record Syncro ticket import success",
                 event_id=event_id,
                 error=str(record_exc),
+            )
+        else:
+            log_info(
+                "Syncro ticket import execution recorded",
+                mode=mode_lower,
+                event_id=event_id,
+                attempt=attempt_number,
+                using_monitor=using_monitor,
             )
     return summary

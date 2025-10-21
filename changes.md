@@ -1,3 +1,4 @@
+- 2025-12-13, 17:15 UTC, Fix, Added detailed Syncro ticket import logging for admin requests and webhook lifecycle events to troubleshoot missing monitor processing
 - 2025-12-13, 16:30 UTC, Fix, Routed Syncro ticket import fallback logging through the webhook repository so webhook monitor entries persist when manual monitor helpers fail
 - 2025-12-13, 15:45 UTC, Fix, Normalised webhook event timestamp updates to stay database-agnostic so Syncro ticket import API calls appear in the monitor log
 - 2025-12-13, 14:30 UTC, Fix, Hardened Syncro ticket import webhook fallback with repository error handling tests and logging coverage
