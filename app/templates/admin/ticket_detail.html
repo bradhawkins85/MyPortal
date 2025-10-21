@@ -275,8 +275,109 @@
                 <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
               {% endif %}
               <div class="form-field">
-                <label class="form-label" for="ticket-reply-body">Reply</label>
-                <textarea id="ticket-reply-body" name="body" class="form-input" rows="4" required></textarea>
+                <span class="form-label" id="ticket-reply-label">Reply</span>
+                <div
+                  class="rich-text-editor"
+                  data-rich-text-editor
+                  aria-labelledby="ticket-reply-label"
+                >
+                  <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Formatting options">
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="bold"
+                      aria-label="Bold"
+                    >
+                      <span aria-hidden="true">B</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="italic"
+                      aria-label="Italic"
+                    >
+                      <span aria-hidden="true">I</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="underline"
+                      aria-label="Underline"
+                    >
+                      <span aria-hidden="true">U</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="insertUnorderedList"
+                      aria-label="Bulleted list"
+                    >
+                      <span aria-hidden="true">•</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="insertOrderedList"
+                      aria-label="Numbered list"
+                    >
+                      <span aria-hidden="true">1.</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="formatBlock"
+                      data-command-value="blockquote"
+                      aria-label="Quote"
+                    >
+                      <span aria-hidden="true">“”</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="formatBlock"
+                      data-command-value="pre"
+                      aria-label="Code block"
+                    >
+                      <span aria-hidden="true">&lt;/&gt;</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="link"
+                      aria-label="Insert link"
+                    >
+                      <span aria-hidden="true">🔗</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="removeFormat"
+                      aria-label="Clear formatting"
+                    >
+                      <span aria-hidden="true">⨯</span>
+                    </button>
+                  </div>
+                  <div
+                    id="ticket-reply-body"
+                    class="rich-text-editor__surface"
+                    data-rich-text-content
+                    contenteditable="true"
+                    role="textbox"
+                    aria-labelledby="ticket-reply-label"
+                    aria-multiline="true"
+                    data-placeholder="Write your reply..."
+                  ></div>
+                  <input type="hidden" name="body" data-rich-text-value required />
+                </div>
               </div>
               <div class="form-field form-field--checkbox">
                 <label class="checkbox">
@@ -311,8 +412,9 @@
                         </span>
                       </header>
                       <div class="timeline__body">
-                        {% set safe_body = (reply.body | e).replace('\n', '<br />') %}
-                        <p>{{ safe_body | safe }}</p>
+                        <div class="rich-text-viewer">
+                          {{ reply.body | safe }}
+                        </div>
                       </div>
                     </article>
                   {% endfor %}
@@ -326,4 +428,9 @@
       </div>
     </section>
   </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/rich_text_editor.js" defer></script>
 {% endblock %}

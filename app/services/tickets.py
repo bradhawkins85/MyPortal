@@ -12,6 +12,7 @@ from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
 from app.services import modules as modules_service
 from app.services.tagging import filter_helpful_slugs, is_helpful_slug, slugify_tag
+from app.services.sanitization import sanitize_rich_text
 
 _PROMPT_HEADER = (
     "You are an AI assistant that summarises helpdesk tickets for technicians. "
@@ -229,8 +230,9 @@ def _render_prompt(
             author_record = user_lookup.get(author_id) if isinstance(author_id, int) else None
             author_label = str(author_record.get("email") or author_record.get("first_name") or "User") if author_record else "User"
             visibility = "internal note" if reply.get("is_internal") else "public reply"
-            body = str(reply.get("body") or "").strip()
-            lines.append(f"- {timestamp} • {author_label} ({visibility}): {body}")
+            sanitised = sanitize_rich_text(str(reply.get("body") or ""))
+            body_text = sanitised.text_content or ""
+            lines.append(f"- {timestamp} • {author_label} ({visibility}): {body_text}")
 
     lines.append("")
     lines.append(
@@ -280,8 +282,9 @@ def _render_tags_prompt(
                 else "User"
             )
             visibility = "internal note" if reply.get("is_internal") else "public reply"
-            body = str(reply.get("body") or "").strip()
-            lines.append(f"- {timestamp} • {author_label} ({visibility}): {body}")
+            sanitised = sanitize_rich_text(str(reply.get("body") or ""))
+            body_text = sanitised.text_content or ""
+            lines.append(f"- {timestamp} • {author_label} ({visibility}): {body_text}")
 
     lines.append("")
     lines.append(
