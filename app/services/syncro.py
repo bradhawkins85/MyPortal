@@ -10,6 +10,7 @@ import httpx
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import integration_modules as module_repo
+from app.services import webhook_monitor
 
 
 class SyncroConfigurationError(RuntimeError):
@@ -162,6 +163,41 @@ async def _request(
     if settings.get("api_key"):
         headers["Authorization"] = f"Bearer {settings['api_key']}"
     log_info("Calling Syncro API", url=url, method=method)
+
+    webhook_event: dict[str, Any] | None = None
+    webhook_payload: dict[str, Any] = {"method": method.upper()}
+    if params:
+        webhook_payload["params"] = params
+    if json is not None:
+        webhook_payload["body"] = json
+    try:
+        webhook_event = await webhook_monitor.enqueue_event(
+            name="syncro.api.request",
+            target_url=url,
+            payload=webhook_payload,
+            headers=None,
+            max_attempts=1,
+            backoff_seconds=0,
+            attempt_immediately=False,
+        )
+    except Exception as exc:  # pragma: no cover - webhook monitor safety
+        log_error("Failed to record Syncro request in webhook monitor", url=url, error=str(exc))
+        webhook_event = None
+
+    event_id: int | None = None
+    if webhook_event and webhook_event.get("id") is not None:
+        try:
+            event_id = int(webhook_event["id"])
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            event_id = None
+
+    def _truncate_body(body: str | None) -> str | None:
+        if body is None:
+            return None
+        if len(body) <= 4000:
+            return body
+        return body[:3997] + "..."
+
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
             response = await client.request(
@@ -173,8 +209,38 @@ async def _request(
             )
         except httpx.HTTPError as exc:
             log_error("Syncro API request failed", url=url, error=str(exc))
+            if event_id is not None:
+                try:
+                    await webhook_monitor.record_manual_failure(
+                        event_id,
+                        attempt_number=1,
+                        status="error",
+                        error_message=str(exc),
+                        response_status=None,
+                        response_body=None,
+                    )
+                except Exception as record_exc:  # pragma: no cover - logging safety
+                    log_error(
+                        "Failed to record Syncro webhook failure",
+                        event_id=event_id,
+                        error=str(record_exc),
+                    )
             raise SyncroAPIError(str(exc)) from exc
     if response.status_code == httpx.codes.NOT_FOUND:
+        if event_id is not None:
+            try:
+                await webhook_monitor.record_manual_success(
+                    event_id,
+                    attempt_number=1,
+                    response_status=response.status_code,
+                    response_body=_truncate_body(response.text),
+                )
+            except Exception as record_exc:  # pragma: no cover - logging safety
+                log_error(
+                    "Failed to record Syncro webhook success",
+                    event_id=event_id,
+                    error=str(record_exc),
+                )
         return None
     if response.status_code >= 400:
         log_error(
@@ -183,13 +249,57 @@ async def _request(
             status=response.status_code,
             body=response.text,
         )
+        if event_id is not None:
+            try:
+                await webhook_monitor.record_manual_failure(
+                    event_id,
+                    attempt_number=1,
+                    status="failed",
+                    error_message=f"HTTP {response.status_code}",
+                    response_status=response.status_code,
+                    response_body=_truncate_body(response.text),
+                )
+            except Exception as record_exc:  # pragma: no cover - logging safety
+                log_error(
+                    "Failed to record Syncro webhook failure",
+                    event_id=event_id,
+                    error=str(record_exc),
+                )
         raise SyncroAPIError(f"Syncro API responded with {response.status_code}")
     if response.status_code == httpx.codes.NO_CONTENT:
+        if event_id is not None:
+            try:
+                await webhook_monitor.record_manual_success(
+                    event_id,
+                    attempt_number=1,
+                    response_status=response.status_code,
+                    response_body=None,
+                )
+            except Exception as record_exc:  # pragma: no cover - logging safety
+                log_error(
+                    "Failed to record Syncro webhook success",
+                    event_id=event_id,
+                    error=str(record_exc),
+                )
         return None
     try:
         data = response.json()
     except ValueError:
         data = response.text
+    if event_id is not None:
+        try:
+            await webhook_monitor.record_manual_success(
+                event_id,
+                attempt_number=1,
+                response_status=response.status_code,
+                response_body=_truncate_body(response.text),
+            )
+        except Exception as record_exc:  # pragma: no cover - logging safety
+            log_error(
+                "Failed to record Syncro webhook success",
+                event_id=event_id,
+                error=str(record_exc),
+            )
     return data
 
 
