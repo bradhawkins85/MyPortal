@@ -6272,20 +6272,75 @@ async def _render_automations_dashboard(
     )
     status_counts = Counter((automation.get("status") or "inactive").lower() for automation in automations)
     kind_counts = Counter((automation.get("kind") or "scheduled").lower() for automation in automations)
-    modules = await modules_service.list_modules()
-    modules_payload = _serialise_for_json(modules)
     extra = {
         "title": "Automation orchestration",
         "automations": automations,
         "automation_status_counts": status_counts,
         "automation_kind_counts": kind_counts,
         "automation_filters": {"status": status_filter, "kind": kind_filter},
-        "automation_modules": modules_payload,
-        "automation_trigger_options": automations_service.list_trigger_events(),
         "success_message": success_message,
         "error_message": error_message,
     }
     response = await _render_template("admin/automations.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
+
+
+async def _render_automation_form(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    kind: str,
+    form_values: Mapping[str, Any] | None = None,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    kind_normalised = "event" if str(kind).lower() == "event" else "scheduled"
+    modules = await modules_service.list_modules()
+    modules_payload = _serialise_for_json(modules)
+    trigger_options = automations_service.list_trigger_events()
+    base_values: dict[str, Any] = {
+        "name": "",
+        "description": "",
+        "status": "inactive",
+        "cadence": "",
+        "cronExpression": "",
+        "triggerEvent": "",
+        "triggerFiltersRaw": "",
+        "actionModule": "",
+        "actionPayloadRaw": "",
+    }
+    if form_values:
+        for key, value in form_values.items():
+            if value is None:
+                continue
+            base_values[key] = value
+    trigger_event = str(base_values.get("triggerEvent") or "").strip()
+    option_values = {str(option.get("value") or "") for option in trigger_options}
+    if trigger_event and trigger_event not in option_values:
+        trigger_select_value = "__custom__"
+        trigger_custom_value = trigger_event
+    else:
+        trigger_select_value = trigger_event
+        trigger_custom_value = ""
+    base_values["triggerSelectValue"] = trigger_select_value
+    base_values["triggerCustomValue"] = trigger_custom_value
+    template_name = (
+        "admin/automations_create_event.html"
+        if kind_normalised == "event"
+        else "admin/automations_create_scheduled.html"
+    )
+    extra = {
+        "title": "Create automation",
+        "automation_modules": modules_payload,
+        "automation_trigger_options": trigger_options,
+        "form_values": base_values,
+        "kind": kind_normalised,
+        "success_message": success_message,
+        "error_message": error_message,
+    }
+    response = await _render_template(template_name, request, user, extra=extra)
     response.status_code = status_code
     return response
 
@@ -6311,6 +6366,42 @@ async def admin_automations_page(
     )
 
 
+@app.get("/admin/automations/create/scheduled", response_class=HTMLResponse)
+async def admin_create_scheduled_automation_page(
+    request: Request,
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _render_automation_form(
+        request,
+        current_user,
+        kind="scheduled",
+        success_message=_sanitize_message(success),
+        error_message=_sanitize_message(error),
+    )
+
+
+@app.get("/admin/automations/create/event", response_class=HTMLResponse)
+async def admin_create_event_automation_page(
+    request: Request,
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _render_automation_form(
+        request,
+        current_user,
+        kind="event",
+        success_message=_sanitize_message(success),
+        error_message=_sanitize_message(error),
+    )
+
+
 @app.post("/admin/automations", response_class=HTMLResponse)
 async def admin_create_automation(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
@@ -6318,36 +6409,59 @@ async def admin_create_automation(request: Request):
         return redirect
     form = await request.form()
     name = str(form.get("name", "")).strip()
-    kind = (str(form.get("kind", "")).strip() or "scheduled")
+    description_value = str(form.get("description", "")).strip()
+    kind_raw = str(form.get("kind", "")).strip()
+    kind = "event" if kind_raw.lower() == "event" else "scheduled"
     status_value = (str(form.get("status", "")).strip() or "inactive")
-    cadence = str(form.get("cadence", "")).strip() or None
-    cron_expression = str(form.get("cronExpression", "")).strip() or None
-    action_module = str(form.get("actionModule", "")).strip() or None
-    trigger_event = str(form.get("triggerEvent", "")).strip() or None
-    trigger_filters_raw = str(form.get("triggerFilters", "")).strip() or None
-    action_payload_raw = str(form.get("actionPayload", "")).strip() or None
+    cadence_raw = str(form.get("cadence", "")).strip()
+    cron_raw = str(form.get("cronExpression", "")).strip()
+    action_module_raw = str(form.get("actionModule", "")).strip()
+    trigger_event_raw = str(form.get("triggerEvent", "")).strip()
+    trigger_filters_raw = str(form.get("triggerFilters", "")).strip()
+    action_payload_raw = str(form.get("actionPayload", "")).strip()
+    form_state = {
+        "name": name,
+        "description": description_value,
+        "status": status_value,
+        "cadence": cadence_raw,
+        "cronExpression": cron_raw,
+        "triggerEvent": trigger_event_raw,
+        "triggerFiltersRaw": trigger_filters_raw,
+        "actionModule": action_module_raw,
+        "actionPayloadRaw": action_payload_raw,
+    }
     if not name:
-        return await _render_automations_dashboard(
+        return await _render_automation_form(
             request,
             current_user,
+            kind=kind,
+            form_values=form_state,
             error_message="Enter an automation name.",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
+    cadence = cadence_raw or None
+    cron_expression = cron_raw or None
+    action_module = action_module_raw or None
+    trigger_event = trigger_event_raw or None
     try:
         trigger_filters = json.loads(trigger_filters_raw) if trigger_filters_raw else None
     except json.JSONDecodeError:
-        return await _render_automations_dashboard(
+        return await _render_automation_form(
             request,
             current_user,
+            kind=kind,
+            form_values=form_state,
             error_message="Trigger filters must be valid JSON.",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     try:
         action_payload = json.loads(action_payload_raw) if action_payload_raw else None
     except json.JSONDecodeError:
-        return await _render_automations_dashboard(
+        return await _render_automation_form(
             request,
             current_user,
+            kind=kind,
+            form_values=form_state,
             error_message="Action payload must be valid JSON.",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -6355,33 +6469,41 @@ async def admin_create_automation(request: Request):
     if isinstance(action_payload, dict) and "actions" in action_payload:
         actions_value = action_payload.get("actions")
         if not isinstance(actions_value, list):
-            return await _render_automations_dashboard(
+            return await _render_automation_form(
                 request,
                 current_user,
+                kind=kind,
+                form_values=form_state,
                 error_message="Trigger actions must be provided as a list.",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
         for index, entry in enumerate(actions_value, start=1):
             if not isinstance(entry, dict):
-                return await _render_automations_dashboard(
+                return await _render_automation_form(
                     request,
                     current_user,
+                    kind=kind,
+                    form_values=form_state,
                     error_message=f"Trigger action {index} is invalid.",
                     status_code=status.HTTP_400_BAD_REQUEST,
                 )
             module_value = str(entry.get("module") or "").strip()
             if not module_value:
-                return await _render_automations_dashboard(
+                return await _render_automation_form(
                     request,
                     current_user,
+                    kind=kind,
+                    form_values=form_state,
                     error_message=f"Select an action module for trigger action {index}.",
                     status_code=status.HTTP_400_BAD_REQUEST,
                 )
             payload_value = entry.get("payload") or {}
             if not isinstance(payload_value, dict):
-                return await _render_automations_dashboard(
+                return await _render_automation_form(
                     request,
                     current_user,
+                    kind=kind,
+                    form_values=form_state,
                     error_message=f"Trigger action {index} payload must be an object.",
                     status_code=status.HTTP_400_BAD_REQUEST,
                 )
@@ -6390,9 +6512,11 @@ async def admin_create_automation(request: Request):
         updated_payload["actions"] = normalised_actions
         action_payload = updated_payload
         action_module = normalised_actions[0]["module"] if normalised_actions else None
+        form_state["actionPayloadRaw"] = json.dumps(action_payload)
+        form_state["actionModule"] = action_module or ""
     data = {
         "name": name,
-        "description": str(form.get("description", "")).strip() or None,
+        "description": description_value or None,
         "kind": kind,
         "cadence": cadence,
         "cron_expression": cron_expression,
@@ -6409,9 +6533,11 @@ async def admin_create_automation(request: Request):
         record = await automation_repo.create_automation(next_run_at=next_run, **data)
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create automation", error=str(exc))
-        return await _render_automations_dashboard(
+        return await _render_automation_form(
             request,
             current_user,
+            kind=kind,
+            form_values=form_state,
             error_message="Unable to create automation. Please try again.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )

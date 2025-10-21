@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if success_message or error_message %}
+    <div class="alert-stack">
+      {% if success_message %}
+        <div class="alert" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% set values = form_values or {} %}
+  {% set trigger_select = values.get('triggerSelectValue', '') %}
+  {% set trigger_custom = values.get('triggerCustomValue', '') %}
+
+  <div class="management" data-layout>
+    <aside class="management__sidebar">
+      <h2 class="management__heading">Automation workspace</h2>
+      <p class="management__intro">React to platform signals or third-party webhooks while maintaining local audit history.</p>
+      <div class="management__quick-actions">
+        <a class="button button--ghost" href="/admin/automations">
+          <span class="button__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false"><path d="M12.7 4.7a1 1 0 0 0-1.4 0l-6 6a1 1 0 0 0 0 1.4l6 6a1 1 0 0 0 1.4-1.4L8.41 13H19a1 1 0 0 0 0-2H8.41l4.3-4.3a1 1 0 0 0-.01-1.4z"/></svg>
+          </span>
+          Back to automation list
+        </a>
+        <a class="button button--primary" href="/admin/automations/create/scheduled">
+          <span class="button__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2a2 2 0 0 0-2 2v3a1 1 0 0 0 1 1h1v2H5a1 1 0 0 0-1 1v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a1 1 0 0 0-1-1h-1V8h1a1 1 0 0 0 1-1V4a2 2 0 0 0-2-2h-3a2 2 0 0 0-2 2v1h-2V4a2 2 0 0 0-2-2z"/></svg>
+          </span>
+          Switch to scheduled automation
+        </a>
+      </div>
+      <nav class="management__nav" aria-label="Automation navigation">
+        <ul class="management__list">
+          <li class="management__list-item">
+            <a class="management__nav-link" href="/admin/automations">
+              <span class="management__nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M5 5a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v1h2V5a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-1v2h1a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-3a2 2 0 0 1-2-2v-1h-2v1a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h1V10H7a2 2 0 0 1-2-2zm2 0v3h3V5zm7 0v3h3V5zm-7 11v3h3v-3zm7 0v3h3v-3z"/></svg>
+              </span>
+              <span class="management__nav-text">
+                <span class="management__nav-title">Automation overview</span>
+                <span class="management__nav-subtitle">List of configured workflows</span>
+              </span>
+            </a>
+          </li>
+          <li class="management__list-item">
+            <a class="management__nav-link" href="/admin/automations/create/scheduled">
+              <span class="management__nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2a2 2 0 0 0-2 2v3a1 1 0 0 0 1 1h1v2H5a1 1 0 0 0-1 1v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a1 1 0 0 0-1-1h-1V8h1a1 1 0 0 0 1-1V4a2 2 0 0 0-2-2h-3a2 2 0 0 0-2 2v1h-2V4a2 2 0 0 0-2-2z"/></svg>
+              </span>
+              <span class="management__nav-text">
+                <span class="management__nav-title">Scheduled workflows</span>
+                <span class="management__nav-subtitle">Create cadence-driven tasks</span>
+              </span>
+            </a>
+          </li>
+          <li class="management__list-item management__list-item--current">
+            <a class="management__nav-link" href="/admin/automations/create/event" aria-current="page">
+              <span class="management__nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2a3 3 0 0 1 3 3v.18a3 3 0 0 1 2.12 2.12H17a3 3 0 0 1 3 3v.18a3 3 0 0 1 0 5.03V16a3 3 0 0 1-3 3h-.18a3 3 0 0 1-2.12 2.12V21a3 3 0 0 1-6 0v-.88A3 3 0 0 1 7.12 19H7a3 3 0 0 1-3-3v-.67a3 3 0 0 1 0-4.66V9a3 3 0 0 1 3-3h.18A3 3 0 0 1 9.3 3.18V3a3 3 0 0 1 3-3zm0 2a1 1 0 0 0-1 1v1.5a1 1 0 0 1-.76.97 3 3 0 0 0-2.29 2.29 1 1 0 0 1-.97.76H7a1 1 0 0 0-1 1v1.5a1 1 0 0 1 .76.97 3 3 0 0 0 2.29 2.29 1 1 0 0 1 .97.76V17a1 1 0 0 0 1 1h1.5a1 1 0 0 1 .97.76 3 3 0 0 0 2.29 2.29 1 1 0 0 1 .76.97V23a1 1 0 0 0 2 0v-1.5a1 1 0 0 1 .76-.97 3 3 0 0 0 2.29-2.29 1 1 0 0 1 .97-.76H19a1 1 0 0 0 1-1v-1.5a1 1 0 0 1-.76-.97 3 3 0 0 0-2.29-2.29 1 1 0 0 1-.97-.76V9a1 1 0 0 0-1-1h-1.5a1 1 0 0 1-.97-.76 3 3 0 0 0-2.29-2.29 1 1 0 0 1-.76-.97V3a1 1 0 0 0-1-1z"/></svg>
+              </span>
+              <span class="management__nav-text">
+                <span class="management__nav-title">Event-driven flows</span>
+                <span class="management__nav-subtitle">Respond to inbound signals</span>
+              </span>
+            </a>
+          </li>
+        </ul>
+      </nav>
+    </aside>
+
+    <section class="management__content">
+      <header class="management__header">
+        <div>
+          <h1 class="management__title">Create event automation</h1>
+          <p class="management__subtitle">Link webhook payloads and application events to integration modules for immediate processing.</p>
+        </div>
+        <div class="management__header-actions">
+          <a class="button button--ghost" href="/admin/automations">
+            <span class="button__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false"><path d="M12.7 4.7a1 1 0 0 0-1.4 0l-6 6a1 1 0 0 0 0 1.4l6 6a1 1 0 0 0 1.4-1.4L8.41 13H19a1 1 0 0 0 0-2H8.41l4.3-4.3a1 1 0 0 0-.01-1.4z"/></svg>
+            </span>
+            Back to automations
+          </a>
+          <a class="button button--ghost" href="/admin/automations/create/scheduled">
+            <span class="button__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2a2 2 0 0 0-2 2v3a1 1 0 0 0 1 1h1v2H5a1 1 0 0 0-1 1v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a1 1 0 0 0-1-1h-1V8h1a1 1 0 0 0 1-1V4a2 2 0 0 0-2-2h-3a2 2 0 0 0-2 2v1h-2V4a2 2 0 0 0-2-2z"/></svg>
+            </span>
+            Switch to scheduled automation
+          </a>
+        </div>
+      </header>
+
+      <div class="management__body">
+        <section class="card card--panel">
+          <header class="card__header card__header--stacked">
+            <h2 class="card__title">Trigger and action configuration</h2>
+            <p class="card__subtitle">Provide deterministic JSON filters to keep automations secure and auditable.</p>
+          </header>
+          <div class="card__body">
+            <form action="/admin/automations" method="post" class="form management__form">
+              {% if csrf_token %}
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+              {% endif %}
+              <input type="hidden" id="automation-kind" name="kind" value="event" />
+              <div class="form-field">
+                <label class="form-label" for="automation-name">Name</label>
+                <input id="automation-name" name="name" class="form-input" maxlength="255" required value="{{ values.get('name', '') }}" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="automation-description">Description</label>
+                <textarea id="automation-description" name="description" class="form-input" rows="3" placeholder="Explain the business outcome">{{ values.get('description', '') }}</textarea>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="automation-status">Status</label>
+                <select id="automation-status" name="status" class="form-input">
+                  <option value="inactive" {% if values.get('status', 'inactive') != 'active' %}selected{% endif %}>Inactive</option>
+                  <option value="active" {% if values.get('status') == 'active' %}selected{% endif %}>Active</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="automation-trigger-select">Trigger event</label>
+                <select id="automation-trigger-select" class="form-input" data-trigger-select>
+                  <option value="">Select a trigger</option>
+                  {% for trigger in automation_trigger_options %}
+                    <option value="{{ trigger.value }}" {% if trigger_select == trigger.value %}selected{% endif %}>{{ trigger.label }}</option>
+                  {% endfor %}
+                  <option value="__custom__" {% if trigger_select == '__custom__' %}selected{% endif %}>Custom event…</option>
+                </select>
+                <input
+                  id="automation-trigger-custom"
+                  class="form-input"
+                  type="text"
+                  name="triggerEventCustom"
+                  placeholder="custom.event"
+                  data-trigger-custom
+                  {% if trigger_select != '__custom__' %}hidden{% endif %}
+                  value="{{ trigger_custom }}"
+                />
+                <input type="hidden" id="automation-trigger" name="triggerEvent" value="{{ values.get('triggerEvent', '') }}" />
+                <p class="form-help">Only trusted services should be allowed to emit the chosen event name.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="automation-filters">Trigger filters (JSON)</label>
+                <textarea id="automation-filters" name="triggerFilters" class="form-input" rows="3" placeholder='{"match":{"status":"open"}}'>{{ values.get('triggerFiltersRaw', '') }}</textarea>
+              </div>
+              <div class="form-field" data-automation-actions>
+                <label class="form-label">Trigger actions</label>
+                <p class="form-help">Securely forward event payloads to connected modules with structured JSON arguments.</p>
+                <div
+                  class="automation-actions"
+                  id="automation-actions-list"
+                  data-action-list
+                  data-modules='{{ automation_modules | tojson }}'
+                ></div>
+                <button type="button" class="button button--ghost" data-action-add>Add action</button>
+                <p class="form-help" data-action-error hidden></p>
+                <input type="hidden" id="automation-action-module-primary" name="actionModule" value="{{ values.get('actionModule', '') }}" />
+                <input type="hidden" id="automation-actions-data" name="actionPayload" value="{{ values.get('actionPayloadRaw', '') }}" />
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button button--primary">Save automation</button>
+              </div>
+            </form>
+          </div>
+        </section>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/automation.js" defer></script>
+{% endblock %}
