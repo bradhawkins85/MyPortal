@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 from typing import Any
 
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
 from app.repositories import tickets as tickets_repo
-from app.services import syncro
+from app.services import syncro, webhook_monitor
 
 _ALLOWED_PRIORITIES = {"urgent", "high", "normal", "low"}
 _ALLOWED_STATUSES = {"open", "in_progress", "pending", "resolved", "closed"}
@@ -336,6 +337,23 @@ async def import_all_tickets(
     return summary
 
 
+def _build_import_target(
+    mode: str, ticket_id: int | None, start_id: int | None, end_id: int | None
+) -> str:
+    base = f"syncro://tickets/import?mode={mode}"
+    if mode == "single" and ticket_id is not None:
+        return f"{base}&ticketId={ticket_id}"
+    if mode == "range":
+        params: list[str] = []
+        if start_id is not None:
+            params.append(f"startId={start_id}")
+        if end_id is not None:
+            params.append(f"endId={end_id}")
+        if params:
+            return f"{base}&{'&'.join(params)}"
+    return base
+
+
 async def import_from_request(
     *,
     mode: str,
@@ -345,16 +363,83 @@ async def import_from_request(
     rate_limiter: syncro.AsyncRateLimiter | None = None,
 ) -> TicketImportSummary:
     mode_lower = mode.lower()
-    if mode_lower == "single":
-        if ticket_id is None:
-            raise ValueError("ticket_id is required for single imports")
-        return await import_ticket_by_id(ticket_id, rate_limiter=rate_limiter)
-    if mode_lower == "range":
-        if start_id is None or end_id is None:
-            raise ValueError("start_id and end_id are required for range imports")
-        if end_id < start_id:
-            raise ValueError("end_id must be greater than or equal to start_id")
-        return await import_ticket_range(start_id, end_id, rate_limiter=rate_limiter)
-    if mode_lower == "all":
-        return await import_all_tickets(rate_limiter=rate_limiter)
-    raise ValueError("mode must be one of 'single', 'range', or 'all'")
+    payload: dict[str, Any] = {"mode": mode_lower}
+    if ticket_id is not None:
+        payload["ticketId"] = ticket_id
+    if start_id is not None:
+        payload["startId"] = start_id
+    if end_id is not None:
+        payload["endId"] = end_id
+
+    event_id: int | None = None
+    target_url = _build_import_target(mode_lower, ticket_id, start_id, end_id)
+    try:
+        event = await webhook_monitor.create_manual_event(
+            name="syncro.ticket.import",
+            target_url=target_url,
+            payload=payload,
+            max_attempts=1,
+            backoff_seconds=0,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to record Syncro ticket import in webhook monitor", mode=mode_lower, error=str(exc))
+        event = None
+    if event and event.get("id") is not None:
+        try:
+            event_id = int(event["id"])
+        except (TypeError, ValueError):  # pragma: no cover - defensive casting
+            event_id = None
+
+    async def _record_failure(error: Exception) -> None:
+        if event_id is None:
+            return
+        try:
+            await webhook_monitor.record_manual_failure(
+                event_id,
+                attempt_number=1,
+                status="failed",
+                error_message=str(error),
+                response_status=None,
+                response_body=None,
+            )
+        except Exception as record_exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to record Syncro ticket import failure",
+                event_id=event_id,
+                error=str(record_exc),
+            )
+
+    try:
+        if mode_lower == "single":
+            if ticket_id is None:
+                raise ValueError("ticket_id is required for single imports")
+            summary = await import_ticket_by_id(ticket_id, rate_limiter=rate_limiter)
+        elif mode_lower == "range":
+            if start_id is None or end_id is None:
+                raise ValueError("start_id and end_id are required for range imports")
+            if end_id < start_id:
+                raise ValueError("end_id must be greater than or equal to start_id")
+            summary = await import_ticket_range(start_id, end_id, rate_limiter=rate_limiter)
+        elif mode_lower == "all":
+            summary = await import_all_tickets(rate_limiter=rate_limiter)
+        else:
+            raise ValueError("mode must be one of 'single', 'range', or 'all'")
+    except Exception as exc:
+        await _record_failure(exc)
+        raise
+
+    if event_id is not None:
+        try:
+            await webhook_monitor.record_manual_success(
+                event_id,
+                attempt_number=1,
+                response_status=200,
+                response_body=json.dumps(summary.as_dict()),
+            )
+        except Exception as record_exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to record Syncro ticket import success",
+                event_id=event_id,
+                error=str(record_exc),
+            )
+    return summary
