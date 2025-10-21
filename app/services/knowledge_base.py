@@ -13,6 +13,7 @@ from app.core.logging import log_error
 from app.repositories import knowledge_base as kb_repo
 from app.repositories import user_companies as user_company_repo
 from app.services import modules as modules_service
+from app.services.tagging import filter_helpful_texts
 
 PermissionScope = str
 
@@ -201,7 +202,6 @@ def _parse_ai_tag_text(raw: str) -> list[str]:
     candidates = decoded if decoded is not None else []
 
     tags: list[str] = []
-    seen: set[str] = set()
     for item in candidates:
         if item is None:
             continue
@@ -209,13 +209,9 @@ def _parse_ai_tag_text(raw: str) -> list[str]:
         if not tag:
             continue
         tag = re.sub(r"\s+", " ", tag)
-        if tag in seen:
-            continue
-        seen.add(tag)
         tags.append(tag)
-        if len(tags) >= 10:
-            break
-    return tags
+    helpful = filter_helpful_texts(tags)
+    return helpful[:10]
 
 
 async def _generate_article_ai_tags(
