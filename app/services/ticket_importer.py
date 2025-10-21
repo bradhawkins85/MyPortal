@@ -124,11 +124,34 @@ def _parse_datetime(value: Any) -> datetime | None:
     return parsed.replace(tzinfo=timezone.utc)
 
 
+def _extract_comment_body(comment: dict[str, Any]) -> str | None:
+    return _clean_text(
+        comment.get("body")
+        or comment.get("comment")
+        or comment.get("text")
+        or comment.get("content")
+    )
+
+
+def _extract_comment_subject(comment: dict[str, Any]) -> str | None:
+    for key in ("subject", "title", "summary"):
+        candidate = _clean_text(comment.get(key))
+        if candidate:
+            return candidate
+    return None
+
+
 def _extract_description(ticket: dict[str, Any]) -> str | None:
     for key in ("problem", "description", "issue", "body", "notes"):
         candidate = _clean_text(ticket.get(key))
         if candidate:
             return candidate
+    for comment in _extract_comments(ticket):
+        subject = _extract_comment_subject(comment)
+        if subject and subject.lower() == "initial issue":
+            body = _extract_comment_body(comment)
+            if body:
+                return body
     return None
 
 
@@ -298,7 +321,69 @@ async def _resolve_user_id_by_email(email: str | None) -> int | None:
         return None
 
 
-async def _sync_ticket_replies(ticket_id: int, comments: list[dict[str, Any]]) -> None:
+def _extract_comment_author_email(comment: dict[str, Any]) -> str | None:
+    for key in (
+        "user_email",
+        "userEmail",
+        "author_email",
+        "authorEmail",
+        "from_email",
+        "fromEmail",
+        "email",
+        "sender",
+        "sender_email",
+        "senderEmail",
+        "reply_to",
+        "replyTo",
+        "tech_email",
+        "techEmail",
+    ):
+        email = _normalise_email(comment.get(key))
+        if email:
+            return email
+    for key in ("user", "author", "created_by", "creator"):
+        nested = comment.get(key)
+        if isinstance(nested, dict):
+            for nested_key in ("email", "user_email", "address", "value"):
+                email = _normalise_email(nested.get(nested_key))
+                if email:
+                    return email
+    return None
+
+
+async def _resolve_comment_author_id(
+    comment: dict[str, Any],
+    *,
+    requester_id: int | None,
+    contact_email: str | None,
+    cache: dict[str, int | None],
+) -> int | None:
+    tech = _clean_text(comment.get("tech"))
+    if tech and tech.lower() == "customer-reply":
+        if requester_id is not None:
+            return requester_id
+        if contact_email:
+            key = contact_email.lower()
+            if key not in cache:
+                cache[key] = await _resolve_user_id_by_email(contact_email)
+            return cache[key]
+        return None
+    email = _extract_comment_author_email(comment)
+    if not email:
+        return None
+    key = email.lower()
+    if key not in cache:
+        cache[key] = await _resolve_user_id_by_email(email)
+    return cache[key]
+
+
+async def _sync_ticket_replies(
+    ticket_id: int,
+    comments: list[dict[str, Any]],
+    *,
+    requester_id: int | None,
+    contact_email: str | None,
+) -> None:
     if not comments:
         return
     try:
@@ -311,13 +396,9 @@ async def _sync_ticket_replies(ticket_id: int, comments: list[dict[str, Any]]) -
         for reply in existing
         if reply.get("external_reference") is not None
     }
+    author_cache: dict[str, int | None] = {}
     for comment in comments:
-        body = _clean_text(
-            comment.get("body")
-            or comment.get("comment")
-            or comment.get("text")
-            or comment.get("content")
-        )
+        body = _extract_comment_body(comment)
         if not body:
             continue
         external_ref_raw = (
@@ -336,9 +417,15 @@ async def _sync_ticket_replies(ticket_id: int, comments: list[dict[str, Any]]) -
             or comment.get("updated_at")
         )
         is_internal = _should_comment_be_internal(comment)
+        author_id = await _resolve_comment_author_id(
+            comment,
+            requester_id=requester_id,
+            contact_email=contact_email,
+            cache=author_cache,
+        )
         await tickets_repo.create_reply(
             ticket_id=ticket_id,
-            author_id=None,
+            author_id=author_id,
             body=body,
             is_internal=is_internal,
             external_reference=external_ref,
@@ -520,17 +607,17 @@ async def _upsert_ticket(
     else:
         created = await tickets_repo.create_ticket(
             subject=subject,
-        description=description_value,
-        requester_id=requester_id,
-        company_id=company_id,
-        assigned_user_id=None,
-        priority=priority,
-        status=status,
-        category=category_value,
-        module_slug=None,
-        external_reference=external_reference,
-        ticket_number=ticket_number,
-    )
+            description=description_value,
+            requester_id=requester_id,
+            company_id=company_id,
+            assigned_user_id=None,
+            priority=priority,
+            status=status,
+            category=category_value,
+            module_slug=None,
+            external_reference=external_reference,
+            ticket_number=ticket_number,
+        )
         created_id = created.get("id")
         ticket_db_id = int(created_id) if created_id is not None else None
         if created_id is not None and any((created_at, updated_at, closed_at)):
@@ -546,7 +633,12 @@ async def _upsert_ticket(
 
     comments = _extract_comments(ticket)
     if ticket_db_id is not None:
-        await _sync_ticket_replies(ticket_db_id, comments)
+        await _sync_ticket_replies(
+            ticket_db_id,
+            comments,
+            requester_id=requester_id,
+            contact_email=contact_email,
+        )
         await _sync_ticket_watchers(ticket_db_id, comments, contact_email)
 
     return outcome
