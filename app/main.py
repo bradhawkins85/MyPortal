@@ -4693,10 +4693,40 @@ async def admin_automation(request: Request):
     if redirect:
         return redirect
     tasks = await scheduled_tasks_repo.list_tasks()
+    companies = await company_repo.list_companies()
+
+    company_lookup: dict[int, str] = {}
+    for company in companies:
+        try:
+            company_id = int(company.get("id")) if company.get("id") is not None else None
+        except (TypeError, ValueError):
+            company_id = None
+        if company_id is None:
+            continue
+        company_lookup[company_id] = str(company.get("name") or f"Company #{company_id}")
+
     prepared_tasks: list[dict[str, Any]] = []
+    missing_company_ids: set[int] = set()
     for task in tasks:
         serialised_task = _serialise_mapping(task)
         serialised_task["last_run_iso"] = _to_iso(task.get("last_run_at"))
+        company_id = task.get("company_id")
+        company_name: str
+        if company_id is None:
+            company_name = "All companies"
+        else:
+            try:
+                company_key = int(company_id)
+            except (TypeError, ValueError):
+                company_key = None
+            if company_key is None:
+                company_name = "All companies"
+            else:
+                company_name = company_lookup.get(company_key)
+                if not company_name:
+                    company_name = f"Company #{company_key}"
+                    missing_company_ids.add(company_key)
+        serialised_task["company_name"] = company_name
         prepared_tasks.append(serialised_task)
     command_options = [
         {"value": "sync_staff", "label": "Sync staff directory"},
@@ -4706,10 +4736,19 @@ async def admin_automation(request: Request):
     for command in sorted(existing_commands):
         if command and command not in {option["value"] for option in command_options}:
             command_options.append({"value": str(command), "label": str(command)})
+    company_options = [
+        {"value": "", "label": "All companies"},
+    ]
+    for company_id, company_name in sorted(company_lookup.items(), key=lambda item: item[1].lower()):
+        company_options.append({"value": str(company_id), "label": company_name})
+    for company_id in sorted(missing_company_ids):
+        company_options.append({"value": str(company_id), "label": f"Company #{company_id}"})
+
     extra = {
         "title": "Automation & monitoring",
         "tasks": prepared_tasks,
         "command_options": command_options,
+        "company_options": company_options,
     }
     return await _render_template("admin/automation.html", request, current_user, extra=extra)
 
