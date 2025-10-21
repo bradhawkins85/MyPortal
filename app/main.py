@@ -5773,8 +5773,10 @@ async def _render_ticket_detail(
                 module_info = module
                 break
 
+    ordered_replies = list(reversed(replies))
+
     enriched_replies: list[dict[str, Any]] = []
-    for reply in replies:
+    for reply in ordered_replies:
         author_id = reply.get("author_id")
         author = user_lookup.get(author_id) if author_id else None
         enriched_replies.append({**reply, "author": author})
