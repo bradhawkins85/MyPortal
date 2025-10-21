@@ -25,6 +25,8 @@ from fastapi import (
     Request,
     Response,
     UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
     status,
 )
 from fastapi.encoders import jsonable_encoder
@@ -58,6 +60,7 @@ from app.api.routes import (
     staff as staff_api,
     tickets as tickets_api,
     users,
+    system,
     uptimekuma,
 )
 from app.core.config import get_settings, get_templates_config
@@ -108,6 +111,7 @@ from app.services import ticket_importer
 from app.services import tickets as tickets_service
 from app.services import template_variables
 from app.services import webhook_monitor
+from app.services.realtime import refresh_notifier
 from app.services.sanitization import sanitize_rich_text
 from app.services.opnform import (
     OpnformValidationError,
@@ -217,6 +221,10 @@ tags_metadata = [
     {
         "name": "ChatGPT MCP",
         "description": "Expose secure Model Context Protocol tooling for ChatGPT ticket triage and updates.",
+    },
+    {
+        "name": "System",
+        "description": "Administrative system controls and realtime refresh notifications.",
     },
 ]
 app = FastAPI(
@@ -363,6 +371,22 @@ async def pwa_service_worker() -> FileResponse:
 app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
 
 
+@app.websocket("/ws/refresh")
+async def refresh_updates(websocket: WebSocket) -> None:
+    """Maintain a websocket connection for realtime refresh notifications."""
+
+    await refresh_notifier.connect(websocket)
+    try:
+        while True:
+            # Keep the connection open and consume incoming messages so we
+            # detect client disconnects promptly.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await refresh_notifier.disconnect(websocket)
+
+
 @app.get(PROTECTED_OPENAPI_PATH, include_in_schema=False)
 async def authenticated_openapi_schema(
     _: SessionData = Depends(get_current_session),
@@ -409,6 +433,7 @@ app.include_router(tickets_api.router)
 app.include_router(automations_api.router)
 app.include_router(modules_api.router)
 app.include_router(mcp_api.router)
+app.include_router(system.router)
 app.include_router(uptimekuma.router)
 
 HELPDESK_PERMISSION_KEY = "helpdesk.technician"
