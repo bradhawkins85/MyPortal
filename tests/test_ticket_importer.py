@@ -262,6 +262,7 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
             "comments": [
                 {
                     "id": 1,
+                    "subject": "Initial Issue",
                     "body": "Customer message",
                     "tech": "customer-reply",
                     "hidden": False,
@@ -275,6 +276,7 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
                     "id": 2,
                     "body": "Internal update",
                     "tech": "agent",
+                    "user_email": "tech@example.com",
                     "hidden": True,
                     "destination_emails": [
                         "tech@example.com",
@@ -351,11 +353,14 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
     assert created_call["ticket_number"] == "TCK-5001"
     assert created_call["company_id"] == 8
     assert created_call["requester_id"] == 21
+    assert created_call["description"] == "Customer message"
     assert len(reply_calls) == 2
     assert reply_calls[0]["external_reference"] == "1"
     assert reply_calls[0]["is_internal"] is False
+    assert reply_calls[0]["author_id"] == 21
     assert reply_calls[1]["external_reference"] == "2"
     assert reply_calls[1]["is_internal"] is True
+    assert reply_calls[1]["author_id"] == 31
     assert added_watchers == [(400, 31)]
 
 
