@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import smtplib
 import ssl
 from email.message import EmailMessage
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 from loguru import logger
 
 from app.core.config import get_settings
+from app.services import webhook_monitor
 
 
 class EmailDispatchError(Exception):
@@ -37,22 +39,23 @@ async def send_email(
     sender: str | None = None,
     reply_to: str | None = None,
     timeout: float = 30.0,
-) -> bool:
+) -> tuple[bool, dict[str, Any] | None]:
     """Send an email using the configured SMTP server.
 
-    Returns ``True`` when the message was handed to the SMTP server, ``False`` when
-    delivery was skipped because SMTP is not configured.
+    Returns a tuple where the first element indicates if delivery was attempted and
+    succeeded, and the second element contains the webhook monitor event metadata
+    when available.
     """
 
     settings = get_settings()
     to_addresses = _normalise_recipients(recipients)
     if not to_addresses:
         logger.warning("Email delivery skipped because no recipients were provided", subject=subject)
-        return False
+        return False, None
 
     if not settings.smtp_host:
         logger.warning("SMTP host not configured; email delivery skipped", subject=subject)
-        return False
+        return False, None
 
     message = EmailMessage()
     message["Subject"] = subject
@@ -68,6 +71,34 @@ async def send_email(
             message.add_alternative(html_body, subtype="html")
     else:
         message.set_content(html_body, subtype="html")
+
+    port_segment = f":{settings.smtp_port}" if settings.smtp_port else ""
+    endpoint = f"smtp://{settings.smtp_host}{port_segment}"
+    event_record: dict[str, Any] | None = None
+    event_id: int | None = None
+    try:
+        event_record = await webhook_monitor.enqueue_event(
+            name="email.smtp.send",
+            target_url=endpoint,
+            payload={
+                "subject": subject,
+                "recipients": to_addresses,
+                "endpoint": endpoint,
+            },
+            headers={"X-Service": "email"},
+            max_attempts=1,
+            backoff_seconds=60,
+            attempt_immediately=False,
+        )
+        if event_record.get("id") is not None:
+            event_id = int(event_record["id"])
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error(
+            "Failed to enqueue email delivery in webhook monitor",
+            subject=subject,
+            recipients=to_addresses,
+            error=str(exc),
+        )
 
     def _dispatch() -> None:
         context = ssl.create_default_context()
@@ -85,11 +116,53 @@ async def send_email(
         except OSError as exc:  # pragma: no cover - handled in caller
             raise EmailDispatchError(str(exc)) from exc
 
-    await asyncio.to_thread(_dispatch)
+    try:
+        await asyncio.to_thread(_dispatch)
+    except EmailDispatchError as exc:
+        if event_id is not None:
+            try:
+                event_record = await webhook_monitor.record_manual_failure(
+                    event_id,
+                    attempt_number=1,
+                    status="error",
+                    error_message=str(exc),
+                    response_status=None,
+                    response_body=None,
+                )
+            except Exception as monitor_exc:  # pragma: no cover - defensive logging
+                logger.error(
+                    "Failed to record SMTP failure in webhook monitor",
+                    event_id=event_id,
+                    error=str(monitor_exc),
+                )
+        raise
+    else:
+        if event_id is not None:
+            try:
+                response_body = json.dumps(
+                    {
+                        "recipients": to_addresses,
+                        "subject": subject,
+                        "endpoint": endpoint,
+                    }
+                )
+                event_record = await webhook_monitor.record_manual_success(
+                    event_id,
+                    attempt_number=1,
+                    response_status=250,
+                    response_body=response_body,
+                )
+            except Exception as monitor_exc:  # pragma: no cover - defensive logging
+                logger.error(
+                    "Failed to record SMTP success in webhook monitor",
+                    event_id=event_id,
+                    error=str(monitor_exc),
+                )
     logger.info(
         "Email dispatched via SMTP",
         subject=subject,
         recipients=to_addresses,
         sender=message["From"],
+        event_id=event_record.get("id") if isinstance(event_record, dict) else None,
     )
-    return True
+    return True, event_record

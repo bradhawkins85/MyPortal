@@ -17,7 +17,7 @@ def test_emit_notification_sends_email(monkeypatch):
 
     async def fake_send_email(**kwargs):
         captured["email"] = kwargs
-        return True
+        return True, {"id": 1, "status": "succeeded"}
 
     monkeypatch.setattr(notifications.preferences_repo, "get_preference", fake_get_preference)
     monkeypatch.setattr(notifications.notifications_repo, "create_notification", fake_create_notification)
