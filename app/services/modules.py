@@ -523,14 +523,13 @@ async def _invoke_ollama(settings: Mapping[str, Any], payload: Mapping[str, Any]
         raise ValueError("Ollama prompt cannot be empty")
     endpoint = urljoin(f"{base_url}/", "api/generate")
     body = {"model": model, "prompt": prompt, "stream": False}
-    event = await webhook_monitor.enqueue_event(
+    event = await webhook_monitor.create_manual_event(
         name="module.ollama.generate",
         target_url=endpoint,
         payload={"request_body": body},
         headers={"Content-Type": "application/json"},
         max_attempts=1,
         backoff_seconds=60,
-        attempt_immediately=False,
     )
     event_id = int(event.get("id")) if event.get("id") is not None else None
     if event_id is None:
@@ -590,7 +589,7 @@ async def _invoke_smtp(settings: Mapping[str, Any], payload: Mapping[str, Any]) 
     html_body = str(payload.get("html") or payload.get("body") or "<p>Automation triggered.</p>")
     text_body = payload.get("text")
     sender = str(settings.get("from_address") or "") or None
-    event = await webhook_monitor.enqueue_event(
+    event = await webhook_monitor.create_manual_event(
         name="module.smtp.send",
         target_url="smtp://send",
         payload={
@@ -603,7 +602,6 @@ async def _invoke_smtp(settings: Mapping[str, Any], payload: Mapping[str, Any]) 
         headers={"X-Module": "smtp"},
         max_attempts=1,
         backoff_seconds=60,
-        attempt_immediately=False,
     )
     event_id = int(event.get("id")) if event.get("id") is not None else None
     if event_id is None:
@@ -688,7 +686,7 @@ async def _invoke_tacticalrmm(settings: Mapping[str, Any], payload: Mapping[str,
             headers[str(key)] = str(value)
     request_body = payload.get("body")
     url = urljoin(f"{base_url}/", endpoint_path)
-    event = await webhook_monitor.enqueue_event(
+    event = await webhook_monitor.create_manual_event(
         name="module.tacticalrmm.invoke",
         target_url=url,
         payload={
@@ -699,7 +697,6 @@ async def _invoke_tacticalrmm(settings: Mapping[str, Any], payload: Mapping[str,
         headers=headers,
         max_attempts=1,
         backoff_seconds=60,
-        attempt_immediately=False,
     )
     event_id = int(event.get("id")) if event.get("id") is not None else None
     if event_id is None:
@@ -772,7 +769,7 @@ async def _invoke_ntfy(settings: Mapping[str, Any], payload: Mapping[str, Any]) 
     if token:
         headers["Authorization"] = f"Bearer {token}"
     headers["Priority"] = priority
-    event = await webhook_monitor.enqueue_event(
+    event = await webhook_monitor.create_manual_event(
         name="module.ntfy.publish",
         target_url=url,
         payload={
@@ -782,7 +779,6 @@ async def _invoke_ntfy(settings: Mapping[str, Any], payload: Mapping[str, Any]) 
         headers=headers,
         max_attempts=1,
         backoff_seconds=60,
-        attempt_immediately=False,
     )
     event_id = int(event.get("id")) if event.get("id") is not None else None
     if event_id is None:
