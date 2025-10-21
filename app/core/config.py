@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     )
     default_timezone: str = Field(default="UTC", validation_alias="CRON_TIMEZONE")
     enable_csrf: bool = Field(default=True, validation_alias="ENABLE_CSRF")
+    enable_auto_refresh: bool = Field(
+        default=False, validation_alias="ENABLE_AUTO_REFRESH"
+    )
     swagger_ui_url: str = Field(default="/docs", validation_alias="SWAGGER_UI_URL")
     opnform_base_url: AnyHttpUrl | None = Field(
         default=None,
