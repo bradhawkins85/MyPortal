@@ -58,6 +58,7 @@ from app.api.routes import (
     staff as staff_api,
     tickets as tickets_api,
     users,
+    uptimekuma,
 )
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
@@ -407,6 +408,7 @@ app.include_router(tickets_api.router)
 app.include_router(automations_api.router)
 app.include_router(modules_api.router)
 app.include_router(mcp_api.router)
+app.include_router(uptimekuma.router)
 
 HELPDESK_PERMISSION_KEY = "helpdesk.technician"
 

@@ -17,7 +17,7 @@
       <header class="management__header">
         <div>
           <h1 class="management__title">Integration modules</h1>
-          <p class="management__subtitle">Synchronise credentials and delivery endpoints for Syncro, Ollama, SMTP, TacticalRMM, ntfy, and ChatGPT.</p>
+          <p class="management__subtitle">Synchronise credentials and delivery endpoints for Syncro, Ollama, SMTP, TacticalRMM, ntfy, Uptime Kuma, and ChatGPT.</p>
         </div>
       </header>
 
@@ -122,6 +122,17 @@
                 <div class="form-field">
                   <label class="form-label" for="ntfy-token">Auth token</label>
                   <input id="ntfy-token" name="settings.auth_token" class="form-input" value="{{ settings.auth_token or '' }}" />
+                </div>
+              {% elif module.slug == 'uptimekuma' %}
+                <div class="form-field">
+                  <label class="form-label" for="uptimekuma-webhook">Webhook URL</label>
+                  <input id="uptimekuma-webhook" class="form-input" value="{{ request.url_for('uptimekuma_receive_alert') }}" readonly />
+                  <p class="form-help">Configure this endpoint as the HTTP POST target inside Uptime Kuma.</p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="uptimekuma-secret">Shared secret</label>
+                  <input id="uptimekuma-secret" name="settings.shared_secret" class="form-input" type="password" autocomplete="off" placeholder="Enter a new shared secret" />
+                  <p class="form-help">Secrets are stored as SHA-256 hashes. Provide the same value as a <code>Bearer</code> token or <code>?token=</code> query in Uptime Kuma.</p>
                 </div>
               {% elif module.slug == 'chatgpt-mcp' %}
                 <div class="form-field">

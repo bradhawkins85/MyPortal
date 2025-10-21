@@ -127,6 +127,14 @@ def _default_chatgpt_settings() -> dict[str, Any]:
     }
 
 
+def _default_uptimekuma_settings() -> dict[str, Any]:
+    shared_secret = str(os.getenv("UPTIMEKUMA_SHARED_SECRET", "")).strip()
+    shared_secret_hash = _hash_secret(shared_secret) if shared_secret else ""
+    return {
+        "shared_secret_hash": shared_secret_hash,
+    }
+
+
 DEFAULT_MODULES: list[dict[str, Any]] = [
     {
         "slug": "syncro",
@@ -182,6 +190,13 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "topic": "",
             "auth_token": "",
         },
+    },
+    {
+        "slug": "uptimekuma",
+        "name": "Uptime Kuma",
+        "description": "Ingest uptime alerts from Uptime Kuma webhooks.",
+        "icon": "📈",
+        "settings": _default_uptimekuma_settings(),
     },
     {
         "slug": "chatgpt-mcp",
@@ -279,12 +294,33 @@ def _coerce_settings(
         merged["allowed_statuses"] = _normalise_statuses(merged.get("allowed_statuses"))
         merged["system_user_id"] = _coerce_int(merged.get("system_user_id"))
         merged.pop("shared_secret", None)
+    elif slug == "uptimekuma":
+        overrides = payload or {}
+        shared_secret_override = overrides.get("shared_secret")
+        shared_secret_hash_override = overrides.get("shared_secret_hash")
+        if shared_secret_override is not None or shared_secret_hash_override is not None:
+            candidate = shared_secret_override
+            if candidate in (None, ""):
+                candidate = shared_secret_hash_override
+            candidate_str = str(candidate or "").strip()
+            if not candidate_str:
+                merged["shared_secret_hash"] = ""
+            elif (
+                len(candidate_str) == 64
+                and all(char in string.hexdigits for char in candidate_str)
+                and shared_secret_override in (None, "")
+            ):
+                merged["shared_secret_hash"] = candidate_str.lower()
+            else:
+                merged["shared_secret_hash"] = _hash_secret(candidate_str)
+        merged["shared_secret_hash"] = str(merged.get("shared_secret_hash", "")).strip()
+        merged.pop("shared_secret", None)
     return merged
 
 
 def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
     slug = module.get("slug")
-    if slug not in {"chatgpt-mcp", "syncro"}:
+    if slug not in {"chatgpt-mcp", "syncro", "uptimekuma"}:
         return module
     redacted = dict(module)
     settings = dict(redacted.get("settings") or {})
@@ -292,6 +328,8 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         settings["shared_secret_hash"] = "********"
     if slug == "syncro" and settings.get("api_key"):
         settings["api_key"] = "********"
+    if slug == "uptimekuma" and settings.get("shared_secret_hash"):
+        settings["shared_secret_hash"] = "********"
     redacted["settings"] = settings
     return redacted
 
@@ -379,6 +417,7 @@ async def trigger_module(slug: str, payload: Mapping[str, Any] | None = None) ->
         "smtp": _invoke_smtp,
         "tacticalrmm": _invoke_tacticalrmm,
         "ntfy": _invoke_ntfy,
+        "uptimekuma": _validate_uptimekuma,
         "chatgpt-mcp": _invoke_chatgpt_mcp,
     }.get(slug)
     if not handler:
@@ -820,6 +859,14 @@ async def _validate_syncro(settings: Mapping[str, Any], payload: Mapping[str, An
         "base_url": base_url,
         "has_api_key": bool(api_key),
         "rate_limit_per_minute": rate_limit,
+    }
+
+
+async def _validate_uptimekuma(settings: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+    shared_secret_hash = str(settings.get("shared_secret_hash") or "").strip()
+    return {
+        "status": "ok",
+        "has_shared_secret": bool(shared_secret_hash),
     }
 
 

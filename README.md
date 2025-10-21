@@ -31,6 +31,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - Ticketing workspace with replies, watchers, and module-aligned categorisation surfaced through API and admin UI
 - Automation builder covering scheduled and event-driven workflows with Ollama, SMTP, TacticalRMM, and ntfy integrations
 - Integration module catalogue to manage external credentials, run diagnostics, and ensure webhook retries remain observable
+- Uptime Kuma integration module to receive monitoring alerts over secure HTTP POST webhooks with shared-secret validation
 - ChatGPT MCP module providing secure ticket triage tools and automations to OpenAI ChatGPT via the Model Context Protocol
 - Syncro ticket importer with super admin UI controls, rate limiting, and REST API access for bulk migrations
 
