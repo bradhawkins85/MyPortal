@@ -37,9 +37,48 @@ detect_python_interpreter() {
   printf '%s' "$interpreter"
 }
 
+ensure_env_default() {
+  local interpreter="$1"
+  local key="$2"
+  local default_value="$3"
+  local env_file="${PROJECT_ROOT}/.env"
+
+  if [[ -z "$interpreter" || ! -f "$env_file" ]]; then
+    return
+  fi
+
+  ENV_DEFAULT_KEY="$key" \
+    ENV_DEFAULT_VALUE="$default_value" \
+    ENV_DEFAULT_FILE="$env_file" \
+    "$interpreter" - <<'PY'
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+env_path = Path(os.environ["ENV_DEFAULT_FILE"])
+key = os.environ["ENV_DEFAULT_KEY"]
+default = os.environ["ENV_DEFAULT_VALUE"]
+
+existing = env_path.read_text(encoding="utf-8")
+for raw_line in existing.splitlines():
+    stripped = raw_line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in raw_line:
+        continue
+    name, _ = raw_line.split("=", 1)
+    if name.strip() == key:
+        break
+else:
+    suffix = "" if not existing or existing.endswith("\n") else "\n"
+    env_path.write_text(existing + f"{suffix}{key}={default}\n", encoding="utf-8")
+PY
+}
+
 PYTHON_INTERPRETER=$(detect_python_interpreter)
 
 cd "$PROJECT_ROOT"
+
+ensure_env_default "$PYTHON_INTERPRETER" "ENABLE_AUTO_REFRESH" "false"
 
 # Load GitHub credentials from .env in a safe manner
 if [[ -f .env ]]; then
