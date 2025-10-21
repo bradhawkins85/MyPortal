@@ -277,3 +277,4 @@ in text
 - 2025-10-21, 12:06 UTC, Feature, Added a super admin company access console with full company visibility and direct staff permission assignment without invitations
 
 - 2025-10-21, 12:02 UTC, Fix, Removed automation workspace sidebar from automation creation forms per request
+- 2025-12-21, 11:00 UTC, Feature, Broadcast refresh notifications after knowledge base and module mutations with notifier injection and regression tests
