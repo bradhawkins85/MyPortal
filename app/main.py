@@ -4397,6 +4397,15 @@ async def import_syncro_tickets(request: Request):
         import_request = SyncroTicketImportRequest.model_validate(payload)
     except ValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.errors()) from exc
+    log_info(
+        "Syncro ticket import admin request received",
+        user_id=current_user.get("id"),
+        mode=import_request.mode.value,
+        ticket_id=import_request.ticket_id,
+        start_id=import_request.start_id,
+        end_id=import_request.end_id,
+        request_path=str(request.url),
+    )
     try:
         summary = await ticket_importer.import_from_request(
             mode=import_request.mode.value,
