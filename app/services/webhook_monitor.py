@@ -47,6 +47,39 @@ async def enqueue_event(
     return event
 
 
+async def create_manual_event(
+    *,
+    name: str,
+    target_url: str,
+    payload: Any = None,
+    headers: dict[str, str] | None = None,
+    max_attempts: int = 1,
+    backoff_seconds: int = 0,
+) -> dict[str, Any]:
+    """Create a webhook event handled outside the automatic dispatcher.
+
+    Manual events are marked ``in_progress`` immediately so the background
+    webhook monitor does not attempt delivery before the caller records a
+    success or failure outcome.  This mirrors the behaviour of
+    :func:`enqueue_event` without triggering outbound HTTP retries.
+    """
+
+    event = await webhook_repo.create_event(
+        name=name,
+        target_url=target_url,
+        headers=headers,
+        payload=payload,
+        max_attempts=max(1, max_attempts),
+        backoff_seconds=max(0, backoff_seconds),
+    )
+    if not event or event.get("id") is None:
+        return event
+    event_id = int(event["id"])
+    await webhook_repo.mark_in_progress(event_id)
+    refreshed = await webhook_repo.get_event(event_id)
+    return refreshed or event
+
+
 async def record_manual_success(
     event_id: int,
     *,
