@@ -1,3 +1,4 @@
+- 2025-12-19, 16:10 UTC, Fix, Removed the AI tag status label entirely from the admin ticket detail view for a leaner tags section
 - 2025-10-21, 11:44 UTC, Fix, Removed succeeded/skipped AI tag status labels from the admin ticket detail view to declutter the tags section
 - 2025-10-21, 11:31 UTC, Feature, Added rich text ticket replies with sanitised storage, WYSIWYG composer, and HTML conversation rendering
 - 2025-12-19, 15:30 UTC, Fix, Removed AI tag status badge, model label, and timestamp from the admin ticket detail metadata view
