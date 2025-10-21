@@ -71,6 +71,50 @@
     return document.getElementById(id);
   }
 
+  function randomDailyCron() {
+    const minute = Math.floor(Math.random() * 60);
+    const hour = Math.floor(Math.random() * 24);
+    return `${minute} ${hour} * * *`;
+  }
+
+  function getTaskNameFields() {
+    return {
+      hidden: query('task-name'),
+      display: query('task-name-display'),
+    };
+  }
+
+  function generateTaskName() {
+    const commandField = query('task-command');
+    const companyField = query('task-company');
+    let companyName = 'All companies';
+    if (companyField && companyField.options.length > 0) {
+      const option = companyField.options[companyField.selectedIndex];
+      if (option) {
+        companyName = option.textContent.trim() || companyName;
+      }
+    }
+    let commandName = 'Task';
+    if (commandField && commandField.options.length > 0) {
+      const option = commandField.options[commandField.selectedIndex];
+      const label = option ? option.textContent.trim() : '';
+      const value = commandField.value ? commandField.value.trim() : '';
+      commandName = label || value || commandName;
+    }
+    return `${companyName} — ${commandName}`;
+  }
+
+  function setTaskName(value) {
+    const { hidden, display } = getTaskNameFields();
+    const name = value || generateTaskName();
+    if (hidden) {
+      hidden.value = name;
+    }
+    if (display) {
+      display.value = name;
+    }
+  }
+
   function openModal(modal) {
     if (!modal) {
       return;
@@ -118,7 +162,6 @@
 
   function populateTaskForm(task) {
     const idField = query('task-id');
-    const nameField = query('task-name');
     const commandField = query('task-command');
     const companyField = query('task-company');
     const cronField = query('task-cron');
@@ -126,9 +169,9 @@
     const maxRetriesField = query('task-max-retries');
     const backoffField = query('task-backoff');
     const activeField = query('task-active');
+    const nameFields = getTaskNameFields();
     if (
       !idField ||
-      !nameField ||
       !commandField ||
       !cronField ||
       !descriptionField ||
@@ -138,21 +181,55 @@
     ) {
       return;
     }
-    idField.value = task.id || '';
-    nameField.value = task.name || '';
-    commandField.value = task.command || '';
+    const taskData = task || {};
+    const isEditing = Boolean(taskData.id);
+    idField.value = taskData.id || '';
+
+    const rawCompanyValue =
+      taskData.company_id ?? taskData.companyId ?? taskData.company ?? '';
     if (companyField) {
-      companyField.value = task.company_id || '';
+      companyField.value =
+        rawCompanyValue === null || rawCompanyValue === undefined
+          ? ''
+          : String(rawCompanyValue);
     }
-    cronField.value = task.cron || '';
-    descriptionField.value = task.description || '';
-    maxRetriesField.value =
-      typeof task.max_retries === 'number' ? task.max_retries : task.maxRetries || 0;
-    backoffField.value =
-      typeof task.retry_backoff_seconds === 'number'
-        ? task.retry_backoff_seconds
-        : task.retryBackoffSeconds || 300;
-    activeField.checked = Boolean(task.active !== false);
+
+    const commandValue = taskData.command || '';
+    commandField.value = commandValue;
+    if (!commandField.value && commandField.options.length > 0) {
+      commandField.value = commandField.options[0].value;
+    }
+
+    if (companyField && !companyField.value && companyField.options.length > 0) {
+      companyField.value = '';
+    }
+
+    const cronValue = taskData.cron || (isEditing ? '' : randomDailyCron());
+    cronField.value = cronValue;
+
+    descriptionField.value = taskData.description || '';
+
+    let maxRetriesValue = Number(taskData.max_retries ?? taskData.maxRetries ?? 12);
+    if (!Number.isFinite(maxRetriesValue) || maxRetriesValue < 0) {
+      maxRetriesValue = 12;
+    }
+    maxRetriesField.value = maxRetriesValue;
+
+    let backoffValue = Number(
+      taskData.retry_backoff_seconds ?? taskData.retryBackoffSeconds ?? 300
+    );
+    if (!Number.isFinite(backoffValue) || backoffValue < 30) {
+      backoffValue = 300;
+    }
+    backoffField.value = backoffValue;
+
+    activeField.checked = Boolean(taskData.active !== false);
+
+    const existingName = taskData.name ? String(taskData.name) : '';
+    if (nameFields.hidden) {
+      nameFields.hidden.dataset.originalName = existingName;
+    }
+    setTaskName(existingName || generateTaskName());
   }
 
   function clearTaskForm() {
@@ -163,7 +240,7 @@
       company_id: '',
       cron: '',
       description: '',
-      max_retries: 0,
+      max_retries: 12,
       retry_backoff_seconds: 300,
       active: true,
     });
@@ -296,13 +373,22 @@
         cron: (formData.get('cron') || '').toString().trim(),
         description: (formData.get('description') || '').toString().trim() || null,
         active: formData.get('active') !== null,
-        maxRetries: Number(formData.get('maxRetries') || formData.get('max_retries') || 0),
+        maxRetries: Number(formData.get('maxRetries') || formData.get('max_retries') || 12),
         retryBackoffSeconds: Number(
           formData.get('retryBackoffSeconds') || formData.get('retry_backoff_seconds') || 300
         ),
       };
       const companyIdValue = formData.get('companyId') || formData.get('company_id');
-      payload.companyId = companyIdValue ? Number(companyIdValue) : null;
+      if (companyIdValue === null || companyIdValue === undefined || companyIdValue === '') {
+        payload.companyId = null;
+      } else {
+        const parsedCompanyId = Number(companyIdValue);
+        if (Number.isNaN(parsedCompanyId)) {
+          alert('Company selection is invalid.');
+          return;
+        }
+        payload.companyId = parsedCompanyId;
+      }
       if (!payload.name || !payload.command || !payload.cron) {
         alert('Name, command, and cron schedule are required.');
         return;
@@ -335,6 +421,24 @@
         clearTaskForm();
       });
     }
+
+    const commandField = query('task-command');
+    const companyField = query('task-company');
+    const refreshTaskName = () => {
+      const nameFields = getTaskNameFields();
+      if (nameFields.hidden) {
+        nameFields.hidden.dataset.originalName = '';
+      }
+      setTaskName(generateTaskName());
+    };
+    if (commandField) {
+      commandField.addEventListener('change', refreshTaskName);
+      commandField.addEventListener('input', refreshTaskName);
+    }
+    if (companyField) {
+      companyField.addEventListener('change', refreshTaskName);
+      companyField.addEventListener('input', refreshTaskName);
+    }
   }
 
   function bindTaskActions() {
@@ -351,7 +455,7 @@
     document.querySelectorAll('[data-task-create]').forEach((button) => {
       button.addEventListener('click', () => {
         clearTaskForm();
-        showTaskModal({ active: true, retry_backoff_seconds: 300, max_retries: 0 });
+        showTaskModal({ active: true, retry_backoff_seconds: 300, max_retries: 12 });
       });
     });
 
