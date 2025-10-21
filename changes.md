@@ -1,3 +1,4 @@
+- 2025-12-20, 10:30 UTC, Feature, Added super-admin ticket deletion control on the admin ticket detail page with secure backend handling and confirmation prompts
 - 2025-12-20, 09:45 UTC, Fix, Corrected automation admin handler to import the automation repository consistently so creation succeeds without runtime errors
 - 2025-12-20, 09:15 UTC, Fix, Corrected automation insert column list to avoid SQL syntax errors when creating ticket automations
 - 2025-12-20, 09:00 UTC, Fix, Restored scheduler task creation responses by fetching the inserted row using the returned task ID
