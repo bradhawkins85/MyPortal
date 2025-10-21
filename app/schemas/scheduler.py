@@ -13,7 +13,7 @@ class ScheduledTaskBase(BaseModel):
     company_id: int | None = Field(default=None, validation_alias="companyId")
     description: str | None = None
     active: bool = True
-    max_retries: int = Field(default=0, validation_alias="maxRetries")
+    max_retries: int = Field(default=12, validation_alias="maxRetries")
     retry_backoff_seconds: int = Field(default=300, validation_alias="retryBackoffSeconds")
 
     model_config = {
