@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.services import ticket_importer
@@ -192,3 +194,87 @@ async def test_import_all_tickets_uses_pagination(monkeypatch):
     assert summary.updated == 1
     assert created[0]["external_reference"] == "201"
     assert updated[0][0] == 88
+
+
+@pytest.mark.anyio
+async def test_import_from_request_records_webhook_success(monkeypatch):
+    summary = ticket_importer.TicketImportSummary(mode="single", fetched=1, created=1)
+
+    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None):
+        assert ticket_id == 42
+        return summary
+
+    recorded: dict[str, dict[str, object]] = {}
+
+    async def fake_create_manual_event(**kwargs):
+        recorded["create"] = kwargs
+        return {"id": 77}
+
+    async def fake_record_success(event_id, *, attempt_number, response_status, response_body):
+        recorded["success"] = {
+            "event_id": event_id,
+            "attempt_number": attempt_number,
+            "response_status": response_status,
+            "response_body": response_body,
+        }
+        return {"id": event_id, "status": "succeeded"}
+
+    async def fake_record_failure(*args, **kwargs):  # pragma: no cover - should not be called
+        raise AssertionError("record_manual_failure should not be invoked on success")
+
+    monkeypatch.setattr(ticket_importer, "import_ticket_by_id", fake_import_ticket_by_id)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "create_manual_event", fake_create_manual_event)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "record_manual_success", fake_record_success)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "record_manual_failure", fake_record_failure)
+
+    result = await ticket_importer.import_from_request(
+        mode="single", ticket_id=42, start_id=None, end_id=None, rate_limiter=None
+    )
+
+    assert result is summary
+    assert recorded["create"]["name"] == "syncro.ticket.import"
+    assert recorded["create"]["target_url"].startswith("syncro://tickets/import?mode=single")
+    assert recorded["create"]["payload"]["ticketId"] == 42
+    success_payload = json.loads(recorded["success"]["response_body"])
+    assert success_payload == summary.as_dict()
+    assert recorded["success"]["response_status"] == 200
+
+
+@pytest.mark.anyio
+async def test_import_from_request_records_webhook_failure(monkeypatch):
+    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None):
+        raise RuntimeError("boom")
+
+    recorded: dict[str, dict[str, object]] = {}
+
+    async def fake_create_manual_event(**kwargs):
+        recorded["create"] = kwargs
+        return {"id": 91}
+
+    async def fake_record_success(*args, **kwargs):  # pragma: no cover - should not be called
+        raise AssertionError("record_manual_success should not be invoked on failure")
+
+    async def fake_record_failure(event_id, *, attempt_number, status, error_message, response_status, response_body):
+        recorded["failure"] = {
+            "event_id": event_id,
+            "attempt_number": attempt_number,
+            "status": status,
+            "error_message": error_message,
+            "response_status": response_status,
+            "response_body": response_body,
+        }
+        return {"id": event_id, "status": status}
+
+    monkeypatch.setattr(ticket_importer, "import_ticket_by_id", fake_import_ticket_by_id)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "create_manual_event", fake_create_manual_event)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "record_manual_success", fake_record_success)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "record_manual_failure", fake_record_failure)
+
+    with pytest.raises(RuntimeError):
+        await ticket_importer.import_from_request(
+            mode="single", ticket_id=99, start_id=None, end_id=None, rate_limiter=None
+        )
+
+    assert recorded["failure"]["event_id"] == 91
+    assert recorded["failure"]["status"] == "failed"
+    assert recorded["failure"]["error_message"] == "boom"
