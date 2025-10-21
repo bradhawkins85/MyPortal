@@ -35,7 +35,7 @@
       </thead>
       <tbody>
         {% for event in events %}
-          <tr data-event='{{ event | tojson }}'>
+          <tr data-event="{{ event | tojson | escape }}">
             <td data-label="Name">{{ event.name }}</td>
             <td data-label="Target">{{ event.target_url }}</td>
             <td data-label="Status">{{ event.status }}</td>

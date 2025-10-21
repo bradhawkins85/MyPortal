@@ -59,7 +59,7 @@
       return null;
     }
     try {
-      const value = row.dataset.event || '{}';
+      const value = row.dataset.event || row.getAttribute('data-event') || '{}';
       return JSON.parse(value);
     } catch (error) {
       return null;
