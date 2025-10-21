@@ -269,3 +269,5 @@ in text
 - 2025-12-08, 10:30 UTC, Fix, Hardened SQL migration runner to respect quoted semicolons so HTML seed data applies without syntax errors
 - 2025-12-19, 14:05 UTC, Fix, Filtered unhelpful AI-generated tags for tickets and knowledge base content using shared validation helpers
 - 2025-10-21, 11:43 UTC, Feature, Automated Automation & monitoring task creation with company name selection, generated task names, random daily cron defaults, and 12 retry baseline
+
+- 2025-10-21, 12:02 UTC, Fix, Removed automation workspace sidebar from automation creation forms per request
