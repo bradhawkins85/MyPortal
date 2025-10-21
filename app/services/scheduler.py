@@ -98,6 +98,16 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        if not self._scheduler.get_job("webhook-cleanup"):
+            self._scheduler.add_job(
+                webhook_monitor.purge_completed_events,
+                "interval",
+                hours=1,
+                id="webhook-cleanup",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
         if not self._scheduler.get_job("automation-runner"):
             self._scheduler.add_job(
                 automations_service.process_due_automations,

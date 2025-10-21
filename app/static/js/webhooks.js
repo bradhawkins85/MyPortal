@@ -208,6 +208,26 @@
     showAttemptPrompt('Select an attempt to inspect request and response payloads.');
   }
 
+  function updateTableEmptyState() {
+    const tbody = document.querySelector('#webhooks-table tbody');
+    if (!tbody) {
+      return;
+    }
+    const hasDataRow = Array.from(tbody.rows).some(
+      (row) => !row.classList.contains('table__empty') && row.dataset.event
+    );
+    if (!hasDataRow) {
+      tbody.innerHTML = '';
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 8;
+      cell.className = 'table__empty';
+      cell.textContent = 'No webhook activity recorded.';
+      row.appendChild(cell);
+      tbody.appendChild(row);
+    }
+  }
+
   function formatData(value) {
     if (value === null || value === undefined) {
       return '—';
@@ -348,6 +368,39 @@
     });
   }
 
+  function bindDeleteButtons() {
+    document.querySelectorAll('[data-webhook-delete]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const row = button.closest('tr');
+        const eventData = parseEvent(row);
+        if (!eventData || !eventData.id) {
+          return;
+        }
+        const target = eventData.target_url || eventData.targetUrl || 'the configured endpoint';
+        const status = (eventData.status || '').toLowerCase();
+        const confirmMessage =
+          status === 'pending'
+            ? `Delete this webhook event and cancel the pending request to ${target}?`
+            : 'Delete this webhook event?';
+        if (!window.confirm(confirmMessage)) {
+          return;
+        }
+        button.disabled = true;
+        try {
+          await requestJson(`/scheduler/webhooks/${eventData.id}`, { method: 'DELETE' });
+          if (row && row.parentElement) {
+            row.remove();
+            updateTableEmptyState();
+          }
+          alert('Webhook event deleted.');
+        } catch (error) {
+          alert(`Unable to delete webhook: ${error.message}`);
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     attemptsModal = query('webhook-attempts-modal');
     attemptPlaceholder = document.querySelector('[data-attempt-placeholder]');
@@ -361,5 +414,6 @@
     bindModalDismissal(attemptsModal);
     bindRetryButtons();
     bindAttemptsButtons();
+    bindDeleteButtons();
   });
 })();
