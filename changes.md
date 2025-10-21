@@ -1,3 +1,4 @@
+- 2025-12-13, 15:45 UTC, Fix, Normalised webhook event timestamp updates to stay database-agnostic so Syncro ticket import API calls appear in the monitor log
 - 2025-12-13, 14:30 UTC, Fix, Hardened Syncro ticket import webhook fallback with repository error handling tests and logging coverage
 - 2025-12-13, 13:45 UTC, Fix, Logged Syncro ticket import jobs in the webhook monitor with success and failure outcomes so the delivery queue lists them
 - 2025-12-13, 12:15 UTC, Feature, Added Uptime Kuma alert ingestion module with secure webhook endpoint, admin configuration UI, and alert listing APIs
