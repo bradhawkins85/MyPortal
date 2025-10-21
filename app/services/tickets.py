@@ -11,6 +11,7 @@ from app.core.logging import log_error
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
 from app.services import modules as modules_service
+from app.services.tagging import filter_helpful_slugs, is_helpful_slug, slugify_tag
 
 _PROMPT_HEADER = (
     "You are an AI assistant that summarises helpdesk tickets for technicians. "
@@ -466,32 +467,23 @@ def _normalise_tag_list(source: Any) -> list[str]:
     else:
         return []
     tags: list[str] = []
+    seen: set[str] = set()
     for item in iterable:
         text = str(item).strip()
-        slug = _slugify_tag(text)
-        if not slug:
+        slug = slugify_tag(text)
+        if slug is None or not is_helpful_slug(slug):
             continue
-        if slug not in tags:
-            tags.append(slug)
+        if slug in seen:
+            continue
+        tags.append(slug)
+        seen.add(slug)
     return tags
-
-
-def _slugify_tag(value: str) -> str | None:
-    if not value:
-        return None
-    lowered = value.lower()
-    cleaned = re.sub(r"[^a-z0-9\s\-]+", "", lowered)
-    cleaned = re.sub(r"\s+", "-", cleaned)
-    cleaned = re.sub(r"-+", "-", cleaned).strip("-")
-    if not cleaned:
-        return None
-    return cleaned[:48]
 
 
 def _finalise_tags(tags: list[str], ticket: Mapping[str, Any]) -> list[str]:
     unique: list[str] = []
     seen: set[str] = set()
-    for tag in tags:
+    for tag in filter_helpful_slugs(tags):
         if tag in seen:
             continue
         unique.append(tag)
@@ -502,7 +494,7 @@ def _finalise_tags(tags: list[str], ticket: Mapping[str, Any]) -> list[str]:
     for candidate in _generate_candidate_tags(ticket):
         if len(unique) >= 10:
             break
-        if candidate in seen:
+        if candidate in seen or not is_helpful_slug(candidate):
             continue
         unique.append(candidate)
         seen.add(candidate)
@@ -510,7 +502,7 @@ def _finalise_tags(tags: list[str], ticket: Mapping[str, Any]) -> list[str]:
     for fallback in _DEFAULT_TAG_FILL:
         if len(unique) >= 5:
             break
-        if fallback in seen:
+        if fallback in seen or not is_helpful_slug(fallback):
             continue
         unique.append(fallback)
         seen.add(fallback)
@@ -519,7 +511,7 @@ def _finalise_tags(tags: list[str], ticket: Mapping[str, Any]) -> list[str]:
         for fallback in _DEFAULT_TAG_FILL:
             if len(unique) >= 5:
                 break
-            if fallback in seen:
+            if fallback in seen or not is_helpful_slug(fallback):
                 continue
             unique.append(fallback)
             seen.add(fallback)
@@ -532,22 +524,22 @@ def _generate_candidate_tags(ticket: Mapping[str, Any]) -> list[str]:
     for key in ("category", "module_slug", "priority", "status"):
         value = ticket.get(key)
         if isinstance(value, str):
-            slug = _slugify_tag(value)
-            if slug:
+            slug = slugify_tag(value)
+            if slug and is_helpful_slug(slug):
                 candidates.append(slug)
     subject = str(ticket.get("subject") or "")
     description = str(ticket.get("description") or "")
     for word in re.findall(r"[A-Za-z0-9]+", subject):
         if len(word) < 3:
             continue
-        slug = _slugify_tag(word)
-        if slug:
+        slug = slugify_tag(word)
+        if slug and is_helpful_slug(slug):
             candidates.append(slug)
     for word in re.findall(r"[A-Za-z0-9]+", description):
         if len(word) < 5:
             continue
-        slug = _slugify_tag(word)
-        if slug:
+        slug = slugify_tag(word)
+        if slug and is_helpful_slug(slug):
             candidates.append(slug)
         if len(candidates) >= 25:
             break

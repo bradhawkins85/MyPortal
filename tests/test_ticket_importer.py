@@ -26,6 +26,15 @@ def test_normalise_priority_mapping():
     assert ticket_importer._normalise_priority(None) == "normal"
 
 
+def test_clean_text_converts_basic_html():
+    value = "<p>Hello<br />World</p>\n<div>Next&nbsp;Line</div>"
+    assert ticket_importer._clean_text(value) == "Hello\nWorld\nNext Line"
+
+
+def test_clean_text_preserves_angle_brackets_when_not_tags():
+    assert ticket_importer._clean_text("Value is < 3 &amp; rising") == "Value is < 3 & rising"
+
+
 @pytest.mark.anyio
 async def test_import_ticket_by_id_creates_new_ticket(monkeypatch):
     async def fake_get_ticket(ticket_id, rate_limiter=None):
