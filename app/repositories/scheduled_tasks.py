@@ -70,7 +70,7 @@ async def create_task(
     company_id: int | None = None,
     description: str | None = None,
     active: bool = True,
-    max_retries: int = 0,
+    max_retries: int = 12,
     retry_backoff_seconds: int = 300,
 ) -> dict[str, Any]:
     await db.execute(
