@@ -40,6 +40,19 @@
         </div>
         <div class="management__header-actions">
           <a href="/admin/tickets" class="button button--ghost">Back to tickets</a>
+          {% if can_delete_ticket %}
+            <form
+              action="/admin/tickets/{{ ticket.id }}/delete"
+              method="post"
+              class="inline-form"
+              data-confirm="Delete ticket {{ ticket.id }}? This cannot be undone."
+            >
+              {% if csrf_token %}
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+              {% endif %}
+              <button type="submit" class="button button--danger">Delete ticket</button>
+            </form>
+          {% endif %}
         </div>
       </header>
 
