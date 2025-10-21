@@ -155,6 +155,39 @@ async def list_due_events(limit: int = 25) -> list[dict[str, Any]]:
     return [_normalise_event(row) for row in rows]
 
 
+async def delete_event(event_id: int) -> None:
+    await db.execute(
+        "DELETE FROM webhook_events WHERE id = %s",
+        (event_id,),
+    )
+
+
+async def delete_succeeded_before(cutoff: datetime) -> int:
+    threshold = _ensure_naive_utc(cutoff)
+    if threshold is None:
+        return 0
+    row = await db.fetch_one(
+        """
+        SELECT COUNT(*) AS count
+        FROM webhook_events
+        WHERE status = 'succeeded'
+          AND COALESCE(updated_at, created_at) < %s
+        """,
+        (threshold,),
+    )
+    count = int(row["count"]) if row and row.get("count") is not None else 0
+    if count:
+        await db.execute(
+            """
+            DELETE FROM webhook_events
+            WHERE status = 'succeeded'
+              AND COALESCE(updated_at, created_at) < %s
+            """,
+            (threshold,),
+        )
+    return count
+
+
 async def mark_in_progress(event_id: int) -> None:
     now = _utcnow()
     await db.execute(
