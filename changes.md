@@ -1,3 +1,4 @@
+- 2025-10-21, 11:50 UTC, Fix, Removed automation workspace sidebar so the orchestration view spans the full width per request
 - 2025-10-21, 11:40 UTC, Feature, Rebuilt automation orchestration workspace with dedicated list and create pages plus quick-action navigation
 - 2025-10-21, 11:31 UTC, Feature, Added rich text ticket replies with sanitised storage, WYSIWYG composer, and HTML conversation rendering
 - 2025-12-19, 15:30 UTC, Fix, Removed AI tag status badge, model label, and timestamp from the admin ticket detail metadata view
