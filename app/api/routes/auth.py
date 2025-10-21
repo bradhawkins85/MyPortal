@@ -277,7 +277,7 @@ async def password_forgot(
         "<p>If you did not request a reset you can ignore this email.</p>"
     )
     try:
-        sent = await email_service.send_email(
+        sent, event_metadata = await email_service.send_email(
             subject=f"Reset your {settings.app_name} password",
             recipients=[user["email"]],
             text_body=text_body,
@@ -287,6 +287,7 @@ async def password_forgot(
             logger.warning(
                 "Password reset email skipped because SMTP is not configured",
                 user_id=user["id"],
+                event_id=(event_metadata or {}).get("id") if isinstance(event_metadata, dict) else None,
             )
     except email_service.EmailDispatchError as exc:  # pragma: no cover - log and continue
         logger.error(

@@ -45,6 +45,63 @@ async def enqueue_event(
     return event
 
 
+async def record_manual_success(
+    event_id: int,
+    *,
+    attempt_number: int,
+    response_status: int | None,
+    response_body: str | None,
+) -> dict[str, Any]:
+    """Persist a successful delivery outcome for an externally handled event."""
+
+    await webhook_repo.record_attempt(
+        event_id=event_id,
+        attempt_number=attempt_number,
+        status="succeeded",
+        response_status=response_status,
+        response_body=response_body,
+        error_message=None,
+    )
+    await webhook_repo.mark_event_completed(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=response_status,
+        response_body=response_body,
+    )
+    refreshed = await webhook_repo.get_event(event_id)
+    return refreshed or {"id": event_id, "status": "succeeded"}
+
+
+async def record_manual_failure(
+    event_id: int,
+    *,
+    attempt_number: int,
+    status: str,
+    error_message: str | None,
+    response_status: int | None,
+    response_body: str | None,
+) -> dict[str, Any]:
+    """Persist a failed delivery outcome for an externally handled event."""
+
+    await webhook_repo.record_attempt(
+        event_id=event_id,
+        attempt_number=attempt_number,
+        status=status,
+        response_status=response_status,
+        response_body=response_body,
+        error_message=error_message,
+    )
+    await webhook_repo.mark_event_failed(
+        event_id,
+        attempt_number=attempt_number,
+        error_message=error_message,
+        response_status=response_status,
+        response_body=response_body,
+    )
+    refreshed = await webhook_repo.get_event(event_id)
+    return refreshed or {"id": event_id, "status": "failed", "last_error": error_message}
+
+
 async def process_pending_events(limit: int = 10) -> None:
     events = await webhook_repo.list_due_events(limit=limit)
     for event in events:
