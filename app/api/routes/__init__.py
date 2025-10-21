@@ -19,6 +19,7 @@ from . import (
     staff,
     tickets,
     users,
+    system,
     uptimekuma,
 )
 
@@ -43,5 +44,6 @@ __all__ = [
     "roles",
     "staff",
     "users",
+    "system",
     "uptimekuma",
 ]
