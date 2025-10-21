@@ -27,7 +27,7 @@
           <tr>
             <th scope="col" data-sort="string">Name</th>
             <th scope="col" data-sort="string">Command</th>
-            <th scope="col" data-sort="number">Company</th>
+            <th scope="col" data-sort="string">Company</th>
             <th scope="col" data-sort="string">Cron</th>
             <th scope="col" data-sort="string">Active</th>
             <th scope="col" data-sort="date">Last run</th>
@@ -40,8 +40,8 @@
             <tr data-task='{{ task | tojson }}'>
               <td data-label="Name">{{ task.name }}</td>
               <td data-label="Command">{{ task.command }}</td>
-              <td data-label="Company" data-value="{{ task.company_id or 0 }}">
-                {{ task.company_id if task.company_id else 'All companies' }}
+              <td data-label="Company" data-value="{{ task.company_name }}">
+                {{ task.company_name }}
               </td>
               <td data-label="Cron">{{ task.cron }}</td>
               <td data-label="Active">
@@ -108,8 +108,19 @@
       <form id="scheduled-task-form" class="form" autocomplete="off">
         <input type="hidden" name="task_id" id="task-id" />
         <div class="form-field">
-          <label class="form-label" for="task-name">Task name</label>
-          <input class="form-input" id="task-name" name="name" required maxlength="255" data-initial-focus />
+          <label class="form-label" for="task-name-display">Task name</label>
+          <input
+            class="form-input"
+            id="task-name-display"
+            type="text"
+            value=""
+            readonly
+            aria-readonly="true"
+            tabindex="-1"
+            data-initial-focus
+          />
+          <p class="form-help">Generated automatically from the selected company and command.</p>
+          <input type="hidden" id="task-name" name="name" />
         </div>
         <div class="form-field">
           <label class="form-label" for="task-command">Command</label>
@@ -120,15 +131,13 @@
           </select>
         </div>
         <div class="form-field">
-          <label class="form-label" for="task-company">Company ID</label>
-          <input
-            class="form-input"
-            id="task-company"
-            name="companyId"
-            type="number"
-            min="1"
-            placeholder="Leave blank for all companies"
-          />
+          <label class="form-label" for="task-company">Company</label>
+          <select class="form-input" id="task-company" name="companyId">
+            {% for option in company_options %}
+              <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+          <p class="form-help">Choose a company or leave All companies selected to run globally.</p>
         </div>
         <div class="form-field">
           <label class="form-label" for="task-cron">Cron expression</label>
@@ -148,7 +157,7 @@
         </div>
         <div class="form-field form-field--inline">
           <label class="form-label" for="task-max-retries">Max retries</label>
-          <input class="form-input" id="task-max-retries" name="maxRetries" type="number" min="0" value="0" />
+          <input class="form-input" id="task-max-retries" name="maxRetries" type="number" min="0" value="12" />
         </div>
         <div class="form-field form-field--inline">
           <label class="form-label" for="task-backoff">Retry backoff (seconds)</label>
