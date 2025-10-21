@@ -1,4 +1,5 @@
 - 2025-12-15, 10:15 UTC, Fix, Escaped webhook event payloads in the admin delivery queue so delete actions parse identifiers correctly
+- 2025-12-16, 10:00 UTC, Fix, Sanitised Syncro ticket import text to convert HTML line breaks and remove unsupported tags
 - 2025-12-15, 09:30 UTC, Feature, Added automated webhook cleanup after 24 hours with admin delete controls to cancel pending deliveries
 - 2025-12-15, 09:30 UTC, Fix, Imported Syncro ticket Initial Issue comments as descriptions and mapped reply authors to customer or technician users
 - 2025-12-14, 09:00 UTC, Feature, Enriched Syncro ticket import to persist ticket numbers, map companies by business name, sync comment replies, and subscribe watcher emails from destination lists
@@ -257,3 +258,4 @@ in text
 - 2025-12-07, 09:00 UTC, Fix, Removed knowledge base search results and Ollama insight panels from the portal view to simplify the article list
 - 2025-12-07, 12:45 UTC, Fix, Combined ticket AI tags into the AI summary panel so related insights stay in one place on the admin ticket detail view
 - 2025-12-08, 10:30 UTC, Fix, Hardened SQL migration runner to respect quoted semicolons so HTML seed data applies without syntax errors
+- 2025-12-19, 14:05 UTC, Fix, Filtered unhelpful AI-generated tags for tickets and knowledge base content using shared validation helpers
