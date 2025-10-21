@@ -64,6 +64,12 @@
                   data-webhook-retry
                   {% if event.status == 'succeeded' %}disabled{% endif %}
                 >Retry</button>
+                <button
+                  type="button"
+                  class="button button--danger"
+                  data-webhook-delete
+                  {% if event.status == 'in_progress' %}disabled{% endif %}
+                >Delete</button>
               </div>
             </td>
           </tr>

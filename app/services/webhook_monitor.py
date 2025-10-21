@@ -191,6 +191,16 @@ async def process_pending_events(limit: int = 10) -> None:
             log_error("Failed to process webhook event", event_id=event.get("id"), error=str(exc))
 
 
+async def purge_completed_events(*, retention: timedelta = timedelta(hours=24)) -> int:
+    if retention.total_seconds() <= 0:
+        return 0
+    cutoff = datetime.now(timezone.utc) - retention
+    deleted = await webhook_repo.delete_succeeded_before(cutoff)
+    if deleted:
+        log_info("Purged delivered webhook events", count=deleted)
+    return deleted
+
+
 async def force_retry(event_id: int) -> dict[str, Any] | None:
     await webhook_repo.force_retry(event_id)
     event = await webhook_repo.get_event(event_id)

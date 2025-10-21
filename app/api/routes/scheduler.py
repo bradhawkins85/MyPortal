@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.database import require_database
+from app.core.logging import log_info
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import webhook_events as webhook_events_repo
 from app.schemas.scheduler import (
@@ -189,3 +190,22 @@ async def retry_webhook_event(
     if not event:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     return WebhookEventResponse.model_validate(event)
+
+
+@router.delete("/webhooks/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_webhook_event(
+    event_id: int,
+    _: None = Depends(require_database),
+    __: dict[str, Any] = Depends(require_super_admin),
+) -> None:
+    event = await webhook_events_repo.get_event(event_id)
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    if str(event.get("status") or "").lower() == "in_progress":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Webhook is currently being delivered and cannot be deleted",
+        )
+    await webhook_events_repo.delete_event(event_id)
+    log_info("Webhook event deleted", event_id=event_id)
+    return None
