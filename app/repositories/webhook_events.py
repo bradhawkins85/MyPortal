@@ -7,6 +7,22 @@ from typing import Any
 from app.core.database import db
 
 
+def _utcnow() -> datetime:
+    """Return a timezone-naive UTC timestamp for database writes."""
+
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _ensure_naive_utc(dt: datetime | None) -> datetime | None:
+    """Normalise aware datetimes to timezone-naive UTC values."""
+
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 def _serialise(value: Any) -> str | None:
     if value is None:
         return None
@@ -121,28 +137,30 @@ async def list_events(*, status: str | None = None, limit: int = 100) -> list[di
 
 
 async def list_due_events(limit: int = 25) -> list[dict[str, Any]]:
+    now = _utcnow()
     rows = await db.fetch_all(
         """
         SELECT *
         FROM webhook_events
         WHERE status = 'pending'
-          AND (next_attempt_at IS NULL OR next_attempt_at <= UTC_TIMESTAMP())
+          AND (next_attempt_at IS NULL OR next_attempt_at <= %s)
         ORDER BY created_at ASC
         LIMIT %s
         """,
-        (limit,),
+        (now, limit),
     )
     return [_normalise_event(row) for row in rows]
 
 
 async def mark_in_progress(event_id: int) -> None:
+    now = _utcnow()
     await db.execute(
         """
         UPDATE webhook_events
-        SET status = 'in_progress', updated_at = UTC_TIMESTAMP()
+        SET status = 'in_progress', updated_at = %s
         WHERE id = %s AND status = 'pending'
         """,
-        (event_id,),
+        (now, event_id),
     )
 
 
@@ -179,6 +197,7 @@ async def mark_event_completed(
     response_status: int | None,
     response_body: str | None,
 ) -> None:
+    now = _utcnow()
     await db.execute(
         """
         UPDATE webhook_events
@@ -188,13 +207,14 @@ async def mark_event_completed(
             attempt_count = %s,
             last_error = NULL,
             next_attempt_at = NULL,
-            updated_at = UTC_TIMESTAMP()
+            updated_at = %s
         WHERE id = %s
         """,
         (
             response_status,
             response_body,
             attempt_number,
+            now,
             event_id,
         ),
     )
@@ -208,6 +228,7 @@ async def mark_event_failed(
     response_status: int | None,
     response_body: str | None,
 ) -> None:
+    now = _utcnow()
     await db.execute(
         """
         UPDATE webhook_events
@@ -217,7 +238,7 @@ async def mark_event_failed(
             attempt_count = %s,
             last_error = %s,
             next_attempt_at = NULL,
-            updated_at = UTC_TIMESTAMP()
+            updated_at = %s
         WHERE id = %s
         """,
         (
@@ -225,6 +246,7 @@ async def mark_event_failed(
             response_body,
             attempt_number,
             error_message,
+            now,
             event_id,
         ),
     )
@@ -239,6 +261,8 @@ async def schedule_retry(
     response_status: int | None,
     response_body: str | None,
 ) -> None:
+    now = _utcnow()
+    next_attempt = _ensure_naive_utc(next_attempt_at)
     await db.execute(
         """
         UPDATE webhook_events
@@ -248,15 +272,16 @@ async def schedule_retry(
             last_error = %s,
             response_status = %s,
             response_body = %s,
-            updated_at = UTC_TIMESTAMP()
+            updated_at = %s
         WHERE id = %s
         """,
         (
             attempt_number,
-            next_attempt_at.replace(tzinfo=None),
+            next_attempt,
             error_message,
             response_status,
             response_body,
+            now,
             event_id,
         ),
     )
@@ -277,13 +302,14 @@ async def list_attempts(event_id: int, limit: int = 20) -> list[dict[str, Any]]:
 
 
 async def force_retry(event_id: int) -> None:
+    now = _utcnow()
     await db.execute(
         """
         UPDATE webhook_events
         SET status = 'pending',
-            next_attempt_at = UTC_TIMESTAMP(),
-            updated_at = UTC_TIMESTAMP()
+            next_attempt_at = %s,
+            updated_at = %s
         WHERE id = %s
         """,
-        (event_id,),
+        (now, now, event_id),
     )
