@@ -1,3 +1,4 @@
+- 2025-12-19, 15:30 UTC, Fix, Removed AI tag status badge, model label, and timestamp from the admin ticket detail metadata view
 - 2025-10-21, 11:06 UTC, Fix, Moved ticket AI tags into the Ticket details metadata panel above the module label for clearer context
 - 2025-12-15, 10:15 UTC, Fix, Escaped webhook event payloads in the admin delivery queue so delete actions parse identifiers correctly
 - 2025-12-16, 10:00 UTC, Fix, Sanitised Syncro ticket import text to convert HTML line breaks and remove unsupported tags
