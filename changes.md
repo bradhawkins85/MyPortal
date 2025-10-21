@@ -1,3 +1,4 @@
+- 2025-12-13, 13:45 UTC, Fix, Logged Syncro ticket import jobs in the webhook monitor with success and failure outcomes so the delivery queue lists them
 - 2025-12-13, 12:15 UTC, Feature, Added Uptime Kuma alert ingestion module with secure webhook endpoint, admin configuration UI, and alert listing APIs
 - 2025-12-13, 11:00 UTC, Fix, Marked manual webhook events as in progress when logging Syncro and module API calls so the monitor now records their delivery outcomes
 - 2025-12-13, 09:30 UTC, Fix, Ensured webhook events capture their identifiers during Syncro API logging so monitor entries persist with delivery outcomes
