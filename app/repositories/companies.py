@@ -30,6 +30,14 @@ async def get_company_by_syncro_id(syncro_company_id: str) -> Optional[dict[str,
     return _normalise_company(row) if row else None
 
 
+async def get_company_by_name(name: str) -> Optional[dict[str, Any]]:
+    row = await db.fetch_one(
+        "SELECT * FROM companies WHERE LOWER(name) = LOWER(%s) LIMIT 1",
+        (name,),
+    )
+    return _normalise_company(row) if row else None
+
+
 async def list_companies() -> List[dict[str, Any]]:
     rows = await db.fetch_all("SELECT * FROM companies ORDER BY name")
     return [_normalise_company(row) for row in rows]
