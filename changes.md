@@ -1,3 +1,4 @@
+- 2025-10-21, 11:40 UTC, Feature, Rebuilt automation orchestration workspace with dedicated list and create pages plus quick-action navigation
 - 2025-10-21, 11:31 UTC, Feature, Added rich text ticket replies with sanitised storage, WYSIWYG composer, and HTML conversation rendering
 - 2025-12-19, 15:30 UTC, Fix, Removed AI tag status badge, model label, and timestamp from the admin ticket detail metadata view
 - 2025-10-21, 11:06 UTC, Fix, Moved ticket AI tags into the Ticket details metadata panel above the module label for clearer context
