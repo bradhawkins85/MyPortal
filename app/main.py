@@ -5959,6 +5959,7 @@ async def _render_ticket_detail(
         "ticket_requester_options": requester_options,
         "ticket_priority_options": priority_options,
         "ticket_return_url": request.url.path,
+        "can_delete_ticket": bool(user.get("is_super_admin")),
         "success_message": success_message,
         "error_message": error_message,
     }
@@ -6330,6 +6331,41 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
         destination = f"{return_url}{separator}success={message}"
 
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/admin/tickets/{ticket_id}/delete", response_class=HTMLResponse)
+async def admin_delete_ticket(ticket_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    try:
+        await tickets_repo.delete_ticket(ticket_id)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to delete ticket", ticket_id=ticket_id, error=str(exc))
+        return await _render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Unable to delete the ticket. Please try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    log_info(
+        "Ticket deleted",
+        ticket_id=ticket_id,
+        deleted_by=current_user.get("id") if current_user else None,
+    )
+
+    message = quote(f"Ticket {ticket_id} deleted.")
+    return RedirectResponse(
+        url=f"/admin/tickets?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.post("/admin/tickets/{ticket_id}/replies", response_class=HTMLResponse)
