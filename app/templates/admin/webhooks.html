@@ -125,14 +125,45 @@
               <th scope="col" data-sort="number">Duration (ms)</th>
               <th scope="col" data-sort="string">Response</th>
               <th scope="col" data-sort="string">Error</th>
+              <th scope="col" class="table__actions">Details</th>
             </tr>
           </thead>
           <tbody id="webhook-attempts-body">
             <tr>
-              <td colspan="5" class="table__empty" id="webhook-attempts-empty">Select a webhook event to inspect its attempts.</td>
+              <td colspan="6" class="table__empty" id="webhook-attempts-empty">Select a webhook event to inspect its attempts.</td>
             </tr>
           </tbody>
         </table>
+      </div>
+      <div class="attempt-details" id="webhook-attempt-details">
+        <h3 class="attempt-details__title">Attempt details</h3>
+        <p class="text-muted" data-attempt-placeholder>
+          Choose a delivery attempt to review the recorded request and response payloads.
+        </p>
+        <div class="attempt-details__grid" data-attempt-details hidden>
+          <section class="attempt-details__section" aria-labelledby="attempt-request-heading">
+            <h4 id="attempt-request-heading">Request</h4>
+            <dl class="attempt-details__list">
+              <dt>Headers</dt>
+              <dd><pre data-attempt-request-headers class="attempt-details__code">—</pre></dd>
+              <dt>Body</dt>
+              <dd><pre data-attempt-request-body class="attempt-details__code">—</pre></dd>
+            </dl>
+          </section>
+          <section class="attempt-details__section" aria-labelledby="attempt-response-heading">
+            <h4 id="attempt-response-heading">Response</h4>
+            <dl class="attempt-details__list">
+              <dt>Status</dt>
+              <dd data-attempt-response-status>—</dd>
+              <dt>Headers</dt>
+              <dd><pre data-attempt-response-headers class="attempt-details__code">—</pre></dd>
+              <dt>Body</dt>
+              <dd><pre data-attempt-response-body class="attempt-details__code">—</pre></dd>
+              <dt>Error</dt>
+              <dd data-attempt-response-error>—</dd>
+            </dl>
+          </section>
+        </div>
       </div>
     </div>
   </div>

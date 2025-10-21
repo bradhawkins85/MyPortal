@@ -210,7 +210,14 @@ async def test_import_from_request_records_webhook_success(monkeypatch):
         recorded["create"] = kwargs
         return {"id": 77}
 
-    async def fake_record_success(event_id, *, attempt_number, response_status, response_body):
+    async def fake_record_success(
+        event_id,
+        *,
+        attempt_number,
+        response_status,
+        response_body,
+        **_kwargs,
+    ):
         recorded["success"] = {
             "event_id": event_id,
             "attempt_number": attempt_number,
@@ -265,7 +272,16 @@ async def test_import_from_request_falls_back_to_repo(monkeypatch):
     async def fake_record_success(*_args, **_kwargs):  # pragma: no cover - should not be called
         raise AssertionError("webhook_monitor.record_manual_success should not be used on fallback")
 
-    async def fake_record_attempt(*, event_id, attempt_number, status, response_status, response_body, error_message):
+    async def fake_record_attempt(
+        *,
+        event_id,
+        attempt_number,
+        status,
+        response_status,
+        response_body,
+        error_message,
+        **_extra,
+    ):
         attempts.append(
             {
                 "event_id": event_id,
@@ -437,7 +453,16 @@ async def test_import_from_request_fallback_failure_records_repo(monkeypatch):
     attempts: list[dict[str, object]] = []
     failures: list[dict[str, object]] = []
 
-    async def fake_record_attempt(*, event_id, attempt_number, status, response_status, response_body, error_message):
+    async def fake_record_attempt(
+        *,
+        event_id,
+        attempt_number,
+        status,
+        response_status,
+        response_body,
+        error_message,
+        **_extra,
+    ):
         attempts.append(
             {
                 "event_id": event_id,

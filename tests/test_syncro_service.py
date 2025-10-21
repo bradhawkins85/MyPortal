@@ -37,7 +37,14 @@ async def test_syncro_request_records_webhook_success(reset_syncro_caches):
         recorded["enqueue"] = kwargs
         return {"id": 321}
 
-    async def fake_record_success(event_id: int, *, attempt_number: int, response_status: int | None, response_body: str | None):
+    async def fake_record_success(
+        event_id: int,
+        *,
+        attempt_number: int,
+        response_status: int | None,
+        response_body: str | None,
+        **_kwargs,
+    ):
         recorded.setdefault("success", []).append(
             {
                 "event_id": event_id,
@@ -48,7 +55,16 @@ async def test_syncro_request_records_webhook_success(reset_syncro_caches):
         )
         return {"id": event_id, "status": "succeeded"}
 
-    async def fake_record_failure(event_id: int, *, attempt_number: int, status: str, error_message: str | None, response_status: int | None, response_body: str | None):
+    async def fake_record_failure(
+        event_id: int,
+        *,
+        attempt_number: int,
+        status: str,
+        error_message: str | None,
+        response_status: int | None,
+        response_body: str | None,
+        **_kwargs,
+    ):
         recorded.setdefault("failure", []).append(
             {
                 "event_id": event_id,
@@ -129,7 +145,16 @@ async def test_syncro_request_records_webhook_failure(reset_syncro_caches):
         recorded["enqueue"] = kwargs
         return {"id": 654}
 
-    async def fake_record_failure(event_id: int, *, attempt_number: int, status: str, error_message: str | None, response_status: int | None, response_body: str | None):
+    async def fake_record_failure(
+        event_id: int,
+        *,
+        attempt_number: int,
+        status: str,
+        error_message: str | None,
+        response_status: int | None,
+        response_body: str | None,
+        **_kwargs,
+    ):
         recorded.setdefault("failure", []).append(
             {
                 "event_id": event_id,
