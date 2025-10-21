@@ -571,7 +571,7 @@ async def _invoke_smtp(settings: Mapping[str, Any], payload: Mapping[str, Any]) 
         raise RuntimeError("Failed to create webhook event for SMTP request")
     attempt_number = 1
     try:
-        sent = await email_service.send_email(
+        sent, email_event_metadata = await email_service.send_email(
             subject=subject,
             recipients=recipients,
             html_body=html_body,
@@ -603,7 +603,13 @@ async def _invoke_smtp(settings: Mapping[str, Any], payload: Mapping[str, Any]) 
         )
         return _build_event_result(
             updated_event,
-            extra={"recipients": recipients, "subject": subject},
+            extra={
+                "recipients": recipients,
+                "subject": subject,
+                "email_event_id": (email_event_metadata or {}).get("id")
+                if isinstance(email_event_metadata, dict)
+                else None,
+            },
         )
 
     response_body = json.dumps({"recipients": recipients, "subject": subject})
@@ -615,7 +621,13 @@ async def _invoke_smtp(settings: Mapping[str, Any], payload: Mapping[str, Any]) 
     )
     return _build_event_result(
         updated_event,
-        extra={"recipients": recipients, "subject": subject},
+        extra={
+            "recipients": recipients,
+            "subject": subject,
+            "email_event_id": (email_event_metadata or {}).get("id")
+            if isinstance(email_event_metadata, dict)
+            else None,
+        },
     )
 
 

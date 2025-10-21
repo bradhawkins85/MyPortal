@@ -52,7 +52,7 @@ def test_password_forgot_sends_email(monkeypatch):
 
     async def fake_send_email(**kwargs):
         email_payload.update(kwargs)
-        return True
+        return True, {"id": 11, "status": "succeeded"}
 
     def fake_token_hex(size: int) -> str:
         return "fixedtoken"

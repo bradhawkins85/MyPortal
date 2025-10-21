@@ -1,3 +1,4 @@
+- 2025-12-12, 12:30 UTC, Feature, Logged SMTP email deliveries through the webhook monitor with outcome metadata and test updates
 - 2025-12-12, 09:00 UTC, Fix, Routed shop Discord stock notifications through the webhook monitor with persisted event metadata and tests
 - 2025-12-11, 10:00 UTC, Feature, Routed integration module webhooks through the monitor with persisted event metadata and regression tests
 - 2025-12-10, 13:30 UTC, Feature, Moved Syncro ticket import to dedicated admin page with module gating and configuration controls
