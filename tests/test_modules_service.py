@@ -89,7 +89,7 @@ def test_invoke_ollama_records_event_success(monkeypatch):
 
     client_factory = _AsyncClientFactory(FakeResponse())
 
-    monkeypatch.setattr(modules.webhook_monitor, "enqueue_event", fake_enqueue_event)
+    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_enqueue_event)
     monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
     monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", fake_mark_event_completed)
     monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", _noop)
@@ -103,7 +103,8 @@ def test_invoke_ollama_records_event_success(monkeypatch):
     assert result["event_id"] == 1
     assert result["status"] == "succeeded"
     assert result["response"] == {"result": "ok"}
-    assert captured_event["attempt_immediately"] is False
+    assert captured_event.get("max_attempts") == 1
+    assert "attempt_immediately" not in captured_event
     assert attempts and attempts[0]["status"] == "succeeded"
 
 
@@ -150,7 +151,7 @@ def test_invoke_ollama_records_event_failure(monkeypatch):
 
     client_factory = _AsyncClientFactory(FakeResponse())
 
-    monkeypatch.setattr(modules.webhook_monitor, "enqueue_event", fake_enqueue_event)
+    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_enqueue_event)
     monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
     monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", _noop)
     monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", fake_mark_event_failed)
@@ -203,7 +204,7 @@ def test_invoke_smtp_records_success(monkeypatch):
         captured_event["email_kwargs"] = kwargs
         return True, {"id": 70, "status": "succeeded"}
 
-    monkeypatch.setattr(modules.webhook_monitor, "enqueue_event", fake_enqueue_event)
+    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_enqueue_event)
     monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
     monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", fake_mark_event_completed)
     monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", _noop)
@@ -220,7 +221,8 @@ def test_invoke_smtp_records_success(monkeypatch):
     assert result["event_id"] == 7
     assert result["status"] == "succeeded"
     assert result["recipients"] == ["user@example.com"]
-    assert captured_event["attempt_immediately"] is False
+    assert captured_event.get("max_attempts") == 1
+    assert "attempt_immediately" not in captured_event
     assert result["email_event_id"] == 70
     assert "email_kwargs" in captured_event
 
@@ -262,7 +264,7 @@ def test_invoke_smtp_records_failure(monkeypatch):
     async def fake_send_email(**kwargs):
         return False, None
 
-    monkeypatch.setattr(modules.webhook_monitor, "enqueue_event", fake_enqueue_event)
+    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_enqueue_event)
     monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
     monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", _noop)
     monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", fake_mark_event_failed)
@@ -335,7 +337,7 @@ def test_invoke_tacticalrmm_records_success(monkeypatch):
 
     client_factory = _AsyncClientFactory(FakeResponse())
 
-    monkeypatch.setattr(modules.webhook_monitor, "enqueue_event", fake_enqueue_event)
+    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_enqueue_event)
     monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
     monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", fake_mark_event_completed)
     monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", _noop)
@@ -352,7 +354,8 @@ def test_invoke_tacticalrmm_records_success(monkeypatch):
     assert result["event_id"] == 11
     assert result["status"] == "succeeded"
     assert result["status_code"] == 201
-    assert captured_event["attempt_immediately"] is False
+    assert captured_event.get("max_attempts") == 1
+    assert "attempt_immediately" not in captured_event
 
 
 def test_invoke_ntfy_records_success(monkeypatch):
@@ -401,7 +404,7 @@ def test_invoke_ntfy_records_success(monkeypatch):
 
     client_factory = _AsyncClientFactory(FakeResponse())
 
-    monkeypatch.setattr(modules.webhook_monitor, "enqueue_event", fake_enqueue_event)
+    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_enqueue_event)
     monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
     monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", fake_mark_event_completed)
     monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", _noop)
@@ -418,4 +421,5 @@ def test_invoke_ntfy_records_success(monkeypatch):
     assert result["event_id"] == 15
     assert result["status"] == "succeeded"
     assert result["topic"] == "alerts"
-    assert captured_event["attempt_immediately"] is False
+    assert captured_event.get("max_attempts") == 1
+    assert "attempt_immediately" not in captured_event
