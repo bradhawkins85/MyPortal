@@ -171,14 +171,13 @@ async def _request(
     if json is not None:
         webhook_payload["body"] = json
     try:
-        webhook_event = await webhook_monitor.enqueue_event(
+        webhook_event = await webhook_monitor.create_manual_event(
             name="syncro.api.request",
             target_url=url,
             payload=webhook_payload,
             headers=None,
             max_attempts=1,
             backoff_seconds=0,
-            attempt_immediately=False,
         )
     except Exception as exc:  # pragma: no cover - webhook monitor safety
         log_error("Failed to record Syncro request in webhook monitor", url=url, error=str(exc))

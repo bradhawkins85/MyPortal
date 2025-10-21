@@ -33,7 +33,7 @@ async def test_syncro_request_records_webhook_success(reset_syncro_caches):
             },
         }
 
-    async def fake_enqueue_event(**kwargs):
+    async def fake_manual_event(**kwargs):
         recorded["enqueue"] = kwargs
         return {"id": 321}
 
@@ -95,7 +95,7 @@ async def test_syncro_request_records_webhook_success(reset_syncro_caches):
             return DummyResponse()
 
     reset_syncro_caches.setattr(syncro.module_repo, "get_module", fake_get_module)
-    reset_syncro_caches.setattr(syncro.webhook_monitor, "enqueue_event", fake_enqueue_event)
+    reset_syncro_caches.setattr(syncro.webhook_monitor, "create_manual_event", fake_manual_event)
     reset_syncro_caches.setattr(syncro.webhook_monitor, "record_manual_success", fake_record_success)
     reset_syncro_caches.setattr(syncro.webhook_monitor, "record_manual_failure", fake_record_failure)
     reset_syncro_caches.setattr(syncro.httpx, "AsyncClient", DummyClient)
@@ -125,7 +125,7 @@ async def test_syncro_request_records_webhook_failure(reset_syncro_caches):
             },
         }
 
-    async def fake_enqueue_event(**kwargs):
+    async def fake_manual_event(**kwargs):
         recorded["enqueue"] = kwargs
         return {"id": 654}
 
@@ -159,7 +159,7 @@ async def test_syncro_request_records_webhook_failure(reset_syncro_caches):
             raise httpx.HTTPError("boom")
 
     reset_syncro_caches.setattr(syncro.module_repo, "get_module", fake_get_module)
-    reset_syncro_caches.setattr(syncro.webhook_monitor, "enqueue_event", fake_enqueue_event)
+    reset_syncro_caches.setattr(syncro.webhook_monitor, "create_manual_event", fake_manual_event)
     reset_syncro_caches.setattr(syncro.webhook_monitor, "record_manual_failure", fake_record_failure)
     reset_syncro_caches.setattr(syncro.webhook_monitor, "record_manual_success", fake_record_success)
     reset_syncro_caches.setattr(syncro.httpx, "AsyncClient", FailingClient)
