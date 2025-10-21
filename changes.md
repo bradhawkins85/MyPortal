@@ -1,3 +1,4 @@
+- 2025-12-20, 09:45 UTC, Fix, Corrected automation admin handler to import the automation repository consistently so creation succeeds without runtime errors
 - 2025-12-20, 09:15 UTC, Fix, Corrected automation insert column list to avoid SQL syntax errors when creating ticket automations
 - 2025-12-20, 09:00 UTC, Fix, Restored scheduler task creation responses by fetching the inserted row using the returned task ID
 - 2025-10-21, 11:50 UTC, Fix, Removed automation workspace sidebar so the orchestration view spans the full width per request
