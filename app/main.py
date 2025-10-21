@@ -3993,6 +3993,109 @@ async def admin_create_company(request: Request):
     )
 
 
+@app.post("/admin/companies/assign", response_class=HTMLResponse)
+async def admin_assign_user_to_company(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    user_id_raw = form.get("userId") or form.get("user_id")
+    company_id_raw = form.get("companyId") or form.get("company_id")
+    try:
+        user_id = int(user_id_raw)
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError):
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            error_message="Select both a user and a company.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        return response
+    user_record = await user_repo.get_user_by_id(user_id)
+    company_record = await company_repo.get_company_by_id(company_id)
+    if not user_record or not company_record:
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            error_message="User or company not found.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+        return response
+    staff_permission_raw = form.get("staffPermission") or form.get("staff_permission")
+    try:
+        staff_permission = int(staff_permission_raw) if staff_permission_raw is not None else 0
+    except (TypeError, ValueError):
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            selected_company_id=company_id,
+            error_message="Select a valid staff permission level.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        return response
+    if staff_permission < 0:
+        staff_permission = 0
+    if staff_permission > 3:
+        staff_permission = 3
+
+    permission_values: dict[str, bool] = {}
+    for column in _COMPANY_PERMISSION_COLUMNS:
+        field = column.get("field")
+        if not field:
+            continue
+        permission_values[field] = _parse_bool(form.get(field))
+
+    can_manage_staff = _parse_bool(form.get("can_manage_staff"))
+
+    assign_kwargs: dict[str, Any] = {
+        "user_id": user_id,
+        "company_id": company_id,
+        "staff_permission": staff_permission,
+        "can_manage_staff": can_manage_staff,
+    }
+    for field, value in permission_values.items():
+        assign_kwargs[field] = value
+
+    await user_company_repo.assign_user_to_company(**assign_kwargs)
+
+    role_raw = form.get("roleId") or form.get("role_id")
+    if role_raw:
+        try:
+            role_id = int(role_raw)
+        except (TypeError, ValueError):
+            response = await _render_companies_dashboard(
+                request,
+                current_user,
+                selected_company_id=company_id,
+                error_message="Select a valid role for the membership.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+            return response
+        role_record = await role_repo.get_role_by_id(role_id)
+        if not role_record:
+            response = await _render_companies_dashboard(
+                request,
+                current_user,
+                selected_company_id=company_id,
+                error_message="Selected role could not be found.",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+            return response
+        membership = await membership_repo.get_membership_by_company_user(company_id, user_id)
+        if membership:
+            membership_id = membership.get("id")
+            if membership_id is not None and membership.get("role_id") != role_id:
+                await membership_repo.update_membership(int(membership_id), role_id=role_id)
+
+    return _companies_redirect(
+        company_id=company_id,
+        success=(
+            f"Updated access for {user_record.get('email')} at {company_record.get('name')}"
+        ),
+    )
+
+
 @app.post("/admin/companies/{company_id}", response_class=HTMLResponse)
 async def admin_update_company(company_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
@@ -4200,109 +4303,6 @@ async def admin_invite_company_user(request: Request):
         success_message=f"Invitation generated for {email}.",
         temporary_password=temporary_password,
         invited_email=email,
-    )
-
-
-@app.post("/admin/companies/assign", response_class=HTMLResponse)
-async def admin_assign_user_to_company(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    form = await request.form()
-    user_id_raw = form.get("userId") or form.get("user_id")
-    company_id_raw = form.get("companyId") or form.get("company_id")
-    try:
-        user_id = int(user_id_raw)
-        company_id = int(company_id_raw)
-    except (TypeError, ValueError):
-        response = await _render_companies_dashboard(
-            request,
-            current_user,
-            error_message="Select both a user and a company.",
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-        return response
-    user_record = await user_repo.get_user_by_id(user_id)
-    company_record = await company_repo.get_company_by_id(company_id)
-    if not user_record or not company_record:
-        response = await _render_companies_dashboard(
-            request,
-            current_user,
-            error_message="User or company not found.",
-            status_code=status.HTTP_404_NOT_FOUND,
-        )
-        return response
-    staff_permission_raw = form.get("staffPermission") or form.get("staff_permission")
-    try:
-        staff_permission = int(staff_permission_raw) if staff_permission_raw is not None else 0
-    except (TypeError, ValueError):
-        response = await _render_companies_dashboard(
-            request,
-            current_user,
-            selected_company_id=company_id,
-            error_message="Select a valid staff permission level.",
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-        return response
-    if staff_permission < 0:
-        staff_permission = 0
-    if staff_permission > 3:
-        staff_permission = 3
-
-    permission_values: dict[str, bool] = {}
-    for column in _COMPANY_PERMISSION_COLUMNS:
-        field = column.get("field")
-        if not field:
-            continue
-        permission_values[field] = _parse_bool(form.get(field))
-
-    can_manage_staff = _parse_bool(form.get("can_manage_staff"))
-
-    assign_kwargs: dict[str, Any] = {
-        "user_id": user_id,
-        "company_id": company_id,
-        "staff_permission": staff_permission,
-        "can_manage_staff": can_manage_staff,
-    }
-    for field, value in permission_values.items():
-        assign_kwargs[field] = value
-
-    await user_company_repo.assign_user_to_company(**assign_kwargs)
-
-    role_raw = form.get("roleId") or form.get("role_id")
-    if role_raw:
-        try:
-            role_id = int(role_raw)
-        except (TypeError, ValueError):
-            response = await _render_companies_dashboard(
-                request,
-                current_user,
-                selected_company_id=company_id,
-                error_message="Select a valid role for the membership.",
-                status_code=status.HTTP_400_BAD_REQUEST,
-            )
-            return response
-        role_record = await role_repo.get_role_by_id(role_id)
-        if not role_record:
-            response = await _render_companies_dashboard(
-                request,
-                current_user,
-                selected_company_id=company_id,
-                error_message="Selected role could not be found.",
-                status_code=status.HTTP_404_NOT_FOUND,
-            )
-            return response
-        membership = await membership_repo.get_membership_by_company_user(company_id, user_id)
-        if membership:
-            membership_id = membership.get("id")
-            if membership_id is not None and membership.get("role_id") != role_id:
-                await membership_repo.update_membership(int(membership_id), role_id=role_id)
-
-    return _companies_redirect(
-        company_id=company_id,
-        success=(
-            f"Updated access for {user_record.get('email')} at {company_record.get('name')}"
-        ),
     )
 
 
