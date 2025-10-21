@@ -27,6 +27,7 @@ from app.schemas.tickets import (
 )
 from app.security.session import SessionData
 from app.services import ticket_importer, tickets as tickets_service
+from app.services.sanitization import sanitize_rich_text
 
 HELPDESK_PERMISSION_KEY = "helpdesk.technician"
 
@@ -68,9 +69,14 @@ async def _build_ticket_detail(ticket_id: int, current_user: dict) -> TicketDeta
     watcher_records = []
     if has_helpdesk_access:
         watcher_records = await tickets_repo.list_watchers(ticket_id)
+    sanitised_replies = []
+    for reply in ordered_replies:
+        sanitised = sanitize_rich_text(str(reply.get("body") or ""))
+        sanitised_replies.append({**reply, "body": sanitised.html})
+
     return TicketDetail(
         **ticket,
-        replies=[TicketReply(**reply) for reply in ordered_replies],
+        replies=[TicketReply(**reply) for reply in sanitised_replies],
         watchers=[TicketWatcher(**watcher) for watcher in watcher_records],
     )
 
@@ -241,10 +247,17 @@ async def add_reply(
     has_helpdesk_access = await _has_helpdesk_permission(current_user)
     if not has_helpdesk_access and ticket.get("requester_id") != session.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    sanitised_body = sanitize_rich_text(payload.body)
+    if not sanitised_body.text_content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reply body cannot be empty.",
+        )
+
     reply = await tickets_repo.create_reply(
         ticket_id=ticket_id,
         author_id=session.user_id,
-        body=payload.body,
+        body=sanitised_body.html,
         is_internal=payload.is_internal if has_helpdesk_access else False,
     )
     try:
@@ -255,7 +268,9 @@ async def add_reply(
     updated_ticket = await tickets_repo.get_ticket(ticket_id)
     ticket_payload = updated_ticket or ticket
     ticket_response = TicketResponse(**ticket_payload)
-    return TicketReplyResponse(ticket=ticket_response, reply=TicketReply(**reply))
+    sanitised_reply_payload = sanitize_rich_text(str(reply.get("body") or ""))
+    reply_payload = {**reply, "body": sanitised_reply_payload.html}
+    return TicketReplyResponse(ticket=ticket_response, reply=TicketReply(**reply_payload))
 
 
 @router.put("/{ticket_id}/watchers", response_model=TicketDetail)
