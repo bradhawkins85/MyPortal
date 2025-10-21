@@ -1,3 +1,4 @@
+- 2025-12-21, 09:30 UTC, Feature, Added configurable auto-refresh websocket client with toast notifications before page reloads
 - 2025-10-21, 21:54 UTC, Feature, Added system refresh websocket notifier with super-admin broadcast API and audit logging
 - 2025-10-21, 12:33 UTC, Fix, Reordered company assignment route registration to stop FastAPI parsing the static path as a company ID
 - 2025-12-20, 10:30 UTC, Feature, Added super-admin ticket deletion control on the admin ticket detail page with secure backend handling and confirmation prompts

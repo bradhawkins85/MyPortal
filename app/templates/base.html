@@ -15,7 +15,10 @@
     {% endif %}
     {% block extra_head %}{% endblock %}
   </head>
-  <body class="theme-default">
+  <body
+    class="theme-default"
+    data-enable-auto-refresh="{{ 'true' if enable_auto_refresh else 'false' }}"
+  >
     <div class="layout" data-layout>
       <div class="layout__scrim" data-mobile-nav-scrim aria-hidden="true"></div>
       <nav class="layout__sidebar" id="primary-navigation" data-sidebar tabindex="-1">
@@ -336,7 +339,9 @@
         </section>
       </main>
     </div>
+    {% include "partials/notifications/toast.html" %}
     <script src="/static/js/pwa.js" defer></script>
+    <script src="/static/js/main.js" defer></script>
     <script>
       (function () {
         const tokenMeta = document.querySelector('meta[name="csrf-token"]');
