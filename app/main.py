@@ -756,6 +756,7 @@ async def _build_base_context(
         "is_company_admin": is_super_admin or bool(membership_data.get("is_admin")),
         "integration_modules": module_lookup,
         "syncro_module_enabled": bool((module_lookup or {}).get("syncro", {}).get("enabled")),
+        "enable_auto_refresh": bool(settings.enable_auto_refresh),
     }
     context.update(permission_flags)
     if extra:
@@ -820,6 +821,7 @@ async def _build_public_context(
         "can_manage_staff": False,
         "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
         "notification_unread_count": 0,
+        "enable_auto_refresh": bool(settings.enable_auto_refresh),
     }
     if extra:
         context.update(extra)

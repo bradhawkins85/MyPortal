@@ -2280,6 +2280,62 @@ body {
   color: #bbf7d0;
 }
 
+.alert--warning {
+  background: rgba(253, 224, 71, 0.18);
+  border: 1px solid rgba(253, 224, 71, 0.4);
+  color: #fef08a;
+}
+
+.notification-stack {
+  position: fixed;
+  right: var(--space-gap-roomy);
+  bottom: var(--space-gap-roomy);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+  z-index: 1200;
+  max-width: min(420px, 90vw);
+}
+
+.notification-toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-base);
+  box-shadow: 0 24px 45px -20px rgba(15, 23, 42, 0.85);
+  border-radius: 0.85rem;
+}
+
+.notification-toast[hidden] {
+  display: none;
+}
+
+.notification-toast__message {
+  flex: 1 1 auto;
+  font-weight: 500;
+}
+
+.notification-toast__dismiss {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .notification-stack {
+    left: var(--space-gap-roomy);
+    right: var(--space-gap-roomy);
+  }
+
+  .notification-toast {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .notification-toast__dismiss {
+    align-self: flex-end;
+  }
+}
+
 .notification-preference__event {
   display: flex;
   flex-direction: column;
