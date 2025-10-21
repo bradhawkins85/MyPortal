@@ -6068,6 +6068,17 @@ async def admin_create_ticket(request: Request):
         await tickets_repo.add_watcher(created["id"], current_user.get("id"))
         await tickets_service.refresh_ticket_ai_summary(created["id"])
         await tickets_service.refresh_ticket_ai_tags(created["id"])
+        try:
+            await automations_service.handle_event(
+                "tickets.created",
+                {"ticket": created},
+            )
+        except Exception as automation_exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to execute ticket creation automations",
+                ticket_id=created.get("id"),
+                error=str(automation_exc),
+            )
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create ticket", error=str(exc))
         return await _render_tickets_dashboard(
