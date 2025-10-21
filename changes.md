@@ -1,3 +1,4 @@
+- 2025-12-20, 09:00 UTC, Fix, Restored scheduler task creation responses by fetching the inserted row using the returned task ID
 - 2025-12-19, 16:10 UTC, Fix, Removed the AI tag status label entirely from the admin ticket detail view for a leaner tags section
 - 2025-10-21, 11:44 UTC, Fix, Removed succeeded/skipped AI tag status labels from the admin ticket detail view to declutter the tags section
 - 2025-10-21, 11:40 UTC, Feature, Rebuilt automation orchestration workspace with dedicated list and create pages plus quick-action navigation

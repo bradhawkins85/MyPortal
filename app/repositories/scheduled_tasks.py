@@ -73,7 +73,7 @@ async def create_task(
     max_retries: int = 12,
     retry_backoff_seconds: int = 300,
 ) -> dict[str, Any]:
-    await db.execute(
+    task_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO scheduled_tasks
             (company_id, name, command, cron, description, active, max_retries, retry_backoff_seconds)
@@ -90,8 +90,11 @@ async def create_task(
             max(1, retry_backoff_seconds),
         ),
     )
+    if not task_id:
+        return {}
     created = await db.fetch_one(
-        "SELECT * FROM scheduled_tasks WHERE id = LAST_INSERT_ID()",
+        "SELECT * FROM scheduled_tasks WHERE id = %s",
+        (task_id,),
     )
     return _normalise_task(created) if created else {}
 
