@@ -104,6 +104,9 @@ class WebhookEventAttemptResponse(BaseModel):
     response_status: int | None = Field(default=None, serialization_alias="responseStatus")
     response_body: str | None = Field(default=None, serialization_alias="responseBody")
     error_message: str | None = Field(default=None, serialization_alias="errorMessage")
+    request_headers: dict[str, Any] | None = Field(default=None, serialization_alias="requestHeaders")
+    request_body: Any = Field(default=None, serialization_alias="requestBody")
+    response_headers: dict[str, Any] | None = Field(default=None, serialization_alias="responseHeaders")
     attempted_at: datetime | None = Field(default=None, serialization_alias="attemptedAt")
 
     model_config = {

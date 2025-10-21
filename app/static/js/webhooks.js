@@ -1,5 +1,14 @@
 (function () {
   let attemptsModal = null;
+  let selectedAttemptRow = null;
+  let attemptPlaceholder = null;
+  let attemptDetailsWrapper = null;
+  let attemptRequestHeaders = null;
+  let attemptRequestBody = null;
+  let attemptResponseHeaders = null;
+  let attemptResponseBody = null;
+  let attemptResponseStatus = null;
+  let attemptResponseError = null;
 
   function getCookie(name) {
     const pattern = `(?:^|; )${name.replace(/([.$?*|{}()\[\]\\\/\+^])/g, '\\$1')}=([^;]*)`;
@@ -125,11 +134,12 @@
     tbody.innerHTML = '';
     const row = document.createElement('tr');
     const cell = document.createElement('td');
-    cell.colSpan = 5;
+    cell.colSpan = 6;
     cell.className = 'table__empty';
     cell.textContent = message;
     row.appendChild(cell);
     tbody.appendChild(row);
+    showAttemptPrompt(message);
   }
 
   function renderAttempts(attempts) {
@@ -181,8 +191,102 @@
       errorCell.textContent = errorMessage || '—';
       row.appendChild(errorCell);
 
+      const detailsCell = document.createElement('td');
+      detailsCell.className = 'table__actions';
+      const detailsButton = document.createElement('button');
+      detailsButton.type = 'button';
+      detailsButton.className = 'button button--ghost';
+      detailsButton.textContent = 'View details';
+      detailsButton.addEventListener('click', () => {
+        selectAttempt(row, attempt);
+      });
+      detailsCell.appendChild(detailsButton);
+      row.appendChild(detailsCell);
+
       tbody.appendChild(row);
     });
+    showAttemptPrompt('Select an attempt to inspect request and response payloads.');
+  }
+
+  function formatData(value) {
+    if (value === null || value === undefined) {
+      return '—';
+    }
+    if (typeof value === 'string') {
+      return value || '—';
+    }
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (error) {
+      try {
+        return String(value);
+      } catch (stringError) {
+        return '—';
+      }
+    }
+  }
+
+  function showAttemptPrompt(message) {
+    if (attemptPlaceholder) {
+      attemptPlaceholder.hidden = false;
+      attemptPlaceholder.textContent = message;
+    }
+    if (attemptDetailsWrapper) {
+      attemptDetailsWrapper.hidden = true;
+    }
+    if (selectedAttemptRow) {
+      selectedAttemptRow.classList.remove('table__row--active');
+      selectedAttemptRow = null;
+    }
+  }
+
+  function updateAttemptDetails(attempt) {
+    if (!attemptDetailsWrapper || !attemptPlaceholder) {
+      return;
+    }
+    if (!attempt) {
+      showAttemptPrompt('Select an attempt to inspect request and response payloads.');
+      return;
+    }
+    attemptPlaceholder.hidden = true;
+    attemptDetailsWrapper.hidden = false;
+
+    if (attemptRequestHeaders) {
+      const headers = attempt.request_headers || attempt.requestHeaders || null;
+      attemptRequestHeaders.textContent = formatData(headers);
+    }
+    if (attemptRequestBody) {
+      const body = attempt.request_body || attempt.requestBody || null;
+      attemptRequestBody.textContent = formatData(body);
+    }
+    if (attemptResponseHeaders) {
+      const headers = attempt.response_headers || attempt.responseHeaders || null;
+      attemptResponseHeaders.textContent = formatData(headers);
+    }
+    if (attemptResponseBody) {
+      const body = attempt.response_body || attempt.responseBody || null;
+      attemptResponseBody.textContent = formatData(body);
+    }
+    if (attemptResponseStatus) {
+      const statusCode =
+        attempt.response_status ?? attempt.responseStatus ?? attempt.statusCode ?? null;
+      attemptResponseStatus.textContent = statusCode !== null ? String(statusCode) : '—';
+    }
+    if (attemptResponseError) {
+      const errorMessage = attempt.error_message || attempt.errorMessage || attempt.error;
+      attemptResponseError.textContent = errorMessage || '—';
+    }
+  }
+
+  function selectAttempt(row, attempt) {
+    if (selectedAttemptRow) {
+      selectedAttemptRow.classList.remove('table__row--active');
+    }
+    selectedAttemptRow = row;
+    if (selectedAttemptRow) {
+      selectedAttemptRow.classList.add('table__row--active');
+    }
+    updateAttemptDetails(attempt);
   }
 
   async function showAttemptsModal(eventData) {
@@ -246,6 +350,14 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     attemptsModal = query('webhook-attempts-modal');
+    attemptPlaceholder = document.querySelector('[data-attempt-placeholder]');
+    attemptDetailsWrapper = document.querySelector('[data-attempt-details]');
+    attemptRequestHeaders = document.querySelector('[data-attempt-request-headers]');
+    attemptRequestBody = document.querySelector('[data-attempt-request-body]');
+    attemptResponseHeaders = document.querySelector('[data-attempt-response-headers]');
+    attemptResponseBody = document.querySelector('[data-attempt-response-body]');
+    attemptResponseStatus = document.querySelector('[data-attempt-response-status]');
+    attemptResponseError = document.querySelector('[data-attempt-response-error]');
     bindModalDismissal(attemptsModal);
     bindRetryButtons();
     bindAttemptsButtons();
