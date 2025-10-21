@@ -14,6 +14,7 @@ from app.repositories import knowledge_base as kb_repo
 from app.repositories import user_companies as user_company_repo
 from app.services import modules as modules_service
 from app.services.tagging import filter_helpful_texts
+from app.services.realtime import RefreshNotifier, refresh_notifier
 
 PermissionScope = str
 
@@ -449,6 +450,7 @@ async def create_article(
     payload: Mapping[str, Any],
     *,
     author_id: int | None,
+    notifier: RefreshNotifier | None = None,
 ) -> dict[str, Any]:
     permission_scope = str(payload.get("permission_scope") or "anonymous")
     is_published = bool(payload.get("is_published", False))
@@ -481,10 +483,17 @@ async def create_article(
     refreshed = await kb_repo.get_article_by_id(created["id"])
     if not refreshed:
         raise RuntimeError("Failed to load knowledge base article after creation")
+    resolved_notifier = notifier or refresh_notifier
+    await resolved_notifier.broadcast_refresh(reason="knowledge_base:article_created")
     return refreshed
 
 
-async def update_article(article_id: int, payload: Mapping[str, Any]) -> dict[str, Any]:
+async def update_article(
+    article_id: int,
+    payload: Mapping[str, Any],
+    *,
+    notifier: RefreshNotifier | None = None,
+) -> dict[str, Any]:
     current = await kb_repo.get_article_by_id(article_id)
     if not current:
         raise ValueError("Article not found")
@@ -529,11 +538,15 @@ async def update_article(article_id: int, payload: Mapping[str, Any]) -> dict[st
     refreshed = await kb_repo.get_article_by_id(article_id)
     if not refreshed:
         raise RuntimeError("Failed to refresh article after update")
+    resolved_notifier = notifier or refresh_notifier
+    await resolved_notifier.broadcast_refresh(reason="knowledge_base:article_updated")
     return refreshed
 
 
-async def delete_article(article_id: int) -> None:
+async def delete_article(article_id: int, *, notifier: RefreshNotifier | None = None) -> None:
     await kb_repo.delete_article(article_id)
+    resolved_notifier = notifier or refresh_notifier
+    await resolved_notifier.broadcast_refresh(reason="knowledge_base:article_deleted")
 
 
 async def _sync_relations(article_id: int, permission_scope: str, payload: Mapping[str, Any]) -> None:

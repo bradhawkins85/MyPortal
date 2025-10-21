@@ -15,6 +15,7 @@ from app.core.database import db
 from app.repositories import integration_modules as module_repo
 from app.repositories import webhook_events as webhook_repo
 from app.services import email as email_service, webhook_monitor
+from app.services.realtime import RefreshNotifier, refresh_notifier
 
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
@@ -389,10 +390,14 @@ async def update_module(
     *,
     enabled: bool | None = None,
     settings: Mapping[str, Any] | None = None,
+    notifier: RefreshNotifier | None = None,
 ) -> dict[str, Any] | None:
     existing = await module_repo.get_module(slug)
     coerced = _coerce_settings(slug, settings, existing) if settings is not None else None
     updated = await module_repo.update_module(slug, enabled=enabled, settings=coerced)
+    if updated:
+        resolved_notifier = notifier or refresh_notifier
+        await resolved_notifier.broadcast_refresh(reason=f"modules:updated:{slug}")
     return _redact_module_settings(updated) if updated else None
 
 
