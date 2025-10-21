@@ -42,6 +42,8 @@ async def create_task(
     __: dict[str, Any] = Depends(require_super_admin),
 ) -> ScheduledTaskResponse:
     data = payload.model_dump(by_alias=False)
+    raw_max_retries = data.get("max_retries")
+    raw_retry_backoff = data.get("retry_backoff_seconds")
     created = await scheduled_tasks_repo.create_task(
         name=data["name"],
         command=data["command"],
@@ -49,8 +51,10 @@ async def create_task(
         company_id=data.get("company_id"),
         description=data.get("description"),
         active=data.get("active", True),
-        max_retries=int(data.get("max_retries", 0) or 0),
-        retry_backoff_seconds=int(data.get("retry_backoff_seconds", 300) or 300),
+        max_retries=int(raw_max_retries if raw_max_retries is not None else 12),
+        retry_backoff_seconds=int(
+            raw_retry_backoff if raw_retry_backoff is not None else 300
+        ),
     )
     await scheduler_service.refresh()
     return ScheduledTaskResponse.model_validate(created)
@@ -84,6 +88,8 @@ async def update_task(
         for key, value in updates.items()
         if value is not None
     }
+    raw_max_retries = merged.get("max_retries")
+    raw_retry_backoff = merged.get("retry_backoff_seconds")
     updated = await scheduled_tasks_repo.update_task(
         task_id,
         name=merged["name"],
@@ -92,8 +98,10 @@ async def update_task(
         company_id=merged.get("company_id"),
         description=merged.get("description"),
         active=bool(merged.get("active", True)),
-        max_retries=int(merged.get("max_retries", 0) or 0),
-        retry_backoff_seconds=int(merged.get("retry_backoff_seconds", 300) or 300),
+        max_retries=int(raw_max_retries if raw_max_retries is not None else 12),
+        retry_backoff_seconds=int(
+            raw_retry_backoff if raw_retry_backoff is not None else 300
+        ),
     )
     await scheduler_service.refresh()
     return ScheduledTaskResponse.model_validate(updated)

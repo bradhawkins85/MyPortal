@@ -33,7 +33,6 @@
           {% set ai_status_label = ai_status_lower.replace('_', ' ') | title %}
           {% set tag_status_value = ticket.ai_tags_status if ticket.ai_tags_status is not none else 'skipped' %}
           {% set tag_status_lower = tag_status_value | lower %}
-          {% set tag_status_label = tag_status_lower.replace('_', ' ') | title %}
           <p class="management__subtitle">
             Ticket #{{ ticket.id }}
             <span class="badge {{ status_badge_map.get(ticket_status, 'badge--muted') }}">{{ ticket_status.replace('_', ' ') }}</span>
@@ -152,7 +151,6 @@
                   <div class="definition-list__item">
                     <dt>AI Tags</dt>
                     <dd>
-                      <div>{{ tag_status_label }}</div>
                       {% if tag_status_lower == 'succeeded' and ticket.ai_tags %}
                         <div class="tag-list">
                           {% for tag in ticket.ai_tags %}
