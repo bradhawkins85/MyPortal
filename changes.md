@@ -1,4 +1,6 @@
 - 2025-12-14, 09:00 UTC, Feature, Enriched Syncro ticket import to persist ticket numbers, map companies by business name, sync comment replies, and subscribe watcher emails from destination lists
+- 2025-10-21, 10:39 UTC, Feature, Auto-created missing companies from Syncro ticket imports using returned customer details to keep tickets linked
+- 2025-10-21, 10:39 UTC, Fix, Displayed ticket conversation history with newest replies first across admin views, APIs, and AI prompts
 - 2025-10-21, 07:59 UTC, Feature, Persisted webhook attempt request and response payloads with an admin monitor detail viewer for troubleshooting
 - 2025-12-13, 18:00 UTC, Fix, Loaded the admin.js bundle on the Syncro ticket import page so the import forms trigger the API workflow
 - 2025-12-13, 17:15 UTC, Fix, Added detailed Syncro ticket import logging for admin requests and webhook lifecycle events to troubleshoot missing monitor processing

@@ -152,6 +152,8 @@ def _iter_company_name_candidates(ticket: dict[str, Any]):
     fields = [
         ticket.get("customer_business_then_name"),
         ticket.get("business_then_name"),
+        ticket.get("customer_business_name"),
+        ticket.get("customer_name"),
     ]
     customer = ticket.get("customer")
     if isinstance(customer, dict):
@@ -160,6 +162,7 @@ def _iter_company_name_candidates(ticket: dict[str, Any]):
                 customer.get("business_then_name"),
                 customer.get("business_name"),
                 customer.get("name"),
+                customer.get("company_name"),
             ]
         )
     for field in fields:
@@ -170,6 +173,31 @@ def _iter_company_name_candidates(ticket: dict[str, Any]):
         segments = [segment.strip() for segment in re.split(r"\s*[-–—]\s*", text) if segment.strip()]
         if segments:
             yield segments[0]
+
+
+def _extract_syncro_company_ids(ticket: dict[str, Any]) -> list[str]:
+    seen: set[str] = set()
+    syncro_ids: list[str] = []
+    keys = ("customer_id", "customerId", "customerid", "client_id")
+    for key in keys:
+        value = ticket.get(key)
+        text = _clean_text(value)
+        if not text:
+            continue
+        if text not in seen:
+            seen.add(text)
+            syncro_ids.append(text)
+    customer = ticket.get("customer")
+    if isinstance(customer, dict):
+        for key in ("id", "customer_id"):
+            value = customer.get(key)
+            text = _clean_text(value)
+            if not text:
+                continue
+            if text not in seen:
+                seen.add(text)
+                syncro_ids.append(text)
+    return syncro_ids
 
 
 def _normalise_email(value: Any) -> str | None:
@@ -363,17 +391,7 @@ async def _sync_ticket_watchers(
 
 
 async def _resolve_company_id(ticket: dict[str, Any]) -> int | None:
-    syncro_ids: list[str] = []
-    for key in ("customer_id", "customerId", "customerid", "client_id"):
-        value = ticket.get(key)
-        if value is not None:
-            syncro_ids.append(str(value))
-    customer = ticket.get("customer")
-    if isinstance(customer, dict):
-        for key in ("id", "customer_id"):
-            value = customer.get(key)
-            if value is not None:
-                syncro_ids.append(str(value))
+    syncro_ids = _extract_syncro_company_ids(ticket)
     for syncro_id in syncro_ids:
         try:
             company = await company_repo.get_company_by_syncro_id(syncro_id)
@@ -385,7 +403,8 @@ async def _resolve_company_id(ticket: dict[str, Any]) -> int | None:
                 return int(company["id"])
             except (TypeError, ValueError):
                 continue
-    for name in _iter_company_name_candidates(ticket):
+    name_candidates = list(_iter_company_name_candidates(ticket))
+    for name in name_candidates:
         try:
             company = await company_repo.get_company_by_name(name)
         except RuntimeError as exc:  # pragma: no cover - defensive logging
@@ -396,6 +415,38 @@ async def _resolve_company_id(ticket: dict[str, Any]) -> int | None:
                 return int(company["id"])
             except (TypeError, ValueError):
                 continue
+    primary_name = name_candidates[0] if name_candidates else None
+    primary_syncro_id = syncro_ids[0] if syncro_ids else None
+    if not primary_name and primary_syncro_id:
+        primary_name = f"Syncro Customer {primary_syncro_id}"
+    if not primary_name:
+        return None
+    payload: dict[str, Any] = {"name": primary_name}
+    if primary_syncro_id:
+        payload["syncro_company_id"] = primary_syncro_id
+    try:
+        created = await company_repo.create_company(**payload)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to auto-create company from Syncro ticket",
+            company_name=primary_name,
+            syncro_company_id=primary_syncro_id,
+            error=str(exc),
+        )
+        return None
+    created_id = created.get("id") if isinstance(created, dict) else None
+    if created_id is None:
+        return None
+    log_info(
+        "Auto-created company from Syncro ticket",
+        company_id=created_id,
+        company_name=primary_name,
+        syncro_company_id=primary_syncro_id,
+    )
+    try:
+        return int(created_id)
+    except (TypeError, ValueError):
+        return None
     return None
 
 

@@ -399,10 +399,18 @@ def test_ticket_detail_filters_private_replies_for_requester(monkeypatch):
                 "id": 1,
                 "ticket_id": ticket_id,
                 "author_id": 5,
-                "body": "Public reply",
+                "body": "Older reply",
+                "is_internal": False,
+                "created_at": now - timedelta(hours=1),
+            },
+            {
+                "id": 2,
+                "ticket_id": ticket_id,
+                "author_id": 5,
+                "body": "Newer reply",
                 "is_internal": False,
                 "created_at": now,
-            }
+            },
         ]
 
     async def fake_list_watchers(*args, **kwargs):
@@ -428,8 +436,9 @@ def test_ticket_detail_filters_private_replies_for_requester(monkeypatch):
     body = response.json()
     assert captured.get("include_internal") is False
     assert body["watchers"] == []
-    assert len(body["replies"]) == 1
-    assert body["replies"][0]["body"] == "Public reply"
+    assert len(body["replies"]) == 2
+    assert body["replies"][0]["body"] == "Newer reply"
+    assert body["replies"][1]["body"] == "Older reply"
 
 
 def test_helpdesk_ticket_listing_allows_global_filters(monkeypatch):
