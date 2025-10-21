@@ -34,6 +34,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - Uptime Kuma integration module to receive monitoring alerts over secure HTTP POST webhooks with shared-secret validation
 - ChatGPT MCP module providing secure ticket triage tools and automations to OpenAI ChatGPT via the Model Context Protocol
 - Syncro ticket importer with super admin UI controls, rate limiting, and REST API access for bulk migrations
+- Realtime refresh channel via `/ws/refresh` with a super-admin broadcast API at `/api/system/refresh`
 
 ## Syncro Ticket Importer
 
@@ -110,6 +111,19 @@ for richer clients:
 - `GET /api/notifications/event-types` – Provides the distinct notification
   event types available to the authenticated user by combining defaults,
   preferences, and recorded history.
+
+## System Refresh API
+
+Realtime clients can subscribe to `/ws/refresh` to receive JSON messages when a
+super administrator broadcasts a refresh event. Each payload includes a UTC
+timestamp and optional metadata so dashboards can invalidate caches or reload
+their data sources without polling.
+
+Super administrators trigger the broadcast from `POST /api/system/refresh`. The
+endpoint records an audit log entry detailing how many websocket clients were
+contacted, ensuring refresh actions remain traceable. Responses include
+`attempted`, `delivered`, and `dropped` counts so operational tooling can
+surface delivery metrics in admin dashboards.
 
 ## ChatGPT MCP Module
 
