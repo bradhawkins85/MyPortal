@@ -111,12 +111,13 @@ async def create_ticket(
     category: str | None,
     module_slug: str | None,
     external_reference: str | None,
+    ticket_number: str | None = None,
 ) -> TicketRecord:
     ticket_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO tickets
-            (company_id, requester_id, assigned_user_id, subject, description, status, priority, category, module_slug, external_reference)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (company_id, requester_id, assigned_user_id, subject, description, status, priority, category, module_slug, external_reference, ticket_number)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -129,6 +130,7 @@ async def create_ticket(
             category,
             module_slug,
             external_reference,
+            ticket_number,
         ),
     )
     if ticket_id:
@@ -147,6 +149,7 @@ async def create_ticket(
         "category": category,
         "module_slug": module_slug,
         "external_reference": external_reference,
+        "ticket_number": ticket_number,
         "ai_summary": None,
         "ai_summary_status": None,
         "ai_summary_model": None,
@@ -315,13 +318,24 @@ async def create_reply(
     author_id: int | None,
     body: str,
     is_internal: bool = False,
+    external_reference: str | None = None,
+    created_at: datetime | None = None,
 ) -> TicketRecord:
+    columns = ["ticket_id", "author_id", "body", "is_internal"]
+    params: list[Any] = [ticket_id, author_id, body, 1 if is_internal else 0]
+    if external_reference is not None:
+        columns.append("external_reference")
+        params.append(external_reference)
+    if created_at is not None:
+        columns.append("created_at")
+        params.append(created_at)
+    placeholders = ", ".join(["%s"] * len(columns))
     reply_id = await db.execute_returning_lastrowid(
-        """
-        INSERT INTO ticket_replies (ticket_id, author_id, body, is_internal)
-        VALUES (%s, %s, %s, %s)
+        f"""
+        INSERT INTO ticket_replies ({', '.join(columns)})
+        VALUES ({placeholders})
         """,
-        (ticket_id, author_id, body, 1 if is_internal else 0),
+        tuple(params),
     )
     if reply_id:
         row = await db.fetch_one("SELECT * FROM ticket_replies WHERE id = %s", (reply_id,))
@@ -333,7 +347,8 @@ async def create_reply(
         "author_id": author_id,
         "body": body,
         "is_internal": 1 if is_internal else 0,
-        "created_at": None,
+        "external_reference": external_reference,
+        "created_at": created_at,
     }
     return _normalise_reply(fallback_row)
 

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
 import json
 from typing import Any
 
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import users as user_repo
 from app.repositories import webhook_events as webhook_events_repo
 from app.services import syncro, webhook_monitor
 
@@ -50,6 +52,12 @@ def _clean_text(value: Any) -> str | None:
 
 
 def _normalise_status(value: Any) -> str:
+    if isinstance(value, dict):
+        for key in ("name", "status", "label"):
+            text_value = value.get(key)
+            if text_value:
+                value = text_value
+                break
     text = _clean_text(value)
     if not text:
         return _DEFAULT_STATUS
@@ -68,6 +76,12 @@ def _normalise_status(value: Any) -> str:
 
 
 def _normalise_priority(value: Any) -> str:
+    if isinstance(value, dict):
+        for key in ("name", "priority", "label"):
+            text_value = value.get(key)
+            if text_value:
+                value = text_value
+                break
     text = _clean_text(value)
     if not text:
         return _DEFAULT_PRIORITY
@@ -118,6 +132,236 @@ def _extract_description(ticket: dict[str, Any]) -> str | None:
     return None
 
 
+def _extract_ticket_number(ticket: dict[str, Any]) -> str | None:
+    candidates = [
+        ticket.get("ticket_number"),
+        ticket.get("ticketNumber"),
+        ticket.get("number"),
+        ticket.get("ticket_no"),
+        ticket.get("ticketNo"),
+    ]
+    for candidate in candidates:
+        text = _clean_text(candidate)
+        if text:
+            return text
+    fallback = ticket.get("id")
+    return str(fallback) if fallback is not None else None
+
+
+def _iter_company_name_candidates(ticket: dict[str, Any]):
+    fields = [
+        ticket.get("customer_business_then_name"),
+        ticket.get("business_then_name"),
+    ]
+    customer = ticket.get("customer")
+    if isinstance(customer, dict):
+        fields.extend(
+            [
+                customer.get("business_then_name"),
+                customer.get("business_name"),
+                customer.get("name"),
+            ]
+        )
+    for field in fields:
+        text = _clean_text(field)
+        if not text:
+            continue
+        yield text
+        segments = [segment.strip() for segment in re.split(r"\s*[-–—]\s*", text) if segment.strip()]
+        if segments:
+            yield segments[0]
+
+
+def _normalise_email(value: Any) -> str | None:
+    text = _clean_text(value)
+    if not text or "@" not in text:
+        return None
+    return text
+
+
+def _extract_contact_email(ticket: dict[str, Any]) -> str | None:
+    contact = ticket.get("contact")
+    if isinstance(contact, dict):
+        for key in ("email", "primary_email", "contact_email"):
+            email = _normalise_email(contact.get(key))
+            if email:
+                return email
+    for key in ("contact_email", "contactEmail", "customer_email", "email"):
+        email = _normalise_email(ticket.get(key))
+        if email:
+            return email
+    return None
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = _clean_text(value)
+    if not text:
+        return False
+    return text.lower() in {"1", "true", "yes", "y", "t"}
+
+
+def _extract_comments(ticket: dict[str, Any]) -> list[dict[str, Any]]:
+    for key in ("comments", "ticket_comments", "ticketComments"):
+        comments = ticket.get(key)
+        if isinstance(comments, list):
+            return [comment for comment in comments if isinstance(comment, dict)]
+    return []
+
+
+def _extract_destination_emails(comment: dict[str, Any]) -> set[str]:
+    raw = comment.get("destination_emails") or comment.get("destinationEmails")
+    emails: set[str] = set()
+
+    def _add(candidate: Any) -> None:
+        email = _normalise_email(candidate)
+        if email:
+            emails.add(email)
+
+    if isinstance(raw, str):
+        for segment in re.split(r"[,;\s]+", raw):
+            _add(segment)
+    elif isinstance(raw, dict):
+        for key in ("email", "address", "value"):
+            _add(raw.get(key))
+    elif isinstance(raw, (list, tuple, set)):
+        for item in raw:
+            if isinstance(item, dict):
+                for key in ("email", "address", "value"):
+                    _add(item.get(key))
+            else:
+                _add(item)
+    return emails
+
+
+def _gather_comment_watchers(comments: list[dict[str, Any]]) -> set[str]:
+    watchers: dict[str, str] = {}
+    for comment in comments:
+        for email in _extract_destination_emails(comment):
+            key = email.lower()
+            if key not in watchers:
+                watchers[key] = email
+    return set(watchers.values())
+
+
+def _should_comment_be_internal(comment: dict[str, Any]) -> bool:
+    tech = _clean_text(comment.get("tech"))
+    if tech and tech.lower() == "customer-reply":
+        return False
+    return _coerce_bool(comment.get("hidden"))
+
+
+async def _resolve_user_id_by_email(email: str | None) -> int | None:
+    if not email:
+        return None
+    try:
+        user = await user_repo.get_user_by_email(email)
+    except RuntimeError as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to resolve user from email", email=email, error=str(exc))
+        return None
+    if not user or user.get("id") is None:
+        return None
+    try:
+        return int(user["id"])
+    except (TypeError, ValueError):
+        return None
+
+
+async def _sync_ticket_replies(ticket_id: int, comments: list[dict[str, Any]]) -> None:
+    if not comments:
+        return
+    try:
+        existing = await tickets_repo.list_replies(ticket_id)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to fetch existing ticket replies", ticket_id=ticket_id, error=str(exc))
+        existing = []
+    known_refs = {
+        str(reply.get("external_reference"))
+        for reply in existing
+        if reply.get("external_reference") is not None
+    }
+    for comment in comments:
+        body = _clean_text(
+            comment.get("body")
+            or comment.get("comment")
+            or comment.get("text")
+            or comment.get("content")
+        )
+        if not body:
+            continue
+        external_ref_raw = (
+            comment.get("id")
+            or comment.get("comment_id")
+            or comment.get("commentId")
+            or comment.get("guid")
+        )
+        external_ref = str(external_ref_raw) if external_ref_raw is not None else None
+        if external_ref and external_ref in known_refs:
+            continue
+        created_at = _parse_datetime(
+            comment.get("created_at")
+            or comment.get("created_on")
+            or comment.get("created")
+            or comment.get("updated_at")
+        )
+        is_internal = _should_comment_be_internal(comment)
+        await tickets_repo.create_reply(
+            ticket_id=ticket_id,
+            author_id=None,
+            body=body,
+            is_internal=is_internal,
+            external_reference=external_ref,
+            created_at=created_at,
+        )
+        if external_ref:
+            known_refs.add(external_ref)
+
+
+async def _sync_ticket_watchers(
+    ticket_id: int,
+    comments: list[dict[str, Any]],
+    contact_email: str | None,
+) -> None:
+    watchers = _gather_comment_watchers(comments)
+    if contact_email:
+        watchers = {email for email in watchers if email.lower() != contact_email.lower()}
+    watchers = {
+        email
+        for email in watchers
+        if email.lower() != "support@hawkinsitsolutions.com.au"
+    }
+    if not watchers:
+        return
+    try:
+        existing = await tickets_repo.list_watchers(ticket_id)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to fetch existing ticket watchers", ticket_id=ticket_id, error=str(exc))
+        existing = []
+    existing_ids = {
+        int(watcher["user_id"])
+        for watcher in existing
+        if watcher.get("user_id") is not None
+    }
+    for email in sorted(watchers, key=lambda value: value.lower()):
+        user_id = await _resolve_user_id_by_email(email)
+        if user_id is None or user_id in existing_ids:
+            continue
+        try:
+            await tickets_repo.add_watcher(ticket_id, user_id)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to add ticket watcher",
+                ticket_id=ticket_id,
+                email=email,
+                error=str(exc),
+            )
+            continue
+        existing_ids.add(user_id)
+
+
 async def _resolve_company_id(ticket: dict[str, Any]) -> int | None:
     syncro_ids: list[str] = []
     for key in ("customer_id", "customerId", "customerid", "client_id"):
@@ -141,6 +385,17 @@ async def _resolve_company_id(ticket: dict[str, Any]) -> int | None:
                 return int(company["id"])
             except (TypeError, ValueError):
                 continue
+    for name in _iter_company_name_candidates(ticket):
+        try:
+            company = await company_repo.get_company_by_name(name)
+        except RuntimeError as exc:  # pragma: no cover - defensive logging
+            log_error("Failed to resolve company from name", company_name=name, error=str(exc))
+            continue
+        if company and company.get("id") is not None:
+            try:
+                return int(company["id"])
+            except (TypeError, ValueError):
+                continue
     return None
 
 
@@ -158,6 +413,9 @@ async def _upsert_ticket(
     status = _normalise_status(ticket.get("status_name") or ticket.get("status"))
     priority = _normalise_priority(ticket.get("priority"))
     category = _clean_text(ticket.get("type") or ticket.get("category"))
+    ticket_number = _extract_ticket_number(ticket)
+    contact_email = _extract_contact_email(ticket)
+    requester_id = await _resolve_user_id_by_email(contact_email)
 
     created_at = _parse_datetime(
         ticket.get("created_at")
@@ -192,6 +450,8 @@ async def _upsert_ticket(
             "description": description_value,
             "status": status,
             "priority": priority,
+            "ticket_number": ticket_number,
+            "requester_id": requester_id,
         }
         if category_value is not None:
             updates["category"] = category_value
@@ -204,12 +464,13 @@ async def _upsert_ticket(
         if updated_at is not None:
             updates["updated_at"] = updated_at
         await tickets_repo.update_ticket(int(existing["id"]), **updates)
-        return "updated"
-
-    created = await tickets_repo.create_ticket(
-        subject=subject,
+        ticket_db_id = int(existing["id"])
+        outcome = "updated"
+    else:
+        created = await tickets_repo.create_ticket(
+            subject=subject,
         description=description_value,
-        requester_id=None,
+        requester_id=requester_id,
         company_id=company_id,
         assigned_user_id=None,
         priority=priority,
@@ -217,18 +478,27 @@ async def _upsert_ticket(
         category=category_value,
         module_slug=None,
         external_reference=external_reference,
+        ticket_number=ticket_number,
     )
-    created_id = created.get("id")
-    if created_id is not None and any((created_at, updated_at, closed_at)):
-        timestamp_updates: dict[str, Any] = {}
-        if created_at is not None:
-            timestamp_updates["created_at"] = created_at
-        if updated_at is not None:
-            timestamp_updates["updated_at"] = updated_at
-        if closed_at is not None:
-            timestamp_updates["closed_at"] = closed_at
-        await tickets_repo.update_ticket(int(created_id), **timestamp_updates)
-    return "created"
+        created_id = created.get("id")
+        ticket_db_id = int(created_id) if created_id is not None else None
+        if created_id is not None and any((created_at, updated_at, closed_at)):
+            timestamp_updates: dict[str, Any] = {}
+            if created_at is not None:
+                timestamp_updates["created_at"] = created_at
+            if updated_at is not None:
+                timestamp_updates["updated_at"] = updated_at
+            if closed_at is not None:
+                timestamp_updates["closed_at"] = closed_at
+            await tickets_repo.update_ticket(int(created_id), **timestamp_updates)
+        outcome = "created"
+
+    comments = _extract_comments(ticket)
+    if ticket_db_id is not None:
+        await _sync_ticket_replies(ticket_db_id, comments)
+        await _sync_ticket_watchers(ticket_db_id, comments, contact_email)
+
+    return outcome
 
 
 async def import_ticket_by_id(
