@@ -8,6 +8,7 @@ from typing import Any
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import webhook_events as webhook_events_repo
 from app.services import syncro, webhook_monitor
 
 _ALLOWED_PRIORITIES = {"urgent", "high", "normal", "low"}
@@ -389,6 +390,39 @@ async def import_from_request(
             event_id = int(event["id"])
         except (TypeError, ValueError):  # pragma: no cover - defensive casting
             event_id = None
+
+    if event_id is None:
+        try:
+            fallback_event = await webhook_events_repo.create_event(
+                name="syncro.ticket.import",
+                target_url=target_url,
+                payload=payload,
+                max_attempts=1,
+                backoff_seconds=0,
+            )
+        except Exception as fallback_exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to create fallback Syncro ticket import event",
+                mode=mode_lower,
+                error=str(fallback_exc),
+            )
+            fallback_event = None
+        else:
+            fallback_raw_id = fallback_event.get("id") if fallback_event else None
+            try:
+                event_id = int(fallback_raw_id) if fallback_raw_id is not None else None
+            except (TypeError, ValueError):  # pragma: no cover - defensive casting
+                event_id = None
+            if event_id is not None:
+                try:
+                    await webhook_events_repo.mark_in_progress(event_id)
+                except Exception as mark_exc:  # pragma: no cover - defensive logging
+                    log_error(
+                        "Failed to mark fallback Syncro ticket import event in progress",
+                        event_id=event_id,
+                        error=str(mark_exc),
+                    )
+                    event_id = None
 
     async def _record_failure(error: Exception) -> None:
         if event_id is None:

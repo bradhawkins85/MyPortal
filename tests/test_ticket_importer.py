@@ -241,6 +241,143 @@ async def test_import_from_request_records_webhook_success(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_import_from_request_falls_back_to_repo(monkeypatch):
+    summary = ticket_importer.TicketImportSummary(mode="single", fetched=1, created=1)
+
+    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None):
+        assert ticket_id == 21
+        return summary
+
+    recorded: dict[str, dict[str, object]] = {}
+
+    async def fake_create_manual_event(**kwargs):
+        raise RuntimeError("webhook monitor unavailable")
+
+    async def fake_create_event(**kwargs):
+        recorded["fallback_create"] = kwargs
+        return {"id": 55}
+
+    async def fake_mark_in_progress(event_id):
+        recorded["mark_in_progress"] = {"event_id": event_id}
+
+    async def fake_record_success(event_id, *, attempt_number, response_status, response_body):
+        recorded["success"] = {
+            "event_id": event_id,
+            "attempt_number": attempt_number,
+            "response_status": response_status,
+            "response_body": response_body,
+        }
+
+    monkeypatch.setattr(ticket_importer, "import_ticket_by_id", fake_import_ticket_by_id)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "create_manual_event", fake_create_manual_event)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "record_manual_success", fake_record_success)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "record_manual_failure", lambda *_, **__: None)
+    monkeypatch.setattr(ticket_importer.webhook_events_repo, "create_event", fake_create_event)
+    monkeypatch.setattr(ticket_importer.webhook_events_repo, "mark_in_progress", fake_mark_in_progress)
+
+    result = await ticket_importer.import_from_request(
+        mode="single", ticket_id=21, start_id=None, end_id=None, rate_limiter=None
+    )
+
+    assert result is summary
+    assert recorded["fallback_create"]["name"] == "syncro.ticket.import"
+    assert recorded["mark_in_progress"]["event_id"] == 55
+    success_payload = json.loads(recorded["success"]["response_body"])
+    assert success_payload == summary.as_dict()
+    assert recorded["success"]["event_id"] == 55
+
+
+@pytest.mark.anyio
+async def test_import_from_request_fallback_repo_create_failure(monkeypatch):
+    summary = ticket_importer.TicketImportSummary(mode="single", fetched=1, created=1)
+
+    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None):
+        assert ticket_id == 22
+        return summary
+
+    errors: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_create_manual_event(**_kwargs):
+        raise RuntimeError("webhook monitor down")
+
+    async def fake_create_event(**_kwargs):
+        raise RuntimeError("database unavailable")
+
+    async def fake_mark_in_progress(_event_id):  # pragma: no cover - should not be called
+        raise AssertionError("mark_in_progress should not be invoked when creation fails")
+
+    async def fake_record_success(*_args, **_kwargs):  # pragma: no cover - should not be called
+        raise AssertionError("record_manual_success should not be called without an event")
+
+    def fake_log_error(message, **kwargs):
+        errors.append((message, kwargs))
+
+    monkeypatch.setattr(ticket_importer, "import_ticket_by_id", fake_import_ticket_by_id)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "create_manual_event", fake_create_manual_event)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "record_manual_success", fake_record_success)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "record_manual_failure", lambda *_, **__: None)
+    monkeypatch.setattr(ticket_importer.webhook_events_repo, "create_event", fake_create_event)
+    monkeypatch.setattr(ticket_importer.webhook_events_repo, "mark_in_progress", fake_mark_in_progress)
+    monkeypatch.setattr(ticket_importer, "log_error", fake_log_error)
+
+    result = await ticket_importer.import_from_request(
+        mode="single", ticket_id=22, start_id=None, end_id=None, rate_limiter=None
+    )
+
+    assert result is summary
+    messages = [message for message, _payload in errors]
+    assert "Failed to create fallback Syncro ticket import event" in messages
+
+
+@pytest.mark.anyio
+async def test_import_from_request_fallback_mark_in_progress_failure(monkeypatch):
+    summary = ticket_importer.TicketImportSummary(mode="single", fetched=1, created=1)
+
+    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None):
+        assert ticket_id == 23
+        return summary
+
+    recorded: dict[str, object] = {}
+
+    async def fake_create_manual_event(**_kwargs):
+        raise RuntimeError("webhook monitor down")
+
+    async def fake_create_event(**kwargs):
+        recorded["create_event"] = kwargs
+        return {"id": 66}
+
+    async def fake_mark_in_progress(event_id):
+        recorded["mark_in_progress_attempt"] = event_id
+        raise RuntimeError("write lock timeout")
+
+    async def fake_record_success(*_args, **_kwargs):  # pragma: no cover - should not be called
+        raise AssertionError("record_manual_success should not be called when mark_in_progress fails")
+
+    errors: list[tuple[str, dict[str, object]]] = []
+
+    def fake_log_error(message, **kwargs):
+        errors.append((message, kwargs))
+
+    monkeypatch.setattr(ticket_importer, "import_ticket_by_id", fake_import_ticket_by_id)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "create_manual_event", fake_create_manual_event)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "record_manual_success", fake_record_success)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "record_manual_failure", lambda *_, **__: None)
+    monkeypatch.setattr(ticket_importer.webhook_events_repo, "create_event", fake_create_event)
+    monkeypatch.setattr(ticket_importer.webhook_events_repo, "mark_in_progress", fake_mark_in_progress)
+    monkeypatch.setattr(ticket_importer, "log_error", fake_log_error)
+
+    result = await ticket_importer.import_from_request(
+        mode="single", ticket_id=23, start_id=None, end_id=None, rate_limiter=None
+    )
+
+    assert result is summary
+    assert recorded["create_event"]["name"] == "syncro.ticket.import"
+    assert recorded["mark_in_progress_attempt"] == 66
+    messages = [message for message, _payload in errors]
+    assert "Failed to mark fallback Syncro ticket import event in progress" in messages
+
+
+@pytest.mark.anyio
 async def test_import_from_request_records_webhook_failure(monkeypatch):
     async def fake_import_ticket_by_id(ticket_id, rate_limiter=None):
         raise RuntimeError("boom")
