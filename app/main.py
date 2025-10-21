@@ -82,7 +82,7 @@ from app.repositories import cart as cart_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import staff as staff_repo
 from app.repositories import tickets as tickets_repo
-from app.repositories import automations as automations_repo
+from app.repositories import automations as automation_repo
 from app.repositories import integration_modules as integration_modules_repo
 from app.repositories import webhook_events as webhook_events_repo
 from app.repositories import user_companies as user_company_repo
@@ -6314,7 +6314,7 @@ async def _render_automations_dashboard(
     error_message: str | None = None,
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
-    automations = await automations_repo.list_automations(
+    automations = await automation_repo.list_automations(
         status=status_filter,
         kind=kind_filter,
         limit=200,
