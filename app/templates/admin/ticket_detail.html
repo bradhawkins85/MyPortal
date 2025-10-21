@@ -25,6 +25,15 @@
             'resolved': 'badge--success',
             'closed': 'badge--muted'
           } %}
+          {% set ai_badge_map = {'succeeded': 'badge--success', 'error': 'badge--danger', 'skipped': 'badge--muted', 'unknown': 'badge--muted'} %}
+          {% set resolution_label_map = {'likely_resolved': 'Likely Resolved', 'likely_in_progress': 'Likely In Progress'} %}
+          {% set resolution_badge_map = {'likely_resolved': 'badge--success', 'likely_in_progress': 'badge--warning'} %}
+          {% set ai_status_value = ticket.ai_summary_status if ticket.ai_summary_status is not none else 'skipped' %}
+          {% set ai_status_lower = ai_status_value | lower %}
+          {% set ai_status_label = ai_status_lower.replace('_', ' ') | title %}
+          {% set tag_status_value = ticket.ai_tags_status if ticket.ai_tags_status is not none else 'skipped' %}
+          {% set tag_status_lower = tag_status_value | lower %}
+          {% set tag_status_label = tag_status_lower.replace('_', ' ') | title %}
           <p class="management__subtitle">
             Ticket #{{ ticket.id }}
             <span class="badge {{ status_badge_map.get(ticket_status, 'badge--muted') }}">{{ ticket_status.replace('_', ' ') }}</span>
@@ -139,6 +148,37 @@
             </form>
             <div class="card__body card__body--meta">
               <dl class="definition-list">
+                {% if ticket.ai_tags_status or (ticket.ai_tags is not none and ticket.ai_tags|length > 0) %}
+                  <div class="definition-list__item">
+                    <dt>AI Tags</dt>
+                    <dd>
+                      <div>
+                        <span class="badge {{ ai_badge_map.get(tag_status_lower, 'badge--warning') }}">{{ tag_status_label }}</span>
+                        {% if ticket.ai_tags_model %}
+                          <span>{{ ticket.ai_tags_model }}</span>
+                        {% endif %}
+                        {% if ticket.ai_tags_updated_at %}
+                          <span>Updated {{ ticket.ai_tags_updated_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</span>
+                        {% endif %}
+                      </div>
+                      {% if tag_status_lower == 'succeeded' and ticket.ai_tags %}
+                        <div class="tag-list">
+                          {% for tag in ticket.ai_tags %}
+                            <span class="tag">{{ tag.replace('-', ' ') }}</span>
+                          {% endfor %}
+                        </div>
+                      {% elif tag_status_lower == 'succeeded' %}
+                        <span class="card__empty">Ollama did not return tags for this ticket.</span>
+                      {% elif tag_status_lower == 'skipped' %}
+                        <span class="card__empty">Enable the Ollama integration module to generate tags.</span>
+                      {% elif tag_status_lower == 'error' %}
+                        <span class="card__empty">AI tag generation failed. Check the Ollama module logs.</span>
+                      {% else %}
+                        <span class="card__empty">AI tags are not currently available.</span>
+                      {% endif %}
+                    </dd>
+                  </div>
+                {% endif %}
                 <div class="definition-list__item">
                   <dt>Module</dt>
                   <dd>{{ ticket_module.name if ticket_module else (ticket.module_slug or '—') }}</dd>
@@ -189,15 +229,6 @@
             </article>
           {% endif %}
 
-          {% set ai_status_value = ticket.ai_summary_status if ticket.ai_summary_status is not none else 'skipped' %}
-          {% set ai_status_lower = ai_status_value | lower %}
-          {% set ai_status_label = ai_status_lower.replace('_', ' ') | title %}
-          {% set ai_badge_map = {'succeeded': 'badge--success', 'error': 'badge--danger', 'skipped': 'badge--muted', 'unknown': 'badge--muted'} %}
-          {% set resolution_label_map = {'likely_resolved': 'Likely Resolved', 'likely_in_progress': 'Likely In Progress'} %}
-          {% set resolution_badge_map = {'likely_resolved': 'badge--success', 'likely_in_progress': 'badge--warning'} %}
-          {% set tag_status_value = ticket.ai_tags_status if ticket.ai_tags_status is not none else 'skipped' %}
-          {% set tag_status_lower = tag_status_value | lower %}
-          {% set tag_status_label = tag_status_lower.replace('_', ' ') | title %}
           {% if ticket.ai_summary or ticket.ai_summary_status %}
             <article class="card card--panel">
               <header class="card__header">
@@ -239,34 +270,6 @@
                   <p class="card__empty">AI summary is not currently available.</p>
                 {% endif %}
 
-                {% if ticket.ai_tags_status or (ticket.ai_tags is not none and ticket.ai_tags|length > 0) %}
-                  <section class="divider"></section>
-                  <h3 class="card__subtitle">AI Tags</h3>
-                  <p class="card__subtitle">
-                    <span class="badge {{ ai_badge_map.get(tag_status_lower, 'badge--warning') }}">{{ tag_status_label }}</span>
-                    {% if ticket.ai_tags_model %}
-                      <span>{{ ticket.ai_tags_model }}</span>
-                    {% endif %}
-                    {% if ticket.ai_tags_updated_at %}
-                      <span>Updated {{ ticket.ai_tags_updated_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</span>
-                    {% endif %}
-                  </p>
-                  {% if tag_status_lower == 'succeeded' and ticket.ai_tags %}
-                    <div class="tag-list">
-                      {% for tag in ticket.ai_tags %}
-                        <span class="tag">{{ tag.replace('-', ' ') }}</span>
-                      {% endfor %}
-                    </div>
-                  {% elif tag_status_lower == 'succeeded' %}
-                    <p class="card__empty">Ollama did not return tags for this ticket.</p>
-                  {% elif tag_status_lower == 'skipped' %}
-                    <p class="card__empty">Enable the Ollama integration module to generate tags.</p>
-                  {% elif tag_status_lower == 'error' %}
-                    <p class="card__empty">AI tag generation failed. Check the Ollama module logs.</p>
-                  {% else %}
-                    <p class="card__empty">AI tags are not currently available.</p>
-                  {% endif %}
-                {% endif %}
               </div>
             </article>
           {% endif %}

@@ -1,3 +1,4 @@
+- 2025-10-21, 11:06 UTC, Fix, Moved ticket AI tags into the Ticket details metadata panel above the module label for clearer context
 - 2025-12-15, 10:15 UTC, Fix, Escaped webhook event payloads in the admin delivery queue so delete actions parse identifiers correctly
 - 2025-12-16, 10:00 UTC, Fix, Sanitised Syncro ticket import text to convert HTML line breaks and remove unsupported tags
 - 2025-12-15, 09:30 UTC, Feature, Added automated webhook cleanup after 24 hours with admin delete controls to cancel pending deliveries
