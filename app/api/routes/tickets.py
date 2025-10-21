@@ -8,6 +8,7 @@ from app.api.dependencies.auth import (
     require_helpdesk_technician,
     require_super_admin,
 )
+from app.core.logging import log_error
 from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
 from app.repositories import tickets as tickets_repo
@@ -26,6 +27,7 @@ from app.schemas.tickets import (
     TicketWatcherUpdate,
 )
 from app.security.session import SessionData
+from app.services import automations as automations_service
 from app.services import ticket_importer, tickets as tickets_service
 from app.services.sanitization import sanitize_rich_text
 
@@ -177,6 +179,17 @@ async def create_ticket(
     except RuntimeError:
         pass
     await tickets_service.refresh_ticket_ai_tags(ticket["id"])
+    try:
+        await automations_service.handle_event(
+            "tickets.created",
+            {"ticket": ticket},
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to execute ticket creation automations",
+            ticket_id=ticket.get("id"),
+            error=str(exc),
+        )
     return await _build_ticket_detail(ticket["id"], current_user)
 
 
