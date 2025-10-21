@@ -249,6 +249,8 @@ async def test_import_from_request_falls_back_to_repo(monkeypatch):
         return summary
 
     recorded: dict[str, dict[str, object]] = {}
+    attempts: list[dict[str, object]] = []
+    completions: list[dict[str, object]] = []
 
     async def fake_create_manual_event(**kwargs):
         raise RuntimeError("webhook monitor unavailable")
@@ -260,13 +262,30 @@ async def test_import_from_request_falls_back_to_repo(monkeypatch):
     async def fake_mark_in_progress(event_id):
         recorded["mark_in_progress"] = {"event_id": event_id}
 
-    async def fake_record_success(event_id, *, attempt_number, response_status, response_body):
-        recorded["success"] = {
-            "event_id": event_id,
-            "attempt_number": attempt_number,
-            "response_status": response_status,
-            "response_body": response_body,
-        }
+    async def fake_record_success(*_args, **_kwargs):  # pragma: no cover - should not be called
+        raise AssertionError("webhook_monitor.record_manual_success should not be used on fallback")
+
+    async def fake_record_attempt(*, event_id, attempt_number, status, response_status, response_body, error_message):
+        attempts.append(
+            {
+                "event_id": event_id,
+                "attempt_number": attempt_number,
+                "status": status,
+                "response_status": response_status,
+                "response_body": response_body,
+                "error_message": error_message,
+            }
+        )
+
+    async def fake_mark_event_completed(event_id, *, attempt_number, response_status, response_body):
+        completions.append(
+            {
+                "event_id": event_id,
+                "attempt_number": attempt_number,
+                "response_status": response_status,
+                "response_body": response_body,
+            }
+        )
 
     monkeypatch.setattr(ticket_importer, "import_ticket_by_id", fake_import_ticket_by_id)
     monkeypatch.setattr(ticket_importer.webhook_monitor, "create_manual_event", fake_create_manual_event)
@@ -274,6 +293,8 @@ async def test_import_from_request_falls_back_to_repo(monkeypatch):
     monkeypatch.setattr(ticket_importer.webhook_monitor, "record_manual_failure", lambda *_, **__: None)
     monkeypatch.setattr(ticket_importer.webhook_events_repo, "create_event", fake_create_event)
     monkeypatch.setattr(ticket_importer.webhook_events_repo, "mark_in_progress", fake_mark_in_progress)
+    monkeypatch.setattr(ticket_importer.webhook_events_repo, "record_attempt", fake_record_attempt)
+    monkeypatch.setattr(ticket_importer.webhook_events_repo, "mark_event_completed", fake_mark_event_completed)
 
     result = await ticket_importer.import_from_request(
         mode="single", ticket_id=21, start_id=None, end_id=None, rate_limiter=None
@@ -282,9 +303,24 @@ async def test_import_from_request_falls_back_to_repo(monkeypatch):
     assert result is summary
     assert recorded["fallback_create"]["name"] == "syncro.ticket.import"
     assert recorded["mark_in_progress"]["event_id"] == 55
-    success_payload = json.loads(recorded["success"]["response_body"])
-    assert success_payload == summary.as_dict()
-    assert recorded["success"]["event_id"] == 55
+    assert attempts == [
+        {
+            "event_id": 55,
+            "attempt_number": 1,
+            "status": "succeeded",
+            "response_status": 200,
+            "response_body": json.dumps(summary.as_dict()),
+            "error_message": None,
+        }
+    ]
+    assert completions == [
+        {
+            "event_id": 55,
+            "attempt_number": 1,
+            "response_status": 200,
+            "response_body": json.dumps(summary.as_dict()),
+        }
+    ]
 
 
 @pytest.mark.anyio
@@ -375,6 +411,88 @@ async def test_import_from_request_fallback_mark_in_progress_failure(monkeypatch
     assert recorded["mark_in_progress_attempt"] == 66
     messages = [message for message, _payload in errors]
     assert "Failed to mark fallback Syncro ticket import event in progress" in messages
+
+
+@pytest.mark.anyio
+async def test_import_from_request_fallback_failure_records_repo(monkeypatch):
+    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None):
+        assert ticket_id == 24
+        raise RuntimeError("boom")
+
+    async def fake_create_manual_event(**_kwargs):
+        raise RuntimeError("webhook monitor down")
+
+    async def fake_create_event(**_kwargs):
+        return {"id": 88}
+
+    async def fake_mark_in_progress(event_id):
+        assert event_id == 88
+
+    async def fake_record_success(*_args, **_kwargs):  # pragma: no cover - should not run
+        raise AssertionError("webhook_monitor.record_manual_success should not be invoked")
+
+    async def fake_record_failure(*_args, **_kwargs):  # pragma: no cover - should not run
+        raise AssertionError("webhook_monitor.record_manual_failure should not be invoked")
+
+    attempts: list[dict[str, object]] = []
+    failures: list[dict[str, object]] = []
+
+    async def fake_record_attempt(*, event_id, attempt_number, status, response_status, response_body, error_message):
+        attempts.append(
+            {
+                "event_id": event_id,
+                "attempt_number": attempt_number,
+                "status": status,
+                "response_status": response_status,
+                "response_body": response_body,
+                "error_message": error_message,
+            }
+        )
+
+    async def fake_mark_event_failed(event_id, *, attempt_number, error_message, response_status, response_body):
+        failures.append(
+            {
+                "event_id": event_id,
+                "attempt_number": attempt_number,
+                "error_message": error_message,
+                "response_status": response_status,
+                "response_body": response_body,
+            }
+        )
+
+    monkeypatch.setattr(ticket_importer, "import_ticket_by_id", fake_import_ticket_by_id)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "create_manual_event", fake_create_manual_event)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "record_manual_success", fake_record_success)
+    monkeypatch.setattr(ticket_importer.webhook_monitor, "record_manual_failure", fake_record_failure)
+    monkeypatch.setattr(ticket_importer.webhook_events_repo, "create_event", fake_create_event)
+    monkeypatch.setattr(ticket_importer.webhook_events_repo, "mark_in_progress", fake_mark_in_progress)
+    monkeypatch.setattr(ticket_importer.webhook_events_repo, "record_attempt", fake_record_attempt)
+    monkeypatch.setattr(ticket_importer.webhook_events_repo, "mark_event_failed", fake_mark_event_failed)
+
+    with pytest.raises(RuntimeError):
+        await ticket_importer.import_from_request(
+            mode="single", ticket_id=24, start_id=None, end_id=None, rate_limiter=None
+        )
+
+    assert attempts == [
+        {
+            "event_id": 88,
+            "attempt_number": 1,
+            "status": "failed",
+            "response_status": None,
+            "response_body": None,
+            "error_message": "boom",
+        }
+    ]
+    assert failures == [
+        {
+            "event_id": 88,
+            "attempt_number": 1,
+            "error_message": "boom",
+            "response_status": None,
+            "response_body": None,
+        }
+    ]
 
 
 @pytest.mark.anyio
