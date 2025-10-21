@@ -77,7 +77,7 @@ async def send_email(
     event_record: dict[str, Any] | None = None
     event_id: int | None = None
     try:
-        event_record = await webhook_monitor.enqueue_event(
+        event_record = await webhook_monitor.create_manual_event(
             name="email.smtp.send",
             target_url=endpoint,
             payload={
@@ -88,7 +88,6 @@ async def send_email(
             headers={"X-Service": "email"},
             max_attempts=1,
             backoff_seconds=60,
-            attempt_immediately=False,
         )
         if event_record.get("id") is not None:
             event_id = int(event_record["id"])
