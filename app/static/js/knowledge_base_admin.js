@@ -763,10 +763,10 @@
         const detail = await response.json().catch(() => ({}));
         throw new Error((detail && detail.detail) || `${response.status} ${response.statusText}`);
       }
-      setStatus('Article deleted. Reloading…', 'success');
+      setStatus('Article deleted. Returning to catalogue…', 'success');
       window.setTimeout(() => {
-        window.location.reload();
-      }, 600);
+        window.location.assign('/admin/knowledge-base');
+      }, 400);
     } catch (error) {
       console.error(error);
       setStatus(`Unable to delete article: ${error.message}`, 'error');
