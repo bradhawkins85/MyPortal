@@ -105,8 +105,19 @@ async def create_automation(
     await _ensure_connection()
     automation_id = await db.execute_returning_lastrowid(
         """
-        INSERT INTO automations
-            (name, description, kind, cadence, cron_expression, trigger_event, trigger_filters, action_module, action_payload, status, next_run_at)
+        INSERT INTO automations (
+            name,
+            description,
+            kind,
+            cadence,
+            cron_expression,
+            trigger_event,
+            trigger_filters,
+            action_module,
+            action_payload,
+            status,
+            next_run_at
+        )
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
