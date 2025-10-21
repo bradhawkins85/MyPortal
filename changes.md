@@ -1,3 +1,4 @@
+- 2025-12-13, 09:30 UTC, Fix, Ensured webhook events capture their identifiers during Syncro API logging so monitor entries persist with delivery outcomes
 - 2025-12-13, 08:45 UTC, Fix, Recorded Syncro API requests for ticket imports in the webhook monitor with manual success and failure logging
 - 2025-12-12, 12:30 UTC, Feature, Logged SMTP email deliveries through the webhook monitor with outcome metadata and test updates
 - 2025-12-12, 09:00 UTC, Fix, Routed shop Discord stock notifications through the webhook monitor with persisted event metadata and tests
