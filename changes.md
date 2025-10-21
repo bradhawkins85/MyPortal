@@ -1,3 +1,4 @@
+- 2025-10-21, 11:06 UTC, Fix, Moved ticket AI tags into the Ticket details metadata panel above the module label for clearer context
 - 2025-12-15, 09:30 UTC, Fix, Imported Syncro ticket Initial Issue comments as descriptions and mapped reply authors to customer or technician users
 - 2025-12-14, 09:00 UTC, Feature, Enriched Syncro ticket import to persist ticket numbers, map companies by business name, sync comment replies, and subscribe watcher emails from destination lists
 - 2025-10-21, 10:39 UTC, Feature, Auto-created missing companies from Syncro ticket imports using returned customer details to keep tickets linked
