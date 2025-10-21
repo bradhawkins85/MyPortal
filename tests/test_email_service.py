@@ -55,7 +55,14 @@ def test_send_email_success(monkeypatch):
         event_store[event["id"]] = event
         return event
 
-    async def fake_record_manual_success(event_id: int, *, attempt_number: int, response_status: int | None, response_body: str | None):
+    async def fake_record_manual_success(
+        event_id: int,
+        *,
+        attempt_number: int,
+        response_status: int | None,
+        response_body: str | None,
+        **_kwargs,
+    ):
         event = dict(event_store.get(event_id, {}))
         event.update(
             {
@@ -153,7 +160,16 @@ def test_send_email_raises_on_failure(monkeypatch):
         event_state.update({"payload": kwargs.get("payload"), "target_url": kwargs.get("target_url")})
         return dict(event_state)
 
-    async def fake_record_manual_failure(event_id: int, *, attempt_number: int, status: str, error_message: str | None, response_status: int | None, response_body: str | None):
+    async def fake_record_manual_failure(
+        event_id: int,
+        *,
+        attempt_number: int,
+        status: str,
+        error_message: str | None,
+        response_status: int | None,
+        response_body: str | None,
+        **_kwargs,
+    ):
         event_state.update(
             {
                 "id": event_id,

@@ -197,6 +197,24 @@ async def _request(
             return body
         return body[:3997] + "..."
 
+    def _normalise_params(value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return value
+        if hasattr(value, "items"):
+            return dict(value.items())
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        return value
+
+    request_snapshot = {
+        "method": method,
+        "params": _normalise_params(params),
+        "json": json,
+    }
+
+    response_headers: Any = None
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
             response = await client.request(
@@ -206,6 +224,7 @@ async def _request(
                 params=params,
                 json=json,
             )
+            response_headers = getattr(response, "headers", None)
         except httpx.HTTPError as exc:
             log_error("Syncro API request failed", url=url, error=str(exc))
             if event_id is not None:
@@ -217,6 +236,9 @@ async def _request(
                         error_message=str(exc),
                         response_status=None,
                         response_body=None,
+                        request_headers=headers,
+                        request_body=request_snapshot,
+                        response_headers=None,
                     )
                 except Exception as record_exc:  # pragma: no cover - logging safety
                     log_error(
@@ -233,6 +255,9 @@ async def _request(
                     attempt_number=1,
                     response_status=response.status_code,
                     response_body=_truncate_body(response.text),
+                    request_headers=headers,
+                    request_body=request_snapshot,
+                    response_headers=response_headers,
                 )
             except Exception as record_exc:  # pragma: no cover - logging safety
                 log_error(
@@ -257,6 +282,9 @@ async def _request(
                     error_message=f"HTTP {response.status_code}",
                     response_status=response.status_code,
                     response_body=_truncate_body(response.text),
+                    request_headers=headers,
+                    request_body=request_snapshot,
+                    response_headers=response_headers,
                 )
             except Exception as record_exc:  # pragma: no cover - logging safety
                 log_error(
@@ -273,6 +301,9 @@ async def _request(
                     attempt_number=1,
                     response_status=response.status_code,
                     response_body=None,
+                    request_headers=headers,
+                    request_body=request_snapshot,
+                    response_headers=response_headers,
                 )
             except Exception as record_exc:  # pragma: no cover - logging safety
                 log_error(
@@ -292,6 +323,9 @@ async def _request(
                 attempt_number=1,
                 response_status=response.status_code,
                 response_body=_truncate_body(response.text),
+                request_headers=headers,
+                request_body=request_snapshot,
+                response_headers=response_headers,
             )
         except Exception as record_exc:  # pragma: no cover - logging safety
             log_error(
