@@ -316,6 +316,169 @@ body {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.rich-text-editor {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.85rem;
+  background: rgba(15, 23, 42, 0.6);
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.rich-text-editor:focus-within {
+  border-color: rgba(56, 189, 248, 0.8);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.25);
+}
+
+.rich-text-editor__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.4rem 0.5rem;
+  background: rgba(15, 23, 42, 0.85);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.rich-text-editor__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  padding: 0.35rem 0.55rem;
+  border: none;
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.rich-text-editor__button:hover,
+.rich-text-editor__button:focus-visible {
+  background: rgba(56, 189, 248, 0.2);
+  color: #f8fafc;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35);
+}
+
+.rich-text-editor__button span {
+  pointer-events: none;
+}
+
+.rich-text-editor__surface {
+  min-height: 10.5rem;
+  padding: var(--space-gap-base);
+  color: #f8fafc;
+  line-height: 1.6;
+  font-size: 1rem;
+  background: rgba(15, 23, 42, 0.3);
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rich-text-editor__surface a {
+  color: #38bdf8;
+  text-decoration: underline;
+}
+
+.rich-text-editor__surface code {
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 0.4rem;
+  padding: 0.1rem 0.35rem;
+  font-family: "Fira Code", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.9rem;
+}
+
+.rich-text-editor__surface pre {
+  background: rgba(15, 23, 42, 0.75);
+  border-radius: 0.6rem;
+  padding: 0.75rem;
+  overflow-x: auto;
+  font-family: "Fira Code", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.9rem;
+}
+
+.rich-text-editor__surface--empty::before {
+  content: attr(data-placeholder);
+  color: rgba(148, 163, 184, 0.75);
+  pointer-events: none;
+}
+
+.rich-text-viewer {
+  color: #e2e8f0;
+  line-height: 1.6;
+  font-size: 0.975rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.rich-text-viewer p {
+  margin: 0;
+}
+
+.rich-text-viewer ul,
+.rich-text-viewer ol {
+  margin: 0;
+  padding-left: 1.4rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.rich-text-viewer blockquote {
+  margin: 0;
+  padding-left: 1rem;
+  border-left: 3px solid rgba(148, 163, 184, 0.4);
+  color: rgba(226, 232, 240, 0.85);
+  font-style: italic;
+}
+
+.rich-text-viewer code {
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 0.4rem;
+  padding: 0.15rem 0.4rem;
+  font-family: "Fira Code", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.9rem;
+}
+
+.rich-text-viewer pre {
+  margin: 0;
+  background: rgba(15, 23, 42, 0.75);
+  border-radius: 0.6rem;
+  padding: 0.85rem;
+  overflow-x: auto;
+  font-family: "Fira Code", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.9rem;
+}
+
+.rich-text-viewer a {
+  color: #38bdf8;
+  text-decoration: underline;
+}
+
+.rich-text-viewer table {
+  width: 100%;
+  border-collapse: collapse;
+  background: rgba(15, 23, 42, 0.55);
+  border-radius: 0.6rem;
+  overflow: hidden;
+}
+
+.rich-text-viewer th,
+.rich-text-viewer td {
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+  text-align: left;
+}
+
+.rich-text-viewer tr:last-child th,
+.rich-text-viewer tr:last-child td {
+  border-bottom: none;
+}
+
 .input {
   padding: var(--space-gap-tight) var(--space-gap-base);
   border-radius: 0.8rem;

@@ -108,6 +108,7 @@ from app.services import ticket_importer
 from app.services import tickets as tickets_service
 from app.services import template_variables
 from app.services import webhook_monitor
+from app.services.sanitization import sanitize_rich_text
 from app.services.opnform import (
     OpnformValidationError,
     extract_allowed_host,
@@ -5779,7 +5780,15 @@ async def _render_ticket_detail(
     for reply in ordered_replies:
         author_id = reply.get("author_id")
         author = user_lookup.get(author_id) if author_id else None
-        enriched_replies.append({**reply, "author": author})
+        sanitized_reply = sanitize_rich_text(str(reply.get("body") or ""))
+        enriched_replies.append(
+            {
+                **reply,
+                "author": author,
+                "body": sanitized_reply.html,
+                "text_body": sanitized_reply.text_content,
+            }
+        )
 
     enriched_watchers: list[dict[str, Any]] = []
     for watcher in watchers:
@@ -6215,9 +6224,10 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
         return redirect
     form = await request.form()
     body_value = form.get("body", "")
-    body = str(body_value).strip() if isinstance(body_value, str) else ""
+    body_raw = str(body_value) if isinstance(body_value, str) else ""
+    sanitized_body = sanitize_rich_text(body_raw)
     is_internal = str(form.get("isInternal", "")).lower() in {"1", "true", "on", "yes"}
-    if not body:
+    if not sanitized_body.text_content:
         return await _render_ticket_detail(
             request,
             current_user,
@@ -6233,7 +6243,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
         await tickets_repo.create_reply(
             ticket_id=ticket_id,
             author_id=author_id if isinstance(author_id, int) else None,
-            body=body,
+            body=sanitized_body.html,
             is_internal=is_internal,
         )
         if isinstance(author_id, int):
