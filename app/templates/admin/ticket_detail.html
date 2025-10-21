@@ -152,15 +152,7 @@
                   <div class="definition-list__item">
                     <dt>AI Tags</dt>
                     <dd>
-                      <div>
-                        <span class="badge {{ ai_badge_map.get(tag_status_lower, 'badge--warning') }}">{{ tag_status_label }}</span>
-                        {% if ticket.ai_tags_model %}
-                          <span>{{ ticket.ai_tags_model }}</span>
-                        {% endif %}
-                        {% if ticket.ai_tags_updated_at %}
-                          <span>Updated {{ ticket.ai_tags_updated_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</span>
-                        {% endif %}
-                      </div>
+                      <div>{{ tag_status_label }}</div>
                       {% if tag_status_lower == 'succeeded' and ticket.ai_tags %}
                         <div class="tag-list">
                           {% for tag in ticket.ai_tags %}
