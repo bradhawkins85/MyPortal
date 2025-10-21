@@ -77,6 +77,8 @@ async def test_create_automation_returns_inserted_record(monkeypatch):
     assert record["id"] == 99
     assert dummy_db.fetch_sql == "SELECT * FROM automations WHERE id = %s"
     assert dummy_db.fetch_params == (99,)
+    assert "status" in dummy_db.insert_sql
+    assert "next_run_at" in dummy_db.insert_sql
 
 
 @pytest.mark.anyio
