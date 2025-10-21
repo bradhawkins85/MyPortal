@@ -77,7 +77,7 @@ async def create_event(
     max_attempts: int = 3,
     backoff_seconds: int = 300,
 ) -> dict[str, Any]:
-    await db.execute(
+    event_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO webhook_events
             (name, target_url, headers, payload, max_attempts, backoff_seconds)
@@ -92,8 +92,10 @@ async def create_event(
             max(1, backoff_seconds),
         ),
     )
-    row = await db.fetch_one("SELECT * FROM webhook_events WHERE id = LAST_INSERT_ID()")
-    return _normalise_event(row) if row else {}
+    if not event_id:
+        return {}
+    row = await get_event(event_id)
+    return row or {}
 
 
 async def get_event(event_id: int) -> dict[str, Any] | None:
