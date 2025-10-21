@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 
@@ -169,6 +170,37 @@ async def test_import_ticket_range_handles_missing(monkeypatch):
     assert summary.fetched == 1
     assert summary.created == 1
     assert summary.skipped == 1
+
+
+@pytest.mark.anyio
+async def test_resolve_company_creates_company_when_missing(monkeypatch):
+    created_payload: dict[str, Any] = {}
+
+    async def fake_get_company_by_syncro_id(syncro_company_id: str):  # noqa: ARG001
+        return None
+
+    async def fake_get_company_by_name(company_name: str):  # noqa: ARG001
+        return None
+
+    async def fake_create_company(**payload):
+        created_payload.update(payload)
+        return {"id": 42, **payload}
+
+    monkeypatch.setattr(company_repo, "get_company_by_syncro_id", fake_get_company_by_syncro_id)
+    monkeypatch.setattr(company_repo, "get_company_by_name", fake_get_company_by_name)
+    monkeypatch.setattr(company_repo, "create_company", fake_create_company)
+
+    ticket = {
+        "id": 501,
+        "customer_id": "9001",
+        "customer": {"id": 9001, "business_name": "Example Holdings"},
+    }
+
+    company_id = await ticket_importer._resolve_company_id(ticket)
+
+    assert company_id == 42
+    assert created_payload["name"] == "Example Holdings"
+    assert created_payload["syncro_company_id"] == "9001"
 
 
 @pytest.mark.anyio

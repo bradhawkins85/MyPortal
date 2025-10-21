@@ -211,9 +211,10 @@ def _render_prompt(
     lines.append("Ticket description:")
     lines.append(description)
     lines.append("")
-    lines.append("Conversation history (newest last):")
+    lines.append("Conversation history (newest first):")
 
-    trimmed = replies[-12:]
+    trimmed = list(replies[-12:])
+    trimmed.reverse()
     if not trimmed:
         lines.append("- No replies have been posted yet.")
     else:
@@ -257,9 +258,10 @@ def _render_tags_prompt(
     lines.append("Ticket description:")
     lines.append(description)
     lines.append("")
-    lines.append("Conversation highlights (newest last):")
+    lines.append("Conversation highlights (newest first):")
 
-    trimmed = replies[-12:]
+    trimmed = list(replies[-12:])
+    trimmed.reverse()
     if not trimmed:
         lines.append("- No replies have been posted yet.")
     else:

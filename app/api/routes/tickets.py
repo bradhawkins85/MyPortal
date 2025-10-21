@@ -64,12 +64,13 @@ async def _build_ticket_detail(ticket_id: int, current_user: dict) -> TicketDeta
     replies = await tickets_repo.list_replies(
         ticket_id, include_internal=has_helpdesk_access
     )
+    ordered_replies = list(reversed(replies))
     watcher_records = []
     if has_helpdesk_access:
         watcher_records = await tickets_repo.list_watchers(ticket_id)
     return TicketDetail(
         **ticket,
-        replies=[TicketReply(**reply) for reply in replies],
+        replies=[TicketReply(**reply) for reply in ordered_replies],
         watchers=[TicketWatcher(**watcher) for watcher in watcher_records],
     )
 
