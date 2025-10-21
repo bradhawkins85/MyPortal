@@ -44,7 +44,7 @@ def test_send_email_success(monkeypatch):
 
     monkeypatch.setattr(email_service.smtplib, "SMTP", DummySMTP)
 
-    async def fake_enqueue_event(**kwargs):
+    async def fake_manual_event(**kwargs):
         captured["enqueue_event"] = kwargs
         event = {
             "id": 101,
@@ -71,7 +71,7 @@ def test_send_email_success(monkeypatch):
     async def fake_record_manual_failure(*_args, **_kwargs):  # pragma: no cover - success path only
         raise AssertionError("Failure recorder should not be called in success test")
 
-    monkeypatch.setattr(email_service.webhook_monitor, "enqueue_event", fake_enqueue_event)
+    monkeypatch.setattr(email_service.webhook_monitor, "create_manual_event", fake_manual_event)
     monkeypatch.setattr(email_service.webhook_monitor, "record_manual_success", fake_record_manual_success)
     monkeypatch.setattr(email_service.webhook_monitor, "record_manual_failure", fake_record_manual_failure)
 
@@ -102,9 +102,9 @@ def test_send_email_skips_without_smtp(monkeypatch):
     monkeypatch.setattr(settings, "smtp_host", None)
 
     async def fail_enqueue(**_kwargs):  # pragma: no cover - should not be called
-        raise AssertionError("enqueue_event should not be invoked when SMTP is disabled")
+        raise AssertionError("create_manual_event should not be invoked when SMTP is disabled")
 
-    monkeypatch.setattr(email_service.webhook_monitor, "enqueue_event", fail_enqueue)
+    monkeypatch.setattr(email_service.webhook_monitor, "create_manual_event", fail_enqueue)
 
     result = asyncio.run(
         email_service.send_email(
@@ -149,7 +149,7 @@ def test_send_email_raises_on_failure(monkeypatch):
 
     event_state: dict[str, object] = {"status": "pending", "id": 202}
 
-    async def fake_enqueue_event(**kwargs):
+    async def fake_manual_event(**kwargs):
         event_state.update({"payload": kwargs.get("payload"), "target_url": kwargs.get("target_url")})
         return dict(event_state)
 
@@ -169,7 +169,7 @@ def test_send_email_raises_on_failure(monkeypatch):
     async def fake_record_manual_success(*_args, **_kwargs):  # pragma: no cover - failure path only
         raise AssertionError("Success recorder should not be called in failure test")
 
-    monkeypatch.setattr(email_service.webhook_monitor, "enqueue_event", fake_enqueue_event)
+    monkeypatch.setattr(email_service.webhook_monitor, "create_manual_event", fake_manual_event)
     monkeypatch.setattr(email_service.webhook_monitor, "record_manual_failure", fake_record_manual_failure)
     monkeypatch.setattr(email_service.webhook_monitor, "record_manual_success", fake_record_manual_success)
 
