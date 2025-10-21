@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from html import unescape
 import re
 import json
 from typing import Any
@@ -42,13 +43,26 @@ class TicketImportSummary:
             "updated": self.updated,
             "skipped": self.skipped,
         }
+_HTML_NEWLINE_TAGS = re.compile(
+    r"<\s*(?:br\s*/?|/(?:p|div|li|tr|table|thead|tbody|tfoot|section|article|header|footer|h[1-6]))\b[^>]*>",
+    flags=re.IGNORECASE,
+)
+_HTML_TAGS = re.compile(r"<\s*/?\s*[a-zA-Z][^>]*>")
 
 
 def _clean_text(value: Any) -> str | None:
     if value is None:
         return None
-    text = str(value).strip()
-    return text or None
+    text = str(value)
+    if not text:
+        return None
+    normalised = unescape(text.replace("\r\n", "\n")).replace("\xa0", " ")
+    normalised = _HTML_NEWLINE_TAGS.sub("\n", normalised)
+    normalised = _HTML_TAGS.sub("", normalised)
+    normalised = re.sub(r"[\t ]*\n[\t ]*", "\n", normalised)
+    normalised = re.sub(r"\n{2,}", "\n", normalised)
+    normalised = normalised.strip()
+    return normalised or None
 
 
 def _normalise_status(value: Any) -> str:

@@ -1,3 +1,4 @@
+- 2025-12-16, 10:00 UTC, Fix, Sanitised Syncro ticket import text to convert HTML line breaks and remove unsupported tags
 - 2025-12-15, 09:30 UTC, Feature, Added automated webhook cleanup after 24 hours with admin delete controls to cancel pending deliveries
 - 2025-12-15, 09:30 UTC, Fix, Imported Syncro ticket Initial Issue comments as descriptions and mapped reply authors to customer or technician users
 - 2025-12-14, 09:00 UTC, Feature, Enriched Syncro ticket import to persist ticket numbers, map companies by business name, sync comment replies, and subscribe watcher emails from destination lists
