@@ -373,7 +373,15 @@ async def import_from_request(
         payload["endId"] = end_id
 
     event_id: int | None = None
+    using_monitor: bool = False
     target_url = _build_import_target(mode_lower, ticket_id, start_id, end_id)
+
+    def _coerce_event_id(raw_id: Any) -> int | None:
+        try:
+            return int(raw_id)
+        except (TypeError, ValueError):  # pragma: no cover - defensive casting
+            return None
+
     try:
         event = await webhook_monitor.create_manual_event(
             name="syncro.ticket.import",
@@ -383,13 +391,15 @@ async def import_from_request(
             backoff_seconds=0,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
-        log_error("Failed to record Syncro ticket import in webhook monitor", mode=mode_lower, error=str(exc))
+        log_error(
+            "Failed to record Syncro ticket import in webhook monitor",
+            mode=mode_lower,
+            error=str(exc),
+        )
         event = None
-    if event and event.get("id") is not None:
-        try:
-            event_id = int(event["id"])
-        except (TypeError, ValueError):  # pragma: no cover - defensive casting
-            event_id = None
+    else:
+        event_id = _coerce_event_id(event.get("id")) if event else None
+        using_monitor = event_id is not None
 
     if event_id is None:
         try:
@@ -409,10 +419,7 @@ async def import_from_request(
             fallback_event = None
         else:
             fallback_raw_id = fallback_event.get("id") if fallback_event else None
-            try:
-                event_id = int(fallback_raw_id) if fallback_raw_id is not None else None
-            except (TypeError, ValueError):  # pragma: no cover - defensive casting
-                event_id = None
+            event_id = _coerce_event_id(fallback_raw_id)
             if event_id is not None:
                 try:
                     await webhook_events_repo.mark_in_progress(event_id)
@@ -423,19 +430,40 @@ async def import_from_request(
                         error=str(mark_exc),
                     )
                     event_id = None
+                else:
+                    using_monitor = False
+
+    attempt_number = 1
 
     async def _record_failure(error: Exception) -> None:
         if event_id is None:
             return
         try:
-            await webhook_monitor.record_manual_failure(
-                event_id,
-                attempt_number=1,
-                status="failed",
-                error_message=str(error),
-                response_status=None,
-                response_body=None,
-            )
+            if using_monitor:
+                await webhook_monitor.record_manual_failure(
+                    event_id,
+                    attempt_number=attempt_number,
+                    status="failed",
+                    error_message=str(error),
+                    response_status=None,
+                    response_body=None,
+                )
+            else:
+                await webhook_events_repo.record_attempt(
+                    event_id=event_id,
+                    attempt_number=attempt_number,
+                    status="failed",
+                    response_status=None,
+                    response_body=None,
+                    error_message=str(error),
+                )
+                await webhook_events_repo.mark_event_failed(
+                    event_id,
+                    attempt_number=attempt_number,
+                    error_message=str(error),
+                    response_status=None,
+                    response_body=None,
+                )
         except Exception as record_exc:  # pragma: no cover - defensive logging
             log_error(
                 "Failed to record Syncro ticket import failure",
@@ -463,13 +491,30 @@ async def import_from_request(
         raise
 
     if event_id is not None:
+        response_body = json.dumps(summary.as_dict())
         try:
-            await webhook_monitor.record_manual_success(
-                event_id,
-                attempt_number=1,
-                response_status=200,
-                response_body=json.dumps(summary.as_dict()),
-            )
+            if using_monitor:
+                await webhook_monitor.record_manual_success(
+                    event_id,
+                    attempt_number=attempt_number,
+                    response_status=200,
+                    response_body=response_body,
+                )
+            else:
+                await webhook_events_repo.record_attempt(
+                    event_id=event_id,
+                    attempt_number=attempt_number,
+                    status="succeeded",
+                    response_status=200,
+                    response_body=response_body,
+                    error_message=None,
+                )
+                await webhook_events_repo.mark_event_completed(
+                    event_id,
+                    attempt_number=attempt_number,
+                    response_status=200,
+                    response_body=response_body,
+                )
         except Exception as record_exc:  # pragma: no cover - defensive logging
             log_error(
                 "Failed to record Syncro ticket import success",
