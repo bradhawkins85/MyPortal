@@ -13,7 +13,8 @@ from loguru import logger
 
 from app.core.database import db
 from app.repositories import integration_modules as module_repo
-from app.services import email as email_service
+from app.repositories import webhook_events as webhook_repo
+from app.services import email as email_service, webhook_monitor
 
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
@@ -385,6 +386,95 @@ async def trigger_module(slug: str, payload: Mapping[str, Any] | None = None) ->
     return await handler(settings, payload or {})
 
 
+def _parse_event_response(event: Mapping[str, Any]) -> Any:
+    response_body = event.get("response_body")
+    if response_body is None:
+        return None
+    if isinstance(response_body, (dict, list)):
+        return response_body
+    if isinstance(response_body, str):
+        try:
+            return json.loads(response_body)
+        except json.JSONDecodeError:
+            return response_body
+    return response_body
+
+
+def _build_event_result(event: Mapping[str, Any], extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    if extra:
+        result.update(extra)
+    event_id = event.get("id")
+    if event_id is not None:
+        result["event_id"] = int(event_id)
+    status = str(event.get("status") or "pending")
+    result["status"] = status
+    result["event_status"] = status
+    if event.get("response_status") is not None:
+        result["response_status"] = event.get("response_status")
+    if event.get("attempt_count") is not None:
+        result["attempt_count"] = event.get("attempt_count")
+    if event.get("last_error"):
+        result["last_error"] = event.get("last_error")
+    parsed_response = _parse_event_response(event)
+    if parsed_response is not None:
+        result["response"] = parsed_response
+    return result
+
+
+async def _record_success(
+    event_id: int,
+    *,
+    attempt_number: int,
+    response_status: int | None,
+    response_body: str | None,
+) -> dict[str, Any]:
+    await webhook_repo.record_attempt(
+        event_id=event_id,
+        attempt_number=attempt_number,
+        status="succeeded",
+        response_status=response_status,
+        response_body=response_body,
+        error_message=None,
+    )
+    await webhook_repo.mark_event_completed(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=response_status,
+        response_body=response_body,
+    )
+    refreshed = await webhook_repo.get_event(event_id)
+    return refreshed or {"id": event_id, "status": "succeeded"}
+
+
+async def _record_failure(
+    event_id: int,
+    *,
+    attempt_number: int,
+    status: str,
+    error_message: str | None,
+    response_status: int | None,
+    response_body: str | None,
+) -> dict[str, Any]:
+    await webhook_repo.record_attempt(
+        event_id=event_id,
+        attempt_number=attempt_number,
+        status=status,
+        response_status=response_status,
+        response_body=response_body,
+        error_message=error_message,
+    )
+    await webhook_repo.mark_event_failed(
+        event_id,
+        attempt_number=attempt_number,
+        error_message=error_message,
+        response_status=response_status,
+        response_body=response_body,
+    )
+    refreshed = await webhook_repo.get_event(event_id)
+    return refreshed or {"id": event_id, "status": "failed", "last_error": error_message}
+
+
 async def _invoke_ollama(settings: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
     base_url = str(settings.get("base_url") or "http://127.0.0.1:11434").rstrip("/")
     model = str(settings.get("model") or "llama3")
@@ -394,16 +484,62 @@ async def _invoke_ollama(settings: Mapping[str, Any], payload: Mapping[str, Any]
         raise ValueError("Ollama prompt cannot be empty")
     endpoint = urljoin(f"{base_url}/", "api/generate")
     body = {"model": model, "prompt": prompt, "stream": False}
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-        response = await client.post(endpoint, json=body)
+    event = await webhook_monitor.enqueue_event(
+        name="module.ollama.generate",
+        target_url=endpoint,
+        payload={"request_body": body},
+        headers={"Content-Type": "application/json"},
+        max_attempts=1,
+        backoff_seconds=60,
+        attempt_immediately=False,
+    )
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for Ollama request")
+    attempt_number = 1
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            response = await client.post(endpoint, json=body)
         response.raise_for_status()
-        data = response.json()
-    return {
-        "status": "succeeded",
-        "response": data,
-        "model": model,
-        "endpoint": endpoint,
-    }
+    except httpx.HTTPStatusError as exc:
+        response_body = exc.response.text if exc.response is not None else None
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="failed",
+            error_message=f"HTTP {exc.response.status_code}" if exc.response else str(exc),
+            response_status=exc.response.status_code if exc.response else None,
+            response_body=response_body,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"model": model, "endpoint": endpoint},
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=str(exc),
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"model": model, "endpoint": endpoint},
+        )
+
+    response_body = response.text
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=response.status_code,
+        response_body=response_body,
+    )
+    return _build_event_result(
+        updated_event,
+        extra={"model": model, "endpoint": endpoint},
+    )
 
 
 async def _invoke_smtp(settings: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -415,14 +551,72 @@ async def _invoke_smtp(settings: Mapping[str, Any], payload: Mapping[str, Any]) 
     html_body = str(payload.get("html") or payload.get("body") or "<p>Automation triggered.</p>")
     text_body = payload.get("text")
     sender = str(settings.get("from_address") or "") or None
-    sent = await email_service.send_email(
-        subject=subject,
-        recipients=recipients,
-        html_body=html_body,
-        text_body=str(text_body) if text_body is not None else None,
-        sender=sender,
+    event = await webhook_monitor.enqueue_event(
+        name="module.smtp.send",
+        target_url="smtp://send",
+        payload={
+            "subject": subject,
+            "recipients": recipients,
+            "html": html_body,
+            "text": text_body,
+            "sender": sender,
+        },
+        headers={"X-Module": "smtp"},
+        max_attempts=1,
+        backoff_seconds=60,
+        attempt_immediately=False,
     )
-    return {"status": "succeeded" if sent else "skipped", "recipients": recipients, "subject": subject}
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for SMTP request")
+    attempt_number = 1
+    try:
+        sent = await email_service.send_email(
+            subject=subject,
+            recipients=recipients,
+            html_body=html_body,
+            text_body=str(text_body) if text_body is not None else None,
+            sender=sender,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=str(exc),
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"recipients": recipients, "subject": subject},
+        )
+
+    if not sent:
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="failed",
+            error_message="SMTP service declined to send message",
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"recipients": recipients, "subject": subject},
+        )
+
+    response_body = json.dumps({"recipients": recipients, "subject": subject})
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=250,
+        response_body=response_body,
+    )
+    return _build_event_result(
+        updated_event,
+        extra={"recipients": recipients, "subject": subject},
+    )
 
 
 async def _invoke_tacticalrmm(settings: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -443,20 +637,75 @@ async def _invoke_tacticalrmm(settings: Mapping[str, Any], payload: Mapping[str,
             headers[str(key)] = str(value)
     request_body = payload.get("body")
     url = urljoin(f"{base_url}/", endpoint_path)
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, verify=verify_ssl) as client:
-        response = await client.request(method, url, json=request_body, headers=headers)
+    event = await webhook_monitor.enqueue_event(
+        name="module.tacticalrmm.invoke",
+        target_url=url,
+        payload={
+            "method": method,
+            "json": request_body,
+            "verify_ssl": verify_ssl,
+        },
+        headers=headers,
+        max_attempts=1,
+        backoff_seconds=60,
+        attempt_immediately=False,
+    )
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for TacticalRMM request")
+    attempt_number = 1
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, verify=verify_ssl) as client:
+            response = await client.request(method, url, json=request_body, headers=headers)
         response.raise_for_status()
-        try:
-            data = response.json()
-        except json.JSONDecodeError:
-            data = response.text
-    return {
-        "status": "succeeded",
-        "response": data,
-        "status_code": response.status_code,
-        "url": url,
-        "method": method,
-    }
+    except httpx.HTTPStatusError as exc:
+        response_body = exc.response.text if exc.response is not None else None
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="failed",
+            error_message=f"HTTP {exc.response.status_code}" if exc.response else str(exc),
+            response_status=exc.response.status_code if exc.response else None,
+            response_body=response_body,
+        )
+        result = _build_event_result(
+            updated_event,
+            extra={"url": url, "method": method},
+        )
+        if "response_status" in result:
+            result["status_code"] = result["response_status"]
+        return result
+    except Exception as exc:  # pragma: no cover - defensive
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=str(exc),
+            response_status=None,
+            response_body=None,
+        )
+        result = _build_event_result(
+            updated_event,
+            extra={"url": url, "method": method},
+        )
+        if "response_status" in result:
+            result["status_code"] = result["response_status"]
+        return result
+
+    response_body = response.text
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=response.status_code,
+        response_body=response_body,
+    )
+    result = _build_event_result(
+        updated_event,
+        extra={"url": url, "method": method},
+    )
+    if "response_status" in result:
+        result["status_code"] = result["response_status"]
+    return result
 
 
 async def _invoke_ntfy(settings: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -472,15 +721,65 @@ async def _invoke_ntfy(settings: Mapping[str, Any], payload: Mapping[str, Any]) 
     if token:
         headers["Authorization"] = f"Bearer {token}"
     headers["Priority"] = priority
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-        response = await client.post(url, data=message.encode("utf-8"), headers=headers)
+    event = await webhook_monitor.enqueue_event(
+        name="module.ntfy.publish",
+        target_url=url,
+        payload={
+            "message": message,
+            "priority": priority,
+        },
+        headers=headers,
+        max_attempts=1,
+        backoff_seconds=60,
+        attempt_immediately=False,
+    )
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for ntfy request")
+    attempt_number = 1
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            response = await client.post(url, data=message.encode("utf-8"), headers=headers)
         response.raise_for_status()
-    return {
-        "status": "succeeded",
-        "topic": topic,
-        "priority": priority,
-        "url": url,
-    }
+    except httpx.HTTPStatusError as exc:
+        response_body = exc.response.text if exc.response is not None else None
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="failed",
+            error_message=f"HTTP {exc.response.status_code}" if exc.response else str(exc),
+            response_status=exc.response.status_code if exc.response else None,
+            response_body=response_body,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"topic": topic, "priority": priority, "url": url},
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=str(exc),
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"topic": topic, "priority": priority, "url": url},
+        )
+
+    response_body = response.text
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=response.status_code,
+        response_body=response_body,
+    )
+    return _build_event_result(
+        updated_event,
+        extra={"topic": topic, "priority": priority, "url": url},
+    )
 
 
 async def _invoke_chatgpt_mcp(settings: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
