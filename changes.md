@@ -1,4 +1,5 @@
 - 2025-12-10, 13:30 UTC, Feature, Moved Syncro ticket import to dedicated admin page with module gating and configuration controls
+- 2025-12-08, 16:45 UTC, Fix, Redirected knowledge base deletion flow back to the admin catalogue to prevent Article not found errors
 - 2025-10-20, 22:17 UTC, Fix, Corrected HTTP POST module knowledge base seed to keep migration column counts aligned
 - 2025-12-09, 16:30 UTC, Fix, Replaced PWA PNG icons with SVG sources and updated manifest caching to remove binary assets
 - 2025-12-09, 14:00 UTC, Fix, Allowed controlled service worker activation by removing forced skipWaiting and exposing Service-Worker-Allowed header
