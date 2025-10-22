@@ -86,8 +86,41 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
     prompt = _render_prompt(ticket, replies, user_lookup)
     now = datetime.now(timezone.utc)
 
+    await _safely_call(
+        tickets_repo.update_ticket,
+        ticket_id,
+        ai_summary=None,
+        ai_summary_status="queued",
+        ai_summary_model=None,
+        ai_resolution_state=None,
+        ai_summary_updated_at=now,
+    )
+
+    async def _apply_result(result: Mapping[str, Any]) -> None:
+        status_value = str(result.get("status") or result.get("event_status") or "unknown")
+        model_value = result.get("model")
+        payload = result.get("response")
+        summary_text, resolution_label = _extract_summary_fields(payload)
+        resolution_state = _normalise_resolution_state(resolution_label)
+        if status_value == "succeeded" and summary_text and not resolution_state:
+            resolution_state = "likely_in_progress"
+        updated_at = datetime.now(timezone.utc)
+        await _safely_call(
+            tickets_repo.update_ticket,
+            ticket_id,
+            ai_summary=summary_text if status_value == "succeeded" else None,
+            ai_summary_status=status_value,
+            ai_summary_model=str(model_value) if isinstance(model_value, str) else None,
+            ai_resolution_state=resolution_state if status_value == "succeeded" else None,
+            ai_summary_updated_at=updated_at,
+        )
+
     try:
-        response = await modules_service.trigger_module("ollama", {"prompt": prompt})
+        response = await modules_service.trigger_module(
+            "ollama",
+            {"prompt": prompt},
+            on_complete=_apply_result,
+        )
     except ValueError:
         await _safely_call(
             tickets_repo.update_ticket,
@@ -113,24 +146,16 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
         return
 
     status_value = str(response.get("status") or "unknown")
-    model_value = response.get("model")
-    payload = response.get("response")
-
-    summary_text, resolution_label = _extract_summary_fields(payload)
-    resolution_state = _normalise_resolution_state(resolution_label)
-
-    if status_value == "succeeded" and summary_text and not resolution_state:
-        resolution_state = "likely_in_progress"
-
-    await _safely_call(
-        tickets_repo.update_ticket,
-        ticket_id,
-        ai_summary=summary_text,
-        ai_summary_status=status_value,
-        ai_summary_model=str(model_value) if isinstance(model_value, str) else None,
-        ai_resolution_state=resolution_state,
-        ai_summary_updated_at=now,
-    )
+    if status_value == "skipped":
+        await _safely_call(
+            tickets_repo.update_ticket,
+            ticket_id,
+            ai_summary=None,
+            ai_summary_status="skipped",
+            ai_summary_model=None,
+            ai_resolution_state=None,
+            ai_summary_updated_at=now,
+        )
 
 
 async def refresh_ticket_ai_tags(ticket_id: int) -> None:
@@ -161,10 +186,41 @@ async def refresh_ticket_ai_tags(ticket_id: int) -> None:
     prompt = _render_tags_prompt(ticket, replies, user_lookup)
     now = datetime.now(timezone.utc)
 
+    await _safely_call(
+        tickets_repo.update_ticket,
+        ticket_id,
+        ai_tags=None,
+        ai_tags_status="queued",
+        ai_tags_model=None,
+        ai_tags_updated_at=now,
+    )
+
+    async def _apply_result(result: Mapping[str, Any]) -> None:
+        status_value = str(result.get("status") or result.get("event_status") or "unknown")
+        model_value = result.get("model")
+        payload = result.get("response")
+        tags: list[str] | None = None
+        if status_value == "succeeded":
+            tags = _extract_tags(payload, ticket)
+        updated_at = datetime.now(timezone.utc)
+        await _safely_call(
+            tickets_repo.update_ticket,
+            ticket_id,
+            ai_tags=tags if status_value == "succeeded" else None,
+            ai_tags_status=status_value,
+            ai_tags_model=str(model_value) if isinstance(model_value, str) else None,
+            ai_tags_updated_at=updated_at,
+        )
+
     try:
-        response = await modules_service.trigger_module("ollama", {"prompt": prompt})
+        response = await modules_service.trigger_module(
+            "ollama",
+            {"prompt": prompt},
+            on_complete=_apply_result,
+        )
     except ValueError:
-        await tickets_repo.update_ticket(
+        await _safely_call(
+            tickets_repo.update_ticket,
             ticket_id,
             ai_tags=None,
             ai_tags_status="skipped",
@@ -174,7 +230,8 @@ async def refresh_ticket_ai_tags(ticket_id: int) -> None:
         return
     except Exception as exc:  # pragma: no cover - network interaction
         log_error("Ticket AI tags failed", ticket_id=ticket_id, error=str(exc))
-        await tickets_repo.update_ticket(
+        await _safely_call(
+            tickets_repo.update_ticket,
             ticket_id,
             ai_tags=None,
             ai_tags_status="error",
@@ -183,20 +240,15 @@ async def refresh_ticket_ai_tags(ticket_id: int) -> None:
         )
         return
 
-    status_value = str(response.get("status") or "unknown")
-    model_value = response.get("model")
-    payload = response.get("response")
-
-    tags: list[str] | None = None
-    if status_value == "succeeded":
-        tags = _extract_tags(payload, ticket)
-    await tickets_repo.update_ticket(
-        ticket_id,
-        ai_tags=tags,
-        ai_tags_status=status_value,
-        ai_tags_model=str(model_value) if isinstance(model_value, str) else None,
-        ai_tags_updated_at=now,
-    )
+    if str(response.get("status") or "").lower() == "skipped":
+        await _safely_call(
+            tickets_repo.update_ticket,
+            ticket_id,
+            ai_tags=None,
+            ai_tags_status="skipped",
+            ai_tags_model=None,
+            ai_tags_updated_at=now,
+        )
 
 
 async def create_ticket(

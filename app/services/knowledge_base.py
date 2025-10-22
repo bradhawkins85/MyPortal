@@ -215,43 +215,61 @@ def _parse_ai_tag_text(raw: str) -> list[str]:
     return helpful[:10]
 
 
-async def _generate_article_ai_tags(
+async def _schedule_article_ai_tags(
+    article_id: int,
     title: str,
     summary: str | None,
     sections: Sequence[Mapping[str, Any]],
     combined_content: str,
-) -> list[str]:
+    *,
+    notifier: RefreshNotifier | None = None,
+) -> None:
     prompt = _render_ai_tag_prompt(title, summary, sections, combined_content)
+
+    async def _apply_result(result: Mapping[str, Any]) -> None:
+        status = str(result.get("status") or result.get("event_status") or "").lower()
+        if status == "queued":
+            return
+        if status == "skipped":
+            return
+        payload = result.get("response")
+        text: str | None = None
+        if isinstance(payload, Mapping):
+            text = payload.get("response") or payload.get("message") or payload.get("text")
+        elif isinstance(payload, str):
+            text = payload
+        if not text:
+            message = result.get("message")
+            if isinstance(message, str):
+                text = message
+        if not text:
+            log_error("Knowledge base AI tag generation returned empty response")
+            return
+        tags = _parse_ai_tag_text(text)
+        if not tags:
+            log_error("Knowledge base AI tag parsing yielded no tags")
+            return
+        await kb_repo.update_article(article_id, ai_tags=tags)
+        resolved_notifier = notifier or refresh_notifier
+        await resolved_notifier.broadcast_refresh(
+            reason="knowledge_base:article_tags_refreshed"
+        )
+
     try:
-        response = await modules_service.trigger_module("ollama", {"prompt": prompt})
+        response = await modules_service.trigger_module(
+            "ollama",
+            {"prompt": prompt},
+            on_complete=_apply_result,
+        )
+    except ValueError:
+        return
     except Exception as exc:  # pragma: no cover - network interaction
         log_error("Knowledge base AI tag generation failed", error=str(exc))
-        return []
-    status = str(response.get("status") or "").lower()
-    if status == "skipped":
-        return []
-    if status not in {"succeeded", "ok"}:
-        log_error(
-            "Knowledge base AI tag generation returned unexpected status",
-            status=status,
-        )
-        return []
-    payload = response.get("response")
-    text: str | None = None
-    if isinstance(payload, Mapping):
-        text = payload.get("response") or payload.get("message") or payload.get("text")
-    elif isinstance(payload, str):
-        text = payload
-    if not text:
-        message = response.get("message")
-        if isinstance(message, str):
-            text = message
-    if not text:
-        return []
-    tags = _parse_ai_tag_text(text)
-    if not tags:
-        log_error("Knowledge base AI tag parsing yielded no tags")
-    return tags
+        return
+
+    if str(response.get("status") or "").lower() not in {"queued", "skipped"}:
+        # For immediate synchronous completions we still invoke the callback
+        await _apply_result(response)
 
 
 @dataclass(slots=True)
@@ -466,7 +484,6 @@ async def create_article(
         raise ValueError("At least one section with content is required")
     title_value = str(payload.get("title"))
     summary_value = payload.get("summary")
-    ai_tags = await _generate_article_ai_tags(title_value, summary_value, prepared_sections, combined_content)
     created = await kb_repo.create_article(
         slug=str(payload.get("slug")),
         title=title_value,
@@ -476,7 +493,7 @@ async def create_article(
         is_published=is_published,
         published_at=published_at,
         created_by=author_id,
-        ai_tags=ai_tags,
+        ai_tags=None,
     )
     await _sync_relations(created["id"], permission_scope, payload)
     await kb_repo.replace_article_sections(created["id"], prepared_sections)
@@ -485,6 +502,14 @@ async def create_article(
         raise RuntimeError("Failed to load knowledge base article after creation")
     resolved_notifier = notifier or refresh_notifier
     await resolved_notifier.broadcast_refresh(reason="knowledge_base:article_created")
+    await _schedule_article_ai_tags(
+        created["id"],
+        title_value,
+        summary_value,
+        prepared_sections,
+        combined_content,
+        notifier=notifier,
+    )
     return refreshed
 
 
@@ -527,8 +552,6 @@ async def update_article(
     title_for_ai = str(title_for_ai_source) if title_for_ai_source is not None else ""
     summary_for_ai = updates.get("summary") if "summary" in updates else current.get("summary")
     content_for_ai = updates.get("content", current.get("content") or "")
-    ai_tags = await _generate_article_ai_tags(title_for_ai, summary_for_ai, prepared_sections, str(content_for_ai))
-    updates["ai_tags"] = ai_tags
     if updates:
         current = await kb_repo.update_article(article_id, **updates)
     permission_scope = str(current.get("permission_scope"))
@@ -538,6 +561,14 @@ async def update_article(
     refreshed = await kb_repo.get_article_by_id(article_id)
     if not refreshed:
         raise RuntimeError("Failed to refresh article after update")
+    await _schedule_article_ai_tags(
+        article_id,
+        title_for_ai,
+        summary_for_ai,
+        prepared_sections,
+        str(content_for_ai),
+        notifier=notifier,
+    )
     resolved_notifier = notifier or refresh_notifier
     await resolved_notifier.broadcast_refresh(reason="knowledge_base:article_updated")
     return refreshed
@@ -655,7 +686,9 @@ async def search_articles(query: str, context: ArticleAccessContext, *, limit: i
         prompt_articles = visible[: min(3, len(visible))]
         prompt = _render_prompt(query, prompt_articles)
         try:
-            response = await modules_service.trigger_module("ollama", {"prompt": prompt})
+            response = await modules_service.trigger_module(
+                "ollama", {"prompt": prompt}, background=False
+            )
         except Exception as exc:  # pragma: no cover - network interaction
             log_error("Knowledge base Ollama search failed", error=str(exc))
             ollama_status = "error"
