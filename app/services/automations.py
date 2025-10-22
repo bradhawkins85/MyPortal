@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+import asyncio
+from collections.abc import Awaitable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
-from typing import Any, Mapping
+from typing import Any
 
 from croniter import croniter
+
 from loguru import logger
 
 from app.core.database import db
@@ -25,6 +27,9 @@ def list_trigger_events() -> list[dict[str, str]]:
     """Return the available automation trigger event options."""
 
     return [dict(option) for option in TRIGGER_EVENTS]
+
+
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 
 
 def _normalise_actions(actions: Any) -> list[dict[str, Any]]:
@@ -305,6 +310,31 @@ async def execute_now(automation_id: int) -> dict[str, Any]:
     return await _execute_automation(automation)
 
 
+def _schedule_background_execution(
+    coro: Awaitable[dict[str, Any]],
+    *,
+    automation_id: int,
+) -> asyncio.Task[dict[str, Any]]:
+    """Schedule an automation execution coroutine in the background."""
+
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+
+    def _cleanup(completed: asyncio.Task[dict[str, Any]]) -> None:
+        _BACKGROUND_TASKS.discard(completed)
+        try:
+            completed.result()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "Automation background task failed",
+                automation_id=automation_id,
+                error=str(exc),
+            )
+
+    task.add_done_callback(_cleanup)
+    return task
+
+
 async def handle_event(
     event_name: str,
     context: Mapping[str, Any] | None = None,
@@ -331,9 +361,14 @@ async def handle_event(
         filters_mapping = filters if isinstance(filters, Mapping) else None
         if not _filters_match(filters_mapping, context):
             continue
-        execution = await _execute_automation(automation, context=context)
-        execution_with_id = dict(execution)
-        execution_with_id["automation_id"] = int(automation.get("id"))
-        matched.append(execution_with_id)
+        automation_id = int(automation.get("id"))
+        _schedule_background_execution(
+            _execute_automation(automation, context=context),
+            automation_id=automation_id,
+        )
+        matched.append({
+            "automation_id": automation_id,
+            "status": "queued",
+        })
     return matched
 

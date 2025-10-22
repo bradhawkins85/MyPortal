@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -55,6 +56,13 @@ async def test_handle_event_executes_matching_automations(monkeypatch):
             "next_run_at": None,
         }
 
+    scheduled_tasks: list[tuple[int, asyncio.Task[dict[str, object]]]] = []
+
+    def fake_schedule(coro, *, automation_id: int):
+        task = asyncio.create_task(coro)
+        scheduled_tasks.append((automation_id, task))
+        return task
+
     monkeypatch.setattr(
         automations_service.automation_repo,
         "list_event_automations",
@@ -65,16 +73,23 @@ async def test_handle_event_executes_matching_automations(monkeypatch):
         "_execute_automation",
         fake_execute,
     )
+    monkeypatch.setattr(
+        automations_service,
+        "_schedule_background_execution",
+        fake_schedule,
+    )
 
     results = await automations_service.handle_event(
         "tickets.created",
         {"ticket": {"status": "open"}},
     )
 
+    await asyncio.gather(*(task for _, task in scheduled_tasks))
+
     assert contexts == [(1, {"ticket": {"status": "open"}})]
     assert len(results) == 1
     assert results[0]["automation_id"] == 1
-    assert results[0]["status"] == "succeeded"
+    assert results[0]["status"] == "queued"
 
 
 @pytest.mark.anyio
