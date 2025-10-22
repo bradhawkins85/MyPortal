@@ -7,6 +7,7 @@ from app.services import ticket_importer
 from app.services import syncro
 from app.repositories import tickets as tickets_repo
 from app.repositories import companies as company_repo
+from app.services import tickets as tickets_service
 
 
 @pytest.fixture
@@ -80,7 +81,7 @@ async def test_import_ticket_by_id_creates_new_ticket(monkeypatch):
     monkeypatch.setattr(company_repo, "get_company_by_syncro_id", fake_get_company)
     monkeypatch.setattr(company_repo, "get_company_by_name", fake_get_company_by_name)
     monkeypatch.setattr(tickets_repo, "get_ticket_by_external_reference", fake_get_existing)
-    monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
     monkeypatch.setattr(ticket_importer.user_repo, "get_user_by_email", fake_get_user_by_email)
 
@@ -170,7 +171,7 @@ async def test_import_ticket_range_handles_missing(monkeypatch):
     monkeypatch.setattr(syncro, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(company_repo, "get_company_by_syncro_id", lambda syncro_id: None)
     monkeypatch.setattr(tickets_repo, "get_ticket_by_external_reference", fake_get_existing)
-    monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
 
     summary = await ticket_importer.import_ticket_range(10, 11, rate_limiter=None)
@@ -244,7 +245,7 @@ async def test_import_all_tickets_uses_pagination(monkeypatch):
     monkeypatch.setattr(syncro, "list_tickets", fake_list_tickets)
     monkeypatch.setattr(company_repo, "get_company_by_syncro_id", fake_get_company)
     monkeypatch.setattr(tickets_repo, "get_ticket_by_external_reference", fake_get_existing)
-    monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
 
     summary = await ticket_importer.import_all_tickets(rate_limiter=None)
@@ -348,7 +349,7 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
     monkeypatch.setattr(company_repo, "get_company_by_syncro_id", fake_get_company_by_syncro_id)
     monkeypatch.setattr(company_repo, "get_company_by_name", fake_get_company_by_name)
     monkeypatch.setattr(tickets_repo, "get_ticket_by_external_reference", fake_get_existing)
-    monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
     monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
     monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
