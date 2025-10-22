@@ -35,9 +35,9 @@ def test_calculate_next_run_for_event_automation():
 async def test_handle_event_executes_matching_automations(monkeypatch):
     contexts: list[tuple[int, dict[str, object] | None]] = []
 
-    async def fake_list_event_automations(trigger_event: str, *, limit: int = 50):
+    async def fake_list_event_automations(trigger_event: str, *, limit: int | None = None):
         assert trigger_event == "tickets.created"
-        assert limit == 50
+        assert limit is None
         return [
             {"id": 1, "trigger_filters": {"match": {"ticket.status": "open"}}},
             {"id": 2, "trigger_filters": {"match": {"ticket.status": "closed"}}},
