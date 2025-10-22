@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Iterable
 
 import aiomysql
 from loguru import logger
@@ -153,6 +153,30 @@ class Database:
                 await cursor.execute(sql, params)
                 return await cursor.fetchall()
 
+    def _get_migrations_dir(self) -> Path:
+        return Path(__file__).resolve().parent.parent.parent / "migrations"
+
+    async def _ensure_migrations_table(self, conn: aiomysql.Connection) -> None:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SET sql_notes = 0")
+            try:
+                await cursor.execute(
+                    "CREATE TABLE IF NOT EXISTS migrations (name VARCHAR(255) PRIMARY KEY)"
+                )
+            finally:
+                await cursor.execute("SET sql_notes = 1")
+
+    async def _apply_migration_file(self, conn: aiomysql.Connection, path: Path) -> None:
+        sql = path.read_text(encoding="utf-8")
+        statements = self._split_sql_statements(sql)
+        async with conn.cursor() as cursor:
+            for statement in statements:
+                await cursor.execute(statement)
+            await cursor.execute(
+                "INSERT INTO migrations (name) VALUES (%s)",
+                (path.name,),
+            )
+
     async def run_migrations(self) -> None:
         temp_conn = await aiomysql.connect(
             host=self._settings.database_host,
@@ -175,7 +199,7 @@ class Database:
             await wait_closed()
 
         await self.connect()
-        migrations_dir = Path(__file__).resolve().parent.parent.parent / "migrations"
+        migrations_dir = self._get_migrations_dir()
         if not migrations_dir.exists():
             logger.warning("No migrations directory found at {path}", path=str(migrations_dir))
             return
@@ -198,14 +222,7 @@ class Database:
                     )
                     raise RuntimeError("Could not obtain database migration lock")
 
-                async with conn.cursor() as cursor:
-                    await cursor.execute("SET sql_notes = 0")
-                    try:
-                        await cursor.execute(
-                            "CREATE TABLE IF NOT EXISTS migrations (name VARCHAR(255) PRIMARY KEY)"
-                        )
-                    finally:
-                        await cursor.execute("SET sql_notes = 1")
+                await self._ensure_migrations_table(conn)
 
                 async with conn.cursor(aiomysql.DictCursor) as cursor:
                     await cursor.execute("SELECT name FROM migrations")
@@ -215,15 +232,77 @@ class Database:
                 for path in sorted(migrations_dir.glob("*.sql")):
                     if path.name in applied:
                         continue
-                    sql = path.read_text()
-                    statements = self._split_sql_statements(sql)
-                    async with conn.cursor() as cursor:
-                        for statement in statements:
-                            await cursor.execute(statement)
-                        await cursor.execute(
-                            "INSERT INTO migrations (name) VALUES (%s)", (path.name,)
-                        )
+                    await self._apply_migration_file(conn, path)
                     logger.info("Applied migration {name}", name=path.name)
+            finally:
+                if lock_acquired:
+                    async with conn.cursor() as cursor:
+                        await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+
+    async def reprocess_migrations(self, names: Iterable[str] | None = None) -> None:
+        await self.connect()
+        migrations_dir = self._get_migrations_dir()
+        if not migrations_dir.exists():
+            logger.warning("No migrations directory found at {path}", path=str(migrations_dir))
+            return
+
+        available = {path.name: path for path in sorted(migrations_dir.glob("*.sql"))}
+        if not available:
+            logger.info("No migrations available to reprocess in {path}", path=str(migrations_dir))
+            return
+
+        if names is None:
+            target_paths = list(available.values())
+        else:
+            normalised = []
+            for name in names:
+                if not name:
+                    continue
+                candidate = name if name.endswith(".sql") else f"{name}.sql"
+                normalised.append(candidate)
+
+            deduped: list[str] = []
+            seen: set[str] = set()
+            for name in normalised:
+                if name in seen:
+                    continue
+                seen.add(name)
+                deduped.append(name)
+            normalised = deduped
+
+            missing = [name for name in normalised if name not in available]
+            if missing:
+                raise ValueError(
+                    "Unknown migrations requested for reprocessing: " + ", ".join(sorted(missing))
+                )
+
+            target_paths = [available[name] for name in normalised]
+
+        lock_name = f"{self._settings.database_name}_migration_lock"
+        lock_timeout = getattr(self._settings, "migration_lock_timeout", 60)
+        lock_acquired = False
+
+        async with self.acquire() as conn:
+            try:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("SELECT GET_LOCK(%s, %s)", (lock_name, lock_timeout))
+                    result = await cursor.fetchone()
+                lock_acquired = bool(result and result[0] == 1)
+                if not lock_acquired:
+                    logger.error(
+                        "Unable to obtain database migration lock {lock} within {timeout}s",
+                        lock=lock_name,
+                        timeout=lock_timeout,
+                    )
+                    raise RuntimeError("Could not obtain database migration lock")
+
+                await self._ensure_migrations_table(conn)
+
+                for path in target_paths:
+                    async with conn.cursor() as cursor:
+                        await cursor.execute("DELETE FROM migrations WHERE name = %s", (path.name,))
+                    await self._apply_migration_file(conn, path)
+                    logger.info("Reprocessed migration {name}", name=path.name)
             finally:
                 if lock_acquired:
                     async with conn.cursor() as cursor:
