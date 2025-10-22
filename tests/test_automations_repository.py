@@ -1,15 +1,27 @@
+from typing import Any
+
 import pytest
 
 from app.repositories import automations
 
 
 class _DummyAutomationDB:
-    def __init__(self, fetched_row, *, last_insert_id: int = 99, connected: bool = True):
+    def __init__(
+        self,
+        fetched_row,
+        *,
+        fetched_rows: list[dict[str, Any]] | None = None,
+        last_insert_id: int = 99,
+        connected: bool = True,
+    ):
         self.insert_sql: str | None = None
         self.insert_params: tuple | None = None
         self.fetch_sql: str | None = None
         self.fetch_params: tuple | None = None
+        self.fetch_all_sql: str | None = None
+        self.fetch_all_params: tuple | None = None
         self._fetched_row = fetched_row
+        self._fetched_rows = fetched_rows
         self._last_insert_id = last_insert_id
         self._connected = connected
         self.connect_calls = 0
@@ -30,6 +42,11 @@ class _DummyAutomationDB:
         self.fetch_sql = sql.strip()
         self.fetch_params = params
         return self._fetched_row
+
+    async def fetch_all(self, sql, params):  # pragma: no cover - interface parity
+        self.fetch_all_sql = sql.strip()
+        self.fetch_all_params = params
+        return self._fetched_rows or []
 
 
 @pytest.fixture
@@ -179,3 +196,36 @@ async def test_record_run_falls_back_when_fetch_missing(monkeypatch):
     assert record["automation_id"] == 3
     assert record["status"] == "failed"
     assert record["result_payload"] == {"error": "timeout"}
+
+
+@pytest.mark.anyio
+async def test_list_event_automations_without_limit(monkeypatch):
+    rows = [
+        {
+            "id": 301,
+            "name": "Ticket ntfy alert",
+            "description": None,
+            "kind": "event",
+            "cadence": None,
+            "cron_expression": None,
+            "trigger_event": "tickets.created",
+            "trigger_filters": None,
+            "action_module": "ntfy",
+            "action_payload": {"message": "Created"},
+            "status": "active",
+            "next_run_at": None,
+            "last_run_at": None,
+            "last_error": None,
+            "created_at": None,
+            "updated_at": None,
+        }
+    ]
+    dummy_db = _DummyAutomationDB(fetched_row=None, fetched_rows=rows)
+    monkeypatch.setattr(automations, "db", dummy_db)
+
+    records = await automations.list_event_automations("tickets.created")
+
+    assert "LIMIT" not in (dummy_db.fetch_all_sql or "")
+    assert dummy_db.fetch_all_params == ("tickets.created",)
+    assert len(records) == 1
+    assert records[0]["id"] == 301
