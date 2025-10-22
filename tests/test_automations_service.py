@@ -209,3 +209,70 @@ async def test_execute_automation_interpolates_context(monkeypatch):
     assert payload["metadata"]["tags"] == ["critical", "vip"]
     assert payload["metadata"]["timestamp"] == created_at.isoformat()
     assert payload["context"] == context
+
+
+@pytest.mark.anyio
+async def test_execute_automation_supports_constant_tokens(monkeypatch):
+    captured: list[dict[str, object]] = []
+
+    async def fake_trigger_module(module_slug, payload, *, background=False):
+        assert background is False
+        captured.append(payload)
+        return {"status": "ok"}
+
+    async def fake_mark_started(*args, **kwargs):
+        return None
+
+    async def fake_record_run(**kwargs):
+        return None
+
+    async def fake_set_last_error(*args, **kwargs):
+        return None
+
+    async def fake_set_next_run(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        automations_service.modules_service,
+        "trigger_module",
+        fake_trigger_module,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "mark_started",
+        fake_mark_started,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "record_run",
+        fake_record_run,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "set_last_error",
+        fake_set_last_error,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "set_next_run",
+        fake_set_next_run,
+    )
+
+    context = {"ticket": {"id": 41, "subject": "VPN outage", "priority": "high"}}
+    automation = {
+        "id": 91,
+        "kind": "event",
+        "action_module": "ntfy",
+        "action_payload": {
+            "message": "{{ TICKET_SUMMARY }}",
+            "title": "{{ TICKET_PRIORITY }} priority",
+        },
+    }
+
+    result = await automations_service._execute_automation(automation, context=context)
+
+    assert result["status"] == "succeeded"
+    assert captured
+    payload = captured[0]
+    assert payload["message"] == "VPN outage"
+    assert payload["title"] == "high priority"
