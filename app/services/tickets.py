@@ -9,6 +9,8 @@ from typing import Any, Iterable, Mapping
 from app.core.database import db
 from app.core.logging import log_error
 from app.repositories import tickets as tickets_repo
+from app.repositories.tickets import TicketRecord
+from app.services import automations as automations_service
 from app.repositories import users as user_repo
 from app.services import modules as modules_service
 from app.services.tagging import filter_helpful_slugs, is_helpful_slug, slugify_tag
@@ -195,6 +197,51 @@ async def refresh_ticket_ai_tags(ticket_id: int) -> None:
         ai_tags_model=str(model_value) if isinstance(model_value, str) else None,
         ai_tags_updated_at=now,
     )
+
+
+async def create_ticket(
+    *,
+    subject: str,
+    description: str | None,
+    requester_id: int | None,
+    company_id: int | None,
+    assigned_user_id: int | None,
+    priority: str,
+    status: str,
+    category: str | None,
+    module_slug: str | None,
+    external_reference: str | None,
+    ticket_number: str | None = None,
+    trigger_automations: bool = True,
+) -> TicketRecord:
+    """Create a ticket and emit the corresponding automation event."""
+
+    ticket = await tickets_repo.create_ticket(
+        subject=subject,
+        description=description,
+        requester_id=requester_id,
+        company_id=company_id,
+        assigned_user_id=assigned_user_id,
+        priority=priority,
+        status=status,
+        category=category,
+        module_slug=module_slug,
+        external_reference=external_reference,
+        ticket_number=ticket_number,
+    )
+    if trigger_automations:
+        try:
+            await automations_service.handle_event(
+                "tickets.created",
+                {"ticket": ticket},
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to execute ticket creation automations",
+                ticket_id=ticket.get("id"),
+                error=str(exc),
+            )
+    return ticket
 
 
 def _render_prompt(

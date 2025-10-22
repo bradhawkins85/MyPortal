@@ -12,7 +12,7 @@ from app.repositories import companies as company_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
 from app.repositories import webhook_events as webhook_events_repo
-from app.services import syncro, webhook_monitor
+from app.services import syncro, tickets as tickets_service, webhook_monitor
 
 _ALLOWED_PRIORITIES = {"urgent", "high", "normal", "low"}
 _ALLOWED_STATUSES = {"open", "in_progress", "pending", "resolved", "closed"}
@@ -619,7 +619,7 @@ async def _upsert_ticket(
         ticket_db_id = int(existing["id"])
         outcome = "updated"
     else:
-        created = await tickets_repo.create_ticket(
+        created = await tickets_service.create_ticket(
             subject=subject,
             description=description_value,
             requester_id=requester_id,
@@ -631,6 +631,7 @@ async def _upsert_ticket(
             module_slug=None,
             external_reference=external_reference,
             ticket_number=ticket_number,
+            trigger_automations=True,
         )
         created_id = created.get("id")
         ticket_db_id = int(created_id) if created_id is not None else None

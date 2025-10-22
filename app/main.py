@@ -6081,7 +6081,7 @@ async def admin_create_ticket(request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     try:
-        created = await tickets_repo.create_ticket(
+        created = await tickets_service.create_ticket(
             subject=subject,
             description=description,
             requester_id=current_user.get("id"),
@@ -6092,21 +6092,11 @@ async def admin_create_ticket(request: Request):
             category=str(form.get("category", "")).strip() or None,
             module_slug=module_slug,
             external_reference=str(form.get("externalReference", "")).strip() or None,
+            trigger_automations=True,
         )
         await tickets_repo.add_watcher(created["id"], current_user.get("id"))
         await tickets_service.refresh_ticket_ai_summary(created["id"])
         await tickets_service.refresh_ticket_ai_tags(created["id"])
-        try:
-            await automations_service.handle_event(
-                "tickets.created",
-                {"ticket": created},
-            )
-        except Exception as automation_exc:  # pragma: no cover - defensive logging
-            log_error(
-                "Failed to execute ticket creation automations",
-                ticket_id=created.get("id"),
-                error=str(automation_exc),
-            )
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create ticket", error=str(exc))
         return await _render_tickets_dashboard(
