@@ -131,7 +131,7 @@ class SchedulerService:
             )
             return None
 
-    async def _run_task(self, task: dict[str, Any]) -> None:
+    async def _run_task(self, task: dict[str, Any], *, force_restart: bool = False) -> None:
         task_id = task.get("id")
         command = task.get("command")
         log_info("Running scheduled task", task_id=task_id, command=command)
@@ -159,7 +159,7 @@ class SchedulerService:
             elif command == "update_stock_feed":
                 await products_service.update_stock_feed()
             elif command == "system_update":
-                output = await self._run_system_update()
+                output = await self._run_system_update(force_restart=force_restart)
                 if output:
                     details = output
             else:
@@ -191,9 +191,9 @@ class SchedulerService:
         task = await scheduled_tasks_repo.get_task(task_id)
         if not task:
             raise ValueError(f"Task {task_id} not found")
-        await self._run_task(task)
+        await self._run_task(task, force_restart=True)
 
-    async def _run_system_update(self) -> str | None:
+    async def _run_system_update(self, *, force_restart: bool = False) -> str | None:
         script_path = _PROJECT_ROOT / "scripts" / "upgrade.sh"
         if not script_path.exists():
             raise FileNotFoundError("System update script not found")
@@ -202,11 +202,17 @@ class SchedulerService:
 
         async with _SYSTEM_UPDATE_LOCK:
             log_info("Starting system update", script=str(script_path))
+            if force_restart:
+                log_info("System update run requested from UI; forcing restart helper execution")
+            env = os.environ.copy()
+            if force_restart:
+                env["FORCE_RESTART"] = "1"
             process = await asyncio.create_subprocess_exec(
                 str(script_path),
                 stdout=PIPE,
                 stderr=PIPE,
                 cwd=str(_PROJECT_ROOT),
+                env=env,
             )
             stdout, stderr = await process.communicate()
             stdout_preview = _truncate_output(stdout)

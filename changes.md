@@ -1,3 +1,4 @@
+- 2025-10-22, 09:55 UTC, Fix, Forced web UI system updates to run the restart helper even when the repository is already up to date
 - 2025-12-26, 09:10 UTC, Feature, Documented how to trigger targeted or full database migration reprocessing from the app helpers
 - 2025-10-22, 06:49 UTC, Feature, Added database migration reprocessing helper to re-run individual or all SQL files safely
 - 2025-12-24, 16:30 UTC, Feature, Expanded System Variables Reference knowledge base article with the full catalogue of application, runtime, and environment tokens
