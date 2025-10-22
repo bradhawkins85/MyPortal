@@ -15,14 +15,18 @@
   {% set values = form_values or {} %}
   {% set trigger_select = values.get('triggerSelectValue', '') %}
   {% set trigger_custom = values.get('triggerCustomValue', '') %}
+  {% set header_title = page_title or 'Create event automation' %}
+  {% set header_subtitle = page_subtitle or 'Link webhook payloads and application events to integration modules for immediate processing.' %}
+  {% set submit_text = submit_label or 'Save automation' %}
+  {% set action_url = form_action or '/admin/automations' %}
 
   <div class="management management--single" data-layout>
 
     <section class="management__content">
       <header class="management__header">
         <div>
-          <h1 class="management__title">Create event automation</h1>
-          <p class="management__subtitle">Link webhook payloads and application events to integration modules for immediate processing.</p>
+          <h1 class="management__title">{{ header_title }}</h1>
+          <p class="management__subtitle">{{ header_subtitle }}</p>
         </div>
         <div class="management__header-actions">
           <a class="button button--ghost" href="/admin/automations">
@@ -31,12 +35,14 @@
             </span>
             Back to automations
           </a>
-          <a class="button button--ghost" href="/admin/automations/create/scheduled">
-            <span class="button__icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2a2 2 0 0 0-2 2v3a1 1 0 0 0 1 1h1v2H5a1 1 0 0 0-1 1v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a1 1 0 0 0-1-1h-1V8h1a1 1 0 0 0 1-1V4a2 2 0 0 0-2-2h-3a2 2 0 0 0-2 2v1h-2V4a2 2 0 0 0-2-2z"/></svg>
-            </span>
-            Switch to scheduled automation
-          </a>
+          {% if alternate_link %}
+            <a class="button button--ghost" href="{{ alternate_link.url }}">
+              <span class="button__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2a2 2 0 0 0-2 2v3a1 1 0 0 0 1 1h1v2H5a1 1 0 0 0-1 1v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a1 1 0 0 0-1-1h-1V8h1a1 1 0 0 0 1-1V4a2 2 0 0 0-2-2h-3a2 2 0 0 0-2 2v1h-2V4a2 2 0 0 0-2-2z"/></svg>
+              </span>
+              {{ alternate_link.label }}
+            </a>
+          {% endif %}
         </div>
       </header>
 
@@ -47,7 +53,7 @@
             <p class="card__subtitle">Provide deterministic JSON filters to keep automations secure and auditable.</p>
           </header>
           <div class="card__body">
-            <form action="/admin/automations" method="post" class="form management__form">
+            <form action="{{ action_url }}" method="post" class="form management__form">
               {% if csrf_token %}
                 <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
               {% endif %}
@@ -108,7 +114,7 @@
                 <input type="hidden" id="automation-actions-data" name="actionPayload" value="{{ values.get('actionPayloadRaw', '') }}" />
               </div>
               <div class="form-actions">
-                <button type="submit" class="button button--primary">Save automation</button>
+                <button type="submit" class="button button--primary">{{ submit_text }}</button>
               </div>
             </form>
           </div>
