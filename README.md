@@ -198,6 +198,45 @@ gracefully fall back to an empty string.
    uvicorn app.main:app --reload
    ```
    On startup the application automatically applies any pending SQL migrations and ensures the database exists.
+
+## Database migrations
+
+The application stores its SQL migrations under the top-level `migrations/`
+directory and automatically applies new files during startup. Every migration
+is recorded in the `migrations` table so repeats are skipped on future boots.
+
+### Reprocessing migration steps
+
+In the rare case that a migration needs to be re-applied (for example after a
+manual database restore) you can trigger a targeted or full reprocess straight
+from the FastAPI project. Activate the virtual environment and run the helper
+below, substituting the migration names you want to re-run:
+
+```bash
+source .venv/bin/activate
+python - <<'PY'
+import asyncio
+
+from app.core.database import db
+
+
+async def main() -> None:
+    # Re-run a specific migration file.
+    await db.reprocess_migrations(["001_initial_schema"])  # omit the .sql suffix
+    await db.disconnect()
+
+
+asyncio.run(main())
+PY
+```
+
+Pass a list of migration stems (e.g. `001_initial_schema`) or their `.sql`
+filenames. When the list is omitted `reprocess_migrations()` replays every file
+in order, deleting their entries from the tracking table before executing the
+SQL again. The helper acquires the same advisory lock used during startup, so
+other workers wait rather than applying migrations concurrently. Adjust the
+lock timeout with the `MIGRATION_LOCK_TIMEOUT` environment variable if your
+production servers need a longer window.
 6. Access `http://localhost:8000` for the responsive portal UI. After signing in, visit `http://localhost:8000/docs` for the interactive Swagger UI covering every API endpoint.
 7. The first visit will redirect the login flow to the registration page if no users exist, ensuring the first account becomes the super administrator.
 
