@@ -1,3 +1,4 @@
+- 2025-12-24, 13:45 UTC, Feature, Seeded default automation filter and action templates so new workflows start with example JSON payloads in the admin builder
 - 2025-10-22, 02:23 UTC, Feature, Added quick add dropdowns for automation trigger filters and module-specific action templates
 - 2025-10-22, 01:47 UTC, Feature, Enabled ticket automation editing with prefilled forms and admin entry points for updating workflows
 - 2025-12-24, 11:30 UTC, Fix, Moved Ollama module generation into shared background tasks with ticket and knowledge base callbacks to remove UI delays
