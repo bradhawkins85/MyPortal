@@ -1,3 +1,5 @@
+- 2025-12-26, 14:50 UTC, Fix, Rebuilt system variables knowledge base section seeds with CONCAT_WS strings to restore valid SQL syntax during article re-imports
+- 2025-12-26, 12:30 UTC, Fix, Corrected super admin knowledge base seed content concatenation so migrations import with matching column counts
 - 2025-10-22, 09:55 UTC, Fix, Forced web UI system updates to run the restart helper even when the repository is already up to date
 - 2025-12-26, 09:10 UTC, Feature, Documented how to trigger targeted or full database migration reprocessing from the app helpers
 - 2025-10-22, 06:49 UTC, Feature, Added database migration reprocessing helper to re-run individual or all SQL files safely
