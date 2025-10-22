@@ -15,7 +15,7 @@ def anyio_backend() -> str:
 async def test_create_article_broadcasts_refresh(monkeypatch):
     notifier = AsyncMock(spec=RefreshNotifier)
 
-    monkeypatch.setattr(kb_service, "_generate_article_ai_tags", AsyncMock(return_value=["tag"]))
+    monkeypatch.setattr(kb_service, "_schedule_article_ai_tags", AsyncMock())
     monkeypatch.setattr(kb_service.kb_repo, "create_article", AsyncMock(return_value={"id": 11, "slug": "intro"}))
     monkeypatch.setattr(kb_service.kb_repo, "replace_article_sections", AsyncMock())
     monkeypatch.setattr(kb_service.kb_repo, "replace_article_users", AsyncMock())
@@ -52,11 +52,7 @@ async def test_update_article_broadcasts_refresh(monkeypatch):
         "get_article_by_id",
         AsyncMock(side_effect=[current_article, refreshed_article]),
     )
-    monkeypatch.setattr(
-        kb_service,
-        "_generate_article_ai_tags",
-        AsyncMock(return_value=["updated"]),
-    )
+    monkeypatch.setattr(kb_service, "_schedule_article_ai_tags", AsyncMock())
     monkeypatch.setattr(kb_service.kb_repo, "update_article", AsyncMock(return_value=refreshed_article))
     monkeypatch.setattr(kb_service.kb_repo, "replace_article_sections", AsyncMock())
     monkeypatch.setattr(kb_service.kb_repo, "replace_article_users", AsyncMock())

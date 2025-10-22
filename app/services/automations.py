@@ -230,6 +230,7 @@ async def _execute_automation(
                     action_result = await modules_service.trigger_module(
                         module_slug,
                         module_payload,
+                        background=False,
                     )
                     results.append(
                         {"module": module_slug, "status": "succeeded", "result": action_result}
@@ -258,7 +259,9 @@ async def _execute_automation(
                 module_payload = dict(payload)
                 if context:
                     module_payload.setdefault("context", context)
-                result_payload = await modules_service.trigger_module(str(module_slug), module_payload)
+                result_payload = await modules_service.trigger_module(
+                    str(module_slug), module_payload, background=False
+                )
             else:
                 result_payload = {"status": "skipped", "reason": "No action module configured"}
     except Exception as exc:  # pragma: no cover - network/runtime guard
