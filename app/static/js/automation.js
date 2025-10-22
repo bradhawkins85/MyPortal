@@ -2,6 +2,194 @@
   let taskModal = null;
   let logsModal = null;
 
+  function toJsonTemplate(data) {
+    try {
+      return JSON.stringify(data, null, 2);
+    } catch (error) {
+      return '';
+    }
+  }
+
+  const FILTER_SNIPPETS = [
+    {
+      label: 'Match status equals "open"',
+      value: toJsonTemplate({
+        match: {
+          status: 'open',
+        },
+      }),
+    },
+    {
+      label: 'Match ticket priority equals "high"',
+      value: toJsonTemplate({
+        match: {
+          'ticket.priority': 'high',
+        },
+      }),
+    },
+    {
+      label: 'Match any status open or pending',
+      value: toJsonTemplate({
+        any: [
+          { match: { status: 'open' } },
+          { match: { status: 'pending' } },
+        ],
+      }),
+    },
+    {
+      label: 'Require status open and priority high',
+      value: toJsonTemplate({
+        all: [
+          { match: { status: 'open' } },
+          { match: { 'ticket.priority': 'high' } },
+        ],
+      }),
+    },
+    {
+      label: 'Exclude cancelled status',
+      value: toJsonTemplate({
+        not: {
+          match: {
+            status: 'cancelled',
+          },
+        },
+      }),
+    },
+    {
+      label: 'Match nested payload customer ID',
+      value: toJsonTemplate({
+        match: {
+          'payload.customer.id': 12345,
+        },
+      }),
+    },
+  ];
+
+  const ACTION_SNIPPETS = {
+    smtp: [
+      {
+        label: 'Notify support team via email',
+        value: toJsonTemplate({
+          recipients: ['support@example.com'],
+          subject: 'Ticket {{ticket.number}} requires attention',
+          html: '<p>Ticket {{ticket.number}} triggered this automation.</p>',
+          text: 'Ticket {{ticket.number}} triggered this automation.',
+        }),
+      },
+      {
+        label: 'Escalate with custom sender',
+        value: toJsonTemplate({
+          recipients: ['escalations@example.com'],
+          subject: 'Escalation for ticket {{ticket.number}}',
+          html: '<p>Please review the ticket escalation details.</p>',
+          sender: 'alerts@example.com',
+        }),
+      },
+    ],
+    ntfy: [
+      {
+        label: 'Publish high priority ntfy alert',
+        value: toJsonTemplate({
+          topic: 'alerts',
+          title: 'Automation alert',
+          message: 'Ticket {{ticket.number}} breached SLA thresholds.',
+          priority: 'urgent',
+        }),
+      },
+      {
+        label: 'Send acknowledgement request',
+        value: toJsonTemplate({
+          title: 'Ticket update required',
+          message: 'Acknowledge ticket {{ticket.number}} in the portal.',
+          priority: 'high',
+        }),
+      },
+    ],
+    tacticalrmm: [
+      {
+        label: 'Trigger Tactical RMM script',
+        value: toJsonTemplate({
+          endpoint: '/api/v3/scripts/run',
+          method: 'POST',
+          body: {
+            agent_id: 1234,
+            script: 'Reboot Agent',
+          },
+        }),
+      },
+      {
+        label: 'Queue reboot task',
+        value: toJsonTemplate({
+          endpoint: '/api/v3/tasks/run',
+          method: 'POST',
+          body: {
+            agent_id: 1234,
+            task_name: 'Reboot',
+          },
+        }),
+      },
+    ],
+    ollama: [
+      {
+        label: 'Generate ticket summary prompt',
+        value: toJsonTemplate({
+          prompt: 'Summarise ticket {{ticket.number}} and highlight next actions.',
+        }),
+      },
+      {
+        label: 'Draft customer reply prompt',
+        value: toJsonTemplate({
+          prompt: 'Draft a courteous reply for ticket {{ticket.number}} referencing recent updates.',
+        }),
+      },
+    ],
+    syncro: [
+      {
+        label: 'Override Syncro rate limit',
+        value: toJsonTemplate({
+          rate_limit_per_minute: 120,
+        }),
+      },
+      {
+        label: 'Provide temporary API key override',
+        value: toJsonTemplate({
+          api_key: '{{ secrets.syncro_api_key }}',
+        }),
+      },
+    ],
+    uptimekuma: [
+      {
+        label: 'Override shared secret for alert',
+        value: toJsonTemplate({
+          shared_secret: '{{ secrets.uptimekuma_shared_secret }}',
+        }),
+      },
+      {
+        label: 'Provide shared secret hash',
+        value: toJsonTemplate({
+          shared_secret_hash: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        }),
+      },
+    ],
+    'chatgpt-mcp': [
+      {
+        label: 'Limit MCP actions to ticket reads',
+        value: toJsonTemplate({
+          allowed_actions: ['listTickets', 'getTicket'],
+          allow_ticket_updates: false,
+        }),
+      },
+      {
+        label: 'Enable ticket updates with cap',
+        value: toJsonTemplate({
+          allowed_actions: ['listTickets', 'getTicket', 'updateTicket'],
+          allow_ticket_updates: true,
+          max_results: 25,
+        }),
+      },
+    ],
+  };
+
   function getCookie(name) {
     const pattern = `(?:^|; )${name.replace(/([.$?*|{}()\[\]\\\/\+^])/g, '\\$1')}=([^;]*)`;
     const matches = document.cookie.match(new RegExp(pattern));
@@ -524,6 +712,100 @@
     });
   }
 
+  function insertSnippet(field, snippet) {
+    if (!field) {
+      return;
+    }
+    const trimmedSnippet = typeof snippet === 'string' ? snippet.trim() : '';
+    if (!trimmedSnippet) {
+      return;
+    }
+    const existing = field.value || '';
+    const hasContent = existing.trim().length > 0;
+    const cleanedExisting = hasContent ? existing.replace(/\s+$/u, '') : '';
+    const combined = hasContent ? `${cleanedExisting}\n${trimmedSnippet}` : trimmedSnippet;
+    field.value = combined;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    if (typeof field.focus === 'function') {
+      field.focus({ preventScroll: false });
+      const end = field.value.length;
+      if (typeof field.setSelectionRange === 'function') {
+        field.setSelectionRange(end, end);
+      }
+    }
+  }
+
+  function setupFilterQuickAdd() {
+    const select = document.querySelector('[data-filter-quick-add]');
+    const button = document.querySelector('[data-filter-quick-add-apply]');
+    const textarea = document.getElementById('automation-filters');
+    if (!select || !button || !textarea) {
+      return;
+    }
+
+    FILTER_SNIPPETS.filter((snippet) => snippet && snippet.value).forEach((snippet) => {
+      const option = document.createElement('option');
+      option.value = snippet.value;
+      option.textContent = snippet.label;
+      select.appendChild(option);
+    });
+
+    const hasTemplates = select.options.length > 1;
+    select.disabled = !hasTemplates;
+    button.disabled = !hasTemplates;
+
+    button.addEventListener('click', () => {
+      const value = select.value;
+      if (!value) {
+        select.focus();
+        return;
+      }
+      insertSnippet(textarea, value);
+      select.value = '';
+    });
+
+    select.addEventListener('change', () => {
+      if (select.value) {
+        button.focus();
+      }
+    });
+  }
+
+  function getActionTemplates(moduleValue) {
+    if (!moduleValue) {
+      return [];
+    }
+    const key = String(moduleValue).trim().toLowerCase();
+    const templates = ACTION_SNIPPETS[key];
+    if (!Array.isArray(templates)) {
+      return [];
+    }
+    return templates.filter((entry) => entry && entry.value);
+  }
+
+  function populateActionQuickAdd(select, button, wrapper, moduleValue) {
+    if (!select || !button || !wrapper) {
+      return;
+    }
+    while (select.options.length > 1) {
+      select.remove(1);
+    }
+    const templates = getActionTemplates(moduleValue);
+    templates.forEach((template) => {
+      const option = document.createElement('option');
+      option.value = template.value;
+      option.textContent = template.label;
+      select.appendChild(option);
+    });
+    const hasTemplates = templates.length > 0;
+    select.disabled = !hasTemplates;
+    button.disabled = !hasTemplates;
+    wrapper.hidden = !hasTemplates;
+    if (!hasTemplates) {
+      select.value = '';
+    }
+  }
+
   function setupTriggerField() {
     const select = document.querySelector('[data-trigger-select]');
     const hidden = document.getElementById('automation-trigger');
@@ -696,48 +978,100 @@
       serializeActions();
     };
 
-    const createActionRow = (action = null) => {
-      const row = document.createElement('div');
-      row.className = 'automation-action';
-      row.setAttribute('data-action-row', 'true');
+      let actionRowCounter = 0;
 
-      const moduleWrapper = document.createElement('div');
-      moduleWrapper.className = 'automation-action__field';
-      const moduleSelect = createModuleSelect(action && action.module ? action.module : '');
-      moduleSelect.addEventListener('change', updateState);
-      moduleWrapper.appendChild(moduleSelect);
-      row.appendChild(moduleWrapper);
+      const createActionRow = (action = null) => {
+        actionRowCounter += 1;
+        const rowId = actionRowCounter;
+        const row = document.createElement('div');
+        row.className = 'automation-action';
+        row.setAttribute('data-action-row', 'true');
 
-      const payloadWrapper = document.createElement('div');
-      payloadWrapper.className = 'automation-action__field';
-      const payloadInput = document.createElement('textarea');
-      payloadInput.className = 'form-input';
-      payloadInput.rows = 2;
-      payloadInput.placeholder = '{}';
-      payloadInput.setAttribute('data-action-payload', 'true');
-      if (action && action.payload) {
-        try {
-          payloadInput.value = JSON.stringify(action.payload, null, 2);
-        } catch (error) {
-          payloadInput.value = '';
+        const moduleWrapper = document.createElement('div');
+        moduleWrapper.className = 'automation-action__field';
+        let refreshQuickAddOptions = () => {};
+        const moduleSelect = createModuleSelect(action && action.module ? action.module : '');
+        moduleSelect.addEventListener('change', () => {
+          refreshQuickAddOptions();
+          updateState();
+        });
+        moduleWrapper.appendChild(moduleSelect);
+        row.appendChild(moduleWrapper);
+
+        const payloadWrapper = document.createElement('div');
+        payloadWrapper.className = 'automation-action__field';
+        const quickAddWrapper = document.createElement('div');
+        quickAddWrapper.className = 'form-quick-add';
+        quickAddWrapper.hidden = true;
+        const quickAddLabel = document.createElement('label');
+        quickAddLabel.className = 'sr-only';
+        quickAddLabel.setAttribute('for', `automation-action-quick-add-${rowId}`);
+        quickAddLabel.textContent = 'Quick add action payload template';
+        const quickAddSelect = document.createElement('select');
+        quickAddSelect.className = 'form-input form-quick-add__select';
+        quickAddSelect.id = `automation-action-quick-add-${rowId}`;
+        quickAddSelect.setAttribute('data-action-quick-add', 'true');
+        const quickAddPlaceholder = document.createElement('option');
+        quickAddPlaceholder.value = '';
+        quickAddPlaceholder.textContent = 'Select a payload template';
+        quickAddSelect.appendChild(quickAddPlaceholder);
+        const quickAddButton = document.createElement('button');
+        quickAddButton.type = 'button';
+        quickAddButton.className = 'button button--ghost';
+        quickAddButton.textContent = 'Insert template';
+        quickAddButton.setAttribute('data-action-quick-add-apply', 'true');
+        quickAddWrapper.appendChild(quickAddLabel);
+        quickAddWrapper.appendChild(quickAddSelect);
+        quickAddWrapper.appendChild(quickAddButton);
+
+        const payloadInput = document.createElement('textarea');
+        payloadInput.className = 'form-input';
+        payloadInput.rows = 2;
+        payloadInput.placeholder = '{}';
+        payloadInput.setAttribute('data-action-payload', 'true');
+        if (action && action.payload) {
+          try {
+            payloadInput.value = JSON.stringify(action.payload, null, 2);
+          } catch (error) {
+            payloadInput.value = '';
+          }
         }
-      }
-      payloadInput.addEventListener('input', updateState);
-      payloadWrapper.appendChild(payloadInput);
-      row.appendChild(payloadWrapper);
+        payloadInput.addEventListener('input', updateState);
+        quickAddButton.addEventListener('click', () => {
+          const templateValue = quickAddSelect.value;
+          if (!templateValue) {
+            quickAddSelect.focus();
+            return;
+          }
+          insertSnippet(payloadInput, templateValue);
+          quickAddSelect.value = '';
+          updateState();
+        });
+        quickAddSelect.addEventListener('change', () => {
+          if (quickAddSelect.value) {
+            quickAddButton.focus();
+          }
+        });
+        refreshQuickAddOptions = () => {
+          populateActionQuickAdd(quickAddSelect, quickAddButton, quickAddWrapper, moduleSelect.value);
+        };
+        refreshQuickAddOptions();
+        payloadWrapper.appendChild(quickAddWrapper);
+        payloadWrapper.appendChild(payloadInput);
+        row.appendChild(payloadWrapper);
 
-      const removeButton = document.createElement('button');
-      removeButton.type = 'button';
-      removeButton.className = 'button button--ghost automation-action__remove';
-      removeButton.textContent = 'Remove';
-      removeButton.addEventListener('click', () => {
-        row.remove();
-        updateState();
-      });
-      row.appendChild(removeButton);
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'button button--ghost automation-action__remove';
+        removeButton.textContent = 'Remove';
+        removeButton.addEventListener('click', () => {
+          row.remove();
+          updateState();
+        });
+        row.appendChild(removeButton);
 
-      return row;
-    };
+        return row;
+      };
 
     const addRow = (action = null) => {
       const row = createActionRow(action);
@@ -779,6 +1113,7 @@
 
   function setupAutomationForm() {
     setupTriggerField();
+    setupFilterQuickAdd();
     setupActionBuilder();
     setupScheduleVisibility();
   }

@@ -97,7 +97,21 @@
               </div>
               <div class="form-field">
                 <label class="form-label" for="automation-filters">Trigger filters (JSON)</label>
-                <textarea id="automation-filters" name="triggerFilters" class="form-input" rows="3" placeholder='{"match":{"status":"open"}}'>{{ values.get('triggerFiltersRaw', '') }}</textarea>
+                <div class="form-quick-add">
+                  <label class="sr-only" for="automation-filter-quick-add">Quick add trigger filter template</label>
+                  <select id="automation-filter-quick-add" class="form-input form-quick-add__select" data-filter-quick-add>
+                    <option value="">Select a filter template</option>
+                  </select>
+                  <button type="button" class="button button--ghost" data-filter-quick-add-apply>Insert template</button>
+                </div>
+                <textarea
+                  id="automation-filters"
+                  name="triggerFilters"
+                  class="form-input"
+                  rows="3"
+                  placeholder='{"match":{"status":"open"}}'
+                >{{ values.get('triggerFiltersRaw', '') }}</textarea>
+                <p class="form-help">Use filter templates to match webhook payloads without manually writing JSON.</p>
               </div>
               <div class="form-field" data-automation-actions>
                 <label class="form-label">Trigger actions</label>
