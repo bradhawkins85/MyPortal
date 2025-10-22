@@ -1,3 +1,4 @@
+- 2025-12-24, 16:30 UTC, Feature, Expanded System Variables Reference knowledge base article with the full catalogue of application, runtime, and environment tokens
 - 2025-12-24, 15:45 UTC, Feature, Added ticket-aware system variable expansion for templates and automations including flattened ticket tokens
 - 2025-10-22, 04:08 UTC, Feature, Expanded safe system variable exposure for automations and templates with runtime and environment tokens
 - 2025-12-24, 14:20 UTC, Fix, Restored uppercase automation variable interpolation for ntfy event alerts and added regression coverage
