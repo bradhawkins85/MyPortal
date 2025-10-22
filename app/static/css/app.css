@@ -568,6 +568,24 @@ body {
   }
 }
 
+.form-quick-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-gap-tight);
+  margin-bottom: var(--space-gap-tight);
+}
+
+.form-quick-add__select {
+  flex: 1 1 220px;
+  min-width: 200px;
+}
+
+.form-quick-add .button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .form-help--error,
 .form-help[data-action-error]:not([hidden]) {
   color: #fecaca;

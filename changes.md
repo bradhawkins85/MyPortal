@@ -1,3 +1,4 @@
+- 2025-10-22, 02:23 UTC, Feature, Added quick add dropdowns for automation trigger filters and module-specific action templates
 - 2025-10-22, 01:47 UTC, Feature, Enabled ticket automation editing with prefilled forms and admin entry points for updating workflows
 - 2025-12-24, 11:30 UTC, Fix, Moved Ollama module generation into shared background tasks with ticket and knowledge base callbacks to remove UI delays
 - 2025-12-24, 09:00 UTC, Fix, Queued ticket automation module execution in background tasks so ntfy notifications run without blocking the UI
