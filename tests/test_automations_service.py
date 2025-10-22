@@ -276,3 +276,81 @@ async def test_execute_automation_supports_constant_tokens(monkeypatch):
     payload = captured[0]
     assert payload["message"] == "VPN outage"
     assert payload["title"] == "high priority"
+
+
+@pytest.mark.anyio
+async def test_execute_automation_injects_system_variables(monkeypatch):
+    from app.core.config import get_settings
+
+    captured: list[dict[str, object]] = []
+
+    async def fake_trigger_module(module_slug, payload, *, background=False):
+        assert background is False
+        captured.append(payload)
+        return {"status": "ok"}
+
+    async def fake_mark_started(*args, **kwargs):
+        return None
+
+    async def fake_record_run(**kwargs):
+        return None
+
+    async def fake_set_last_error(*args, **kwargs):
+        return None
+
+    async def fake_set_next_run(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        automations_service.modules_service,
+        "trigger_module",
+        fake_trigger_module,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "mark_started",
+        fake_mark_started,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "record_run",
+        fake_record_run,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "set_last_error",
+        fake_set_last_error,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "set_next_run",
+        fake_set_next_run,
+    )
+
+    settings = get_settings()
+
+    automation = {
+        "id": 105,
+        "kind": "event",
+        "action_module": "ntfy",
+        "action_payload": {
+            "message": "App {{ APP_NAME }} ({{ APP_ENVIRONMENT }})",
+            "metadata": {
+                "timestamp": "{{ NOW_UTC }}",
+                "backend": "{{ APP_DATABASE_BACKEND }}",
+            },
+        },
+    }
+
+    result = await automations_service._execute_automation(automation)
+
+    assert result["status"] == "succeeded"
+    assert captured
+    payload = captured[0]
+    assert payload["message"].startswith(f"App {settings.app_name} (")
+    assert payload["metadata"]["backend"] in {"mysql", "sqlite"}
+
+    timestamp = payload["metadata"]["timestamp"]
+    parsed = datetime.fromisoformat(timestamp)
+    assert parsed.tzinfo is not None
+    assert parsed.utcoffset() == timezone.utc.utcoffset(parsed)

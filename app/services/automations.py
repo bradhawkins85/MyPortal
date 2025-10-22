@@ -14,6 +14,7 @@ from loguru import logger
 from app.core.database import db
 from app.repositories import automations as automation_repo
 from app.services import modules as modules_service
+from app.services import system_variables
 
 
 TRIGGER_EVENTS: list[dict[str, str]] = [
@@ -37,46 +38,15 @@ _TOKEN_PATTERN = re.compile(r"\{\{\s*([^\s{}]+)\s*\}\}")
 
 
 def _build_constant_token_map(context: Mapping[str, Any] | None) -> dict[str, Any]:
-    if not context:
-        return {}
+    ticket: Mapping[str, Any] | None = None
+    if isinstance(context, Mapping):
+        possible_ticket = context.get("ticket")
+        if isinstance(possible_ticket, Mapping):
+            ticket = possible_ticket
 
-    tokens: dict[str, Any] = {}
-    seen: set[int] = set()
-
-    def _visit(current: Any, path: list[str]) -> None:
-        if isinstance(current, Mapping):
-            identifier = id(current)
-            if identifier in seen:
-                return
-            seen.add(identifier)
-            for key, value in current.items():
-                if not isinstance(key, str):
-                    continue
-                _visit(value, path + [key])
-            return
-        if isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)):
-            identifier = id(current)
-            if identifier in seen:
-                return
-            seen.add(identifier)
-            for index, item in enumerate(current):
-                _visit(item, path + [str(index)])
-            return
-        if not path:
-            return
-        token_name = "_".join(segment.upper() for segment in path if segment)
-        if not token_name:
-            return
-        if token_name not in tokens:
-            tokens[token_name] = current
-        if token_name.endswith("_SUBJECT"):
-            summary_alias = token_name[:-8] + "_SUMMARY"
-            tokens.setdefault(summary_alias, current)
-        elif token_name.endswith("_SUMMARY"):
-            subject_alias = token_name[:-8] + "_SUBJECT"
-            tokens.setdefault(subject_alias, current)
-
-    _visit(context, [])
+    tokens: dict[str, Any] = dict(system_variables.get_system_variables(ticket=ticket))
+    if context:
+        tokens.update(system_variables.build_context_variables(context))
     return tokens
 
 
@@ -123,7 +93,7 @@ def _interpolate_string(
     *,
     legacy_tokens: Mapping[str, Any] | None = None,
 ) -> Any:
-    if not context:
+    if not context and not legacy_tokens:
         return value
     token_map = legacy_tokens or {}
     stripped = value.strip()
@@ -151,7 +121,7 @@ def _interpolate_payload(
     *,
     legacy_tokens: Mapping[str, Any] | None = None,
 ) -> Any:
-    if context and legacy_tokens is None:
+    if legacy_tokens is None:
         legacy_tokens = _build_constant_token_map(context)
     if isinstance(value, str):
         return _interpolate_string(value, context, legacy_tokens=legacy_tokens)
