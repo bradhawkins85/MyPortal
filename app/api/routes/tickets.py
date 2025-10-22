@@ -27,7 +27,6 @@ from app.schemas.tickets import (
     TicketWatcherUpdate,
 )
 from app.security.session import SessionData
-from app.services import automations as automations_service
 from app.services import ticket_importer, tickets as tickets_service
 from app.services.sanitization import sanitize_rich_text
 
@@ -161,7 +160,7 @@ async def create_ticket(
     category = payload.category if has_helpdesk_access else None
     module_slug = payload.module_slug if has_helpdesk_access else None
     external_reference = payload.external_reference if has_helpdesk_access else None
-    ticket = await tickets_repo.create_ticket(
+    ticket = await tickets_service.create_ticket(
         subject=payload.subject,
         description=payload.description,
         requester_id=requester_id,
@@ -172,6 +171,7 @@ async def create_ticket(
         category=category,
         module_slug=module_slug,
         external_reference=external_reference,
+        trigger_automations=True,
     )
     await tickets_repo.add_watcher(ticket["id"], session.user_id)
     try:
@@ -179,17 +179,6 @@ async def create_ticket(
     except RuntimeError:
         pass
     await tickets_service.refresh_ticket_ai_tags(ticket["id"])
-    try:
-        await automations_service.handle_event(
-            "tickets.created",
-            {"ticket": ticket},
-        )
-    except Exception as exc:  # pragma: no cover - defensive logging
-        log_error(
-            "Failed to execute ticket creation automations",
-            ticket_id=ticket.get("id"),
-            error=str(exc),
-        )
     return await _build_ticket_detail(ticket["id"], current_user)
 
 
