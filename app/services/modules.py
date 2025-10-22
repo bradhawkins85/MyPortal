@@ -5,7 +5,8 @@ import json
 import os
 import string
 from datetime import datetime, timezone
-from typing import Any, Mapping
+import asyncio
+from typing import Any, Awaitable, Callable, Mapping
 from urllib.parse import urljoin
 
 import httpx
@@ -18,6 +19,8 @@ from app.services import email as email_service, webhook_monitor
 from app.services.realtime import RefreshNotifier, refresh_notifier
 
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 
 DEFAULT_CHATGPT_TOOLS = [
     "listTickets",
@@ -401,12 +404,18 @@ async def update_module(
     return _redact_module_settings(updated) if updated else None
 
 
-async def trigger_module(slug: str, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+async def trigger_module(
+    slug: str,
+    payload: Mapping[str, Any] | None = None,
+    *,
+    background: bool = True,
+    on_complete: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+) -> dict[str, Any]:
     module = await module_repo.get_module(slug)
     if not module:
         raise ValueError(f"Module {slug} is not configured")
     if not module.get("enabled"):
-        return {"status": "skipped", "reason": "Module disabled"}
+        return {"status": "skipped", "reason": "Module disabled", "module": slug}
     raw_settings = module.get("settings")
     if isinstance(raw_settings, Mapping):
         settings = _coerce_settings(slug, raw_settings)
@@ -416,7 +425,7 @@ async def trigger_module(slug: str, payload: Mapping[str, Any] | None = None) ->
         except json.JSONDecodeError:
             parsed = None
         settings = _coerce_settings(slug, parsed)
-    handler = {
+    handler_map: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
         "syncro": _validate_syncro,
         "ollama": _invoke_ollama,
         "smtp": _invoke_smtp,
@@ -424,10 +433,69 @@ async def trigger_module(slug: str, payload: Mapping[str, Any] | None = None) ->
         "ntfy": _invoke_ntfy,
         "uptimekuma": _validate_uptimekuma,
         "chatgpt-mcp": _invoke_chatgpt_mcp,
-    }.get(slug)
+    }
+    handler = handler_map.get(slug)
     if not handler:
         raise ValueError(f"No handler registered for module {slug}")
-    return await handler(settings, payload or {})
+
+    async def _invoke_handler(
+        *,
+        event_future: asyncio.Future[int | None] | None,
+    ) -> dict[str, Any]:
+        try:
+            result = await handler(settings, payload or {}, event_future=event_future)
+        except Exception as exc:
+            logger.error("Module background task encountered an error", module=slug, error=str(exc))
+            if event_future and not event_future.done():
+                event_future.set_result(None)
+            result = {"status": "error", "error": str(exc), "module": slug}
+        if event_future and not event_future.done():
+            event_id_value = result.get("event_id")
+            event_future.set_result(event_id_value if isinstance(event_id_value, int) else None)
+        if on_complete:
+            try:
+                await on_complete(result)
+            except Exception as callback_exc:  # pragma: no cover - defensive logging
+                logger.error(
+                    "Module completion callback failed",
+                    module=slug,
+                    error=str(callback_exc),
+                )
+        return result
+
+    if not background:
+        return await _invoke_handler(event_future=None)
+
+    loop = asyncio.get_running_loop()
+    event_future: asyncio.Future[int | None] = loop.create_future()
+
+    async def _runner() -> dict[str, Any]:
+        return await _invoke_handler(event_future=event_future)
+
+    task: asyncio.Task[dict[str, Any]] = asyncio.create_task(_runner())
+    _BACKGROUND_TASKS.add(task)
+
+    def _cleanup(completed: asyncio.Task[dict[str, Any]]) -> None:
+        _BACKGROUND_TASKS.discard(completed)
+        try:
+            completed.result()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "Module background task failed", module=slug, error=str(exc)
+            )
+
+    task.add_done_callback(_cleanup)
+
+    event_id_value: int | None = None
+    try:
+        event_id_value = await asyncio.wait_for(event_future, timeout=0.5)
+    except asyncio.TimeoutError:  # pragma: no cover - timing dependent
+        event_id_value = None
+
+    queued_result: dict[str, Any] = {"status": "queued", "module": slug}
+    if event_id_value is not None:
+        queued_result["event_id"] = event_id_value
+    return queued_result
 
 
 def _parse_event_response(event: Mapping[str, Any]) -> Any:
@@ -519,7 +587,12 @@ async def _record_failure(
     return refreshed or {"id": event_id, "status": "failed", "last_error": error_message}
 
 
-async def _invoke_ollama(settings: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+async def _invoke_ollama(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
     base_url = str(settings.get("base_url") or "http://127.0.0.1:11434").rstrip("/")
     model = str(settings.get("model") or "llama3")
     default_prompt = str(settings.get("prompt") or "")
@@ -539,6 +612,8 @@ async def _invoke_ollama(settings: Mapping[str, Any], payload: Mapping[str, Any]
     event_id = int(event.get("id")) if event.get("id") is not None else None
     if event_id is None:
         raise RuntimeError("Failed to create webhook event for Ollama request")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
     attempt_number = 1
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
@@ -585,7 +660,12 @@ async def _invoke_ollama(settings: Mapping[str, Any], payload: Mapping[str, Any]
     )
 
 
-async def _invoke_smtp(settings: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+async def _invoke_smtp(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
     recipients = _ensure_list(payload.get("recipients")) or _ensure_list(settings.get("default_recipients"))
     subject_prefix = str(settings.get("subject_prefix") or "").strip()
     subject = str(payload.get("subject") or "Automation notification")
@@ -611,6 +691,8 @@ async def _invoke_smtp(settings: Mapping[str, Any], payload: Mapping[str, Any]) 
     event_id = int(event.get("id")) if event.get("id") is not None else None
     if event_id is None:
         raise RuntimeError("Failed to create webhook event for SMTP request")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
     attempt_number = 1
     try:
         sent, email_event_metadata = await email_service.send_email(
@@ -673,7 +755,12 @@ async def _invoke_smtp(settings: Mapping[str, Any], payload: Mapping[str, Any]) 
     )
 
 
-async def _invoke_tacticalrmm(settings: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+async def _invoke_tacticalrmm(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
     base_url = str(settings.get("base_url") or "").rstrip("/")
     if not base_url:
         raise ValueError("Tactical RMM base URL is not configured")
@@ -706,6 +793,8 @@ async def _invoke_tacticalrmm(settings: Mapping[str, Any], payload: Mapping[str,
     event_id = int(event.get("id")) if event.get("id") is not None else None
     if event_id is None:
         raise RuntimeError("Failed to create webhook event for TacticalRMM request")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
     attempt_number = 1
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, verify=verify_ssl) as client:
@@ -761,7 +850,12 @@ async def _invoke_tacticalrmm(settings: Mapping[str, Any], payload: Mapping[str,
     return result
 
 
-async def _invoke_ntfy(settings: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+async def _invoke_ntfy(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
     base_url = str(settings.get("base_url") or "https://ntfy.sh").rstrip("/")
     topic = str(payload.get("topic") or settings.get("topic") or "").strip()
     if not topic:
@@ -788,6 +882,8 @@ async def _invoke_ntfy(settings: Mapping[str, Any], payload: Mapping[str, Any]) 
     event_id = int(event.get("id")) if event.get("id") is not None else None
     if event_id is None:
         raise RuntimeError("Failed to create webhook event for ntfy request")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
     attempt_number = 1
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
@@ -834,7 +930,12 @@ async def _invoke_ntfy(settings: Mapping[str, Any], payload: Mapping[str, Any]) 
     )
 
 
-async def _invoke_chatgpt_mcp(settings: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+async def _invoke_chatgpt_mcp(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
     secret_hash = str(settings.get("shared_secret_hash") or "").strip()
     if not secret_hash:
         raise ValueError("Shared secret hash is not configured")
@@ -849,7 +950,12 @@ async def _invoke_chatgpt_mcp(settings: Mapping[str, Any], payload: Mapping[str,
     }
 
 
-async def _validate_syncro(settings: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+async def _validate_syncro(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
     base_url = str(settings.get("base_url") or "").strip()
     api_key = str(settings.get("api_key") or "").strip()
     rate_limit = _coerce_int(settings.get("rate_limit_per_minute"), minimum=1, maximum=600) or 180
@@ -863,7 +969,12 @@ async def _validate_syncro(settings: Mapping[str, Any], payload: Mapping[str, An
     }
 
 
-async def _validate_uptimekuma(settings: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+async def _validate_uptimekuma(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
     shared_secret_hash = str(settings.get("shared_secret_hash") or "").strip()
     return {
         "status": "ok",
@@ -873,7 +984,7 @@ async def _validate_uptimekuma(settings: Mapping[str, Any], payload: Mapping[str
 
 async def test_module(slug: str) -> dict[str, Any]:
     try:
-        result = await trigger_module(slug, {})
+        result = await trigger_module(slug, {}, background=False)
         return {"status": "ok", "details": result}
     except Exception as exc:  # pragma: no cover - network dependent
         logger.warning("Module test failed", slug=slug, error=str(exc))

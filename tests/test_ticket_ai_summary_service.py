@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from app.services import tickets as tickets_service
@@ -10,7 +12,7 @@ def anyio_backend():
 
 @pytest.mark.anyio
 async def test_refresh_ticket_ai_summary_updates_summary(monkeypatch):
-    captured = {}
+    updates: list[dict[str, Any]] = []
 
     async def fake_get_ticket(ticket_id):
         return {
@@ -37,17 +39,20 @@ async def test_refresh_ticket_ai_summary_updates_summary(monkeypatch):
     async def fake_get_user(user_id):
         return {"id": user_id, "email": f"user{user_id}@example.test"}
 
-    async def fake_trigger(slug, payload):
+    async def fake_trigger(slug, payload, *, background=True, on_complete=None):
         assert slug == "ollama"
         assert "Printer issue" in payload.get("prompt", "")
-        return {
+        result = {
             "status": "succeeded",
             "model": "llama3",
             "response": '{"summary": "Printer fixed after toner replacement.", "resolution": "Likely Resolved"}',
         }
+        if on_complete:
+            await on_complete(result)
+        return result
 
     async def fake_update(ticket_id, **fields):
-        captured.update(fields)
+        updates.append(fields)
 
     monkeypatch.setattr(tickets_service.tickets_repo, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(tickets_service.tickets_repo, "list_replies", fake_list_replies)
@@ -57,22 +62,25 @@ async def test_refresh_ticket_ai_summary_updates_summary(monkeypatch):
 
     await tickets_service.refresh_ticket_ai_summary(5)
 
-    assert captured["ai_summary"] == "Printer fixed after toner replacement."
-    assert captured["ai_resolution_state"] == "likely_resolved"
-    assert captured["ai_summary_status"] == "succeeded"
-    assert captured["ai_summary_model"] == "llama3"
-    assert captured["ai_summary_updated_at"] is not None
+    assert len(updates) >= 2
+    assert updates[0]["ai_summary_status"] == "queued"
+    final_update = updates[-1]
+    assert final_update["ai_summary"] == "Printer fixed after toner replacement."
+    assert final_update["ai_resolution_state"] == "likely_resolved"
+    assert final_update["ai_summary_status"] == "succeeded"
+    assert final_update["ai_summary_model"] == "llama3"
+    assert final_update["ai_summary_updated_at"] is not None
 
 
 @pytest.mark.anyio
 async def test_refresh_ticket_ai_summary_handles_missing_module(monkeypatch):
-    captured = {}
+    updates: list[dict[str, Any]] = []
 
     async def fake_get_ticket(ticket_id):
         return {"id": ticket_id, "subject": "Issue", "description": "", "status": "open", "priority": "normal"}
 
     async def fake_update(ticket_id, **fields):
-        captured.update(fields)
+        updates.append(fields)
 
     async def fake_list_replies(*args, **kwargs):
         return []
@@ -85,27 +93,28 @@ async def test_refresh_ticket_ai_summary_handles_missing_module(monkeypatch):
     monkeypatch.setattr(tickets_service.tickets_repo, "update_ticket", fake_update)
     monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
 
-    async def fake_trigger(slug, payload):
+    async def fake_trigger(slug, payload, *, background=True, on_complete=None):
         raise ValueError("module not configured")
 
     monkeypatch.setattr(tickets_service.modules_service, "trigger_module", fake_trigger)
 
     await tickets_service.refresh_ticket_ai_summary(9)
 
-    assert captured["ai_summary_status"] == "skipped"
-    assert captured["ai_summary"] is None
-    assert captured["ai_resolution_state"] is None
+    assert updates
+    assert updates[-1]["ai_summary_status"] == "skipped"
+    assert updates[-1]["ai_summary"] is None
+    assert updates[-1]["ai_resolution_state"] is None
 
 
 @pytest.mark.anyio
 async def test_refresh_ticket_ai_summary_handles_errors(monkeypatch):
-    captured = {}
+    updates: list[dict[str, Any]] = []
 
     async def fake_get_ticket(ticket_id):
         return {"id": ticket_id, "subject": "Issue", "description": "", "status": "open", "priority": "normal"}
 
     async def fake_update(ticket_id, **fields):
-        captured.update(fields)
+        updates.append(fields)
 
     async def fake_list_replies(*args, **kwargs):
         return []
@@ -118,16 +127,17 @@ async def test_refresh_ticket_ai_summary_handles_errors(monkeypatch):
     monkeypatch.setattr(tickets_service.tickets_repo, "update_ticket", fake_update)
     monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
 
-    async def fake_trigger(slug, payload):
+    async def fake_trigger(slug, payload, *, background=True, on_complete=None):
         raise RuntimeError("network error")
 
     monkeypatch.setattr(tickets_service.modules_service, "trigger_module", fake_trigger)
 
     await tickets_service.refresh_ticket_ai_summary(11)
 
-    assert captured["ai_summary_status"] == "error"
-    assert captured["ai_summary"] is None
-    assert captured["ai_resolution_state"] is None
+    assert updates
+    assert updates[-1]["ai_summary_status"] == "error"
+    assert updates[-1]["ai_summary"] is None
+    assert updates[-1]["ai_resolution_state"] is None
 
 
 def test_extract_summary_fields_from_markdown_block():
