@@ -111,3 +111,101 @@ async def test_handle_event_returns_empty_for_blank_event(monkeypatch):
 
     assert results == []
     assert called is False
+
+
+@pytest.mark.anyio
+async def test_execute_automation_interpolates_context(monkeypatch):
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_trigger_module(module_slug, payload, *, background=False):
+        assert background is False
+        captured.append((module_slug, payload))
+        return {"status": "ok"}
+
+    async def fake_mark_started(*args, **kwargs):
+        return None
+
+    recorded_runs: list[dict[str, object]] = []
+
+    async def fake_record_run(**kwargs):
+        recorded_runs.append(kwargs)
+
+    async def fake_set_last_error(*args, **kwargs):
+        return None
+
+    async def fake_set_next_run(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        automations_service.modules_service,
+        "trigger_module",
+        fake_trigger_module,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "mark_started",
+        fake_mark_started,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "record_run",
+        fake_record_run,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "set_last_error",
+        fake_set_last_error,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "set_next_run",
+        fake_set_next_run,
+    )
+
+    created_at = datetime(2025, 3, 1, 9, 30, tzinfo=timezone.utc)
+    context = {
+        "ticket": {
+            "id": 321,
+            "priority": "high",
+            "requester": {"email": "alice@example.com"},
+            "labels": ["critical", "vip"],
+            "created_at": created_at,
+        }
+    }
+    automation = {
+        "id": 77,
+        "kind": "event",
+        "action_payload": {
+            "actions": [
+                {
+                    "module": "smtp",
+                    "payload": {
+                        "subject": "Ticket #{{ticket.id}} assigned to {{ticket.requester.email}}",
+                        "ticket_id": "{{ticket.id}}",
+                        "metadata": {
+                            "priority": "{{ticket.priority}}",
+                            "first_tag": "{{ticket.labels.0}}",
+                            "tags": ["{{ticket.labels.0}}", "{{ticket.labels.1}}"],
+                            "timestamp": "{{ticket.created_at}}",
+                        },
+                    },
+                }
+            ]
+        },
+    }
+
+    result = await automations_service._execute_automation(automation, context=context)
+
+    assert result["status"] == "succeeded"
+    assert recorded_runs and recorded_runs[0]["status"] == "succeeded"
+
+    assert captured, "expected module to be invoked"
+    module_slug, payload = captured[0]
+    assert module_slug == "smtp"
+    assert payload["subject"] == "Ticket #321 assigned to alice@example.com"
+    assert payload["ticket_id"] == 321
+    assert payload["metadata"]["priority"] == "high"
+    assert payload["metadata"]["first_tag"] == "critical"
+    assert payload["metadata"]["tags"] == ["critical", "vip"]
+    assert payload["metadata"]["timestamp"] == created_at.isoformat()
+    assert payload["context"] == context

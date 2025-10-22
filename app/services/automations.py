@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Mapping, Sequence
-from datetime import datetime, timedelta, timezone
+import json
+import re
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from croniter import croniter
@@ -30,6 +32,71 @@ def list_trigger_events() -> list[dict[str, str]]:
 
 
 _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
+_TOKEN_PATTERN = re.compile(r"\{\{\s*([^\s{}]+)\s*\}\}")
+
+
+def _coerce_template_value(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc).isoformat()
+        return value.astimezone(timezone.utc).isoformat()
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, time):
+        return value.isoformat()
+    if isinstance(value, (int, float, bool, str)):
+        return value
+    return value
+
+
+def _stringify_template_value(value: Any) -> str:
+    coerced = _coerce_template_value(value)
+    if isinstance(coerced, str):
+        return coerced
+    if isinstance(coerced, (int, float, bool)):
+        return str(coerced)
+    if coerced is None or coerced == "":
+        return ""
+    if isinstance(coerced, Mapping):
+        try:
+            return json.dumps(coerced)
+        except TypeError:
+            return str(coerced)
+    if isinstance(coerced, Sequence) and not isinstance(coerced, (str, bytes, bytearray)):
+        try:
+            return json.dumps(coerced)
+        except TypeError:
+            return str(coerced)
+    return str(coerced)
+
+
+def _interpolate_string(value: str, context: Mapping[str, Any] | None) -> Any:
+    if not context:
+        return value
+    stripped = value.strip()
+    single_match = _TOKEN_PATTERN.fullmatch(stripped)
+    if single_match:
+        resolved = _resolve_context_value(context, single_match.group(1))
+        return _coerce_template_value(resolved)
+
+    def _replace(match: re.Match[str]) -> str:
+        resolved = _resolve_context_value(context, match.group(1))
+        return _stringify_template_value(resolved)
+
+    return _TOKEN_PATTERN.sub(_replace, value)
+
+
+def _interpolate_payload(value: Any, context: Mapping[str, Any] | None) -> Any:
+    if isinstance(value, str):
+        return _interpolate_string(value, context)
+    if isinstance(value, Mapping):
+        return {key: _interpolate_payload(item, context) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_interpolate_payload(item, context) for item in value]
+    return value
 
 
 def _normalise_actions(actions: Any) -> list[dict[str, Any]]:
@@ -224,6 +291,7 @@ async def _execute_automation(
                     if isinstance(payload_source, Mapping)
                     else {}
                 )
+                module_payload = _interpolate_payload(module_payload, context)
                 if context:
                     module_payload.setdefault("context", context)
                 try:
@@ -256,7 +324,7 @@ async def _execute_automation(
                 payload = {}
             module_slug = automation.get("action_module")
             if module_slug:
-                module_payload = dict(payload)
+                module_payload = _interpolate_payload(dict(payload), context)
                 if context:
                     module_payload.setdefault("context", context)
                 result_payload = await modules_service.trigger_module(
