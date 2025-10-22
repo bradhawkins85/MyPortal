@@ -1,3 +1,4 @@
+- 2025-12-24, 14:20 UTC, Fix, Restored uppercase automation variable interpolation for ntfy event alerts and added regression coverage
 - 2025-12-24, 13:45 UTC, Feature, Seeded default automation filter and action templates so new workflows start with example JSON payloads in the admin builder
 - 2025-10-22, 02:23 UTC, Feature, Added quick add dropdowns for automation trigger filters and module-specific action templates
 - 2025-10-22, 01:47 UTC, Feature, Enabled ticket automation editing with prefilled forms and admin entry points for updating workflows
