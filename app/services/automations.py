@@ -36,6 +36,50 @@ _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 _TOKEN_PATTERN = re.compile(r"\{\{\s*([^\s{}]+)\s*\}\}")
 
 
+def _build_constant_token_map(context: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not context:
+        return {}
+
+    tokens: dict[str, Any] = {}
+    seen: set[int] = set()
+
+    def _visit(current: Any, path: list[str]) -> None:
+        if isinstance(current, Mapping):
+            identifier = id(current)
+            if identifier in seen:
+                return
+            seen.add(identifier)
+            for key, value in current.items():
+                if not isinstance(key, str):
+                    continue
+                _visit(value, path + [key])
+            return
+        if isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)):
+            identifier = id(current)
+            if identifier in seen:
+                return
+            seen.add(identifier)
+            for index, item in enumerate(current):
+                _visit(item, path + [str(index)])
+            return
+        if not path:
+            return
+        token_name = "_".join(segment.upper() for segment in path if segment)
+        if not token_name:
+            return
+        if token_name not in tokens:
+            tokens[token_name] = current
+        if token_name.endswith("_SUBJECT"):
+            summary_alias = token_name[:-8] + "_SUMMARY"
+            tokens.setdefault(summary_alias, current)
+        elif token_name.endswith("_SUMMARY"):
+            subject_alias = token_name[:-8] + "_SUBJECT"
+            tokens.setdefault(subject_alias, current)
+
+    _visit(context, [])
+    return tokens
+
+
 def _coerce_template_value(value: Any) -> Any:
     if value is None:
         return ""
@@ -73,29 +117,54 @@ def _stringify_template_value(value: Any) -> str:
     return str(coerced)
 
 
-def _interpolate_string(value: str, context: Mapping[str, Any] | None) -> Any:
+def _interpolate_string(
+    value: str,
+    context: Mapping[str, Any] | None,
+    *,
+    legacy_tokens: Mapping[str, Any] | None = None,
+) -> Any:
     if not context:
         return value
+    token_map = legacy_tokens or {}
     stripped = value.strip()
     single_match = _TOKEN_PATTERN.fullmatch(stripped)
     if single_match:
-        resolved = _resolve_context_value(context, single_match.group(1))
+        token_name = single_match.group(1)
+        resolved = _resolve_context_value(context, token_name)
+        if resolved is None and token_name in token_map:
+            resolved = token_map[token_name]
         return _coerce_template_value(resolved)
 
     def _replace(match: re.Match[str]) -> str:
-        resolved = _resolve_context_value(context, match.group(1))
+        token_name = match.group(1)
+        resolved = _resolve_context_value(context, token_name)
+        if resolved is None and token_name in token_map:
+            resolved = token_map[token_name]
         return _stringify_template_value(resolved)
 
     return _TOKEN_PATTERN.sub(_replace, value)
 
 
-def _interpolate_payload(value: Any, context: Mapping[str, Any] | None) -> Any:
+def _interpolate_payload(
+    value: Any,
+    context: Mapping[str, Any] | None,
+    *,
+    legacy_tokens: Mapping[str, Any] | None = None,
+) -> Any:
+    if context and legacy_tokens is None:
+        legacy_tokens = _build_constant_token_map(context)
     if isinstance(value, str):
-        return _interpolate_string(value, context)
+        return _interpolate_string(value, context, legacy_tokens=legacy_tokens)
     if isinstance(value, Mapping):
-        return {key: _interpolate_payload(item, context) for key, item in value.items()}
+        return {
+            key: _interpolate_payload(item, context, legacy_tokens=legacy_tokens)
+            for key, item in value.items()
+        }
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_interpolate_payload(item, context) for item in value]
+        return [
+            _interpolate_payload(item, context, legacy_tokens=legacy_tokens)
+            for item in value
+        ]
     return value
 
 
