@@ -1,3 +1,4 @@
+- 2025-12-26, 09:10 UTC, Feature, Documented how to trigger targeted or full database migration reprocessing from the app helpers
 - 2025-10-22, 06:49 UTC, Feature, Added database migration reprocessing helper to re-run individual or all SQL files safely
 - 2025-12-24, 16:30 UTC, Feature, Expanded System Variables Reference knowledge base article with the full catalogue of application, runtime, and environment tokens
 - 2025-12-24, 15:45 UTC, Feature, Added ticket-aware system variable expansion for templates and automations including flattened ticket tokens
