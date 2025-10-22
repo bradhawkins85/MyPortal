@@ -63,8 +63,115 @@ SELECT
     'system-variables-reference',
     'System Variables Reference',
     'Comprehensive catalogue of system variables available throughout MyPortal and how to apply them.',
-    '<section class="kb-article__section" data-section-index="1"><h2>Syntax and evaluation rules</h2><p>System variables follow the <code>{{ VARIABLE_NAME }}</code> format. They are evaluated server-side before responses are sent to clients.</p><ul><li>Variable names are uppercase with underscores.</li><li>Nesting is not supported; use dedicated helper functions instead.</li><li>If a variable is undefined, the renderer leaves the token unchanged so you can quickly spot configuration gaps.</li></ul></section><section class="kb-article__section" data-section-index="2"><h2>Global context variables</h2><p>The following tokens are resolved for any authenticated request:</p><table><thead><tr><th>Variable</th><th>Description</th></tr></thead><tbody><tr><td><code>{{ USER_NAME }}</code></td><td>Displays the signed-in user''s display name.</td></tr><tr><td><code>{{ USER_EMAIL }}</code></td><td>Outputs the user''s primary email address.</td></tr><tr><td><code>{{ COMPANY_NAME }}</code></td><td>Shows the active company when the user belongs to multiple organisations.</td></tr><tr><td><code>{{ NOW_UTC }}</code></td><td>Renders the current timestamp in UTC; UI layers localise automatically.</td></tr></tbody></table></section><section class="kb-article__section" data-section-index="3"><h2>Module-specific variables</h2><p>Modules extend the variable namespace with scoped values.</p><ul><li><strong>Tickets:</strong> <code>{{ TICKET_ID }}</code>, <code>{{ TICKET_PRIORITY }}</code>, <code>{{ TICKET_SUMMARY }}</code></li><li><strong>Notifications:</strong> <code>{{ NOTIFICATION_COUNT }}</code>, <code>{{ LAST_NOTIFICATION_AT }}</code></li><li><strong>Knowledge Base:</strong> <code>{{ ARTICLE_TITLE }}</code>, <code>{{ ARTICLE_URL }}</code></li></ul><p>Consult Swagger documentation when new modules expose additional variables.</p></section><section class="kb-article__section" data-section-index="4"><h2>Validation and testing workflow</h2><p>Use the development installer to spin up a sandbox environment before promoting new templates.</p><ol><li>Open <strong>Admin ▸ Variables Lab</strong> to preview rendered content.</li><li>Leverage unit tests in <code>tests/</code> to cover regression cases for critical templates.</li><li>Document successful evaluations directly in the associated change request.</li></ol></section>',
-    'super_admin',
+    '<section class="kb-article__section" data-section-index="1">\n'
+    '  <h2>Syntax and evaluation rules</h2>\n'
+    '  <p>System variables follow the <code>{{ VARIABLE_NAME }}</code> format. They are evaluated server-side before responses are sent to clients.</p>\n'
+    '  <ul>\n'
+    '    <li>Variable names are uppercase with underscores.</li>\n'
+    '    <li>Nesting is not supported; use dedicated helper functions instead.</li>\n'
+    '    <li>If a variable is undefined, the renderer leaves the token unchanged so you can quickly spot configuration gaps.</li>\n'
+    '    <li>Boolean values render as <code>true</code> or <code>false</code>; lists and mappings are joined into comma-separated strings.</li>\n'
+    '  </ul>\n'
+    '</section>\n'
+    '<section class="kb-article__section" data-section-index="2">\n'
+    '  <h2>Application and platform variables</h2>\n'
+    '  <p>The following tokens are available on every render once the portal settings load.</p>\n'
+    '  <table>\n'
+    '    <thead>\n'
+    '      <tr><th>Variable</th><th>Description</th></tr>\n'
+    '    </thead>\n'
+    '    <tbody>\n'
+    '      <tr><td><code>{{ APP_NAME }}</code></td><td>Portal display name from configuration.</td></tr>\n'
+    '      <tr><td><code>{{ APP_ENVIRONMENT }}</code></td><td>Active deployment environment (for example, <code>production</code> or <code>staging</code>).</td></tr>\n'
+    '      <tr><td><code>{{ APP_ENV }}</code></td><td>Alias for <code>{{ APP_ENVIRONMENT }}</code> maintained for backwards compatibility.</td></tr>\n'
+    '      <tr><td><code>{{ APP_PORTAL_URL }}</code></td><td>Fully-qualified base URL configured for the portal.</td></tr>\n'
+    '      <tr><td><code>{{ APP_PORTAL_ORIGIN }}</code></td><td>Scheme and host portion of the portal URL, suitable for CORS policies.</td></tr>\n'
+    '      <tr><td><code>{{ APP_PORTAL_HOSTNAME }}</code></td><td>Hostname extracted from the portal URL.</td></tr>\n'
+    '      <tr><td><code>{{ APP_PORTAL_CONFIGURED }}</code></td><td>Returns <code>true</code> when a portal URL is set.</td></tr>\n'
+    '      <tr><td><code>{{ APP_DEFAULT_TIMEZONE }}</code></td><td>Configured display timezone for scheduling and UI defaults.</td></tr>\n'
+    '      <tr><td><code>{{ APP_CRON_TIMEZONE }}</code></td><td>Timezone used for scheduler cron expressions.</td></tr>\n'
+    '      <tr><td><code>{{ APP_ENABLE_CSRF }}</code></td><td>Indicates whether CSRF protection is enforced.</td></tr>\n'
+    '      <tr><td><code>{{ APP_ENABLE_AUTO_REFRESH }}</code></td><td>Signals if websocket-driven auto refresh is active.</td></tr>\n'
+    '      <tr><td><code>{{ APP_SWAGGER_UI_URL }}</code></td><td>Path to the interactive API documentation.</td></tr>\n'
+    '      <tr><td><code>{{ APP_SESSION_COOKIE_NAME }}</code></td><td>Name of the authentication session cookie.</td></tr>\n'
+    '      <tr><td><code>{{ APP_ALLOWED_ORIGINS }}</code></td><td>Comma-separated list of additional origins permitted for CORS.</td></tr>\n'
+    '      <tr><td><code>{{ APP_ALLOWED_ORIGIN_COUNT }}</code></td><td>Number of configured allowed origins.</td></tr>\n'
+    '      <tr><td><code>{{ APP_DATABASE_BACKEND }}</code></td><td>Resolved database backend (<code>mysql</code> or <code>sqlite</code> fallback).</td></tr>\n'
+    '      <tr><td><code>{{ APP_REDIS_ENABLED }}</code></td><td>True when a Redis connection string is configured.</td></tr>\n'
+    '      <tr><td><code>{{ APP_SMTP_ENABLED }}</code></td><td>True when outbound email is configured.</td></tr>\n'
+    '      <tr><td><code>{{ APP_STOCK_FEED_ENABLED }}</code></td><td>True when the stock feed endpoint is configured.</td></tr>\n'
+    '      <tr><td><code>{{ APP_SYNCRO_WEBHOOK_ENABLED }}</code></td><td>True when the Syncro webhook URL is configured.</td></tr>\n'
+    '      <tr><td><code>{{ APP_VERIFY_WEBHOOK_ENABLED }}</code></td><td>True when the Verify webhook URL is configured.</td></tr>\n'
+    '      <tr><td><code>{{ APP_LICENSES_WEBHOOK_ENABLED }}</code></td><td>True when the licenses webhook URL is configured.</td></tr>\n'
+    '      <tr><td><code>{{ APP_SHOP_WEBHOOK_ENABLED }}</code></td><td>True when the shop webhook URL is configured.</td></tr>\n'
+    '      <tr><td><code>{{ APP_SMS_ENDPOINT_CONFIGURED }}</code></td><td>True when an SMS delivery endpoint is configured.</td></tr>\n'
+    '      <tr><td><code>{{ APP_OPNFORM_BASE_URL }}</code></td><td>Base URL used for OpnForm integrations.</td></tr>\n'
+    '      <tr><td><code>{{ APP_FAIL2BAN_LOG_PATH }}</code></td><td>Filesystem path to the Fail2ban log monitored by the portal.</td></tr>\n'
+    '      <tr><td><code>{{ APP_MIGRATION_LOCK_TIMEOUT }}</code></td><td>Seconds the migration runner waits before timing out.</td></tr>\n'
+    '      <tr><td><code>{{ APP_THEME }}</code></td><td>Active theme name applied to the UI.</td></tr>\n'
+    '      <tr><td><code>{{ APP_STATIC_PATH }}</code></td><td>Absolute path to the static asset directory.</td></tr>\n'
+    '      <tr><td><code>{{ APP_TEMPLATE_PATH }}</code></td><td>Absolute path to the template directory.</td></tr>\n'
+    '      <tr><td><code>{{ PYTHON_IMPLEMENTATION }}</code></td><td>Python implementation running the portal (for example, CPython).</td></tr>\n'
+    '      <tr><td><code>{{ PYTHON_VERSION }}</code></td><td>Python version string.</td></tr>\n'
+    '      <tr><td><code>{{ PYTHON_RUNTIME }}</code></td><td>Combined implementation and version string.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_HOSTNAME }}</code></td><td>Host name of the application server.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_FQDN }}</code></td><td>Fully qualified domain name of the server.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_PLATFORM }}</code></td><td>Operating system family.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_PLATFORM_RELEASE }}</code></td><td>Operating system release identifier.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_PLATFORM_VERSION }}</code></td><td>Detailed operating system version.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_ARCHITECTURE }}</code></td><td>CPU architecture reported by the host.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_PROCESSOR }}</code></td><td>Processor string reported by Python.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_PATH_SEPARATOR }}</code></td><td>Path separator used by the host platform.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_LINE_SEPARATOR }}</code></td><td>Line separator sequence used by the host platform.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_CWD }}</code></td><td>Current working directory for the portal process.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_APP_ROOT }}</code></td><td>Filesystem path to the application root.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_ENVIRONMENT_VARIABLE_COUNT }}</code></td><td>Total number of environment variables detected at runtime.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_PYTHON_EXECUTABLE }}</code></td><td>Absolute path to the Python interpreter executing the portal.</td></tr>\n'
+    '      <tr><td><code>{{ APP_VERSION }}</code></td><td>Application version string when <code>version.txt</code> is present.</td></tr>\n'
+    '    </tbody>\n'
+    '  </table>\n'
+    '  <p><strong>Note:</strong> Boolean results render as lower-case <code>true</code> or <code>false</code> strings so they can be consumed by templating logic.</p>\n'
+    '</section>\n'
+    '<section class="kb-article__section" data-section-index="3">\n'
+    '  <h2>Runtime and time-based variables</h2>\n'
+    '  <p>Time tokens resolve dynamically when the template is rendered.</p>\n'
+    '  <table>\n'
+    '    <thead>\n'
+    '      <tr><th>Variable</th><th>Description</th></tr>\n'
+    '    </thead>\n'
+    '    <tbody>\n'
+    '      <tr><td><code>{{ NOW_UTC }}</code></td><td>Current timestamp in ISO 8601 UTC format.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_TIME_UTC }}</code></td><td>Alias for <code>{{ NOW_UTC }}</code>.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_TIME_UTC_HUMAN }}</code></td><td>UTC timestamp formatted as <code>YYYY-MM-DD HH:MM:SSZ</code>.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_UNIX_TIMESTAMP }}</code></td><td>Seconds since the Unix epoch.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_UNIX_TIMESTAMP_MS }}</code></td><td>Milliseconds since the Unix epoch.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_DATE_UTC }}</code></td><td>UTC calendar date.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_YEAR_UTC }}</code></td><td>UTC year component.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_MONTH_UTC }}</code></td><td>UTC month component.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_DAY_UTC }}</code></td><td>UTC day component.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_ISO_WEEK_UTC }}</code></td><td>ISO week number in UTC.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_DAY_OF_YEAR_UTC }}</code></td><td>Day number within the UTC year.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_TIME_LOCAL }}</code></td><td>Current timestamp in the server local timezone.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_DATE_LOCAL }}</code></td><td>Local calendar date.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_TIMEZONE_NAME }}</code></td><td>Server reported timezone name.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_TIMEZONE_OFFSET_MINUTES }}</code></td><td>Offset from UTC in minutes.</td></tr>\n'
+    '      <tr><td><code>{{ SYSTEM_TIMEZONE_OFFSET_HOURS }}</code></td><td>Offset from UTC in hours (decimal).</td></tr>\n'
+    '    </tbody>\n'
+    '  </table>\n'
+    '  <p>Display layers convert UTC timestamps to the viewer local timezone automatically.</p>\n'
+    '</section>\n'
+    '<section class="kb-article__section" data-section-index="4">\n'
+    '  <h2>Context-sensitive expansions</h2>\n'
+    '  <p>Modules and data payloads expand the variable catalogue further.</p>\n'
+    '  <ul>\n'
+    '    <li><strong>Tickets:</strong> Tokens derived from ticket payloads use the <code>{{ TICKET_* }}</code> prefix such as <code>{{ TICKET_ID }}</code>, <code>{{ TICKET_PRIORITY }}</code>, <code>{{ TICKET_SUBJECT }}</code>, and <code>{{ TICKET_SUMMARY }}</code>. Nested data flattens into uppercase keys joined by underscores.</li>\n'
+    '    <li><strong>Notifications:</strong> Counts and timestamps are exposed through <code>{{ NOTIFICATION_COUNT }}</code> and <code>{{ LAST_NOTIFICATION_AT }}</code>.</li>\n'
+    '    <li><strong>Knowledge Base:</strong> Article metadata resolves via <code>{{ ARTICLE_TITLE }}</code> and <code>{{ ARTICLE_URL }}</code>.</li>\n'
+    '    <li><strong>Environment pass-through:</strong> Non-sensitive environment variables prefixed with <code>APP_</code> or named <code>ENVIRONMENT</code>, <code>PORTAL_URL</code>, <code>CRON_TIMEZONE</code>, <code>ENABLE_CSRF</code>, <code>ENABLE_AUTO_REFRESH</code>, <code>SWAGGER_UI_URL</code>, <code>OPNFORM_BASE_URL</code>, <code>FAIL2BAN_LOG_PATH</code>, <code>SYSTEMD_SERVICE_NAME</code>, <code>APP_RESTART_COMMAND</code>, <code>TZ</code>, <code>LANG</code>, and <code>LC_ALL</code> are also surfaced for templates.</li>\n'
+    '  </ul>\n'
+    '  <p>Use <strong>Admin ▸ Variables Lab</strong> to inspect module payloads and confirm the token names produced by each workflow.</p>\n'
+    '  <p>Execute template updates in a development environment first, then document successful evaluations in the associated change request before promoting to production.</p>\n'
+    '</section>'    'super_admin',
     1,
     '2025-12-08 09:05:00'
 WHERE NOT EXISTS (
@@ -73,7 +180,7 @@ WHERE NOT EXISTS (
 
 INSERT INTO knowledge_base_sections (article_id, position, heading, content)
 SELECT a.id, 1, 'Syntax and evaluation rules',
-       '<p>System variables follow the <code>{{ VARIABLE_NAME }}</code> format. They are evaluated server-side before responses are sent to clients.</p><ul><li>Variable names are uppercase with underscores.</li><li>Nesting is not supported; use dedicated helper functions instead.</li><li>If a variable is undefined, the renderer leaves the token unchanged so you can quickly spot configuration gaps.</li></ul>'
+       '<p>System variables follow the <code>{{ VARIABLE_NAME }}</code> format. They are evaluated server-side before responses are sent to clients.</p>\n<ul>\n  <li>Variable names are uppercase with underscores.</li>\n  <li>Nesting is not supported; use dedicated helper functions instead.</li>\n  <li>If a variable is undefined, the renderer leaves the token unchanged so you can quickly spot configuration gaps.</li>\n  <li>Boolean values render as <code>true</code> or <code>false</code>; lists and mappings are joined into comma-separated strings.</li>\n</ul>
 FROM knowledge_base_articles a
 WHERE a.slug = 'system-variables-reference'
   AND NOT EXISTS (
@@ -81,8 +188,8 @@ WHERE a.slug = 'system-variables-reference'
   );
 
 INSERT INTO knowledge_base_sections (article_id, position, heading, content)
-SELECT a.id, 2, 'Global context variables',
-       '<p>The following tokens are resolved for any authenticated request:</p><table><thead><tr><th>Variable</th><th>Description</th></tr></thead><tbody><tr><td><code>{{ USER_NAME }}</code></td><td>Displays the signed-in user''s display name.</td></tr><tr><td><code>{{ USER_EMAIL }}</code></td><td>Outputs the user''s primary email address.</td></tr><tr><td><code>{{ COMPANY_NAME }}</code></td><td>Shows the active company when the user belongs to multiple organisations.</td></tr><tr><td><code>{{ NOW_UTC }}</code></td><td>Renders the current timestamp in UTC; UI layers localise automatically.</td></tr></tbody></table>'
+SELECT a.id, 2, 'Application and platform variables',
+       '<p>The following tokens are available on every render once the portal settings load.</p>\n<table>\n  <thead>\n    <tr><th>Variable</th><th>Description</th></tr>\n  </thead>\n  <tbody>\n    <tr><td><code>{{ APP_NAME }}</code></td><td>Portal display name from configuration.</td></tr>\n    <tr><td><code>{{ APP_ENVIRONMENT }}</code></td><td>Active deployment environment (for example, <code>production</code> or <code>staging</code>).</td></tr>\n    <tr><td><code>{{ APP_ENV }}</code></td><td>Alias for <code>{{ APP_ENVIRONMENT }}</code> maintained for backwards compatibility.</td></tr>\n    <tr><td><code>{{ APP_PORTAL_URL }}</code></td><td>Fully-qualified base URL configured for the portal.</td></tr>\n    <tr><td><code>{{ APP_PORTAL_ORIGIN }}</code></td><td>Scheme and host portion of the portal URL, suitable for CORS policies.</td></tr>\n    <tr><td><code>{{ APP_PORTAL_HOSTNAME }}</code></td><td>Hostname extracted from the portal URL.</td></tr>\n    <tr><td><code>{{ APP_PORTAL_CONFIGURED }}</code></td><td>Returns <code>true</code> when a portal URL is set.</td></tr>\n    <tr><td><code>{{ APP_DEFAULT_TIMEZONE }}</code></td><td>Configured display timezone for scheduling and UI defaults.</td></tr>\n    <tr><td><code>{{ APP_CRON_TIMEZONE }}</code></td><td>Timezone used for scheduler cron expressions.</td></tr>\n    <tr><td><code>{{ APP_ENABLE_CSRF }}</code></td><td>Indicates whether CSRF protection is enforced.</td></tr>\n    <tr><td><code>{{ APP_ENABLE_AUTO_REFRESH }}</code></td><td>Signals if websocket-driven auto refresh is active.</td></tr>\n    <tr><td><code>{{ APP_SWAGGER_UI_URL }}</code></td><td>Path to the interactive API documentation.</td></tr>\n    <tr><td><code>{{ APP_SESSION_COOKIE_NAME }}</code></td><td>Name of the authentication session cookie.</td></tr>\n    <tr><td><code>{{ APP_ALLOWED_ORIGINS }}</code></td><td>Comma-separated list of additional origins permitted for CORS.</td></tr>\n    <tr><td><code>{{ APP_ALLOWED_ORIGIN_COUNT }}</code></td><td>Number of configured allowed origins.</td></tr>\n    <tr><td><code>{{ APP_DATABASE_BACKEND }}</code></td><td>Resolved database backend (<code>mysql</code> or <code>sqlite</code> fallback).</td></tr>\n    <tr><td><code>{{ APP_REDIS_ENABLED }}</code></td><td>True when a Redis connection string is configured.</td></tr>\n    <tr><td><code>{{ APP_SMTP_ENABLED }}</code></td><td>True when outbound email is configured.</td></tr>\n    <tr><td><code>{{ APP_STOCK_FEED_ENABLED }}</code></td><td>True when the stock feed endpoint is configured.</td></tr>\n    <tr><td><code>{{ APP_SYNCRO_WEBHOOK_ENABLED }}</code></td><td>True when the Syncro webhook URL is configured.</td></tr>\n    <tr><td><code>{{ APP_VERIFY_WEBHOOK_ENABLED }}</code></td><td>True when the Verify webhook URL is configured.</td></tr>\n    <tr><td><code>{{ APP_LICENSES_WEBHOOK_ENABLED }}</code></td><td>True when the licenses webhook URL is configured.</td></tr>\n    <tr><td><code>{{ APP_SHOP_WEBHOOK_ENABLED }}</code></td><td>True when the shop webhook URL is configured.</td></tr>\n    <tr><td><code>{{ APP_SMS_ENDPOINT_CONFIGURED }}</code></td><td>True when an SMS delivery endpoint is configured.</td></tr>\n    <tr><td><code>{{ APP_OPNFORM_BASE_URL }}</code></td><td>Base URL used for OpnForm integrations.</td></tr>\n    <tr><td><code>{{ APP_FAIL2BAN_LOG_PATH }}</code></td><td>Filesystem path to the Fail2ban log monitored by the portal.</td></tr>\n    <tr><td><code>{{ APP_MIGRATION_LOCK_TIMEOUT }}</code></td><td>Seconds the migration runner waits before timing out.</td></tr>\n    <tr><td><code>{{ APP_THEME }}</code></td><td>Active theme name applied to the UI.</td></tr>\n    <tr><td><code>{{ APP_STATIC_PATH }}</code></td><td>Absolute path to the static asset directory.</td></tr>\n    <tr><td><code>{{ APP_TEMPLATE_PATH }}</code></td><td>Absolute path to the template directory.</td></tr>\n    <tr><td><code>{{ PYTHON_IMPLEMENTATION }}</code></td><td>Python implementation running the portal (for example, CPython).</td></tr>\n    <tr><td><code>{{ PYTHON_VERSION }}</code></td><td>Python version string.</td></tr>\n    <tr><td><code>{{ PYTHON_RUNTIME }}</code></td><td>Combined implementation and version string.</td></tr>\n    <tr><td><code>{{ SYSTEM_HOSTNAME }}</code></td><td>Host name of the application server.</td></tr>\n    <tr><td><code>{{ SYSTEM_FQDN }}</code></td><td>Fully qualified domain name of the server.</td></tr>\n    <tr><td><code>{{ SYSTEM_PLATFORM }}</code></td><td>Operating system family.</td></tr>\n    <tr><td><code>{{ SYSTEM_PLATFORM_RELEASE }}</code></td><td>Operating system release identifier.</td></tr>\n    <tr><td><code>{{ SYSTEM_PLATFORM_VERSION }}</code></td><td>Detailed operating system version.</td></tr>\n    <tr><td><code>{{ SYSTEM_ARCHITECTURE }}</code></td><td>CPU architecture reported by the host.</td></tr>\n    <tr><td><code>{{ SYSTEM_PROCESSOR }}</code></td><td>Processor string reported by Python.</td></tr>\n    <tr><td><code>{{ SYSTEM_PATH_SEPARATOR }}</code></td><td>Path separator used by the host platform.</td></tr>\n    <tr><td><code>{{ SYSTEM_LINE_SEPARATOR }}</code></td><td>Line separator sequence used by the host platform.</td></tr>\n    <tr><td><code>{{ SYSTEM_CWD }}</code></td><td>Current working directory for the portal process.</td></tr>\n    <tr><td><code>{{ SYSTEM_APP_ROOT }}</code></td><td>Filesystem path to the application root.</td></tr>\n    <tr><td><code>{{ SYSTEM_ENVIRONMENT_VARIABLE_COUNT }}</code></td><td>Total number of environment variables detected at runtime.</td></tr>\n    <tr><td><code>{{ SYSTEM_PYTHON_EXECUTABLE }}</code></td><td>Absolute path to the Python interpreter executing the portal.</td></tr>\n    <tr><td><code>{{ APP_VERSION }}</code></td><td>Application version string when <code>version.txt</code> is present.</td></tr>\n  </tbody>\n</table>\n<p><strong>Note:</strong> Boolean results render as lower-case <code>true</code> or <code>false</code> strings so they can be consumed by templating logic.</p>
 FROM knowledge_base_articles a
 WHERE a.slug = 'system-variables-reference'
   AND NOT EXISTS (
@@ -90,8 +197,8 @@ WHERE a.slug = 'system-variables-reference'
   );
 
 INSERT INTO knowledge_base_sections (article_id, position, heading, content)
-SELECT a.id, 3, 'Module-specific variables',
-       '<p>Modules extend the variable namespace with scoped values.</p><ul><li><strong>Tickets:</strong> <code>{{ TICKET_ID }}</code>, <code>{{ TICKET_PRIORITY }}</code>, <code>{{ TICKET_SUMMARY }}</code></li><li><strong>Notifications:</strong> <code>{{ NOTIFICATION_COUNT }}</code>, <code>{{ LAST_NOTIFICATION_AT }}</code></li><li><strong>Knowledge Base:</strong> <code>{{ ARTICLE_TITLE }}</code>, <code>{{ ARTICLE_URL }}</code></li></ul><p>Consult Swagger documentation when new modules expose additional variables.</p>'
+SELECT a.id, 3, 'Runtime and time-based variables',
+       '<p>Time tokens resolve dynamically when the template is rendered.</p>\n<table>\n  <thead>\n    <tr><th>Variable</th><th>Description</th></tr>\n  </thead>\n  <tbody>\n    <tr><td><code>{{ NOW_UTC }}</code></td><td>Current timestamp in ISO 8601 UTC format.</td></tr>\n    <tr><td><code>{{ SYSTEM_TIME_UTC }}</code></td><td>Alias for <code>{{ NOW_UTC }}</code>.</td></tr>\n    <tr><td><code>{{ SYSTEM_TIME_UTC_HUMAN }}</code></td><td>UTC timestamp formatted as <code>YYYY-MM-DD HH:MM:SSZ</code>.</td></tr>\n    <tr><td><code>{{ SYSTEM_UNIX_TIMESTAMP }}</code></td><td>Seconds since the Unix epoch.</td></tr>\n    <tr><td><code>{{ SYSTEM_UNIX_TIMESTAMP_MS }}</code></td><td>Milliseconds since the Unix epoch.</td></tr>\n    <tr><td><code>{{ SYSTEM_DATE_UTC }}</code></td><td>UTC calendar date.</td></tr>\n    <tr><td><code>{{ SYSTEM_YEAR_UTC }}</code></td><td>UTC year component.</td></tr>\n    <tr><td><code>{{ SYSTEM_MONTH_UTC }}</code></td><td>UTC month component.</td></tr>\n    <tr><td><code>{{ SYSTEM_DAY_UTC }}</code></td><td>UTC day component.</td></tr>\n    <tr><td><code>{{ SYSTEM_ISO_WEEK_UTC }}</code></td><td>ISO week number in UTC.</td></tr>\n    <tr><td><code>{{ SYSTEM_DAY_OF_YEAR_UTC }}</code></td><td>Day number within the UTC year.</td></tr>\n    <tr><td><code>{{ SYSTEM_TIME_LOCAL }}</code></td><td>Current timestamp in the server local timezone.</td></tr>\n    <tr><td><code>{{ SYSTEM_DATE_LOCAL }}</code></td><td>Local calendar date.</td></tr>\n    <tr><td><code>{{ SYSTEM_TIMEZONE_NAME }}</code></td><td>Server reported timezone name.</td></tr>\n    <tr><td><code>{{ SYSTEM_TIMEZONE_OFFSET_MINUTES }}</code></td><td>Offset from UTC in minutes.</td></tr>\n    <tr><td><code>{{ SYSTEM_TIMEZONE_OFFSET_HOURS }}</code></td><td>Offset from UTC in hours (decimal).</td></tr>\n  </tbody>\n</table>\n<p>Display layers convert UTC timestamps to the viewer local timezone automatically.</p>
 FROM knowledge_base_articles a
 WHERE a.slug = 'system-variables-reference'
   AND NOT EXISTS (
@@ -99,8 +206,8 @@ WHERE a.slug = 'system-variables-reference'
   );
 
 INSERT INTO knowledge_base_sections (article_id, position, heading, content)
-SELECT a.id, 4, 'Validation and testing workflow',
-       '<p>Use the development installer to spin up a sandbox environment before promoting new templates.</p><ol><li>Open <strong>Admin ▸ Variables Lab</strong> to preview rendered content.</li><li>Leverage unit tests in <code>tests/</code> to cover regression cases for critical templates.</li><li>Document successful evaluations directly in the associated change request.</li></ol>'
+SELECT a.id, 4, 'Context-sensitive expansions',
+       '<p>Modules and data payloads expand the variable catalogue further.</p>\n<ul>\n  <li><strong>Tickets:</strong> Tokens derived from ticket payloads use the <code>{{ TICKET_* }}</code> prefix such as <code>{{ TICKET_ID }}</code>, <code>{{ TICKET_PRIORITY }}</code>, <code>{{ TICKET_SUBJECT }}</code>, and <code>{{ TICKET_SUMMARY }}</code>. Nested data flattens into uppercase keys joined by underscores.</li>\n  <li><strong>Notifications:</strong> Counts and timestamps are exposed through <code>{{ NOTIFICATION_COUNT }}</code> and <code>{{ LAST_NOTIFICATION_AT }}</code>.</li>\n  <li><strong>Knowledge Base:</strong> Article metadata resolves via <code>{{ ARTICLE_TITLE }}</code> and <code>{{ ARTICLE_URL }}</code>.</li>\n  <li><strong>Environment pass-through:</strong> Non-sensitive environment variables prefixed with <code>APP_</code> or named <code>ENVIRONMENT</code>, <code>PORTAL_URL</code>, <code>CRON_TIMEZONE</code>, <code>ENABLE_CSRF</code>, <code>ENABLE_AUTO_REFRESH</code>, <code>SWAGGER_UI_URL</code>, <code>OPNFORM_BASE_URL</code>, <code>FAIL2BAN_LOG_PATH</code>, <code>SYSTEMD_SERVICE_NAME</code>, <code>APP_RESTART_COMMAND</code>, <code>TZ</code>, <code>LANG</code>, and <code>LC_ALL</code> are also surfaced for templates.</li>\n</ul>\n<p>Use <strong>Admin ▸ Variables Lab</strong> to inspect module payloads and confirm the token names produced by each workflow.</p>\n<p>Execute template updates in a development environment first, then document successful evaluations in the associated change request before promoting to production.</p>
 FROM knowledge_base_articles a
 WHERE a.slug = 'system-variables-reference'
   AND NOT EXISTS (
