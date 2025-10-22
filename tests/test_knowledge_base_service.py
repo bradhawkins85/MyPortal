@@ -141,6 +141,7 @@ async def test_create_article_generates_ai_tags(monkeypatch):
         ai_tags=["vpn", "remote access"],
     )
 
+    update_article_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(knowledge_base_service.kb_repo, "create_article", AsyncMock(side_effect=_create_article))
     monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_sections", AsyncMock())
     monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_users", AsyncMock())
@@ -150,16 +151,20 @@ async def test_create_article_generates_ai_tags(monkeypatch):
         "get_article_by_id",
         AsyncMock(return_value=refreshed_article),
     )
-    monkeypatch.setattr(
-        knowledge_base_service.modules_service,
-        "trigger_module",
-        AsyncMock(
-            return_value={
-                "status": "succeeded",
-                "response": {"response": '["vpn", "remote access", "security"]'},
-            }
-        ),
-    )
+    monkeypatch.setattr(knowledge_base_service.kb_repo, "update_article", update_article_mock)
+
+    async def fake_trigger(slug, payload, *, background=True, on_complete=None):
+        assert slug == "ollama"
+        result = {
+            "status": "succeeded",
+            "response": {"response": '["vpn", "remote access", "security"]'},
+        }
+        if on_complete:
+            await on_complete(result)
+        return {"status": "queued", "event_id": 101}
+
+    trigger_mock = AsyncMock(side_effect=fake_trigger)
+    monkeypatch.setattr(knowledge_base_service.modules_service, "trigger_module", trigger_mock)
 
     payload = {
         "slug": "vpn-guide",
@@ -172,9 +177,10 @@ async def test_create_article_generates_ai_tags(monkeypatch):
 
     article = await knowledge_base_service.create_article(payload, author_id=7)
 
-    assert captured["ai_tags"] == ["vpn", "remote access", "security"]
+    assert captured["ai_tags"] is None
     assert article["ai_tags"] == ["vpn", "remote access"]
-    knowledge_base_service.modules_service.trigger_module.assert_awaited_once()
+    trigger_mock.assert_awaited_once()
+    assert update_article_mock.await_args.kwargs == {"ai_tags": ["vpn", "remote access", "security"]}
 
 
 @pytest.mark.anyio("asyncio")
@@ -205,11 +211,14 @@ async def test_update_article_refreshes_ai_tags(monkeypatch):
     monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_sections", AsyncMock())
     monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_users", AsyncMock())
     monkeypatch.setattr(knowledge_base_service.kb_repo, "replace_article_companies", AsyncMock())
-    monkeypatch.setattr(
-        knowledge_base_service.modules_service,
-        "trigger_module",
-        AsyncMock(return_value={"status": "succeeded", "response": {"response": '["security", "hardening"]'}}),
-    )
+    async def fake_trigger(slug, payload, *, background=True, on_complete=None):
+        result = {"status": "succeeded", "response": {"response": '["security", "hardening"]'}}
+        if on_complete:
+            await on_complete(result)
+        return {"status": "queued"}
+
+    trigger_mock = AsyncMock(side_effect=fake_trigger)
+    monkeypatch.setattr(knowledge_base_service.modules_service, "trigger_module", trigger_mock)
 
     payload = {
         "title": "Security fundamentals",
@@ -218,6 +227,13 @@ async def test_update_article_refreshes_ai_tags(monkeypatch):
 
     article = await knowledge_base_service.update_article(31, payload)
 
-    assert update_mock.await_args.kwargs["ai_tags"] == ["security", "hardening"]
+    # First update call handles metadata changes, callback updates ai_tags
+    assert len(update_mock.await_args_list) >= 2
+    first_call_kwargs = update_mock.await_args_list[0].kwargs
+    assert "ai_tags" not in first_call_kwargs
+    ai_tag_call = next(
+        kwargs for kwargs in (args.kwargs for args in update_mock.await_args_list) if "ai_tags" in kwargs
+    )
+    assert ai_tag_call["ai_tags"] == ["security", "hardening"]
     assert article["ai_tags"] == ["security", "hardening"]
-    knowledge_base_service.modules_service.trigger_module.assert_awaited_once()
+    trigger_mock.assert_awaited_once()

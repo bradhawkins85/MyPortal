@@ -1,3 +1,4 @@
+- 2025-12-24, 11:30 UTC, Fix, Moved Ollama module generation into shared background tasks with ticket and knowledge base callbacks to remove UI delays
 - 2025-12-24, 09:00 UTC, Fix, Queued ticket automation module execution in background tasks so ntfy notifications run without blocking the UI
 - 2025-12-23, 08:45 UTC, Fix, Removed event automation fetch limits so ntfy publish alerts fire during ticket creation workflows
 - 2025-12-22, 12:00 UTC, Fix, Ensured ticket creation helper emits ticket-created automation events across UI, API, and Syncro imports so event workflows fire consistently

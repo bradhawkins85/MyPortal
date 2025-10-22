@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from app.services import tickets as tickets_service
@@ -10,7 +12,7 @@ def anyio_backend():
 
 @pytest.mark.anyio
 async def test_refresh_ticket_ai_tags_updates_tags(monkeypatch):
-    captured: dict = {}
+    updates: list[dict[str, Any]] = []
 
     async def fake_get_ticket(ticket_id):
         return {
@@ -39,17 +41,20 @@ async def test_refresh_ticket_ai_tags_updates_tags(monkeypatch):
     async def fake_get_user(user_id):
         return {"id": user_id, "email": f"user{user_id}@example.test"}
 
-    async def fake_trigger(slug, payload):
+    async def fake_trigger(slug, payload, *, background=True, on_complete=None):
         assert slug == "ollama"
         assert "Printer issue" in payload.get("prompt", "")
-        return {
+        result = {
             "status": "succeeded",
             "model": "llama3",
             "response": '{"tags": ["Printer", "Paper Jam"]}',
         }
+        if on_complete:
+            await on_complete(result)
+        return result
 
     async def fake_update(ticket_id, **fields):
-        captured.update(fields)
+        updates.append(fields)
 
     monkeypatch.setattr(tickets_service.tickets_repo, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(tickets_service.tickets_repo, "list_replies", fake_list_replies)
@@ -59,18 +64,21 @@ async def test_refresh_ticket_ai_tags_updates_tags(monkeypatch):
 
     await tickets_service.refresh_ticket_ai_tags(5)
 
-    assert captured["ai_tags_status"] == "succeeded"
-    assert captured["ai_tags_model"] == "llama3"
-    assert captured["ai_tags_updated_at"] is not None
-    assert isinstance(captured["ai_tags"], list)
-    assert 5 <= len(captured["ai_tags"]) <= 10
-    assert "printer" in captured["ai_tags"]
-    assert "paper-jam" in captured["ai_tags"]
+    assert len(updates) >= 2
+    assert updates[0]["ai_tags_status"] == "queued"
+    final_update = updates[-1]
+    assert final_update["ai_tags_status"] == "succeeded"
+    assert final_update["ai_tags_model"] == "llama3"
+    assert final_update["ai_tags_updated_at"] is not None
+    assert isinstance(final_update["ai_tags"], list)
+    assert 5 <= len(final_update["ai_tags"]) <= 10
+    assert "printer" in final_update["ai_tags"]
+    assert "paper-jam" in final_update["ai_tags"]
 
 
 @pytest.mark.anyio
 async def test_refresh_ticket_ai_tags_handles_missing_module(monkeypatch):
-    captured: dict = {}
+    updates: list[dict[str, Any]] = []
 
     async def fake_get_ticket(ticket_id):
         return {"id": ticket_id, "subject": "Issue", "description": "", "status": "open", "priority": "normal"}
@@ -82,9 +90,9 @@ async def test_refresh_ticket_ai_tags_handles_missing_module(monkeypatch):
         return None
 
     async def fake_update(ticket_id, **fields):
-        captured.update(fields)
+        updates.append(fields)
 
-    async def fake_trigger(slug, payload):
+    async def fake_trigger(slug, payload, *, background=True, on_complete=None):
         raise ValueError("module not configured")
 
     monkeypatch.setattr(tickets_service.tickets_repo, "get_ticket", fake_get_ticket)
@@ -95,14 +103,15 @@ async def test_refresh_ticket_ai_tags_handles_missing_module(monkeypatch):
 
     await tickets_service.refresh_ticket_ai_tags(9)
 
-    assert captured["ai_tags_status"] == "skipped"
-    assert captured["ai_tags"] is None
-    assert captured["ai_tags_model"] is None
+    assert updates
+    assert updates[-1]["ai_tags_status"] == "skipped"
+    assert updates[-1]["ai_tags"] is None
+    assert updates[-1]["ai_tags_model"] is None
 
 
 @pytest.mark.anyio
 async def test_refresh_ticket_ai_tags_handles_errors(monkeypatch):
-    captured: dict = {}
+    updates: list[dict[str, Any]] = []
 
     async def fake_get_ticket(ticket_id):
         return {"id": ticket_id, "subject": "Issue", "description": "", "status": "open", "priority": "normal"}
@@ -114,9 +123,9 @@ async def test_refresh_ticket_ai_tags_handles_errors(monkeypatch):
         return None
 
     async def fake_update(ticket_id, **fields):
-        captured.update(fields)
+        updates.append(fields)
 
-    async def fake_trigger(slug, payload):
+    async def fake_trigger(slug, payload, *, background=True, on_complete=None):
         raise RuntimeError("network error")
 
     monkeypatch.setattr(tickets_service.tickets_repo, "get_ticket", fake_get_ticket)
@@ -127,6 +136,7 @@ async def test_refresh_ticket_ai_tags_handles_errors(monkeypatch):
 
     await tickets_service.refresh_ticket_ai_tags(11)
 
-    assert captured["ai_tags_status"] == "error"
-    assert captured["ai_tags"] is None
-    assert captured["ai_tags_model"] is None
+    assert updates
+    assert updates[-1]["ai_tags_status"] == "error"
+    assert updates[-1]["ai_tags"] is None
+    assert updates[-1]["ai_tags_model"] is None
