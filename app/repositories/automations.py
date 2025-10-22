@@ -335,21 +335,22 @@ async def set_last_error(automation_id: int, message: str | None) -> None:
 async def list_event_automations(
     trigger_event: str,
     *,
-    limit: int = 50,
+    limit: int | None = None,
 ) -> list[AutomationRecord]:
     """Return active event-driven automations matching the provided trigger."""
 
     await _ensure_connection()
-    rows = await db.fetch_all(
-        """
+    query = """
         SELECT *
         FROM automations
         WHERE status = 'active'
           AND kind = 'event'
           AND trigger_event = %s
         ORDER BY id ASC
-        LIMIT %s
-        """,
-        (trigger_event, limit),
-    )
+    """
+    params: list[Any] = [trigger_event]
+    if limit is not None:
+        query += " LIMIT %s"
+        params.append(limit)
+    rows = await db.fetch_all(query, tuple(params))
     return [_normalise_automation(row) for row in rows]

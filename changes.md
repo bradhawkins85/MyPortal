@@ -1,3 +1,4 @@
+- 2025-12-23, 08:45 UTC, Fix, Removed event automation fetch limits so ntfy publish alerts fire during ticket creation workflows
 - 2025-12-22, 12:00 UTC, Fix, Ensured ticket creation helper emits ticket-created automation events across UI, API, and Syncro imports so event workflows fire consistently
 - 2025-12-21, 09:30 UTC, Feature, Added configurable auto-refresh websocket client with toast notifications before page reloads
 - 2025-10-21, 21:54 UTC, Feature, Added system refresh websocket notifier with super-admin broadcast API and audit logging
