@@ -1,0 +1,7 @@
+{
+  "guid": "e09acc04-a63e-4a21-ad2e-386a7e2998eb",
+  "occurred_at": "2025-10-23T11:28:17Z",
+  "change_type": "Feature",
+  "summary": "Made integration module cards collapsible with module name and status visible by default.",
+  "content_hash": "53cb46493beb368258a5a458ac865a4bb5ef4d9d230796beb3d40feefb5dd45e"
+}
