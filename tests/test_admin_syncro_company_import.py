@@ -1,13 +1,14 @@
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
-
 import pytest
 from fastapi.testclient import TestClient
 from urllib.parse import parse_qs, urlparse
 
 import app.main as main_module
 from app.core.database import db
-from app.main import app, company_importer, scheduler_service
+from app.main import app, scheduler_service
+from app.services import background as background_tasks
+from app.services import change_log as change_log_service
 
 
 class DummySummary:
@@ -74,12 +75,18 @@ def disable_startup(monkeypatch):
     async def fake_stop():
         return None
 
+    async def fake_sync_change_log_sources(*args, **kwargs):
+        return None
+
     monkeypatch.setattr(db, "connect", fake_connect)
     monkeypatch.setattr(db, "disconnect", fake_disconnect)
     monkeypatch.setattr(db, "acquire", fake_acquire)
     monkeypatch.setattr(db, "run_migrations", fake_run_migrations)
     monkeypatch.setattr(scheduler_service, "start", fake_start)
     monkeypatch.setattr(scheduler_service, "stop", fake_stop)
+    monkeypatch.setattr(
+        change_log_service, "sync_change_log_sources", fake_sync_change_log_sources
+    )
     monkeypatch.setattr(main_module.settings, "enable_csrf", False)
 
 
@@ -96,10 +103,16 @@ def super_admin_context(monkeypatch):
 
 
 def test_import_companies_returns_json(monkeypatch):
-    async def fake_import_all_companies():
-        return DummySummary(fetched=2, created=1, updated=1, skipped=0)
+    captured: dict[str, str] = {}
 
-    monkeypatch.setattr(company_importer, "import_all_companies", fake_import_all_companies)
+    def fake_queue(task_factory, *, task_id=None, description=None, on_complete=None, on_error=None):
+        assigned = task_id or "queued-task-id"
+        captured["task_id"] = assigned
+        if on_complete:
+            on_complete(DummySummary(fetched=2, created=1, updated=1, skipped=0))
+        return assigned
+
+    monkeypatch.setattr(background_tasks, "queue_background_task", fake_queue)
 
     with TestClient(app) as client:
         response = client.post(
@@ -107,15 +120,26 @@ def test_import_companies_returns_json(monkeypatch):
             headers={"accept": "application/json"},
         )
 
-    assert response.status_code == 200
-    assert response.json() == {"fetched": 2, "created": 1, "updated": 1, "skipped": 0}
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload == {
+        "status": "queued",
+        "taskId": captured["task_id"],
+        "message": "Syncro company import queued.",
+    }
 
 
 def test_import_companies_form_redirect(monkeypatch):
-    async def fake_import_all_companies():
-        return DummySummary(fetched=1, created=1, updated=0, skipped=0)
+    captured: dict[str, str] = {}
 
-    monkeypatch.setattr(company_importer, "import_all_companies", fake_import_all_companies)
+    def fake_queue(task_factory, *, task_id=None, description=None, on_complete=None, on_error=None):
+        assigned = task_id or "abc12345def"
+        captured["task_id"] = assigned
+        if on_complete:
+            on_complete(DummySummary(fetched=1, created=1, updated=0, skipped=0))
+        return assigned
+
+    monkeypatch.setattr(background_tasks, "queue_background_task", fake_queue)
 
     with TestClient(app, follow_redirects=False) as client:
         response = client.post(
@@ -130,4 +154,5 @@ def test_import_companies_form_redirect(monkeypatch):
     parsed = urlparse(location)
     assert parsed.path == "/admin/companies/syncro-import"
     params = parse_qs(parsed.query)
-    assert params["success"] == ["Imported 1 company (created 1, updated 0, skipped 0)."]
+    expected_task_id = captured["task_id"][:8]
+    assert params["success"] == [f"Syncro company import queued. Task ID: {expected_task_id}"]
