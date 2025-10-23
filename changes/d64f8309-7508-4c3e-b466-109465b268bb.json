@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-23T10:56Z",
   "change_type": "Feature",
   "summary": "Added Syncro company importer with admin UI and REST endpoint to synchronise customer records.",
-  "content_hash": "b009e309c10fb8532c18f515d73fb99e38772e1d026524ed981123f17c0159ad"
+  "content_hash": "e8197400295bdced0171a92ae37ddde9f8c0b47012f9240ee0cdd48014dcc7e6"
 }

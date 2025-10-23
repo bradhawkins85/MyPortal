@@ -1,0 +1,7 @@
+{
+  "guid": "1ca99070-973f-42d1-82c0-aaca74eebd44",
+  "occurred_at": "2025-10-09T12:59Z",
+  "change_type": "Fix",
+  "summary": "Prevented shop pagination from exceeding the viewport when recalculating rows while scrolled",
+  "content_hash": "ce53e40bb12a72e9995e057e5b07ac9dbd6ba654e88dffd6eb4e57f0964ca459"
+}

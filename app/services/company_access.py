@@ -29,6 +29,13 @@ async def list_accessible_companies(user: Mapping[str, Any]) -> list[dict[str, A
         return []
 
     companies = await company_repo.list_companies()
+    try:
+        companies = await company_repo.list_companies()
+    except RuntimeError as exc:
+        message = str(exc)
+        if "Database pool not initialised" in message or not db.is_connected():
+            return []
+        raise
     accessible: list[dict[str, Any]] = []
     for company in companies:
         membership = _build_super_admin_membership(company)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -18,6 +18,7 @@ from app.schemas.scheduler import (
     ScheduledTaskUpdate,
     WebhookEventAttemptResponse,
     WebhookEventResponse,
+    WebhookEventsBulkDeleteResponse,
 )
 from app.services import webhook_monitor
 from app.services.scheduler import scheduler_service
@@ -198,6 +199,19 @@ async def retry_webhook_event(
     if not event:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     return WebhookEventResponse.model_validate(event)
+
+
+@router.delete("/webhooks", response_model=WebhookEventsBulkDeleteResponse)
+async def delete_webhook_events_by_status(
+    status: Literal["failed", "succeeded"] = Query(
+        ..., description="Delete webhook events with the provided status"
+    ),
+    _: None = Depends(require_database),
+    __: dict[str, Any] = Depends(require_super_admin),
+) -> WebhookEventsBulkDeleteResponse:
+    deleted = await webhook_events_repo.delete_events_by_status(status)
+    log_info("Webhook events bulk deleted", status=status, count=deleted)
+    return WebhookEventsBulkDeleteResponse(status=status, deleted=deleted)
 
 
 @router.delete("/webhooks/{event_id}", status_code=status.HTTP_204_NO_CONTENT)

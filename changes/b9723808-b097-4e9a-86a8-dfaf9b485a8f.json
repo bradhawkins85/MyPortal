@@ -1,0 +1,7 @@
+{
+  "guid": "b9723808-b097-4e9a-86a8-dfaf9b485a8f",
+  "occurred_at": "2025-10-08T04:05Z",
+  "change_type": "Feature",
+  "summary": "Introduced role-based company memberships with audit logging and admin control panels",
+  "content_hash": "e612c6813379d99a905695d272d0f69c11692cc9dfb2b897c348557282c72408"
+}

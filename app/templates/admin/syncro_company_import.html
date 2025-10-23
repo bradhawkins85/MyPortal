@@ -47,8 +47,6 @@
       </header>
 
       <div class="management__body management__body--stacked">
-        <div class="alert-stack" data-syncro-company-import-status hidden></div>
-
         {% if not is_configured %}
           <div class="alert alert--error" role="alert">
             Configure the Syncro module with a base URL and API key before running imports.
@@ -61,18 +59,16 @@
             <div>
               <h2 class="card__title">Import Syncro companies</h2>
               <p class="card__subtitle">
-                Pull the complete Syncro customer list. Existing companies are matched by Syncro ID or name and updated in place.
+                Syncro company imports now live on the integration modules page alongside the Syncro configuration.
               </p>
             </div>
           </header>
-          <form class="card__form" data-syncro-company-import method="post" action="/admin/syncro/import-companies">
-            <p class="card__subtitle text-muted">
-              The importer will create new companies, update addresses, and attach Syncro identifiers where missing.
+          <div class="card__body card__body--stacked">
+            <p class="text-muted">
+              Queue imports directly from the Syncro module card to keep configuration and data synchronisation controls together.
             </p>
-            <div class="form-actions">
-              <button type="submit" class="button button--primary" {% if not is_configured %}disabled{% endif %}>Import companies</button>
-            </div>
-          </form>
+            <a class="button button--secondary" href="/admin/modules#module-syncro">Open Syncro module settings</a>
+          </div>
         </article>
       </div>
     </section>
@@ -81,6 +77,5 @@
 
 {% block scripts %}
   {{ super() }}
-  <script src="/static/js/admin.js" defer></script>
 {% endblock %}
 

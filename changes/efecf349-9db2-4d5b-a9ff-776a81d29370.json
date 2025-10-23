@@ -1,0 +1,7 @@
+{
+  "guid": "efecf349-9db2-4d5b-a9ff-776a81d29370",
+  "occurred_at": "2025-10-21T21:54Z",
+  "change_type": "Feature",
+  "summary": "Added system refresh websocket notifier with super-admin broadcast API and audit logging",
+  "content_hash": "68f45323532792b7938736679bca477f94657bf8201aea536e494ca39eed738d"
+}

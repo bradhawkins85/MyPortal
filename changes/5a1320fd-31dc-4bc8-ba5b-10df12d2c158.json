@@ -1,0 +1,7 @@
+{
+  "guid": "5a1320fd-31dc-4bc8-ba5b-10df12d2c158",
+  "occurred_at": "2025-10-20T11:45Z",
+  "change_type": "Fix",
+  "summary": "Split upgrade automation into pull-only upgrade.sh and restart.sh for dependency reinstalls and service restarts",
+  "content_hash": "c5067be10e6ecd8b92922ed9c6da13823a70cee4c1607389bc903dc9a0da1b7b"
+}

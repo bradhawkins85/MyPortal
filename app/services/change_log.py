@@ -212,6 +212,8 @@ async def sync_change_log_sources(*, base_path: Path | None = None, repository=c
     changes_dir.mkdir(parents=True, exist_ok=True)
 
     if not db.is_connected() and repository is change_log_repo:
+    requires_database = repository is change_log_repo
+    if requires_database and not db.is_connected():
         log_info("Skipping change log synchronisation because the database is not connected")
         return
 
