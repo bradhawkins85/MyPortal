@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if error_message or success_message %}
+    <div class="stacked" style="margin-bottom: 1.5rem; gap: 1rem;">
+      {% if success_message %}
+        <div class="alert" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="admin-grid admin-grid--columns">
+    <section class="card card--panel admin-grid__full">
+      <header class="card__header card__header--actions">
+        <div class="stacked">
+          <h2 class="card__title">{{ form_data.name or company.name }}</h2>
+          <p class="card__subtitle">Manage identifiers, email domains, and VIP status for this company.</p>
+        </div>
+        <div class="card__controls">
+          <a class="button button--ghost" href="/admin/companies">Back to companies</a>
+        </div>
+      </header>
+      <div class="card__body card__body--stacked">
+        <form action="/admin/companies/{{ company.id }}" method="post" class="form" autocomplete="off">
+          {% include "partials/csrf.html" %}
+          <div class="form-field">
+            <label class="form-label" for="edit-company-name">Company name</label>
+            <input
+              id="edit-company-name"
+              name="name"
+              class="form-input"
+              value="{{ form_data.name }}"
+              maxlength="255"
+              required
+            />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-company-syncro">Syncro company ID</label>
+            <input
+              id="edit-company-syncro"
+              name="syncroCompanyId"
+              class="form-input"
+              value="{{ form_data.syncro_company_id }}"
+              maxlength="255"
+            />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-company-xero">Xero ID</label>
+            <input
+              id="edit-company-xero"
+              name="xeroId"
+              class="form-input"
+              value="{{ form_data.xero_id }}"
+              maxlength="255"
+            />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-company-email-domains">Email domains</label>
+            <textarea
+              id="edit-company-email-domains"
+              name="emailDomains"
+              class="form-input form-input--textarea"
+              rows="3"
+              placeholder="example.com, example.org"
+            >{{ form_data.email_domains }}</textarea>
+            <p class="form-help">Use commas or new lines to list domains. Domains are matched case-insensitively.</p>
+          </div>
+          <div class="form-field form-field--checkbox">
+            <label class="checkbox" for="edit-company-vip">
+              <input
+                id="edit-company-vip"
+                type="checkbox"
+                name="isVip"
+                value="1"
+                {% if form_data.is_vip %}checked{% endif %}
+              />
+              <span>VIP pricing</span>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="button">Save changes</button>
+          </div>
+        </form>
+      </div>
+      <div class="card__body card__body--meta">
+        <h3 class="card__subtitle">Company details</h3>
+        <dl class="definition-list">
+          <div class="definition-list__item">
+            <dt>ID</dt>
+            <dd>{{ company.id }}</dd>
+          </div>
+          <div class="definition-list__item">
+            <dt>Syncro ID</dt>
+            <dd>
+              {% if form_data.syncro_company_id %}
+                {{ form_data.syncro_company_id }}
+              {% else %}
+                <span class="text-muted">Not set</span>
+              {% endif %}
+            </dd>
+          </div>
+          <div class="definition-list__item">
+            <dt>Xero ID</dt>
+            <dd>
+              {% if form_data.xero_id %}
+                {{ form_data.xero_id }}
+              {% else %}
+                <span class="text-muted">Not set</span>
+              {% endif %}
+            </dd>
+          </div>
+          <div class="definition-list__item">
+            <dt>VIP status</dt>
+            <dd>
+              {% if form_data.is_vip %}
+                <span class="tag tag--success">VIP</span>
+              {% else %}
+                <span class="tag tag--muted">Standard</span>
+              {% endif %}
+            </dd>
+          </div>
+        </dl>
+      </div>
+      <div class="card__body card__body--meta">
+        <h3 class="card__subtitle">Email domains</h3>
+        {% if email_domain_preview %}
+          <ul class="list" role="list">
+            {% for domain in email_domain_preview %}
+              <li>{{ domain }}</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="text-muted">No domains registered.</p>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/admin.js" defer></script>
+{% endblock %}

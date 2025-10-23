@@ -1750,6 +1750,24 @@ def _companies_redirect(
     return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
 
 
+def _company_edit_redirect(
+    *,
+    company_id: int,
+    success: str | None = None,
+    error: str | None = None,
+) -> RedirectResponse:
+    params: dict[str, str] = {}
+    if success:
+        params["success"] = success.strip()[:200]
+    if error:
+        params["error"] = error.strip()[:200]
+    query = urlencode(params)
+    url = f"/admin/companies/{company_id}/edit"
+    if query:
+        url = f"{url}?{query}"
+    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+
 _COMPANY_PERMISSION_COLUMNS: list[dict[str, str]] = [
     {"field": "can_access_shop", "label": "Shop"},
     {"field": "can_access_cart", "label": "Cart"},
@@ -1910,6 +1928,75 @@ async def _render_companies_dashboard(
     }
 
     response = await _render_template("admin/companies.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
+
+
+async def _render_company_edit_page(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    company_id: int,
+    form_values: Mapping[str, Any] | None = None,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    company_record = await company_repo.get_company_by_id(company_id)
+    if not company_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    is_super_admin, managed_companies, _ = await _get_company_management_scope(request, user)
+
+    def _string_value(key: str, default: str) -> str:
+        if not form_values or key not in form_values:
+            return default
+        value = form_values.get(key)
+        return str(value) if value is not None else ""
+
+    def _bool_value(key: str, default: bool) -> bool:
+        if not form_values or key not in form_values:
+            return default
+        value = form_values.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    default_email_domains = ", ".join(company_record.get("email_domains") or [])
+    form_data = {
+        "name": _string_value("name", (company_record.get("name") or "").strip()),
+        "syncro_company_id": _string_value(
+            "syncro_company_id", (company_record.get("syncro_company_id") or "").strip()
+        ),
+        "xero_id": _string_value("xero_id", (company_record.get("xero_id") or "").strip()),
+        "email_domains": _string_value("email_domains", default_email_domains),
+        "is_vip": _bool_value("is_vip", bool(company_record.get("is_vip"))),
+    }
+
+    form_email_text = form_data.get("email_domains", "")
+    if form_values and "email_domains" in form_values:
+        preview_domains = [
+            domain.strip()
+            for domain in form_email_text.replace("\n", ",").split(",")
+            if domain.strip()
+        ]
+    else:
+        preview_domains = list(company_record.get("email_domains") or [])
+
+    extra = {
+        "title": f"Edit {company_record.get('name') or 'company'}",
+        "company": company_record,
+        "form_data": form_data,
+        "managed_companies": managed_companies,
+        "is_super_admin": is_super_admin,
+        "success_message": success_message,
+        "error_message": error_message,
+        "email_domain_preview": preview_domains,
+    }
+
+    response = await _render_template("admin/company_edit.html", request, user, extra=extra)
     response.status_code = status_code
     return response
 
@@ -4014,6 +4101,25 @@ async def admin_companies_page(
     )
 
 
+@app.get("/admin/companies/{company_id}/edit", response_class=HTMLResponse)
+async def admin_company_edit_page(
+    company_id: int,
+    request: Request,
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _render_company_edit_page(
+        request,
+        current_user,
+        company_id=company_id,
+        success_message=_sanitize_message(success),
+        error_message=_sanitize_message(error),
+    )
+
+
 @app.get("/admin/companies/syncro-import", response_class=HTMLResponse)
 async def admin_syncro_company_import_page(
     request: Request,
@@ -4211,35 +4317,43 @@ async def admin_update_company(company_id: int, request: Request):
         return redirect
     form = await request.form()
     name = str(form.get("name", "")).strip()
-    syncro_company_id = (str(form.get("syncroCompanyId", "")).strip() or None)
-    xero_id = (str(form.get("xeroId", "")).strip() or None)
+    syncro_company_raw = str(form.get("syncroCompanyId", "")).strip()
+    xero_id_raw = str(form.get("xeroId", "")).strip()
     is_vip = _parse_bool(form.get("isVip"))
     raw_email_domains = form.get("emailDomains")
-    try:
-        email_domains = company_domains.parse_email_domain_text(
-            str(raw_email_domains) if raw_email_domains is not None else ""
-        )
-    except company_domains.EmailDomainError as exc:
-        response = await _render_companies_dashboard(
-            request,
-            current_user,
-            selected_company_id=company_id,
-            error_message=str(exc),
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-        return response
-    if not name:
-        response = await _render_companies_dashboard(
-            request,
-            current_user,
-            selected_company_id=company_id,
-            error_message="Enter a company name.",
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-        return response
+    email_domains_text = str(raw_email_domains) if raw_email_domains is not None else ""
+    form_values = {
+        "name": name,
+        "syncro_company_id": syncro_company_raw,
+        "xero_id": xero_id_raw,
+        "email_domains": email_domains_text,
+        "is_vip": is_vip,
+    }
     existing = await company_repo.get_company_by_id(company_id)
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    try:
+        email_domains = company_domains.parse_email_domain_text(email_domains_text)
+    except company_domains.EmailDomainError as exc:
+        return await _render_company_edit_page(
+            request,
+            current_user,
+            company_id=company_id,
+            form_values=form_values,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    if not name:
+        return await _render_company_edit_page(
+            request,
+            current_user,
+            company_id=company_id,
+            form_values=form_values,
+            error_message="Enter a company name.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    syncro_company_id = syncro_company_raw or None
+    xero_id = xero_id_raw or None
     updates: dict[str, Any] = {
         "name": name,
         "is_vip": 1 if is_vip else 0,
@@ -4251,15 +4365,15 @@ async def admin_update_company(company_id: int, request: Request):
         await company_repo.update_company(company_id, **updates)
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to update company", company_id=company_id, error=str(exc))
-        response = await _render_companies_dashboard(
+        return await _render_company_edit_page(
             request,
             current_user,
-            selected_company_id=company_id,
+            company_id=company_id,
+            form_values=form_values,
             error_message="Unable to update company. Please try again.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-        return response
-    return _companies_redirect(
+    return _company_edit_redirect(
         company_id=company_id,
         success=f"Company {name} updated.",
     )
