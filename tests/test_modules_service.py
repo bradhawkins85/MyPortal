@@ -354,6 +354,7 @@ def test_invoke_tacticalrmm_records_success(monkeypatch):
     assert result["event_id"] == 11
     assert result["status"] == "succeeded"
     assert result["status_code"] == 201
+    assert client_factory.captured_kwargs["headers"].get("X-API-KEY") == "abc"
     assert captured_event.get("max_attempts") == 1
     assert "attempt_immediately" not in captured_event
 
@@ -426,10 +427,10 @@ def test_push_companies_to_tacticalrmm_creates_clients_and_sites(monkeypatch):
         for entry in created_sites
     )
 
-    assert call_payloads[0] == {"endpoint": "/api/v3/clients/", "method": "GET"}
-    assert call_payloads[1]["endpoint"] == "/api/v3/clients/"
+    assert call_payloads[0] == {"endpoint": "/clients/", "method": "GET"}
+    assert call_payloads[1]["endpoint"] == "/clients/"
     assert call_payloads[1]["method"] == "POST"
-    assert call_payloads[2]["endpoint"] == "/api/v3/clients/sites/"
+    assert call_payloads[2]["endpoint"] == "/clients/sites/"
     assert call_payloads[2]["method"] == "POST"
     assert len(call_payloads) == 3
 def test_invoke_ntfy_records_success(monkeypatch):
