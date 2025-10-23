@@ -36,6 +36,13 @@ There are no default login credentials; the first visit will prompt you to regis
 - Syncro ticket importer with super admin UI controls, rate limiting, and REST API access for bulk migrations
 - Realtime refresh channel via `/ws/refresh` with a super-admin broadcast API at `/api/system/refresh`
 
+## Change Log Management
+
+- Each release note lives in the `changes/` directory as a JSON document named with its GUID.
+- The FastAPI startup routine imports those files into the `change_log` database table so updates are queryable alongside other audit data.
+- Historical entries stored in `changes.md` are automatically migrated on startup, ensuring legacy notes remain available without manual intervention.
+- When adding a new feature or fix, create a new GUID-named JSON file in `changes/` with the change metadata; the importer will synchronise it into the database using UTC timestamps.
+
 ## Syncro Ticket Importer
 
 Super administrators can synchronise Syncro tickets into MyPortal directly from **Admin → Syncro ticket import** once the Syncro integration module is enabled. The import console offers

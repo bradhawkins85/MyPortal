@@ -100,6 +100,7 @@ from app.services.scheduler import scheduler_service
 from app.security.api_keys import mask_api_key
 from app.services import audit as audit_service
 from app.services import automations as automations_service
+from app.services import change_log as change_log_service
 from app.services import email as email_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import m365 as m365_service
@@ -1885,6 +1886,7 @@ async def _render_companies_dashboard(
 async def on_startup() -> None:
     await db.connect()
     await db.run_migrations()
+    await change_log_service.sync_change_log_sources()
     await modules_service.ensure_default_modules()
     await automations_service.refresh_all_schedules()
     await scheduler_service.start()
