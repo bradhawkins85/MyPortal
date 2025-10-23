@@ -104,6 +104,7 @@
                         method="post"
                         class="inline-form"
                       >
+                        {% include "partials/csrf.html" %}
                         <input type="hidden" name="name" value="{{ company.name }}" />
                         <button type="submit" class="button button--ghost">Save</button>
                       </form>
@@ -136,6 +137,7 @@
           <h2 class="modal__title" id="add-company-title">Add a company</h2>
           <p class="modal__subtitle">Create a new customer record with optional Syncro and Xero identifiers.</p>
           <form action="/admin/companies" method="post" class="form" autocomplete="off">
+            {% include "partials/csrf.html" %}
             <div class="form-field">
               <label class="form-label" for="company-name">Company name</label>
               <input id="company-name" name="name" class="form-input" required maxlength="255" />
@@ -184,6 +186,7 @@
           </div>
         </header>
         <form action="/admin/companies/assign" method="post" class="form-grid" autocomplete="off">
+          {% include "partials/csrf.html" %}
           <div class="form-field">
             <label class="form-label" for="assign-user">User</label>
             <select id="assign-user" name="userId" class="form-input" required>
