@@ -184,6 +184,22 @@
                 <button type="submit" class="button button--primary">Update module</button>
               </div>
             </form>
+            {% if module.slug == 'tacticalrmm' %}
+              <form action="/admin/modules/tacticalrmm/push-companies" method="post" class="form card__form">
+                {% if csrf_token %}
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                {% endif %}
+                <div class="form-field">
+                  <p class="form-help">
+                    Push all companies from My Portal to Tactical RMM. Missing clients will be created with a
+                    <strong>Default</strong> site, and existing clients gain the Default site when absent.
+                  </p>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="button button--secondary">Push companies to Tactical RMM</button>
+                </div>
+              </form>
+            {% endif %}
           </article>
         {% endfor %}
       </div>
