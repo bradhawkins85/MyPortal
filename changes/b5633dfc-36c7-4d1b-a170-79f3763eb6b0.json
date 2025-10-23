@@ -1,6 +1,6 @@
 {
   "guid": "b5633dfc-36c7-4d1b-a170-79f3763eb6b0",
-  "occurred_at": "2025-02-14T10:00:00Z",
+  "occurred_at": "2025-02-14T10:00Z",
   "change_type": "Fix",
   "summary": "Restored Syncro company import button so admin requests trigger the importer via AJAX or form fallback.",
   "content_hash": "f68d0d6022e3fcbc32e53a83965e571a36ecb43e1a141b19500dd031c3d68252"

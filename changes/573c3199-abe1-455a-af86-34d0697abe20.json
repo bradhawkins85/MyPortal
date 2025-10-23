@@ -1,7 +1,7 @@
 {
   "guid": "573c3199-abe1-455a-af86-34d0697abe20",
-  "occurred_at": "2025-10-23T12:26:27Z",
+  "occurred_at": "2025-10-23T12:26Z",
   "change_type": "Feature",
   "summary": "Paginated the companies list and moved company settings into a dedicated edit view with clearer context.",
-  "content_hash": "527354b66a625717fb435bb3ae3ceff2a5900ac1c427b6d7756445f449c27467"
+  "content_hash": "7186eb0fd5791690891d16efa5896b34c13996e87a5c3f7e25d61f4ee520df6d"
 }

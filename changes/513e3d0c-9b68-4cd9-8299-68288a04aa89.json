@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-23T10:27Z",
   "change_type": "Fix",
   "summary": "Fix Tactical RMM site creation endpoint to prevent HTTP 405 errors during sync.",
-  "content_hash": "78671783ca72a27d0e76cab4291b256ff1de2a6f33059e9d16cf05603430325a"
+  "content_hash": "3a0442440d0a22a0ab40d44ec1c1f9104dccab7bd5098a15eb04aa77a6cfd2e7"
 }
