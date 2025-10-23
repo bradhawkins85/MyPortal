@@ -71,6 +71,7 @@ from app.repositories import api_keys as api_key_repo
 from app.repositories import auth as auth_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
+from app.repositories import change_log as change_log_repo
 from app.repositories import assets as asset_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import licenses as license_repo
@@ -4898,6 +4899,48 @@ async def admin_audit_logs(
         },
     }
     return await _render_template("admin/audit_logs.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/change-log", response_class=HTMLResponse)
+async def admin_change_log(
+    request: Request,
+    change_type: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    limit = max(1, min(limit, 500))
+    available_types = await change_log_repo.list_change_types()
+
+    selected_type: str | None = None
+    raw_change_type = (change_type or "").strip()
+    if raw_change_type:
+        lowered = raw_change_type.lower()
+        for candidate in available_types:
+            if candidate.lower() == lowered:
+                selected_type = candidate
+                break
+
+    entries = await change_log_repo.list_change_log_entries(
+        change_type=selected_type,
+        limit=limit,
+    )
+    for entry in entries:
+        entry["occurred_at_iso"] = _to_iso(entry.get("occurred_at_utc"))
+
+    extra = {
+        "title": "Change log",
+        "change_entries": entries,
+        "change_types": available_types,
+        "filters": {
+            "change_type": raw_change_type,
+            "selected_change_type": selected_type.lower() if selected_type else "",
+            "limit": limit,
+        },
+    }
+    return await _render_template("admin/change_log.html", request, current_user, extra=extra)
 
 
 @app.get("/admin/forms", response_class=HTMLResponse)
