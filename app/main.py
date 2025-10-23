@@ -4052,6 +4052,9 @@ async def admin_assign_user_to_company(request: Request):
             status_code=status.HTTP_404_NOT_FOUND,
         )
         return response
+    existing_assignment = await user_company_repo.get_user_company(user_id, company_id)
+    form_keys = set(form.keys())
+
     staff_permission_raw = form.get("staffPermission") or form.get("staff_permission")
     try:
         staff_permission = int(staff_permission_raw) if staff_permission_raw is not None else 0
@@ -4074,9 +4077,19 @@ async def admin_assign_user_to_company(request: Request):
         field = column.get("field")
         if not field:
             continue
-        permission_values[field] = _parse_bool(form.get(field))
+        if field in form_keys:
+            permission_values[field] = _parse_bool(form.get(field))
+        elif existing_assignment is not None:
+            permission_values[field] = bool(existing_assignment.get(field, False))
+        else:
+            permission_values[field] = False
 
-    can_manage_staff = _parse_bool(form.get("can_manage_staff"))
+    if "can_manage_staff" in form_keys:
+        can_manage_staff = _parse_bool(form.get("can_manage_staff"))
+    elif existing_assignment is not None:
+        can_manage_staff = bool(existing_assignment.get("can_manage_staff", False))
+    else:
+        can_manage_staff = False
 
     assign_kwargs: dict[str, Any] = {
         "user_id": user_id,
