@@ -1206,7 +1206,7 @@ def _summarise_event_error(result: Mapping[str, Any]) -> str:
     return "Unknown error"
 
 
-async def push_companies_to_tacticalrmm(default_site_name: str = "Default") -> dict[str, Any]:
+async def _load_tacticalrmm_settings() -> dict[str, Any]:
     module = await module_repo.get_module("tacticalrmm")
     if not module:
         raise ValueError("Tactical RMM module is not configured")
@@ -1227,6 +1227,19 @@ async def push_companies_to_tacticalrmm(default_site_name: str = "Default") -> d
     api_key = str(settings.get("api_key") or "").strip()
     if not api_key:
         raise ValueError("Tactical RMM API key is not configured")
+    return settings
+
+
+async def ensure_tacticalrmm_ready() -> None:
+    """Validate Tactical RMM configuration before executing operations."""
+
+    await _load_tacticalrmm_settings()
+
+
+async def push_companies_to_tacticalrmm(
+    default_site_name: str = "Default",
+) -> dict[str, Any]:
+    settings = await _load_tacticalrmm_settings()
 
     default_site = str(default_site_name or "").strip() or "Default"
     default_site_key = default_site.casefold()

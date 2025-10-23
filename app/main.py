@@ -63,6 +63,8 @@ from app.api.routes import (
     system,
     uptimekuma,
 )
+from uuid import uuid4
+
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
 from app.core.logging import configure_logging, log_error, log_info
@@ -100,6 +102,7 @@ from app.api.dependencies.auth import get_current_session
 from app.services.scheduler import scheduler_service
 from app.security.api_keys import mask_api_key
 from app.services import audit as audit_service
+from app.services import background as background_tasks
 from app.services import automations as automations_service
 from app.services import change_log as change_log_service
 from app.services import company_domains
@@ -4583,14 +4586,51 @@ async def import_syncro_companies(request: Request):
         user_id=current_user.get("id"),
         request_path=str(request.url),
     )
-    summary = await company_importer.import_all_companies()
-    summary_data = summary.as_dict()
-    if _request_prefers_json(request):
-        return JSONResponse(summary_data)
-    message = (
-        f"Imported {summary.fetched} compan{'y' if summary.fetched == 1 else 'ies'} "
-        f"(created {summary.created}, updated {summary.updated}, skipped {summary.skipped})."
+    task_id = uuid4().hex
+
+    def _on_success(summary: company_importer.CompanyImportSummary) -> None:
+        summary_data = summary.as_dict()
+        log_info(
+            "Syncro company import background task completed",
+            task_id=task_id,
+            fetched=summary_data.get("fetched", 0),
+            created=summary_data.get("created", 0),
+            updated=summary_data.get("updated", 0),
+            skipped=summary_data.get("skipped", 0),
+        )
+
+    async def _on_error(exc: Exception) -> None:
+        log_error(
+            "Syncro company import background task failed",
+            task_id=task_id,
+            error=str(exc),
+        )
+
+    background_tasks.queue_background_task(
+        lambda: company_importer.import_all_companies(),
+        task_id=task_id,
+        description="syncro-company-import",
+        on_complete=_on_success,
+        on_error=_on_error,
     )
+
+    log_info(
+        "Syncro company import queued",
+        task_id=task_id,
+        user_id=current_user.get("id"),
+        request_path=str(request.url),
+    )
+
+    if _request_prefers_json(request):
+        return JSONResponse(
+            {
+                "status": "queued",
+                "taskId": task_id,
+                "message": "Syncro company import queued.",
+            },
+            status_code=status.HTTP_202_ACCEPTED,
+        )
+    message = f"Syncro company import queued. Task ID: {task_id[:8]}"
     redirect_url = str(request.url_for("admin_syncro_company_import_page"))
     if message:
         redirect_url = f"{redirect_url}?{urlencode({'success': message})}"
@@ -7214,7 +7254,7 @@ async def admin_push_companies_to_tactical_rmm(request: Request):
         return redirect
 
     try:
-        summary = await modules_service.push_companies_to_tacticalrmm()
+        await modules_service.ensure_tacticalrmm_ready()
     except ValueError as exc:
         log_error("Unable to synchronise Tactical RMM companies", error=str(exc))
         return await _render_modules_dashboard(
@@ -7232,60 +7272,68 @@ async def admin_push_companies_to_tactical_rmm(request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
-    created_clients = summary.get("created_clients") or []
-    created_sites = summary.get("created_sites") or []
-    existing_clients = summary.get("existing_clients") or []
-    skipped = summary.get("skipped") or []
-    errors = summary.get("errors") or []
-    processed = int(summary.get("processed_companies") or 0)
+    task_id = uuid4().hex
 
-    site_created_count = len(created_sites)
-    created_count = len(created_clients)
-    existing_count = len(existing_clients)
-    skipped_count = len(skipped)
-    error_count = len(errors)
+    async def _on_success(summary: Mapping[str, Any]) -> None:
+        created_clients = summary.get("created_clients") or []
+        created_sites = summary.get("created_sites") or []
+        existing_clients = summary.get("existing_clients") or []
+        skipped = summary.get("skipped") or []
+        errors = summary.get("errors") or []
+        processed = int(summary.get("processed_companies") or 0)
 
-    log_info(
-        "Tactical RMM company synchronisation completed",
-        processed=processed,
-        created_clients=created_count,
-        site_creations=site_created_count,
-        existing_clients=existing_count,
-        skipped=skipped_count,
-        errors=error_count,
+        site_created_count = len(created_sites)
+        created_count = len(created_clients)
+        existing_count = len(existing_clients)
+        skipped_count = len(skipped)
+        error_count = len(errors)
+
+        log_info(
+            "Tactical RMM company synchronisation completed",
+            task_id=task_id,
+            processed=processed,
+            created_clients=created_count,
+            site_creations=site_created_count,
+            existing_clients=existing_count,
+            skipped=skipped_count,
+            errors=error_count,
+        )
+
+        if error_count:
+            example = errors[0]
+            detail = example.get("error") or "Unknown error"
+            log_error(
+                "Tactical RMM synchronisation encountered errors",
+                task_id=task_id,
+                error_count=error_count,
+                example=detail,
+            )
+
+    async def _on_error(exc: Exception) -> None:
+        log_error(
+            "Tactical RMM company synchronisation failed",
+            task_id=task_id,
+            error=str(exc),
+        )
+
+    background_tasks.queue_background_task(
+        lambda: modules_service.push_companies_to_tacticalrmm(),
+        task_id=task_id,
+        description="tacticalrmm-company-sync",
+        on_complete=_on_success,
+        on_error=_on_error,
     )
 
-    success_parts = [
-        f"Synchronised {processed} compan{'y' if processed == 1 else 'ies'} with Tactical RMM."
-    ]
-    if created_count:
-        success_parts.append(f"Created {created_count} new client{'s' if created_count != 1 else ''}.")
-    if site_created_count:
-        success_parts.append(
-            f"Ensured {site_created_count} default site{'s' if site_created_count != 1 else ''}."
-        )
-    if not created_count and not site_created_count:
-        success_parts.append("No changes were required.")
-    if skipped_count:
-        success_parts.append(f"Skipped {skipped_count} duplicate or unnamed compan{'y' if skipped_count == 1 else 'ies'}.")
+    log_info(
+        "Queued Tactical RMM company synchronisation",
+        task_id=task_id,
+        user_id=current_user.get("id"),
+        request_path=str(request.url),
+    )
 
-    success_message = " ".join(success_parts)
-
-    params = [("success", success_message)]
-    if error_count:
-        example = errors[0]
-        detail = example.get("error") or "Unknown error"
-        params.append(
-            (
-                "error",
-                f"Encountered {error_count} Tactical RMM synchronisation error{'s' if error_count != 1 else ''}. Example: {detail}",
-            )
-        )
-
-    query = "&".join(f"{key}={quote(value)}" for key, value in params if value)
-    redirect_url = "/admin/modules"
-    if query:
-        redirect_url = f"{redirect_url}?{query}"
+    success_message = f"Tactical RMM company synchronisation queued. Task ID: {task_id[:8]}"
+    query = f"success={quote(success_message)}"
+    redirect_url = f"/admin/modules?{query}" if query else "/admin/modules"
 
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
