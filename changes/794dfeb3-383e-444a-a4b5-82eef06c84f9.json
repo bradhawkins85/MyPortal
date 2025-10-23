@@ -1,0 +1,7 @@
+{
+  "guid": "794dfeb3-383e-444a-a4b5-82eef06c84f9",
+  "occurred_at": "2025-10-23T13:00Z",
+  "change_type": "Fix",
+  "summary": "Restored webhook queue admin actions when CSRF cookies use custom session names",
+  "content_hash": "6508d82ee35b90719fa1f6f327f3f0a67e0b117d7ab45189d1e94bc3bb58042a"
+}
