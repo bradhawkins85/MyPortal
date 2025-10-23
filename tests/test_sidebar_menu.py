@@ -23,9 +23,21 @@ def mock_startup(monkeypatch):
     async def fake_stop():
         return None
 
+    async def fake_change_log_sync():
+        return None
+
+    async def fake_ensure_modules():
+        return None
+
+    async def fake_refresh_automations():
+        return None
+
     monkeypatch.setattr(db, "connect", fake_connect)
     monkeypatch.setattr(db, "disconnect", fake_disconnect)
     monkeypatch.setattr(db, "run_migrations", fake_run_migrations)
+    monkeypatch.setattr(main_module.change_log_service, "sync_change_log_sources", fake_change_log_sync)
+    monkeypatch.setattr(main_module.modules_service, "ensure_default_modules", fake_ensure_modules)
+    monkeypatch.setattr(main_module.automations_service, "refresh_all_schedules", fake_refresh_automations)
     monkeypatch.setattr(scheduler_service, "start", fake_start)
     monkeypatch.setattr(scheduler_service, "stop", fake_stop)
 
