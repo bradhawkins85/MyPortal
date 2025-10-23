@@ -1,0 +1,7 @@
+{
+  "guid": "c31db42b-4249-4e1e-bbf0-c9f6620d5650",
+  "occurred_at": "2025-10-23T11:34:51Z",
+  "change_type": "Feature",
+  "summary": "Restricted self-registration to company email domains and added sign-up entry point on the login page.",
+  "content_hash": "8c2c00b0854015261546e0f0ad18c96a78b3582bf3f207dc87699ddec3e5b516"
+}
