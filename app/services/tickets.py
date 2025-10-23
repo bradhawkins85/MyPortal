@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable, Mapping as MappingABC
+from collections.abc import Awaitable, Callable, Mapping as MappingABC, Mapping
 import re
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
@@ -9,6 +9,7 @@ from typing import Any, Iterable, Mapping
 from app.core.database import db
 from app.core.logging import log_error
 from app.repositories import tickets as tickets_repo
+from app.repositories import companies as company_repo
 from app.repositories.tickets import TicketRecord
 from app.services import automations as automations_service
 from app.repositories import users as user_repo
@@ -52,6 +53,49 @@ async def _safely_call(async_fn: Callable[..., Awaitable[Any]], *args, **kwargs)
         if "Database pool not initialised" in message or not db.is_connected():
             return None
         raise
+
+
+def _format_user_display_name(user: Mapping[str, Any] | None) -> str | None:
+    if not isinstance(user, Mapping):
+        return None
+    first = str(user.get("first_name") or "").strip()
+    last = str(user.get("last_name") or "").strip()
+    if first and last:
+        return f"{first} {last}".strip()
+    if first or last:
+        return (first or last).strip()
+    email = str(user.get("email") or "").strip()
+    return email or None
+
+
+async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
+    enriched: TicketRecord = dict(ticket)
+
+    company_value = enriched.get("company") if isinstance(enriched.get("company"), Mapping) else None
+    company_id = enriched.get("company_id")
+    if not isinstance(company_value, Mapping) and isinstance(company_id, int):
+        company_value = await _safely_call(company_repo.get_company_by_id, company_id)
+    if isinstance(company_value, Mapping):
+        enriched["company"] = dict(company_value)
+        enriched["company_name"] = company_value.get("name")
+    else:
+        enriched.setdefault("company", None)
+        enriched.setdefault("company_name", None)
+
+    assigned_value = enriched.get("assigned_user") if isinstance(enriched.get("assigned_user"), Mapping) else None
+    assigned_user_id = enriched.get("assigned_user_id")
+    if not isinstance(assigned_value, Mapping) and isinstance(assigned_user_id, int):
+        assigned_value = await _safely_call(user_repo.get_user_by_id, assigned_user_id)
+    if isinstance(assigned_value, Mapping):
+        enriched["assigned_user"] = dict(assigned_value)
+        enriched["assigned_user_email"] = assigned_value.get("email")
+        enriched["assigned_user_display_name"] = _format_user_display_name(assigned_value)
+    else:
+        enriched.setdefault("assigned_user", None)
+        enriched["assigned_user_email"] = None
+        enriched["assigned_user_display_name"] = None
+
+    return enriched
 
 
 async def refresh_ticket_ai_summary(ticket_id: int) -> None:
@@ -281,11 +325,13 @@ async def create_ticket(
         external_reference=external_reference,
         ticket_number=ticket_number,
     )
+    enriched_ticket = await _enrich_ticket_context(ticket)
+
     if trigger_automations:
         try:
             await automations_service.handle_event(
                 "tickets.created",
-                {"ticket": ticket},
+                {"ticket": enriched_ticket},
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             log_error(
@@ -293,7 +339,7 @@ async def create_ticket(
                 ticket_id=ticket.get("id"),
                 error=str(exc),
             )
-    return ticket
+    return enriched_ticket
 
 
 def _render_prompt(

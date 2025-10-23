@@ -1,3 +1,4 @@
+- 2025-10-23, 01:25 UTC, Feature, Added enriched ticket automation variables including company and assignment metadata with AI and status fields for template tokens
 - 2025-12-26, 16:20 UTC, Fix, Allowed ntfy automation payloads to override notification headers and metadata with JSON-defined values and added regression coverage
 - 2025-10-22, 23:59 UTC, Fix, Guarded migration CREATE statements with IF NOT EXISTS to allow safe reimports when objects already exist
 - 2025-12-26, 14:50 UTC, Fix, Rebuilt system variables knowledge base section seeds with CONCAT_WS strings to restore valid SQL syntax during article re-imports
