@@ -103,6 +103,7 @@ from app.services import audit as audit_service
 from app.services import automations as automations_service
 from app.services import change_log as change_log_service
 from app.services import company_domains
+from app.services import company_access
 from app.services import email as email_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import m365 as m365_service
@@ -673,17 +674,7 @@ def _parse_int_in_range(value: Any, *, default: int, minimum: int, maximum: int)
 
 
 async def _resolve_initial_company_id(user: dict[str, Any]) -> int | None:
-    raw_company = user.get("company_id")
-    if raw_company is not None:
-        try:
-            return int(raw_company)
-        except (TypeError, ValueError):
-            pass
-
-    companies = await user_company_repo.list_companies_for_user(user["id"])
-    if companies:
-        return int(companies[0].get("company_id"))
-    return None
+    return await company_access.first_accessible_company_id(user)
 
 
 async def _build_base_context(
@@ -695,7 +686,7 @@ async def _build_base_context(
     session = await session_manager.load_session(request)
     available_companies = getattr(request.state, "available_companies", None)
     if available_companies is None:
-        available_companies = await user_company_repo.list_companies_for_user(user["id"])
+        available_companies = await company_access.list_accessible_companies(user)
         request.state.available_companies = available_companies
     active_company_id = getattr(request.state, "active_company_id", None)
     if active_company_id is None and session:
@@ -893,7 +884,7 @@ async def _build_consolidated_overview(
     session = await session_manager.load_session(request)
     available_companies = getattr(request.state, "available_companies", None)
     if available_companies is None:
-        available_companies = await user_company_repo.list_companies_for_user(user["id"])
+        available_companies = await company_access.list_accessible_companies(user)
         request.state.available_companies = available_companies
 
     active_company_id = getattr(request.state, "active_company_id", None)
@@ -2494,7 +2485,7 @@ async def switch_company(
     return_url_raw = _first_non_blank(("returnUrl", "return_url"), body_data, query_params)
     return_url: str | None = return_url_raw if isinstance(return_url_raw, str) else None
 
-    companies = await user_company_repo.list_companies_for_user(user["id"])
+    companies = await company_access.list_accessible_companies(user)
     request.state.available_companies = companies
 
     if any(company.get("company_id") == company_id for company in companies):
