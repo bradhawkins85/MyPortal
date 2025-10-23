@@ -100,6 +100,81 @@ async def test_admin_update_company_permission_toggles(monkeypatch):
     )
 
 
+@pytest.mark.anyio("asyncio")
+async def test_admin_assign_user_to_company_preserves_existing_permissions(monkeypatch):
+    request = _make_request("/admin/companies/assign")
+
+    form_mock = AsyncMock(
+        return_value={
+            "userId": "7",
+            "companyId": "4",
+            "staffPermission": "2",
+        }
+    )
+    monkeypatch.setattr(request, "form", form_mock)
+
+    current_user = {"id": 1, "is_super_admin": True}
+    monkeypatch.setattr(
+        main,
+        "_require_super_admin_page",
+        AsyncMock(return_value=(current_user, None)),
+    )
+
+    monkeypatch.setattr(
+        main.user_repo,
+        "get_user_by_id",
+        AsyncMock(return_value={"id": 7, "email": "user@example.com"}),
+    )
+    monkeypatch.setattr(
+        main.company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": 4, "name": "Example Co"}),
+    )
+
+    existing_assignment = {
+        "can_access_shop": True,
+        "can_access_cart": True,
+        "can_access_orders": False,
+        "can_access_forms": True,
+        "can_manage_assets": True,
+        "can_manage_licenses": False,
+        "can_manage_invoices": True,
+        "can_manage_office_groups": False,
+        "can_order_licenses": True,
+        "is_admin": True,
+        "can_manage_staff": True,
+    }
+    monkeypatch.setattr(
+        main.user_company_repo,
+        "get_user_company",
+        AsyncMock(return_value=existing_assignment),
+    )
+
+    assign_mock = AsyncMock()
+    monkeypatch.setattr(main.user_company_repo, "assign_user_to_company", assign_mock)
+
+    response = await main.admin_assign_user_to_company(request)
+
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    assign_mock.assert_awaited_once()
+    assert assign_mock.await_args.kwargs == {
+        "user_id": 7,
+        "company_id": 4,
+        "staff_permission": 2,
+        "can_manage_staff": True,
+        "can_access_shop": True,
+        "can_access_cart": True,
+        "can_access_orders": False,
+        "can_access_forms": True,
+        "can_manage_assets": True,
+        "can_manage_licenses": False,
+        "can_manage_invoices": True,
+        "can_manage_office_groups": False,
+        "can_order_licenses": True,
+        "is_admin": True,
+    }
+
+
 def test_membership_update_accepts_camel_case_alias():
     update = MembershipUpdate.model_validate({"roleId": 9})
     assert update.role_id == 9
