@@ -28,6 +28,9 @@
           {% set highlight_module = module.slug == 'syncro' and 'syncro' in module_feedback %}
           <details class="card card--panel card-collapsible" data-module-card id="module-{{ module.slug }}" {% if highlight_module %}open{% endif %}>
             <summary class="card__header card__header--collapsible card__header--module-summary">
+              <span class="card__module-icon card__module-icon--summary" aria-hidden="true">
+                {{ module.icon or '🔌' }}
+              </span>
               <h2 class="card__title">{{ module.name }}</h2>
               <div class="card__collapsible-meta">
                 <span
