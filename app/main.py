@@ -102,6 +102,7 @@ from app.security.api_keys import mask_api_key
 from app.services import audit as audit_service
 from app.services import automations as automations_service
 from app.services import change_log as change_log_service
+from app.services import company_domains
 from app.services import email as email_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import m365 as m365_service
@@ -3993,6 +3994,19 @@ async def admin_create_company(request: Request):
     syncro_company_id = (str(form.get("syncroCompanyId", "")).strip() or None)
     xero_id = (str(form.get("xeroId", "")).strip() or None)
     is_vip = _parse_bool(form.get("isVip"))
+    raw_email_domains = form.get("emailDomains")
+    try:
+        email_domains = company_domains.parse_email_domain_text(
+            str(raw_email_domains) if raw_email_domains is not None else ""
+        )
+    except company_domains.EmailDomainError as exc:
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        return response
     if not name:
         response = await _render_companies_dashboard(
             request,
@@ -4001,7 +4015,11 @@ async def admin_create_company(request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
         return response
-    payload: dict[str, Any] = {"name": name, "is_vip": 1 if is_vip else 0}
+    payload: dict[str, Any] = {
+        "name": name,
+        "is_vip": 1 if is_vip else 0,
+        "email_domains": email_domains,
+    }
     if syncro_company_id:
         payload["syncro_company_id"] = syncro_company_id
     if xero_id:
@@ -4136,6 +4154,20 @@ async def admin_update_company(company_id: int, request: Request):
     syncro_company_id = (str(form.get("syncroCompanyId", "")).strip() or None)
     xero_id = (str(form.get("xeroId", "")).strip() or None)
     is_vip = _parse_bool(form.get("isVip"))
+    raw_email_domains = form.get("emailDomains")
+    try:
+        email_domains = company_domains.parse_email_domain_text(
+            str(raw_email_domains) if raw_email_domains is not None else ""
+        )
+    except company_domains.EmailDomainError as exc:
+        response = await _render_companies_dashboard(
+            request,
+            current_user,
+            selected_company_id=company_id,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        return response
     if not name:
         response = await _render_companies_dashboard(
             request,
@@ -4153,6 +4185,7 @@ async def admin_update_company(company_id: int, request: Request):
         "is_vip": 1 if is_vip else 0,
         "syncro_company_id": syncro_company_id,
         "xero_id": xero_id,
+        "email_domains": email_domains,
     }
     try:
         await company_repo.update_company(company_id, **updates)
