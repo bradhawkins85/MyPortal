@@ -11,7 +11,7 @@ import bleach
 
 from app.core.logging import log_error
 from app.repositories import knowledge_base as kb_repo
-from app.repositories import user_companies as user_company_repo
+from app.services import company_access
 from app.services import modules as modules_service
 from app.services.tagging import filter_helpful_texts
 from app.services.realtime import RefreshNotifier, refresh_notifier
@@ -310,7 +310,7 @@ async def build_access_context(user: Mapping[str, Any] | None) -> ArticleAccessC
     memberships: dict[int, Mapping[str, Any]] = {}
     if user_id is not None:
         try:
-            membership_rows = await user_company_repo.list_companies_for_user(user_id)
+            membership_rows = await company_access.list_accessible_companies(user)
         except Exception as exc:  # pragma: no cover - defensive
             log_error("Failed to list company memberships for knowledge base", error=str(exc))
             membership_rows = []
