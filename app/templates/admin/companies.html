@@ -18,7 +18,7 @@
         <header class="card__header">
           <div class="stacked">
             <h2 class="card__title">Companies</h2>
-            <p class="card__subtitle">Update identifiers and VIP status for existing customers.</p>
+            <p class="card__subtitle">Review the customer directory and open a company to edit identifiers or VIP status.</p>
           </div>
           <div class="card__controls">
             <input
@@ -40,14 +40,14 @@
           </div>
         </header>
         <div class="table-wrapper">
-          <table class="table" id="companies-table" data-table>
+          <table class="table" id="companies-table" data-table data-page-size-max="25">
             <thead>
               <tr>
                 <th scope="col" data-sort="string">Name</th>
                 <th scope="col" data-sort="string">Syncro ID</th>
                 <th scope="col" data-sort="string">Xero ID</th>
                 <th scope="col" data-sort="string">Email domains</th>
-                <th scope="col" data-sort="string">VIP</th>
+                <th scope="col" data-sort="number">VIP</th>
                 <th scope="col" class="table__actions">Actions</th>
               </tr>
             </thead>
@@ -56,58 +56,41 @@
                 {% for company in managed_companies %}
                   <tr>
                     <td data-label="Name">{{ company.name }}</td>
-                    <td data-label="Syncro ID">
-                      <input
-                        type="text"
-                        name="syncroCompanyId"
-                        class="form-input"
-                        value="{{ company.syncro_company_id or '' }}"
-                        maxlength="255"
-                        form="company-{{ company.id }}-form"
-                      />
+                    <td data-label="Syncro ID" data-value="{{ company.syncro_company_id or '' }}">
+                      {% if company.syncro_company_id %}
+                        {{ company.syncro_company_id }}
+                      {% else %}
+                        <span class="text-muted">—</span>
+                      {% endif %}
                     </td>
-                    <td data-label="Xero ID">
-                      <input
-                        type="text"
-                        name="xeroId"
-                        class="form-input"
-                        value="{{ company.xero_id or '' }}"
-                        maxlength="255"
-                        form="company-{{ company.id }}-form"
-                      />
+                    <td data-label="Xero ID" data-value="{{ company.xero_id or '' }}">
+                      {% if company.xero_id %}
+                        {{ company.xero_id }}
+                      {% else %}
+                        <span class="text-muted">—</span>
+                      {% endif %}
                     </td>
-                    <td data-label="Email domains">
-                      <textarea
-                        name="emailDomains"
-                        class="form-input form-input--textarea"
-                        rows="2"
-                        placeholder="example.com, example.org"
-                        form="company-{{ company.id }}-form"
-                      >{{ company.email_domains | join(', ') }}</textarea>
+                    <td data-label="Email domains" data-value="{{ company.email_domains | join(', ') }}">
+                      {% if company.email_domains %}
+                        {{ company.email_domains | join(', ') }}
+                      {% else %}
+                        <span class="text-muted">—</span>
+                      {% endif %}
                     </td>
-                    <td data-label="VIP">
-                      <label class="checkbox">
-                        <input
-                          type="checkbox"
-                          name="isVip"
-                          value="1"
-                          form="company-{{ company.id }}-form"
-                          {% if company.is_vip %}checked{% endif %}
-                        />
-                        <span class="visually-hidden">VIP pricing</span>
-                      </label>
+                    {% set is_vip = 1 if company.is_vip else 0 %}
+                    <td data-label="VIP" data-value="{{ is_vip }}">
+                      {% if company.is_vip %}
+                        <span class="tag tag--success">VIP</span>
+                      {% else %}
+                        <span class="tag tag--muted">Standard</span>
+                      {% endif %}
                     </td>
                     <td class="table__actions">
-                      <form
-                        id="company-{{ company.id }}-form"
-                        action="/admin/companies/{{ company.id }}"
-                        method="post"
-                        class="inline-form"
-                      >
-                        {% include "partials/csrf.html" %}
-                        <input type="hidden" name="name" value="{{ company.name }}" />
-                        <button type="submit" class="button button--ghost">Save</button>
-                      </form>
+                      <div class="table__action-buttons">
+                        <a class="button button--ghost" href="/admin/companies/{{ company.id }}/edit">
+                          Edit
+                        </a>
+                      </div>
                     </td>
                   </tr>
                 {% endfor %}
@@ -118,6 +101,26 @@
               {% endif %}
             </tbody>
           </table>
+        </div>
+        <div class="table-pagination" data-pagination="companies-table">
+          <div class="table-pagination__group">
+            <button
+              type="button"
+              class="button button--ghost table-pagination__button"
+              data-page-prev
+              disabled
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              class="button button--ghost table-pagination__button"
+              data-page-next
+            >
+              Next
+            </button>
+          </div>
+          <p class="table-pagination__status" data-page-info aria-live="polite"></p>
         </div>
       </section>
       <div

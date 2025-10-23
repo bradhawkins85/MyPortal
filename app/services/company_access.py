@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from app.core.database import db
 from app.repositories import companies as company_repo
 from app.repositories import user_companies as user_company_repo
 
@@ -24,7 +25,13 @@ async def list_accessible_companies(user: Mapping[str, Any]) -> list[dict[str, A
             return []
         return await user_company_repo.list_companies_for_user(user_id)
 
-    companies = await company_repo.list_companies()
+    try:
+        companies = await company_repo.list_companies()
+    except RuntimeError as exc:
+        message = str(exc)
+        if "Database pool not initialised" in message or not db.is_connected():
+            return []
+        raise
     accessible: list[dict[str, Any]] = []
     for company in companies:
         membership = _build_super_admin_membership(company)
