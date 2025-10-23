@@ -673,6 +673,19 @@ def _parse_int_in_range(value: Any, *, default: int, minimum: int, maximum: int)
     return parsed
 
 
+def _request_prefers_json(request: Request) -> bool:
+    accept = (request.headers.get("accept") or "").lower()
+    if "application/json" in accept:
+        return True
+    requested_with = (request.headers.get("x-requested-with") or "").lower()
+    if requested_with == "xmlhttprequest":
+        return True
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        return True
+    return False
+
+
 async def _resolve_initial_company_id(user: dict[str, Any]) -> int | None:
     return await company_access.first_accessible_company_id(user)
 
@@ -4571,7 +4584,17 @@ async def import_syncro_companies(request: Request):
         request_path=str(request.url),
     )
     summary = await company_importer.import_all_companies()
-    return JSONResponse(summary.as_dict())
+    summary_data = summary.as_dict()
+    if _request_prefers_json(request):
+        return JSONResponse(summary_data)
+    message = (
+        f"Imported {summary.fetched} compan{'y' if summary.fetched == 1 else 'ies'} "
+        f"(created {summary.created}, updated {summary.updated}, skipped {summary.skipped})."
+    )
+    redirect_url = str(request.url_for("admin_syncro_company_import_page"))
+    if message:
+        redirect_url = f"{redirect_url}?{urlencode({'success': message})}"
+    return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/admin/syncro/import-tickets")
