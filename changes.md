@@ -301,3 +301,4 @@ in text
 - 2025-12-21, 11:00 UTC, Feature, Broadcast refresh notifications after knowledge base and module mutations with notifier injection and regression tests
 - 2025-12-22, 09:15 UTC, Feature, Seeded ENABLE_AUTO_REFRESH across installers and deployment scripts with documentation and regression coverage
 - 2025-12-22, 15:30 UTC, Fix, Restored automation action variable interpolation with context-aware payload rendering and regression tests
+- 2025-10-23, 03:05 UTC, Fix, Stopped event automation forms from seeding default trigger filters and action payload templates on load.
