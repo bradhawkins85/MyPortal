@@ -23,6 +23,8 @@
     const csrfToken = getCsrfToken();
     const headers = {
       'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'X-Requested-With': 'XMLHttpRequest',
       ...(config.headers || {}),
     };
     if (csrfToken) {
@@ -56,6 +58,8 @@
     if (csrfToken) {
       headers['X-CSRF-Token'] = csrfToken;
     }
+    headers['Accept'] = 'application/json';
+    headers['X-Requested-With'] = 'XMLHttpRequest';
     const response = await fetch(url, {
       method: 'POST',
       body: formData,
@@ -200,6 +204,7 @@
         renderStatus('Import in progress…', false);
         const response = await requestJson('/admin/syncro/import-companies', {
           method: 'POST',
+          body: JSON.stringify({}),
         });
         const fetched = Number(response?.fetched ?? 0);
         const created = Number(response?.created ?? 0);
