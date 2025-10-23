@@ -2,7 +2,7 @@
 
 ## Current Status
 
-MyPortal is now a Python-first portal that ships exclusively with the FastAPI implementation described in the project README. The legacy Node.js and TypeScript sources have been removed so the repository contains a single application stack and a single dependency workflow to maintain.【F:README.md†L1-L41】【F:changes.md†L1-L40】
+MyPortal is now a Python-first portal that ships exclusively with the FastAPI implementation described in the project README. The legacy Node.js and TypeScript sources have been removed so the repository contains a single application stack and a single dependency workflow to maintain.【F:README.md†L1-L41】【F:README.md†L39-L44】
 
 ## Key Capabilities Preserved in Python
 
