@@ -29,7 +29,7 @@ SET @index_stmt = (
         AND INDEX_NAME = 'idx_user_sessions_active_company'
     ),
     'SELECT 1',
-    'CREATE INDEX idx_user_sessions_active_company ON user_sessions (active_company_id)'
+    'CREATE INDEX IF NOT EXISTS idx_user_sessions_active_company ON user_sessions (active_company_id)'
   )
 );
 PREPARE stmt FROM @index_stmt;

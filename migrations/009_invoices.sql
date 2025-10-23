@@ -1,4 +1,4 @@
-CREATE TABLE invoices (
+CREATE TABLE IF NOT EXISTS invoices (
   id INT AUTO_INCREMENT PRIMARY KEY,
   company_id INT NOT NULL,
   invoice_number VARCHAR(255) NOT NULL,
