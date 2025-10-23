@@ -418,8 +418,133 @@ def test_invoke_ntfy_records_success(monkeypatch):
         )
     )
 
+    request_kwargs = client_factory.captured_kwargs
+
     assert result["event_id"] == 15
     assert result["status"] == "succeeded"
     assert result["topic"] == "alerts"
+    assert result["priority"] == "high"
+    assert result["title"] == "Automation event"
+    assert captured_event.get("max_attempts") == 1
+    assert "attempt_immediately" not in captured_event
+    assert captured_event.get("payload") == {
+        "topic": "alerts",
+        "message": "hello",
+        "priority": "high",
+        "title": "Automation event",
+        "headers": {
+            "Title": "Automation event",
+            "Priority": "high",
+        },
+    }
+    assert request_kwargs["url"] == "https://ntfy.sh/alerts"
+    assert request_kwargs["data"] == b"hello"
+    assert request_kwargs["headers"]["Title"] == "Automation event"
+    assert request_kwargs["headers"]["Priority"] == "high"
+
+
+def test_invoke_ntfy_payload_overrides_defaults(monkeypatch):
+    captured_event: dict[str, object] = {}
+
+    async def fake_enqueue_event(**kwargs):
+        captured_event.update(kwargs)
+        return {"id": 18, "status": "pending", "attempt_count": 0}
+
+    fake_event_state = {
+        "id": 18,
+        "status": "pending",
+        "attempt_count": 0,
+    }
+
+    async def fake_record_attempt(**kwargs):
+        fake_event_state.update(
+            {
+                "attempt_count": kwargs["attempt_number"],
+                "response_status": kwargs["response_status"],
+                "response_body": kwargs["response_body"],
+            }
+        )
+
+    async def fake_mark_event_completed(event_id, *, attempt_number, response_status, response_body):
+        fake_event_state.update(
+            {
+                "status": "succeeded",
+                "attempt_count": attempt_number,
+                "response_status": response_status,
+                "response_body": response_body,
+            }
+        )
+
+    async def fake_get_event(event_id):
+        return dict(fake_event_state)
+
+    class FakeResponse:
+        def __init__(self):
+            self.status_code = 200
+            self.text = "ok"
+            self.request = httpx.Request("POST", "http://example.com")
+
+        def raise_for_status(self):
+            return None
+
+    client_factory = _AsyncClientFactory(FakeResponse())
+
+    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_enqueue_event)
+    monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", fake_mark_event_completed)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", _noop)
+    monkeypatch.setattr(modules.webhook_repo, "get_event", fake_get_event)
+    monkeypatch.setattr(modules.httpx, "AsyncClient", lambda *a, **kw: client_factory)
+
+    payload = {
+        "base_url": "https://alerts.example.com",
+        "topic": "custom-topic",
+        "auth_token": "payload-token",
+        "title": "Ticket created",
+        "message": {"text": "Ticket #1"},
+        "priority": 5,
+        "tags": ["tickets", "created"],
+        "click": "https://portal.example.com/tickets/1",
+        "headers": {"Custom-Header": "value"},
+    }
+
+    result = asyncio.run(
+        modules._invoke_ntfy(
+            {"base_url": "https://ntfy.sh", "topic": "alerts", "auth_token": "settings-token"},
+            payload,
+        )
+    )
+
+    request_kwargs = client_factory.captured_kwargs
+    expected_message = json.dumps({"text": "Ticket #1"}).encode("utf-8")
+
+    assert request_kwargs["url"] == "https://alerts.example.com/custom-topic"
+    assert request_kwargs["data"] == expected_message
+    assert request_kwargs["headers"]["Title"] == "Ticket created"
+    assert request_kwargs["headers"]["Priority"] == "5"
+    assert request_kwargs["headers"]["Tags"] == "tickets,created"
+    assert request_kwargs["headers"]["Click"] == "https://portal.example.com/tickets/1"
+    assert request_kwargs["headers"]["Authorization"] == "Bearer payload-token"
+    assert request_kwargs["headers"]["Custom-Header"] == "value"
+
+    assert captured_event.get("payload") == {
+        "topic": "custom-topic",
+        "message": json.dumps({"text": "Ticket #1"}),
+        "priority": "5",
+        "title": "Ticket created",
+        "headers": {
+            "Title": "Ticket created",
+            "Priority": "5",
+            "Tags": "tickets,created",
+            "Click": "https://portal.example.com/tickets/1",
+            "Authorization": "Bearer payload-token",
+            "Custom-Header": "value",
+        },
+    }
+
+    assert result["status"] == "succeeded"
+    assert result["topic"] == "custom-topic"
+    assert result["priority"] == "5"
+    assert result["title"] == "Ticket created"
     assert captured_event.get("max_attempts") == 1
     assert "attempt_immediately" not in captured_event
