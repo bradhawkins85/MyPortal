@@ -294,6 +294,14 @@
                 </a>
               </li>
               <li class="menu__item">
+                <a href="/admin/change-log" {% if current_path.startswith('/admin/change-log') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M5 4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v14.5a.5.5 0 0 1-.76.43L12 16l-6.24 2.93A.5.5 0 0 1 5 18.5zM7 6v9.62l5-2.35 5 2.35V6z"/></svg>
+                  </span>
+                  <span class="menu__label">Change log</span>
+                </a>
+              </li>
+              <li class="menu__item">
                 <a href="/admin/audit-logs" {% if current_path.startswith('/admin/audit-logs') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M5 4h14a1 1 0 0 1 1 1v15l-8-3-8 3V5a1 1 0 0 1 1-1z"/></svg>
