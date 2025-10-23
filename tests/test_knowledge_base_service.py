@@ -15,8 +15,8 @@ def anyio_backend() -> str:
 @pytest.fixture(autouse=True)
 def _stub_company_memberships(monkeypatch):
     monkeypatch.setattr(
-        knowledge_base_service.user_company_repo,
-        "list_companies_for_user",
+        knowledge_base_service.company_access,
+        "list_accessible_companies",
         AsyncMock(return_value=[]),
     )
 

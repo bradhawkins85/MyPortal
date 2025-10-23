@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Mapping
 from unittest.mock import AsyncMock
 
 import pytest
@@ -92,9 +92,9 @@ def test_register_allows_general_signup_after_first_user(monkeypatch, active_ses
         call_args.update(kwargs)
         return created_user
 
-    async def fake_list_companies_for_user(user_id: int):
-        assert user_id == created_user["id"]
-        return []
+    async def fake_first_accessible_company_id(user: Mapping[str, Any]):
+        assert user["id"] == created_user["id"]
+        return None
 
     async def fake_create_session(user_id, request, active_company_id=None):
         assert user_id == created_user["id"]
@@ -113,9 +113,9 @@ def test_register_allows_general_signup_after_first_user(monkeypatch, active_ses
         AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
-        auth_routes.user_company_repo,
-        "list_companies_for_user",
-        fake_list_companies_for_user,
+        auth_routes.company_access,
+        "first_accessible_company_id",
+        fake_first_accessible_company_id,
     )
     monkeypatch.setattr(auth_routes.session_manager, "create_session", fake_create_session)
     monkeypatch.setattr(auth_routes.session_manager, "apply_session_cookies", fake_apply_session_cookies)
@@ -179,13 +179,9 @@ def test_register_assigns_company_by_email_domain(monkeypatch, active_session):
     async def fake_assign_user_to_company(**kwargs):
         captured["assignment"] = kwargs
 
-    async def fake_list_companies_for_user(user_id: int):
-        assert user_id == created_user["id"]
-        return [
-            {
-                "company_id": matched_company["id"],
-            }
-        ]
+    async def fake_first_accessible_company_id(user: Mapping[str, Any]):
+        assert user["id"] == created_user["id"]
+        return matched_company["id"]
 
     async def fake_create_session(user_id, request, active_company_id=None):
         captured["active_company_id"] = active_company_id
@@ -208,9 +204,9 @@ def test_register_assigns_company_by_email_domain(monkeypatch, active_session):
         fake_assign_user_to_company,
     )
     monkeypatch.setattr(
-        auth_routes.user_company_repo,
-        "list_companies_for_user",
-        fake_list_companies_for_user,
+        auth_routes.company_access,
+        "first_accessible_company_id",
+        fake_first_accessible_company_id,
     )
     monkeypatch.setattr(auth_routes.session_manager, "create_session", fake_create_session)
     monkeypatch.setattr(auth_routes.session_manager, "apply_session_cookies", fake_apply_session_cookies)
