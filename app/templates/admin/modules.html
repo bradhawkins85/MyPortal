@@ -24,8 +24,13 @@
       <div class="management__body management__body--cards">
         {% for module in modules %}
           {% set settings = module.settings or {} %}
-          <details class="card card--panel card-collapsible" data-module-card>
+          {% set module_feedback = ((success_message or '') ~ ' ' ~ (error_message or '')).lower() %}
+          {% set highlight_module = module.slug == 'syncro' and 'syncro' in module_feedback %}
+          <details class="card card--panel card-collapsible" data-module-card id="module-{{ module.slug }}" {% if highlight_module %}open{% endif %}>
             <summary class="card__header card__header--collapsible card__header--module-summary">
+              <span class="card__module-icon card__module-icon--summary" aria-hidden="true">
+                {{ module.icon or '🔌' }}
+              </span>
               <h2 class="card__title">{{ module.name }}</h2>
               <div class="card__collapsible-meta">
                 <span
@@ -38,6 +43,10 @@
               </div>
             </summary>
             <div class="card-collapsible__content">
+              {% if module.slug == 'syncro' %}
+                {% set syncro_is_ready = module.enabled %}
+                <div class="alert-stack" data-syncro-company-import-status hidden></div>
+              {% endif %}
               <header class="card__header card__header--module card__header--module-expanded">
                 <div class="card__module-info">
                   <span class="card__module-icon" aria-hidden="true">{{ module.icon or '🔌' }}</span>
@@ -196,6 +205,46 @@
                 <button type="submit" class="button button--primary">Update module</button>
               </div>
             </form>
+            {% if module.slug == 'syncro' %}
+              <form
+                action="/admin/syncro/import-companies"
+                method="post"
+                class="form card__form"
+                data-syncro-company-import
+              >
+                {% if csrf_token %}
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                {% endif %}
+                <div class="form-field">
+                  <p class="form-help">
+                    Pull the complete Syncro customer list. Existing companies are matched by Syncro ID or name
+                    and updated in place.
+                  </p>
+                </div>
+                <div class="form-field">
+                  <p class="form-help">
+                    The importer will create new companies, update addresses, and attach Syncro identifiers where
+                    missing.
+                  </p>
+                </div>
+                {% if not syncro_is_ready %}
+                  <div class="form-field">
+                    <p class="form-help form-help--error">
+                      Enable the Syncro module and configure the base URL and API key before running imports.
+                    </p>
+                  </div>
+                {% endif %}
+                <div class="form-actions">
+                  <button
+                    type="submit"
+                    class="button button--secondary"
+                    {% if not syncro_is_ready %}disabled{% endif %}
+                  >
+                    Import Syncro companies
+                  </button>
+                </div>
+              </form>
+            {% endif %}
             {% if module.slug == 'tacticalrmm' %}
               <form action="/admin/modules/tacticalrmm/push-companies" method="post" class="form card__form">
                 {% if csrf_token %}
@@ -218,5 +267,10 @@
       </div>
     </section>
   </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/admin.js" defer></script>
 {% endblock %}
 

@@ -1,0 +1,7 @@
+{
+  "guid": "fcce4ae8-02a6-4130-a58e-b2df4760df2d",
+  "occurred_at": "2025-10-25T11:00Z",
+  "change_type": "Feature",
+  "summary": "Logged SMS notifications as webhook events so delivery follows monitored retry logic",
+  "content_hash": "a16e462a62901c7053ff0d1132946bc093d0a149e3030c3ccaa460d67ee6667f"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "245e21bb-0a96-4733-b125-6205c263564c",
+  "occurred_at": "2025-10-02T14:32Z",
+  "change_type": "Fix",
+  "summary": "Prevented duplicate membership permission lookups when deriving helpdesk technician access without a database pool",
+  "content_hash": "01a3c6df4d721f0c2688ac576483f55fdc1dad08565919c9f2b9eada3cbdeb4d"
+}

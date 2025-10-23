@@ -1,0 +1,7 @@
+{
+  "guid": "96b125f7-80f9-485a-bb9a-0510ea2557e8",
+  "occurred_at": "2025-10-16T00:00Z",
+  "change_type": "Fix",
+  "summary": "Corrected webhook queue action buttons to load attempt history and delete events reliably.",
+  "content_hash": "98555a12401f94eccd7ec0ec6026c24ab96bc5f41c243f08cce4b7517994cc8e"
+}

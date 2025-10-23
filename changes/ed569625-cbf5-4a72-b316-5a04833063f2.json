@@ -1,0 +1,7 @@
+{
+  "guid": "ed569625-cbf5-4a72-b316-5a04833063f2",
+  "occurred_at": "2025-10-02T10:15Z",
+  "change_type": "Feature",
+  "summary": "Added super-admin knowledge base composer with granular permission assignments, inline preview, and CRUD workflow integration",
+  "content_hash": "00e5ea17d84ae2685808a0abea86bc14b9874e66c56d49c47d36d5dc5ee65fbc"
+}

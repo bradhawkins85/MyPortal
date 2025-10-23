@@ -10,6 +10,22 @@
       </p>
     </div>
     <div class="card__controls">
+      <div class="button-group">
+        <button
+          type="button"
+          class="button button--danger"
+          data-webhook-delete-status="failed"
+        >
+          Delete all failed
+        </button>
+        <button
+          type="button"
+          class="button button--danger"
+          data-webhook-delete-status="succeeded"
+        >
+          Delete all successful
+        </button>
+      </div>
       <input
         type="search"
         class="form-input"
@@ -35,7 +51,12 @@
       </thead>
       <tbody>
         {% for event in events %}
-          <tr data-event="{{ event | tojson | escape }}">
+          <tr
+            data-event-id="{{ event.id }}"
+            data-event-name="{{ event.name }}"
+            data-event-target="{{ event.target_url or '' }}"
+            data-event-status="{{ event.status }}"
+          >
             <td data-label="Name">{{ event.name }}</td>
             <td data-label="Target">{{ event.target_url }}</td>
             <td data-label="Status">{{ event.status }}</td>

@@ -1,0 +1,7 @@
+{
+  "guid": "9d683037-0e29-4e4a-8fab-487081a6e768",
+  "occurred_at": "2025-10-08T00:58Z",
+  "change_type": "Feature",
+  "summary": "Delivered responsive login and super-admin registration pages with session-aware redirects and client-side MFA support",
+  "content_hash": "ed12794d1684df336e831a49854849acd795d6ba2458e4a6da37b094d9d5c60e"
+}

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -120,3 +120,8 @@ class ActivateTaskRequest(BaseModel):
 
 class RunTaskResponse(BaseModel):
     accepted: bool = True
+
+
+class WebhookEventsBulkDeleteResponse(BaseModel):
+    status: Literal["failed", "succeeded"]
+    deleted: int

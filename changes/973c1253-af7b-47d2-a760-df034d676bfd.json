@@ -1,0 +1,7 @@
+{
+  "guid": "973c1253-af7b-47d2-a760-df034d676bfd",
+  "occurred_at": "2025-10-08T02:32Z",
+  "change_type": "Fix",
+  "summary": "Forced login submissions to include sanitised TOTP values from the authenticator input when present to satisfy MFA checks",
+  "content_hash": "13788c66a962829f202a7eb43b4ec5946ec7f724e68094146b425c88fa8cab9a"
+}
