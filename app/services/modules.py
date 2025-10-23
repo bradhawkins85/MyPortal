@@ -856,25 +856,201 @@ async def _invoke_ntfy(
     *,
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
-    base_url = str(settings.get("base_url") or "https://ntfy.sh").rstrip("/")
-    topic = str(payload.get("topic") or settings.get("topic") or "").strip()
+    def _lookup(source: Mapping[str, Any], *keys: str) -> tuple[Any, bool]:
+        seen: set[str] = set()
+        for key in keys:
+            if key is None:
+                continue
+            candidates = [key]
+            lower = key.lower()
+            upper = key.upper()
+            title = key.title()
+            capitalized = key.capitalize()
+            candidates.extend([lower, upper, title, capitalized])
+            swapped_dash = key.replace("-", "_")
+            swapped_underscore = key.replace("_", "-")
+            candidates.extend([swapped_dash, swapped_underscore])
+            candidates.extend([swapped_dash.lower(), swapped_dash.upper()])
+            candidates.extend([swapped_underscore.lower(), swapped_underscore.upper()])
+            camel_source = swapped_dash
+            parts = [part for part in camel_source.split("_") if part]
+            if parts:
+                camel = parts[0].lower() + "".join(part.capitalize() for part in parts[1:])
+                pascal = "".join(part.capitalize() for part in parts)
+                candidates.extend([camel, pascal])
+            for candidate in candidates:
+                if candidate is None:
+                    continue
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                if candidate in source:
+                    return source[candidate], True
+        return None, False
+
+    def _coerce_header_value(value: Any) -> str:
+        if isinstance(value, Mapping):
+            return json.dumps(value)
+        if isinstance(value, (list, tuple)):
+            return ",".join(str(item) for item in value if item is not None)
+        if isinstance(value, set):
+            return ",".join(str(item) for item in sorted(value))
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if value is None:
+            return ""
+        return str(value)
+
+    def _canonical_header(name: str) -> str:
+        aliases = {
+            "title": "Title",
+            "priority": "Priority",
+            "tags": "Tags",
+            "tag": "Tags",
+            "icon": "Icon",
+            "click": "Click",
+            "actions": "Actions",
+            "attach": "Attach",
+            "attachment": "Attach",
+            "filename": "Filename",
+            "email": "Email",
+            "delay": "Delay",
+            "cache": "Cache",
+            "content-type": "Content-Type",
+            "content_type": "Content-Type",
+            "authorization": "Authorization",
+        }
+        lowered = name.lower()
+        return aliases.get(lowered, name)
+
+    payload_dict: dict[str, Any] = dict(payload) if isinstance(payload, Mapping) else {}
+    json_overrides = payload_dict.get("json")
+    if isinstance(json_overrides, Mapping):
+        merged_payload: dict[str, Any] = dict(json_overrides)
+        for key, value in payload_dict.items():
+            if key == "json":
+                continue
+            merged_payload[key] = value
+    else:
+        merged_payload = dict(payload_dict)
+
+    base_url_value, has_base_url = _lookup(merged_payload, "base_url", "base-url", "baseUrl")
+    if not has_base_url:
+        base_url_value = settings.get("base_url")
+    base_url = str(base_url_value or "https://ntfy.sh").rstrip("/")
+
+    topic_value, has_topic = _lookup(merged_payload, "topic", "Topic")
+    if not has_topic:
+        topic_value = settings.get("topic")
+    topic = str(topic_value or "").strip()
     if not topic:
         raise ValueError("ntfy topic must be configured")
-    message = str(payload.get("message") or payload.get("body") or "Automation triggered")
-    priority = str(payload.get("priority") or "default").strip()
+
+    message_value, has_message = _lookup(merged_payload, "message", "body", "Message", "Body")
+    if not has_message:
+        message_value = "Automation triggered"
+    if isinstance(message_value, Mapping) or (
+        isinstance(message_value, (list, tuple)) and not isinstance(message_value, (str, bytes, bytearray))
+    ):
+        message_text = json.dumps(message_value)
+    elif message_value is None:
+        message_text = ""
+    else:
+        message_text = str(message_value)
+
+    priority_value, has_priority = _lookup(merged_payload, "priority", "Priority")
+    if not has_priority:
+        priority_value = "default"
+    priority_text = ""
+    if priority_value is not None:
+        priority_text = str(priority_value).strip()
+    if not priority_text:
+        priority_text = "default"
+
+    title_value, has_title = _lookup(merged_payload, "title", "Title")
+    if not has_title:
+        title_value = "Automation event"
+    title_text = ""
+    if title_value is not None:
+        title_text = str(title_value).strip()
+    if not title_text:
+        title_text = "Automation event"
+
+    headers: dict[str, str] = {}
+    raw_headers = merged_payload.get("headers")
+    if isinstance(raw_headers, Mapping):
+        for name, value in raw_headers.items():
+            if value is None:
+                continue
+            canonical = _canonical_header(str(name))
+            headers[canonical] = _coerce_header_value(value)
+
+    header_aliases = {
+        "title": "Title",
+        "priority": "Priority",
+        "tags": "Tags",
+        "tag": "Tags",
+        "icon": "Icon",
+        "click": "Click",
+        "actions": "Actions",
+        "attach": "Attach",
+        "attachment": "Attach",
+        "filename": "Filename",
+        "email": "Email",
+        "delay": "Delay",
+        "cache": "Cache",
+        "content_type": "Content-Type",
+        "content-type": "Content-Type",
+    }
+    for key, canonical in header_aliases.items():
+        value, exists = _lookup(merged_payload, key, key.capitalize())
+        if not exists or value is None:
+            continue
+        if canonical not in headers:
+            headers[canonical] = _coerce_header_value(value)
+
+    if "Title" in headers:
+        title_text = headers["Title"]
+    else:
+        headers["Title"] = _coerce_header_value(title_text)
+        title_text = headers["Title"]
+
+    if "Priority" in headers:
+        priority_text = headers["Priority"]
+    else:
+        headers["Priority"] = _coerce_header_value(priority_text)
+        priority_text = headers["Priority"]
+
+    token_value, has_token = _lookup(
+        merged_payload, "auth_token", "token", "auth-token", "authToken"
+    )
+    if not has_token:
+        token_value = settings.get("auth_token")
+    token_text = str(token_value).strip() if token_value else ""
+    if token_text and "Authorization" not in headers:
+        headers["Authorization"] = f"Bearer {token_text}"
+
     url = f"{base_url}/{topic}"
-    headers: dict[str, str] = {"Title": str(payload.get("title") or "Automation event")}
-    token = str(settings.get("auth_token") or "").strip()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    headers["Priority"] = priority
+
+    # Ensure any remaining canonical header aliases are applied exactly once more.
+    for header_name, value in list(headers.items()):
+        headers[header_name] = _coerce_header_value(value)
+
+    message = message_text
+    priority = priority_text
+    title = title_text
+
+    event_payload = {
+        "topic": topic,
+        "message": message,
+        "priority": priority,
+        "title": title,
+        "headers": headers,
+    }
     event = await webhook_monitor.create_manual_event(
         name="module.ntfy.publish",
         target_url=url,
-        payload={
-            "message": message,
-            "priority": priority,
-        },
+        payload=event_payload,
         headers=headers,
         max_attempts=1,
         backoff_seconds=60,
@@ -887,7 +1063,11 @@ async def _invoke_ntfy(
     attempt_number = 1
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-            response = await client.post(url, data=message.encode("utf-8"), headers=headers)
+            response = await client.post(
+                url,
+                data=message.encode("utf-8"),
+                headers=headers,
+            )
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         response_body = exc.response.text if exc.response is not None else None
@@ -901,7 +1081,7 @@ async def _invoke_ntfy(
         )
         return _build_event_result(
             updated_event,
-            extra={"topic": topic, "priority": priority, "url": url},
+            extra={"topic": topic, "priority": priority, "title": title, "url": url},
         )
     except Exception as exc:  # pragma: no cover - defensive
         updated_event = await _record_failure(
@@ -914,7 +1094,7 @@ async def _invoke_ntfy(
         )
         return _build_event_result(
             updated_event,
-            extra={"topic": topic, "priority": priority, "url": url},
+            extra={"topic": topic, "priority": priority, "title": title, "url": url},
         )
 
     response_body = response.text
@@ -926,7 +1106,7 @@ async def _invoke_ntfy(
     )
     return _build_event_result(
         updated_event,
-        extra={"topic": topic, "priority": priority, "url": url},
+        extra={"topic": topic, "priority": priority, "title": title, "url": url},
     )
 
 
