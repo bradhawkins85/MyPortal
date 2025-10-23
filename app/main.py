@@ -4120,23 +4120,6 @@ async def admin_company_edit_page(
     )
 
 
-@app.get("/admin/companies/syncro-import", response_class=HTMLResponse)
-async def admin_syncro_company_import_page(
-    request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
-):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    return await _render_syncro_company_import(
-        request,
-        current_user,
-        success_message=_sanitize_message(success),
-        error_message=_sanitize_message(error),
-    )
-
-
 @app.post("/admin/companies", response_class=HTMLResponse)
 async def admin_create_company(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
@@ -6135,29 +6118,6 @@ async def _render_syncro_ticket_import(
         "syncro_module": module_description,
     }
     response = await _render_template("admin/syncro_ticket_import.html", request, user, extra=extra)
-    response.status_code = status_code
-    return response
-
-
-async def _render_syncro_company_import(
-    request: Request,
-    user: dict[str, Any],
-    *,
-    success_message: str | None = None,
-    error_message: str | None = None,
-    status_code: int = status.HTTP_200_OK,
-) -> HTMLResponse:
-    module = await _load_syncro_module()
-    module_description = _describe_syncro_module(module)
-    if not module_description.get("enabled"):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Syncro company import is not available")
-    extra = {
-        "title": "Syncro company import",
-        "success_message": success_message,
-        "error_message": error_message,
-        "syncro_module": module_description,
-    }
-    response = await _render_template("admin/syncro_company_import.html", request, user, extra=extra)
     response.status_code = status_code
     return response
 

@@ -46,13 +46,13 @@ There are no default login credentials; the first visit will prompt you to regis
 
 ## Syncro Company Importer
 
-Super administrators can populate and refresh the company directory directly from Syncro at **Admin → Syncro company import**. The workflow:
+Super administrators can populate and refresh the company directory directly from Syncro via the controls on the Syncro module card (**Admin → Modules → Syncro**). The workflow:
 
 - Retrieves every customer record from Syncro using the configured rate limit.
 - Matches existing companies by Syncro customer ID or name and updates their names, addresses, and mappings in place.
 - Creates any missing companies and attaches the Syncro identifier so future imports and ticket syncs stay linked.
 
-Progress is surfaced in-page and via the JSON response from `POST /admin/syncro/import-companies`, reporting how many companies were fetched, created, updated, or skipped. The importer requires the Syncro integration module to be enabled with both a base URL and API key.
+Progress is surfaced via the JSON response from `POST /admin/syncro/import-companies`, reporting how many companies were fetched, created, updated, or skipped. When using the module card action from the admin UI, success messages are shown inline on the module page. The importer requires the Syncro integration module to be enabled with both a base URL and API key.
 
 ## Syncro Ticket Importer
 
