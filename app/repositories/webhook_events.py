@@ -162,6 +162,26 @@ async def delete_event(event_id: int) -> None:
     )
 
 
+async def delete_events_by_status(status: str) -> int:
+    """Delete webhook events matching the provided status and return the number removed."""
+
+    normalised = (status or "").strip().lower()
+    if normalised not in {"failed", "succeeded"}:
+        raise ValueError("Unsupported status for bulk webhook deletion")
+
+    row = await db.fetch_one(
+        "SELECT COUNT(*) AS count FROM webhook_events WHERE status = %s",
+        (normalised,),
+    )
+    count = int(row["count"]) if row and row.get("count") is not None else 0
+    if count:
+        await db.execute(
+            "DELETE FROM webhook_events WHERE status = %s",
+            (normalised,),
+        )
+    return count
+
+
 async def delete_succeeded_before(cutoff: datetime) -> int:
     threshold = _ensure_naive_utc(cutoff)
     if threshold is None:
