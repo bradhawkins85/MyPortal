@@ -1,0 +1,7 @@
+{
+  "guid": "cd289cc9-316f-4820-bd59-c2e4141a28b2",
+  "occurred_at": "2023-10-23T03:13Z",
+  "change_type": "Fix",
+  "summary": "Corrected change log entries with future occurred_at timestamps to match original release dates.",
+  "content_hash": "df1f17b56290a343b061efab72b07e07b05836f944396cb6d7f726211ef59105"
+}
