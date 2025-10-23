@@ -1,0 +1,7 @@
+{
+  "guid": "c9c8c0a5-4cd9-4c6d-bcaa-5f8852d3b1d4",
+  "occurred_at": "2025-10-29T10:00Z",
+  "change_type": "Fix",
+  "summary": "Restricted ticket assignment options to helpdesk technicians with active role permissions",
+  "content_hash": "0cfd563c710d667b70b795bde5ab427869aab2fe9b2e1d04b8ad167fbbd7021b"
+}

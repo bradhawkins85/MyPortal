@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-23T02:57Z",
   "change_type": "Fix",
   "summary": "Updated upgrade flow to restart the myportal systemd service via sudo instead of the user session to ensure the daemon restarts with elevated privileges.",
-  "content_hash": "5afb11a16eee8e06c82b09c6c018f79a346c0e16cb32ea11232ab2280a67fd31"
+  "content_hash": "4c1f0839c2f444dc1b84c841213e093d6d782b7b5be734a08a1a3ae56e8faf4d"
 }

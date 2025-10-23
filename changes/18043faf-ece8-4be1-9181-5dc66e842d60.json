@@ -1,0 +1,7 @@
+{
+  "guid": "18043faf-ece8-4be1-9181-5dc66e842d60",
+  "occurred_at": "2025-10-09T11:44Z",
+  "change_type": "Feature",
+  "summary": "Added inline role selection to company memberships so administrators can reassign members without leaving the table",
+  "content_hash": "1e2ec91a874e61732767391beae1bfae4b3a494e3092df0c8b35fbe00efb6c33"
+}

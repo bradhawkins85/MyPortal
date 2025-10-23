@@ -1,0 +1,7 @@
+{
+  "guid": "89ba371f-3960-416c-80b5-e91e071d1844",
+  "occurred_at": "2025-10-20T11:13Z",
+  "change_type": "Feature",
+  "summary": "Introduced WYSIWYG knowledge base section editor with ordered multi-section storage and sanitised HTML handling",
+  "content_hash": "0948363fd832506ac6f929deaaf535b2a15fba3dd183e70643c6bb201bc4ddaf"
+}
