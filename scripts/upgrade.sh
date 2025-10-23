@@ -37,6 +37,55 @@ detect_python_interpreter() {
   printf '%s' "$interpreter"
 }
 
+read_env_var() {
+  local key="$1"
+  local default_value="${2:-}"
+
+  if [[ -n "${!key:-}" ]]; then
+    printf '%s' "${!key}"
+    return
+  fi
+
+  if [[ -z "$PYTHON_INTERPRETER" || ! -f "${PROJECT_ROOT}/.env" ]]; then
+    printf '%s' "$default_value"
+    return
+  fi
+
+  local value
+  value=$(ENV_LOOKUP_KEY="$key" ENV_LOOKUP_DEFAULT="$default_value" PROJECT_ROOT="$PROJECT_ROOT" "$PYTHON_INTERPRETER" - <<'PY'
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+key = os.environ["ENV_LOOKUP_KEY"]
+default = os.environ.get("ENV_LOOKUP_DEFAULT", "")
+env_path = Path(Path(os.environ["PROJECT_ROOT"]) / ".env")
+
+if not env_path.exists():
+    print(default)
+    raise SystemExit
+
+for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    name, value = line.split("=", 1)
+    if name.strip() != key:
+        continue
+    value = value.strip()
+    if value and len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        value = value[1:-1]
+    print(value)
+    break
+else:
+    print(default)
+PY
+  )
+
+  printf '%s' "$value"
+}
+
 ensure_env_default() {
   local interpreter="$1"
   local key="$2"
@@ -79,6 +128,94 @@ PYTHON_INTERPRETER=$(detect_python_interpreter)
 cd "$PROJECT_ROOT"
 
 ensure_env_default "$PYTHON_INTERPRETER" "ENABLE_AUTO_REFRESH" "false"
+
+detect_service_name() {
+  local explicit
+  explicit=$(read_env_var "SYSTEMD_SERVICE_NAME" "")
+  if [[ -n "$explicit" ]]; then
+    printf '%s' "$explicit"
+    return
+  fi
+  printf '%s' "myportal"
+}
+
+resolve_service_user() {
+  local service_name="$1"
+
+  if [[ -n "${MYPORTAL_SERVICE_USER:-}" ]]; then
+    printf '%s' "$MYPORTAL_SERVICE_USER"
+    return
+  fi
+
+  if [[ -n "${SERVICE_USER:-}" ]]; then
+    printf '%s' "$SERVICE_USER"
+    return
+  fi
+
+  local env_override
+  env_override=$(read_env_var "SERVICE_USER" "")
+  if [[ -n "$env_override" ]]; then
+    printf '%s' "$env_override"
+    return
+  fi
+
+  local systemctl_bin
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl_bin=$(command -v systemctl)
+  else
+    systemctl_bin=""
+  fi
+
+  if [[ -n "$systemctl_bin" ]]; then
+    local reported_user
+    reported_user=$($systemctl_bin show "$service_name" --property=User --value 2>/dev/null | tr -d '\r') || reported_user=""
+    if [[ -n "$reported_user" ]]; then
+      printf '%s' "$reported_user"
+      return
+    fi
+
+    local fragment_path
+    fragment_path=$($systemctl_bin show "$service_name" --property=FragmentPath --value 2>/dev/null | tr -d '\r') || fragment_path=""
+    if [[ -n "$fragment_path" && -f "$fragment_path" ]]; then
+      local parsed_user
+      parsed_user=$(awk -F'=' '/^User=/{print $2; exit}' "$fragment_path")
+      if [[ -n "$parsed_user" ]]; then
+        printf '%s' "$parsed_user"
+        return
+      fi
+    fi
+  fi
+
+  printf '%s' "$service_name"
+}
+
+reset_project_permissions() {
+  local service_user="$1"
+  if [[ -z "$service_user" ]]; then
+    echo "Warning: Unable to determine service user; skipping ownership reset." >&2
+    return
+  fi
+
+  if ! id "$service_user" >/dev/null 2>&1; then
+    echo "Warning: Service user '$service_user' was not found on this system; skipping ownership reset." >&2
+    return
+  fi
+
+  local service_group
+  service_group=$(id -gn "$service_user" 2>/dev/null || true)
+  if [[ -z "$service_group" ]]; then
+    service_group="$service_user"
+  fi
+
+  if chown -R "$service_user:$service_group" "$PROJECT_ROOT"; then
+    echo "Reset ownership of ${PROJECT_ROOT} to ${service_user}:${service_group}."
+  else
+    echo "Warning: Failed to reset ownership of ${PROJECT_ROOT}; please update permissions manually if required." >&2
+  fi
+}
+
+SERVICE_NAME=$(detect_service_name)
+SERVICE_USER=$(resolve_service_user "$SERVICE_NAME")
 
 # Load GitHub credentials from .env in a safe manner
 if [[ -f .env ]]; then
@@ -131,6 +268,8 @@ fi
 
 POST_PULL_HEAD=$(git rev-parse HEAD)
 FORCE_RESTART="${FORCE_RESTART:-0}"
+
+reset_project_permissions "$SERVICE_USER"
 
 if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
   echo "Repository updated to $POST_PULL_HEAD. Run scripts/restart.sh to reinstall dependencies and restart the service."

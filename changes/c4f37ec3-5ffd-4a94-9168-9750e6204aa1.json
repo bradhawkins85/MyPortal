@@ -1,0 +1,7 @@
+{
+  "guid": "c4f37ec3-5ffd-4a94-9168-9750e6204aa1",
+  "occurred_at": "2025-10-23T02:10Z",
+  "change_type": "Fix",
+  "summary": "Preserved existing company assignment permissions when granting staff access via the admin companies page.",
+  "content_hash": "29ee12d608b56e1558e0be8873efba41c68d97482e6ab127ac7866056423d487"
+}
