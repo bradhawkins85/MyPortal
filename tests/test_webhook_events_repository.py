@@ -65,3 +65,43 @@ def test_delete_event_executes_delete(monkeypatch):
     assert dummy_db.execute_calls == [
         ("DELETE FROM webhook_events WHERE id = %s", (42,)),
     ]
+
+
+def test_delete_events_by_status_removes_matching_records(monkeypatch):
+    dummy_db = _DummyDatabase(count=5)
+    monkeypatch.setattr(repo, "db", dummy_db)
+
+    deleted = asyncio.run(repo.delete_events_by_status("FAILED"))
+
+    assert deleted == 5
+    assert dummy_db.fetch_one_calls == [
+        ("SELECT COUNT(*) AS count FROM webhook_events WHERE status = %s", ("failed",)),
+    ]
+    assert dummy_db.execute_calls == [
+        ("DELETE FROM webhook_events WHERE status = %s", ("failed",)),
+    ]
+
+
+def test_delete_events_by_status_handles_empty_set(monkeypatch):
+    dummy_db = _DummyDatabase(count=0)
+    monkeypatch.setattr(repo, "db", dummy_db)
+
+    deleted = asyncio.run(repo.delete_events_by_status("succeeded"))
+
+    assert deleted == 0
+    assert dummy_db.fetch_one_calls == [
+        ("SELECT COUNT(*) AS count FROM webhook_events WHERE status = %s", ("succeeded",)),
+    ]
+    assert dummy_db.execute_calls == []
+
+
+def test_delete_events_by_status_rejects_unsupported_status(monkeypatch):
+    dummy_db = _DummyDatabase(count=3)
+    monkeypatch.setattr(repo, "db", dummy_db)
+
+    try:
+        asyncio.run(repo.delete_events_by_status("pending"))
+    except ValueError as error:
+        assert str(error) == "Unsupported status for bulk webhook deletion"
+    else:
+        raise AssertionError("Expected ValueError for unsupported status")
