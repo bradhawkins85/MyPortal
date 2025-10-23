@@ -7130,6 +7130,89 @@ async def admin_update_module(slug: str, request: Request):
     )
 
 
+@app.post("/admin/modules/tacticalrmm/push-companies", response_class=HTMLResponse)
+async def admin_push_companies_to_tactical_rmm(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    try:
+        summary = await modules_service.push_companies_to_tacticalrmm()
+    except ValueError as exc:
+        log_error("Unable to synchronise Tactical RMM companies", error=str(exc))
+        return await _render_modules_dashboard(
+            request,
+            current_user,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to synchronise Tactical RMM companies", error=str(exc))
+        return await _render_modules_dashboard(
+            request,
+            current_user,
+            error_message="Unable to synchronise companies with Tactical RMM. Please verify the module configuration.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    created_clients = summary.get("created_clients") or []
+    created_sites = summary.get("created_sites") or []
+    existing_clients = summary.get("existing_clients") or []
+    skipped = summary.get("skipped") or []
+    errors = summary.get("errors") or []
+    processed = int(summary.get("processed_companies") or 0)
+
+    site_created_count = len(created_sites)
+    created_count = len(created_clients)
+    existing_count = len(existing_clients)
+    skipped_count = len(skipped)
+    error_count = len(errors)
+
+    log_info(
+        "Tactical RMM company synchronisation completed",
+        processed=processed,
+        created_clients=created_count,
+        site_creations=site_created_count,
+        existing_clients=existing_count,
+        skipped=skipped_count,
+        errors=error_count,
+    )
+
+    success_parts = [
+        f"Synchronised {processed} compan{'y' if processed == 1 else 'ies'} with Tactical RMM."
+    ]
+    if created_count:
+        success_parts.append(f"Created {created_count} new client{'s' if created_count != 1 else ''}.")
+    if site_created_count:
+        success_parts.append(
+            f"Ensured {site_created_count} default site{'s' if site_created_count != 1 else ''}."
+        )
+    if not created_count and not site_created_count:
+        success_parts.append("No changes were required.")
+    if skipped_count:
+        success_parts.append(f"Skipped {skipped_count} duplicate or unnamed compan{'y' if skipped_count == 1 else 'ies'}.")
+
+    success_message = " ".join(success_parts)
+
+    params = [("success", success_message)]
+    if error_count:
+        example = errors[0]
+        detail = example.get("error") or "Unknown error"
+        params.append(
+            (
+                "error",
+                f"Encountered {error_count} Tactical RMM synchronisation error{'s' if error_count != 1 else ''}. Example: {detail}",
+            )
+        )
+
+    query = "&".join(f"{key}={quote(value)}" for key, value in params if value)
+    redirect_url = "/admin/modules"
+    if query:
+        redirect_url = f"{redirect_url}?{query}"
+
+    return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.post("/admin/modules/{slug}/test", response_class=HTMLResponse)
 async def admin_test_module(slug: str, request: Request):
     current_user, redirect = await _require_super_admin_page(request)

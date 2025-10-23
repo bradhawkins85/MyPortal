@@ -358,6 +358,80 @@ def test_invoke_tacticalrmm_records_success(monkeypatch):
     assert "attempt_immediately" not in captured_event
 
 
+def test_push_companies_to_tacticalrmm_requires_module(monkeypatch):
+    async def fake_get_module(slug):
+        return None
+
+    monkeypatch.setattr(modules.module_repo, "get_module", fake_get_module)
+
+    with pytest.raises(ValueError):
+        asyncio.run(modules.push_companies_to_tacticalrmm())
+
+
+def test_push_companies_to_tacticalrmm_validates_configuration(monkeypatch):
+    async def fake_get_module(slug):
+        return {"slug": slug, "settings": {"base_url": "", "api_key": ""}}
+
+    monkeypatch.setattr(modules.module_repo, "get_module", fake_get_module)
+
+    with pytest.raises(ValueError):
+        asyncio.run(modules.push_companies_to_tacticalrmm())
+
+
+def test_push_companies_to_tacticalrmm_creates_clients_and_sites(monkeypatch):
+    module_record = {
+        "slug": "tacticalrmm",
+        "settings": {"base_url": "https://rmm.example.com", "api_key": "token", "verify_ssl": True},
+    }
+
+    async def fake_get_module(slug):
+        return module_record
+
+    async def fake_list_companies():
+        return [
+            {"id": 1, "name": "Alpha"},
+            {"id": 2, "name": "Beta"},
+        ]
+
+    call_payloads: list[dict[str, object]] = []
+    responses = [
+        {"status": "succeeded", "response": [{"id": 21, "name": "Beta", "sites": [{"id": 5, "name": "North"}]}]},
+        {"status": "succeeded", "event_id": 101},
+        {"status": "succeeded", "event_id": 102},
+    ]
+
+    async def fake_invoke(settings, payload, event_future=None):
+        call_payloads.append(payload)
+        if responses:
+            return responses.pop(0)
+        raise AssertionError("Unexpected TacticalRMM invocation")
+
+    monkeypatch.setattr(modules.module_repo, "get_module", fake_get_module)
+    monkeypatch.setattr(modules.company_repo, "list_companies", fake_list_companies)
+    monkeypatch.setattr(modules, "_invoke_tacticalrmm", fake_invoke)
+
+    summary = asyncio.run(modules.push_companies_to_tacticalrmm())
+
+    assert summary["created_clients"] == ["Alpha"]
+    assert summary["existing_clients"] == ["Beta"]
+    assert not summary["errors"]
+
+    created_sites = summary["created_sites"]
+    assert any(
+        entry["company"] == "Alpha" and entry["action"] == "created_with_client"
+        for entry in created_sites
+    )
+    assert any(
+        entry["company"] == "Beta" and entry["action"] == "created_for_existing_client"
+        for entry in created_sites
+    )
+
+    assert call_payloads[0] == {"endpoint": "/api/v3/clients/", "method": "GET"}
+    assert call_payloads[1]["endpoint"] == "/api/v3/clients/"
+    assert call_payloads[1]["method"] == "POST"
+    assert call_payloads[2]["endpoint"] == "/api/v3/clients/sites/"
+    assert call_payloads[2]["method"] == "POST"
+    assert len(call_payloads) == 3
 def test_invoke_ntfy_records_success(monkeypatch):
     captured_event: dict[str, object] = {}
 

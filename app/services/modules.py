@@ -13,6 +13,7 @@ import httpx
 from loguru import logger
 
 from app.core.database import db
+from app.repositories import companies as company_repo
 from app.repositories import integration_modules as module_repo
 from app.repositories import webhook_events as webhook_repo
 from app.services import email as email_service, webhook_monitor
@@ -1169,3 +1170,237 @@ async def test_module(slug: str) -> dict[str, Any]:
     except Exception as exc:  # pragma: no cover - network dependent
         logger.warning("Module test failed", slug=slug, error=str(exc))
         return {"status": "error", "error": str(exc)}
+
+
+def _summarise_event_error(result: Mapping[str, Any]) -> str:
+    if not isinstance(result, Mapping):
+        return "Unknown error"
+    messages: list[str] = []
+    last_error = result.get("last_error")
+    if last_error:
+        messages.append(str(last_error))
+    response_status = result.get("response_status") or result.get("status_code")
+    if response_status:
+        messages.append(f"HTTP {response_status}")
+    response = result.get("response")
+    if not last_error and response:
+        if isinstance(response, Mapping):
+            detail = response.get("detail") or response.get("error")
+            if detail:
+                messages.append(str(detail))
+        elif isinstance(response, str) and response:
+            messages.append(response)
+    status_text = result.get("status")
+    if status_text and status_text not in {"succeeded"}:
+        messages.append(str(status_text))
+    if messages:
+        unique_messages = list(dict.fromkeys(messages))
+        return "; ".join(unique_messages)
+    return "Unknown error"
+
+
+async def push_companies_to_tacticalrmm(default_site_name: str = "Default") -> dict[str, Any]:
+    module = await module_repo.get_module("tacticalrmm")
+    if not module:
+        raise ValueError("Tactical RMM module is not configured")
+
+    raw_settings: Mapping[str, Any] | None = None
+    if isinstance(module.get("settings"), Mapping):
+        raw_settings = module["settings"]
+    elif isinstance(module.get("settings"), str):
+        try:
+            raw_settings = json.loads(module["settings"])
+        except json.JSONDecodeError:
+            raw_settings = None
+
+    settings = _coerce_settings("tacticalrmm", raw_settings, module)
+    base_url = str(settings.get("base_url") or "").strip()
+    if not base_url:
+        raise ValueError("Tactical RMM base URL is not configured")
+    api_key = str(settings.get("api_key") or "").strip()
+    if not api_key:
+        raise ValueError("Tactical RMM API key is not configured")
+
+    default_site = str(default_site_name or "").strip() or "Default"
+    default_site_key = default_site.casefold()
+
+    companies = await company_repo.list_companies()
+    unique_companies: list[tuple[str, Mapping[str, Any]] | tuple[str, dict[str, Any]]] = []
+    skipped: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    for company in companies:
+        name = str(company.get("name") or "").strip()
+        if not name:
+            identifier = str(company.get("id") or "unknown")
+            skipped.append({"company": identifier, "reason": "missing_name"})
+            continue
+        key = name.casefold()
+        if key in seen:
+            skipped.append({"company": name, "reason": "duplicate_name"})
+            continue
+        seen.add(key)
+        unique_companies.append((name, company))
+
+    logger.info(
+        "Synchronising companies with Tactical RMM", count=len(unique_companies)
+    )
+
+    existing_clients_result = await _invoke_tacticalrmm(
+        settings,
+        {"endpoint": "/api/v3/clients/", "method": "GET"},
+        event_future=None,
+    )
+
+    if existing_clients_result.get("status") != "succeeded":
+        error = _summarise_event_error(existing_clients_result)
+        raise RuntimeError(f"Failed to fetch Tactical RMM clients: {error}")
+
+    response = existing_clients_result.get("response")
+    raw_clients: list[Mapping[str, Any]] = []
+    if isinstance(response, list):
+        raw_clients = [item for item in response if isinstance(item, Mapping)]
+    elif isinstance(response, Mapping):
+        results = response.get("results")
+        if isinstance(results, list):
+            raw_clients = [item for item in results if isinstance(item, Mapping)]
+
+    client_lookup: dict[str, Mapping[str, Any]] = {}
+    for client in raw_clients:
+        name = str(client.get("name") or "").strip()
+        if not name:
+            continue
+        key = name.casefold()
+        if key not in client_lookup:
+            client_lookup[key] = client
+
+    summary: dict[str, Any] = {
+        "processed_companies": len(unique_companies),
+        "created_clients": [],
+        "existing_clients": [],
+        "created_sites": [],
+        "existing_sites": [],
+        "skipped": skipped,
+        "errors": [],
+    }
+
+    for company_name, company in unique_companies:
+        client_key = company_name.casefold()
+        existing_client = client_lookup.get(client_key)
+
+        if not existing_client:
+            logger.info(
+                "Creating Tactical RMM client", company=company_name
+            )
+            create_payload = {
+                "endpoint": "/api/v3/clients/",
+                "method": "POST",
+                "body": {
+                    "client": {"name": company_name},
+                    "site": {"name": default_site},
+                },
+            }
+            create_result = await _invoke_tacticalrmm(
+                settings, create_payload, event_future=None
+            )
+            if create_result.get("status") == "succeeded":
+                summary["created_clients"].append(company_name)
+                summary["created_sites"].append(
+                    {
+                        "company": company_name,
+                        "site": default_site,
+                        "action": "created_with_client",
+                    }
+                )
+                client_lookup[client_key] = {
+                    "name": company_name,
+                    "id": None,
+                    "sites": [{"name": default_site}],
+                }
+            else:
+                error_message = _summarise_event_error(create_result)
+                summary["errors"].append(
+                    {
+                        "company": company_name,
+                        "action": "create_client",
+                        "error": error_message,
+                        "event_id": create_result.get("event_id"),
+                    }
+                )
+            continue
+
+        summary["existing_clients"].append(company_name)
+        existing_sites = []
+        raw_sites = (
+            existing_client.get("sites")
+            if isinstance(existing_client, Mapping)
+            else None
+        )
+        if isinstance(raw_sites, list):
+            existing_sites = [
+                site for site in raw_sites if isinstance(site, Mapping)
+            ]
+
+        has_default_site = False
+        for site in existing_sites:
+            site_name = str(site.get("name") or "").strip()
+            if site_name.casefold() == default_site_key:
+                has_default_site = True
+                summary["existing_sites"].append(
+                    {"company": company_name, "site": site_name}
+                )
+                break
+
+        if has_default_site:
+            continue
+
+        client_id = existing_client.get("id")
+        try:
+            client_id_int = int(client_id) if client_id is not None else None
+        except (TypeError, ValueError):
+            client_id_int = None
+
+        if client_id_int is None:
+            summary["errors"].append(
+                {
+                    "company": company_name,
+                    "action": "resolve_client_id",
+                    "error": "Client ID missing; unable to create default site.",
+                    "event_id": existing_clients_result.get("event_id"),
+                }
+            )
+            continue
+
+        logger.info(
+            "Creating Tactical RMM default site",
+            company=company_name,
+            client_id=client_id_int,
+        )
+        site_payload = {
+            "endpoint": "/api/v3/clients/sites/",
+            "method": "POST",
+            "body": {"site": {"client": client_id_int, "name": default_site}},
+        }
+        site_result = await _invoke_tacticalrmm(
+            settings, site_payload, event_future=None
+        )
+        if site_result.get("status") == "succeeded":
+            summary["created_sites"].append(
+                {
+                    "company": company_name,
+                    "site": default_site,
+                    "action": "created_for_existing_client",
+                }
+            )
+        else:
+            error_message = _summarise_event_error(site_result)
+            summary["errors"].append(
+                {
+                    "company": company_name,
+                    "action": "create_site",
+                    "error": error_message,
+                    "event_id": site_result.get("event_id"),
+                }
+            )
+
+    return summary
