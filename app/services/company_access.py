@@ -25,6 +25,10 @@ async def list_accessible_companies(user: Mapping[str, Any]) -> list[dict[str, A
             return []
         return await user_company_repo.list_companies_for_user(user_id)
 
+    if not db.is_connected():
+        return []
+
+    companies = await company_repo.list_companies()
     try:
         companies = await company_repo.list_companies()
     except RuntimeError as exc:
