@@ -777,6 +777,7 @@
     const hasTemplates = select.options.length > 1;
     select.disabled = !hasTemplates;
     button.disabled = !hasTemplates;
+    select.value = '';
 
     button.addEventListener('click', () => {
       const value = select.value;
@@ -913,8 +914,6 @@
         label: String(entry.name || entry.slug || '').trim(),
       }))
       .filter((option) => option.value);
-
-    let hasSeededDefaultAction = false;
 
     const createModuleSelect = (value) => {
       const select = document.createElement('select');
@@ -1081,22 +1080,7 @@
         refreshQuickAddOptions = () => {
           populateActionQuickAdd(quickAddSelect, quickAddButton, quickAddWrapper, moduleSelect.value);
         };
-        if (!action && !hasSeededDefaultAction && moduleOptions.length) {
-          const defaultModule = moduleOptions[0].value;
-          if (defaultModule) {
-            moduleSelect.value = defaultModule;
-          }
-        }
         refreshQuickAddOptions();
-        if (!action && !hasSeededDefaultAction) {
-          const moduleKey = moduleSelect.value;
-          const templates = getActionTemplates(moduleKey);
-          if (templates.length) {
-            insertSnippet(payloadInput, templates[0].value);
-            quickAddSelect.value = '';
-            hasSeededDefaultAction = true;
-          }
-        }
         payloadWrapper.appendChild(quickAddWrapper);
         payloadWrapper.appendChild(payloadInput);
         row.appendChild(payloadWrapper);
@@ -1131,9 +1115,6 @@
         const parsed = JSON.parse(initialValue);
         if (parsed && Array.isArray(parsed.actions)) {
           parsed.actions.forEach((action) => addRow(action));
-          if (parsed.actions.length) {
-            hasSeededDefaultAction = true;
-          }
         }
       } catch (error) {
         addRow();
