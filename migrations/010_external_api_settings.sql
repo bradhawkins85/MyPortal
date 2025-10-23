@@ -1,4 +1,4 @@
-CREATE TABLE external_api_settings (
+CREATE TABLE IF NOT EXISTS external_api_settings (
   company_id INT PRIMARY KEY,
   xero_endpoint VARCHAR(255),
   xero_api_key VARCHAR(255),

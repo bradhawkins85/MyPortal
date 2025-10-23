@@ -1,4 +1,4 @@
-CREATE TABLE apps (
+CREATE TABLE IF NOT EXISTS apps (
   id INT AUTO_INCREMENT PRIMARY KEY,
   sku VARCHAR(255) NOT NULL UNIQUE,
   name VARCHAR(255) NOT NULL,
@@ -6,7 +6,7 @@ CREATE TABLE apps (
   contract_term VARCHAR(255) NOT NULL
 );
 
-CREATE TABLE company_app_prices (
+CREATE TABLE IF NOT EXISTS company_app_prices (
   company_id INT NOT NULL,
   app_id INT NOT NULL,
   price DECIMAL(10,2) NOT NULL,

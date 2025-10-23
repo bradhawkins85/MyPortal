@@ -1,4 +1,4 @@
-CREATE TABLE password_tokens (
+CREATE TABLE IF NOT EXISTS password_tokens (
   token VARCHAR(64) PRIMARY KEY,
   user_id INT NOT NULL,
   expires_at DATETIME NOT NULL,
