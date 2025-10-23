@@ -36,6 +36,7 @@ from app.schemas.auth import (
 from app.schemas.users import UserResponse
 from app.security.passwords import verify_password
 from app.security.session import SessionData, ensure_datetime, session_manager
+from app.services import company_access
 from app.services import email as email_service
 
 
@@ -67,16 +68,7 @@ def _build_login_response(user: dict, session: SessionData) -> LoginResponse:
 
 
 async def _determine_active_company_id(user: dict[str, Any]) -> int | None:
-    raw_company = user.get("company_id")
-    if raw_company is not None:
-        try:
-            return int(raw_company)
-        except (TypeError, ValueError):
-            pass
-    companies = await user_company_repo.list_companies_for_user(user["id"])
-    if companies:
-        return int(companies[0].get("company_id"))
-    return None
+    return await company_access.first_accessible_company_id(user)
 
 
 def _client_ip(request: Request) -> str:

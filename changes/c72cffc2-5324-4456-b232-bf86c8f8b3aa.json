@@ -1,0 +1,7 @@
+{
+  "guid": "c72cffc2-5324-4456-b232-bf86c8f8b3aa",
+  "occurred_at": "2025-10-23T11:33:05Z",
+  "change_type": "Feature",
+  "summary": "Allow super administrators to manage all companies without explicit memberships.",
+  "content_hash": "667d66ddd7dd50fa7513935fd077a9b7578f9b25ebddd0d5ef504fd81573c52d"
+}

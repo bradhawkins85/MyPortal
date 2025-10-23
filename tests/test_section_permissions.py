@@ -105,8 +105,8 @@ async def test_build_base_context_includes_cart_permission(monkeypatch):
 
     monkeypatch.setattr(main.session_manager, "load_session", fake_load_session)
     monkeypatch.setattr(
-        main.user_company_repo,
-        "list_companies_for_user",
+        main.company_access,
+        "list_accessible_companies",
         AsyncMock(return_value=[{"company_id": 7, "company_name": "Example"}]),
     )
     membership = {
