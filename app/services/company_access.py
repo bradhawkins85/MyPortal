@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from app.core.database import db
 from app.repositories import companies as company_repo
 from app.repositories import user_companies as user_company_repo
 
@@ -23,6 +24,9 @@ async def list_accessible_companies(user: Mapping[str, Any]) -> list[dict[str, A
         if user_id <= 0:
             return []
         return await user_company_repo.list_companies_for_user(user_id)
+
+    if not db.is_connected():
+        return []
 
     companies = await company_repo.list_companies()
     accessible: list[dict[str, Any]] = []
