@@ -712,6 +712,30 @@
     });
   }
 
+  function bindAutomationDeleteActions() {
+    document.querySelectorAll('[data-automation-delete]').forEach((form) => {
+      if (form.dataset.automationDeleteBound === 'true') {
+        return;
+      }
+      form.dataset.automationDeleteBound = 'true';
+      form.addEventListener('submit', (event) => {
+        const nameRaw = (form.dataset.automationName || '').trim();
+        const idRaw = (form.dataset.automationId || '').trim();
+        const confirmLabel = nameRaw
+          ? `"${nameRaw}"`
+          : idRaw
+          ? `#${idRaw}`
+          : 'this automation';
+        const message =
+          form.getAttribute('data-confirm') ||
+          `Delete automation ${confirmLabel}? This cannot be undone.`;
+        if (!window.confirm(message)) {
+          event.preventDefault();
+        }
+      });
+    });
+  }
+
   function insertSnippet(field, snippet) {
     if (!field) {
       return;
@@ -1152,6 +1176,7 @@
     clearTaskForm();
     bindTaskForm();
     bindTaskActions();
+    bindAutomationDeleteActions();
     setupAutomationForm();
   }
 
