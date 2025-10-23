@@ -97,7 +97,8 @@ def test_change_log_page_renders_entries(super_admin_context, monkeypatch):
     assert response.status_code == 200
     html = response.text
     assert "Added change log page" in html
-    assert "changes/example.json" in html
+    assert "Source file" not in html
+    assert "changes/example.json" not in html
     assert "data-utc=\"2025-01-01T12:30:00+00:00\"" in html
 
 

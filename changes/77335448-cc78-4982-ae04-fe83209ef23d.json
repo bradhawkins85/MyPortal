@@ -1,0 +1,7 @@
+{
+  "guid": "77335448-cc78-4982-ae04-fe83209ef23d",
+  "occurred_at": "2025-10-23T02:19Z",
+  "change_type": "Fix",
+  "summary": "Removed source file column from admin change log to hide repository paths.",
+  "content_hash": "0f14bc7c2858edbf56fbfd5b914787da7943194084183cd7ba2f4335c650b05f"
+}
