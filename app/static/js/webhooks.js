@@ -58,8 +58,23 @@
     if (!row) {
       return null;
     }
+    const { dataset } = row;
+    if (dataset) {
+      const identifier = dataset.eventId || dataset.eventid;
+      if (identifier) {
+        const idNumber = Number.parseInt(identifier, 10);
+        const resolvedId = Number.isNaN(idNumber) ? identifier : idNumber;
+        return {
+          id: resolvedId,
+          name: dataset.eventName || '',
+          target_url: dataset.eventTarget || '',
+          targetUrl: dataset.eventTarget || '',
+          status: dataset.eventStatus || '',
+        };
+      }
+    }
     try {
-      const value = row.dataset.event || row.getAttribute('data-event') || '{}';
+      const value = row.dataset?.event || row.getAttribute('data-event') || '{}';
       return JSON.parse(value);
     } catch (error) {
       return null;
@@ -213,9 +228,13 @@
     if (!tbody) {
       return;
     }
-    const hasDataRow = Array.from(tbody.rows).some(
-      (row) => !row.classList.contains('table__empty') && row.dataset.event
-    );
+    const hasDataRow = Array.from(tbody.rows).some((row) => {
+      if (row.classList.contains('table__empty')) {
+        return false;
+      }
+      const { dataset } = row;
+      return Boolean(dataset?.eventId || dataset?.event || row.getAttribute('data-event'));
+    });
     if (!hasDataRow) {
       tbody.innerHTML = '';
       const row = document.createElement('tr');
@@ -319,7 +338,7 @@
     }
     const description = query('webhook-attempts-description');
     if (description) {
-      const target = eventData.target_url || eventData.targetUrl || '';
+      const target = eventData.target_url || eventData.targetUrl || eventData.target || '';
       description.textContent = target
         ? `Review the latest delivery attempts for ${target}.`
         : 'Review the latest delivery attempts for the selected webhook event.';
@@ -401,6 +420,40 @@
     });
   }
 
+  function bindBulkDeleteButtons() {
+    document.querySelectorAll('[data-webhook-delete-status]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const status = button.dataset.webhookDeleteStatus;
+        if (!status || button.disabled) {
+          return;
+        }
+        const confirmationMessage =
+          status === 'failed'
+            ? 'Delete all failed webhook events? This action cannot be undone.'
+            : 'Delete all successful webhook events? This action cannot be undone.';
+        if (!window.confirm(confirmationMessage)) {
+          return;
+        }
+        button.disabled = true;
+        try {
+          const response = await requestJson(`/scheduler/webhooks?status=${encodeURIComponent(status)}`, {
+            method: 'DELETE',
+          });
+          const deletedCount = response && typeof response.deleted === 'number' ? response.deleted : 0;
+          alert(
+            deletedCount
+              ? `Removed ${deletedCount} ${status} webhook event${deletedCount === 1 ? '' : 's'}.`
+              : `No ${status} webhook events were removed.`
+          );
+          window.location.reload();
+        } catch (error) {
+          alert(`Unable to delete ${status} webhooks: ${error.message}`);
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     attemptsModal = query('webhook-attempts-modal');
     attemptPlaceholder = document.querySelector('[data-attempt-placeholder]');
@@ -415,5 +468,6 @@
     bindRetryButtons();
     bindAttemptsButtons();
     bindDeleteButtons();
+    bindBulkDeleteButtons();
   });
 })();
