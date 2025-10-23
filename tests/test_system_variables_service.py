@@ -73,6 +73,7 @@ def test_system_variables_include_ticket_tokens(ticket):
     assert variables["TICKET_LABELS_1"] == "onsite"
     assert variables["TICKET_REQUESTER_EMAIL"] == "user@example.com"
     assert variables["TICKET_COMPANY_NAME"] == "Acme Corp"
+    assert variables["COMPANY_NAME"] == "Acme Corp"
     assert variables["TICKET_ASSIGNED_USER_EMAIL"] == "tech@example.com"
     assert variables["TICKET_ASSIGNED_USER_DISPLAY_NAME"] == "Taylor Nguyen"
     assert variables["TICKET_AI_SUMMARY"] == "Printer offline awaiting vendor response"

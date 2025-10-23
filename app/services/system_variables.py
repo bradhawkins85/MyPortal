@@ -279,4 +279,7 @@ def get_system_variables(*, ticket: Mapping[str, Any] | None = None) -> dict[str
     variables.update(_runtime_variables())
     if ticket:
         variables.update(build_context_variables(ticket, prefix="ticket", stringify=True))
+        company_name = variables.get("TICKET_COMPANY_NAME")
+        if company_name and not variables.get("COMPANY_NAME"):
+            variables["COMPANY_NAME"] = company_name
     return variables
