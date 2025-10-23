@@ -767,12 +767,19 @@ async def _invoke_tacticalrmm(
         raise ValueError("Tactical RMM base URL is not configured")
     api_key = str(settings.get("api_key") or "").strip()
     verify_ssl = _ensure_bool(settings.get("verify_ssl"), True)
-    endpoint_path = str(payload.get("endpoint") or payload.get("path") or "/api/v3/tasks/run").lstrip("/")
+    task_identifier = payload.get("task") or payload.get("task_id")
+    endpoint_path: str
+    if payload.get("endpoint") or payload.get("path"):
+        endpoint_path = str(payload.get("endpoint") or payload.get("path")).lstrip("/")
+    elif task_identifier is not None:
+        endpoint_path = f"automation/tasks/{task_identifier}/run/"
+    else:
+        endpoint_path = "automation/tasks/run/"
     method = str(payload.get("method") or "POST").upper()
     headers = {"Content-Type": "application/json"}
-    auth_header = str(payload.get("auth_header") or "Authorization")
+    auth_header = str(payload.get("auth_header") or "X-API-KEY")
     if api_key:
-        headers[auth_header] = payload.get("auth_prefix", "Token ") + api_key
+        headers[auth_header] = payload.get("auth_prefix", "") + api_key
     extra_headers = payload.get("headers")
     if isinstance(extra_headers, Mapping):
         for key, value in extra_headers.items():
@@ -1248,7 +1255,7 @@ async def push_companies_to_tacticalrmm(default_site_name: str = "Default") -> d
 
     existing_clients_result = await _invoke_tacticalrmm(
         settings,
-        {"endpoint": "/api/v3/clients/", "method": "GET"},
+        {"endpoint": "/clients/", "method": "GET"},
         event_future=None,
     )
 
@@ -1293,7 +1300,7 @@ async def push_companies_to_tacticalrmm(default_site_name: str = "Default") -> d
                 "Creating Tactical RMM client", company=company_name
             )
             create_payload = {
-                "endpoint": "/api/v3/clients/",
+                "endpoint": "/clients/",
                 "method": "POST",
                 "body": {
                     "client": {"name": company_name},
@@ -1377,7 +1384,7 @@ async def push_companies_to_tacticalrmm(default_site_name: str = "Default") -> d
             client_id=client_id_int,
         )
         site_payload = {
-            "endpoint": "/api/v3/clients/sites/",
+            "endpoint": "/clients/sites/",
             "method": "POST",
             "body": {"site": {"client": client_id_int, "name": default_site}},
         }
