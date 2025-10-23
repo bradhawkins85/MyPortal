@@ -24,26 +24,38 @@
       <div class="management__body management__body--cards">
         {% for module in modules %}
           {% set settings = module.settings or {} %}
-          <article class="card card--panel">
-            <header class="card__header card__header--module">
-              <div class="card__module-info">
-                <span class="card__module-icon" aria-hidden="true">{{ module.icon or '🔌' }}</span>
-                <div>
-                  <h2 class="card__title">{{ module.name }}</h2>
-                  <p class="card__subtitle">{{ module.description }}</p>
+          <details class="card card--panel card-collapsible" data-module-card>
+            <summary class="card__header card__header--collapsible card__header--module-summary">
+              <h2 class="card__title">{{ module.name }}</h2>
+              <div class="card__collapsible-meta">
+                <span
+                  class="badge {{ 'badge--success' if module.enabled else 'badge--danger' }}"
+                  aria-label="Module status"
+                >
+                  {{ 'Enabled' if module.enabled else 'Disabled' }}
+                </span>
+                <span class="card__toggle-icon" aria-hidden="true"></span>
+              </div>
+            </summary>
+            <div class="card-collapsible__content">
+              <header class="card__header card__header--module card__header--module-expanded">
+                <div class="card__module-info">
+                  <span class="card__module-icon" aria-hidden="true">{{ module.icon or '🔌' }}</span>
+                  <div>
+                    <h3 class="card__title">{{ module.name }}</h3>
+                    <p class="card__subtitle">{{ module.description }}</p>
+                  </div>
                 </div>
-              </div>
-              <div class="card__module-actions">
-                <span class="card__badge" aria-label="Module status">{{ 'Enabled' if module.enabled else 'Disabled' }}</span>
-                <form action="/admin/modules/{{ module.slug }}/test" method="post" class="card__module-test">
-                  {% if csrf_token %}
-                    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                  {% endif %}
-                  <button type="submit" class="button button--ghost button--small">Run test</button>
-                </form>
-              </div>
-            </header>
-            <form action="/admin/modules/{{ module.slug }}" method="post" class="form card__form">
+                <div class="card__module-actions">
+                  <form action="/admin/modules/{{ module.slug }}/test" method="post" class="card__module-test">
+                    {% if csrf_token %}
+                      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                    {% endif %}
+                    <button type="submit" class="button button--ghost button--small">Run test</button>
+                  </form>
+                </div>
+              </header>
+              <form action="/admin/modules/{{ module.slug }}" method="post" class="form card__form">
               {% if csrf_token %}
                 <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
               {% endif %}
@@ -200,7 +212,8 @@
                 </div>
               </form>
             {% endif %}
-          </article>
+            </div>
+          </details>
         {% endfor %}
       </div>
     </section>
