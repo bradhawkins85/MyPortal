@@ -1,4 +1,5 @@
 - 2025-12-26, 16:20 UTC, Fix, Allowed ntfy automation payloads to override notification headers and metadata with JSON-defined values and added regression coverage
+- 2025-10-22, 23:59 UTC, Fix, Guarded migration CREATE statements with IF NOT EXISTS to allow safe reimports when objects already exist
 - 2025-12-26, 14:50 UTC, Fix, Rebuilt system variables knowledge base section seeds with CONCAT_WS strings to restore valid SQL syntax during article re-imports
 - 2025-12-26, 12:30 UTC, Fix, Corrected super admin knowledge base seed content concatenation so migrations import with matching column counts
 - 2025-10-22, 09:55 UTC, Fix, Forced web UI system updates to run the restart helper even when the repository is already up to date

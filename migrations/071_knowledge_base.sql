@@ -30,5 +30,5 @@ CREATE TABLE IF NOT EXISTS knowledge_base_article_companies (
     CONSTRAINT fk_kb_article_companies_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE INDEX idx_kb_articles_published_scope ON knowledge_base_articles (is_published, permission_scope);
-CREATE INDEX idx_kb_articles_updated_at ON knowledge_base_articles (updated_at);
+CREATE INDEX IF NOT EXISTS idx_kb_articles_published_scope ON knowledge_base_articles (is_published, permission_scope);
+CREATE INDEX IF NOT EXISTS idx_kb_articles_updated_at ON knowledge_base_articles (updated_at);

@@ -1,4 +1,4 @@
-CREATE TABLE roles (
+CREATE TABLE IF NOT EXISTS roles (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(100) NOT NULL UNIQUE,
   description TEXT NULL,
@@ -29,7 +29,7 @@ VALUES
     1
   );
 
-CREATE TABLE company_memberships (
+CREATE TABLE IF NOT EXISTS company_memberships (
   id INT AUTO_INCREMENT PRIMARY KEY,
   company_id INT NOT NULL,
   user_id INT NOT NULL,
