@@ -5,6 +5,21 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 VENV_DIR="${PROJECT_ROOT}/.venv"
 
+purge_spurious_dist_info() {
+  if [[ ! -d "$VENV_DIR" ]]; then
+    return
+  fi
+
+  local pattern="~?portal-*.dist-info"
+
+  while IFS= read -r -d '' site_packages; do
+    while IFS= read -r -d '' artifact; do
+      echo "Removing unexpected dist-info artifact: $artifact"
+      rm -rf "$artifact"
+    done < <(find "$site_packages" -maxdepth 1 -mindepth 1 -name "$pattern" -print0 2>/dev/null)
+  done < <(find "$VENV_DIR" -type d -name "site-packages" -print0 2>/dev/null)
+}
+
 prepare_git_environment() {
   local current_home="${HOME:-}"
   if [[ -n "$current_home" ]]; then
@@ -126,6 +141,9 @@ PY
 PYTHON_INTERPRETER=$(detect_python_interpreter)
 
 cd "$PROJECT_ROOT"
+
+purge_spurious_dist_info
+trap purge_spurious_dist_info EXIT
 
 ensure_env_default "$PYTHON_INTERPRETER" "ENABLE_AUTO_REFRESH" "false"
 
