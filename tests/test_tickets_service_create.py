@@ -15,6 +15,13 @@ async def test_create_ticket_triggers_automations(monkeypatch):
     async def fake_create_ticket(**kwargs):
         return {"id": 42, **kwargs}
 
+    async def fake_get_company(company_id):
+        assert company_id == 3
+        return {"id": company_id, "name": "Acme Corp"}
+
+    async def fake_get_user(user_id):
+        return None
+
     recorded: dict[str, object] = {}
 
     async def fake_handle_event(event_name, context):  # pragma: no cover - via test
@@ -24,6 +31,8 @@ async def test_create_ticket_triggers_automations(monkeypatch):
 
     monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
+    monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
 
     ticket = await tickets_service.create_ticket(
         subject="Printer offline",
@@ -40,6 +49,8 @@ async def test_create_ticket_triggers_automations(monkeypatch):
     )
 
     assert ticket["id"] == 42
+    assert ticket["company_name"] == "Acme Corp"
+    assert ticket["assigned_user_display_name"] is None
     assert recorded["event"] == "tickets.created"
     assert recorded["context"] == {"ticket": ticket}
 
@@ -48,6 +59,13 @@ async def test_create_ticket_triggers_automations(monkeypatch):
 async def test_create_ticket_can_skip_automations(monkeypatch):
     async def fake_create_ticket(**kwargs):
         return {"id": 77, **kwargs}
+
+    async def fake_get_company(company_id):
+        return None
+
+    async def fake_get_user(user_id):
+        assert user_id == 10
+        return {"id": user_id, "email": "tech@example.com", "first_name": "Sam", "last_name": "Support"}
 
     called = False
 
@@ -58,6 +76,8 @@ async def test_create_ticket_can_skip_automations(monkeypatch):
 
     monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
+    monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
 
     ticket = await tickets_service.create_ticket(
         subject="Laptop setup",
@@ -75,4 +95,6 @@ async def test_create_ticket_can_skip_automations(monkeypatch):
     )
 
     assert ticket["id"] == 77
+    assert ticket["assigned_user_email"] == "tech@example.com"
+    assert ticket["assigned_user_display_name"] == "Sam Support"
     assert called is False
