@@ -399,6 +399,34 @@ async def get_assets(customer_id: str | int) -> list[dict[str, Any]]:
     return results
 
 
+async def list_customers(
+    *,
+    page: int = 1,
+    per_page: int = 100,
+    rate_limiter: AsyncRateLimiter | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Fetch a page of Syncro customers with pagination metadata."""
+
+    params = {"page": page, "per_page": per_page}
+    payload = await _request(
+        "GET",
+        "/customers",
+        params=params,
+        rate_limiter=rate_limiter,
+    )
+    customers = _extract_collection(payload, "customers", "data")
+    meta: dict[str, Any] = {}
+    if isinstance(payload, dict):
+        candidate = payload.get("meta")
+        if isinstance(candidate, dict):
+            meta = candidate
+        else:
+            pagination = payload.get("pagination")
+            if isinstance(pagination, dict):
+                meta = pagination
+    return customers, meta
+
+
 async def list_tickets(
     *,
     page: int = 1,

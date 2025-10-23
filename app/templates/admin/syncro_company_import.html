@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if success_message or error_message %}
+    <div class="alert-stack">
+      {% if success_message %}
+        <div class="alert" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% set module = syncro_module or {} %}
+  {% set base_url = module.base_url or '' %}
+  {% set effective_base_url = module.effective_base_url or '' %}
+  {% set has_api_key = module.has_api_key %}
+  {% set rate_limit = module.rate_limit_per_minute or 180 %}
+  {% set is_configured = effective_base_url and has_api_key %}
+
+  <div class="management management--single" data-layout>
+    <section class="management__content">
+      <header class="management__header">
+        <div>
+          <h1 class="management__title">Syncro company import</h1>
+          <p class="management__subtitle">
+            Synchronise the Syncro customer directory with MyPortal. Imports reuse the module rate limit and require the Syncro integration to be configured.
+          </p>
+        </div>
+        <div class="management__header-actions">
+          <dl class="definition-list">
+            <div class="definition-list__item">
+              <dt class="definition-list__label">Base URL</dt>
+              <dd class="definition-list__value">{{ effective_base_url or 'Not configured' }}</dd>
+            </div>
+            <div class="definition-list__item">
+              <dt class="definition-list__label">API key</dt>
+              <dd class="definition-list__value">{{ 'Configured' if has_api_key else 'Missing' }}</dd>
+            </div>
+            <div class="definition-list__item">
+              <dt class="definition-list__label">Rate limit</dt>
+              <dd class="definition-list__value">{{ rate_limit }} requests/minute</dd>
+            </div>
+          </dl>
+        </div>
+      </header>
+
+      <div class="management__body management__body--stacked">
+        <div class="alert-stack" data-syncro-company-import-status hidden></div>
+
+        {% if not is_configured %}
+          <div class="alert alert--error" role="alert">
+            Configure the Syncro module with a base URL and API key before running imports.
+            <a href="/admin/modules" class="alert__link">Open module settings</a>
+          </div>
+        {% endif %}
+
+        <article class="card card--panel">
+          <header class="card__header">
+            <div>
+              <h2 class="card__title">Import Syncro companies</h2>
+              <p class="card__subtitle">
+                Pull the complete Syncro customer list. Existing companies are matched by Syncro ID or name and updated in place.
+              </p>
+            </div>
+          </header>
+          <form class="card__form" data-syncro-company-import>
+            <p class="card__subtitle text-muted">
+              The importer will create new companies, update addresses, and attach Syncro identifiers where missing.
+            </p>
+            <div class="form-actions">
+              <button type="submit" class="button button--primary" {% if not is_configured %}disabled{% endif %}>Import companies</button>
+            </div>
+          </form>
+        </article>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/admin.js" defer></script>
+{% endblock %}
+

@@ -110,6 +110,7 @@ from app.services import modules as modules_service
 from app.services import products as products_service
 from app.services import shop as shop_service
 from app.services import staff_importer
+from app.services import company_importer
 from app.services import ticket_importer
 from app.services import tickets as tickets_service
 from app.services import template_variables
@@ -793,6 +794,28 @@ async def _load_syncro_module() -> dict[str, Any] | None:
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to load Syncro module configuration", error=str(exc))
         return None
+
+
+def _describe_syncro_module(module: dict[str, Any] | None) -> dict[str, Any]:
+    settings_payload = (module or {}).get("settings") or {}
+    base_url = str(settings_payload.get("base_url") or "").strip()
+    api_key_present = bool(str(settings_payload.get("api_key") or "").strip())
+    env_base_url = str(settings.syncro_webhook_url or "").strip()
+    env_api_key = str(settings.syncro_api_key or "").strip()
+    effective_base_url = (base_url or env_base_url).rstrip("/")
+    rate_limit = _parse_int_in_range(
+        settings_payload.get("rate_limit_per_minute"),
+        default=180,
+        minimum=1,
+        maximum=600,
+    )
+    return {
+        "enabled": bool(module and module.get("enabled")),
+        "base_url": base_url,
+        "effective_base_url": effective_base_url,
+        "has_api_key": api_key_present or bool(env_api_key),
+        "rate_limit_per_minute": rate_limit,
+    }
 
 
 async def _build_public_context(
@@ -3984,6 +4007,23 @@ async def admin_companies_page(
     )
 
 
+@app.get("/admin/companies/syncro-import", response_class=HTMLResponse)
+async def admin_syncro_company_import_page(
+    request: Request,
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _render_syncro_company_import(
+        request,
+        current_user,
+        success_message=_sanitize_message(success),
+        error_message=_sanitize_message(error),
+    )
+
+
 @app.post("/admin/companies", response_class=HTMLResponse)
 async def admin_create_company(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
@@ -4524,6 +4564,23 @@ async def import_syncro_contacts(request: Request):
         "updated": summary.updated,
         "skipped": summary.skipped,
     })
+
+
+@app.post("/admin/syncro/import-companies")
+async def import_syncro_companies(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    module = await _load_syncro_module()
+    if not module or not module.get("enabled"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Syncro module is disabled")
+    log_info(
+        "Syncro company import admin request received",
+        user_id=current_user.get("id"),
+        request_path=str(request.url),
+    )
+    summary = await company_importer.import_all_companies()
+    return JSONResponse(summary.as_dict())
 
 
 @app.post("/admin/syncro/import-tickets")
@@ -5899,33 +5956,39 @@ async def _render_syncro_ticket_import(
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     module = await _load_syncro_module()
-    if not module or not module.get("enabled"):
+    module_description = _describe_syncro_module(module)
+    if not module_description.get("enabled"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Syncro ticket import is not available")
-    settings_payload = module.get("settings") or {}
-    base_url = str(settings_payload.get("base_url") or "").strip()
-    api_key_present = bool(str(settings_payload.get("api_key") or "").strip())
-    env_base_url = str(settings.syncro_webhook_url or "").strip()
-    env_api_key = str(settings.syncro_api_key or "").strip()
-    effective_base_url = (base_url or env_base_url).rstrip("/")
-    rate_limit = _parse_int_in_range(
-        settings_payload.get("rate_limit_per_minute"),
-        default=180,
-        minimum=1,
-        maximum=600,
-    )
     extra = {
         "title": "Syncro ticket import",
         "success_message": success_message,
         "error_message": error_message,
-        "syncro_module": {
-            "enabled": True,
-            "base_url": base_url,
-            "effective_base_url": effective_base_url,
-            "has_api_key": api_key_present or bool(env_api_key),
-            "rate_limit_per_minute": rate_limit,
-        },
+        "syncro_module": module_description,
     }
     response = await _render_template("admin/syncro_ticket_import.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
+
+
+async def _render_syncro_company_import(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    module = await _load_syncro_module()
+    module_description = _describe_syncro_module(module)
+    if not module_description.get("enabled"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Syncro company import is not available")
+    extra = {
+        "title": "Syncro company import",
+        "success_message": success_message,
+        "error_message": error_message,
+        "syncro_module": module_description,
+    }
+    response = await _render_template("admin/syncro_company_import.html", request, user, extra=extra)
     response.status_code = status_code
     return response
 
