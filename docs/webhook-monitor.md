@@ -29,6 +29,18 @@ and queue state. The following additions expand the operational tooling:
 - When all events are removed the table displays the existing empty-state
   message to confirm the queue is clear.
 
+## Bulk cleanup for completed investigations
+
+- Super admins can bulk-delete events that no longer require attention using
+  the API or the admin UI.
+- `DELETE /scheduler/webhooks?status=failed` removes all failed deliveries.
+- `DELETE /scheduler/webhooks?status=succeeded` removes all successful
+  deliveries.
+- The admin console now surfaces **Delete all failed** and **Delete all
+  successful** controls alongside the delivery queue filter. Each action
+  displays a confirmation prompt, reports how many records were removed, and
+  refreshes the table so administrators can see the updated queue.
+
 These changes complement the retry workflow and keep the monitor focused on
 actionable events while leaving a short retention period for successful
 deliveries.
