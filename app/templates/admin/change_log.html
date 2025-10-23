@@ -58,6 +58,7 @@
           <tr>
             <th scope="col" data-sort="date">Occurred</th>
             <th scope="col" data-sort="string">Type</th>
+            <th scope="col" data-sort="string">File</th>
             <th scope="col" data-sort="string">Summary</th>
           </tr>
         </thead>
@@ -71,12 +72,19 @@
                 <td data-label="Type">
                   <span class="tag">{{ entry.change_type }}</span>
                 </td>
+                <td data-label="File">
+                  {% if entry.source_file %}
+                    <code>{{ entry.source_file }}</code>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
                 <td data-label="Summary">{{ entry.summary }}</td>
               </tr>
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="3" class="table__empty">No change log entries match the selected filters.</td>
+              <td colspan="4" class="table__empty">No change log entries match the selected filters.</td>
             </tr>
           {% endif %}
         </tbody>
