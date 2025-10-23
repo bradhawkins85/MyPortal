@@ -16,20 +16,39 @@
     return matches ? decodeURIComponent(matches[1]) : '';
   }
 
+  function getMetaCsrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta && typeof meta.getAttribute === 'function'
+      ? meta.getAttribute('content') || ''
+      : '';
+  }
+
   function getCsrfToken() {
+    const metaToken = getMetaCsrfToken();
+    if (metaToken) {
+      return metaToken;
+    }
     return getCookie('myportal_session_csrf');
   }
 
-  async function requestJson(url, options) {
-    const response = await fetch(url, {
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': getCsrfToken(),
-        ...(options && options.headers ? options.headers : {}),
-      },
-      ...options,
-    });
+  async function requestJson(url, options = {}) {
+    const init = { ...options };
+    if (!init.credentials) {
+      init.credentials = 'same-origin';
+    }
+
+    const headers = new Headers(init.headers || {});
+    const csrfToken = getCsrfToken();
+    if (csrfToken && !headers.has('X-CSRF-Token')) {
+      headers.set('X-CSRF-Token', csrfToken);
+    }
+    if (init.body && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
+
+    init.headers = headers;
+
+    const response = await fetch(url, init);
     if (!response.ok) {
       let detail = `${response.status} ${response.statusText}`;
       try {
