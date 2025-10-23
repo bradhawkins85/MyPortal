@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Change log</h2>
+        <p class="card__subtitle">
+          Review recent features and fixes synced from the repository's <code>changes</code> directory. Timestamps display in your local timezone.
+        </p>
+      </div>
+      <form method="get" class="filter-grid">
+        <div class="form-field">
+          <label class="form-label" for="filter-change-type">Change type</label>
+          <select class="form-input" id="filter-change-type" name="change_type">
+            <option value="" {% if not filters.selected_change_type %}selected{% endif %}>All changes</option>
+            {% for change_type in change_types %}
+              <option
+                value="{{ change_type }}"
+                {% if change_type.lower() == filters.selected_change_type %}selected{% endif %}
+              >
+                {{ change_type }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="filter-limit">Limit</label>
+          <input
+            class="form-input"
+            id="filter-limit"
+            type="number"
+            min="1"
+            max="500"
+            name="limit"
+            value="{{ filters.limit }}"
+          />
+        </div>
+        <div class="form-actions form-actions--inline">
+          <button type="submit" class="button">Apply filters</button>
+          <a class="button button--ghost" href="/admin/change-log">Reset</a>
+        </div>
+      </form>
+    </header>
+    <div class="card__controls card__controls--bordered">
+      <input
+        type="search"
+        class="form-input"
+        placeholder="Search change log"
+        aria-label="Search change log"
+        data-table-filter="change-log-table"
+      />
+    </div>
+    <div class="table-wrapper">
+      <table class="table" id="change-log-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="date">Occurred</th>
+            <th scope="col" data-sort="string">Type</th>
+            <th scope="col" data-sort="string">Summary</th>
+            <th scope="col" data-sort="string">Source file</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if change_entries %}
+            {% for entry in change_entries %}
+              <tr>
+                <td data-label="Occurred" data-utc="{{ entry.occurred_at_iso or '' }}" data-value="{{ entry.occurred_at_iso or '' }}">
+                  {{ entry.occurred_at_iso or '—' }}
+                </td>
+                <td data-label="Type">
+                  <span class="tag">{{ entry.change_type }}</span>
+                </td>
+                <td data-label="Summary">{{ entry.summary }}</td>
+                <td data-label="Source file">
+                  {% if entry.source_file %}
+                    <code>{{ entry.source_file }}</code>
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="4" class="table__empty">No change log entries match the selected filters.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/admin.js" defer></script>
+{% endblock %}
