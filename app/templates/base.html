@@ -191,6 +191,16 @@
               </a>
             </li>
             {% if is_super_admin %}
+              {% if syncro_module_enabled %}
+                <li class="menu__item">
+                  <a href="/admin/companies/syncro-import" {% if current_path.startswith('/admin/companies/syncro-import') %}aria-current="page"{% endif %}>
+                    <span class="menu__icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false"><path d="M4 3h6v6H4v12H2V4a1 1 0 0 1 1-1zm8 0h7a1 1 0 0 1 1 1v17h-3v-6h-4v6h-3V4a1 1 0 0 1 1-1zm1 2v4h3V5z"/></svg>
+                    </span>
+                    <span class="menu__label">Syncro company import</span>
+                  </a>
+                </li>
+              {% endif %}
               <li class="menu__item">
                 <a href="/admin/companies" {% if current_path.startswith('/admin/companies') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">

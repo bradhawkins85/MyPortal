@@ -162,6 +162,64 @@
     });
   }
 
+  function bindSyncroCompanyImportForm() {
+    const form = document.querySelector('[data-syncro-company-import]');
+    if (!form) {
+      return;
+    }
+
+    const statusRegion = document.querySelector('[data-syncro-company-import-status]');
+
+    const renderStatus = (message, isError) => {
+      if (!statusRegion) {
+        if (message) {
+          alert(message);
+        }
+        return;
+      }
+      statusRegion.innerHTML = '';
+      if (!message) {
+        statusRegion.hidden = true;
+        return;
+      }
+      const alertBox = document.createElement('div');
+      alertBox.className = isError ? 'alert alert--error' : 'alert';
+      alertBox.setAttribute('role', isError ? 'alert' : 'status');
+      alertBox.textContent = message;
+      statusRegion.appendChild(alertBox);
+      statusRegion.hidden = false;
+    };
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const submitButton = form.querySelector('button[type="submit"]');
+      if (submitButton) {
+        submitButton.disabled = true;
+      }
+      try {
+        renderStatus('Import in progress…', false);
+        const response = await requestJson('/admin/syncro/import-companies', {
+          method: 'POST',
+        });
+        const fetched = Number(response?.fetched ?? 0);
+        const created = Number(response?.created ?? 0);
+        const updated = Number(response?.updated ?? 0);
+        const skipped = Number(response?.skipped ?? 0);
+        renderStatus(
+          `Imported ${fetched} compan${fetched === 1 ? 'y' : 'ies'} (created ${created}, updated ${updated}, skipped ${skipped}).`,
+          false,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to import companies.';
+        renderStatus(message, true);
+      } finally {
+        if (submitButton) {
+          submitButton.disabled = false;
+        }
+      }
+    });
+  }
+
   function parsePermissions(value) {
     return value
       .split(',')
@@ -497,6 +555,7 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     bindSyncroTicketImportForms();
+    bindSyncroCompanyImportForm();
     bindRoleForm();
     bindCompanyAssignmentControls();
     bindApiKeyCopyButtons();
