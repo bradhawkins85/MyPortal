@@ -1,7 +1,9 @@
 import asyncio
-import pytest
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from unittest.mock import AsyncMock
+
+import pytest
 from fastapi import status
 from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
@@ -39,6 +41,11 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(db, "run_migrations", fake_run_migrations)
     monkeypatch.setattr(scheduler_service, "start", fake_start)
     monkeypatch.setattr(scheduler_service, "stop", fake_stop)
+    monkeypatch.setattr(
+        main_module.change_log_service,
+        "sync_change_log_sources",
+        AsyncMock(return_value=None),
+    )
 
 
 @pytest.fixture
@@ -101,6 +108,11 @@ def test_register_allows_general_signup_after_first_user(monkeypatch, active_ses
     monkeypatch.setattr(auth_routes.user_repo, "get_user_by_email", fake_get_user_by_email)
     monkeypatch.setattr(auth_routes.user_repo, "create_user", fake_create_user)
     monkeypatch.setattr(
+        auth_routes.company_repo,
+        "get_company_by_email_domain",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
         auth_routes.user_company_repo,
         "list_companies_for_user",
         fake_list_companies_for_user,
@@ -132,6 +144,101 @@ def test_register_allows_general_signup_after_first_user(monkeypatch, active_ses
     assert call_args.get("is_super_admin") is False
     assert call_args.get("company_id") is None
     assert call_args.get("active_company_id") is None
+
+
+def test_register_assigns_company_by_email_domain(monkeypatch, active_session):
+    now = datetime(2025, 1, 1, 8, 0, tzinfo=timezone.utc)
+    matched_company = {"id": 12, "name": "Example", "email_domains": ["example.com"]}
+    created_user = {
+        "id": active_session.user_id,
+        "email": "new.user@example.com",
+        "first_name": "New",
+        "last_name": "User",
+        "mobile_phone": None,
+        "company_id": matched_company["id"],
+        "is_super_admin": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+    captured: dict[str, Any] = {}
+
+    async def fake_count_users():
+        return 5
+
+    async def fake_get_user_by_email(email: str):
+        return None
+
+    async def fake_get_company_by_email_domain(domain: str):
+        captured["domain"] = domain
+        return matched_company
+
+    async def fake_create_user(**kwargs):
+        captured["create_kwargs"] = kwargs
+        return created_user
+
+    async def fake_assign_user_to_company(**kwargs):
+        captured["assignment"] = kwargs
+
+    async def fake_list_companies_for_user(user_id: int):
+        assert user_id == created_user["id"]
+        return [
+            {
+                "company_id": matched_company["id"],
+            }
+        ]
+
+    async def fake_create_session(user_id, request, active_company_id=None):
+        captured["active_company_id"] = active_company_id
+        return active_session
+
+    def fake_apply_session_cookies(response, session):
+        return None
+
+    monkeypatch.setattr(auth_routes.user_repo, "count_users", fake_count_users)
+    monkeypatch.setattr(auth_routes.user_repo, "get_user_by_email", fake_get_user_by_email)
+    monkeypatch.setattr(auth_routes.user_repo, "create_user", fake_create_user)
+    monkeypatch.setattr(
+        auth_routes.company_repo,
+        "get_company_by_email_domain",
+        fake_get_company_by_email_domain,
+    )
+    monkeypatch.setattr(
+        auth_routes.user_company_repo,
+        "assign_user_to_company",
+        fake_assign_user_to_company,
+    )
+    monkeypatch.setattr(
+        auth_routes.user_company_repo,
+        "list_companies_for_user",
+        fake_list_companies_for_user,
+    )
+    monkeypatch.setattr(auth_routes.session_manager, "create_session", fake_create_session)
+    monkeypatch.setattr(auth_routes.session_manager, "apply_session_cookies", fake_apply_session_cookies)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/auth/register",
+                json={
+                    "email": created_user["email"],
+                    "password": "strong-password",
+                    "first_name": created_user["first_name"],
+                    "last_name": created_user["last_name"],
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    data = response.json()
+    assert captured.get("domain") == "example.com"
+    assert data["user"]["company_id"] == matched_company["id"]
+    assert captured["create_kwargs"]["company_id"] == matched_company["id"]
+    assert captured["assignment"]["company_id"] == matched_company["id"]
+    assert captured["assignment"]["user_id"] == created_user["id"]
+    assert captured["active_company_id"] == matched_company["id"]
 
 
 def test_non_admin_ticket_listing_scoped_to_requester(monkeypatch):
