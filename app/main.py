@@ -4745,9 +4745,10 @@ async def import_syncro_companies(request: Request):
             status_code=status.HTTP_202_ACCEPTED,
         )
     message = f"Syncro company import queued. Task ID: {task_id[:8]}"
-    redirect_url = str(request.url_for("admin_syncro_company_import_page"))
+    redirect_url = str(request.url_for("admin_modules_page"))
     if message:
         redirect_url = f"{redirect_url}?{urlencode({'success': message})}"
+    redirect_url = f"{redirect_url}#module-syncro"
     return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
 

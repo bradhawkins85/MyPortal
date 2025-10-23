@@ -152,7 +152,8 @@ def test_import_companies_form_redirect(monkeypatch):
     location = response.headers.get("location")
     assert location is not None
     parsed = urlparse(location)
-    assert parsed.path == "/admin/companies/syncro-import"
+    assert parsed.path == "/admin/modules"
+    assert parsed.fragment == "module-syncro"
     params = parse_qs(parsed.query)
     expected_task_id = captured["task_id"][:8]
     assert params["success"] == [f"Syncro company import queued. Task ID: {expected_task_id}"]
