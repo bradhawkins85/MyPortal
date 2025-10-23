@@ -256,12 +256,18 @@ restart_service() {
   fi
 
   if (( ! succeeded )); then
-    if systemctl --user restart "$service_name" >/dev/null 2>&1; then
-      echo "Restarted ${service_name} via systemctl --user." >&2
+    if command -v sudo >/dev/null 2>&1; then
+      if sudo systemctl restart "$service_name" >/dev/null 2>&1; then
+        echo "Restarted ${service_name} via sudo systemctl (interactive)." >&2
+        succeeded=1
+      else
+        local exit_code=$?
+        attempts+=("sudo systemctl restart ${service_name} (exit ${exit_code})")
+      fi
+    elif systemctl restart "$service_name" >/dev/null 2>&1; then
+      # Fallback in case sudo is unavailable but a direct restart now works.
+      echo "Restarted ${service_name} via systemctl." >&2
       succeeded=1
-    else
-      local exit_code=$?
-      attempts+=("systemctl --user restart ${service_name} (exit ${exit_code})")
     fi
   fi
 
