@@ -132,13 +132,32 @@ async def register(
 
     matched_company_id: int | None = None
     if not is_first_user:
-        domain = payload.email.split("@")[-1].lower()
+        domain = payload.email.split("@")[-1].strip().lower()
         matched = await company_repo.get_company_by_email_domain(domain)
-        if matched and matched.get("id") is not None:
-            try:
-                matched_company_id = int(matched["id"])
-            except (TypeError, ValueError):
-                matched_company_id = None
+        if not matched:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Registration is restricted to approved company domains",
+            )
+
+        raw_company_id = matched.get("id")
+        if raw_company_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Registration is restricted to approved company domains",
+            )
+
+        try:
+            matched_company_id = int(raw_company_id)
+        except (TypeError, ValueError) as exc:
+            log_error(
+                "Failed to coerce matched company identifier during registration",
+                error=str(exc),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Registration is restricted to approved company domains",
+            ) from exc
 
     created = await user_repo.create_user(
         email=payload.email,
