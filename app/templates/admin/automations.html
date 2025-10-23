@@ -140,6 +140,19 @@
                           {% endif %}
                           <button type="submit" class="button button--ghost">Run now</button>
                         </form>
+                        <form
+                          action="/admin/automations/{{ automation.id }}/delete"
+                          method="post"
+                          class="inline-form"
+                          data-automation-delete
+                          data-automation-id="{{ automation.id }}"
+                          data-automation-name="{{ automation.name }}"
+                        >
+                          {% if csrf_token %}
+                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                          {% endif %}
+                          <button type="submit" class="button button--danger">Delete</button>
+                        </form>
                       </div>
                     </td>
                   </tr>

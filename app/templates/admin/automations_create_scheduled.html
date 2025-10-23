@@ -148,6 +148,23 @@
                 <button type="submit" class="button button--primary">{{ submit_text }}</button>
               </div>
             </form>
+            {% if values.get('id') %}
+              <div class="form-actions">
+                <form
+                  action="/admin/automations/{{ values.get('id') }}/delete"
+                  method="post"
+                  class="inline-form"
+                  data-automation-delete
+                  data-automation-id="{{ values.get('id') }}"
+                  data-automation-name="{{ values.get('name', '') }}"
+                >
+                  {% if csrf_token %}
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                  {% endif %}
+                  <button type="submit" class="button button--danger">Delete automation</button>
+                </form>
+              </div>
+            {% endif %}
           </div>
         </section>
       </div>

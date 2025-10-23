@@ -6922,6 +6922,44 @@ async def admin_execute_automation(automation_id: int, request: Request):
     )
 
 
+@app.post("/admin/automations/{automation_id}/delete", response_class=HTMLResponse)
+async def admin_delete_automation(automation_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    automation = await automation_repo.get_automation(automation_id)
+    if not automation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+
+    try:
+        await automation_repo.delete_automation(automation_id)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to delete automation",
+            automation_id=automation_id,
+            error=str(exc),
+        )
+        return await _render_automations_dashboard(
+            request,
+            current_user,
+            error_message="Unable to delete the automation. Please try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    log_info(
+        "Automation deleted",
+        automation_id=automation_id,
+        deleted_by=current_user.get("id") if isinstance(current_user, Mapping) else None,
+    )
+
+    message = quote(f"Automation {automation_id} deleted.")
+    return RedirectResponse(
+        url=f"/admin/automations?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 async def _render_modules_dashboard(
     request: Request,
     user: dict[str, Any],
