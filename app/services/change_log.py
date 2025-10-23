@@ -9,6 +9,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Sequence
 
+from app.core.database import db
 from app.core.logging import log_error, log_info
 from app.repositories import change_log as change_log_repo
 
@@ -209,6 +210,10 @@ async def sync_change_log_sources(*, base_path: Path | None = None, repository=c
     root = base_path or _project_root()
     changes_dir = root / "changes"
     changes_dir.mkdir(parents=True, exist_ok=True)
+
+    if not db.is_connected():
+        log_info("Skipping change log synchronisation because the database is not connected")
+        return
 
     entries: list[ChangeLogEntry] = []
     for path in sorted(changes_dir.glob("*.json")):

@@ -66,7 +66,7 @@ def active_session() -> SessionData:
     )
 
 
-def test_register_allows_general_signup_after_first_user(monkeypatch, active_session):
+def test_register_rejects_unapproved_domain_after_first_user(monkeypatch, active_session):
     now = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
     created_user = {
         "id": active_session.user_id,
@@ -79,8 +79,6 @@ def test_register_allows_general_signup_after_first_user(monkeypatch, active_ses
         "created_at": now,
         "updated_at": now,
     }
-    call_args: dict[str, object] = {}
-
     async def fake_count_users():
         return 3
 
@@ -89,20 +87,19 @@ def test_register_allows_general_signup_after_first_user(monkeypatch, active_ses
         return None
 
     async def fake_create_user(**kwargs):
-        call_args.update(kwargs)
-        return created_user
+        raise AssertionError("create_user should not be called when domain is unapproved")
 
     async def fake_first_accessible_company_id(user: Mapping[str, Any]):
         assert user["id"] == created_user["id"]
         return None
+    async def fake_list_companies_for_user(*_args, **_kwargs):
+        raise AssertionError("list_companies_for_user should not be called when domain is unapproved")
 
-    async def fake_create_session(user_id, request, active_company_id=None):
-        assert user_id == created_user["id"]
-        call_args["active_company_id"] = active_company_id
-        return active_session
+    async def fake_create_session(*_args, **_kwargs):
+        raise AssertionError("create_session should not be called when domain is unapproved")
 
-    def fake_apply_session_cookies(response, session):
-        return None
+    def fake_apply_session_cookies(*_args, **_kwargs):
+        raise AssertionError("apply_session_cookies should not be called when domain is unapproved")
 
     monkeypatch.setattr(auth_routes.user_repo, "count_users", fake_count_users)
     monkeypatch.setattr(auth_routes.user_repo, "get_user_by_email", fake_get_user_by_email)
@@ -137,13 +134,9 @@ def test_register_allows_general_signup_after_first_user(monkeypatch, active_ses
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 201
+    assert response.status_code == status.HTTP_403_FORBIDDEN
     data = response.json()
-    assert data["user"]["email"] == created_user["email"]
-    assert data["user"]["is_super_admin"] is False
-    assert call_args.get("is_super_admin") is False
-    assert call_args.get("company_id") is None
-    assert call_args.get("active_company_id") is None
+    assert data["detail"] == "Registration is restricted to approved company domains"
 
 
 def test_register_assigns_company_by_email_domain(monkeypatch, active_session):
@@ -235,6 +228,80 @@ def test_register_assigns_company_by_email_domain(monkeypatch, active_session):
     assert captured["assignment"]["company_id"] == matched_company["id"]
     assert captured["assignment"]["user_id"] == created_user["id"]
     assert captured["active_company_id"] == matched_company["id"]
+
+
+def test_register_allows_first_user_without_company_domain(monkeypatch, active_session):
+    now = datetime(2025, 1, 1, 7, 0, tzinfo=timezone.utc)
+    created_user = {
+        "id": active_session.user_id,
+        "email": "admin@example.net",
+        "first_name": "Portal",
+        "last_name": "Admin",
+        "mobile_phone": None,
+        "company_id": None,
+        "is_super_admin": True,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    async def fake_count_users():
+        return 0
+
+    async def fake_get_user_by_email(email: str):
+        assert email == created_user["email"]
+        return None
+
+    async def fake_create_user(**kwargs):
+        assert kwargs["is_super_admin"] is True
+        return created_user
+
+    async def fake_list_companies_for_user(user_id: int):
+        assert user_id == created_user["id"]
+        return []
+
+    async def fake_create_session(user_id, request, active_company_id=None):
+        assert user_id == created_user["id"]
+        return active_session
+
+    def fake_apply_session_cookies(response, session):
+        return None
+
+    monkeypatch.setattr(auth_routes.user_repo, "count_users", fake_count_users)
+    monkeypatch.setattr(auth_routes.user_repo, "get_user_by_email", fake_get_user_by_email)
+    monkeypatch.setattr(auth_routes.user_repo, "create_user", fake_create_user)
+    monkeypatch.setattr(
+        auth_routes.company_repo,
+        "get_company_by_email_domain",
+        AsyncMock(side_effect=AssertionError("Company domain lookup should not run for first user")),
+    )
+    monkeypatch.setattr(
+        auth_routes.user_company_repo,
+        "list_companies_for_user",
+        fake_list_companies_for_user,
+    )
+    monkeypatch.setattr(auth_routes.session_manager, "create_session", fake_create_session)
+    monkeypatch.setattr(auth_routes.session_manager, "apply_session_cookies", fake_apply_session_cookies)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/auth/register",
+                json={
+                    "email": created_user["email"],
+                    "password": "strong-password",
+                    "first_name": created_user["first_name"],
+                    "last_name": created_user["last_name"],
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == status.HTTP_201_CREATED
+    data = response.json()
+    assert data["user"]["email"] == created_user["email"]
+    assert data["user"]["is_super_admin"] is True
 
 
 def test_non_admin_ticket_listing_scoped_to_requester(monkeypatch):
