@@ -1,4 +1,4 @@
-CREATE TABLE user_companies (
+CREATE TABLE IF NOT EXISTS user_companies (
   user_id INT NOT NULL,
   company_id INT NOT NULL,
   can_manage_licenses TINYINT(1) DEFAULT 0,

@@ -1,4 +1,4 @@
-CREATE TABLE staff_licenses (
+CREATE TABLE IF NOT EXISTS staff_licenses (
   staff_id INT NOT NULL,
   license_id INT NOT NULL,
   PRIMARY KEY (staff_id, license_id),

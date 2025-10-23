@@ -1,4 +1,4 @@
-CREATE TABLE scheduled_tasks (
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
   id INT AUTO_INCREMENT PRIMARY KEY,
   company_id INT NULL,
   name VARCHAR(255) NOT NULL,

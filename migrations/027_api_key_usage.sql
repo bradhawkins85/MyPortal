@@ -1,4 +1,4 @@
-CREATE TABLE api_key_usage (
+CREATE TABLE IF NOT EXISTS api_key_usage (
   api_key_id INT NOT NULL,
   ip_address VARCHAR(45) NOT NULL,
   usage_count INT NOT NULL DEFAULT 1,
