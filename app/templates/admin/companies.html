@@ -46,6 +46,7 @@
                 <th scope="col" data-sort="string">Name</th>
                 <th scope="col" data-sort="string">Syncro ID</th>
                 <th scope="col" data-sort="string">Xero ID</th>
+                <th scope="col" data-sort="string">Email domains</th>
                 <th scope="col" data-sort="string">VIP</th>
                 <th scope="col" class="table__actions">Actions</th>
               </tr>
@@ -75,6 +76,15 @@
                         form="company-{{ company.id }}-form"
                       />
                     </td>
+                    <td data-label="Email domains">
+                      <textarea
+                        name="emailDomains"
+                        class="form-input form-input--textarea"
+                        rows="2"
+                        placeholder="example.com, example.org"
+                        form="company-{{ company.id }}-form"
+                      >{{ company.email_domains | join(', ') }}</textarea>
+                    </td>
                     <td data-label="VIP">
                       <label class="checkbox">
                         <input
@@ -102,7 +112,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="5" class="table__empty">No companies have been registered.</td>
+                  <td colspan="6" class="table__empty">No companies have been registered.</td>
                 </tr>
               {% endif %}
             </tbody>
@@ -137,6 +147,17 @@
             <div class="form-field">
               <label class="form-label" for="company-xero">Xero ID</label>
               <input id="company-xero" name="xeroId" class="form-input" maxlength="255" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="company-email-domains">Email domains</label>
+              <textarea
+                id="company-email-domains"
+                name="emailDomains"
+                class="form-input form-input--textarea"
+                rows="2"
+                placeholder="example.com, example.org"
+              ></textarea>
+              <p class="form-help">Use commas or new lines to list domains for automatic company matching.</p>
             </div>
             <div class="form-field form-field--checkbox">
               <label class="checkbox" for="company-vip">

@@ -15,6 +15,7 @@ from app.api.dependencies.database import require_database
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import auth as auth_repo
+from app.repositories import companies as company_repo
 from app.repositories import users as user_repo
 from app.repositories import user_companies as user_company_repo
 from app.schemas.auth import (
@@ -129,15 +130,31 @@ async def register(
     if existing_user:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
+    matched_company_id: int | None = None
+    if not is_first_user:
+        domain = payload.email.split("@")[-1].lower()
+        matched = await company_repo.get_company_by_email_domain(domain)
+        if matched and matched.get("id") is not None:
+            try:
+                matched_company_id = int(matched["id"])
+            except (TypeError, ValueError):
+                matched_company_id = None
+
     created = await user_repo.create_user(
         email=payload.email,
         password=payload.password,
         first_name=payload.first_name,
         last_name=payload.last_name,
         mobile_phone=payload.mobile_phone,
-        company_id=payload.company_id if is_first_user else None,
+        company_id=payload.company_id if is_first_user else matched_company_id,
         is_super_admin=is_first_user,
     )
+
+    if matched_company_id is not None:
+        await user_company_repo.assign_user_to_company(
+            user_id=created["id"],
+            company_id=matched_company_id,
+        )
 
     active_company_id = await _determine_active_company_id(created)
     session = await session_manager.create_session(
