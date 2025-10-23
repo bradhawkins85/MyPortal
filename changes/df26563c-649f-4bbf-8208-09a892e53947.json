@@ -1,0 +1,7 @@
+{
+  "guid": "df26563c-649f-4bbf-8208-09a892e53947",
+  "occurred_at": "2025-10-23T12:21Z",
+  "change_type": "Fix",
+  "summary": "Displayed module icons in collapsed module headers for easier identification.",
+  "content_hash": "c7eaa07632bd02233810e720c8cb3fa70a20f19a2f9700284369c97f7d739b5f"
+}

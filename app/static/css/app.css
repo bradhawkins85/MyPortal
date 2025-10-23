@@ -2998,6 +2998,14 @@ body {
   line-height: 1;
 }
 
+.card__module-icon--summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  min-width: 1.75rem;
+}
+
 .card__module-actions {
   display: flex;
   flex-direction: column;
