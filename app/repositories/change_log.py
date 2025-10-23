@@ -87,3 +87,42 @@ async def upsert_change(
             content_hash,
         ),
     )
+
+
+async def list_change_log_entries(
+    *, change_type: str | None = None, limit: int = 200
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if change_type:
+        clauses.append("change_type = %s")
+        params.append(change_type)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+    rows = await db.fetch_all(
+        f"""
+        SELECT guid, occurred_at_utc, change_type, summary, source_file, content_hash
+        FROM change_log
+        {where}
+        ORDER BY occurred_at_utc DESC
+        LIMIT %s
+        """,
+        tuple(params),
+    )
+    return [row for row in (_normalise_row(row) for row in rows) if row]
+
+
+async def list_change_types() -> list[str]:
+    rows = await db.fetch_all(
+        "SELECT DISTINCT change_type FROM change_log WHERE change_type IS NOT NULL ORDER BY change_type ASC"
+    )
+    types: list[str] = []
+    for row in rows:
+        value = row.get("change_type") if isinstance(row, dict) else None
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", errors="ignore")
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                types.append(stripped)
+    return types
