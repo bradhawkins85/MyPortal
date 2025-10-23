@@ -206,6 +206,12 @@
           method: 'POST',
           body: JSON.stringify({}),
         });
+        const status = String(response?.status ?? '').toLowerCase();
+        if (status === 'queued') {
+          const message = response?.message || 'Syncro company import queued. Monitor the webhook monitor for updates.';
+          renderStatus(message, false);
+          return;
+        }
         const fetched = Number(response?.fetched ?? 0);
         const created = Number(response?.created ?? 0);
         const updated = Number(response?.updated ?? 0);

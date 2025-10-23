@@ -1,0 +1,7 @@
+{
+  "guid": "f8be38ca-0fc9-44fe-828a-6e971485bd77",
+  "occurred_at": "2025-10-23T12:07Z",
+  "change_type": "Feature",
+  "summary": "Queued Syncro and Tactical RMM company synchronisation jobs to run asynchronously from the admin tools.",
+  "content_hash": "8171e9acd78b111652ae01fd0481dccde80e4c41af9002f24032076b2af207d4"
+}
