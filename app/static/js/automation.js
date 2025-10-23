@@ -774,12 +774,6 @@
       select.appendChild(option);
     });
 
-    const defaultFilter = FILTER_SNIPPETS.find((snippet) => snippet && snippet.value);
-    if (defaultFilter && !textarea.value.trim()) {
-      insertSnippet(textarea, defaultFilter.value);
-      select.value = '';
-    }
-
     const hasTemplates = select.options.length > 1;
     select.disabled = !hasTemplates;
     button.disabled = !hasTemplates;
