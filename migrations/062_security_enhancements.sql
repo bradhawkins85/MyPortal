@@ -1,4 +1,4 @@
-CREATE TABLE user_sessions (
+CREATE TABLE IF NOT EXISTS user_sessions (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   session_token CHAR(64) NOT NULL UNIQUE,
@@ -13,7 +13,7 @@ CREATE TABLE user_sessions (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE TABLE login_rate_limits (
+CREATE TABLE IF NOT EXISTS login_rate_limits (
   id INT AUTO_INCREMENT PRIMARY KEY,
   identifier VARCHAR(255) NOT NULL UNIQUE,
   window_start DATETIME NOT NULL,

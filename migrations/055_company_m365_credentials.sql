@@ -1,4 +1,4 @@
-CREATE TABLE company_m365_credentials (
+CREATE TABLE IF NOT EXISTS company_m365_credentials (
   id INT AUTO_INCREMENT PRIMARY KEY,
   company_id INT NOT NULL UNIQUE,
   tenant_id VARCHAR(255) NOT NULL,

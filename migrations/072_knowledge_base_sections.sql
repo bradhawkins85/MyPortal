@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS knowledge_base_sections (
     CONSTRAINT fk_kb_sections_article FOREIGN KEY (article_id) REFERENCES knowledge_base_articles(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE INDEX idx_kb_sections_article_position ON knowledge_base_sections (article_id, position);
+CREATE INDEX IF NOT EXISTS idx_kb_sections_article_position ON knowledge_base_sections (article_id, position);
 
 INSERT INTO knowledge_base_sections (article_id, position, heading, content)
 SELECT id AS article_id,
