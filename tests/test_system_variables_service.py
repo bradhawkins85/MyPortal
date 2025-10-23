@@ -44,6 +44,21 @@ def test_system_variables_filter_sensitive_env(monkeypatch):
             "labels": ["urgent", "onsite"],
             "priority": "high",
             "requester": {"email": "user@example.com"},
+            "status": "open",
+            "category": "hardware",
+            "external_reference": "RMM-42",
+            "ai_summary": "Printer offline awaiting vendor response",
+            "ai_tags": ["printer", "hardware"],
+            "company": {"id": 7, "name": "Acme Corp"},
+            "company_name": "Acme Corp",
+            "assigned_user": {
+                "id": 9,
+                "email": "tech@example.com",
+                "first_name": "Taylor",
+                "last_name": "Nguyen",
+            },
+            "assigned_user_email": "tech@example.com",
+            "assigned_user_display_name": "Taylor Nguyen",
         }
     ],
 )
@@ -57,3 +72,12 @@ def test_system_variables_include_ticket_tokens(ticket):
     assert variables["TICKET_LABELS_0"] == "urgent"
     assert variables["TICKET_LABELS_1"] == "onsite"
     assert variables["TICKET_REQUESTER_EMAIL"] == "user@example.com"
+    assert variables["TICKET_COMPANY_NAME"] == "Acme Corp"
+    assert variables["TICKET_ASSIGNED_USER_EMAIL"] == "tech@example.com"
+    assert variables["TICKET_ASSIGNED_USER_DISPLAY_NAME"] == "Taylor Nguyen"
+    assert variables["TICKET_AI_SUMMARY"] == "Printer offline awaiting vendor response"
+    assert variables["TICKET_AI_TAGS_0"] == "printer"
+    assert variables["TICKET_STATUS"] == "open"
+    assert variables["TICKET_CATEGORY"] == "hardware"
+    assert variables["TICKET_PRIORITY"] == "high"
+    assert variables["TICKET_EXTERNAL_REFERENCE"] == "RMM-42"
