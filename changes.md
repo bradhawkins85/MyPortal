@@ -1,3 +1,4 @@
+- 2025-10-30, 00:55 UTC, Fix, Normalised shop package payloads before JSON serialisation so the packages category renders without server errors
 - 2025-10-23, 01:20 UTC, Feature, Added super admin deletion controls for scheduled and event automations with confirmation prompts and audit logging
 - 2025-10-29, 10:45 UTC, Fix, Redacted TacticalRMM and ntfy credentials in module management while keeping stored keys when left blank
 - 2025-10-23, 01:25 UTC, Feature, Added enriched ticket automation variables including company and assignment metadata with AI and status fields for template tokens
