@@ -1,0 +1,7 @@
+{
+  "guid": "28fa0aa8-199f-4f3b-b69c-2deeac082f70",
+  "occurred_at": "2025-10-29T13:06Z",
+  "change_type": "Change",
+  "summary": "Moved the Forms admin control from the sidebar into the Forms page header for quicker access.",
+  "content_hash": "d20a77292975fa416384df731948f07fd52567717835325da32da981b29a6c7b"
+}
