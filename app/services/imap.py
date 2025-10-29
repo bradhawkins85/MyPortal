@@ -4,11 +4,14 @@ import email
 import imaplib
 from datetime import datetime, timezone
 from email.header import decode_header, make_header
+from email.utils import getaddresses
 from typing import Any, Mapping
 
 from app.core.logging import log_error, log_info
 from app.repositories import imap_accounts as imap_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
+from app.repositories import companies as company_repo
+from app.repositories import staff as staff_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import modules as modules_service
 from app.services import tickets as tickets_service
@@ -44,6 +47,68 @@ def _normalise_bool(value: Any, *, default: bool = False) -> bool:
         if lowered in {"0", "false", "no", "off"}:
             return False
     return default
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_email_addresses(from_header: str | None) -> list[str]:
+    if not from_header:
+        return []
+    addresses = []
+    for _name, email_address in getaddresses([from_header]):
+        candidate = (email_address or "").strip()
+        if candidate:
+            addresses.append(candidate)
+    return addresses
+
+
+async def _resolve_ticket_entities(
+    from_header: str | None,
+    *,
+    default_company_id: int | None = None,
+) -> tuple[int | None, int | None]:
+    email_addresses = _extract_email_addresses(from_header)
+    seen_domains: set[str] = set()
+
+    for email_address in email_addresses:
+        if "@" not in email_address:
+            continue
+        domain = email_address.rsplit("@", 1)[1].lower()
+        if not domain:
+            continue
+        if domain in seen_domains:
+            continue
+        seen_domains.add(domain)
+        company = await company_repo.get_company_by_email_domain(domain)
+        if not company:
+            continue
+        company_id = _int_or_none(company.get("id"))
+        if company_id is None:
+            continue
+        staff_member = await staff_repo.get_staff_by_company_and_email(company_id, email_address)
+        requester_id = _int_or_none(staff_member.get("id")) if staff_member else None
+        return company_id, requester_id
+
+    company_id = _int_or_none(default_company_id)
+    requester_id: int | None = None
+
+    if company_id is not None:
+        checked: set[str] = set()
+        for email_address in email_addresses:
+            if email_address in checked:
+                continue
+            checked.add(email_address)
+            staff_member = await staff_repo.get_staff_by_company_and_email(company_id, email_address)
+            if staff_member:
+                requester_id = _int_or_none(staff_member.get("id"))
+                break
+
+    return company_id, requester_id
 
 
 async def list_accounts() -> list[dict[str, Any]]:
@@ -335,12 +400,17 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             if body:
                 description_lines.append("\n" + body)
             description = "\n\n".join(description_lines).strip()
+            default_company_id = _int_or_none(account.get("company_id"))
+            company_id, requester_id = await _resolve_ticket_entities(
+                from_address,
+                default_company_id=default_company_id,
+            )
             try:
                 ticket = await tickets_service.create_ticket(
                     subject=subject,
                     description=description or "Email body unavailable.",
-                    requester_id=None,
-                    company_id=int(account.get("company_id")) if account.get("company_id") else None,
+                    requester_id=requester_id,
+                    company_id=company_id,
                     assigned_user_id=None,
                     priority="normal",
                     status="open",
