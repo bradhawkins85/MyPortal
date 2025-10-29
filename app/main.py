@@ -3110,6 +3110,7 @@ async def view_cart(
     items = await cart_repo.list_items(session.id)
     cart_items: list[dict[str, Any]] = []
     total = Decimal("0")
+    cart_items_payload: list[dict[str, Any]] = []
     for item in items:
         unit_price = item.get("unit_price")
         if not isinstance(unit_price, Decimal):
@@ -3121,12 +3122,26 @@ async def view_cart(
         hydrated["unit_price"] = unit_price
         hydrated["line_total"] = line_total
         cart_items.append(hydrated)
+        cart_items_payload.append(
+            {
+                "product_id": hydrated.get("product_id"),
+                "name": hydrated.get("product_name"),
+                "sku": hydrated.get("product_sku"),
+                "vendor_sku": hydrated.get("product_vendor_sku"),
+                "description": hydrated.get("product_description"),
+                "image_url": hydrated.get("product_image_url"),
+                "unit_price": f"{unit_price:.2f}",
+                "quantity": quantity,
+                "line_total": f"{line_total:.2f}",
+            }
+        )
 
     extra = {
         "title": "Cart",
         "cart_items": cart_items,
         "cart_total": total,
         "order_message": order_message,
+        "cart_items_payload": cart_items_payload,
     }
     return await _render_template("shop/cart.html", request, user, extra=extra)
 
