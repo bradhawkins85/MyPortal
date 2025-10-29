@@ -38,7 +38,7 @@
         <dd>
           {% if package.archived %}
             <span class="badge badge--muted">Archived</span>
-          {% elif not package.items %}
+          {% elif not package["items"] %}
             <span class="badge badge--warning">No items</span>
           {% elif package.is_restricted %}
             <span class="badge badge--warning">Contains archived/restricted products</span>
@@ -104,7 +104,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for item in package.items %}
+        {% for item in package["items"] %}
           <tr data-product-id="{{ item.product_id }}">
             <td data-label="Product">{{ item.product_name }}</td>
             <td data-label="SKU">{{ item.product_sku }}</td>
