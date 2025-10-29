@@ -175,6 +175,15 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         },
     },
     {
+        "slug": "imap",
+        "name": "IMAP Mailboxes",
+        "description": "Import support emails from mailboxes into the ticketing queue.",
+        "icon": "📥",
+        "settings": {
+            "manage_url": "/admin/modules/imap",
+        },
+    },
+    {
         "slug": "tacticalrmm",
         "name": "Tactical RMM",
         "description": "Call Tactical RMM webhook endpoints for automation actions.",
@@ -270,6 +279,9 @@ def _coerce_settings(
                 "auth_token": str(merged.get("auth_token", "")).strip(),
             }
         )
+    elif slug == "imap":
+        manage_url = str(merged.get("manage_url") or "").strip() or "/admin/modules/imap"
+        merged.update({"manage_url": manage_url})
     elif slug == "chatgpt-mcp":
         overrides = payload or {}
         shared_secret_override = overrides.get("shared_secret")
