@@ -6,7 +6,7 @@ import imaplib
 import re
 from datetime import datetime, timezone
 from email.header import decode_header, make_header
-from email.utils import getaddresses
+from email.utils import getaddresses, parsedate_to_datetime
 from typing import Any, Mapping
 
 from app.core.logging import log_error, log_info
@@ -15,10 +15,12 @@ from app.repositories import imap_accounts as imap_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import staff as staff_repo
 from app.repositories import users as users_repo
+from app.repositories import tickets as tickets_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import modules as modules_service
 from app.services import system_state
 from app.services import tickets as tickets_service
+from app.services.sanitization import sanitize_rich_text
 from app.services.scheduler import scheduler_service
 
 _MAX_FETCH_BYTES = 5 * 1024 * 1024
@@ -486,6 +488,19 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             subject = _decode_subject(message) or f"Email from {username}"
             body = _extract_body(message)
             message_id = _normalise_string(message.get("Message-ID"), default=uid)
+            received_at: datetime | None = None
+            raw_date = message.get("Date")
+            if raw_date:
+                try:
+                    parsed_date = parsedate_to_datetime(raw_date)
+                except (TypeError, ValueError, IndexError, OverflowError):
+                    parsed_date = None
+                if parsed_date is not None:
+                    if parsed_date.tzinfo is None:
+                        parsed_date = parsed_date.replace(tzinfo=timezone.utc)
+                    else:
+                        parsed_date = parsed_date.astimezone(timezone.utc)
+                    received_at = parsed_date
             from_address = _normalise_string(message.get("From"))
             description_lines = []
             if from_address:
@@ -531,6 +546,28 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 )
                 continue
             ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
+            if isinstance(ticket_id, int):
+                conversation_source = description or body or ""
+                sanitized = sanitize_rich_text(conversation_source)
+                if sanitized.has_rich_content:
+                    reply_created_at = received_at or datetime.now(timezone.utc)
+                    try:
+                        await tickets_repo.create_reply(
+                            ticket_id=int(ticket_id),
+                            author_id=None,
+                            body=sanitized.html,
+                            is_internal=False,
+                            external_reference=message_id if message_id else None,
+                            created_at=reply_created_at,
+                        )
+                    except Exception as exc:  # pragma: no cover - defensive logging
+                        log_error(
+                            "Failed to add imported email to conversation history",
+                            account_id=account_id,
+                            uid=uid,
+                            ticket_id=ticket_id,
+                            error=str(exc),
+                        )
             await _record_message(
                 account_id=int(account_id),
                 uid=uid,
