@@ -6767,7 +6767,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     body_raw = str(body_value) if isinstance(body_value, str) else ""
     sanitized_body = sanitize_rich_text(body_raw)
     is_internal = str(form.get("isInternal", "")).lower() in {"1", "true", "on", "yes"}
-    if not sanitized_body.text_content:
+    if not sanitized_body.has_rich_content:
         return await _render_ticket_detail(
             request,
             current_user,
