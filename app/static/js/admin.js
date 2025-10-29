@@ -324,6 +324,40 @@
     updateState();
   }
 
+  function bindTicketStatusAutoSubmit() {
+    const forms = document.querySelectorAll('[data-ticket-status-form]');
+    if (!forms.length) {
+      return;
+    }
+
+    forms.forEach((form) => {
+      const select = form.querySelector('[data-ticket-status-select]');
+      if (!select) {
+        return;
+      }
+
+      let hasSubmitted = false;
+
+      form.addEventListener('submit', () => {
+        hasSubmitted = true;
+        select.disabled = true;
+        form.classList.add('inline-form--submitting');
+      });
+
+      select.addEventListener('change', () => {
+        if (hasSubmitted) {
+          return;
+        }
+        hasSubmitted = true;
+        if (typeof form.requestSubmit === 'function') {
+          form.requestSubmit();
+        } else {
+          form.submit();
+        }
+      });
+    });
+  }
+
   function parsePermissions(value) {
     return value
       .split(',')
@@ -669,6 +703,7 @@
     bindSyncroTicketImportForms();
     bindSyncroCompanyImportForm();
     bindTicketBulkDelete();
+    bindTicketStatusAutoSubmit();
     bindRoleForm();
     bindCompanyAssignmentControls();
     bindApiKeyCopyButtons();
