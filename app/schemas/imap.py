@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field, SecretStr
 
@@ -12,6 +13,7 @@ class IMAPAccountBase(BaseModel):
     username: str = Field(..., max_length=255)
     folder: str = Field("INBOX", max_length=255)
     schedule_cron: str = Field(..., max_length=100)
+    filter_query: dict[str, Any] | None = None
     process_unread_only: bool = True
     mark_as_read: bool = True
     active: bool = True
@@ -31,6 +33,7 @@ class IMAPAccountUpdate(BaseModel):
     password: SecretStr | None = None
     folder: str | None = Field(default=None, max_length=255)
     schedule_cron: str | None = Field(default=None, max_length=100)
+    filter_query: dict[str, Any] | None = None
     process_unread_only: bool | None = None
     mark_as_read: bool | None = None
     active: bool | None = None
@@ -46,6 +49,7 @@ class IMAPAccountResponse(BaseModel):
     username: str
     folder: str
     schedule_cron: str
+    filter_query: dict[str, Any] | None
     process_unread_only: bool
     mark_as_read: bool
     active: bool

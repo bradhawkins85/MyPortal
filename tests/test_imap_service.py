@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from email.message import EmailMessage
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
@@ -268,7 +270,7 @@ async def test_sync_account_does_not_mark_as_read_on_ticket_failure(monkeypatch)
                 assert args == (None, "UNSEEN")
                 return "OK", [b"1"]
             if command == "fetch":
-                assert args[1] == "(BODY.PEEK[])"
+                assert args[1] == "(BODY.PEEK[] FLAGS)"
                 raw_message = (
                     b"From: Sender <sender@example.com>\r\n"
                     b"Subject: Help\r\n"
@@ -276,7 +278,7 @@ async def test_sync_account_does_not_mark_as_read_on_ticket_failure(monkeypatch)
                     b"\r\n"
                     b"Body"
                 )
-                return "OK", [(b"1 (RFC822 {5})", raw_message)]
+                return "OK", [(b"1 (FLAGS () BODY[] {5})", raw_message)]
             if command == "store":
                 self.stored_flags.append(args)
                 return "OK", []
@@ -338,12 +340,98 @@ async def test_sync_account_does_not_mark_as_read_on_ticket_failure(monkeypatch)
     mailbox = mailboxes[0]
     fetch_commands = [cmd for cmd in mailbox.commands if cmd[0] == "fetch"]
     assert fetch_commands, "Expected fetch command"
-    assert fetch_commands[0][1][1] == "(BODY.PEEK[])"
+    assert fetch_commands[0][1][1] == "(BODY.PEEK[] FLAGS)"
     assert mailbox.stored_flags == []
 
     assert recorded_messages
     assert recorded_messages[0]["status"] == "error"
     assert account_updates and account_updates[0][0] == 7
+
+
+async def test_sync_account_skips_filtered_message(monkeypatch):
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        assert slug == "imap"
+        return {"enabled": True}
+
+    monkeypatch.setattr(imap.modules_service, "get_module", fake_get_module)
+
+    async def fake_get_account(account_id: int):
+        assert account_id == 4
+        return {
+            "id": account_id,
+            "host": "mail.example.com",
+            "port": 993,
+            "username": "filter",
+            "password_encrypted": "encrypted",
+            "folder": "INBOX",
+            "process_unread_only": False,
+            "mark_as_read": False,
+            "active": True,
+            "filter_query": {"field": "subject", "contains": "urgent"},
+        }
+
+    class FilterMailbox:
+        def __init__(self) -> None:
+            self.selected: tuple[str, bool] | None = None
+            self.logged_out = False
+            self.commands: list[tuple[str, tuple[object, ...]]] = []
+
+        def login(self, username: str, password: str) -> None:
+            assert username == "filter"
+            assert password == "password"
+
+        def select(self, folder: str, readonly: bool = False):
+            self.selected = (folder, readonly)
+            return "OK", []
+
+        def uid(self, command: str, *args):
+            self.commands.append((command, args))
+            if command == "search":
+                assert args == (None, "ALL")
+                return "OK", [b"1"]
+            if command == "fetch":
+                assert args[1] == "(BODY.PEEK[] FLAGS)"
+                message = (
+                    b"From: Ops <ops@example.com>\r\n"
+                    b"Subject: Routine update\r\n"
+                    b"Message-ID: <msg@example.com>\r\n"
+                    b"\r\n"
+                    b"Body"
+                )
+                return "OK", [(b"1 (FLAGS (\\Seen) BODY[] {5})", message)]
+            raise AssertionError(f"Unexpected command {command!r}")
+
+        def logout(self) -> None:
+            self.logged_out = True
+
+    mailbox = FilterMailbox()
+    monkeypatch.setattr(imap.imaplib, "IMAP4_SSL", lambda host, port: mailbox)
+    monkeypatch.setattr(imap.imap_repo, "get_account", fake_get_account)
+    async def fake_get_message(*_args, **_kwargs):
+        return None
+
+    async def fake_upsert_message(**_kwargs):
+        pytest.fail("message recorded")
+
+    async def fake_update_account(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(imap.imap_repo, "get_message", fake_get_message)
+    monkeypatch.setattr(imap.imap_repo, "upsert_message", fake_upsert_message)
+    monkeypatch.setattr(imap.imap_repo, "update_account", fake_update_account)
+    monkeypatch.setattr(imap, "decrypt_secret", lambda value: "password")
+
+    async def fake_create_ticket(**_kwargs):
+        pytest.fail("ticket created")
+
+    monkeypatch.setattr(imap.tickets_service, "create_ticket", fake_create_ticket)
+
+    result = await imap.sync_account(4)
+
+    assert result == {"status": "succeeded", "processed": 0, "errors": []}
+    assert mailbox.logged_out
+    fetch_commands = [cmd for cmd in mailbox.commands if cmd[0] == "fetch"]
+    assert fetch_commands and fetch_commands[0][1][1] == "(BODY.PEEK[] FLAGS)"
 
 
 async def test_sync_account_skips_when_restart_pending(monkeypatch):
@@ -369,6 +457,7 @@ async def test_clone_account_creates_unique_copy(monkeypatch):
         "active": 1,
         "company_id": 17,
         "priority": 10,
+        "filter_query": {"field": "subject", "contains": "urgent"},
     }
     existing_accounts = [
         original_account,
@@ -390,6 +479,10 @@ async def test_clone_account_creates_unique_copy(monkeypatch):
         assert payload["name"] == "Support (copy 2)"
         assert payload["password_encrypted"] == "encrypted"
         assert payload["priority"] == 10
+        expected_filter = json.dumps(
+            {"field": "subject", "contains": "urgent"}, separators=(",", ":"), sort_keys=True
+        )
+        assert payload.get("filter_query") == expected_filter
         return created_account
 
     async def fake_ensure_task(account: dict[str, object]):
@@ -404,6 +497,7 @@ async def test_clone_account_creates_unique_copy(monkeypatch):
 
     assert cloned["name"] == "Support (copy 2)"
     assert cloned["priority"] == 10
+    assert cloned["filter_query"] == {"field": "subject", "contains": "urgent"}
     assert create_calls
 
 
