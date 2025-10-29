@@ -86,14 +86,6 @@
 
     <form action="{{ request.url_for('cart_place_order') }}" method="post" class="cart-checkout form-grid">
       {% include "partials/csrf.html" %}
-      <div class="cart-summary">
-        <dl class="cart-summary__totals">
-          <div>
-            <dt>Total</dt>
-            <dd>${{ '%.2f'|format(cart_total) }}</dd>
-          </div>
-        </dl>
-      </div>
       <div class="form-field">
         <label class="form-label" for="cart-po-number">PO number</label>
         <input
@@ -104,8 +96,18 @@
           placeholder="Optional purchase order reference"
         />
       </div>
-      <div class="form-actions">
-        <button type="submit" class="button">Place order</button>
+      <div class="cart-checkout__actions">
+        <div class="cart-summary">
+          <dl class="cart-summary__totals">
+            <div>
+              <dt>Total</dt>
+              <dd>${{ '%.2f'|format(cart_total) }}</dd>
+            </div>
+          </dl>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button">Place order</button>
+        </div>
       </div>
     </form>
   {% else %}
