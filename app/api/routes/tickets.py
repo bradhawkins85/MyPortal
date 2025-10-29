@@ -270,6 +270,8 @@ async def add_reply(
         author_id=session.user_id,
         body=sanitised_body.html,
         is_internal=payload.is_internal if has_helpdesk_access else False,
+        minutes_spent=payload.minutes_spent if has_helpdesk_access else None,
+        is_billable=payload.is_billable if has_helpdesk_access else False,
     )
     try:
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
