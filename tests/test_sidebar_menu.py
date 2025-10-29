@@ -98,7 +98,7 @@ def test_company_admin_sees_authorised_menu_items(company_admin_context):
     html = response.text
     assert 'href="/shop"' in html
     assert 'href="/shop/packages"' in html
-    assert 'href="/cart"' in html
+    assert 'href="/cart"' not in html
     assert 'href="/forms"' in html
     assert 'href="/invoices"' in html
     assert 'href="/staff"' in html

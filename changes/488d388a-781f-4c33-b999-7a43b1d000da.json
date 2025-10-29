@@ -1,0 +1,7 @@
+{
+  "guid": "488d388a-781f-4c33-b999-7a43b1d000da",
+  "occurred_at": "2025-10-29T14:28Z",
+  "change_type": "Fix",
+  "summary": "Removed the Cart menu item from the sidebar to streamline navigation",
+  "content_hash": "0f1b64d5a58ae85e8f6073cf3c7dc454ffb7d48901ef5f7baa98b056c14b4a0e"
+}
