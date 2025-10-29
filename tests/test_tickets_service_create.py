@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from app.repositories import tickets as tickets_repo
@@ -146,3 +148,116 @@ async def test_create_ticket_truncates_long_description(monkeypatch):
         len(stored_description.encode("utf-8"))
         <= tickets_service._MAX_TICKET_DESCRIPTION_BYTES
     )
+
+
+@pytest.mark.anyio
+async def test_enrich_ticket_context_includes_relationship_details(monkeypatch):
+    ticket = {
+        "id": 99,
+        "subject": "Printer offline",
+        "company_id": 5,
+        "requester_id": 7,
+        "assigned_user_id": 11,
+        "status": "open",
+        "priority": "high",
+    }
+
+    watchers_records = [
+        {
+            "id": 301,
+            "ticket_id": 99,
+            "user_id": 21,
+            "created_at": datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc),
+        },
+        {
+            "id": 302,
+            "ticket_id": 99,
+            "user_id": 22,
+            "created_at": datetime(2025, 1, 2, 8, 30, tzinfo=timezone.utc),
+        },
+    ]
+
+    replies_records = [
+        {
+            "id": 401,
+            "ticket_id": 99,
+            "author_id": 21,
+            "body": "Investigating",
+            "is_internal": True,
+            "created_at": datetime(2025, 1, 2, 9, 0, tzinfo=timezone.utc),
+        },
+        {
+            "id": 402,
+            "ticket_id": 99,
+            "author_id": 11,
+            "body": "Printer restored",
+            "is_internal": False,
+            "created_at": datetime(2025, 1, 2, 10, 15, tzinfo=timezone.utc),
+        },
+    ]
+
+    user_records = {
+        7: {
+            "id": 7,
+            "email": "requester@example.com",
+            "first_name": "Riley",
+            "last_name": "Jones",
+        },
+        11: {
+            "id": 11,
+            "email": "tech@example.com",
+            "first_name": "Taylor",
+            "last_name": "Nguyen",
+        },
+        21: {
+            "id": 21,
+            "email": "watcher.one@example.com",
+            "first_name": "Morgan",
+            "last_name": "Stone",
+        },
+        22: {
+            "id": 22,
+            "email": "watcher.two@example.com",
+            "first_name": "Quinn",
+            "last_name": "Patil",
+        },
+    }
+
+    async def fake_get_company_by_id(company_id):
+        assert company_id == 5
+        return {"id": 5, "name": "Acme Corp"}
+
+    async def fake_get_user_by_id(user_id):
+        return user_records.get(int(user_id))
+
+    async def fake_list_watchers(ticket_id):
+        assert ticket_id == 99
+        return watchers_records
+
+    async def fake_list_replies(ticket_id, include_internal=True):
+        assert ticket_id == 99
+        assert include_internal is True
+        return replies_records
+
+    monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company_by_id)
+    monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user_by_id)
+    monkeypatch.setattr(tickets_repo, "list_watchers", fake_list_watchers)
+    monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
+
+    enriched = await tickets_service._enrich_ticket_context(ticket)
+
+    assert enriched["company_name"] == "Acme Corp"
+    assert enriched["requester_email"] == "requester@example.com"
+    assert enriched["requester_display_name"] == "Riley Jones"
+    assert enriched["assigned_user_display_name"] == "Taylor Nguyen"
+    assert enriched["watchers_count"] == 2
+    assert enriched["watcher_emails"] == [
+        "watcher.one@example.com",
+        "watcher.two@example.com",
+    ]
+    assert enriched["watchers"][0]["email"] == "watcher.one@example.com"
+    assert enriched["watchers"][1]["display_name"] == "Quinn Patil"
+    assert enriched["latest_reply"]
+    assert enriched["latest_reply"]["body"] == "Printer restored"
+    assert enriched["latest_reply"]["author_email"] == "tech@example.com"
+    assert enriched["latest_reply"]["author_display_name"] == "Taylor Nguyen"
