@@ -67,6 +67,14 @@
           <span class="form-help">Cron expression evaluated in the configured timezone.</span>
         </label>
         <label class="form-field">
+          <span class="form-label">Message filter (JSON)</span>
+          <textarea name="filterQuery" class="form-input form-input--textarea" rows="8" placeholder='{"all": [{"field": "from.domain", "equals": "example.com"}]}'>{% if is_editing and editing_account.filter_query %}{{ editing_account.filter_query | tojson(indent=2) }}{% endif %}</textarea>
+          <span class="form-help">
+            Optional JSON rules that control which emails this mailbox processes.
+            <a href="/docs/imap-filters" target="_blank" rel="noopener">View filter examples</a>.
+          </span>
+        </label>
+        <label class="form-field">
           <span class="form-label">Link to company</span>
           <select name="companyId" class="form-input">
             <option value="">No company</option>
@@ -139,6 +147,9 @@
                     <td data-value="{{ account.name|lower }}">
                       <strong>{{ account.name }}</strong>
                       <div class="table__meta">{{ account.username }}</div>
+                      {% if account.filter_query %}
+                        <div class="table__meta">Filter active</div>
+                      {% endif %}
                     </td>
                     <td>{{ account.host }}:{{ account.port }}</td>
                     <td>{{ account.folder }}</td>
