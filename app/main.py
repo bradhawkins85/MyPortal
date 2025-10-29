@@ -6443,6 +6443,11 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
     await tickets_repo.set_ticket_status(ticket_id, status_value)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    await tickets_service.emit_ticket_updated_event(
+        ticket_id,
+        actor_type="technician",
+        actor=current_user,
+    )
     message = quote(f"Ticket {ticket_id} updated.")
     destination = f"/admin/tickets?success={message}"
     if return_url and return_url.startswith("/") and not return_url.startswith("//"):
@@ -6478,6 +6483,11 @@ async def admin_update_ticket_description(ticket_id: int, request: Request):
     await tickets_service.update_ticket_description(ticket_id, description_value)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    await tickets_service.emit_ticket_updated_event(
+        ticket_id,
+        actor_type="technician",
+        actor=current_user,
+    )
 
     message = quote("Ticket description updated.")
     destination = f"/admin/tickets/{ticket_id}?success={message}"
@@ -6513,6 +6523,12 @@ async def admin_replace_ticket_description(ticket_id: int, request: Request):
         updated = await tickets_repo.get_ticket(ticket_id)
 
     sanitized = sanitize_rich_text(str((updated or {}).get("description") or ""))
+
+    await tickets_service.emit_ticket_updated_event(
+        ticket_id,
+        actor_type="technician",
+        actor=current_user,
+    )
 
     return JSONResponse(
         {
@@ -6727,6 +6743,11 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
         await tickets_service.update_ticket_description(ticket_id, description_value)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    await tickets_service.emit_ticket_updated_event(
+        ticket_id,
+        actor_type="technician",
+        actor=current_user,
+    )
 
     message = quote("Ticket details updated.")
     destination = f"/admin/tickets/{ticket_id}?success={message}"
@@ -6919,6 +6940,11 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             await tickets_repo.add_watcher(ticket_id, author_id)
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
         await tickets_service.refresh_ticket_ai_tags(ticket_id)
+        await tickets_service.emit_ticket_updated_event(
+            ticket_id,
+            actor_type="technician",
+            actor=current_user,
+        )
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create ticket reply", error=str(exc))
         return await _render_ticket_detail(

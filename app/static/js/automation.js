@@ -64,6 +64,46 @@
         },
       }),
     },
+    {
+      label: 'Match updates performed by technicians',
+      value: toJsonTemplate({
+        match: {
+          'ticket_update.actor_type': 'technician',
+        },
+      }),
+    },
+    {
+      label: 'Match updates performed by requesters',
+      value: toJsonTemplate({
+        match: {
+          'ticket_update.actor_type': 'requester',
+        },
+      }),
+    },
+    {
+      label: 'Match updates performed by watchers',
+      value: toJsonTemplate({
+        match: {
+          'ticket_update.actor_type': 'watcher',
+        },
+      }),
+    },
+    {
+      label: 'Match updates performed by automations',
+      value: toJsonTemplate({
+        match: {
+          'ticket_update.actor_type': 'automation',
+        },
+      }),
+    },
+    {
+      label: 'Match updates performed by the system',
+      value: toJsonTemplate({
+        match: {
+          'ticket_update.actor_type': 'system',
+        },
+      }),
+    },
   ];
 
   const ACTION_SNIPPETS = {
