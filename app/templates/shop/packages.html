@@ -30,24 +30,7 @@
   <div class="alert alert--error" role="alert">{{ cart_error }}</div>
 {% endif %}
 
-<div class="shop-layout">
-  <aside class="card card--panel shop-layout__sidebar">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Packages</h2>
-        <p class="card__subtitle">Curated bundles assembled by our team for repeat ordering.</p>
-      </div>
-    </header>
-    <div class="package-summary">
-      <p>Each package automatically keeps its price and stock in sync with the included products.</p>
-      <ul class="list list--bullet">
-        <li>Price equals the sum of the current product prices.</li>
-        <li>Stock reflects the lowest stocked product within the bundle.</li>
-        <li>Adding a package adds all contained products to your cart.</li>
-      </ul>
-    </div>
-  </aside>
-
+<div class="shop-layout shop-layout--single">
   <section class="card card--panel shop-layout__content">
     <header class="card__header">
       <div>
@@ -84,9 +67,9 @@
                   <strong>{{ package.name }}</strong>
                   <details class="package-details">
                     <summary>Included products</summary>
-                    <ul class="list list--bullet">
+                    <ul class="list list--bullet package-products">
                       {% for item in package["items"] %}
-                        <li>{{ item.product_name }} ({{ item.product_sku }}) × {{ item.quantity }}</li>
+                        <li class="package-product">{{ item.product_name }} ({{ item.product_sku }}) × {{ item.quantity }}</li>
                       {% endfor %}
                     </ul>
                   </details>
