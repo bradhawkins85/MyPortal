@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block header_title_content %}
+  <div class="header__title-content">
+    <span class="header__title-text">{{ super() }}</span>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  <a class="button button--ghost" href="/admin/shop">Products admin</a>
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Create package</h2>
+        <p class="card__subtitle">Bundle frequently ordered products together for quick ordering.</p>
+      </div>
+    </header>
+    <form action="/shop/admin/package" method="post" class="form-grid">
+      {% include "partials/csrf.html" %}
+      <div class="form-field">
+        <label class="form-label" for="package-name">Name</label>
+        <input class="form-input" id="package-name" name="name" maxlength="255" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="package-sku">SKU</label>
+        <input class="form-input" id="package-sku" name="sku" maxlength="100" required />
+      </div>
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="package-description">Description <span class="text-muted">(optional)</span></label>
+        <textarea class="form-input" id="package-description" name="description" rows="3"></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Create package</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Packages</h2>
+        <p class="card__subtitle">Manage existing bundles, update their contents, and control visibility.</p>
+      </div>
+      <div class="card__controls">
+        <input
+          type="search"
+          class="form-input card__control"
+          placeholder="Search packages"
+          aria-label="Search packages"
+          data-table-filter="admin-packages-table"
+        />
+        <label class="checkbox card__control">
+          <input type="checkbox" id="packages-show-archived" {% if show_archived %}checked{% endif %} />
+          <span>Show archived</span>
+        </label>
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table" id="admin-packages-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string">Name</th>
+            <th scope="col" data-sort="string">SKU</th>
+            <th scope="col" data-sort="number">Items</th>
+            <th scope="col" data-sort="number">Price</th>
+            <th scope="col" data-sort="number">Stock</th>
+            <th scope="col" data-sort="string">Status</th>
+            <th scope="col" class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for package in packages %}
+            <tr data-archived="{{ 'true' if package.archived else 'false' }}" data-package-id="{{ package.id }}">
+              <td data-label="Name">{{ package.name }}</td>
+              <td data-label="SKU">{{ package.sku }}</td>
+              <td data-label="Items" data-value="{{ package.product_count }}">{{ package.product_count }}</td>
+              <td data-label="Price" data-value="{{ package.price_total }}">${{ '%.2f'|format(package.price_total) }}</td>
+              <td data-label="Stock" data-value="{{ package.stock_level }}">{{ package.stock_level }}</td>
+              <td data-label="Status">
+                {% if package.archived %}
+                  <span class="badge badge--muted">Archived</span>
+                {% elif not package.items %}
+                  <span class="badge badge--warning">No items</span>
+                {% elif package.is_restricted %}
+                  <span class="badge badge--warning">Restricted</span>
+                {% else %}
+                  <span class="badge badge--success">Active</span>
+                {% endif %}
+              </td>
+              <td class="table__actions">
+                <div class="table__action-buttons">
+                  <a class="button button--ghost" href="/admin/shop/packages/{{ package.id }}">Edit</a>
+                  <form action="/shop/admin/package/{{ package.id }}/archive" method="post" class="inline-form">
+                    {% include "partials/csrf.html" %}
+                    <input type="hidden" name="archived" value="{{ '0' if package.archived else '1' }}" />
+                    <button type="submit" class="button button--ghost">{{ 'Unarchive' if package.archived else 'Archive' }}</button>
+                  </form>
+                  <form action="/shop/admin/package/{{ package.id }}/delete" method="post" class="inline-form" data-confirm="Delete this package?">
+                    {% include "partials/csrf.html" %}
+                    <button type="submit" class="button button--danger">Delete</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="7" class="table__empty">No packages available.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="table-pagination" data-pagination="admin-packages-table">
+      <div class="table-pagination__group">
+        <button type="button" class="button button--ghost table-pagination__button" data-page-prev disabled>Previous</button>
+        <button type="button" class="button button--ghost table-pagination__button" data-page-next>Next</button>
+      </div>
+      <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+    </div>
+  </section>
+</div>
+
+<script>
+  const showArchivedToggle = document.getElementById('packages-show-archived');
+  if (showArchivedToggle) {
+    showArchivedToggle.addEventListener('change', () => {
+      const url = new URL(window.location.href);
+      if (showArchivedToggle.checked) {
+        url.searchParams.set('showArchived', '1');
+      } else {
+        url.searchParams.delete('showArchived');
+      }
+      window.location.href = url.toString();
+    });
+  }
+</script>
+{% endblock %}
