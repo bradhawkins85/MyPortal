@@ -447,6 +447,8 @@ app.include_router(mcp_api.router)
 app.include_router(system.router)
 app.include_router(uptimekuma.router)
 
+HELPDESK_PERMISSION_KEY = tickets_service.HELPDESK_PERMISSION_KEY
+
 
 
 async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
@@ -493,7 +495,7 @@ async def _is_helpdesk_technician(user: Mapping[str, Any], request: Request | No
     else:
         try:
             result = await membership_repo.user_has_permission(
-                user_id_int, tickets_service.HELPDESK_PERMISSION_KEY
+                user_id_int, HELPDESK_PERMISSION_KEY
             )
             if not result:
                 result = await membership_repo.user_has_permission(
@@ -6211,7 +6213,7 @@ async def _render_ticket_detail(
 
     companies = await company_repo.list_companies()
     technician_users = await membership_repo.list_users_with_permission(
-        tickets_service.HELPDESK_PERMISSION_KEY
+        HELPDESK_PERMISSION_KEY
     )
     requester_options: list[dict[str, Any]] = []
     if ticket_company_id is not None:
@@ -6631,7 +6633,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
             )
         has_permission = await membership_repo.user_has_permission(
             assigned_user_id,
-            tickets_service.HELPDESK_PERMISSION_KEY,
+            HELPDESK_PERMISSION_KEY,
         )
         if not has_permission:
             return await _render_ticket_detail(
