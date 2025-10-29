@@ -1,0 +1,7 @@
+{
+  "guid": "275b018a-34ef-4748-b3f4-8af6faf6ee62",
+  "occurred_at": "2025-10-29T13:38Z",
+  "change_type": "Fix",
+  "summary": "Removed Shop admin link from super admin sidebar navigation.",
+  "content_hash": "fe637d0e060d455db04b39e7b91feb0f8ed874d8d1799f727c2100a3bc2c906c"
+}

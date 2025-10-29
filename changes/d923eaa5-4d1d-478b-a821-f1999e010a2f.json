@@ -1,0 +1,7 @@
+{
+  "guid": "d923eaa5-4d1d-478b-a821-f1999e010a2f",
+  "occurred_at": "2025-10-29T13:29Z",
+  "change_type": "Fix",
+  "summary": "Ensure Shop admin shortcut appears for super administrators on the Shop page header",
+  "content_hash": "416b7adedd31c4d4170ba7a5add0fec2c09a207543a6143992fa192cce9ab5f8"
+}

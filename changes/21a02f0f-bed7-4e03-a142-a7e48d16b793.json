@@ -1,0 +1,7 @@
+{
+  "guid": "21a02f0f-bed7-4e03-a142-a7e48d16b793",
+  "occurred_at": "2025-10-29T13:26:05Z",
+  "change_type": "Fix",
+  "summary": "Fix ticket tools dropdown being clipped by header overflow",
+  "content_hash": "cfd5506431520cd15c54e4fd3719dbaf08521ff286c58b162aa27670caf77386"
+}

@@ -83,6 +83,216 @@
     return response.status !== 204 ? response.json() : null;
   }
 
+  const tableRefreshHandlers = Object.create(null);
+  const tableRefreshControllers = new WeakMap();
+
+  function registerTableRefreshHandler(name, handler) {
+    if (!name || typeof handler !== 'function') {
+      return;
+    }
+    const key = String(name).trim().toLowerCase();
+    if (!key) {
+      return;
+    }
+    tableRefreshHandlers[key] = handler;
+  }
+
+  function getTableRefreshHandler(name) {
+    if (!name) {
+      return null;
+    }
+    const key = String(name).trim().toLowerCase();
+    if (!key) {
+      return null;
+    }
+    return tableRefreshHandlers[key] || null;
+  }
+
+  function parseRefreshTopics(value) {
+    if (!value) {
+      return new Set();
+    }
+    const topics = String(value)
+      .split(',')
+      .map((topic) => topic.trim().toLowerCase())
+      .filter((topic) => topic.length > 0);
+    return new Set(topics);
+  }
+
+  function shouldHandleRefresh(detail, topicSet) {
+    if (!(topicSet instanceof Set) || topicSet.size === 0) {
+      return true;
+    }
+    const detailTopics = Array.isArray(detail?.topics)
+      ? detail.topics
+          .map((topic) => String(topic || '').trim().toLowerCase())
+          .filter((topic) => topic.length > 0)
+      : [];
+    if (detailTopics.length) {
+      return detailTopics.some((topic) => topicSet.has(topic));
+    }
+    const reason = typeof detail?.reason === 'string' ? detail.reason.toLowerCase() : '';
+    if (!reason) {
+      return false;
+    }
+    return Array.from(topicSet).some((topic) => reason.includes(topic));
+  }
+
+  function setupTableRealtimeRefreshControllers() {
+    const tables = document.querySelectorAll('[data-table][data-table-refresh-url]');
+    tables.forEach((table) => {
+      if (!(table instanceof HTMLElement)) {
+        return;
+      }
+      if (tableRefreshControllers.has(table)) {
+        return;
+      }
+
+      const endpoint = table.getAttribute('data-table-refresh-url');
+      if (!endpoint) {
+        return;
+      }
+
+      const handlerName = table.getAttribute('data-table-refresh-handler');
+      const handler =
+        getTableRefreshHandler(handlerName) ||
+        getTableRefreshHandler(table.id || '') ||
+        null;
+      if (!handler) {
+        return;
+      }
+
+      const topicSet = parseRefreshTopics(table.getAttribute('data-table-refresh-topics'));
+      const successMessageAttr = table.getAttribute('data-table-refresh-success') || '';
+      const errorMessageAttr = table.getAttribute('data-table-refresh-error') || '';
+      const defaultSuccessMessage = successMessageAttr.trim();
+      const defaultErrorMessage = errorMessageAttr.trim() || 'Unable to refresh data automatically.';
+
+      let refreshing = false;
+      let queued = false;
+      let queuedDetail = null;
+
+      function setBusy(isBusy) {
+        if (isBusy) {
+          table.setAttribute('aria-busy', 'true');
+          table.dataset.refreshing = 'true';
+        } else {
+          table.removeAttribute('aria-busy');
+          delete table.dataset.refreshing;
+        }
+      }
+
+      async function perform(detail) {
+        setBusy(true);
+        let result;
+        try {
+          const response = await requestJson(endpoint);
+          result =
+            (await handler({
+              table,
+              endpoint,
+              response,
+              detail: detail || null,
+              requestJson,
+              requestForm,
+              defaultSuccessMessage,
+              defaultErrorMessage,
+            })) || {};
+        } catch (error) {
+          console.error('Realtime table refresh failed', { endpoint, error });
+          if (detail && typeof detail.showToast === 'function') {
+            const message =
+              (error && typeof error === 'object' && typeof error.userMessage === 'string' && error.userMessage.trim()) ||
+              defaultErrorMessage;
+            detail.showToast(message, { variant: 'error', autoHideMs: 6000 });
+          }
+          return;
+        } finally {
+          setBusy(false);
+        }
+
+        if (detail && typeof detail.showToast === 'function') {
+          if (result && result.skipDefaultToast) {
+            return;
+          }
+          const message =
+            (result && typeof result.successMessage === 'string' && result.successMessage.trim()) ||
+            defaultSuccessMessage;
+          if (message) {
+            detail.showToast(message, { variant: 'success', autoHideMs: 4000 });
+          }
+        }
+      }
+
+      async function flush(detail) {
+        queuedDetail = detail || queuedDetail;
+        if (refreshing) {
+          queued = true;
+          return;
+        }
+        refreshing = true;
+        try {
+          do {
+            queued = false;
+            const currentDetail = queuedDetail;
+            queuedDetail = null;
+            await perform(currentDetail);
+          } while (queued);
+        } finally {
+          refreshing = false;
+        }
+      }
+
+      function handleRefreshEvent(event) {
+        const detail = event.detail || {};
+        if (!shouldHandleRefresh(detail, topicSet)) {
+          return;
+        }
+        event.preventDefault();
+        flush(detail);
+      }
+
+      document.addEventListener('realtime:refresh', handleRefreshEvent);
+      table.addEventListener('table:refresh-request', (event) => {
+        flush(event.detail || null);
+      });
+
+      table.dataset.tableRefreshBound = 'true';
+      tableRefreshControllers.set(table, { flush });
+    });
+  }
+
+  function requestTableRefresh(target, detail) {
+    let table = null;
+    if (target instanceof HTMLElement) {
+      table = target;
+    } else if (typeof target === 'string') {
+      table = document.getElementById(target) || document.querySelector(target);
+    }
+    if (!table) {
+      return Promise.resolve(false);
+    }
+    const controller = tableRefreshControllers.get(table);
+    if (!controller || typeof controller.flush !== 'function') {
+      return Promise.resolve(false);
+    }
+    return controller.flush(detail || null).then(
+      () => true,
+      (error) => {
+        console.error('Table refresh invocation failed', error);
+        return false;
+      },
+    );
+  }
+
+  const existingTableRefreshApi = window.MyPortalTableRefresh || {};
+  window.MyPortalTableRefresh = {
+    ...existingTableRefreshApi,
+    registerHandler: registerTableRefreshHandler,
+    bind: setupTableRealtimeRefreshControllers,
+    requestRefresh: requestTableRefresh,
+  };
+
   function setButtonProcessing(button, isProcessing) {
     if (!button) {
       return;
@@ -394,6 +604,11 @@
       return;
     }
 
+    if (table.dataset.bulkDeleteBound === 'true') {
+      table.dispatchEvent(new CustomEvent('table:rows-updated'));
+      return;
+    }
+
     const submitButton = form.querySelector('[data-bulk-delete-submit]');
     const countLabel = form.querySelector('[data-bulk-delete-count]');
     const selectAll = table.querySelector('[data-bulk-select-all]');
@@ -435,8 +650,14 @@
       }
     };
 
-    getRowCheckboxes().forEach((checkbox) => {
-      checkbox.addEventListener('change', updateState);
+    table.addEventListener('change', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) {
+        return;
+      }
+      if (target.matches('input[type="checkbox"][data-bulk-delete-checkbox]')) {
+        window.requestAnimationFrame(updateState);
+      }
     });
 
     if (selectAll) {
@@ -478,21 +699,24 @@
     });
 
     updateState();
+    table.dataset.bulkDeleteBound = 'true';
   }
 
   function bindTicketStatusAutoSubmit() {
     const forms = document.querySelectorAll('[data-ticket-status-form]');
-    if (!forms.length) {
-      return;
-    }
-
     forms.forEach((form) => {
+      if (form.dataset.ticketStatusBound === 'true') {
+        return;
+      }
       const select = form.querySelector('[data-ticket-status-select]');
       if (!select) {
+        form.dataset.ticketStatusBound = 'true';
         return;
       }
 
       let hasSubmitted = false;
+
+      form.dataset.ticketStatusBound = 'true';
 
       form.addEventListener('submit', () => {
         hasSubmitted = true;
@@ -512,6 +736,317 @@
         }
       });
     });
+  }
+
+  const ticketTableStateCache = new WeakMap();
+  let ticketRefreshHandlerRegistered = false;
+
+  function getTicketTableState(table) {
+    let state = ticketTableStateCache.get(table);
+    if (state) {
+      return state;
+    }
+
+    let statusOptions = [];
+    try {
+      const parsed = JSON.parse(table.dataset.ticketStatusOptions || '[]');
+      if (Array.isArray(parsed)) {
+        statusOptions = parsed.map((value) => String(value));
+      }
+    } catch (error) {
+      statusOptions = [];
+    }
+    if (!statusOptions.length) {
+      statusOptions = ['open', 'in_progress', 'pending', 'resolved', 'closed'];
+    }
+
+    const statusLabels = statusOptions.reduce((acc, value) => {
+      acc[value] = value.replace(/_/g, ' ');
+      return acc;
+    }, {});
+
+    const csrfToken = table.getAttribute('data-csrf-token') || '';
+    const canBulkDelete = table.getAttribute('data-can-bulk-delete') === 'true';
+    const bulkDeleteFormId = table.getAttribute('data-bulk-delete-form-id') || '';
+    const emptyMessage = table.getAttribute('data-table-empty-label') || 'No records found.';
+
+    const statsContainer = document.querySelector('[data-ticket-stats]');
+    const statElements = {};
+    if (statsContainer) {
+      statsContainer.querySelectorAll('[data-ticket-stat]').forEach((element) => {
+        const key = element.getAttribute('data-ticket-stat');
+        if (key) {
+          statElements[key] = element;
+        }
+      });
+    }
+
+    let dateFormatter;
+    try {
+      dateFormatter = new Intl.DateTimeFormat(undefined, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+    } catch (error) {
+      dateFormatter = null;
+    }
+
+    function normaliseCounts(counts) {
+      const output = {};
+      if (!counts || typeof counts !== 'object') {
+        return output;
+      }
+      Object.entries(counts).forEach(([key, value]) => {
+        const normalisedKey = String(key || '').toLowerCase();
+        if (!normalisedKey) {
+          return;
+        }
+        const numeric = Number(value);
+        output[normalisedKey] = Number.isFinite(numeric) ? numeric : 0;
+      });
+      return output;
+    }
+
+    function updateStats(counts, total) {
+      const normalised = normaliseCounts(counts);
+      if (statElements.open) {
+        const value = Number(normalised.open ?? 0);
+        statElements.open.textContent = String(Number.isFinite(value) ? value : 0);
+      }
+      if (statElements.in_progress) {
+        const value = Number(normalised.in_progress ?? 0) + Number(normalised.pending ?? 0);
+        statElements.in_progress.textContent = String(Number.isFinite(value) ? value : 0);
+      }
+      if (statElements.resolved) {
+        const value = Number(normalised.resolved ?? 0) + Number(normalised.closed ?? 0);
+        statElements.resolved.textContent = String(Number.isFinite(value) ? value : 0);
+      }
+      if (statElements.total) {
+        const safeTotal = Number(total);
+        statElements.total.textContent = String(Number.isFinite(safeTotal) ? safeTotal : 0);
+      }
+    }
+
+    function formatUpdatedAt(value) {
+      if (!value) {
+        return '—';
+      }
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return '—';
+      }
+      if (dateFormatter) {
+        return dateFormatter.format(date);
+      }
+      return date.toISOString().replace('T', ' ').slice(0, 16);
+    }
+
+    function createStatusCell(ticketId, currentStatus) {
+      const cell = document.createElement('td');
+      cell.dataset.label = 'Status';
+      const normalisedStatus = String(currentStatus || 'open');
+      cell.dataset.value = normalisedStatus;
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'ticket-status';
+
+      const labelId = `ticket-status-label-${ticketId}`;
+      const hiddenLabel = document.createElement('span');
+      hiddenLabel.className = 'visually-hidden';
+      hiddenLabel.id = labelId;
+      hiddenLabel.textContent = 'Ticket status';
+      wrapper.appendChild(hiddenLabel);
+
+      const form = document.createElement('form');
+      form.id = `ticket-status-form-${ticketId}`;
+      form.action = `/admin/tickets/${ticketId}/status`;
+      form.method = 'post';
+      form.className = 'inline-form ticket-status__form';
+      form.setAttribute('data-ticket-status-form', '');
+      form.setAttribute('aria-labelledby', labelId);
+
+      if (csrfToken) {
+        const csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden';
+        csrfInput.name = '_csrf';
+        csrfInput.value = csrfToken;
+        form.appendChild(csrfInput);
+      }
+
+      const label = document.createElement('label');
+      label.className = 'visually-hidden';
+      label.htmlFor = `ticket-status-${ticketId}`;
+      label.textContent = 'Status';
+      form.appendChild(label);
+
+      const select = document.createElement('select');
+      select.id = `ticket-status-${ticketId}`;
+      select.name = 'status';
+      select.className = 'form-input form-input--compact';
+      select.setAttribute('data-ticket-status-select', '');
+
+      const uniqueOptions = Array.from(new Set([...statusOptions, normalisedStatus]));
+      uniqueOptions.forEach((option) => {
+        const optionElement = document.createElement('option');
+        optionElement.value = option;
+        optionElement.textContent = statusLabels[option] || option.replace(/_/g, ' ');
+        if (option === normalisedStatus) {
+          optionElement.selected = true;
+        }
+        select.appendChild(optionElement);
+      });
+
+      form.appendChild(select);
+      wrapper.appendChild(form);
+      cell.appendChild(wrapper);
+      return cell;
+    }
+
+    function buildRow(ticket) {
+      const numericId = Number(ticket.id);
+      if (!Number.isFinite(numericId) || numericId <= 0) {
+        return null;
+      }
+      const ticketId = numericId;
+      const row = document.createElement('tr');
+
+      if (canBulkDelete) {
+        const selectCell = document.createElement('td');
+        selectCell.dataset.label = 'Select';
+        selectCell.className = 'table__select';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.name = 'ticketIds';
+        checkbox.value = String(ticketId);
+        checkbox.setAttribute('aria-label', `Select ticket ${ticketId}`);
+        checkbox.setAttribute('data-bulk-delete-checkbox', '');
+        if (bulkDeleteFormId) {
+          checkbox.setAttribute('form', bulkDeleteFormId);
+        }
+        selectCell.appendChild(checkbox);
+        row.appendChild(selectCell);
+      }
+
+      const idCell = document.createElement('td');
+      idCell.dataset.label = 'ID';
+      idCell.dataset.value = String(ticketId);
+      idCell.textContent = String(ticketId);
+      row.appendChild(idCell);
+
+      const subjectCell = document.createElement('td');
+      subjectCell.dataset.label = 'Subject';
+      const subjectLink = document.createElement('a');
+      subjectLink.href = `/admin/tickets/${ticketId}`;
+      subjectLink.textContent = String(ticket.subject || '');
+      subjectCell.appendChild(subjectLink);
+      row.appendChild(subjectCell);
+
+      const statusCell = createStatusCell(ticketId, ticket.status);
+      row.appendChild(statusCell);
+
+      const priorityCell = document.createElement('td');
+      priorityCell.dataset.label = 'Priority';
+      priorityCell.textContent = String(ticket.priority || 'normal');
+      row.appendChild(priorityCell);
+
+      const companyCell = document.createElement('td');
+      companyCell.dataset.label = 'Company';
+      let companyDisplay = '';
+      if (ticket.company_name) {
+        companyDisplay = String(ticket.company_name);
+      } else if (ticket.company_id !== null && ticket.company_id !== undefined) {
+        companyDisplay = String(ticket.company_id);
+      }
+      companyCell.textContent = companyDisplay || '—';
+      row.appendChild(companyCell);
+
+      const assignedCell = document.createElement('td');
+      assignedCell.dataset.label = 'Assigned';
+      assignedCell.textContent = ticket.assigned_user_email ? String(ticket.assigned_user_email) : '—';
+      row.appendChild(assignedCell);
+
+      const updatedCell = document.createElement('td');
+      updatedCell.dataset.label = 'Updated';
+      updatedCell.dataset.value = ticket.updated_at || '';
+      updatedCell.textContent = formatUpdatedAt(ticket.updated_at);
+      row.appendChild(updatedCell);
+
+      const actionsCell = document.createElement('td');
+      actionsCell.className = 'table__actions';
+      const actionLink = document.createElement('a');
+      actionLink.className = 'button button--ghost';
+      actionLink.href = `/admin/tickets/${ticketId}`;
+      actionLink.textContent = 'Open';
+      actionsCell.appendChild(actionLink);
+      row.appendChild(actionsCell);
+
+      return row;
+    }
+
+    function renderTable(items) {
+      const tbody = table.tBodies[0] || table.createTBody();
+      const fragment = document.createDocumentFragment();
+      const rows = Array.isArray(items) ? items : [];
+
+      rows.forEach((ticket) => {
+        const row = buildRow(ticket);
+        if (row) {
+          fragment.appendChild(row);
+        }
+      });
+
+      if (!fragment.childNodes.length) {
+        const emptyRow = document.createElement('tr');
+        const headerCells = table.querySelectorAll('thead th');
+        const columnCount = headerCells.length || (canBulkDelete ? 9 : 8);
+        const emptyCell = document.createElement('td');
+        emptyCell.colSpan = columnCount || 8;
+        emptyCell.className = 'table__empty';
+        emptyCell.textContent = emptyMessage;
+        emptyRow.appendChild(emptyCell);
+        fragment.appendChild(emptyRow);
+      }
+
+      while (tbody.firstChild) {
+        tbody.removeChild(tbody.firstChild);
+      }
+      tbody.appendChild(fragment);
+    }
+
+    state = {
+      renderTable,
+      updateStats,
+    };
+    ticketTableStateCache.set(table, state);
+    return state;
+  }
+
+  function registerTicketTableRefreshHandler() {
+    if (ticketRefreshHandlerRegistered) {
+      return;
+    }
+    ticketRefreshHandlerRegistered = true;
+
+    const handler = async ({ table, response }) => {
+      if (!(table instanceof HTMLTableElement)) {
+        return { skipDefaultToast: true };
+      }
+      const state = getTicketTableState(table);
+      const items = Array.isArray(response?.items) ? response.items : [];
+      state.renderTable(items);
+      state.updateStats(response?.status_counts, response?.total);
+      table.dispatchEvent(new CustomEvent('table:rows-updated'));
+      bindTicketStatusAutoSubmit();
+      bindTicketBulkDelete();
+      return { successMessage: 'Tickets updated.' };
+    };
+
+    registerTableRefreshHandler('tickets', handler);
+    registerTableRefreshHandler('tickets-table', handler);
   }
 
   function parsePermissions(value) {
@@ -860,6 +1395,8 @@
     bindSyncroCompanyImportForm();
     bindTicketBulkDelete();
     bindTicketStatusAutoSubmit();
+    registerTicketTableRefreshHandler();
+    setupTableRealtimeRefreshControllers();
     bindTicketAiReplaceDescription();
     bindTicketAiRefresh();
     bindRoleForm();
