@@ -616,6 +616,10 @@ async def _upsert_ticket(
         if updated_at is not None:
             updates["updated_at"] = updated_at
         await tickets_repo.update_ticket(int(existing["id"]), **updates)
+        await tickets_service.emit_ticket_updated_event(
+            int(existing["id"]),
+            actor_type="automation",
+        )
         ticket_db_id = int(existing["id"])
         outcome = "updated"
     else:
