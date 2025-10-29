@@ -3402,6 +3402,7 @@ async def knowledge_base_index(request: Request, article: str | None = Query(Non
     extra_context = {
         "title": "Knowledge base",
         "kb_articles": articles,
+        "kb_is_super_admin": bool(user and user.get("is_super_admin")),
     }
     context = await _build_portal_context(request, user, extra=extra_context)
     return templates.TemplateResponse("knowledge_base/index.html", context)
