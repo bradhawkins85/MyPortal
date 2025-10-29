@@ -1,6 +1,7 @@
 (function () {
   let taskModal = null;
   let logsModal = null;
+  let activeTaskContext = { id: '', name: '' };
 
   function toJsonTemplate(data) {
     try {
@@ -470,6 +471,15 @@
     }
     const taskData = task || {};
     const isEditing = Boolean(taskData.id);
+    activeTaskContext = {
+      id: isEditing && taskData.id ? String(taskData.id) : '',
+      name: taskData.name ? String(taskData.name) : '',
+    };
+    const form = query('scheduled-task-form');
+    if (form) {
+      form.dataset.taskMode = isEditing ? 'edit' : 'create';
+      form.dataset.taskId = activeTaskContext.id;
+    }
     idField.value = taskData.id || '';
 
     const rawCompanyValue =
@@ -517,6 +527,22 @@
       nameFields.hidden.dataset.originalName = existingName;
     }
     setTaskName(existingName || generateTaskName());
+
+    const deleteButton = document.querySelector('[data-task-delete-modal]');
+    if (deleteButton) {
+      deleteButton.dataset.taskId = activeTaskContext.id;
+      deleteButton.dataset.taskName = activeTaskContext.name;
+      deleteButton.dataset.processing = 'false';
+      if (isEditing) {
+        deleteButton.hidden = false;
+        deleteButton.removeAttribute('aria-hidden');
+        deleteButton.disabled = false;
+      } else {
+        deleteButton.hidden = true;
+        deleteButton.setAttribute('aria-hidden', 'true');
+        deleteButton.disabled = true;
+      }
+    }
   }
 
   function clearTaskForm() {
@@ -709,6 +735,42 @@
       });
     }
 
+    const deleteButton = form.querySelector('[data-task-delete-modal]');
+    if (deleteButton) {
+      deleteButton.addEventListener('click', async () => {
+        if (deleteButton.dataset.processing === 'true') {
+          return;
+        }
+
+        const taskId = deleteButton.dataset.taskId || '';
+        if (!taskId) {
+          return;
+        }
+        const taskName = (deleteButton.dataset.taskName || '').trim();
+        const confirmLabel = taskName ? `"${taskName}"` : `#${taskId}`;
+        const message =
+          deleteButton.getAttribute('data-confirm') ||
+          `Delete scheduled task ${confirmLabel}? This cannot be undone.`;
+        if (!window.confirm(message)) {
+          return;
+        }
+
+        deleteButton.dataset.processing = 'true';
+        deleteButton.disabled = true;
+
+        try {
+          await requestJson(`/scheduler/tasks/${taskId}`, { method: 'DELETE' });
+          window.location.reload();
+        } catch (error) {
+          deleteButton.dataset.processing = 'false';
+          deleteButton.disabled = false;
+          const details =
+            error instanceof Error && error.message ? error.message : 'Unable to delete task.';
+          alert(`Unable to delete task: ${details}`);
+        }
+      });
+    }
+
     const commandField = query('task-command');
     const companyField = query('task-company');
     const refreshTaskName = () => {
@@ -743,25 +805,6 @@
       button.addEventListener('click', () => {
         clearTaskForm();
         showTaskModal({ active: true, retry_backoff_seconds: 300, max_retries: 12 });
-      });
-    });
-
-    document.querySelectorAll('[data-task-toggle]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const row = button.closest('tr');
-        const task = parseTask(row);
-        if (!task || !task.id) {
-          return;
-        }
-        try {
-          await requestJson(`/scheduler/tasks/${task.id}/activate`, {
-            method: 'POST',
-            body: JSON.stringify({ active: !task.active }),
-          });
-          window.location.reload();
-        } catch (error) {
-          alert(`Unable to update task: ${error.message}`);
-        }
       });
     });
 
@@ -805,24 +848,6 @@
       });
     });
 
-    document.querySelectorAll('[data-task-delete]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const row = button.closest('tr');
-        const task = parseTask(row);
-        if (!task || !task.id) {
-          return;
-        }
-        if (!confirm(`Delete task "${task.name}"? This cannot be undone.`)) {
-          return;
-        }
-        try {
-          await requestJson(`/scheduler/tasks/${task.id}`, { method: 'DELETE' });
-          window.location.reload();
-        } catch (error) {
-          alert(`Unable to delete task: ${error.message}`);
-        }
-      });
-    });
   }
 
   function bindAutomationDeleteActions() {
