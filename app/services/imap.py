@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import email
 import imaplib
+import re
 from datetime import datetime, timezone
 from email.header import decode_header, make_header
 from email.utils import getaddresses
@@ -20,6 +22,7 @@ from app.services import tickets as tickets_service
 from app.services.scheduler import scheduler_service
 
 _MAX_FETCH_BYTES = 5 * 1024 * 1024
+_CID_REFERENCE_PATTERN = re.compile(r"(?i)cid:([^\"'>\s]+)")
 
 
 def _redact_account(account: Mapping[str, Any]) -> dict[str, Any]:
@@ -306,23 +309,79 @@ def _decode_subject(message: email.message.Message) -> str:
 
 
 def _extract_body(message: email.message.Message) -> str:
+    def _decode_text_part(part: email.message.Message) -> str:
+        payload = part.get_payload(decode=True) or b""
+        if len(payload) > _MAX_FETCH_BYTES:
+            payload = payload[: _MAX_FETCH_BYTES]
+        try:
+            return payload.decode(part.get_content_charset() or "utf-8", errors="replace").strip()
+        except LookupError:
+            return payload.decode("utf-8", errors="replace").strip()
+
     if message.is_multipart():
-        parts: list[str] = []
+        plain_parts: list[str] = []
+        html_parts: list[str] = []
+        inline_images: dict[str, tuple[str, bytes]] = {}
+
         for part in message.walk():
-            content_type = part.get_content_type()
-            if content_type not in {"text/plain", "text/html"}:
+            if part.get_content_maintype() == "multipart":
                 continue
-            if part.get_content_disposition() in {"attachment", "inline"}:
+            content_type = (part.get_content_type() or "").lower()
+            disposition = (part.get_content_disposition() or "").lower()
+
+            if content_type in {"text/plain", "text/html"} and disposition != "attachment":
+                text = _decode_text_part(part)
+                if not text:
+                    continue
+                if content_type == "text/plain":
+                    plain_parts.append(text)
+                else:
+                    html_parts.append(text)
+                continue
+
+            content_id = part.get("Content-ID")
+            if not content_id or disposition == "attachment":
+                continue
+            if not content_type.startswith("image/"):
                 continue
             payload = part.get_payload(decode=True) or b""
-            if len(payload) > _MAX_FETCH_BYTES:
-                payload = payload[: _MAX_FETCH_BYTES]
-            try:
-                text = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
-            except LookupError:
-                text = payload.decode("utf-8", errors="replace")
-            parts.append(text)
-        return "\n\n".join(parts).strip()
+            if not payload or len(payload) > _MAX_FETCH_BYTES:
+                continue
+            normalised_id = content_id.strip().strip("<>").lower()
+            if not normalised_id:
+                continue
+            inline_images[normalised_id] = (content_type, payload)
+
+        if html_parts:
+            html_body = "\n\n".join(fragment for fragment in html_parts if fragment).strip()
+
+            if inline_images and html_body:
+                def _replace_cid(match: re.Match[str]) -> str:
+                    cid_value = match.group(1)
+                    if not cid_value:
+                        return match.group(0)
+                    lookup_key = cid_value.strip().strip("<>").lower()
+                    resource = inline_images.get(lookup_key)
+                    if not resource:
+                        return match.group(0)
+                    content_type, payload = resource
+                    encoded = base64.b64encode(payload).decode("ascii")
+                    return f"data:{content_type};base64,{encoded}"
+
+                html_body = _CID_REFERENCE_PATTERN.sub(_replace_cid, html_body)
+
+            return html_body
+
+        if plain_parts:
+            return "\n\n".join(fragment for fragment in plain_parts if fragment).strip()
+
+        return ""
+
+    if message.get_content_type() == "text/html":
+        return _decode_text_part(message)
+    if message.get_content_type() == "text/plain":
+        return _decode_text_part(message)
+
     payload = message.get_payload(decode=True) or b""
     if len(payload) > _MAX_FETCH_BYTES:
         payload = payload[: _MAX_FETCH_BYTES]
