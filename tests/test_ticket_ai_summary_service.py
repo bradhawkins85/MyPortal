@@ -197,6 +197,38 @@ def test_render_prompt_ignores_signatures_and_reply_markers():
     assert "Unauthorized viewing prohibited." not in prompt
 
 
+def test_render_prompt_discards_content_below_latest_reply_marker():
+    ticket = {
+        "id": 2,
+        "subject": "Firewall alert",
+        "description": "<p>Multiple blocked connections detected.</p>",
+        "status": "open",
+        "priority": "high",
+    }
+    replies = [
+        {
+            "ticket_id": 2,
+            "author_id": 5,
+            "body": (
+                "<div>Latest escalation shared with networking.</div>"
+                "<div>--- Reply ABOVE THIS LINE to add a comment ---</div>"
+                "<div>Investigating possible outage.</div>"
+                "<div>&gt; --- Reply ABOVE THIS LINE to add a comment ---</div>"
+                "<div>&gt; Historical context should be ignored.</div>"
+            ),
+            "is_internal": False,
+            "created_at": None,
+        }
+    ]
+
+    prompt = tickets_service._render_prompt(ticket, replies, {})
+
+    assert "Latest escalation shared with networking." in prompt
+    assert "Investigating possible outage." not in prompt
+    assert "Historical context should be ignored." not in prompt
+    assert "Reply ABOVE THIS LINE" not in prompt
+
+
 def test_strip_conversation_noise_removes_email_headers():
     text = (
         "Subject: Weekly Update\n"
