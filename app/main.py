@@ -2953,9 +2953,12 @@ async def shop_packages_page(
         is_vip=is_vip,
     )
 
+    packages_json = cast(list[dict[str, Any]], _serialise_for_json(packages))
+
     extra = {
         "title": "Shop packages",
         "packages": packages,
+        "packages_json": packages_json,
         "cart_error": cart_error,
     }
     return await _render_template("shop/packages.html", request, user, extra=extra)
