@@ -1,0 +1,7 @@
+{
+  "guid": "a3a6390c-ae47-4f43-98ee-f672276eec39",
+  "occurred_at": "2025-10-29T03:21Z",
+  "change_type": "Fix",
+  "summary": "Show inline progress when manually running scheduled tasks and refresh automatically on completion.",
+  "content_hash": "0a42455d188a1442c4e44ec9064db1a6e377cfc4fa65c99407040200459f9a99"
+}
