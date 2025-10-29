@@ -23,6 +23,10 @@ async def test_resolve_ticket_entities_matches_company_and_staff(monkeypatch):
         assert email == "user@example.com"
         return {"id": 42}
 
+    async def fake_get_user_by_email(email: str):
+        assert email == "user@example.com"
+        return {"id": 77}
+
     monkeypatch.setattr(
         imap.company_repo,
         "get_company_by_email_domain",
@@ -33,11 +37,16 @@ async def test_resolve_ticket_entities_matches_company_and_staff(monkeypatch):
         "get_staff_by_company_and_email",
         fake_get_staff_by_company_and_email,
     )
+    monkeypatch.setattr(
+        imap.users_repo,
+        "get_user_by_email",
+        fake_get_user_by_email,
+    )
 
     company_id, requester_id = await imap._resolve_ticket_entities("User <user@example.com>")
 
     assert company_id == 5
-    assert requester_id == 42
+    assert requester_id == 77
 
 
 async def test_resolve_ticket_entities_matches_company_without_staff(monkeypatch):
@@ -47,6 +56,10 @@ async def test_resolve_ticket_entities_matches_company_without_staff(monkeypatch
 
     async def fake_get_staff_by_company_and_email(company_id: int, email: str):
         assert company_id == 7
+        assert email == "sender@example.com"
+        return None
+
+    async def fake_get_user_by_email(email: str):
         assert email == "sender@example.com"
         return None
 
@@ -60,6 +73,11 @@ async def test_resolve_ticket_entities_matches_company_without_staff(monkeypatch
         "get_staff_by_company_and_email",
         fake_get_staff_by_company_and_email,
     )
+    monkeypatch.setattr(
+        imap.users_repo,
+        "get_user_by_email",
+        fake_get_user_by_email,
+    )
 
     company_id, requester_id = await imap._resolve_ticket_entities("Sender <sender@example.com>")
 
@@ -71,10 +89,12 @@ async def test_resolve_ticket_entities_falls_back_to_account_company(monkeypatch
     async def fake_get_company_by_email_domain(domain: str):
         return None
 
-    checked: list[tuple[int, str]] = []
-
     async def fake_get_staff_by_company_and_email(company_id: int, email: str):
-        checked.append((company_id, email))
+        if email == "help@tenant.com":
+            return {"id": "81"}
+        return None
+
+    async def fake_get_user_by_email(email: str):
         if email == "help@tenant.com":
             return {"id": "81"}
         return None
@@ -89,6 +109,11 @@ async def test_resolve_ticket_entities_falls_back_to_account_company(monkeypatch
         "get_staff_by_company_and_email",
         fake_get_staff_by_company_and_email,
     )
+    monkeypatch.setattr(
+        imap.users_repo,
+        "get_user_by_email",
+        fake_get_user_by_email,
+    )
 
     company_id, requester_id = await imap._resolve_ticket_entities(
         "Support <help@tenant.com>",
@@ -97,6 +122,22 @@ async def test_resolve_ticket_entities_falls_back_to_account_company(monkeypatch
 
     assert company_id == 11
     assert requester_id == 81
+
+
+async def test_resolve_ticket_entities_handles_staff_without_user(monkeypatch):
+    async def fake_get_company_by_email_domain(domain: str):
+        assert domain == "example.com"
+        return {"id": 15}
+
+    async def fake_get_staff_by_company_and_email(company_id: int, email: str):
+        assert company_id == 15
+        assert email == "member@example.com"
+        return {"id": 123}
+
+    async def fake_get_user_by_email(email: str):
+        assert email == "member@example.com"
+        return None
+
     assert (11, "help@tenant.com") in checked
 
 
@@ -211,6 +252,16 @@ async def test_sync_account_does_not_mark_as_read_on_ticket_failure(monkeypatch)
         "get_staff_by_company_and_email",
         fake_get_staff_by_company_and_email,
     )
+    monkeypatch.setattr(
+        imap.users_repo,
+        "get_user_by_email",
+        fake_get_user_by_email,
+    )
+
+    company_id, requester_id = await imap._resolve_ticket_entities("Member <member@example.com>")
+
+    assert company_id == 15
+    assert requester_id is None
     monkeypatch.setattr(imap.imaplib, "IMAP4_SSL", fake_imap4_ssl)
 
     result = await imap.sync_account(7)
