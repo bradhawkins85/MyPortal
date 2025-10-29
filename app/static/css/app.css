@@ -709,6 +709,21 @@ body {
   text-overflow: ellipsis;
 }
 
+.header__title-content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-gap-tight);
+  min-width: 0;
+}
+
+.header__title-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .header__actions {
   display: flex;
   align-items: center;
