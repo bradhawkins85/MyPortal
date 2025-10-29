@@ -1,0 +1,7 @@
+{
+  "guid": "b9777c75-70cf-453f-8372-8ff19334703a",
+  "occurred_at": "2025-10-29T13:25:00Z",
+  "change_type": "Feature",
+  "summary": "Added technician controls to edit ticket reply time tracking inline.",
+  "content_hash": "f63f0839f6494a6dfc15d3c3ad802dce6232fb393ac172fdbf2526b35723b7a8"
+}
