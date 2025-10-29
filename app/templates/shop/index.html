@@ -129,7 +129,7 @@
                     <details class="package-details">
                       <summary>Included products</summary>
                       <ul class="list list--bullet">
-                        {% for item in product.items %}
+                        {% for item in product.get('items', []) %}
                           <li>{{ item.product_name }} ({{ item.product_sku }}) × {{ item.quantity }}</li>
                         {% endfor %}
                       </ul>
