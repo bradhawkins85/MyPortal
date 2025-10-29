@@ -116,6 +116,11 @@
                   <label class="form-label" for="smtp-prefix">Subject prefix</label>
                   <input id="smtp-prefix" name="settings.subject_prefix" class="form-input" value="{{ settings.subject_prefix or '' }}" />
                 </div>
+              {% elif module.slug == 'imap' %}
+                <p class="form-help">Manage mailbox credentials, folders, and schedules from the dedicated IMAP workspace.</p>
+                <div class="form-actions">
+                  <a class="button" href="{{ settings.manage_url or '/admin/modules/imap' }}">Open IMAP workspace</a>
+                </div>
               {% elif module.slug == 'tacticalrmm' %}
                 <div class="form-field">
                   <label class="form-label" for="rmm-base-url">Base URL</label>

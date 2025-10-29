@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if success_message or error_message %}
+    <div class="alert-stack">
+      {% if success_message %}
+        <div class="alert" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% set is_editing = editing_account is not none %}
+  {% set form_action = '/admin/modules/imap/accounts' %}
+  {% if is_editing %}
+    {% set form_action = '/admin/modules/imap/accounts/' ~ editing_account.id %}
+  {% endif %}
+
+  <div class="management" data-layout>
+    <aside class="management__sidebar">
+      <h2 class="management__heading">{{ 'Update mailbox' if is_editing else 'Create mailbox' }}</h2>
+      <p class="management__intro">
+        Connect an IMAP mailbox to ingest support requests into the ticketing workspace. Credentials are encrypted before storage.
+      </p>
+      <form action="{{ form_action }}" method="post" class="form management__form">
+        {% if csrf_token %}
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <div class="form-grid">
+          <label class="form-field">
+            <span class="form-label">Display name</span>
+            <input type="text" name="name" class="form-input" value="{{ editing_account.name if is_editing else '' }}" maxlength="255" required />
+          </label>
+          <label class="form-field">
+            <span class="form-label">IMAP host</span>
+            <input type="text" name="host" class="form-input" value="{{ editing_account.host if is_editing else '' }}" maxlength="255" required />
+          </label>
+        </div>
+        <div class="form-grid">
+          <label class="form-field">
+            <span class="form-label">Port</span>
+            <input type="number" name="port" class="form-input" value="{{ editing_account.port if is_editing else 993 }}" min="1" max="65535" required />
+          </label>
+          <label class="form-field">
+            <span class="form-label">Folder</span>
+            <input type="text" name="folder" class="form-input" value="{{ editing_account.folder if is_editing else 'INBOX' }}" maxlength="255" required />
+          </label>
+        </div>
+        <label class="form-field">
+          <span class="form-label">Username</span>
+          <input type="text" name="username" class="form-input" value="{{ editing_account.username if is_editing else '' }}" maxlength="255" required />
+        </label>
+        <label class="form-field">
+          <span class="form-label">Password</span>
+          <input type="password" name="password" class="form-input" {% if not is_editing %}required{% endif %} placeholder="{{ 'Leave blank to keep existing secret' if is_editing else '' }}" autocomplete="off" />
+        </label>
+        <label class="form-field">
+          <span class="form-label">Schedule (cron)</span>
+          <input type="text" name="scheduleCron" class="form-input" value="{{ editing_account.schedule_cron if is_editing else '*/15 * * * *' }}" maxlength="100" required />
+          <span class="form-help">Cron expression evaluated in the configured timezone.</span>
+        </label>
+        <label class="form-field">
+          <span class="form-label">Link to company</span>
+          <select name="companyId" class="form-input">
+            <option value="">No company</option>
+            {% for company in companies %}
+              <option value="{{ company.id }}" {% if is_editing and company.id == editing_account.company_id %}selected{% endif %}>{{ company.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="form-field form-field--checkbox">
+          <label class="checkbox">
+            <input type="checkbox" name="processUnreadOnly" value="1" {% if not is_editing or editing_account.process_unread_only %}checked{% endif %} />
+            <span>Only process unread messages</span>
+          </label>
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="checkbox">
+            <input type="checkbox" name="markAsRead" value="1" {% if not is_editing or editing_account.mark_as_read %}checked{% endif %} />
+            <span>Mark messages as read after processing</span>
+          </label>
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="toggle">
+            <input type="checkbox" name="active" value="1" {% if not is_editing or editing_account.active %}checked{% endif %} />
+            <span>Account active</span>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button">{{ 'Update mailbox' if is_editing else 'Create mailbox' }}</button>
+          {% if is_editing %}
+            <a class="button button--ghost" href="/admin/modules/imap">Cancel editing</a>
+          {% endif %}
+        </div>
+      </form>
+    </aside>
+
+    <section class="management__content">
+      <header class="management__header">
+        <div>
+          <h1 class="management__title">IMAP mailboxes</h1>
+          <p class="management__subtitle">Manage inbound email connectors that automatically create or update tickets on the defined schedule.</p>
+        </div>
+        <div class="management__filters">
+          <input type="search" class="form-input" placeholder="Filter mailboxes" aria-label="Filter mailboxes" data-table-filter="imap-accounts-table" />
+        </div>
+      </header>
+
+      <div class="management__body">
+        <div class="table-wrapper">
+          <table class="table" id="imap-accounts-table" data-table>
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string">Name</th>
+                <th scope="col" data-sort="string">Host</th>
+                <th scope="col" data-sort="string">Folder</th>
+                <th scope="col" data-sort="string">Schedule</th>
+                <th scope="col" data-sort="string">Company</th>
+                <th scope="col" data-sort="string">Last synced</th>
+                <th scope="col" data-sort="string">Status</th>
+                <th scope="col" class="table__actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if accounts %}
+                {% for account in accounts %}
+                  <tr>
+                    <td data-value="{{ account.name|lower }}">
+                      <strong>{{ account.name }}</strong>
+                      <div class="table__meta">{{ account.username }}</div>
+                    </td>
+                    <td>{{ account.host }}:{{ account.port }}</td>
+                    <td>{{ account.folder }}</td>
+                    <td><code>{{ account.schedule_cron }}</code></td>
+                    <td>
+                      {% set company = companies | selectattr('id', 'equalto', account.company_id) | first %}
+                      {{ company.name if company else '—' }}
+                    </td>
+                    <td>
+                      {% if account.last_synced_at %}
+                        {{ account.last_synced_at.isoformat() }}
+                      {% else %}
+                        Never
+                      {% endif %}
+                    </td>
+                    <td>
+                      <span class="badge {{ 'badge--success' if account.active else 'badge--secondary' }}">
+                        {{ 'Active' if account.active else 'Paused' }}
+                      </span>
+                    </td>
+                    <td class="table__actions">
+                      <div class="button-group">
+                        <a class="button button--small button--ghost" href="/admin/modules/imap?accountId={{ account.id }}">Edit</a>
+                        <form action="/admin/modules/imap/accounts/{{ account.id }}/sync" method="post" class="inline-form">
+                          {% if csrf_token %}
+                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                          {% endif %}
+                          <button type="submit" class="button button--small">Sync now</button>
+                        </form>
+                        <form action="/admin/modules/imap/accounts/{{ account.id }}/delete" method="post" class="inline-form" onsubmit="return confirm('Delete mailbox {{ account.name }}?');">
+                          {% if csrf_token %}
+                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                          {% endif %}
+                          <button type="submit" class="button button--small button--danger">Delete</button>
+                        </form>
+                      </div>
+                    </td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="8" class="table__empty">No IMAP mailboxes configured yet.</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+{% endblock %}
