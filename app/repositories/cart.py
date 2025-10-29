@@ -84,6 +84,21 @@ async def upsert_item(
     )
 
 
+async def update_item_quantity(
+    session_id: int,
+    product_id: int,
+    quantity: int,
+) -> None:
+    await db.execute(
+        """
+        UPDATE shop_cart_items
+        SET quantity = %s
+        WHERE session_id = %s AND product_id = %s
+        """,
+        (quantity, session_id, product_id),
+    )
+
+
 async def list_items(session_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """

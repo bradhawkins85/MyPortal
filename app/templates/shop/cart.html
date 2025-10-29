@@ -24,12 +24,20 @@
     {% endif %}
   </header>
 
+  {% if cart_error %}
+    <div class="alert alert--error" role="alert">{{ cart_error }}</div>
+  {% endif %}
+
+  {% if cart_message %}
+    <div class="alert alert--success" role="alert">{{ cart_message }}</div>
+  {% endif %}
+
   {% if order_message %}
     <div class="alert alert--info" role="alert">{{ order_message }}</div>
   {% endif %}
 
   {% if cart_items %}
-    <form action="{{ request.url_for('cart_remove_items') }}" method="post" class="cart-remove-form">
+    <form action="{{ request.url_for('cart_update_items') }}" method="post" class="cart-items-form">
       {% include "partials/csrf.html" %}
       <div class="table-wrapper">
         <table class="table" id="cart-table" data-table>
@@ -72,7 +80,19 @@
                 </td>
                 <td data-label="SKU">{{ item.product_sku }}</td>
                 <td data-label="Unit price" data-value="{{ item.unit_price }}">${{ '%.2f'|format(item.unit_price) }}</td>
-                <td data-label="Quantity" data-value="{{ item.quantity }}">{{ item.quantity }}</td>
+                <td data-label="Quantity" data-value="{{ item.quantity }}">
+                  <input
+                    class="form-input form-input--sm"
+                    type="number"
+                    min="0"
+                    max="9999"
+                    step="1"
+                    name="quantity_{{ item.product_id }}"
+                    value="{{ item.quantity }}"
+                    aria-label="Quantity for {{ item.product_name }}"
+                    required
+                  />
+                </td>
                 <td data-label="Line total" data-value="{{ item.line_total }}">${{ '%.2f'|format(item.line_total) }}</td>
               </tr>
             {% endfor %}
@@ -80,7 +100,14 @@
         </table>
       </div>
       <div class="form-actions form-actions--inline">
-        <button type="submit" class="button button--ghost">Remove selected</button>
+        <button type="submit" class="button">Update quantities</button>
+        <button
+          type="submit"
+          class="button button--ghost"
+          formaction="{{ request.url_for('cart_remove_items') }}"
+        >
+          Remove selected
+        </button>
       </div>
     </form>
 
