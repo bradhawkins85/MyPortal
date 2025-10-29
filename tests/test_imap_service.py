@@ -1,8 +1,44 @@
 from __future__ import annotations
 
+from email.message import EmailMessage
+from email.mime.image import MIMEImage
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
 import pytest
 
 from app.services import imap
+
+
+def test_extract_body_prefers_html_over_plain_text():
+    message = EmailMessage()
+    message["Subject"] = "Test"
+    message.set_content("Plain text body")
+    message.add_alternative("<p><strong>Formatted</strong> body</p>", subtype="html")
+
+    body = imap._extract_body(message)
+
+    assert "<p><strong>Formatted</strong> body</p>" in body
+    assert "Plain text body" not in body
+
+
+def test_extract_body_inlines_cid_images():
+    root = MIMEMultipart("related")
+    alternative = MIMEMultipart("alternative")
+    alternative.attach(MIMEText("Plain text fallback", "plain"))
+    cid = "image1"
+    alternative.attach(MIMEText(f"<p><img src=\"cid:{cid}\" alt=\"Inline\"></p>", "html"))
+    root.attach(alternative)
+
+    image = MIMEImage(b"PNGDATA", _subtype="png")
+    image.add_header("Content-ID", f"<{cid}>")
+    image.add_header("Content-Disposition", "inline", filename="image.png")
+    root.attach(image)
+
+    body = imap._extract_body(root)
+
+    assert "cid:image1" not in body
+    assert "data:image/png;base64" in body
 
 
 pytestmark = pytest.mark.anyio("asyncio")
