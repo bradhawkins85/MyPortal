@@ -5,7 +5,7 @@ import json
 from collections.abc import Awaitable, Callable, Mapping as MappingABC, Mapping
 import re
 from datetime import datetime, timezone
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable
 
 from app.core.database import db
 from app.core.logging import log_error
@@ -139,6 +139,40 @@ def _format_user_display_name(user: Mapping[str, Any] | None) -> str | None:
     return email or None
 
 
+async def _resolve_user_snapshot(
+    user_value: Mapping[str, Any] | None,
+    user_id: Any,
+) -> Mapping[str, Any] | None:
+    if isinstance(user_value, Mapping):
+        return dict(user_value)
+    try:
+        numeric_id = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    fetched = await _safely_call(user_repo.get_user_by_id, numeric_id)
+    if isinstance(fetched, Mapping):
+        return dict(fetched)
+    return None
+
+
+def _build_user_snapshot(user: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    if not isinstance(user, Mapping):
+        return None
+    snapshot = {
+        "id": user.get("id"),
+        "email": user.get("email"),
+        "first_name": user.get("first_name"),
+        "last_name": user.get("last_name"),
+        "mobile_phone": user.get("mobile_phone"),
+        "company_id": user.get("company_id"),
+        "is_super_admin": user.get("is_super_admin"),
+    }
+    display_name = _format_user_display_name(user)
+    if display_name:
+        snapshot["display_name"] = display_name
+    return snapshot
+
+
 async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
     enriched: TicketRecord = dict(ticket)
 
@@ -155,16 +189,84 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
 
     assigned_value = enriched.get("assigned_user") if isinstance(enriched.get("assigned_user"), Mapping) else None
     assigned_user_id = enriched.get("assigned_user_id")
-    if not isinstance(assigned_value, Mapping) and isinstance(assigned_user_id, int):
-        assigned_value = await _safely_call(user_repo.get_user_by_id, assigned_user_id)
-    if isinstance(assigned_value, Mapping):
-        enriched["assigned_user"] = dict(assigned_value)
-        enriched["assigned_user_email"] = assigned_value.get("email")
-        enriched["assigned_user_display_name"] = _format_user_display_name(assigned_value)
+    assigned_user = await _resolve_user_snapshot(assigned_value, assigned_user_id)
+    assigned_snapshot = _build_user_snapshot(assigned_user)
+    if assigned_snapshot:
+        enriched["assigned_user"] = assigned_snapshot
+        enriched["assigned_user_email"] = assigned_snapshot.get("email")
+        enriched["assigned_user_display_name"] = assigned_snapshot.get("display_name")
     else:
         enriched.setdefault("assigned_user", None)
         enriched["assigned_user_email"] = None
         enriched["assigned_user_display_name"] = None
+
+    requester_value = enriched.get("requester") if isinstance(enriched.get("requester"), Mapping) else None
+    requester_id = enriched.get("requester_id")
+    requester_user = await _resolve_user_snapshot(requester_value, requester_id)
+    requester_snapshot = _build_user_snapshot(requester_user)
+    if requester_snapshot:
+        enriched["requester"] = requester_snapshot
+        enriched["requester_email"] = requester_snapshot.get("email")
+        enriched["requester_display_name"] = requester_snapshot.get("display_name")
+    else:
+        enriched.setdefault("requester", None)
+        enriched["requester_email"] = None
+        enriched["requester_display_name"] = None
+
+    ticket_id = enriched.get("id")
+    watchers: list[Mapping[str, Any]] = []
+    if isinstance(ticket_id, int):
+        fetched_watchers = await _safely_call(tickets_repo.list_watchers, ticket_id)
+        if isinstance(fetched_watchers, list):
+            watchers = [record for record in fetched_watchers if isinstance(record, Mapping)]
+    elif isinstance(enriched.get("watchers"), list):
+        watchers = [record for record in enriched.get("watchers") if isinstance(record, Mapping)]
+
+    watcher_entries: list[dict[str, Any]] = []
+    watcher_emails: list[str] = []
+    for watcher in watchers:
+        user_value = watcher.get("user") if isinstance(watcher.get("user"), Mapping) else None
+        user_id = watcher.get("user_id")
+        resolved_user = await _resolve_user_snapshot(user_value, user_id)
+        snapshot = _build_user_snapshot(resolved_user)
+        entry: dict[str, Any] = {
+            "id": watcher.get("id"),
+            "ticket_id": watcher.get("ticket_id"),
+            "user_id": watcher.get("user_id"),
+            "created_at": watcher.get("created_at"),
+            "user": snapshot,
+            "email": snapshot.get("email") if snapshot else None,
+            "display_name": snapshot.get("display_name") if snapshot else None,
+        }
+        if entry["email"]:
+            watcher_emails.append(entry["email"])
+        watcher_entries.append(entry)
+    enriched["watchers"] = watcher_entries
+    enriched["watchers_count"] = len(watcher_entries)
+    enriched["watcher_emails"] = watcher_emails
+
+    replies: list[Mapping[str, Any]] = []
+    if isinstance(ticket_id, int):
+        fetched_replies = await _safely_call(
+            tickets_repo.list_replies, ticket_id, include_internal=True
+        )
+        if isinstance(fetched_replies, list):
+            replies = [record for record in fetched_replies if isinstance(record, Mapping)]
+
+    latest_reply: dict[str, Any] | None = None
+    if replies:
+        reply = dict(replies[-1])
+        author_value = reply.get("author") if isinstance(reply.get("author"), Mapping) else None
+        author_id = reply.get("author_id")
+        author_user = await _resolve_user_snapshot(author_value, author_id)
+        author_snapshot = _build_user_snapshot(author_user)
+        reply["author"] = author_snapshot
+        reply["author_email"] = author_snapshot.get("email") if author_snapshot else None
+        reply["author_display_name"] = (
+            author_snapshot.get("display_name") if author_snapshot else None
+        )
+        latest_reply = reply
+    enriched["latest_reply"] = latest_reply
 
     return enriched
 

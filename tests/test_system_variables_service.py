@@ -43,7 +43,13 @@ def test_system_variables_filter_sensitive_env(monkeypatch):
             "subject": "Printer offline",
             "labels": ["urgent", "onsite"],
             "priority": "high",
-            "requester": {"email": "user@example.com"},
+            "requester": {
+                "id": 7,
+                "email": "user@example.com",
+                "first_name": "Jordan",
+                "last_name": "Casey",
+                "display_name": "Jordan Casey",
+            },
             "status": "open",
             "category": "hardware",
             "external_reference": "RMM-42",
@@ -59,6 +65,38 @@ def test_system_variables_filter_sensitive_env(monkeypatch):
             },
             "assigned_user_email": "tech@example.com",
             "assigned_user_display_name": "Taylor Nguyen",
+            "requester_email": "user@example.com",
+            "requester_display_name": "Jordan Casey",
+            "watchers": [
+                {
+                    "id": 77,
+                    "ticket_id": 321,
+                    "user_id": 15,
+                    "email": "watcher@example.com",
+                    "display_name": "Casey Lee",
+                    "user": {
+                        "id": 15,
+                        "email": "watcher@example.com",
+                        "display_name": "Casey Lee",
+                    },
+                }
+            ],
+            "watchers_count": 1,
+            "watcher_emails": ["watcher@example.com"],
+            "latest_reply": {
+                "id": 555,
+                "ticket_id": 321,
+                "author_id": 9,
+                "body": "We rebooted the printer.",
+                "is_internal": False,
+                "author_email": "tech@example.com",
+                "author_display_name": "Taylor Nguyen",
+                "author": {
+                    "id": 9,
+                    "email": "tech@example.com",
+                    "display_name": "Taylor Nguyen",
+                },
+            },
         }
     ],
 )
@@ -76,9 +114,16 @@ def test_system_variables_include_ticket_tokens(ticket):
     assert variables["COMPANY_NAME"] == "Acme Corp"
     assert variables["TICKET_ASSIGNED_USER_EMAIL"] == "tech@example.com"
     assert variables["TICKET_ASSIGNED_USER_DISPLAY_NAME"] == "Taylor Nguyen"
+    assert variables["TICKET_REQUESTER_EMAIL"] == "user@example.com"
+    assert variables["TICKET_REQUESTER_DISPLAY_NAME"] == "Jordan Casey"
     assert variables["TICKET_AI_SUMMARY"] == "Printer offline awaiting vendor response"
     assert variables["TICKET_AI_TAGS_0"] == "printer"
     assert variables["TICKET_STATUS"] == "open"
     assert variables["TICKET_CATEGORY"] == "hardware"
     assert variables["TICKET_PRIORITY"] == "high"
     assert variables["TICKET_EXTERNAL_REFERENCE"] == "RMM-42"
+    assert variables["TICKET_WATCHERS_COUNT"] == "1"
+    assert variables["TICKET_WATCHERS_0_EMAIL"] == "watcher@example.com"
+    assert variables["TICKET_WATCHERS_0_USER_EMAIL"] == "watcher@example.com"
+    assert variables["TICKET_LATEST_REPLY_BODY"] == "We rebooted the printer."
+    assert variables["TICKET_LATEST_REPLY_AUTHOR_EMAIL"] == "tech@example.com"
