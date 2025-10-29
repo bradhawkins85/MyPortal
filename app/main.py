@@ -2905,6 +2905,9 @@ async def shop_page(
 
         products = [product for product in products if _product_has_price(product)]
 
+        if category_id is None:
+            secrets.SystemRandom().shuffle(products)
+
     categories = await categories_task
 
     extra = {
