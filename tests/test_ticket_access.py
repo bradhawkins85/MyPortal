@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any, Mapping
 from unittest.mock import AsyncMock
 
@@ -970,3 +971,117 @@ def test_admin_reprocess_ticket_ai_missing_ticket(monkeypatch, active_session):
     assert payload["detail"] == "Ticket not found"
     summary_mock.assert_not_awaited()
     tags_mock.assert_not_awaited()
+
+
+def test_admin_update_ticket_description_updates_service(monkeypatch, active_session):
+    async def fake_require_helpdesk(request):
+        return {"id": 51, "email": "helper@example.com", "is_super_admin": False}, None
+
+    async def fake_get_ticket(ticket_id: int):
+        assert ticket_id == 42
+        return {"id": ticket_id, "description": "Original"}
+
+    update_mock = AsyncMock(return_value={"id": 42, "description": "Line one\nLine two"})
+    summary_mock = AsyncMock(return_value=None)
+    tags_mock = AsyncMock(return_value=None)
+
+    monkeypatch.setattr(main_module, "_require_helpdesk_page", fake_require_helpdesk)
+    monkeypatch.setattr(main_module.tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(main_module.tickets_service, "update_ticket_description", update_mock)
+    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_summary", summary_mock)
+    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_tags", tags_mock)
+    monkeypatch.setattr(session_manager, "load_session", AsyncMock(return_value=active_session))
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+
+    try:
+        with TestClient(app) as client:
+            client.cookies.set("myportal_session_csrf", active_session.csrf_token)
+            response = client.post(
+                "/admin/tickets/42/description",
+                data={
+                    "description": "Line one\r\nLine two",
+                    "returnUrl": "/admin/tickets/42",
+                },
+                headers={"X-CSRF-Token": "csrf-token"},
+                follow_redirects=False,
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    assert response.headers["location"].startswith("/admin/tickets/42?success=")
+    update_mock.assert_awaited_once_with(42, "Line one\nLine two")
+    summary_mock.assert_awaited_once_with(42)
+    tags_mock.assert_awaited_once_with(42)
+
+
+def test_admin_replace_ticket_description_returns_json(monkeypatch, active_session):
+    async def fake_require_helpdesk(request):
+        return {"id": 71, "email": "helper@example.com", "is_super_admin": False}, None
+
+    async def fake_get_ticket(ticket_id: int):
+        assert ticket_id == 55
+        return {"id": ticket_id, "ai_summary": "First line\r\nSecond line"}
+
+    update_mock = AsyncMock(return_value={"id": 55, "description": "First line\nSecond line"})
+
+    def fake_sanitize(value: str) -> SimpleNamespace:
+        return SimpleNamespace(html=f"<p>{value}</p>", text_content=value)
+
+    monkeypatch.setattr(main_module, "_require_helpdesk_page", fake_require_helpdesk)
+    monkeypatch.setattr(main_module.tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(main_module.tickets_service, "update_ticket_description", update_mock)
+    monkeypatch.setattr(main_module, "sanitize_rich_text", fake_sanitize)
+    monkeypatch.setattr(session_manager, "load_session", AsyncMock(return_value=active_session))
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+
+    try:
+        with TestClient(app) as client:
+            client.cookies.set("myportal_session_csrf", active_session.csrf_token)
+            response = client.post(
+                "/admin/tickets/55/description/replace",
+                json={},
+                headers={"X-CSRF-Token": "csrf-token"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == status.HTTP_200_OK
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["description"] == "First line\nSecond line"
+    assert payload["descriptionHtml"] == "<p>First line\nSecond line</p>"
+    assert payload["descriptionText"] == "First line\nSecond line"
+    update_mock.assert_awaited_once_with(55, "First line\nSecond line")
+
+
+def test_admin_replace_ticket_description_requires_summary(monkeypatch, active_session):
+    async def fake_require_helpdesk(request):
+        return {"id": 71, "email": "helper@example.com", "is_super_admin": False}, None
+
+    async def fake_get_ticket(ticket_id: int):
+        assert ticket_id == 55
+        return {"id": ticket_id, "ai_summary": ""}
+
+    monkeypatch.setattr(main_module, "_require_helpdesk_page", fake_require_helpdesk)
+    monkeypatch.setattr(main_module.tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(session_manager, "load_session", AsyncMock(return_value=active_session))
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+
+    try:
+        with TestClient(app) as client:
+            client.cookies.set("myportal_session_csrf", active_session.csrf_token)
+            response = client.post(
+                "/admin/tickets/55/description/replace",
+                json={},
+                headers={"X-CSRF-Token": "csrf-token"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    payload = response.json()
+    assert payload["detail"] == "AI summary is not available. Generate a summary before replacing the description."

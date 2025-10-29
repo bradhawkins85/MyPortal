@@ -6451,6 +6451,80 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.post("/admin/tickets/{ticket_id}/description", response_class=HTMLResponse)
+async def admin_update_ticket_description(ticket_id: int, request: Request):
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        return redirect
+
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    form = await request.form()
+
+    description_raw = form.get("description")
+    description_value: str | None = None
+    if isinstance(description_raw, str):
+        normalised_description = description_raw.replace("\r\n", "\n").replace("\r", "\n")
+        if normalised_description.strip():
+            description_value = normalised_description
+        else:
+            description_value = None
+
+    return_url_raw = form.get("returnUrl")
+    return_url = str(return_url_raw).strip() if isinstance(return_url_raw, str) else ""
+
+    await tickets_service.update_ticket_description(ticket_id, description_value)
+    await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    await tickets_service.refresh_ticket_ai_tags(ticket_id)
+
+    message = quote("Ticket description updated.")
+    destination = f"/admin/tickets/{ticket_id}?success={message}"
+    if return_url and return_url.startswith(f"/admin/tickets/{ticket_id}"):
+        separator = "&" if "?" in return_url else "?"
+        destination = f"{return_url}{separator}success={message}"
+
+    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/admin/tickets/{ticket_id}/description/replace", response_class=JSONResponse)
+async def admin_replace_ticket_description(ticket_id: int, request: Request):
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        return redirect
+
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    summary = ticket.get("ai_summary")
+    summary_text = str(summary) if summary is not None else ""
+    if not summary_text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="AI summary is not available. Generate a summary before replacing the description.",
+        )
+
+    normalised_summary = summary_text.replace("\r\n", "\n").replace("\r", "\n")
+
+    updated = await tickets_service.update_ticket_description(ticket_id, normalised_summary)
+    if not updated:
+        updated = await tickets_repo.get_ticket(ticket_id)
+
+    sanitized = sanitize_rich_text(str((updated or {}).get("description") or ""))
+
+    return JSONResponse(
+        {
+            "status": "success",
+            "message": "Ticket description replaced with the AI summary.",
+            "description": str((updated or {}).get("description") or ""),
+            "descriptionHtml": sanitized.html,
+            "descriptionText": sanitized.text_content,
+        }
+    )
+
+
 @app.post("/admin/tickets/{ticket_id}/details", response_class=HTMLResponse)
 async def admin_update_ticket_details(ticket_id: int, request: Request):
     current_user, redirect = await _require_helpdesk_page(request)
@@ -6462,6 +6536,15 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
     form = await request.form()
+
+    description_raw = form.get("description")
+    description_value: str | None = None
+    if isinstance(description_raw, str):
+        normalised_description = description_raw.replace("\r\n", "\n").replace("\r", "\n")
+        if normalised_description.strip():
+            description_value = normalised_description
+        else:
+            description_value = None
 
     existing_company_id: int | None = None
     raw_existing_company = ticket.get("company_id")
@@ -6640,6 +6723,8 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
 
     await tickets_repo.update_ticket(ticket_id, **update_fields)
     await tickets_repo.set_ticket_status(ticket_id, status_value)
+    if description_raw is not None:
+        await tickets_service.update_ticket_description(ticket_id, description_value)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
 

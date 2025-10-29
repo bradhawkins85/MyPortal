@@ -93,7 +93,8 @@
       if (!button.dataset.defaultLabel) {
         button.dataset.defaultLabel = defaultLabel;
       }
-      label.textContent = isProcessing ? 'Reprocessing AI summary and AI tags…' : button.dataset.defaultLabel;
+      const processingLabel = button.dataset.processingLabel || 'Reprocessing AI summary and AI tags…';
+      label.textContent = isProcessing ? processingLabel : button.dataset.defaultLabel;
     }
     button.classList.toggle('button--processing', Boolean(isProcessing));
     if (isProcessing) {
@@ -117,6 +118,34 @@
     status.textContent = message || '';
     status.hidden = !message;
     status.classList.toggle('form-help--error', Boolean(isError));
+  }
+
+  function updateTicketDescriptionContent(html, raw) {
+    const panel = document.querySelector('[data-ticket-description-panel]');
+    if (panel && typeof panel.open === 'boolean') {
+      panel.open = true;
+    }
+    const viewer = panel ? panel.querySelector('[data-ticket-description-viewer]') : document.querySelector('[data-ticket-description-viewer]');
+    const emptyState = panel
+      ? panel.querySelector('[data-ticket-description-empty]')
+      : document.querySelector('[data-ticket-description-empty]');
+    const input = panel
+      ? panel.querySelector('[data-ticket-description-input]')
+      : document.querySelector('[data-ticket-description-input]');
+
+    const safeHtml = typeof html === 'string' ? html : '';
+    const rawValue = typeof raw === 'string' ? raw : '';
+
+    if (viewer) {
+      viewer.innerHTML = safeHtml;
+      viewer.hidden = !safeHtml;
+    }
+    if (emptyState) {
+      emptyState.hidden = Boolean(safeHtml);
+    }
+    if (input) {
+      input.value = rawValue;
+    }
   }
 
   function bindTicketAiRefresh() {
@@ -147,6 +176,61 @@
           );
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Unable to refresh AI summary and tags.';
+          updateTicketAiStatus(button, message, true);
+        } finally {
+          setButtonProcessing(button, false);
+        }
+      });
+    });
+  }
+
+  function bindTicketAiReplaceDescription() {
+    const buttons = document.querySelectorAll('[data-ticket-ai-replace-description]');
+    if (!buttons.length) {
+      return;
+    }
+
+    buttons.forEach((button) => {
+      button.addEventListener('click', async (event) => {
+        event.preventDefault();
+        if (button.disabled) {
+          return;
+        }
+
+        const ticketId = button.getAttribute('data-ticket-id');
+        if (!ticketId) {
+          return;
+        }
+
+        const confirmed = window.confirm(
+          'Replace the current ticket description with the AI summary? This will overwrite any manual edits.',
+        );
+        if (!confirmed) {
+          return;
+        }
+
+        try {
+          setButtonProcessing(button, true);
+          updateTicketAiStatus(
+            button,
+            'Replacing the ticket description with the AI summary. This may take a moment…',
+            false,
+          );
+          const response = await requestJson(`/admin/tickets/${ticketId}/description/replace`, {
+            method: 'POST',
+            body: JSON.stringify({}),
+          });
+          const message = response && response.message
+            ? response.message
+            : 'Ticket description replaced with the AI summary.';
+          const html = response && typeof response.descriptionHtml === 'string' ? response.descriptionHtml : '';
+          const rawDescription = response && typeof response.description === 'string' ? response.description : '';
+          updateTicketDescriptionContent(html, rawDescription);
+          updateTicketAiStatus(button, message, false);
+        } catch (error) {
+          const message = error instanceof Error
+            ? error.message
+            : 'Unable to replace the ticket description.';
           updateTicketAiStatus(button, message, true);
         } finally {
           setButtonProcessing(button, false);
@@ -776,6 +860,7 @@
     bindSyncroCompanyImportForm();
     bindTicketBulkDelete();
     bindTicketStatusAutoSubmit();
+    bindTicketAiReplaceDescription();
     bindTicketAiRefresh();
     bindRoleForm();
     bindCompanyAssignmentControls();
