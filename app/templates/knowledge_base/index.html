@@ -10,6 +10,13 @@
 
 {% block title %}Knowledge base{% endblock %}
 
+{% block header_title %}
+  <span class="header__title-text">Knowledge base</span>
+  {% if kb_is_super_admin %}
+    <a class="button-link header__title-link" href="/admin/knowledge-base">Knowledge base admin</a>
+  {% endif %}
+{% endblock %}
+
 {% block header_actions %}
   <form id="knowledge-base-search-form" class="header-search" data-knowledge-base-search>
     <label for="knowledge-base-search" class="visually-hidden">Search knowledge base</label>

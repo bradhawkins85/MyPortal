@@ -705,8 +705,24 @@ body {
   font-weight: 600;
   flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-gap-tight);
+  flex-wrap: wrap;
+  overflow: hidden;
+}
+
+.header__title-text {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.header__title-link {
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .header__actions {
