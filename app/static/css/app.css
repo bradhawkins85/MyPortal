@@ -1588,6 +1588,33 @@ body {
   gap: var(--space-gap-base);
 }
 
+.timeline__message {
+  position: relative;
+  border-radius: 0.75rem;
+  transition: max-height 0.2s ease;
+}
+
+.timeline__message--collapsed {
+  overflow: hidden;
+}
+
+.timeline__message--collapsed::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 3rem;
+  background: linear-gradient(
+    to bottom,
+    rgba(15, 23, 42, 0),
+    rgba(15, 23, 42, 0.85)
+  );
+  pointer-events: none;
+}
+
+.timeline__message-toggle {
+  align-self: flex-start;
+}
+
 .timeline__body p {
   margin: 0;
 }
