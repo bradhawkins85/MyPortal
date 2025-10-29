@@ -897,3 +897,76 @@ def test_admin_ticket_assign_options_only_include_helpdesk_users(monkeypatch):
     assert lookup[1]["email"] == "tech@example.com"
     assert lookup[2]["email"] == "general@example.com"
     assert captured["template_name"] == "admin/tickets.html"
+
+
+def test_admin_reprocess_ticket_ai_triggers_services(monkeypatch, active_session):
+    async def fake_require_helpdesk(request):
+        return {"id": 99, "email": "agent@example.com", "is_super_admin": False}, None
+
+    async def fake_get_ticket(ticket_id: int):
+        assert ticket_id == 42
+        return {"id": ticket_id}
+
+    summary_mock = AsyncMock(return_value=None)
+    tags_mock = AsyncMock(return_value=None)
+
+    monkeypatch.setattr(main_module, "_require_helpdesk_page", fake_require_helpdesk)
+    monkeypatch.setattr(main_module.tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_summary", summary_mock)
+    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_tags", tags_mock)
+    monkeypatch.setattr(session_manager, "load_session", AsyncMock(return_value=active_session))
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+
+    try:
+        with TestClient(app) as client:
+            client.cookies.set("myportal_session_csrf", active_session.csrf_token)
+            response = client.post(
+                "/admin/tickets/42/ai/reprocess",
+                json={},
+                headers={"X-CSRF-Token": "csrf-token"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == status.HTTP_200_OK
+    payload = response.json()
+    assert payload["status"] == "queued"
+    summary_mock.assert_awaited_once_with(42)
+    tags_mock.assert_awaited_once_with(42)
+
+
+def test_admin_reprocess_ticket_ai_missing_ticket(monkeypatch, active_session):
+    async def fake_require_helpdesk(request):
+        return {"id": 77, "email": "agent@example.com", "is_super_admin": False}, None
+
+    async def fake_get_ticket(ticket_id: int):
+        return None
+
+    summary_mock = AsyncMock(return_value=None)
+    tags_mock = AsyncMock(return_value=None)
+
+    monkeypatch.setattr(main_module, "_require_helpdesk_page", fake_require_helpdesk)
+    monkeypatch.setattr(main_module.tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_summary", summary_mock)
+    monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_tags", tags_mock)
+    monkeypatch.setattr(session_manager, "load_session", AsyncMock(return_value=active_session))
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+
+    try:
+        with TestClient(app) as client:
+            client.cookies.set("myportal_session_csrf", active_session.csrf_token)
+            response = client.post(
+                "/admin/tickets/999/ai/reprocess",
+                json={},
+                headers={"X-CSRF-Token": "csrf-token"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    payload = response.json()
+    assert payload["detail"] == "Ticket not found"
+    summary_mock.assert_not_awaited()
+    tags_mock.assert_not_awaited()

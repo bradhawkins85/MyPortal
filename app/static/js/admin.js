@@ -83,6 +83,64 @@
     return response.status !== 204 ? response.json() : null;
   }
 
+  function setButtonProcessing(button, isProcessing) {
+    if (!button) {
+      return;
+    }
+    const icon = button.querySelector('[data-button-icon]');
+    const spinner = button.querySelector('[data-button-spinner]');
+    if (icon) {
+      icon.hidden = Boolean(isProcessing);
+    }
+    if (spinner) {
+      spinner.hidden = !isProcessing;
+    }
+    button.classList.toggle('button--processing', Boolean(isProcessing));
+    if (isProcessing) {
+      button.setAttribute('aria-busy', 'true');
+      button.disabled = true;
+    } else {
+      button.removeAttribute('aria-busy');
+      button.disabled = false;
+    }
+  }
+
+  function bindTicketAiRefresh() {
+    const buttons = document.querySelectorAll('[data-ticket-ai-refresh]');
+    if (!buttons.length) {
+      return;
+    }
+
+    buttons.forEach((button) => {
+      button.addEventListener('click', async (event) => {
+        event.preventDefault();
+        const ticketId = button.getAttribute('data-ticket-id');
+        if (!ticketId || button.disabled) {
+          return;
+        }
+
+        let shouldReload = false;
+        try {
+          setButtonProcessing(button, true);
+          await requestJson(`/admin/tickets/${ticketId}/ai/reprocess`, {
+            method: 'POST',
+            body: JSON.stringify({}),
+          });
+          shouldReload = true;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unable to refresh AI summary and tags.';
+          alert(message);
+        } finally {
+          if (shouldReload) {
+            window.location.reload();
+            return;
+          }
+          setButtonProcessing(button, false);
+        }
+      });
+    });
+  }
+
   function bindSyncroTicketImportForms() {
     const forms = document.querySelectorAll('[data-syncro-ticket-import]');
     if (!forms.length) {
@@ -704,6 +762,7 @@
     bindSyncroCompanyImportForm();
     bindTicketBulkDelete();
     bindTicketStatusAutoSubmit();
+    bindTicketAiRefresh();
     bindRoleForm();
     bindCompanyAssignmentControls();
     bindApiKeyCopyButtons();

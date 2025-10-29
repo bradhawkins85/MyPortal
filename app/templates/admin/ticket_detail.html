@@ -247,16 +247,34 @@
           {% if ticket.ai_summary or ticket.ai_summary_status %}
             <article class="card card--panel">
               <header class="card__header">
-                <h2 class="card__title">AI Summary</h2>
-                <p class="card__subtitle">
-                  <span class="badge {{ ai_badge_map.get(ai_status_lower, 'badge--warning') }}">{{ ai_status_label }}</span>
-                  {% if ticket.ai_summary_model %}
-                    <span>{{ ticket.ai_summary_model }}</span>
-                  {% endif %}
-                  {% if ticket.ai_summary_updated_at %}
-                    <span>Updated {{ ticket.ai_summary_updated_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</span>
-                  {% endif %}
-                </p>
+                <div>
+                  <h2 class="card__title">AI Summary</h2>
+                  <p class="card__subtitle">
+                    <span class="badge {{ ai_badge_map.get(ai_status_lower, 'badge--warning') }}">{{ ai_status_label }}</span>
+                    {% if ticket.ai_summary_model %}
+                      <span>{{ ticket.ai_summary_model }}</span>
+                    {% endif %}
+                    {% if ticket.ai_summary_updated_at %}
+                      <span>Updated {{ ticket.ai_summary_updated_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</span>
+                    {% endif %}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="button button--ghost button--small"
+                  data-ticket-ai-refresh
+                  data-ticket-id="{{ ticket.id }}"
+                  aria-label="Reprocess AI summary and AI tags"
+                  title="Reprocess AI summary and AI tags"
+                >
+                  <span class="sr-only" data-button-label>Reprocess AI summary and AI tags</span>
+                  <span class="button__icon" aria-hidden="true" data-button-icon>
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path d="M12 4a8 8 0 0 1 7.75 6.11 1 1 0 0 1-1.94.46A6 6 0 1 0 17 16h1.59l-1.3-1.29a1 1 0 1 1 1.42-1.42l3 3a1 1 0 0 1 0 1.42l-3 3a1 1 0 0 1-1.42-1.42L18.59 18H17a8 8 0 1 1-5-14Z" />
+                    </svg>
+                  </span>
+                  <span class="button__spinner" aria-hidden="true" data-button-spinner hidden></span>
+                </button>
               </header>
               <div class="card__body">
                 {% if ai_status_lower == 'succeeded' and ticket.ai_summary %}
