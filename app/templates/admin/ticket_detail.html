@@ -220,14 +220,21 @@
         </div>
 
         <div class="management__column management__column--content">
-          {% if ticket.description %}
+          {% set description_html = ticket.description_html if ticket.description_html is defined else '' %}
+          {% set has_original_description = ticket.description is defined and ticket.description %}
+          {% if description_html or has_original_description %}
             <article class="card card--panel">
               <header class="card__header">
                 <h2 class="card__title">Description</h2>
               </header>
               <div class="card__body">
-                {% set safe_description = (ticket.description | e).replace('\n', '<br />') %}
-                <p>{{ safe_description | safe }}</p>
+                {% if description_html %}
+                  <div class="rich-text-viewer" data-ticket-description>
+                    {{ description_html | safe }}
+                  </div>
+                {% else %}
+                  <p class="card__empty">The ticket description does not contain displayable content.</p>
+                {% endif %}
               </div>
             </article>
           {% endif %}
