@@ -119,7 +119,6 @@
                 <th scope="col" data-sort="string">Company</th>
                 <th scope="col" data-sort="string">Assigned</th>
                 <th scope="col" data-sort="string">Updated</th>
-                <th scope="col">Update status</th>
                 <th scope="col" class="table__actions">Actions</th>
               </tr>
             </thead>
@@ -156,31 +155,49 @@
                       'resolved': 'badge--success',
                       'closed': 'badge--muted'
                     } %}
-                    <td data-label="Status">
-                      <span class="badge {{ status_badge_map.get(ticket_status, 'badge--muted') }}">{{ status_label }}</span>
+                    <td data-label="Status" data-value="{{ ticket_status }}">
+                      <div class="ticket-status" data-ticket-status>
+                        <button
+                          type="button"
+                          class="ticket-status__toggle"
+                          data-ticket-status-toggle
+                          aria-haspopup="listbox"
+                          aria-expanded="false"
+                          aria-controls="ticket-status-form-{{ ticket.id }}"
+                        >
+                          <span class="badge {{ status_badge_map.get(ticket_status, 'badge--muted') }}">{{ status_label }}</span>
+                          <span class="ticket-status__chevron" aria-hidden="true"></span>
+                          <span class="visually-hidden">Change ticket status</span>
+                        </button>
+                        <form
+                          id="ticket-status-form-{{ ticket.id }}"
+                          action="/admin/tickets/{{ ticket.id }}/status"
+                          method="post"
+                          class="inline-form ticket-status__form"
+                          data-ticket-status-form
+                          hidden
+                        >
+                          {% if csrf_token %}
+                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                          {% endif %}
+                          <label class="visually-hidden" for="ticket-status-{{ ticket.id }}">Status</label>
+                          <select
+                            id="ticket-status-{{ ticket.id }}"
+                            name="status"
+                            class="form-input form-input--compact"
+                            data-ticket-status-select
+                          >
+                            {% for status_option in ticket_available_statuses %}
+                              <option value="{{ status_option }}" {% if status_option == (ticket.status or 'open') %}selected{% endif %}>{{ status_option.replace('_', ' ') }}</option>
+                            {% endfor %}
+                          </select>
+                        </form>
+                      </div>
                     </td>
                     <td data-label="Priority">{{ ticket.priority or 'normal' }}</td>
                     <td data-label="Company">{{ company.name if company else (ticket.company_id or '—') }}</td>
                     <td data-label="Assigned">{{ assigned.email if assigned else '—' }}</td>
                     <td data-label="Updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
-                    <td data-label="Update status">
-                      <form action="/admin/tickets/{{ ticket.id }}/status" method="post" class="inline-form" data-ticket-status-form>
-                        {% if csrf_token %}
-                          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                        {% endif %}
-                        <label class="visually-hidden" for="ticket-status-{{ ticket.id }}">Status</label>
-                        <select
-                          id="ticket-status-{{ ticket.id }}"
-                          name="status"
-                          class="form-input form-input--compact"
-                          data-ticket-status-select
-                        >
-                          {% for status_option in ticket_available_statuses %}
-                            <option value="{{ status_option }}" {% if status_option == (ticket.status or 'open') %}selected{% endif %}>{{ status_option.replace('_', ' ') }}</option>
-                          {% endfor %}
-                        </select>
-                      </form>
-                    </td>
                     <td class="table__actions">
                       <a href="/admin/tickets/{{ ticket.id }}" class="button button--ghost">Open</a>
                     </td>
