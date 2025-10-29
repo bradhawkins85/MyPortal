@@ -12,9 +12,6 @@
 
 {% block header_title %}
   <span class="header__title-text">Knowledge base</span>
-  {% if kb_is_super_admin %}
-    <a class="button-link header__title-link" href="/admin/knowledge-base">Knowledge base admin</a>
-  {% endif %}
 {% endblock %}
 
 {% block header_actions %}
@@ -31,6 +28,9 @@
     />
     <button type="submit" class="button button--ghost">Search</button>
   </form>
+  {% if kb_is_super_admin %}
+    <a class="button button--ghost" href="/admin/knowledge-base">Knowledge base admin</a>
+  {% endif %}
 {% endblock %}
 
 {% block content %}

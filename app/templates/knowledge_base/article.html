@@ -12,8 +12,24 @@
 
 {% block header_title %}
   <span class="header__title-text">{{ kb_article.title }}</span>
+{% endblock %}
+
+{% block header_actions %}
+  <form id="knowledge-base-search-form" class="header-search" data-knowledge-base-search>
+    <label for="knowledge-base-search" class="visually-hidden">Search knowledge base</label>
+    <input
+      type="search"
+      id="knowledge-base-search"
+      name="query"
+      class="input input--compact"
+      placeholder="Search knowledge base"
+      autocomplete="off"
+      required
+    />
+    <button type="submit" class="button button--ghost">Search</button>
+  </form>
   {% if kb_is_super_admin %}
-    <a class="button-link header__title-link" href="/admin/knowledge-base">Knowledge base admin</a>
+    <a class="button button--ghost" href="/admin/knowledge-base">Knowledge base admin</a>
   {% endif %}
 {% endblock %}
 
