@@ -402,7 +402,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             existing_message = await imap_repo.get_message(int(account_id), uid)
             if existing_message and existing_message.get("status") == "imported":
                 continue
-            fetch_result, fetch_data = mailbox.uid("fetch", raw_uid, "(RFC822)")
+            # Use BODY.PEEK so that fetching the message does not set the \\Seen flag
+            # before the ticket import succeeds.
+            fetch_result, fetch_data = mailbox.uid("fetch", raw_uid, "(BODY.PEEK[])")
             if fetch_result != "OK" or not fetch_data:
                 await _record_message(
                     account_id=int(account_id),
