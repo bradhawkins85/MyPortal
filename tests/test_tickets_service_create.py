@@ -261,3 +261,91 @@ async def test_enrich_ticket_context_includes_relationship_details(monkeypatch):
     assert enriched["latest_reply"]["body"] == "Printer restored"
     assert enriched["latest_reply"]["author_email"] == "tech@example.com"
     assert enriched["latest_reply"]["author_display_name"] == "Taylor Nguyen"
+
+
+@pytest.mark.anyio
+async def test_emit_ticket_updated_event_includes_actor_metadata(monkeypatch):
+    ticket_record = {"id": 55, "status": "open"}
+
+    async def fake_get_ticket(ticket_id):
+        assert ticket_id == 55
+        return ticket_record
+
+    async def fake_enrich(ticket):
+        assert ticket is ticket_record
+        enriched = dict(ticket)
+        enriched.update({
+            "requester_id": 7,
+            "assigned_user_id": 11,
+            "watchers": [],
+        })
+        return enriched
+
+    captured: dict[str, object] = {}
+
+    async def fake_handle_event(event_name, context):
+        captured["event"] = event_name
+        captured["context"] = context
+        return []
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(tickets_service, "_enrich_ticket_context", fake_enrich)
+    monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
+
+    actor = {
+        "id": 11,
+        "email": "tech@example.com",
+        "first_name": "Taylor",
+        "last_name": "Nguyen",
+    }
+
+    await tickets_service.emit_ticket_updated_event(
+        55,
+        actor_type="Technician",
+        actor=actor,
+    )
+
+    assert captured["event"] == "tickets.updated"
+    context = captured["context"]
+    assert context["ticket"]["id"] == 55
+    actor_meta = context["ticket_update"]
+    assert actor_meta["actor_type"] == "technician"
+    assert actor_meta["actor_label"] == "Technician"
+    assert actor_meta["actor_user_email"] == "tech@example.com"
+    assert actor_meta["actor_user_display_name"] == "Taylor Nguyen"
+
+
+@pytest.mark.anyio
+async def test_emit_ticket_updated_event_auto_detects_requester(monkeypatch):
+    ticket_record = {"id": 88, "status": "open", "requester_id": 21}
+
+    async def fake_get_ticket(ticket_id):
+        assert ticket_id == 88
+        return ticket_record
+
+    async def fake_enrich(ticket):
+        assert ticket is ticket_record
+        enriched = dict(ticket)
+        enriched["watchers"] = []
+        return enriched
+
+    captured: dict[str, object] = {}
+
+    async def fake_handle_event(event_name, context):
+        captured["event"] = event_name
+        captured["context"] = context
+        return []
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(tickets_service, "_enrich_ticket_context", fake_enrich)
+    monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
+
+    actor = {"id": 21, "email": "requester@example.com"}
+
+    await tickets_service.emit_ticket_updated_event(88, actor=actor)
+
+    context = captured["context"]
+    assert context["ticket"]["id"] == 88
+    actor_meta = context["ticket_update"]
+    assert actor_meta["actor_type"] == "requester"
+    assert actor_meta["actor_label"] == "Requester"

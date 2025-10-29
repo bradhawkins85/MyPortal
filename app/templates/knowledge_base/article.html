@@ -10,6 +10,13 @@
 
 {% block title %}{{ kb_article.title }} · Knowledge base{% endblock %}
 
+{% block header_title %}
+  <span class="header__title-text">{{ kb_article.title }}</span>
+  {% if kb_is_super_admin %}
+    <a class="button-link header__title-link" href="/admin/knowledge-base">Knowledge base admin</a>
+  {% endif %}
+{% endblock %}
+
 {% block content %}
 <div class="knowledge-base knowledge-base--article">
   <article class="card card--panel knowledge-base__article" data-knowledge-base-article>

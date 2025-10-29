@@ -7,7 +7,7 @@ from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping as MappingABC, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from app.core.database import db
 from app.core.logging import log_error
@@ -88,6 +88,16 @@ _DEFAULT_TAG_FILL = [
     "diagnostics",
     "knowledge-base",
 ]
+
+
+_TICKET_UPDATE_ACTOR_LABELS: dict[str, str] = {
+    "system": "System",
+    "automation": "Automation",
+    "requester": "Requester",
+    "watcher": "Watcher",
+    "technician": "Technician",
+}
+
 
 
 _MAX_TICKET_DESCRIPTION_BYTES = 65_535
@@ -279,6 +289,111 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
     return enriched
 
 
+def _normalise_ticket_update_actor(value: str | None) -> str | None:
+    if value in (None, ""):
+        return None
+    candidate = str(value).strip().lower()
+    if candidate in _TICKET_UPDATE_ACTOR_LABELS:
+        return candidate
+    return None
+
+
+def _auto_detect_ticket_update_actor(
+    ticket: Mapping[str, Any],
+    actor: Mapping[str, Any] | None,
+) -> str:
+    actor_id = None
+    if isinstance(actor, Mapping):
+        try:
+            actor_id = int(actor.get("id")) if actor.get("id") is not None else None
+        except (TypeError, ValueError):
+            actor_id = None
+    if actor_id is not None:
+        requester_id = ticket.get("requester_id")
+        if requester_id is not None and actor_id == requester_id:
+            return "requester"
+        assigned_id = ticket.get("assigned_user_id")
+        if assigned_id is not None and actor_id == assigned_id:
+            return "technician"
+        watchers = ticket.get("watchers")
+        if isinstance(watchers, Sequence):
+            for watcher in watchers:
+                if not isinstance(watcher, Mapping):
+                    continue
+                watcher_user_id = watcher.get("user_id")
+                try:
+                    watcher_user_id_int = int(watcher_user_id)
+                except (TypeError, ValueError):
+                    continue
+                if watcher_user_id_int == actor_id:
+                    return "watcher"
+    return "system"
+
+
+async def emit_ticket_updated_event(
+    ticket: Mapping[str, Any] | int,
+    *,
+    actor_type: str | None = None,
+    actor: Mapping[str, Any] | None = None,
+    trigger_automations: bool = True,
+) -> None:
+    """Emit a ``tickets.updated`` automation event with actor metadata."""
+
+    ticket_record: Mapping[str, Any] | None
+    if isinstance(ticket, Mapping):
+        ticket_record = ticket
+    else:
+        try:
+            ticket_id = int(ticket)
+        except (TypeError, ValueError):
+            return
+        ticket_record = await tickets_repo.get_ticket(ticket_id)
+    if not ticket_record:
+        return
+
+    enriched = await _enrich_ticket_context(ticket_record)
+
+    actor_snapshot = _build_user_snapshot(actor)
+    if actor_snapshot is None and isinstance(actor, Mapping):
+        minimal: dict[str, Any] = {}
+        if "id" in actor:
+            minimal["id"] = actor.get("id")
+        if "email" in actor:
+            minimal["email"] = actor.get("email")
+        if "display_name" in actor:
+            minimal["display_name"] = actor.get("display_name")
+        if "first_name" in actor or "last_name" in actor:
+            display = _format_user_display_name(actor)
+            if display:
+                minimal["display_name"] = display
+        actor_snapshot = minimal or None
+
+    normalised_actor = _normalise_ticket_update_actor(actor_type)
+    if normalised_actor is None:
+        normalised_actor = _auto_detect_ticket_update_actor(enriched, actor_snapshot)
+    actor_label = _TICKET_UPDATE_ACTOR_LABELS.get(normalised_actor, "System")
+
+    metadata: dict[str, Any] = {
+        "actor_type": normalised_actor,
+        "actor_label": actor_label,
+        "actor_user": actor_snapshot,
+    }
+    if isinstance(actor_snapshot, Mapping):
+        metadata["actor_user_id"] = actor_snapshot.get("id")
+        metadata["actor_user_email"] = actor_snapshot.get("email")
+        metadata["actor_user_display_name"] = actor_snapshot.get("display_name")
+
+    context = {
+        "ticket": enriched,
+        "ticket_update": metadata,
+    }
+
+    if not trigger_automations:
+        return
+
+    await automations_service.handle_event("tickets.updated", context)
+
+
 def _normalise_reply_marker_line(value: str) -> str:
     candidate = html.unescape(value).strip()
     candidate = candidate.replace("\u200b", "").replace("\ufeff", "").replace("\xad", "")
@@ -455,6 +570,7 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
             ai_resolution_state=resolution_state if status_value == "succeeded" else None,
             ai_summary_updated_at=updated_at,
         )
+        await emit_ticket_updated_event(ticket_id, actor_type="system")
 
     try:
         response = await modules_service.trigger_module(
@@ -472,6 +588,7 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
             ai_resolution_state=None,
             ai_summary_updated_at=now,
         )
+        await emit_ticket_updated_event(ticket_id, actor_type="system")
         return
     except Exception as exc:  # pragma: no cover - network interaction
         log_error("Ticket AI summary failed", ticket_id=ticket_id, error=str(exc))
@@ -484,6 +601,7 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
             ai_resolution_state=None,
             ai_summary_updated_at=now,
         )
+        await emit_ticket_updated_event(ticket_id, actor_type="system")
         return
 
     status_value = str(response.get("status") or "unknown")
@@ -497,6 +615,7 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
             ai_resolution_state=None,
             ai_summary_updated_at=now,
         )
+        await emit_ticket_updated_event(ticket_id, actor_type="system")
 
 
 async def refresh_ticket_ai_tags(ticket_id: int) -> None:
@@ -552,6 +671,7 @@ async def refresh_ticket_ai_tags(ticket_id: int) -> None:
             ai_tags_model=str(model_value) if isinstance(model_value, str) else None,
             ai_tags_updated_at=updated_at,
         )
+        await emit_ticket_updated_event(ticket_id, actor_type="system")
 
     try:
         response = await modules_service.trigger_module(
@@ -568,6 +688,7 @@ async def refresh_ticket_ai_tags(ticket_id: int) -> None:
             ai_tags_model=None,
             ai_tags_updated_at=now,
         )
+        await emit_ticket_updated_event(ticket_id, actor_type="system")
         return
     except Exception as exc:  # pragma: no cover - network interaction
         log_error("Ticket AI tags failed", ticket_id=ticket_id, error=str(exc))
@@ -579,6 +700,7 @@ async def refresh_ticket_ai_tags(ticket_id: int) -> None:
             ai_tags_model=None,
             ai_tags_updated_at=now,
         )
+        await emit_ticket_updated_event(ticket_id, actor_type="system")
         return
 
     if str(response.get("status") or "").lower() == "skipped":
@@ -590,6 +712,7 @@ async def refresh_ticket_ai_tags(ticket_id: int) -> None:
             ai_tags_model=None,
             ai_tags_updated_at=now,
         )
+        await emit_ticket_updated_event(ticket_id, actor_type="system")
 
 
 async def create_ticket(

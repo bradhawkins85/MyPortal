@@ -11,6 +11,18 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _stub_emit_ticket_events(monkeypatch):
+    async def fake_emit_event(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        chatgpt_service.tickets_service,
+        "emit_ticket_updated_event",
+        fake_emit_event,
+    )
+
+
 def _hashed(secret: str) -> str:
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
 

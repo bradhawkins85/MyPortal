@@ -15,6 +15,23 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _no_ticket_update_events(monkeypatch):
+    async def fake_emit_event(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", fake_emit_event)
+
+    async def fake_refresh_summary(ticket_id):
+        return None
+
+    async def fake_refresh_tags(ticket_id):
+        return None
+
+    monkeypatch.setattr(tickets_service, "refresh_ticket_ai_summary", fake_refresh_summary)
+    monkeypatch.setattr(tickets_service, "refresh_ticket_ai_tags", fake_refresh_tags)
+
+
 def test_normalise_status_mapping():
     assert ticket_importer._normalise_status("In Progress") == "in_progress"
     assert ticket_importer._normalise_status("Waiting on customer") == "pending"
@@ -368,9 +385,13 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
     assert reply_calls[0]["external_reference"] == "1"
     assert reply_calls[0]["is_internal"] is False
     assert reply_calls[0]["author_id"] == 21
+    assert reply_calls[0].get("minutes_spent") is None
+    assert reply_calls[0].get("is_billable", False) is False
     assert reply_calls[1]["external_reference"] == "2"
     assert reply_calls[1]["is_internal"] is True
     assert reply_calls[1]["author_id"] == 31
+    assert reply_calls[1].get("minutes_spent") is None
+    assert reply_calls[1].get("is_billable", False) is False
     assert added_watchers == [(400, 31)]
 
 
@@ -434,6 +455,8 @@ async def test_import_ticket_skips_existing_comment_replies(monkeypatch):
     assert summary.updated == 1
     assert len(reply_calls) == 1
     assert reply_calls[0]["external_reference"] == "2"
+    assert reply_calls[0].get("minutes_spent") is None
+    assert reply_calls[0].get("is_billable", False) is False
 @pytest.mark.anyio
 async def test_import_from_request_records_webhook_success(monkeypatch):
     summary = ticket_importer.TicketImportSummary(mode="single", fetched=1, created=1)

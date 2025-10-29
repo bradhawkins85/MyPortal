@@ -1,0 +1,7 @@
+{
+  "guid": "4f37ec55-c040-48ab-af84-8b461aa3847b",
+  "occurred_at": "2025-10-29T13:06Z",
+  "change_type": "Change",
+  "summary": "Moved Knowledge Base admin access from the sidebar into the Knowledge Base page header.",
+  "content_hash": "993f1d7b4fda127a6eaa02992cd3d7129088233c0058e43746560419d9403b1e"
+}
