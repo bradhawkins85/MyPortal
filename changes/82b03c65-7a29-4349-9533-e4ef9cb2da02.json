@@ -1,0 +1,7 @@
+{
+  "guid": "82b03c65-7a29-4349-9533-e4ef9cb2da02",
+  "occurred_at": "2025-10-29T14:41Z",
+  "change_type": "Fix",
+  "summary": "Ensure shop package details iterate over item lists instead of the dict method to prevent template errors.",
+  "content_hash": "0bee79f43291a48c0c0a1bc40dd24640627b2d58e9d7594a676cdfe346ecbc6b"
+}
