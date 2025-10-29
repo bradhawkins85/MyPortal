@@ -222,6 +222,20 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
 ]
 
 
+def _default_module_setting(slug: str, key: str, fallback: str) -> str:
+    for module in DEFAULT_MODULES:
+        if module.get("slug") == slug:
+            settings = module.get("settings") or {}
+            value = settings.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return fallback
+
+
+_DEFAULT_OLLAMA_MODEL = _default_module_setting("ollama", "model", "llama3")
+_DEFAULT_OLLAMA_BASE_URL = _default_module_setting("ollama", "base_url", "http://127.0.0.1:11434")
+
+
 def _coerce_settings(
     slug: str,
     payload: Mapping[str, Any] | None,
@@ -606,8 +620,14 @@ async def _invoke_ollama(
     *,
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
-    base_url = str(settings.get("base_url") or "http://127.0.0.1:11434").rstrip("/")
-    model = str(settings.get("model") or "llama3")
+    configured_base_url = str(settings.get("base_url") or "").strip()
+    base_url = configured_base_url or _DEFAULT_OLLAMA_BASE_URL
+    base_url = base_url.rstrip("/")
+
+    payload_model = payload.get("model")
+    configured_model = str(settings.get("model") or "").strip()
+    model = str(payload_model or "").strip() or configured_model or _DEFAULT_OLLAMA_MODEL
+
     default_prompt = str(settings.get("prompt") or "")
     prompt = str(payload.get("prompt") or payload.get("text") or default_prompt)
     if not prompt:
