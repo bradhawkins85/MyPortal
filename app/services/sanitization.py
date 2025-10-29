@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Mapping
 
 import bleach
@@ -13,6 +14,7 @@ _ALLOWED_TAGS: tuple[str, ...] = (
     "blockquote",
     "br",
     "code",
+    "img",
     "div",
     "em",
     "h1",
@@ -43,11 +45,12 @@ _ALLOWED_TAGS: tuple[str, ...] = (
 
 _ALLOWED_ATTRIBUTES: Mapping[str, list[str]] = {
     "a": ["href", "title", "target", "rel"],
+    "img": ["src", "alt", "title", "width", "height", "loading", "decoding"],
     "span": ["data-mention"],
     "table": ["role"],
 }
 
-_ALLOWED_PROTOCOLS: tuple[str, ...] = ("http", "https", "mailto", "tel")
+_ALLOWED_PROTOCOLS: tuple[str, ...] = ("http", "https", "mailto", "tel", "data")
 
 
 @dataclass(slots=True)
@@ -56,6 +59,7 @@ class SanitizedRichText:
 
     html: str
     text_content: str
+    has_rich_content: bool
 
 
 def sanitize_rich_text(value: str | None) -> SanitizedRichText:
@@ -84,9 +88,11 @@ def sanitize_rich_text(value: str | None) -> SanitizedRichText:
     else:
         html_value = ""
     text_content = bleach.clean(html_value, tags=[], strip=True).strip()
-    if not text_content:
+    contains_media = bool(re.search(r"<img\b[^>]*\bsrc=", html_value, flags=re.IGNORECASE))
+    if not text_content and not contains_media:
         html_value = ""
-    return SanitizedRichText(html=html_value, text_content=text_content)
+    has_content = bool(text_content) or contains_media
+    return SanitizedRichText(html=html_value, text_content=text_content, has_rich_content=has_content)
 
 
 __all__ = ["SanitizedRichText", "sanitize_rich_text"]
