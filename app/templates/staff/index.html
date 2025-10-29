@@ -3,50 +3,55 @@
 {% block content %}
 <div class="admin-grid">
   {% if is_admin %}
-    <section class="card card--panel admin-grid__full staff-form-card">
-      <header class="card__header card__header--stacked">
+    <details class="card card--panel card-collapsible admin-grid__full staff-form-card" data-staff-form>
+      <summary class="card__header card__header--collapsible">
         <div>
           <h2 class="card__title">Add staff member</h2>
           <p class="card__subtitle">Capture onboarding details to provision accounts and workflows.</p>
         </div>
-      </header>
-      <form action="/staff" method="post" class="staff-form">
-        {% include "partials/csrf.html" %}
-        <div class="form-field">
-          <label class="form-label" for="staff-first-name">First name</label>
-          <input class="form-input" id="staff-first-name" name="firstName" required />
+        <div class="card__collapsible-meta">
+          <span class="card__toggle-icon" aria-hidden="true"></span>
         </div>
-        <div class="form-field">
-          <label class="form-label" for="staff-last-name">Last name</label>
-          <input class="form-input" id="staff-last-name" name="lastName" required />
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="staff-email">Email</label>
-          <input class="form-input" id="staff-email" name="email" type="email" required />
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="staff-mobile">Mobile phone</label>
-          <input class="form-input" id="staff-mobile" name="mobilePhone" type="tel" />
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="staff-department">Department</label>
-          <input class="form-input" id="staff-department" name="department" />
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="staff-date-onboarded">Onboard date</label>
-          <input class="form-input" id="staff-date-onboarded" name="dateOnboarded" type="date" />
-        </div>
-        <div class="form-field form-field--checkbox">
-          <label class="checkbox">
-            <input type="checkbox" name="enabled" value="1" checked />
-            <span>Enabled</span>
-          </label>
-        </div>
-        <div class="form-actions staff-form__actions">
-          <button type="submit" class="button">Add staff</button>
-        </div>
-      </form>
-    </section>
+      </summary>
+      <div class="card-collapsible__content">
+        <form action="/staff" method="post" class="staff-form">
+          {% include "partials/csrf.html" %}
+          <div class="form-field">
+            <label class="form-label" for="staff-first-name">First name</label>
+            <input class="form-input" id="staff-first-name" name="firstName" required />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="staff-last-name">Last name</label>
+            <input class="form-input" id="staff-last-name" name="lastName" required />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="staff-email">Email</label>
+            <input class="form-input" id="staff-email" name="email" type="email" required />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="staff-mobile">Mobile phone</label>
+            <input class="form-input" id="staff-mobile" name="mobilePhone" type="tel" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="staff-department">Department</label>
+            <input class="form-input" id="staff-department" name="department" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="staff-date-onboarded">Onboard date</label>
+            <input class="form-input" id="staff-date-onboarded" name="dateOnboarded" type="date" />
+          </div>
+          <div class="form-field form-field--checkbox">
+            <label class="checkbox">
+              <input type="checkbox" name="enabled" value="1" checked />
+              <span>Enabled</span>
+            </label>
+          </div>
+          <div class="form-actions staff-form__actions">
+            <button type="submit" class="button">Add staff</button>
+          </div>
+        </form>
+      </div>
+    </details>
   {% endif %}
 
   <section class="card card--panel admin-grid__full">
