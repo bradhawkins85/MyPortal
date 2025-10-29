@@ -385,9 +385,13 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
     assert reply_calls[0]["external_reference"] == "1"
     assert reply_calls[0]["is_internal"] is False
     assert reply_calls[0]["author_id"] == 21
+    assert reply_calls[0].get("minutes_spent") is None
+    assert reply_calls[0].get("is_billable", False) is False
     assert reply_calls[1]["external_reference"] == "2"
     assert reply_calls[1]["is_internal"] is True
     assert reply_calls[1]["author_id"] == 31
+    assert reply_calls[1].get("minutes_spent") is None
+    assert reply_calls[1].get("is_billable", False) is False
     assert added_watchers == [(400, 31)]
 
 
@@ -451,6 +455,8 @@ async def test_import_ticket_skips_existing_comment_replies(monkeypatch):
     assert summary.updated == 1
     assert len(reply_calls) == 1
     assert reply_calls[0]["external_reference"] == "2"
+    assert reply_calls[0].get("minutes_spent") is None
+    assert reply_calls[0].get("is_billable", False) is False
 @pytest.mark.anyio
 async def test_import_from_request_records_webhook_success(monkeypatch):
     summary = ticket_importer.TicketImportSummary(mode="single", fetched=1, created=1)

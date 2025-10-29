@@ -6210,17 +6210,44 @@ async def _render_ticket_detail(
 
     ordered_replies = list(reversed(replies))
 
+    total_billable_minutes = 0
+    total_non_billable_minutes = 0
     enriched_replies: list[dict[str, Any]] = []
     for reply in ordered_replies:
         author_id = reply.get("author_id")
         author = user_lookup.get(author_id) if author_id else None
         sanitized_reply = sanitize_rich_text(str(reply.get("body") or ""))
+        minutes_value = reply.get("minutes_spent")
+        minutes_spent: int | None = None
+        if minutes_value is not None:
+            try:
+                candidate = int(minutes_value)
+            except (TypeError, ValueError):
+                minutes_spent = None
+            else:
+                if candidate >= 0:
+                    minutes_spent = candidate
+        billable_flag = bool(reply.get("is_billable"))
+        if minutes_spent is not None:
+            if billable_flag:
+                total_billable_minutes += minutes_spent
+            else:
+                total_non_billable_minutes += minutes_spent
+        if minutes_spent is not None:
+            minutes_label = "minute" if minutes_spent == 1 else "minutes"
+            billing_label = "Billable" if billable_flag else "Non-billable"
+            time_summary = f"{minutes_spent} {minutes_label} · {billing_label}"
+        else:
+            time_summary = None
         enriched_replies.append(
             {
                 **reply,
                 "author": author,
                 "body": sanitized_reply.html,
                 "text_body": sanitized_reply.text_content,
+                "minutes_spent": minutes_spent,
+                "is_billable": billable_flag,
+                "time_summary": time_summary,
             }
         )
 
@@ -6283,6 +6310,8 @@ async def _render_ticket_detail(
         "ticket_requester": user_lookup.get(ticket.get("requester_id")),
         "ticket_replies": enriched_replies,
         "ticket_watchers": enriched_watchers,
+        "ticket_billable_minutes": total_billable_minutes,
+        "ticket_non_billable_minutes": total_non_billable_minutes,
         "ticket_available_statuses": available_statuses,
         "ticket_company_options": companies,
         "ticket_user_options": technician_users,
@@ -6918,6 +6947,38 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     body_raw = str(body_value) if isinstance(body_value, str) else ""
     sanitized_body = sanitize_rich_text(body_raw)
     is_internal = str(form.get("isInternal", "")).lower() in {"1", "true", "on", "yes"}
+    minutes_input_raw = form.get("minutesSpent", "")
+    minutes_input = str(minutes_input_raw).strip() if isinstance(minutes_input_raw, str) else ""
+    minutes_spent: int | None = None
+    if minutes_input:
+        try:
+            minutes_candidate = int(minutes_input)
+        except (TypeError, ValueError):
+            return await _render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message="Enter the time spent in minutes as a whole number.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        if minutes_candidate < 0:
+            return await _render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message="Minutes cannot be negative.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        if minutes_candidate > 1440:
+            return await _render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message="Minutes cannot exceed 1440 per reply.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        minutes_spent = minutes_candidate
+    is_billable = str(form.get("isBillable", "")).lower() in {"1", "true", "on", "yes"}
     if not sanitized_body.has_rich_content:
         return await _render_ticket_detail(
             request,
@@ -6936,6 +6997,8 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             author_id=author_id if isinstance(author_id, int) else None,
             body=sanitized_body.html,
             is_internal=is_internal,
+            minutes_spent=minutes_spent,
+            is_billable=is_billable,
         )
         if isinstance(author_id, int):
             await tickets_repo.add_watcher(ticket_id, author_id)
