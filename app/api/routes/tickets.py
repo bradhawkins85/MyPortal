@@ -18,6 +18,8 @@ from app.schemas.tickets import (
     SyncroTicketImportRequest,
     SyncroTicketImportSummary,
     TicketCreate,
+    TicketDashboardResponse,
+    TicketDashboardRow,
     TicketDetail,
     TicketListResponse,
     TicketReply,
@@ -25,6 +27,7 @@ from app.schemas.tickets import (
     TicketReplyTimeUpdate,
     TicketReplyResponse,
     TicketResponse,
+    TicketSearchFilters,
     TicketUpdate,
     TicketWatcher,
     TicketWatcherUpdate,
@@ -32,8 +35,6 @@ from app.schemas.tickets import (
 from app.security.session import SessionData
 from app.services import ticket_importer, tickets as tickets_service
 from app.services.sanitization import sanitize_rich_text
-
-HELPDESK_PERMISSION_KEY = "helpdesk.technician"
 
 router = APIRouter(prefix="/api/tickets", tags=["Tickets"])
 
@@ -47,7 +48,9 @@ async def _has_helpdesk_permission(current_user: dict) -> bool:
     except (TypeError, ValueError):
         return False
     try:
-        return await membership_repo.user_has_permission(user_id_int, HELPDESK_PERMISSION_KEY)
+        return await membership_repo.user_has_permission(
+            user_id_int, tickets_service.HELPDESK_PERMISSION_KEY
+        )
     except RuntimeError:
         return False
 
@@ -142,6 +145,67 @@ async def list_tickets(
     )
 
 
+@router.get("/dashboard", response_model=TicketDashboardResponse)
+async def get_ticket_dashboard(
+    status_filter: str | None = Query(default=None, alias="status"),
+    module_slug: str | None = Query(default=None, alias="module"),
+    company_id: int | None = Query(default=None, alias="companyId"),
+    assigned_user_id: int | None = Query(default=None, alias="assignedUserId"),
+    search: str | None = Query(default=None, min_length=1),
+    limit: int = Query(default=200, ge=1, le=500),
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TicketDashboardResponse:
+    state = await tickets_service.load_dashboard_state(
+        status_filter=status_filter,
+        module_filter=module_slug,
+        company_id=company_id,
+        assigned_user_id=assigned_user_id,
+        search=search,
+        limit=limit,
+    )
+    rows: list[TicketDashboardRow] = []
+    for ticket in state.tickets:
+        identifier = ticket.get("id")
+        try:
+            numeric_id = int(identifier)
+        except (TypeError, ValueError):
+            continue
+        company_record = state.company_lookup.get(ticket.get("company_id"))
+        assigned_record = state.user_lookup.get(ticket.get("assigned_user_id"))
+        rows.append(
+            TicketDashboardRow(
+                id=numeric_id,
+                subject=str(ticket.get("subject") or ""),
+                status=str(ticket.get("status") or "open"),
+                priority=str(ticket.get("priority") or "normal"),
+                company_id=ticket.get("company_id"),
+                company_name=(company_record or {}).get("name") if isinstance(company_record, dict) else None,
+                assigned_user_id=ticket.get("assigned_user_id"),
+                assigned_user_email=(assigned_record or {}).get("email")
+                if isinstance(assigned_record, dict)
+                else None,
+                module_slug=ticket.get("module_slug"),
+                requester_id=ticket.get("requester_id"),
+                updated_at=ticket.get("updated_at"),
+            )
+        )
+    filters = TicketSearchFilters(
+        status=status_filter,
+        module_slug=module_slug,
+        company_id=company_id,
+        assigned_user_id=assigned_user_id,
+        search=search,
+        limit=limit,
+        offset=0,
+    )
+    return TicketDashboardResponse(
+        items=rows,
+        total=state.total,
+        status_counts=dict(state.status_counts),
+        filters=filters,
+    )
+
+
 @router.post("/", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
 async def create_ticket(
     payload: TicketCreate,
@@ -223,6 +287,7 @@ async def update_ticket(
     except RuntimeError:
         pass
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
     await tickets_service.emit_ticket_updated_event(
         ticket_id,
         actor_type="technician",
@@ -237,6 +302,7 @@ async def delete_ticket(ticket_id: int, current_user: dict = Depends(require_sup
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     await tickets_repo.delete_ticket(ticket_id)
+    await tickets_service.broadcast_ticket_event(action="deleted", ticket_id=ticket_id)
 
 
 @router.post(
@@ -309,6 +375,7 @@ async def add_reply(
     time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag)
     if time_summary:
         reply_payload["time_summary"] = time_summary
+    await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
     return TicketReplyResponse(ticket=ticket_response, reply=TicketReply(**reply_payload))
 
 

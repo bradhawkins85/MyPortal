@@ -112,6 +112,23 @@ class TicketListResponse(BaseModel):
     total: int
 
 
+class TicketDashboardRow(BaseModel):
+    id: int
+    subject: str
+    status: str
+    priority: str
+    company_id: Optional[int] = None
+    company_name: Optional[str] = None
+    assigned_user_id: Optional[int] = None
+    assigned_user_email: Optional[str] = None
+    module_slug: Optional[str] = None
+    requester_id: Optional[int] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class TicketReplyResponse(BaseModel):
     ticket: TicketResponse
     reply: TicketReply
@@ -125,6 +142,13 @@ class TicketSearchFilters(BaseModel):
     search: Optional[str] = None
     limit: int = Field(default=100, ge=1, le=500)
     offset: int = Field(default=0, ge=0)
+
+
+class TicketDashboardResponse(BaseModel):
+    items: list[TicketDashboardRow]
+    total: int
+    status_counts: dict[str, int]
+    filters: TicketSearchFilters
 
 
 class TicketWatcherUpdate(BaseModel):
