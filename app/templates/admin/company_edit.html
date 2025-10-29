@@ -85,57 +85,6 @@
           </div>
         </form>
       </div>
-      <div class="card__body card__body--meta">
-        <h3 class="card__subtitle">Company details</h3>
-        <dl class="definition-list">
-          <div class="definition-list__item">
-            <dt>ID</dt>
-            <dd>{{ company.id }}</dd>
-          </div>
-          <div class="definition-list__item">
-            <dt>Syncro ID</dt>
-            <dd>
-              {% if form_data.syncro_company_id %}
-                {{ form_data.syncro_company_id }}
-              {% else %}
-                <span class="text-muted">Not set</span>
-              {% endif %}
-            </dd>
-          </div>
-          <div class="definition-list__item">
-            <dt>Xero ID</dt>
-            <dd>
-              {% if form_data.xero_id %}
-                {{ form_data.xero_id }}
-              {% else %}
-                <span class="text-muted">Not set</span>
-              {% endif %}
-            </dd>
-          </div>
-          <div class="definition-list__item">
-            <dt>VIP status</dt>
-            <dd>
-              {% if form_data.is_vip %}
-                <span class="tag tag--success">VIP</span>
-              {% else %}
-                <span class="tag tag--muted">Standard</span>
-              {% endif %}
-            </dd>
-          </div>
-        </dl>
-      </div>
-      <div class="card__body card__body--meta">
-        <h3 class="card__subtitle">Email domains</h3>
-        {% if email_domain_preview %}
-          <ul class="list" role="list">
-            {% for domain in email_domain_preview %}
-              <li>{{ domain }}</li>
-            {% endfor %}
-          </ul>
-        {% else %}
-          <p class="text-muted">No domains registered.</p>
-        {% endif %}
-      </div>
     </section>
   </div>
 {% endblock %}
