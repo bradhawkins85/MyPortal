@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dependencies.auth import (
@@ -22,6 +24,7 @@ from app.schemas.tickets import (
     TicketListResponse,
     TicketReply,
     TicketReplyCreate,
+    TicketReplyTimeUpdate,
     TicketReplyResponse,
     TicketResponse,
     TicketSearchFilters,
@@ -76,7 +79,19 @@ async def _build_ticket_detail(ticket_id: int, current_user: dict) -> TicketDeta
     sanitised_replies = []
     for reply in ordered_replies:
         sanitised = sanitize_rich_text(str(reply.get("body") or ""))
-        sanitised_replies.append({**reply, "body": sanitised.html})
+        minutes_value = reply.get("minutes_spent")
+        minutes_spent = minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
+        billable_flag = bool(reply.get("is_billable"))
+        time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag)
+        payload = {
+            **reply,
+            "body": sanitised.html,
+            "minutes_spent": minutes_spent,
+            "is_billable": billable_flag,
+        }
+        if time_summary:
+            payload["time_summary"] = time_summary
+        sanitised_replies.append(payload)
 
     return TicketDetail(
         **ticket,
@@ -354,8 +369,66 @@ async def add_reply(
     ticket_response = TicketResponse(**ticket_payload)
     sanitised_reply_payload = sanitize_rich_text(str(reply.get("body") or ""))
     reply_payload = {**reply, "body": sanitised_reply_payload.html}
+    minutes_value = reply_payload.get("minutes_spent")
+    minutes_spent = minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
+    billable_flag = bool(reply_payload.get("is_billable"))
+    time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag)
+    if time_summary:
+        reply_payload["time_summary"] = time_summary
     await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
     return TicketReplyResponse(ticket=ticket_response, reply=TicketReply(**reply_payload))
+
+
+@router.patch("/{ticket_id}/replies/{reply_id}", response_model=TicketReplyResponse)
+async def update_reply_time_entry(
+    ticket_id: int,
+    reply_id: int,
+    payload: TicketReplyTimeUpdate,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TicketReplyResponse:
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    reply = await tickets_repo.get_reply_by_id(reply_id)
+    if not reply or reply.get("ticket_id") != ticket_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reply not found")
+
+    fields_set = payload.model_fields_set
+    update_kwargs: dict[str, Any] = {}
+    if "minutes_spent" in fields_set:
+        update_kwargs["minutes_spent"] = payload.minutes_spent
+    if "is_billable" in fields_set and payload.is_billable is not None:
+        update_kwargs["is_billable"] = payload.is_billable
+    if not update_kwargs:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide minutes_spent or is_billable to update the reply.",
+        )
+
+    updated = await tickets_repo.update_reply(reply_id, **update_kwargs)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reply not found")
+
+    minutes_value = updated.get("minutes_spent")
+    minutes_spent = minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
+    billable_flag = bool(updated.get("is_billable"))
+    time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag)
+    reply_payload = {
+        **updated,
+        "minutes_spent": minutes_spent,
+        "is_billable": billable_flag,
+    }
+    if time_summary:
+        reply_payload["time_summary"] = time_summary
+
+    await tickets_service.emit_ticket_updated_event(
+        ticket_id,
+        actor_type="technician",
+        actor=current_user,
+    )
+
+    ticket_payload = TicketResponse(**ticket)
+    return TicketReplyResponse(ticket=ticket_payload, reply=TicketReply(**reply_payload))
 
 
 @router.put("/{ticket_id}/watchers", response_model=TicketDetail)

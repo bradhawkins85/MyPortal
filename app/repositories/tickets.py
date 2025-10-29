@@ -9,6 +9,8 @@ from app.core.database import db
 
 TicketRecord = dict[str, Any]
 
+_UNSET = object()
+
 
 def _deserialise_tags(value: Any) -> list[str]:
     if value is None or value == "":
@@ -424,6 +426,46 @@ async def list_replies(ticket_id: int, *, include_internal: bool = True) -> list
         tuple(params),
     )
     return [_normalise_reply(row) for row in rows]
+
+
+async def get_reply_by_id(reply_id: int) -> TicketRecord | None:
+    row = await db.fetch_one(
+        "SELECT * FROM ticket_replies WHERE id = %s",
+        (reply_id,),
+    )
+    if row:
+        return _normalise_reply(row)
+    return None
+
+
+async def update_reply(
+    reply_id: int,
+    *,
+    minutes_spent: int | None | object = _UNSET,
+    is_billable: bool | object = _UNSET,
+) -> TicketRecord | None:
+    updates: list[str] = []
+    params: list[Any] = []
+    if minutes_spent is not _UNSET:
+        if minutes_spent is None:
+            updates.append("minutes_spent = NULL")
+        else:
+            updates.append("minutes_spent = %s")
+            params.append(int(minutes_spent))
+    if is_billable is not _UNSET:
+        updates.append("is_billable = %s")
+        params.append(1 if bool(is_billable) else 0)
+    if updates:
+        params.append(reply_id)
+        await db.execute(
+            f"""
+            UPDATE ticket_replies
+            SET {', '.join(updates)}
+            WHERE id = %s
+            """,
+            tuple(params),
+        )
+    return await get_reply_by_id(reply_id)
 
 
 async def add_watcher(ticket_id: int, user_id: int) -> None:

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ticket reply edit preview</title>
+    <link rel="stylesheet" href="/app/static/css/app.css" />
+  </head>
+  <body class="app-body" style="background: #0f172a; padding: 2rem;">
+    <div class="card card--panel" style="max-width: 720px; margin: 0 auto;">
+      <header class="card__header">
+        <h2 class="card__title">Conversation history</h2>
+      </header>
+      <div class="card__body">
+        <div class="timeline" data-ticket-timeline data-ticket-id="42">
+          <article
+            class="timeline__event"
+            data-ticket-reply
+            data-reply-id="128"
+            data-reply-minutes="30"
+            data-reply-billable="true"
+          >
+            <header class="timeline__header">
+              <div class="timeline__header-main">
+                <span class="timeline__timestamp">2025-10-29 13:10</span>
+                <span class="timeline__action">
+                  tech@example.com
+                  <span class="badge badge--muted">Internal</span>
+                </span>
+                <span class="timeline__meta text-muted" data-reply-time-summary>30 minutes · Billable</span>
+              </div>
+              <div class="timeline__header-controls">
+                <button
+                  type="button"
+                  class="button button--ghost button--icon timeline__edit-button"
+                  data-reply-edit
+                  aria-label="Edit time entry"
+                  aria-controls="reply-time-modal"
+                  aria-haspopup="dialog"
+                >
+                  <span class="visually-hidden">Edit time entry</span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M20.71 7.04a1 1 0 0 0 0-1.41L18.37 3.3a1 1 0 0 0-1.41 0L6 14.25V18h3.75l10.96-10.96Z" />
+                    <path d="M5 20h14a1 1 0 1 0 0-2H5a1 1 0 1 0 0 2Z" />
+                  </svg>
+                </button>
+              </div>
+            </header>
+            <div class="timeline__body">
+              <div class="timeline__message" data-timeline-message>
+                <div class="rich-text-viewer timeline__message-content" data-timeline-message-content>
+                  <p>Replaced the failed switch and verified connectivity across all desks.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="button button--ghost button--small timeline__message-toggle"
+                data-timeline-message-toggle
+                data-more-label="Show more"
+                data-less-label="Show less"
+                aria-expanded="false"
+                hidden
+              >
+                Show more
+              </button>
+            </div>
+          </article>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal is-visible" id="reply-time-modal" role="dialog" aria-modal="true">
+      <div class="modal__content" role="document">
+        <button type="button" class="modal__close" data-modal-close>
+          <span class="visually-hidden">Close time entry editor</span>
+          &times;
+        </button>
+        <h2 class="modal__title">Edit time entry</h2>
+        <form class="form-grid" data-reply-time-form>
+          <p class="form-help">Adjust the minutes recorded for this reply and whether the work is billable.</p>
+          <div class="form-field">
+            <label class="form-label" for="reply-time-minutes">Minutes spent</label>
+            <input
+              class="form-input"
+              id="reply-time-minutes"
+              type="number"
+              min="0"
+              max="1440"
+              step="1"
+              value="30"
+            />
+            <p class="form-help">Leave blank to remove the time entry from this update.</p>
+          </div>
+          <div class="form-field form-field--checkbox">
+            <label class="checkbox">
+              <input type="checkbox" checked />
+              <span>Billable</span>
+            </label>
+          </div>
+          <p class="form-help form-help--error" role="alert" hidden></p>
+          <div class="form-actions">
+            <button type="submit" class="button button--primary">Save changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </body>
+</html>

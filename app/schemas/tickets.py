@@ -42,6 +42,21 @@ class TicketReplyCreate(BaseModel):
     is_billable: bool = False
 
 
+class TicketReplyTimeUpdate(BaseModel):
+    minutes_spent: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=1440,
+        validation_alias=AliasChoices("minutes_spent", "minutesSpent"),
+    )
+    is_billable: Optional[bool] = Field(
+        default=None,
+        validation_alias=AliasChoices("is_billable", "isBillable"),
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class TicketReply(BaseModel):
     id: int
     ticket_id: int
@@ -51,6 +66,7 @@ class TicketReply(BaseModel):
     minutes_spent: Optional[int] = Field(default=None, ge=0)
     is_billable: bool = False
     created_at: datetime
+    time_summary: Optional[str] = None
 
     class Config:
         from_attributes = True
