@@ -197,8 +197,12 @@ async def update_ticket(
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     fields = payload.model_dump(exclude_unset=True)
+    description_marker = object()
+    description_value = fields.pop("description", description_marker)
     if fields:
         await tickets_repo.update_ticket(ticket_id, **fields)
+    if description_value is not description_marker:
+        await tickets_service.update_ticket_description(ticket_id, description_value)
     try:
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
     except RuntimeError:

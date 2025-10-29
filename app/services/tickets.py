@@ -104,6 +104,17 @@ def _truncate_description(description: str | None) -> str | None:
     return _TRUNCATION_NOTICE.lstrip()
 
 
+async def update_ticket_description(
+    ticket_id: int, description: str | None
+) -> TicketRecord | None:
+    """Persist a ticket description after enforcing size limits."""
+
+    return await tickets_repo.update_ticket(
+        ticket_id,
+        description=_truncate_description(description),
+    )
+
+
 async def _safely_call(async_fn: Callable[..., Awaitable[Any]], *args, **kwargs):
     try:
         return await async_fn(*args, **kwargs)
