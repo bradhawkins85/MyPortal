@@ -447,7 +447,6 @@ app.include_router(mcp_api.router)
 app.include_router(system.router)
 app.include_router(uptimekuma.router)
 
-HELPDESK_PERMISSION_KEY = "helpdesk.technician"
 
 
 async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
@@ -494,7 +493,7 @@ async def _is_helpdesk_technician(user: Mapping[str, Any], request: Request | No
     else:
         try:
             result = await membership_repo.user_has_permission(
-                user_id_int, HELPDESK_PERMISSION_KEY
+                user_id_int, tickets_service.HELPDESK_PERMISSION_KEY
             )
             if not result:
                 result = await membership_repo.user_has_permission(
@@ -6053,58 +6052,36 @@ async def _render_tickets_dashboard(
     error_message: str | None = None,
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
-    tickets = await tickets_repo.list_tickets(
-        status=status_filter,
-        module_slug=module_filter,
+    dashboard = await tickets_service.load_dashboard_state(
+        status_filter=status_filter,
+        module_filter=module_filter,
         limit=200,
     )
-    total = await tickets_repo.count_tickets(
-        status=status_filter,
-        module_slug=module_filter,
-    )
-    status_counts = Counter((ticket.get("status") or "open").lower() for ticket in tickets)
-    available_statuses = sorted(
-        {"open", "in_progress", "pending", "resolved", "closed", *status_counts.keys()}
-    )
-    modules = await modules_service.list_modules()
-    companies = await company_repo.list_companies()
-    company_lookup: dict[int, dict[str, Any]] = {}
-    for company in companies:
-        identifier = company.get("id")
-        if identifier is None:
-            continue
-        try:
-            company_lookup[int(identifier)] = company
-        except (TypeError, ValueError):
-            continue
-    users_list = await user_repo.list_users()
-    technician_users = await membership_repo.list_users_with_permission(
-        HELPDESK_PERMISSION_KEY
-    )
-    user_lookup: dict[int, dict[str, Any]] = {}
-    for record in users_list:
-        identifier = record.get("id")
-        if identifier is None:
-            continue
-        try:
-            user_lookup[int(identifier)] = record
-        except (TypeError, ValueError):
-            continue
+    query_params: dict[str, str] = {}
+    if status_filter:
+        query_params["status"] = status_filter
+    if module_filter:
+        query_params["module"] = module_filter
+    dashboard_endpoint = "/api/tickets/dashboard"
+    if query_params:
+        dashboard_endpoint = f"{dashboard_endpoint}?{urlencode(query_params)}"
     extra = {
         "title": "Ticketing workspace",
-        "tickets": tickets,
-        "ticket_total": total,
-        "ticket_status_counts": status_counts,
-        "ticket_available_statuses": available_statuses,
+        "tickets": dashboard.tickets,
+        "ticket_total": dashboard.total,
+        "ticket_status_counts": dashboard.status_counts,
+        "ticket_available_statuses": dashboard.available_statuses,
         "ticket_filters": {"status": status_filter, "module": module_filter},
-        "ticket_modules": modules,
-        "ticket_company_options": companies,
-        "ticket_user_options": technician_users,
-        "ticket_company_lookup": company_lookup,
-        "ticket_user_lookup": user_lookup,
+        "ticket_modules": dashboard.modules,
+        "ticket_company_options": dashboard.companies,
+        "ticket_user_options": dashboard.technicians,
+        "ticket_company_lookup": dashboard.company_lookup,
+        "ticket_user_lookup": dashboard.user_lookup,
         "can_bulk_delete_tickets": bool(user.get("is_super_admin")),
         "success_message": success_message,
         "error_message": error_message,
+        "ticket_dashboard_endpoint": dashboard_endpoint,
+        "ticket_refresh_topics": ["tickets"],
     }
     response = await _render_template("admin/tickets.html", request, user, extra=extra)
     response.status_code = status_code
@@ -6233,7 +6210,9 @@ async def _render_ticket_detail(
     )
 
     companies = await company_repo.list_companies()
-    technician_users = await membership_repo.list_users_with_permission(HELPDESK_PERMISSION_KEY)
+    technician_users = await membership_repo.list_users_with_permission(
+        tickets_service.HELPDESK_PERMISSION_KEY
+    )
     requester_options: list[dict[str, Any]] = []
     if ticket_company_id is not None:
         requester_options = await staff_repo.list_enabled_staff_users(ticket_company_id)
@@ -6443,6 +6422,7 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
     await tickets_repo.set_ticket_status(ticket_id, status_value)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
     message = quote(f"Ticket {ticket_id} updated.")
     destination = f"/admin/tickets?success={message}"
     if return_url and return_url.startswith("/") and not return_url.startswith("//"):
@@ -6651,7 +6631,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
             )
         has_permission = await membership_repo.user_has_permission(
             assigned_user_id,
-            HELPDESK_PERMISSION_KEY,
+            tickets_service.HELPDESK_PERMISSION_KEY,
         )
         if not has_permission:
             return await _render_ticket_detail(
@@ -6727,6 +6707,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
         await tickets_service.update_ticket_description(ticket_id, description_value)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
 
     message = quote("Ticket details updated.")
     destination = f"/admin/tickets/{ticket_id}?success={message}"
@@ -6800,6 +6781,7 @@ async def admin_delete_ticket(ticket_id: int, request: Request):
         ticket_id=ticket_id,
         deleted_by=current_user.get("id") if current_user else None,
     )
+    await tickets_service.broadcast_ticket_event(action="deleted", ticket_id=ticket_id)
 
     message = quote(f"Ticket {ticket_id} deleted.")
     return RedirectResponse(
@@ -6865,6 +6847,7 @@ async def admin_bulk_delete_tickets(request: Request):
         deleted_by=current_user.get("id") if current_user else None,
         ticket_ids=ticket_ids,
     )
+    await tickets_service.broadcast_ticket_event(action="deleted")
 
     message_suffix = "ticket" if deleted_count == 1 else "tickets"
     redirect_message = f"Deleted {deleted_count} {message_suffix}."
@@ -6919,6 +6902,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             await tickets_repo.add_watcher(ticket_id, author_id)
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
         await tickets_service.refresh_ticket_ai_tags(ticket_id)
+        await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create ticket reply", error=str(exc))
         return await _render_ticket_detail(
