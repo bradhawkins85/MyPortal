@@ -176,3 +176,37 @@ def test_render_tags_prompt_ignores_signatures_and_reply_markers():
     assert "Encryption agent offline for host." in prompt
     assert "Reply ABOVE THIS LINE" not in prompt
     assert "confidential" not in prompt.lower()
+
+
+def test_render_tags_prompt_discards_content_below_latest_reply_marker():
+    ticket = {
+        "id": 10,
+        "subject": "Server disk space alert",
+        "description": "Disk space critically low on server-12.",
+        "status": "open",
+        "priority": "urgent",
+        "category": "Infrastructure",
+        "module_slug": "operations",
+    }
+    replies = [
+        {
+            "ticket_id": 10,
+            "author_id": 8,
+            "body": (
+                "Latest cleanup scheduled for tonight.\n"
+                "--- Reply ABOVE THIS LINE to add a comment ---\n"
+                "Archive rotation queued.\n"
+                "> --- Reply ABOVE THIS LINE to add a comment ---\n"
+                "> Historical note retained only in thread."
+            ),
+            "is_internal": False,
+            "created_at": None,
+        }
+    ]
+
+    prompt = tickets_service._render_tags_prompt(ticket, replies, {})
+
+    assert "Latest cleanup scheduled for tonight." in prompt
+    assert "Archive rotation queued." not in prompt
+    assert "Historical note retained only in thread." not in prompt
+    assert "Reply ABOVE THIS LINE" not in prompt
