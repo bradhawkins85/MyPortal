@@ -459,9 +459,28 @@
                         </span>
                       </header>
                       <div class="timeline__body">
-                        <div class="rich-text-viewer">
-                          {{ reply.body | safe }}
+                        <div
+                          class="timeline__message"
+                          data-timeline-message
+                        >
+                          <div
+                            class="rich-text-viewer timeline__message-content"
+                            data-timeline-message-content
+                          >
+                            {{ reply.body | safe }}
+                          </div>
                         </div>
+                        <button
+                          type="button"
+                          class="button button--ghost button--small timeline__message-toggle"
+                          data-timeline-message-toggle
+                          data-more-label="Show more"
+                          data-less-label="Show less"
+                          hidden
+                          aria-expanded="false"
+                        >
+                          Show more
+                        </button>
                       </div>
                     </article>
                   {% endfor %}
@@ -480,4 +499,5 @@
 {% block scripts %}
   {{ super() }}
   <script src="/static/js/rich_text_editor.js" defer></script>
+  <script src="/static/js/ticket_detail.js" defer></script>
 {% endblock %}
