@@ -1,0 +1,7 @@
+{
+  "guid": "07ec2044-3d67-4eaa-8d78-c2a1f324efff",
+  "occurred_at": "2025-12-21T09:45Z",
+  "change_type": "Fix",
+  "summary": "Simplified ticket status control to show only the dropdown in the workspace table",
+  "content_hash": "2ac5f255f2744f98fdf9a4196bb3a9df25f156eaefe4f6317073f592a44265d0"
+}

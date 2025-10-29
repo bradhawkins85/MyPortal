@@ -156,26 +156,15 @@
                       'closed': 'badge--muted'
                     } %}
                     <td data-label="Status" data-value="{{ ticket_status }}">
-                      <div class="ticket-status" data-ticket-status>
-                        <button
-                          type="button"
-                          class="ticket-status__toggle"
-                          data-ticket-status-toggle
-                          aria-haspopup="listbox"
-                          aria-expanded="false"
-                          aria-controls="ticket-status-form-{{ ticket.id }}"
-                        >
-                          <span class="badge {{ status_badge_map.get(ticket_status, 'badge--muted') }}">{{ status_label }}</span>
-                          <span class="ticket-status__chevron" aria-hidden="true"></span>
-                          <span class="visually-hidden">Change ticket status</span>
-                        </button>
+                      <div class="ticket-status">
+                        <span class="visually-hidden" id="ticket-status-label-{{ ticket.id }}">Ticket status</span>
                         <form
                           id="ticket-status-form-{{ ticket.id }}"
                           action="/admin/tickets/{{ ticket.id }}/status"
                           method="post"
                           class="inline-form ticket-status__form"
                           data-ticket-status-form
-                          hidden
+                          aria-labelledby="ticket-status-label-{{ ticket.id }}"
                         >
                           {% if csrf_token %}
                             <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
