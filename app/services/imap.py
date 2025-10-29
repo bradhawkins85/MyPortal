@@ -12,6 +12,7 @@ from app.repositories import imap_accounts as imap_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import companies as company_repo
 from app.repositories import staff as staff_repo
+from app.repositories import users as users_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import modules as modules_service
 from app.services import tickets as tickets_service
@@ -56,6 +57,23 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
+def _extract_record_id(record: Any) -> int | None:
+    if not record:
+        return None
+    if isinstance(record, Mapping):
+        return _int_or_none(record.get("id"))
+    if hasattr(record, "get"):
+        try:
+            return _int_or_none(record.get("id"))  # type: ignore[call-arg]
+        except Exception:  # pragma: no cover - defensive
+            pass
+    try:
+        return _int_or_none(record["id"])  # type: ignore[index]
+    except Exception:  # pragma: no cover - defensive
+        pass
+    return _int_or_none(getattr(record, "id", None))
+
+
 def _extract_email_addresses(from_header: str | None) -> list[str]:
     if not from_header:
         return []
@@ -90,9 +108,14 @@ async def _resolve_ticket_entities(
         company_id = _int_or_none(company.get("id"))
         if company_id is None:
             continue
+        user = await users_repo.get_user_by_email(email_address)
+        requester_id = _extract_record_id(user)
+        if requester_id is not None:
+            return company_id, requester_id
         staff_member = await staff_repo.get_staff_by_company_and_email(company_id, email_address)
-        requester_id = _int_or_none(staff_member.get("id")) if staff_member else None
-        return company_id, requester_id
+        if staff_member:
+            return company_id, None
+        return company_id, None
 
     company_id = _int_or_none(default_company_id)
     requester_id: int | None = None
@@ -103,9 +126,13 @@ async def _resolve_ticket_entities(
             if email_address in checked:
                 continue
             checked.add(email_address)
+            user = await users_repo.get_user_by_email(email_address)
+            requester_id = _extract_record_id(user)
+            if requester_id is not None:
+                break
             staff_member = await staff_repo.get_staff_by_company_and_email(company_id, email_address)
             if staff_member:
-                requester_id = _int_or_none(staff_member.get("id"))
+                requester_id = None
                 break
 
     return company_id, requester_id
