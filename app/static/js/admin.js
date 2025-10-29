@@ -231,6 +231,99 @@
     });
   }
 
+  function bindTicketBulkDelete() {
+    const form = document.querySelector('[data-bulk-delete-form]');
+    const table = document.querySelector('[data-bulk-delete-table]');
+    if (!form || !table) {
+      return;
+    }
+
+    const submitButton = form.querySelector('[data-bulk-delete-submit]');
+    const countLabel = form.querySelector('[data-bulk-delete-count]');
+    const selectAll = table.querySelector('[data-bulk-select-all]');
+    const filterInputs = document.querySelectorAll('[data-table-filter="tickets-table"]');
+
+    const getRowCheckboxes = () =>
+      Array.from(table.querySelectorAll('input[type="checkbox"][data-bulk-delete-checkbox]'));
+
+    const getVisibleCheckboxes = () =>
+      getRowCheckboxes().filter((checkbox) => {
+        const row = checkbox.closest('tr');
+        if (!row || checkbox.disabled) {
+          return false;
+        }
+        return row.dataset.filterHidden !== 'true';
+      });
+
+    const updateState = () => {
+      const selected = getRowCheckboxes().filter((checkbox) => checkbox.checked);
+      const visible = getVisibleCheckboxes();
+      if (submitButton) {
+        submitButton.disabled = selected.length === 0;
+      }
+      if (countLabel) {
+        const count = selected.length;
+        countLabel.textContent = `${count} selected`;
+        countLabel.hidden = count === 0;
+      }
+      if (selectAll) {
+        if (!visible.length) {
+          selectAll.checked = false;
+          selectAll.indeterminate = false;
+        } else {
+          const selectedVisible = visible.filter((checkbox) => checkbox.checked);
+          selectAll.checked = selectedVisible.length === visible.length;
+          selectAll.indeterminate =
+            selectedVisible.length > 0 && selectedVisible.length < visible.length;
+        }
+      }
+    };
+
+    getRowCheckboxes().forEach((checkbox) => {
+      checkbox.addEventListener('change', updateState);
+    });
+
+    if (selectAll) {
+      selectAll.addEventListener('change', () => {
+        const visibleCheckboxes = getVisibleCheckboxes();
+        visibleCheckboxes.forEach((checkbox) => {
+          checkbox.checked = selectAll.checked;
+        });
+        updateState();
+      });
+    }
+
+    if (filterInputs.length) {
+      filterInputs.forEach((input) => {
+        input.addEventListener('input', () => {
+          window.requestAnimationFrame(updateState);
+        });
+      });
+    }
+
+    table.addEventListener('table:rows-updated', () => {
+      window.requestAnimationFrame(updateState);
+    });
+
+    form.addEventListener('submit', (event) => {
+      const selected = getRowCheckboxes().filter((checkbox) => checkbox.checked);
+      const count = selected.length;
+      if (!count) {
+        event.preventDefault();
+        return;
+      }
+      const confirmationMessage =
+        count === 1
+          ? 'Delete the selected ticket? This cannot be undone.'
+          : `Delete ${count} selected tickets? This cannot be undone.`;
+      if (!window.confirm(confirmationMessage)) {
+        event.preventDefault();
+      }
+    });
+
+    updateState();
+  }
+
   function parsePermissions(value) {
     return value
       .split(',')
@@ -567,6 +660,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     bindSyncroTicketImportForms();
     bindSyncroCompanyImportForm();
+    bindTicketBulkDelete();
     bindRoleForm();
     bindCompanyAssignmentControls();
     bindApiKeyCopyButtons();
