@@ -1,0 +1,7 @@
+{
+  "guid": "66744bdb-100b-4e45-be50-4b9524e1ad7c",
+  "occurred_at": "2025-10-29T12:38Z",
+  "change_type": "Feature",
+  "summary": "Increased automation runner refresh frequency with configurable interval and installer defaults.",
+  "content_hash": "8dad7b36314214ae2ee7fd905de0c1c523b6a29f9e6cddc3c627e62d11b53f88"
+}

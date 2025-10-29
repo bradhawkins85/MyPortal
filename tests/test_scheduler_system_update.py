@@ -74,3 +74,52 @@ def test_system_update_default_env_has_no_force(monkeypatch):
     assert captured["env"] is not None
     assert "FORCE_RESTART" not in captured["env"]
     assert output == "done"
+
+
+def test_automation_runner_respects_configured_interval(monkeypatch):
+    recorded_jobs: dict[str, dict[str, object]] = {}
+
+    class FakeScheduler:
+        def __init__(self, *, timezone=None):  # type: ignore[no-untyped-def]
+            self.timezone = timezone
+            self.jobs: dict[str, dict[str, object]] = {}
+
+        def start(self) -> None:  # pragma: no cover - behaviour not needed here
+            return
+
+        def shutdown(self, wait: bool = False) -> None:  # pragma: no cover
+            return
+
+        def get_jobs(self):  # type: ignore[no-untyped-def]
+            return []
+
+        def get_job(self, job_id):  # type: ignore[no-untyped-def]
+            return self.jobs.get(job_id)
+
+        def add_job(self, func, trigger, *args, **kwargs):  # type: ignore[no-untyped-def]
+            job_id = kwargs.get("id")
+            if job_id:
+                self.jobs[job_id] = {
+                    "func": func,
+                    "trigger": trigger,
+                    "args": args,
+                    "kwargs": kwargs,
+                }
+                recorded_jobs[job_id] = self.jobs[job_id]
+
+    settings = SimpleNamespace(
+        default_timezone="UTC",
+        automation_runner_interval_seconds=12,
+    )
+
+    monkeypatch.setattr("app.services.scheduler.AsyncIOScheduler", FakeScheduler)
+    monkeypatch.setattr("app.services.scheduler.get_settings", lambda: settings)
+
+    scheduler = SchedulerService()
+    scheduler._started = True
+    scheduler._ensure_monitoring_jobs()
+
+    automation_job = recorded_jobs.get("automation-runner")
+    assert automation_job is not None
+    assert automation_job["trigger"] == "interval"
+    assert automation_job["kwargs"].get("seconds") == 12

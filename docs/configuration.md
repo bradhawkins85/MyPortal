@@ -18,3 +18,10 @@ The deployment helpers (`scripts/install_production.sh`,
 `scripts/restart.sh`) seed the flag into `.env` if the file was created before
 the option existed. Override the value directly in `.env` or through your
 process manager's secret store.
+
+`AUTOMATION_RUNNER_INTERVAL_SECONDS` adjusts how frequently background
+automations are evaluated for execution. The default of `15` seconds ensures new
+or updated automations run quickly without overwhelming the task queue. Increase
+the value if you prefer a lighter workload on constrained systems, or reduce it
+for near-immediate execution. Values below five seconds are rejected to avoid
+excessive load.

@@ -171,6 +171,7 @@ purge_spurious_dist_info
 trap purge_spurious_dist_info EXIT
 
 ensure_env_default "$PYTHON_INTERPRETER" "ENABLE_AUTO_REFRESH" "false"
+ensure_env_default "$PYTHON_INTERPRETER" "AUTOMATION_RUNNER_INTERVAL_SECONDS" "15"
 
 detect_service_name() {
   local explicit

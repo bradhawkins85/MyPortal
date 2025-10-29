@@ -144,6 +144,7 @@ install_dependencies() {
 
 ensure_env_file
 ensure_env_default "ENABLE_AUTO_REFRESH" "false"
+ensure_env_default "AUTOMATION_RUNNER_INTERVAL_SECONDS" "15"
 ensure_virtualenv
 install_dependencies
 
