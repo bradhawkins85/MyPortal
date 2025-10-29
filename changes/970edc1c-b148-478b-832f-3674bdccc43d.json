@@ -1,0 +1,7 @@
+{
+  "guid": "970edc1c-b148-478b-832f-3674bdccc43d",
+  "occurred_at": "2025-10-29T14:46Z",
+  "change_type": "Feature",
+  "summary": "Randomised the All Products shop listing per visit without affecting pagination order.",
+  "content_hash": "17a75afa58584e607f811375d64504634b9fc2c5ff7ae1b7f82a5a82e7d4dca7"
+}
