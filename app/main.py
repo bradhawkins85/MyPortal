@@ -6139,6 +6139,13 @@ async def _render_ticket_detail(
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
+    sanitized_description = sanitize_rich_text(str(ticket.get("description") or ""))
+    ticket = {
+        **ticket,
+        "description_html": sanitized_description.html,
+        "description_text": sanitized_description.text_content,
+    }
+
     replies = await tickets_repo.list_replies(ticket_id)
     watchers = await tickets_repo.list_watchers(ticket_id)
 
