@@ -2025,6 +2025,10 @@ body {
   font-size: 0.95rem;
 }
 
+.shop-categories__icon--packages::before {
+  content: "🎁";
+}
+
 .shop-categories__link.is-active .shop-categories__icon {
   background: rgba(56, 189, 248, 0.45);
 }
@@ -2475,6 +2479,56 @@ body {
   object-fit: cover;
   border-radius: 0.75rem;
   border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.package-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(56, 189, 248, 0.12);
+  font-size: 1.5rem;
+}
+
+.package-name {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.package-meta {
+  margin: 0;
+  color: rgba(203, 213, 225, 0.85);
+  font-size: 0.875rem;
+}
+
+.package-details {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.package-details summary {
+  cursor: pointer;
+  color: rgba(125, 211, 252, 0.95);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+.package-details[open] summary {
+  margin-bottom: 0.35rem;
+}
+
+.package-details ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.package-details li {
+  margin: 0.25rem 0;
 }
 
 .product-preview {
