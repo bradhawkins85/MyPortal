@@ -108,6 +108,66 @@ def test_invoke_ollama_records_event_success(monkeypatch):
     assert attempts and attempts[0]["status"] == "succeeded"
 
 
+def test_invoke_ollama_uses_default_model_when_blank(monkeypatch):
+    async def fake_enqueue_event(**kwargs):
+        return {"id": 12, "status": "pending", "attempt_count": 0}
+
+    fake_event_state = {
+        "id": 12,
+        "status": "pending",
+        "attempt_count": 0,
+    }
+
+    async def fake_record_attempt(**kwargs):
+        fake_event_state["attempt_count"] = kwargs["attempt_number"]
+
+    async def fake_mark_event_completed(event_id, *, attempt_number, response_status, response_body):
+        fake_event_state.update(
+            {
+                "status": "succeeded",
+                "attempt_count": attempt_number,
+                "response_status": response_status,
+                "response_body": response_body,
+            }
+        )
+
+    async def fake_get_event(event_id):
+        return dict(fake_event_state)
+
+    class FakeResponse:
+        def __init__(self):
+            self.status_code = 200
+            self._text = json.dumps({"result": "ok"})
+            self.request = httpx.Request("POST", "http://example.com")
+
+        @property
+        def text(self):
+            return self._text
+
+        def raise_for_status(self):
+            return None
+
+    client_factory = _AsyncClientFactory(FakeResponse())
+
+    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_enqueue_event)
+    monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", fake_mark_event_completed)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", _noop)
+    monkeypatch.setattr(modules.webhook_repo, "get_event", fake_get_event)
+    monkeypatch.setattr(modules.httpx, "AsyncClient", lambda *a, **kw: client_factory)
+
+    result = asyncio.run(
+        modules._invoke_ollama(
+            {"base_url": "  http://127.0.0.1:11434/  ", "model": "   "},
+            {"prompt": "Hi"},
+        )
+    )
+
+    assert result["status"] == "succeeded"
+    assert client_factory.captured_kwargs["json"]["model"] == modules._DEFAULT_OLLAMA_MODEL
+    assert client_factory.captured_kwargs["url"] == f"{modules._DEFAULT_OLLAMA_BASE_URL}/api/generate"
+
+
 def test_invoke_ollama_records_event_failure(monkeypatch):
     async def fake_enqueue_event(**kwargs):
         return {"id": 4, "status": "pending", "attempt_count": 0}
