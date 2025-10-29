@@ -278,19 +278,41 @@ def _coerce_settings(
             }
         )
     elif slug == "tacticalrmm":
+        overrides = payload or {}
+        api_key_override = overrides.get("api_key")
+        if api_key_override is None:
+            api_key = str(merged.get("api_key") or "").strip()
+        else:
+            candidate = str(api_key_override or "").strip()
+            if not candidate and existing_settings and existing_settings.get("api_key"):
+                api_key = str(existing_settings.get("api_key") or "").strip()
+            else:
+                api_key = candidate
         merged.update(
             {
-                "base_url": str(merged.get("base_url", "")).strip(),
-                "api_key": str(merged.get("api_key", "")).strip(),
+                "base_url": str(merged.get("base_url", "")).strip().rstrip("/"),
+                "api_key": api_key,
                 "verify_ssl": _ensure_bool(merged.get("verify_ssl"), True),
             }
         )
     elif slug == "ntfy":
+        overrides = payload or {}
+        auth_token_override = overrides.get("auth_token")
+        if auth_token_override is None:
+            auth_token = str(merged.get("auth_token") or "").strip()
+        else:
+            candidate = str(auth_token_override or "").strip()
+            if not candidate and existing_settings and existing_settings.get("auth_token"):
+                auth_token = str(existing_settings.get("auth_token") or "").strip()
+            else:
+                auth_token = candidate
+        base_url_value = str(merged.get("base_url", "")).strip()
+        base_url = base_url_value.rstrip("/") if base_url_value else ""
         merged.update(
             {
-                "base_url": str(merged.get("base_url", "")).strip() or "https://ntfy.sh",
+                "base_url": base_url or "https://ntfy.sh",
                 "topic": str(merged.get("topic", "")).strip(),
-                "auth_token": str(merged.get("auth_token", "")).strip(),
+                "auth_token": auth_token,
             }
         )
     elif slug == "imap":
@@ -351,16 +373,21 @@ def _coerce_settings(
 
 def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
     slug = module.get("slug")
-    if slug not in {"chatgpt-mcp", "syncro", "uptimekuma"}:
+    fields_to_redact: dict[str, tuple[str, ...]] = {
+        "chatgpt-mcp": ("shared_secret_hash",),
+        "syncro": ("api_key",),
+        "uptimekuma": ("shared_secret_hash",),
+        "tacticalrmm": ("api_key",),
+        "ntfy": ("auth_token",),
+    }
+    targets = fields_to_redact.get(slug)
+    if not targets:
         return module
     redacted = dict(module)
     settings = dict(redacted.get("settings") or {})
-    if slug == "chatgpt-mcp" and settings.get("shared_secret_hash"):
-        settings["shared_secret_hash"] = "********"
-    if slug == "syncro" and settings.get("api_key"):
-        settings["api_key"] = "********"
-    if slug == "uptimekuma" and settings.get("shared_secret_hash"):
-        settings["shared_secret_hash"] = "********"
+    for field in targets:
+        if settings.get(field):
+            settings[field] = "********"
     redacted["settings"] = settings
     return redacted
 
