@@ -1,0 +1,7 @@
+{
+  "guid": "09c7b09f-508d-46cd-8e28-e8186968fe14",
+  "occurred_at": "2025-10-29T03:00:45Z",
+  "change_type": "Feature",
+  "summary": "Added bulk ticket deletion with workspace selection controls and repository support.",
+  "content_hash": "7741431589fa411f685d8f4757713e49e09f01eed0a99a4b93ba8b32db6bef77"
+}

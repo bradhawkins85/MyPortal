@@ -43,6 +43,24 @@ class _UpdateTicketDB:
         return self._row
 
 
+class _BulkDeleteDB:
+    def __init__(self, count):
+        self.execute_sql = None
+        self.execute_params = None
+        self.fetch_sql = None
+        self.fetch_params = None
+        self._count = count
+
+    async def fetch_one(self, sql, params):
+        self.fetch_sql = sql.strip()
+        self.fetch_params = params
+        return {"total": self._count}
+
+    async def execute(self, sql, params):
+        self.execute_sql = sql.strip()
+        self.execute_params = params
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
@@ -240,3 +258,29 @@ async def test_update_ticket_allows_updated_at_override(monkeypatch):
     assert dummy_db.execute_sql.startswith("UPDATE tickets SET")
     assert dummy_db.execute_params[-1] == 1
     assert dummy_db.execute_params[-2] == override
+
+
+@pytest.mark.anyio
+async def test_delete_tickets_returns_deleted_count(monkeypatch):
+    dummy_db = _BulkDeleteDB(count=2)
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    deleted = await tickets.delete_tickets([1, "2", "ignored", 0, -5, 2])
+
+    assert deleted == 2
+    assert dummy_db.fetch_sql.startswith("SELECT COUNT(*) AS total FROM tickets WHERE id IN")
+    assert dummy_db.fetch_params == (1, 2)
+    assert dummy_db.execute_sql.startswith("DELETE FROM tickets WHERE id IN")
+    assert dummy_db.execute_params == (1, 2)
+
+
+@pytest.mark.anyio
+async def test_delete_tickets_ignores_invalid_values(monkeypatch):
+    dummy_db = _BulkDeleteDB(count=0)
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    deleted = await tickets.delete_tickets([None, "", "abc", -1])
+
+    assert deleted == 0
+    assert dummy_db.fetch_sql is None
+    assert dummy_db.execute_sql is None
