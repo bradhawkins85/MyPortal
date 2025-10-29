@@ -1,0 +1,7 @@
+{
+  "guid": "66040401-915a-4049-ad8c-d639c58cb3c1",
+  "occurred_at": "2025-10-29T03:10Z",
+  "change_type": "Fix",
+  "summary": "Prevent IMAP sync from marking emails as read when ticket creation fails.",
+  "content_hash": "be9a098201039ee2babf1365d1d225ff868f09996dca5b1ba59b81cb782f2fc4"
+}
