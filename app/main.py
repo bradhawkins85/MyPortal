@@ -7614,6 +7614,7 @@ async def admin_create_imap_account(request: Request):
         "password": form.get("password", ""),
         "folder": form.get("folder", ""),
         "schedule_cron": form.get("scheduleCron", ""),
+        "filter_query": form.get("filterQuery"),
         "process_unread_only": _form_bool(form, "processUnreadOnly"),
         "mark_as_read": _form_bool(form, "markAsRead"),
         "active": _form_bool(form, "active"),
@@ -7690,6 +7691,8 @@ async def admin_update_imap_account(account_id: int, request: Request):
         updates["folder"] = form.get("folder")
     if "scheduleCron" in form:
         updates["schedule_cron"] = form.get("scheduleCron")
+    if "filterQuery" in form:
+        updates["filter_query"] = form.get("filterQuery")
     updates["process_unread_only"] = _form_bool(form, "processUnreadOnly")
     updates["mark_as_read"] = _form_bool(form, "markAsRead")
     updates["active"] = _form_bool(form, "active")

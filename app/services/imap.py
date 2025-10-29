@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import email
 import imaplib
+import json
 import re
 from datetime import datetime, timezone
 from email.header import decode_header, make_header
@@ -66,6 +67,340 @@ def _normalise_priority(value: Any, *, default: int = 100) -> int:
     if priority < 0:
         raise ValueError("Priority must be zero or greater")
     return priority
+
+
+_CONDITION_OPERATORS = {
+    "equals",
+    "not_equals",
+    "contains",
+    "not_contains",
+    "starts_with",
+    "ends_with",
+    "matches",
+    "not_matches",
+    "in",
+    "not_in",
+    "present",
+    "absent",
+}
+_REGEX_OPERATORS = {"matches", "not_matches"}
+_SET_OPERATORS = {"in", "not_in"}
+_BOOLEAN_OPERATORS = {"present", "absent"}
+
+
+def _ensure_sequence(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return [value]
+
+
+def _value_is_present(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, Mapping):
+        return bool(value)
+    if isinstance(value, (list, tuple, set)):
+        return any(_value_is_present(item) for item in value)
+    return True
+
+
+def _lookup_field(context: Mapping[str, Any], field: str) -> Any:
+    if not field:
+        return None
+    parts = [part.strip().lower() for part in field.split(".") if part.strip()]
+    if not parts:
+        return None
+    current: Any = context
+    for part in parts:
+        if isinstance(current, Mapping):
+            if part in current:
+                current = current[part]
+            else:
+                return None
+        else:
+            return None
+    return current
+
+
+def _normalise_value(value: Any, *, case_sensitive: bool) -> Any:
+    if isinstance(value, str):
+        return value if case_sensitive else value.lower()
+    return value
+
+
+def _validate_filter_node(node: Mapping[str, Any]) -> None:
+    if "field" in node:
+        if any(key in node for key in ("all", "any", "none")):
+            raise ValueError("Filter conditions cannot contain nested groups")
+        field = str(node.get("field") or "").strip()
+        if not field:
+            raise ValueError("Filter condition is missing a field name")
+        operators = [op for op in _CONDITION_OPERATORS if op in node]
+        if not operators:
+            raise ValueError(f"Filter condition for '{field}' must define an operator")
+        if len(operators) > 1:
+            raise ValueError(f"Filter condition for '{field}' must define exactly one operator")
+        operator = operators[0]
+        value = node.get(operator)
+        if operator in _BOOLEAN_OPERATORS:
+            if value is None:
+                pass
+            elif not isinstance(value, bool):
+                raise ValueError(f"Operator '{operator}' expects a boolean value")
+        elif operator in _SET_OPERATORS:
+            if not isinstance(value, list):
+                raise ValueError(f"Operator '{operator}' expects an array of values")
+        elif operator in _REGEX_OPERATORS:
+            if not isinstance(value, str):
+                raise ValueError(f"Operator '{operator}' expects a string pattern")
+            try:
+                re.compile(value)
+            except re.error as exc:
+                raise ValueError(f"Invalid regular expression for '{field}': {exc}") from exc
+        else:
+            if not isinstance(value, (str, int, float, bool)):
+                raise ValueError(f"Operator '{operator}' has an unsupported value type")
+        case_sensitive = node.get("case_sensitive")
+        if case_sensitive is not None and not isinstance(case_sensitive, bool):
+            raise ValueError("case_sensitive must be a boolean when provided")
+        return
+
+    has_group = False
+    for key in ("all", "any", "none"):
+        group = node.get(key)
+        if group is None:
+            continue
+        has_group = True
+        if not isinstance(group, list):
+            raise ValueError(f"Filter group '{key}' must be an array")
+        for child in group:
+            if not isinstance(child, Mapping):
+                raise ValueError("Filter group entries must be objects")
+            _validate_filter_node(child)
+    if not has_group:
+        raise ValueError("Filter must define at least one condition")
+
+
+def _validate_filter(filter_query: Mapping[str, Any]) -> None:
+    _validate_filter_node(filter_query)
+
+
+def _normalise_filter(value: Any) -> tuple[str | None, dict[str, Any] | None]:
+    if value in (None, ""):
+        return None, None
+    parsed: Any
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if not trimmed:
+            return None, None
+        try:
+            parsed = json.loads(trimmed)
+        except json.JSONDecodeError as exc:  # pragma: no cover - json error messaging
+            raise ValueError(
+                f"Filter must be valid JSON (line {exc.lineno} column {exc.colno}): {exc.msg}"
+            ) from exc
+    elif isinstance(value, Mapping):
+        parsed = dict(value)
+    else:
+        raise ValueError("Filter must be provided as JSON text or an object")
+    if not isinstance(parsed, Mapping):
+        raise ValueError("Filter must be a JSON object")
+    parsed_mapping = dict(parsed)
+    _validate_filter(parsed_mapping)
+    canonical = json.dumps(parsed_mapping, separators=(",", ":"), sort_keys=True)
+    return canonical, parsed_mapping
+
+
+def _evaluate_condition(condition: Mapping[str, Any], context: Mapping[str, Any]) -> bool:
+    field = str(condition.get("field") or "").strip()
+    operator = next((op for op in _CONDITION_OPERATORS if op in condition), None)
+    if operator is None:
+        return True
+    case_sensitive = bool(condition.get("case_sensitive", False))
+    value = _lookup_field(context, field)
+    values = _ensure_sequence(value)
+    normalised_values = [
+        _normalise_value(item, case_sensitive=case_sensitive) for item in values
+    ]
+
+    if operator == "equals":
+        target = _normalise_value(condition.get("equals"), case_sensitive=case_sensitive)
+        return any(item == target for item in normalised_values)
+    if operator == "not_equals":
+        target = _normalise_value(condition.get("not_equals"), case_sensitive=case_sensitive)
+        return all(item != target for item in normalised_values)
+    if operator == "contains":
+        target = condition.get("contains")
+        if isinstance(target, str):
+            needle = target if case_sensitive else target.lower()
+            for raw, norm in zip(values, normalised_values):
+                if isinstance(raw, str) and isinstance(norm, str) and needle in norm:
+                    return True
+        else:
+            target_norm = _normalise_value(target, case_sensitive=case_sensitive)
+            return any(item == target_norm for item in normalised_values)
+        return False
+    if operator == "not_contains":
+        target = condition.get("not_contains")
+        if isinstance(target, str):
+            needle = target if case_sensitive else target.lower()
+            for raw, norm in zip(values, normalised_values):
+                if isinstance(raw, str) and isinstance(norm, str) and needle in norm:
+                    return False
+            return True
+        target_norm = _normalise_value(target, case_sensitive=case_sensitive)
+        return all(item != target_norm for item in normalised_values)
+    if operator == "starts_with":
+        prefix = condition.get("starts_with")
+        if not isinstance(prefix, str):
+            return False
+        prefix_norm = prefix if case_sensitive else prefix.lower()
+        for raw, norm in zip(values, normalised_values):
+            if isinstance(raw, str) and isinstance(norm, str) and norm.startswith(prefix_norm):
+                return True
+        return False
+    if operator == "ends_with":
+        suffix = condition.get("ends_with")
+        if not isinstance(suffix, str):
+            return False
+        suffix_norm = suffix if case_sensitive else suffix.lower()
+        for raw, norm in zip(values, normalised_values):
+            if isinstance(raw, str) and isinstance(norm, str) and norm.endswith(suffix_norm):
+                return True
+        return False
+    if operator in _REGEX_OPERATORS:
+        pattern = condition.get(operator)
+        if not isinstance(pattern, str):
+            return False
+        flags = 0 if case_sensitive else re.IGNORECASE
+        try:
+            compiled = re.compile(pattern, flags)
+        except re.error:
+            return False
+        matched = any(
+            isinstance(raw, str) and compiled.search(raw) is not None for raw in values
+        )
+        return matched if operator == "matches" else not matched
+    if operator in _SET_OPERATORS:
+        raw_targets = condition.get(operator) or []
+        target_values = {
+            _normalise_value(item, case_sensitive=case_sensitive) for item in raw_targets
+        }
+        if operator == "in":
+            return any(item in target_values for item in normalised_values)
+        return all(item not in target_values for item in normalised_values)
+    if operator == "present":
+        requirement = condition.get("present")
+        present = _value_is_present(value)
+        return present if requirement is not False else not present
+    if operator == "absent":
+        requirement = condition.get("absent")
+        present = _value_is_present(value)
+        return (not present) if requirement is not False else present
+    return True
+
+
+def _evaluate_filter(rule: Mapping[str, Any], context: Mapping[str, Any]) -> bool:
+    if "field" in rule:
+        return _evaluate_condition(rule, context)
+    all_group = rule.get("all")
+    if all_group is not None:
+        for child in all_group:
+            if not _evaluate_filter(child, context):
+                return False
+    any_group = rule.get("any")
+    if any_group is not None:
+        if not any_group:
+            return False
+        if not any(_evaluate_filter(child, context) for child in any_group):
+            return False
+    none_group = rule.get("none")
+    if none_group is not None:
+        if any(_evaluate_filter(child, context) for child in none_group):
+            return False
+    return True
+
+
+def _extract_domains(addresses: list[str]) -> list[str]:
+    domains: list[str] = []
+    for address in addresses:
+        if "@" not in address:
+            continue
+        domain = address.rsplit("@", 1)[1].strip().lower()
+        if not domain:
+            continue
+        domains.append(domain)
+    return domains
+
+
+def _build_filter_context(
+    *,
+    account: Mapping[str, Any],
+    message: email.message.Message,
+    subject: str,
+    body: str,
+    from_address: str,
+    folder: str,
+    flags: list[str],
+    is_unread: bool,
+    message_id: str,
+) -> dict[str, Any]:
+    from_addresses = _extract_email_addresses(from_address)
+    from_domains = _extract_domains(from_addresses)
+    to_addresses = _extract_email_addresses(message.get("To"))
+    cc_addresses = _extract_email_addresses(message.get("Cc"))
+    bcc_addresses = _extract_email_addresses(message.get("Bcc"))
+    reply_to_addresses = _extract_email_addresses(message.get("Reply-To"))
+    sender_addresses = _extract_email_addresses(message.get("Sender"))
+    headers: dict[str, str] = {}
+    for key, value in message.items():
+        headers[key.lower()] = str(value)
+
+    context: dict[str, Any] = {
+        "account": {
+            "id": account.get("id"),
+            "name": _normalise_string(account.get("name")),
+            "company_id": account.get("company_id"),
+        },
+        "mailbox": {
+            "folder": folder,
+            "name": _normalise_string(account.get("name")),
+        },
+        "subject": subject or "",
+        "body": body or "",
+        "message_id": message_id or "",
+        "from": {
+            "raw": from_address or "",
+            "addresses": from_addresses,
+            "domains": from_domains,
+        },
+        "reply_to": {
+            "addresses": reply_to_addresses,
+        },
+        "sender": {
+            "addresses": sender_addresses,
+        },
+        "to": to_addresses,
+        "cc": cc_addresses,
+        "bcc": bcc_addresses,
+        "flags": [flag for flag in flags if flag],
+        "is_unread": bool(is_unread),
+        "is_read": not is_unread,
+        "headers": headers,
+    }
+    if from_addresses:
+        context["from"]["address"] = from_addresses[0]
+    if from_domains:
+        context["from"]["domain"] = from_domains[0]
+    if to_addresses:
+        context["to_domains"] = _extract_domains(to_addresses)
+    if cc_addresses:
+        context["cc_domains"] = _extract_domains(cc_addresses)
+    return context
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -229,6 +564,7 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
     active = _normalise_bool(payload.get("active"), default=True)
     company_id = payload.get("company_id")
     priority = _normalise_priority(payload.get("priority"), default=100)
+    filter_canonical, _ = _normalise_filter(payload.get("filter_query"))
     if not password:
         raise ValueError("Password is required")
     encrypted_password = encrypt_secret(password)
@@ -240,6 +576,7 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
         password_encrypted=encrypted_password,
         folder=folder or "INBOX",
         schedule_cron=schedule_cron,
+        filter_query=filter_canonical,
         process_unread_only=process_unread_only,
         mark_as_read=mark_as_read,
         active=active,
@@ -278,6 +615,9 @@ async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[st
         updates["schedule_cron"] = _normalise_string(
             payload.get("schedule_cron"), default=existing.get("schedule_cron") or "*/15 * * * *"
         )
+    if "filter_query" in payload:
+        filter_canonical, _ = _normalise_filter(payload.get("filter_query"))
+        updates["filter_query"] = filter_canonical
     if "process_unread_only" in payload:
         updates["process_unread_only"] = _normalise_bool(
             payload.get("process_unread_only"), default=existing.get("process_unread_only", True)
@@ -325,6 +665,12 @@ async def clone_account(account_id: int) -> dict[str, Any]:
         suffix += 1
 
     priority_value = _normalise_priority(original.get("priority"), default=100)
+    original_filter = original.get("filter_query")
+    filter_canonical: str | None = None
+    if isinstance(original_filter, Mapping):
+        filter_canonical = json.dumps(dict(original_filter), separators=(",", ":"), sort_keys=True)
+    elif isinstance(original_filter, str):
+        filter_canonical = original_filter.strip() or None
 
     account = await imap_repo.create_account(
         name=clone_name,
@@ -334,6 +680,7 @@ async def clone_account(account_id: int) -> dict[str, Any]:
         password_encrypted=password_encrypted,
         folder=_normalise_string(original.get("folder"), default="INBOX") or "INBOX",
         schedule_cron=_normalise_string(original.get("schedule_cron"), default="*/15 * * * *"),
+        filter_query=filter_canonical,
         process_unread_only=bool(original.get("process_unread_only", True)),
         mark_as_read=bool(original.get("mark_as_read", True)),
         active=bool(original.get("active", True)),
@@ -529,7 +876,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 continue
             # Use BODY.PEEK so that fetching the message does not set the \\Seen flag
             # before the ticket import succeeds.
-            fetch_result, fetch_data = mailbox.uid("fetch", raw_uid, "(BODY.PEEK[])")
+            fetch_result, fetch_data = mailbox.uid("fetch", raw_uid, "(BODY.PEEK[] FLAGS)")
             if fetch_result != "OK" or not fetch_data:
                 await _record_message(
                     account_id=int(account_id),
@@ -540,8 +887,42 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 )
                 errors.append({"uid": uid, "error": "Unable to fetch message"})
                 continue
-            raw_message = fetch_data[0][1]
-            message = email.message_from_bytes(raw_message)
+            message_bytes: bytes | None = None
+            metadata_item: Any = None
+            for item in fetch_data:
+                if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], (bytes, bytearray)):
+                    metadata_item = item[0]
+                    message_bytes = bytes(item[1])
+                    break
+            if message_bytes is None:
+                await _record_message(
+                    account_id=int(account_id),
+                    uid=uid,
+                    status="error",
+                    ticket_id=None,
+                    error="Unable to fetch message",
+                )
+                errors.append({"uid": uid, "error": "Unable to fetch message"})
+                continue
+            flags: list[str] = []
+            if metadata_item is not None:
+                if isinstance(metadata_item, (bytes, bytearray)):
+                    metadata_bytes = bytes(metadata_item)
+                else:
+                    metadata_bytes = str(metadata_item).encode("utf-8", errors="ignore")
+                try:
+                    parsed_flags = imaplib.ParseFlags(metadata_bytes)
+                except Exception:
+                    parsed_flags = ()
+                for flag in parsed_flags:
+                    if isinstance(flag, bytes):
+                        decoded = flag.decode("utf-8", errors="ignore")
+                    else:
+                        decoded = str(flag)
+                    decoded = decoded.strip()
+                    if decoded:
+                        flags.append(decoded)
+            message = email.message_from_bytes(message_bytes)
             subject = _decode_subject(message) or f"Email from {username}"
             body = _extract_body(message)
             message_id = _normalise_string(message.get("Message-ID"), default=uid)
@@ -559,6 +940,30 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         parsed_date = parsed_date.astimezone(timezone.utc)
                     received_at = parsed_date
             from_address = _normalise_string(message.get("From"))
+            normalised_flag_set = {flag.upper() for flag in flags}
+            is_unread = "\\SEEN" not in normalised_flag_set if flags else True
+            if process_unread_only:
+                is_unread = True
+            filter_rule = account.get("filter_query")
+            if isinstance(filter_rule, Mapping) and filter_rule:
+                context = _build_filter_context(
+                    account=account,
+                    message=message,
+                    subject=subject,
+                    body=body,
+                    from_address=from_address,
+                    folder=folder,
+                    flags=flags,
+                    is_unread=is_unread,
+                    message_id=message_id,
+                )
+                if not _evaluate_filter(filter_rule, context):
+                    log_info(
+                        "Skipping IMAP message because it did not match the configured filter",
+                        account_id=account_id,
+                        uid=uid,
+                    )
+                    continue
             description_lines = []
             if from_address:
                 description_lines.append(f"From: {from_address}")
