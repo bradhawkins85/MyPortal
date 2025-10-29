@@ -55,7 +55,7 @@ def test_system_update_sets_force_restart_env(monkeypatch):
     assert output == "ok"
 
 
-def test_system_update_default_env_has_no_force(monkeypatch):
+def test_system_update_default_env_sets_force_restart_false(monkeypatch):
     scheduler = SchedulerService()
     captured: dict[str, dict[str, str] | None] = {}
 
@@ -72,5 +72,5 @@ def test_system_update_default_env_has_no_force(monkeypatch):
     output = asyncio.run(scheduler._run_system_update())
 
     assert captured["env"] is not None
-    assert "FORCE_RESTART" not in captured["env"]
+    assert captured["env"].get("FORCE_RESTART") == "0"
     assert output == "done"
