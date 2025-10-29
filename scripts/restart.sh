@@ -197,6 +197,7 @@ select_python() {
 PYTHON_BIN=$(select_python)
 
 ensure_env_default "$PYTHON_BIN" "ENABLE_AUTO_REFRESH" "false"
+ensure_env_default "$PYTHON_BIN" "AUTOMATION_RUNNER_INTERVAL_SECONDS" "15"
 
 if [[ -z "$PYTHON_BIN" ]]; then
   echo "Error: Unable to locate a python interpreter for dependency installation." >&2

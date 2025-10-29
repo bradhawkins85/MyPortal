@@ -45,6 +45,7 @@ def _truncate_output(payload: str | bytes | None) -> str | None:
 class SchedulerService:
     def __init__(self) -> None:
         settings = get_settings()
+        self._settings = settings
         self._scheduler = AsyncIOScheduler(timezone=settings.default_timezone)
         self._started = False
 
@@ -111,10 +112,11 @@ class SchedulerService:
                 max_instances=1,
             )
         if not self._scheduler.get_job("automation-runner"):
+            interval = max(5, min(int(self._settings.automation_runner_interval_seconds), 3600))
             self._scheduler.add_job(
                 automations_service.process_due_automations,
                 "interval",
-                seconds=60,
+                seconds=interval,
                 id="automation-runner",
                 replace_existing=True,
                 coalesce=True,
