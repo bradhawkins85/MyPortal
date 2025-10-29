@@ -528,6 +528,13 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     module_slug="imap",
                     external_reference=message_id,
                 )
+                ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
+                if ticket_id is not None:
+                    try:
+                        await tickets_service.refresh_ticket_ai_summary(int(ticket_id))
+                    except RuntimeError:
+                        pass
+                    await tickets_service.refresh_ticket_ai_tags(int(ticket_id))
             except Exception as exc:  # pragma: no cover - defensive logging
                 error_text = str(exc)
                 errors.append({"uid": uid, "error": error_text})
