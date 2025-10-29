@@ -1,0 +1,7 @@
+{
+  "guid": "f98df8d7-84fc-48f2-acd3-2fe9bff9ad6b",
+  "occurred_at": "2025-10-29T12:27Z",
+  "change_type": "Fix",
+  "summary": "Removed inline status controls from ticket automation list to simplify row actions.",
+  "content_hash": "a594fb0bf41697a6670a5eed2eca1691e6244cae3d1f7c9c296c8e97238e020f"
+}
