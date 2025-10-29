@@ -250,7 +250,7 @@ async def add_reply(
     if not has_helpdesk_access and ticket.get("requester_id") != session.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     sanitised_body = sanitize_rich_text(payload.body)
-    if not sanitised_body.text_content:
+    if not sanitised_body.has_rich_content:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Reply body cannot be empty.",
