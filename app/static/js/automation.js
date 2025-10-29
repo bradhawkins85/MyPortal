@@ -255,6 +255,105 @@
     }
   }
 
+  function updateTaskRowData(row, updates) {
+    if (!row || !updates || typeof updates !== 'object') {
+      return;
+    }
+    let payload = {};
+    if (row.dataset.task) {
+      try {
+        payload = JSON.parse(row.dataset.task) || {};
+      } catch (error) {
+        payload = {};
+      }
+    }
+    const merged = { ...payload, ...updates };
+    try {
+      row.dataset.task = JSON.stringify(merged);
+    } catch (error) {
+      // Ignore serialization issues for dataset metadata.
+    }
+  }
+
+  function setButtonProcessing(button) {
+    if (!button || button.dataset.processing === 'true') {
+      return () => {};
+    }
+
+    const original = {
+      html: button.innerHTML,
+      disabled: button.disabled,
+    };
+
+    button.dataset.processing = 'true';
+    button.disabled = true;
+    button.classList.add('button--processing');
+    button.setAttribute('aria-busy', 'true');
+    button.innerHTML =
+      '<span class="button__icon button__spinner" aria-hidden="true"></span><span class="button__label">Processing…</span>';
+
+    return () => {
+      button.dataset.processing = 'false';
+      button.classList.remove('button--processing');
+      button.removeAttribute('aria-busy');
+      button.innerHTML = original.html;
+      button.disabled = original.disabled;
+    };
+  }
+
+  function setStatusProcessing(row) {
+    if (!row) {
+      return () => {};
+    }
+    const statusCell = row.querySelector('[data-label="Status"]');
+    if (!statusCell) {
+      return () => {};
+    }
+
+    const original = statusCell.innerHTML;
+
+    statusCell.textContent = '';
+    const badge = document.createElement('span');
+    badge.className = 'status status--processing';
+    const spinner = document.createElement('span');
+    spinner.className = 'status__spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('span');
+    label.className = 'status__label';
+    label.textContent = 'Running…';
+    badge.appendChild(spinner);
+    badge.appendChild(label);
+    statusCell.appendChild(badge);
+
+    return () => {
+      statusCell.innerHTML = original;
+    };
+  }
+
+  function showTaskError(row, message) {
+    if (!row) {
+      return;
+    }
+    const statusCell = row.querySelector('[data-label="Status"]');
+    if (!statusCell) {
+      return;
+    }
+
+    const details = typeof message === 'string' && message.trim().length > 0 ? message.trim() : 'Unable to run task.';
+    const truncated = details.length > 140 ? `${details.slice(0, 137)}…` : details;
+
+    statusCell.textContent = '';
+    const badge = document.createElement('span');
+    badge.className = 'status status--error';
+    const label = document.createElement('span');
+    label.className = 'status__label';
+    label.textContent = `Failed: ${truncated}`;
+    badge.appendChild(label);
+    statusCell.appendChild(badge);
+
+    updateTaskRowData(row, { last_status: 'failed', last_error: details });
+  }
+
   function query(id) {
     return document.getElementById(id);
   }
@@ -668,16 +767,30 @@
 
     document.querySelectorAll('[data-task-run]').forEach((button) => {
       button.addEventListener('click', async () => {
+        if (button.dataset.processing === 'true') {
+          return;
+        }
+
         const row = button.closest('tr');
         const task = parseTask(row);
         if (!task || !task.id) {
           return;
         }
+
+        const restoreButton = setButtonProcessing(button);
+        const restoreStatus = setStatusProcessing(row);
+        updateTaskRowData(row, { last_status: 'running', last_error: null });
+
         try {
           await requestJson(`/scheduler/tasks/${task.id}/run`, { method: 'POST' });
-          alert('Task queued for execution. Refresh the page to see updates.');
+          window.setTimeout(() => {
+            window.location.reload();
+          }, 250);
         } catch (error) {
-          alert(`Unable to run task: ${error.message}`);
+          restoreButton();
+          restoreStatus();
+          const message = error instanceof Error ? error.message : 'Unable to run task.';
+          showTaskError(row, message);
         }
       });
     });
