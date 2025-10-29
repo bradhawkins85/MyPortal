@@ -140,3 +140,39 @@ async def test_refresh_ticket_ai_tags_handles_errors(monkeypatch):
     assert updates[-1]["ai_tags_status"] == "error"
     assert updates[-1]["ai_tags"] is None
     assert updates[-1]["ai_tags_model"] is None
+
+
+def test_render_tags_prompt_ignores_signatures_and_reply_markers():
+    ticket = {
+        "id": 9,
+        "subject": "Laptop encryption issue",
+        "description": (
+            "Encryption agent offline for host.\n"
+            "Kind regards,\nSecurity Team\n"
+            "This email and any attachments are confidential."
+        ),
+        "status": "open",
+        "priority": "normal",
+        "category": "Security",
+        "module_slug": "helpdesk",
+    }
+    replies = [
+        {
+            "ticket_id": 9,
+            "author_id": 3,
+            "body": (
+                "Agent reinstall scheduled.\n"
+                "--- Reply ABOVE THIS LINE to add a comment ---\n"
+                "Confidential communication."
+            ),
+            "is_internal": False,
+            "created_at": None,
+        }
+    ]
+
+    prompt = tickets_service._render_tags_prompt(ticket, replies, {})
+
+    assert "Agent reinstall scheduled." in prompt
+    assert "Encryption agent offline for host." in prompt
+    assert "Reply ABOVE THIS LINE" not in prompt
+    assert "confidential" not in prompt.lower()

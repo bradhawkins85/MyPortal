@@ -1,0 +1,7 @@
+{
+  "guid": "5a596234-852d-43e1-8db5-4802ad74d705",
+  "occurred_at": "2025-10-29T05:31Z",
+  "change_type": "Feature",
+  "summary": "Routed new ticket creations through AI summary/tag refresh and removed signatures from AI prompts.",
+  "content_hash": "9f2c0ceb0ff93e425f8dd47b61c818354059632f1f74e4cc2eb547637cb2a236"
+}
