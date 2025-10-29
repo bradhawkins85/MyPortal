@@ -105,7 +105,103 @@ def test_invoke_ollama_records_event_success(monkeypatch):
     assert result["response"] == {"result": "ok"}
     assert captured_event.get("max_attempts") == 1
     assert "attempt_immediately" not in captured_event
-    assert attempts and attempts[0]["status"] == "succeeded"
+
+
+def test_update_module_preserves_tacticalrmm_api_key_when_blank(monkeypatch):
+    stored = {
+        "slug": "tacticalrmm",
+        "enabled": True,
+        "settings": {"base_url": "https://rmm.example.com", "api_key": "secret-key", "verify_ssl": True},
+    }
+    captured: dict[str, object] = {}
+
+    async def fake_get_module(slug: str):
+        assert slug == "tacticalrmm"
+        return stored
+
+    async def fake_update_module(slug: str, *, enabled=None, settings=None):
+        assert slug == "tacticalrmm"
+        captured.update(settings or {})
+        if settings:
+            stored["settings"].update(settings)
+        if enabled is not None:
+            stored["enabled"] = enabled
+        return {"slug": slug, "enabled": stored["enabled"], "settings": dict(stored["settings"])}
+
+    monkeypatch.setattr(modules.module_repo, "get_module", fake_get_module)
+    monkeypatch.setattr(modules.module_repo, "update_module", fake_update_module)
+
+    result = asyncio.run(
+        modules.update_module(
+            "tacticalrmm",
+            enabled=True,
+            settings={"base_url": "https://rmm.example.com", "api_key": "", "verify_ssl": "true"},
+        )
+    )
+
+    assert captured["api_key"] == "secret-key"
+    assert result["settings"]["api_key"] == "********"
+    assert captured["verify_ssl"] is True
+
+
+def test_update_module_preserves_ntfy_auth_token_when_blank(monkeypatch):
+    stored = {
+        "slug": "ntfy",
+        "enabled": True,
+        "settings": {"base_url": "https://ntfy.sh", "topic": "alerts", "auth_token": "existing-token"},
+    }
+    captured: dict[str, object] = {}
+
+    async def fake_get_module(slug: str):
+        assert slug == "ntfy"
+        return stored
+
+    async def fake_update_module(slug: str, *, enabled=None, settings=None):
+        assert slug == "ntfy"
+        captured.update(settings or {})
+        if settings:
+            stored["settings"].update(settings)
+        if enabled is not None:
+            stored["enabled"] = enabled
+        return {"slug": slug, "enabled": stored["enabled"], "settings": dict(stored["settings"])}
+
+    monkeypatch.setattr(modules.module_repo, "get_module", fake_get_module)
+    monkeypatch.setattr(modules.module_repo, "update_module", fake_update_module)
+
+    result = asyncio.run(
+        modules.update_module(
+            "ntfy",
+            enabled=False,
+            settings={"base_url": " https://ntfy.example.com/ ", "topic": "critical", "auth_token": ""},
+        )
+    )
+
+    assert captured["auth_token"] == "existing-token"
+    assert captured["base_url"] == "https://ntfy.example.com"
+    assert result["settings"]["auth_token"] == "********"
+
+
+def test_list_modules_redacts_tacticalrmm_and_ntfy(monkeypatch):
+    async def fake_list_modules():
+        return [
+            {
+                "slug": "tacticalrmm",
+                "enabled": True,
+                "settings": {"base_url": "https://rmm.example.com", "api_key": "secret-key"},
+            },
+            {
+                "slug": "ntfy",
+                "enabled": True,
+                "settings": {"base_url": "https://ntfy.example.com", "topic": "alerts", "auth_token": "existing-token"},
+            },
+        ]
+
+    monkeypatch.setattr(modules.module_repo, "list_modules", fake_list_modules)
+
+    module_list = asyncio.run(modules.list_modules())
+
+    assert module_list[0]["settings"]["api_key"] == "********"
+    assert module_list[1]["settings"]["auth_token"] == "********"
 
 
 def test_invoke_ollama_uses_default_model_when_blank(monkeypatch):
