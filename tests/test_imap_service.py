@@ -123,6 +123,7 @@ async def test_resolve_ticket_entities_matches_company_without_staff(monkeypatch
 
 async def test_resolve_ticket_entities_falls_back_to_account_company(monkeypatch):
     async def fake_get_company_by_email_domain(domain: str):
+        assert domain == "tenant.com"
         return None
 
     async def fake_get_staff_by_company_and_email(company_id: int, email: str):
@@ -161,18 +162,36 @@ async def test_resolve_ticket_entities_falls_back_to_account_company(monkeypatch
 
 
 async def test_resolve_ticket_entities_handles_staff_without_user(monkeypatch):
+    checked: set[tuple[int, str]] = set()
+
     async def fake_get_company_by_email_domain(domain: str):
-        assert domain == "example.com"
-        return {"id": 15}
+        assert domain == "tenant.com"
+        return None
 
     async def fake_get_staff_by_company_and_email(company_id: int, email: str):
-        assert company_id == 15
-        assert email == "member@example.com"
+        checked.add((company_id, email))
         return {"id": 123}
 
     async def fake_get_user_by_email(email: str):
-        assert email == "member@example.com"
         return None
+
+    monkeypatch.setattr(
+        imap.company_repo,
+        "get_company_by_email_domain",
+        fake_get_company_by_email_domain,
+    )
+    monkeypatch.setattr(
+        imap.staff_repo,
+        "get_staff_by_company_and_email",
+        fake_get_staff_by_company_and_email,
+    )
+    monkeypatch.setattr(
+        imap.users_repo,
+        "get_user_by_email",
+        fake_get_user_by_email,
+    )
+
+    await imap._resolve_ticket_entities("Support <help@tenant.com>", default_company_id="11")
 
     assert (11, "help@tenant.com") in checked
 
@@ -219,9 +238,13 @@ async def test_sync_account_does_not_mark_as_read_on_ticket_failure(monkeypatch)
         raise RuntimeError("Ticket creation failed")
 
     async def fake_get_company_by_email_domain(domain: str):
-        return None
+        assert domain == "example.com"
+        return {"id": 15}
 
     async def fake_get_staff_by_company_and_email(company_id: int, email: str):
+        return None
+
+    async def fake_get_user_by_email(email: str):
         return None
 
     class FakeMailbox:
@@ -293,6 +316,11 @@ async def test_sync_account_does_not_mark_as_read_on_ticket_failure(monkeypatch)
         "get_user_by_email",
         fake_get_user_by_email,
     )
+    monkeypatch.setattr(
+        imap.users_repo,
+        "get_user_by_email",
+        fake_get_user_by_email,
+    )
 
     company_id, requester_id = await imap._resolve_ticket_entities("Member <member@example.com>")
 
@@ -324,3 +352,77 @@ async def test_sync_account_skips_when_restart_pending(monkeypatch):
     result = await imap.sync_account(9)
 
     assert result == {"status": "skipped", "reason": "pending_restart"}
+
+
+async def test_clone_account_creates_unique_copy(monkeypatch):
+    original_account = {
+        "id": 5,
+        "name": "Support",
+        "host": "mail.example.com",
+        "port": 993,
+        "username": "support",
+        "password_encrypted": "encrypted",
+        "folder": "INBOX",
+        "schedule_cron": "*/10 * * * *",
+        "process_unread_only": 1,
+        "mark_as_read": 0,
+        "active": 1,
+        "company_id": 17,
+        "priority": 10,
+    }
+    existing_accounts = [
+        original_account,
+        {"id": 6, "name": "Support (copy)", "priority": 10},
+    ]
+    created_account = dict(original_account)
+    created_account.update({"id": 11, "name": "Support (copy 2)", "priority": 10})
+    create_calls: list[dict[str, object]] = []
+
+    async def fake_get_account(account_id: int):
+        assert account_id == 5
+        return original_account
+
+    async def fake_list_accounts():
+        return existing_accounts
+
+    async def fake_create_account(**payload):
+        create_calls.append(payload)
+        assert payload["name"] == "Support (copy 2)"
+        assert payload["password_encrypted"] == "encrypted"
+        assert payload["priority"] == 10
+        return created_account
+
+    async def fake_ensure_task(account: dict[str, object]):
+        return account
+
+    monkeypatch.setattr(imap.imap_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(imap.imap_repo, "list_accounts", fake_list_accounts)
+    monkeypatch.setattr(imap.imap_repo, "create_account", fake_create_account)
+    monkeypatch.setattr(imap, "_ensure_scheduled_task", fake_ensure_task)
+
+    cloned = await imap.clone_account(5)
+
+    assert cloned["name"] == "Support (copy 2)"
+    assert cloned["priority"] == 10
+    assert create_calls
+
+
+async def test_sync_all_active_respects_priority(monkeypatch):
+    sync_order: list[int] = []
+
+    async def fake_list_accounts():
+        return [
+            {"id": 3, "active": True, "priority": 50},
+            {"id": 1, "active": False, "priority": 0},
+            {"id": 2, "active": True, "priority": 5},
+        ]
+
+    async def fake_sync_account(account_id: int):
+        sync_order.append(account_id)
+
+    monkeypatch.setattr(imap.imap_repo, "list_accounts", fake_list_accounts)
+    monkeypatch.setattr(imap, "sync_account", fake_sync_account)
+
+    await imap.sync_all_active()
+
+    assert sync_order == [2, 3]

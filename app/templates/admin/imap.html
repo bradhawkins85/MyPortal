@@ -34,6 +34,11 @@
             <input type="text" name="name" class="form-input" value="{{ editing_account.name if is_editing else '' }}" maxlength="255" required />
           </label>
           <label class="form-field">
+            <span class="form-label">Priority</span>
+            <input type="number" name="priority" class="form-input" value="{{ editing_account.priority if is_editing else 100 }}" min="0" step="1" required />
+            <span class="form-help">Lower numbers run first when multiple mailboxes are scheduled.</span>
+          </label>
+          <label class="form-field">
             <span class="form-label">IMAP host</span>
             <input type="text" name="host" class="form-input" value="{{ editing_account.host if is_editing else '' }}" maxlength="255" required />
           </label>
@@ -113,6 +118,7 @@
           <table class="table" id="imap-accounts-table" data-table>
             <thead>
               <tr>
+                <th scope="col" data-sort="number">Priority</th>
                 <th scope="col" data-sort="string">Name</th>
                 <th scope="col" data-sort="string">Host</th>
                 <th scope="col" data-sort="string">Folder</th>
@@ -127,6 +133,9 @@
               {% if accounts %}
                 {% for account in accounts %}
                   <tr>
+                    <td data-value="{{ account.priority }}">
+                      <code>{{ account.priority }}</code>
+                    </td>
                     <td data-value="{{ account.name|lower }}">
                       <strong>{{ account.name }}</strong>
                       <div class="table__meta">{{ account.username }}</div>
@@ -152,6 +161,12 @@
                     </td>
                     <td class="table__actions">
                       <div class="button-group">
+                        <form action="/admin/modules/imap/accounts/{{ account.id }}/clone" method="post" class="inline-form">
+                          {% if csrf_token %}
+                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                          {% endif %}
+                          <button type="submit" class="button button--small button--ghost">Clone</button>
+                        </form>
                         <a class="button button--small button--ghost" href="/admin/modules/imap?accountId={{ account.id }}">Edit</a>
                         <form action="/admin/modules/imap/accounts/{{ account.id }}/sync" method="post" class="inline-form">
                           {% if csrf_token %}
@@ -171,7 +186,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="8" class="table__empty">No IMAP mailboxes configured yet.</td>
+                  <td colspan="9" class="table__empty">No IMAP mailboxes configured yet.</td>
                 </tr>
               {% endif %}
             </tbody>

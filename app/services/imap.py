@@ -56,6 +56,18 @@ def _normalise_bool(value: Any, *, default: bool = False) -> bool:
     return default
 
 
+def _normalise_priority(value: Any, *, default: int = 100) -> int:
+    if value in (None, ""):
+        return default
+    try:
+        priority = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("Priority must be a whole number")
+    if priority < 0:
+        raise ValueError("Priority must be zero or greater")
+    return priority
+
+
 def _int_or_none(value: Any) -> int | None:
     try:
         return int(value)
@@ -216,6 +228,7 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
     mark_as_read = _normalise_bool(payload.get("mark_as_read"), default=True)
     active = _normalise_bool(payload.get("active"), default=True)
     company_id = payload.get("company_id")
+    priority = _normalise_priority(payload.get("priority"), default=100)
     if not password:
         raise ValueError("Password is required")
     encrypted_password = encrypt_secret(password)
@@ -231,6 +244,7 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
         mark_as_read=mark_as_read,
         active=active,
         company_id=int(company_id) if isinstance(company_id, int) else None,
+        priority=priority,
     )
     if not account:
         raise RuntimeError("Failed to create IMAP account")
@@ -283,11 +297,54 @@ async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[st
                 updates["company_id"] = int(company_value)
             except (TypeError, ValueError):
                 raise ValueError("Company must be numeric")
+    if "priority" in payload:
+        updates["priority"] = _normalise_priority(payload.get("priority"), default=existing.get("priority") or 100)
     updated = await imap_repo.update_account(account_id, **updates)
     if not updated:
         raise RuntimeError("Unable to update IMAP account")
     updated = await _ensure_scheduled_task(updated)
     return _redact_account(updated)
+
+
+async def clone_account(account_id: int) -> dict[str, Any]:
+    original = await imap_repo.get_account(account_id)
+    if not original:
+        raise LookupError("Account not found")
+    password_encrypted = original.get("password_encrypted")
+    if not password_encrypted:
+        raise ValueError("Source account is missing credentials")
+
+    base_name = _normalise_string(original.get("name"), default=f"Mailbox {account_id}")
+    existing_accounts = await imap_repo.list_accounts()
+    existing_names = {acc.get("name") for acc in existing_accounts if acc.get("name")}
+
+    clone_name = f"{base_name} (copy)"
+    suffix = 2
+    while clone_name in existing_names:
+        clone_name = f"{base_name} (copy {suffix})"
+        suffix += 1
+
+    priority_value = _normalise_priority(original.get("priority"), default=100)
+
+    account = await imap_repo.create_account(
+        name=clone_name,
+        host=_normalise_string(original.get("host")),
+        port=int(original.get("port") or 993),
+        username=_normalise_string(original.get("username")),
+        password_encrypted=password_encrypted,
+        folder=_normalise_string(original.get("folder"), default="INBOX") or "INBOX",
+        schedule_cron=_normalise_string(original.get("schedule_cron"), default="*/15 * * * *"),
+        process_unread_only=bool(original.get("process_unread_only", True)),
+        mark_as_read=bool(original.get("mark_as_read", True)),
+        active=bool(original.get("active", True)),
+        company_id=_int_or_none(original.get("company_id")),
+        scheduled_task_id=None,
+        priority=priority_value,
+    )
+    if not account:
+        raise RuntimeError("Failed to clone IMAP account")
+    account = await _ensure_scheduled_task(account)
+    return _redact_account(account)
 
 
 async def delete_account(account_id: int) -> None:
@@ -617,7 +674,14 @@ async def sync_account(account_id: int) -> dict[str, Any]:
 
 async def sync_all_active() -> None:
     accounts = await imap_repo.list_accounts()
-    for account in accounts:
+    sorted_accounts = sorted(
+        accounts,
+        key=lambda account: (
+            int(account.get("priority") or 0),
+            int(account.get("id") or 0),
+        ),
+    )
+    for account in sorted_accounts:
         if not account.get("active", True):
             continue
         try:
