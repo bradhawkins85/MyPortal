@@ -216,11 +216,11 @@
                 </div>
                 <div class="definition-list__item">
                   <dt>Billable minutes</dt>
-                  <dd>{{ ticket_billable_minutes }}</dd>
+                  <dd data-ticket-billable-total>{{ ticket_billable_minutes }}</dd>
                 </div>
                 <div class="definition-list__item">
                   <dt>Non-billable minutes</dt>
-                  <dd>{{ ticket_non_billable_minutes }}</dd>
+                  <dd data-ticket-non-billable-total>{{ ticket_non_billable_minutes }}</dd>
                 </div>
               </dl>
             </div>
@@ -505,22 +505,51 @@
             </header>
             <div class="card__body">
               {% if ticket_replies %}
-                <div class="timeline">
+                <div class="timeline" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
                   {% for reply in ticket_replies %}
-                    <article class="timeline__event">
+                    <article
+                      class="timeline__event"
+                      data-ticket-reply
+                      data-reply-id="{{ reply.id }}"
+                      data-reply-minutes="{{ reply.minutes_spent if reply.minutes_spent is not none else '' }}"
+                      data-reply-billable="{{ 'true' if reply.is_billable else 'false' }}"
+                    >
                       <header class="timeline__header">
-                        <span class="timeline__timestamp">
-                          {{ reply.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.created_at else '—' }}
-                        </span>
-                        <span class="timeline__action">
-                          {{ reply.author.email if reply.author else 'System' }}
-                          {% if reply.is_internal %}
-                            <span class="badge badge--muted">Internal</span>
-                          {% endif %}
-                        </span>
-                        {% if reply.time_summary %}
-                          <span class="timeline__meta text-muted">{{ reply.time_summary }}</span>
-                        {% endif %}
+                        <div class="timeline__header-main">
+                          <span class="timeline__timestamp">
+                            {{ reply.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.created_at else '—' }}
+                          </span>
+                          <span class="timeline__action">
+                            {{ reply.author.email if reply.author else 'System' }}
+                            {% if reply.is_internal %}
+                              <span class="badge badge--muted">Internal</span>
+                            {% endif %}
+                          </span>
+                          <span
+                            class="timeline__meta text-muted"
+                            data-reply-time-summary
+                            {% if not reply.time_summary %}hidden{% endif %}
+                          >
+                            {{ reply.time_summary or '' }}
+                          </span>
+                        </div>
+                        <div class="timeline__header-controls">
+                          <button
+                            type="button"
+                            class="button button--ghost button--icon timeline__edit-button"
+                            data-reply-edit
+                            aria-label="Edit time entry"
+                            aria-controls="reply-time-modal"
+                            aria-haspopup="dialog"
+                            title="Edit time entry"
+                          >
+                            <span class="visually-hidden">Edit time entry</span>
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                              <path d="M20.71 7.04a1 1 0 0 0 0-1.41L18.37 3.3a1 1 0 0 0-1.41 0L6 14.25V18h3.75l10.96-10.96Z" />
+                              <path d="M5 20h14a1 1 0 1 0 0-2H5a1 1 0 1 0 0 2Z" />
+                            </svg>
+                          </button>
+                        </div>
                       </header>
                       <div class="timeline__body">
                         <div
@@ -557,6 +586,43 @@
         </div>
       </div>
     </section>
+  </div>
+
+  <div class="modal" id="reply-time-modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-modal-close>
+        <span class="visually-hidden">Close time entry editor</span>
+        &times;
+      </button>
+      <h2 class="modal__title">Edit time entry</h2>
+      <form class="form-grid" data-reply-time-form novalidate>
+        <p class="form-help">Adjust the minutes recorded for this reply and whether the work is billable.</p>
+        <div class="form-field">
+          <label class="form-label" for="reply-time-minutes">Minutes spent</label>
+          <input
+            class="form-input"
+            id="reply-time-minutes"
+            type="number"
+            min="0"
+            max="1440"
+            step="1"
+            inputmode="numeric"
+            data-reply-time-minutes
+          />
+          <p class="form-help">Leave blank to remove the time entry from this update.</p>
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="checkbox">
+            <input type="checkbox" data-reply-time-billable />
+            <span>Billable</span>
+          </label>
+        </div>
+        <p class="form-help form-help--error" data-reply-time-error role="alert" hidden></p>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary" data-reply-time-submit>Save changes</button>
+        </div>
+      </form>
+    </div>
   </div>
 {% endblock %}
 

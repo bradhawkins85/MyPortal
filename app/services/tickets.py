@@ -115,6 +115,22 @@ def _truncate_description(description: str | None) -> str | None:
     return _TRUNCATION_NOTICE.lstrip()
 
 
+def format_reply_time_summary(minutes_spent: int | None, is_billable: bool) -> str | None:
+    """Return a compact human readable summary for reply time tracking."""
+
+    if minutes_spent is None:
+        return None
+    try:
+        minutes_value = int(minutes_spent)
+    except (TypeError, ValueError):
+        return None
+    if minutes_value < 0:
+        return None
+    label = "minute" if minutes_value == 1 else "minutes"
+    billing_label = "Billable" if is_billable else "Non-billable"
+    return f"{minutes_value} {label} · {billing_label}"
+
+
 async def update_ticket_description(
     ticket_id: int, description: str | None
 ) -> TicketRecord | None:

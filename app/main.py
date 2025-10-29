@@ -6217,27 +6217,14 @@ async def _render_ticket_detail(
         author = user_lookup.get(author_id) if author_id else None
         sanitized_reply = sanitize_rich_text(str(reply.get("body") or ""))
         minutes_value = reply.get("minutes_spent")
-        minutes_spent: int | None = None
-        if minutes_value is not None:
-            try:
-                candidate = int(minutes_value)
-            except (TypeError, ValueError):
-                minutes_spent = None
-            else:
-                if candidate >= 0:
-                    minutes_spent = candidate
+        minutes_spent = minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
         billable_flag = bool(reply.get("is_billable"))
         if minutes_spent is not None:
             if billable_flag:
                 total_billable_minutes += minutes_spent
             else:
                 total_non_billable_minutes += minutes_spent
-        if minutes_spent is not None:
-            minutes_label = "minute" if minutes_spent == 1 else "minutes"
-            billing_label = "Billable" if billable_flag else "Non-billable"
-            time_summary = f"{minutes_spent} {minutes_label} · {billing_label}"
-        else:
-            time_summary = None
+        time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag)
         enriched_replies.append(
             {
                 **reply,
