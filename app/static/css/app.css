@@ -528,6 +528,12 @@ body {
   justify-content: flex-end;
 }
 
+.form-actions__group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-gap-tight);
+}
+
 .automation-actions {
   display: flex;
   flex-direction: column;
