@@ -1,0 +1,7 @@
+{
+  "guid": "73b4a64f-758b-4fee-b618-01aebf392214",
+  "occurred_at": "2025-10-29T14:16Z",
+  "change_type": "Fix",
+  "summary": "Resolved admin package templates referencing dict items attribute causing package editing failure.",
+  "content_hash": "d37a3f5f48d3768890db436a37ecab68707aa1af711bb62841ceef94c882c538"
+}
