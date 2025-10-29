@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from fastapi import WebSocket
 
@@ -38,7 +38,13 @@ class RefreshNotifier:
         async with self._lock:
             self._connections.discard(websocket)
 
-    async def broadcast_refresh(self, *, reason: str | None = None) -> BroadcastResult:
+    async def broadcast_refresh(
+        self,
+        *,
+        reason: str | None = None,
+        topics: Iterable[str] | None = None,
+        data: Mapping[str, Any] | None = None,
+    ) -> BroadcastResult:
         """Broadcast a refresh signal to all connected clients."""
 
         async with self._lock:
@@ -55,6 +61,24 @@ class RefreshNotifier:
         }
         if reason:
             payload["reason"] = reason
+        if topics:
+            topic_list = []
+            seen: set[str] = set()
+            for topic in topics:
+                if not isinstance(topic, str):
+                    continue
+                normalised = topic.strip()
+                if not normalised:
+                    continue
+                lowered = normalised.lower()
+                if lowered in seen:
+                    continue
+                seen.add(lowered)
+                topic_list.append(lowered)
+            if topic_list:
+                payload["topics"] = topic_list
+        if data:
+            payload["data"] = dict(data)
 
         delivered = 0
         dropped = 0

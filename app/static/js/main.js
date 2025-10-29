@@ -109,7 +109,23 @@
     }
 
     function handleRefreshMessage(payload) {
-      const reason = typeof payload.reason === 'string' ? payload.reason.trim() : '';
+      const detail = {
+        ...(payload && typeof payload === 'object' ? payload : {}),
+        showToast(message, options) {
+          toast.show(message, options || {});
+        },
+      };
+
+      const event = new CustomEvent('realtime:refresh', {
+        detail,
+        cancelable: true,
+      });
+      const shouldReload = document.dispatchEvent(event);
+      if (!shouldReload) {
+        return;
+      }
+
+      const reason = typeof detail.reason === 'string' ? detail.reason.trim() : '';
       const message = reason
         ? `${reason} Refreshing to apply updates…`
         : 'Updates are available. Refreshing to apply changes…';

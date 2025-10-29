@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import html
 import json
-from collections.abc import Awaitable, Callable, Mapping as MappingABC, Mapping
 import re
+from collections import Counter
+from collections.abc import Awaitable, Callable, Mapping as MappingABC, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
@@ -11,12 +13,16 @@ from app.core.database import db
 from app.core.logging import log_error
 from app.repositories import tickets as tickets_repo
 from app.repositories import companies as company_repo
+from app.repositories import company_memberships as membership_repo
 from app.repositories.tickets import TicketRecord
 from app.services import automations as automations_service
 from app.repositories import users as user_repo
 from app.services import modules as modules_service
 from app.services.tagging import filter_helpful_slugs, is_helpful_slug, slugify_tag
 from app.services.sanitization import sanitize_rich_text
+from app.services.realtime import RefreshNotifier, refresh_notifier
+
+HELPDESK_PERMISSION_KEY = "helpdesk.technician"
 
 _REPLY_ABOVE_PATTERN = re.compile(
     r"^-{3,}\s*reply\s+above\s+this\s+line\s+to\s+add\s+a\s+comment\s*-{0,}\s*$",
@@ -110,10 +116,12 @@ async def update_ticket_description(
 ) -> TicketRecord | None:
     """Persist a ticket description after enforcing size limits."""
 
-    return await tickets_repo.update_ticket(
+    record = await tickets_repo.update_ticket(
         ticket_id,
         description=_truncate_description(description),
     )
+    await broadcast_ticket_event(action="updated", ticket_id=ticket_id)
+    return record
 
 
 async def _safely_call(async_fn: Callable[..., Awaitable[Any]], *args, **kwargs):
@@ -628,6 +636,7 @@ async def create_ticket(
                 ticket_id=ticket.get("id"),
                 error=str(exc),
             )
+    await broadcast_ticket_event(action="created", ticket_id=enriched_ticket.get("id"))
     return enriched_ticket
 
 
@@ -988,3 +997,121 @@ def _generate_candidate_tags(ticket: Mapping[str, Any]) -> list[str]:
         deduped.append(candidate)
         seen.add(candidate)
     return deduped
+
+
+@dataclass(slots=True)
+class TicketDashboardState:
+    tickets: list[TicketRecord]
+    total: int
+    status_counts: Counter[str]
+    available_statuses: list[str]
+    modules: list[Mapping[str, Any]]
+    companies: list[Mapping[str, Any]]
+    technicians: list[Mapping[str, Any]]
+    company_lookup: dict[int, dict[str, Any]]
+    user_lookup: dict[int, dict[str, Any]]
+
+
+async def broadcast_ticket_event(
+    *,
+    action: str,
+    ticket_id: int | None = None,
+    notifier: RefreshNotifier | None = None,
+) -> None:
+    """Broadcast a realtime notification for ticket list updates."""
+
+    normalised_action = (action or "").strip()
+    if not normalised_action:
+        return
+
+    resolved_notifier = notifier or refresh_notifier
+    data: dict[str, Any] = {"action": normalised_action}
+    reason_parts = ["tickets", normalised_action]
+
+    try:
+        numeric_id = int(ticket_id) if ticket_id is not None else None
+    except (TypeError, ValueError):
+        numeric_id = None
+
+    if numeric_id and numeric_id > 0:
+        data["ticketId"] = numeric_id
+        reason_parts.append(str(numeric_id))
+
+    reason = ":".join(reason_parts)
+
+    await resolved_notifier.broadcast_refresh(
+        reason=reason,
+        topics=("tickets",),
+        data=data,
+    )
+
+
+async def load_dashboard_state(
+    *,
+    status_filter: str | None = None,
+    module_filter: str | None = None,
+    company_id: int | None = None,
+    assigned_user_id: int | None = None,
+    search: str | None = None,
+    requester_id: int | None = None,
+    limit: int = 200,
+) -> TicketDashboardState:
+    """Load ticket dashboard data used by the admin workspace."""
+
+    tickets = await tickets_repo.list_tickets(
+        status=status_filter,
+        module_slug=module_filter,
+        company_id=company_id,
+        assigned_user_id=assigned_user_id,
+        search=search,
+        requester_id=requester_id,
+        limit=limit,
+    )
+    total = await tickets_repo.count_tickets(
+        status=status_filter,
+        module_slug=module_filter,
+        company_id=company_id,
+        assigned_user_id=assigned_user_id,
+        search=search,
+        requester_id=requester_id,
+    )
+
+    status_counts = Counter((str(ticket.get("status") or "open")).lower() for ticket in tickets)
+    available_statuses = sorted(
+        {"open", "in_progress", "pending", "resolved", "closed", *status_counts.keys()}
+    )
+
+    modules = await modules_service.list_modules()
+    companies = await company_repo.list_companies()
+    technicians = await membership_repo.list_users_with_permission(HELPDESK_PERMISSION_KEY)
+
+    company_lookup: dict[int, dict[str, Any]] = {}
+    for company in companies:
+        identifier = company.get("id")
+        try:
+            numeric_id = int(identifier)
+        except (TypeError, ValueError):
+            continue
+        company_lookup[numeric_id] = company
+
+    users = await user_repo.list_users()
+    user_lookup: dict[int, dict[str, Any]] = {}
+    for record in users:
+        identifier = record.get("id")
+        try:
+            numeric_id = int(identifier)
+        except (TypeError, ValueError):
+            continue
+        user_lookup[numeric_id] = record
+
+    return TicketDashboardState(
+        tickets=tickets,
+        total=total,
+        status_counts=status_counts,
+        available_statuses=available_statuses,
+        modules=modules,
+        companies=companies,
+        technicians=technicians,
+        company_lookup=company_lookup,
+        user_lookup=user_lookup,
+    )
