@@ -223,6 +223,8 @@ class SchedulerService:
             env = os.environ.copy()
             if force_restart:
                 env["FORCE_RESTART"] = "1"
+            else:
+                env["FORCE_RESTART"] = "0"
             process = await asyncio.create_subprocess_exec(
                 str(script_path),
                 stdout=PIPE,
