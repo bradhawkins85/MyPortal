@@ -17,6 +17,44 @@ from app.services import modules as modules_service
 from app.services.tagging import filter_helpful_slugs, is_helpful_slug, slugify_tag
 from app.services.sanitization import sanitize_rich_text
 
+_REPLY_ABOVE_PATTERN = re.compile(
+    r"^-{3,}\s*reply\s+above\s+this\s+line\s+to\s+add\s+a\s+comment\s*-{0,}\s*$",
+    re.IGNORECASE,
+)
+
+_SIGNATURE_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^--+\s*$"),
+    re.compile(r"^__+\s*$"),
+    re.compile(r"^cheers[\W_]*$", re.IGNORECASE),
+    re.compile(r"^thanks[\W_]*$", re.IGNORECASE),
+    re.compile(r"^thank\s+you[\W_]*$", re.IGNORECASE),
+    re.compile(r"^regards[\W_]*$", re.IGNORECASE),
+    re.compile(r"^kind\s+regards[\W_]*$", re.IGNORECASE),
+    re.compile(r"^best[\W_]*$", re.IGNORECASE),
+    re.compile(r"^best\s+regards[\W_]*$", re.IGNORECASE),
+    re.compile(r"^sincerely[\W_]*$", re.IGNORECASE),
+    re.compile(r"^sent\s+from\s+my\s+.+$", re.IGNORECASE),
+)
+
+_SIGNATURE_KEYWORDS: tuple[str, ...] = (
+    "kind regards",
+    "warm regards",
+    "with thanks",
+    "many thanks",
+    "yours faithfully",
+    "yours sincerely",
+)
+
+_DISCLAIMER_KEYWORDS: tuple[str, ...] = (
+    "confidential",
+    "disclaimer",
+    "privileged",
+    "intended recipient",
+    "unauthorized",
+    "unauthorised",
+    "may contain information",
+)
+
 _PROMPT_HEADER = (
     "You are an AI assistant that summarises helpdesk tickets for technicians. "
     "Return a compact JSON object with the keys 'summary' and 'resolution'. "
@@ -96,6 +134,81 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
         enriched["assigned_user_display_name"] = None
 
     return enriched
+
+
+def _strip_reply_marker(text: str) -> str:
+    lines = text.splitlines()
+    for index in range(len(lines) - 1, -1, -1):
+        candidate = lines[index].strip()
+        if _REPLY_ABOVE_PATTERN.match(candidate):
+            lines = lines[:index]
+            break
+    return "\n".join(lines).strip()
+
+
+def _strip_signature_block(text: str) -> str:
+    if not text:
+        return ""
+
+    lines = text.splitlines()
+    cutoff = len(lines)
+
+    def _looks_like_signature(candidate: str) -> bool:
+        if not candidate:
+            return False
+        lower = candidate.lower()
+        if any(pattern.match(candidate) for pattern in _SIGNATURE_LINE_PATTERNS):
+            return True
+        if any(lower.startswith(prefix) for prefix in _SIGNATURE_KEYWORDS):
+            return True
+        if lower.endswith(",") and _looks_like_signature(lower[:-1].strip()):
+            return True
+        if lower.startswith("sent from my"):
+            return True
+        if any(keyword in lower for keyword in _DISCLAIMER_KEYWORDS):
+            return True
+        return False
+
+    for index in range(len(lines) - 1, -1, -1):
+        candidate = lines[index].strip()
+        if not candidate:
+            continue
+        distance = len(lines) - index
+        if _looks_like_signature(candidate):
+            cutoff = index
+            continue
+        if distance > 12:
+            break
+
+    trimmed = lines[:cutoff]
+    while trimmed and not trimmed[-1].strip():
+        trimmed.pop()
+    return "\n".join(trimmed).strip()
+
+
+def _strip_conversation_noise(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = _strip_reply_marker(text)
+    cleaned = _strip_signature_block(cleaned)
+    return cleaned.strip()
+
+
+def _prepare_prompt_text(value: Any) -> str:
+    sanitized = sanitize_rich_text(str(value or ""))
+    html_value = sanitized.html or ""
+    with_breaks = re.sub(r"<br\s*/?>", "\n", html_value, flags=re.IGNORECASE)
+    block_breaks = re.sub(
+        r"</(p|div|li|tr|td|th|tbody|thead|ul|ol)>",
+        "\n",
+        with_breaks,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"<[^>]+>", "", block_breaks)
+    text = text.replace("\xa0", " ")
+    lines = [line.strip() for line in text.splitlines()]
+    normalised = "\n".join(line for line in lines if line)
+    return _strip_conversation_noise(normalised)
 
 
 async def refresh_ticket_ai_summary(ticket_id: int) -> None:
@@ -348,7 +461,8 @@ def _render_prompt(
     user_lookup: Mapping[int, Mapping[str, Any]],
 ) -> str:
     subject = str(ticket.get("subject") or "")
-    description = str(ticket.get("description") or "No description provided.")
+    description_text = _prepare_prompt_text(ticket.get("description"))
+    description = description_text or "No description provided."
     status_value = str(ticket.get("status") or "open")
     priority_value = str(ticket.get("priority") or "normal")
 
@@ -375,8 +489,7 @@ def _render_prompt(
             author_record = user_lookup.get(author_id) if isinstance(author_id, int) else None
             author_label = str(author_record.get("email") or author_record.get("first_name") or "User") if author_record else "User"
             visibility = "internal note" if reply.get("is_internal") else "public reply"
-            sanitised = sanitize_rich_text(str(reply.get("body") or ""))
-            body_text = sanitised.text_content or ""
+            body_text = _prepare_prompt_text(reply.get("body"))
             lines.append(f"- {timestamp} • {author_label} ({visibility}): {body_text}")
 
     lines.append("")
@@ -392,7 +505,8 @@ def _render_tags_prompt(
     user_lookup: Mapping[int, Mapping[str, Any]],
 ) -> str:
     subject = str(ticket.get("subject") or "")
-    description = str(ticket.get("description") or "No description provided.")
+    description_text = _prepare_prompt_text(ticket.get("description"))
+    description = description_text or "No description provided."
     status_value = str(ticket.get("status") or "open")
     priority_value = str(ticket.get("priority") or "normal")
     category_value = str(ticket.get("category") or "uncategorised")
@@ -427,8 +541,7 @@ def _render_tags_prompt(
                 else "User"
             )
             visibility = "internal note" if reply.get("is_internal") else "public reply"
-            sanitised = sanitize_rich_text(str(reply.get("body") or ""))
-            body_text = sanitised.text_content or ""
+            body_text = _prepare_prompt_text(reply.get("body"))
             lines.append(f"- {timestamp} • {author_label} ({visibility}): {body_text}")
 
     lines.append("")
@@ -676,7 +789,7 @@ def _generate_candidate_tags(ticket: Mapping[str, Any]) -> list[str]:
             if slug and is_helpful_slug(slug):
                 candidates.append(slug)
     subject = str(ticket.get("subject") or "")
-    description = str(ticket.get("description") or "")
+    description = _prepare_prompt_text(ticket.get("description"))
     for word in re.findall(r"[A-Za-z0-9]+", subject):
         if len(word) < 3:
             continue

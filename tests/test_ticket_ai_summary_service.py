@@ -156,3 +156,42 @@ def test_extract_summary_fields_from_triple_quoted_block():
 
     assert summary == "Still working"
     assert resolution == "Likely In Progress"
+
+
+def test_render_prompt_ignores_signatures_and_reply_markers():
+    ticket = {
+        "id": 1,
+        "subject": "Email outage",
+        "description": (
+            "Users cannot send emails.\n"
+            "--- Reply ABOVE THIS LINE to add a comment ---\n"
+            "Thanks,\n"
+            "Admin Team\n"
+            "CONFIDENTIALITY NOTICE: This message may contain information"
+        ),
+        "status": "open",
+        "priority": "high",
+    }
+    replies = [
+        {
+            "ticket_id": 1,
+            "author_id": 4,
+            "body": (
+                "Investigating SMTP queue delay.\n"
+                "Sent from my iPhone\n"
+                "--- Reply ABOVE THIS LINE to add a comment ---\n"
+                "Unauthorized viewing prohibited."
+            ),
+            "is_internal": False,
+            "created_at": None,
+        }
+    ]
+
+    prompt = tickets_service._render_prompt(ticket, replies, {})
+
+    assert "Investigating SMTP queue delay." in prompt
+    assert "Users cannot send emails." in prompt
+    assert "Reply ABOVE THIS LINE" not in prompt
+    assert "Sent from my iPhone" not in prompt
+    assert "CONFIDENTIALITY NOTICE" not in prompt
+    assert "Unauthorized viewing prohibited." not in prompt
