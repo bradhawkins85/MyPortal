@@ -1,0 +1,3 @@
+# Replace /opt/myportal with the absolute path to your deployment root.
+# This entry checks for the restart flag every minute and applies updates when needed.
+* * * * * root /usr/bin/env bash /opt/myportal/scripts/process_update_flag.sh >> /var/log/myportal/process_update_flag.log 2>&1
