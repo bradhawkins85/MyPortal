@@ -18,7 +18,7 @@ def _make_aware(value: Any) -> datetime | None:
 
 def _normalise_account(row: dict[str, Any]) -> dict[str, Any]:
     account = dict(row)
-    for key in ("id", "company_id", "port", "scheduled_task_id"):
+    for key in ("id", "company_id", "port", "scheduled_task_id", "priority"):
         if key in account and account[key] is not None:
             account[key] = int(account[key])
     for key in ("process_unread_only", "mark_as_read", "active"):
@@ -32,7 +32,7 @@ def _normalise_account(row: dict[str, Any]) -> dict[str, Any]:
 
 async def list_accounts() -> list[dict[str, Any]]:
     rows = await db.fetch_all(
-        "SELECT * FROM imap_accounts ORDER BY name ASC, id ASC"
+        "SELECT * FROM imap_accounts ORDER BY priority ASC, name ASC, id ASC"
     )
     return [_normalise_account(row) for row in rows]
 
@@ -59,6 +59,7 @@ async def create_account(
     active: bool,
     company_id: int | None = None,
     scheduled_task_id: int | None = None,
+    priority: int = 100,
 ) -> dict[str, Any]:
     account_id = await db.execute_returning_lastrowid(
         """
@@ -74,8 +75,9 @@ async def create_account(
             mark_as_read,
             schedule_cron,
             active,
-            scheduled_task_id
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            scheduled_task_id,
+            priority
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -90,6 +92,7 @@ async def create_account(
             schedule_cron,
             1 if active else 0,
             scheduled_task_id,
+            priority,
         ),
     )
     created = await get_account(int(account_id)) if account_id else None
@@ -116,6 +119,7 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
             "company_id",
             "scheduled_task_id",
             "last_synced_at",
+            "priority",
         }:
             continue
         if key in {"process_unread_only", "mark_as_read", "active"}:
@@ -127,6 +131,9 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
                 params.append(value.replace(tzinfo=None))
             else:
                 params.append(value)
+        elif key == "priority":
+            assignments.append("priority = %s")
+            params.append(int(value))
         else:
             assignments.append(f"{key} = %s")
             params.append(value)
