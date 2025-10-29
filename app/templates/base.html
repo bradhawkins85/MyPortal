@@ -288,14 +288,16 @@
                   <span class="menu__label">Webhook monitor</span>
                 </a>
               </li>
-              <li class="menu__item">
-                <a href="/admin/shop" {% if current_path.startswith('/admin/shop') %}aria-current="page"{% endif %}>
-                  <span class="menu__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false"><path d="M4 7h16l-1.5 12.5A2 2 0 0 1 16.52 21H7.48a2 2 0 0 1-1.98-1.5zM6 3h12a1 1 0 0 1 1 1v2H5V4a1 1 0 0 1 1-1z"/></svg>
-                  </span>
-                  <span class="menu__label">Shop admin</span>
-                </a>
-              </li>
+              {% if not current_path.startswith('/shop') %}
+                <li class="menu__item">
+                  <a href="/admin/shop" {% if current_path.startswith('/admin/shop') %}aria-current="page"{% endif %}>
+                    <span class="menu__icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false"><path d="M4 7h16l-1.5 12.5A2 2 0 0 1 16.52 21H7.48a2 2 0 0 1-1.98-1.5zM6 3h12a1 1 0 0 1 1 1v2H5V4a1 1 0 0 1 1-1z"/></svg>
+                    </span>
+                    <span class="menu__label">Shop admin</span>
+                  </a>
+                </li>
+              {% endif %}
               <li class="menu__item">
                 <a href="/admin/change-log" {% if current_path.startswith('/admin/change-log') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
@@ -341,7 +343,11 @@
                 <path d="M3 6.25A1.25 1.25 0 0 1 4.25 5h15.5a1.25 1.25 0 1 1 0 2.5H4.25A1.25 1.25 0 0 1 3 6.25Zm0 5.75A1.25 1.25 0 0 1 4.25 10h15.5a1.25 1.25 0 1 1 0 2.5H4.25A1.25 1.25 0 0 1 3 11.75ZM4.25 15h15.5a1.25 1.25 0 1 1 0 2.5H4.25a1.25 1.25 0 1 1 0-2.5Z" />
               </svg>
             </button>
-            <div class="header__title">{{ title | default('Dashboard') }}</div>
+            <div class="header__title">
+              {% block header_title_content %}
+                {{ title | default('Dashboard') }}
+              {% endblock %}
+            </div>
           </div>
           {% set has_authenticated_user = current_user is defined and current_user and current_user.get('id') %}
           {% set header_actions_content %}

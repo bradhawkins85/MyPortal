@@ -1,0 +1,7 @@
+{
+  "guid": "8c896b9e-b0c0-4efe-b982-826c91fffac7",
+  "occurred_at": "2025-10-29T13:04:47Z",
+  "change_type": "Fix",
+  "summary": "Relocated Shop admin entry into shop header and removed duplicate sidebar link on storefront page.",
+  "content_hash": "99813b2aeb6ea7171d414e997306c8b8a905a2649ce5b42fa65126e01e8f7bae"
+}
