@@ -716,6 +716,11 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 0 1 auto;
+}
+
+.header__title-button {
+  flex: 0 0 auto;
   max-width: 100%;
 }
 
