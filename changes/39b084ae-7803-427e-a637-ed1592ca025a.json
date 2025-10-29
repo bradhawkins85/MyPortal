@@ -1,0 +1,7 @@
+{
+  "guid": "39b084ae-7803-427e-a637-ed1592ca025a",
+  "occurred_at": "2025-10-29T07:46:36Z",
+  "change_type": "Fix",
+  "summary": "Removed email headers from imported conversation history entries.",
+  "content_hash": "9b3144530301aa25f12fcf7efdc461f990591c063f866d79f64876e48f9e7e6d"
+}

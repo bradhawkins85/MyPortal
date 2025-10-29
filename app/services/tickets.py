@@ -218,12 +218,33 @@ def _strip_signature_block(text: str) -> str:
     return "\n".join(trimmed).strip()
 
 
+_HEADER_PREFIXES = (
+    "subject:",
+    "from:",
+    "reply-to:",
+    "date:",
+)
+
+
 def _strip_conversation_noise(text: str) -> str:
     if not text:
         return ""
     cleaned = _strip_reply_marker(text)
     cleaned = _strip_signature_block(cleaned)
-    return cleaned.strip()
+
+    lines = cleaned.splitlines()
+    filtered_lines: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            filtered_lines.append(line)
+            continue
+        lower = stripped.lower()
+        if any(lower.startswith(prefix) for prefix in _HEADER_PREFIXES):
+            continue
+        filtered_lines.append(line)
+
+    return "\n".join(filtered_lines).strip()
 
 
 def _prepare_prompt_text(value: Any) -> str:
