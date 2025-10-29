@@ -98,3 +98,51 @@ async def test_create_ticket_can_skip_automations(monkeypatch):
     assert ticket["assigned_user_email"] == "tech@example.com"
     assert ticket["assigned_user_display_name"] == "Sam Support"
     assert called is False
+
+
+@pytest.mark.anyio
+async def test_create_ticket_truncates_long_description(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_create_ticket(**kwargs):
+        captured.update(kwargs)
+        return {"id": 91, **kwargs}
+
+    async def fake_handle_event(event_name, context):  # pragma: no cover - via test
+        return []
+
+    async def fake_get_company(company_id):
+        return None
+
+    async def fake_get_user(user_id):
+        return None
+
+    monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
+    monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
+
+    long_description = "A" * (tickets_service._MAX_TICKET_DESCRIPTION_BYTES + 512)
+
+    ticket = await tickets_service.create_ticket(
+        subject="Overflowing description",
+        description=long_description,
+        requester_id=None,
+        company_id=None,
+        assigned_user_id=None,
+        priority="normal",
+        status="open",
+        category=None,
+        module_slug="imap",
+        external_reference=None,
+        ticket_number=None,
+    )
+
+    assert ticket["id"] == 91
+    stored_description = captured.get("description")
+    assert isinstance(stored_description, str)
+    assert stored_description.endswith("Message truncated due to size]")
+    assert (
+        len(stored_description.encode("utf-8"))
+        <= tickets_service._MAX_TICKET_DESCRIPTION_BYTES
+    )

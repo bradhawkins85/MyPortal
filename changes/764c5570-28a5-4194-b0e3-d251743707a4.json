@@ -1,0 +1,7 @@
+{
+  "guid": "764c5570-28a5-4194-b0e3-d251743707a4",
+  "occurred_at": "2025-10-29T06:00Z",
+  "change_type": "Fix",
+  "summary": "Prevent IMAP ticket imports from failing due to oversized email bodies by truncating ticket descriptions",
+  "content_hash": "9dd2fcd6dfd7285569323005b81c9e09459b6f1045cb0e6f384bd447d958ffed"
+}

@@ -45,6 +45,27 @@ _DEFAULT_TAG_FILL = [
 ]
 
 
+_MAX_TICKET_DESCRIPTION_BYTES = 65_535
+_TRUNCATION_NOTICE = "\n\n[Message truncated due to size]"
+
+
+def _truncate_description(description: str | None) -> str | None:
+    if description is None:
+        return None
+    text = str(description)
+    if not text:
+        return text
+    encoded = text.encode("utf-8")
+    if len(encoded) <= _MAX_TICKET_DESCRIPTION_BYTES:
+        return text
+    allowance = max(_MAX_TICKET_DESCRIPTION_BYTES - len(_TRUNCATION_NOTICE.encode("utf-8")), 0)
+    truncated_bytes = encoded[:allowance]
+    truncated_text = truncated_bytes.decode("utf-8", errors="ignore").rstrip()
+    if truncated_text:
+        return f"{truncated_text}{_TRUNCATION_NOTICE}"
+    return _TRUNCATION_NOTICE.lstrip()
+
+
 async def _safely_call(async_fn: Callable[..., Awaitable[Any]], *args, **kwargs):
     try:
         return await async_fn(*args, **kwargs)
@@ -314,7 +335,7 @@ async def create_ticket(
 
     ticket = await tickets_repo.create_ticket(
         subject=subject,
-        description=description,
+        description=_truncate_description(description),
         requester_id=requester_id,
         company_id=company_id,
         assigned_user_id=assigned_user_id,
