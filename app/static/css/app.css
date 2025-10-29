@@ -1606,6 +1606,12 @@ body {
   text-transform: capitalize;
 }
 
+.status__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .status--active {
   background: rgba(134, 239, 172, 0.18);
   color: #bbf7d0;
@@ -1618,6 +1624,16 @@ body {
 
 .status--suspended {
   background: rgba(248, 113, 113, 0.18);
+  color: #fecaca;
+}
+
+.status--processing {
+  background: rgba(96, 165, 250, 0.2);
+  color: #bfdbfe;
+}
+
+.status--error {
+  background: rgba(248, 113, 113, 0.22);
   color: #fecaca;
 }
 
@@ -3452,6 +3468,36 @@ body {
 .button__label {
   display: inline-flex;
   align-items: center;
+}
+
+.button--processing {
+  cursor: wait;
+  opacity: 0.75;
+}
+
+@keyframes spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.button__spinner,
+.status__spinner {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  border: 0.2rem solid currentColor;
+  border-top-color: transparent;
+  animation: spinner-rotate 0.8s linear infinite;
+}
+
+.button__spinner {
+  margin-right: 0.5rem;
+}
+
+.status__spinner {
+  margin-right: 0.35rem;
 }
 
 
