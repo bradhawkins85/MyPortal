@@ -128,16 +128,6 @@
               </a>
             </li>
           {% endif %}
-          {% if can_access_cart %}
-            <li class="menu__item">
-              <a href="/cart" {% if current_path.startswith('/cart') %}aria-current="page"{% endif %}>
-                <span class="menu__icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" focusable="false"><path d="M3 3h2l1.24 2.76A2 2 0 0 0 8.08 7H19a1 1 0 0 1 .98 1.2l-1.5 7A2 2 0 0 1 16.53 16H9a2 2 0 0 1-1.9-1.37L4.28 5H3zm6 16a2 2 0 1 0 2 2 2 2 0 0 0-2-2zm8 0a2 2 0 1 0 2 2 2 2 0 0 0-2-2z"/></svg>
-                </span>
-                <span class="menu__label">Cart</span>
-              </a>
-            </li>
-          {% endif %}
           {% if can_access_orders %}
             <li class="menu__item">
               <a href="/orders" {% if current_path.startswith('/orders') %}aria-current="page"{% endif %}>
