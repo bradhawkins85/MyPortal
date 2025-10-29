@@ -4,6 +4,31 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 VENV_DIR="${PROJECT_ROOT}/.venv"
+FLAG_DIR="${PROJECT_ROOT}/var/state"
+RESTART_FLAG_FILE="${FLAG_DIR}/restart_required.flag"
+
+ensure_flag_directory() {
+  if mkdir -p "$FLAG_DIR"; then
+    chmod 750 "$FLAG_DIR" >/dev/null 2>&1 || true
+  else
+    echo "Error: Unable to create flag directory at $FLAG_DIR" >&2
+    exit 1
+  fi
+}
+
+mark_restart_required() {
+  ensure_flag_directory
+
+  local message="$(date -u +"%Y-%m-%dT%H:%M:%SZ") ${POST_PULL_HEAD:-unknown}"
+
+  if printf '%s\n' "$message" >"$RESTART_FLAG_FILE"; then
+    chmod 640 "$RESTART_FLAG_FILE" >/dev/null 2>&1 || true
+    echo "Flagged pending dependency install and service restart at $RESTART_FLAG_FILE"
+  else
+    echo "Error: Failed to write restart flag at $RESTART_FLAG_FILE" >&2
+    exit 1
+  fi
+}
 
 purge_spurious_dist_info() {
   if [[ ! -d "$VENV_DIR" ]]; then
@@ -290,11 +315,11 @@ FORCE_RESTART="${FORCE_RESTART:-0}"
 reset_project_permissions "$SERVICE_USER"
 
 if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
-  echo "Repository updated to $POST_PULL_HEAD. Run scripts/restart.sh to reinstall dependencies and restart the service."
-  "${SCRIPT_DIR}/restart.sh"
+  echo "Repository updated to $POST_PULL_HEAD."
+  mark_restart_required
 elif [[ "$FORCE_RESTART" == "1" ]]; then
-  echo "No repository changes detected but FORCE_RESTART=1; running restart helper."
-  "${SCRIPT_DIR}/restart.sh"
+  echo "No repository changes detected but FORCE_RESTART=1; flagging dependency install and service restart."
+  mark_restart_required
 else
   echo "No changes detected from remote."
 fi
