@@ -1,0 +1,7 @@
+{
+  "guid": "20e583a8-7c3a-4c8a-8911-05c9f07f8e60",
+  "occurred_at": "2025-10-29T02:13Z",
+  "change_type": "Feature",
+  "summary": "Automatically map IMAP-imported tickets to companies and contacts based on sender addresses.",
+  "content_hash": "b01d2aeace6643309240d83b7b3d1f029c13fba2f1bae3b8dc8420863675b98b"
+}
