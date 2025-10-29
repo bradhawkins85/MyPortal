@@ -343,7 +343,26 @@
             </button>
             <div class="header__title">{{ title | default('Dashboard') }}</div>
           </div>
-          {% block header_actions %}{% endblock %}
+          {% set has_authenticated_user = current_user is defined and current_user and current_user.get('id') %}
+          {% set header_actions_content %}
+            {% block header_actions %}{% endblock %}
+          {% endset %}
+          {% if has_authenticated_user %}
+            <div class="header__actions">
+              <a
+                class="button-link"
+                href="/docs"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Open API documentation"
+              >
+                Swagger UI
+              </a>
+              {{ header_actions_content }}
+            </div>
+          {% else %}
+            {{ header_actions_content }}
+          {% endif %}
         </header>
         <section class="layout__content">
           {% block content %}{% endblock %}
