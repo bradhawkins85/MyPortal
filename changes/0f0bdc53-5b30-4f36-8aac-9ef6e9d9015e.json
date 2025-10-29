@@ -1,0 +1,7 @@
+{
+  "guid": "0f0bdc53-5b30-4f36-8aac-9ef6e9d9015e",
+  "occurred_at": "2025-10-29T04:40Z",
+  "change_type": "Fix",
+  "summary": "Renamed Automation & monitoring admin page title to System Automation.",
+  "content_hash": "4b38c4b6a10dcbb7c3d91d5091278f808b0db6f4eb5de7fbb5c0664b6b775a7c"
+}
