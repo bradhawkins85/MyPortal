@@ -16,6 +16,7 @@ class IMAPAccountBase(BaseModel):
     mark_as_read: bool = True
     active: bool = True
     company_id: int | None = None
+    priority: int = Field(100, ge=0, le=32767)
 
 
 class IMAPAccountCreate(IMAPAccountBase):
@@ -34,6 +35,7 @@ class IMAPAccountUpdate(BaseModel):
     mark_as_read: bool | None = None
     active: bool | None = None
     company_id: int | None = None
+    priority: int | None = Field(default=None, ge=0, le=32767)
 
 
 class IMAPAccountResponse(BaseModel):
@@ -48,6 +50,7 @@ class IMAPAccountResponse(BaseModel):
     mark_as_read: bool
     active: bool
     company_id: int | None
+    priority: int
     last_synced_at: datetime | None
     scheduled_task_id: int | None
 

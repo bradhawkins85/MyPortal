@@ -7618,6 +7618,18 @@ async def admin_create_imap_account(request: Request):
         "mark_as_read": _form_bool(form, "markAsRead"),
         "active": _form_bool(form, "active"),
     }
+    priority_value = form.get("priority")
+    if priority_value not in (None, ""):
+        try:
+            data["priority"] = int(priority_value)
+        except (TypeError, ValueError):
+            return await _render_imap_dashboard(
+                request,
+                current_user,
+                success_message=None,
+                error_message="Priority must be a whole number.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
     company_id = form.get("companyId")
     if company_id not in (None, ""):
         try:
@@ -7681,6 +7693,19 @@ async def admin_update_imap_account(account_id: int, request: Request):
     updates["process_unread_only"] = _form_bool(form, "processUnreadOnly")
     updates["mark_as_read"] = _form_bool(form, "markAsRead")
     updates["active"] = _form_bool(form, "active")
+    priority_value = form.get("priority")
+    if priority_value not in (None, ""):
+        try:
+            updates["priority"] = int(priority_value)
+        except (TypeError, ValueError):
+            return await _render_imap_dashboard(
+                request,
+                current_user,
+                editing_account_id=account_id,
+                success_message=None,
+                error_message="Priority must be a whole number.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
     company_id = form.get("companyId")
     if company_id in (None, ""):
         updates["company_id"] = None
@@ -7718,6 +7743,46 @@ async def admin_update_imap_account(account_id: int, request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     message = quote(f"Mailbox {account.get('name') or account.get('username') or account_id} updated.")
+    return RedirectResponse(
+        url=f"/admin/modules/imap?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/modules/imap/accounts/{account_id}/clone", response_class=HTMLResponse)
+async def admin_clone_imap_account(account_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    try:
+        account = await imap_service.clone_account(account_id)
+    except LookupError as exc:
+        return await _render_imap_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message=str(exc),
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    except ValueError as exc:
+        return await _render_imap_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to clone IMAP account", account_id=account_id, error=str(exc))
+        return await _render_imap_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message="Unable to clone the IMAP account at this time.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    label = account.get("name") or f"Mailbox {account_id} copy"
+    message = quote(f"Mailbox {label} cloned.")
     return RedirectResponse(
         url=f"/admin/modules/imap?success={message}",
         status_code=status.HTTP_303_SEE_OTHER,

@@ -8,9 +8,11 @@ Administrators can manage mailboxes at `/admin/modules/imap`. The workspace allo
 
 - Creating mailboxes with encrypted credentials
 - Selecting a source folder and optional company association
+- Setting a mailbox priority to control processing order
 - Choosing to only process unread messages and whether to mark processed mail as read
 - Configuring a cron schedule per mailbox
 - Triggering manual synchronisation or deleting existing mailboxes
+- Cloning existing configurations to rapidly provision new mailboxes
 
 ## API endpoints
 
@@ -24,12 +26,13 @@ All IMAP endpoints require super administrator access.
 | `PUT` | `/api/imap/accounts/{accountId}` | Update mailbox configuration. |
 | `DELETE` | `/api/imap/accounts/{accountId}` | Remove a mailbox and its processing schedule. |
 | `POST` | `/api/imap/accounts/{accountId}/sync` | Run an immediate synchronisation for a mailbox. |
+| `POST` | `/api/imap/accounts/{accountId}/clone` | Duplicate an existing mailbox configuration. |
 
 Responses expose scheduled task identifiers and the last synchronisation timestamp so external tooling can audit ingestion.
 
 ## Scheduling
 
-Each mailbox stores its cron expression. When a mailbox is created or updated the platform provisions a scheduled task using the `imap_sync:{id}` command so that the background scheduler can trigger the importer at the requested cadence.
+Each mailbox stores its cron expression and a priority. When a mailbox is created or updated the platform provisions a scheduled task using the `imap_sync:{id}` command so that the background scheduler can trigger the importer at the requested cadence. Bulk synchronisation processes mailboxes in ascending priority order (so 0 runs before 10) so critical inboxes ingest mail first.
 
 Manual synchronisation is available through the API or the workspace actions.
 
