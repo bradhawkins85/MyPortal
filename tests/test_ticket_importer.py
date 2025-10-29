@@ -15,6 +15,23 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _no_ticket_update_events(monkeypatch):
+    async def fake_emit_event(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", fake_emit_event)
+
+    async def fake_refresh_summary(ticket_id):
+        return None
+
+    async def fake_refresh_tags(ticket_id):
+        return None
+
+    monkeypatch.setattr(tickets_service, "refresh_ticket_ai_summary", fake_refresh_summary)
+    monkeypatch.setattr(tickets_service, "refresh_ticket_ai_tags", fake_refresh_tags)
+
+
 def test_normalise_status_mapping():
     assert ticket_importer._normalise_status("In Progress") == "in_progress"
     assert ticket_importer._normalise_status("Waiting on customer") == "pending"

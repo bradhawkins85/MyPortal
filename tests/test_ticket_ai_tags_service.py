@@ -10,6 +10,14 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _stub_emit_ticket_updates(monkeypatch):
+    async def fake_emit_event(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", fake_emit_event)
+
+
 @pytest.mark.anyio
 async def test_refresh_ticket_ai_tags_updates_tags(monkeypatch):
     updates: list[dict[str, Any]] = []

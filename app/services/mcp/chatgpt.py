@@ -9,6 +9,7 @@ from fastapi import status
 
 from app.repositories import integration_modules as module_repo
 from app.repositories import tickets as tickets_repo
+from app.services import tickets as tickets_service
 
 DEFAULT_TOOLS = [
     "listTickets",
@@ -274,6 +275,12 @@ async def _create_reply(arguments: Mapping[str, Any], settings: Mapping[str, Any
         body=body,
         is_internal=is_internal,
     )
+    actor_payload = {"id": author_id} if author_id is not None else None
+    await tickets_service.emit_ticket_updated_event(
+        ticket,
+        actor_type="automation",
+        actor=actor_payload,
+    )
     return {
         "ticket": _serialise_ticket(ticket),
         "reply": _serialise_reply(reply),
@@ -312,6 +319,10 @@ async def _update_ticket(arguments: Mapping[str, Any], settings: Mapping[str, An
         raise ChatGPTMCPError(status.HTTP_400_BAD_REQUEST, "Provide at least one field to update")
     await tickets_repo.update_ticket(ticket_id, **updates)
     updated_ticket = await tickets_repo.get_ticket(ticket_id)
+    await tickets_service.emit_ticket_updated_event(
+        updated_ticket or ticket,
+        actor_type="automation",
+    )
     return {"ticket": _serialise_ticket(updated_ticket or ticket), "updated_fields": updates}
 
 

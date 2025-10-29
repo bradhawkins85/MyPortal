@@ -1,0 +1,7 @@
+{
+  "guid": "0485aab4-9de8-4256-96d6-9d5bb844ef3f",
+  "occurred_at": "2025-10-29T12:43Z",
+  "change_type": "Feature",
+  "summary": "Expose ticket_update actor metadata so automation filters can target system, automation, requester, watcher, or technician updates.",
+  "content_hash": "020ccfcb36c183ed980b4bf3e2b2989f4f8a1cb3e4d794a945f939d4c434c17d"
+}
