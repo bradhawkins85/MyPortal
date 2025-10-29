@@ -1,0 +1,7 @@
+{
+  "guid": "668e1148-8a94-4fae-b79e-fca172dd511e",
+  "occurred_at": "2025-10-29T13:39Z",
+  "change_type": "Fix",
+  "summary": "Moved the Swagger UI action into the API credentials header bar so the documentation button stays visible.",
+  "content_hash": "6decbe0f3f27c850af71a3f72aecc671be7afbb1169539441cc3ec98a2426060"
+}
