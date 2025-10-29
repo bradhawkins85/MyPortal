@@ -32,15 +32,20 @@
     const lessLabel = toggle.dataset.lessLabel || 'Show less';
 
     function collapse() {
-      wrapper.style.maxHeight = `${maxCollapsedHeight}px`;
+      const collapsedHeight = `${maxCollapsedHeight}px`;
+      wrapper.style.maxHeight = collapsedHeight;
+      content.style.maxHeight = collapsedHeight;
       wrapper.classList.add('timeline__message--collapsed');
+      content.classList.add('timeline__message-content--collapsed');
       toggle.setAttribute('aria-expanded', 'false');
       toggle.textContent = moreLabel;
     }
 
     function expand() {
-      wrapper.style.maxHeight = 'none';
+      wrapper.style.maxHeight = '';
+      content.style.maxHeight = '';
       wrapper.classList.remove('timeline__message--collapsed');
+      content.classList.remove('timeline__message-content--collapsed');
       toggle.setAttribute('aria-expanded', 'true');
       toggle.textContent = lessLabel;
     }
