@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block header_title_content %}
+  <div class="header__title-content">
+    <span class="header__title-text">{{ super() }}</span>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  <a class="button button--ghost" href="/admin/shop/packages">All packages</a>
+  <a class="button button--ghost" href="/admin/shop">Products admin</a>
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Package overview</h2>
+        <p class="card__subtitle">Key metrics for <strong>{{ package.name }}</strong>.</p>
+      </div>
+    </header>
+    <dl class="definition-list">
+      <div class="definition-list__item">
+        <dt>SKU</dt>
+        <dd>{{ package.sku }}</dd>
+      </div>
+      <div class="definition-list__item">
+        <dt>Price</dt>
+        <dd>${{ '%.2f'|format(package.price_total) }}</dd>
+      </div>
+      <div class="definition-list__item">
+        <dt>Stock</dt>
+        <dd>{{ package.stock_level }}</dd>
+      </div>
+      <div class="definition-list__item">
+        <dt>Status</dt>
+        <dd>
+          {% if package.archived %}
+            <span class="badge badge--muted">Archived</span>
+          {% elif not package.items %}
+            <span class="badge badge--warning">No items</span>
+          {% elif package.is_restricted %}
+            <span class="badge badge--warning">Contains archived/restricted products</span>
+          {% else %}
+            <span class="badge badge--success">Active</span>
+          {% endif %}
+        </dd>
+      </div>
+    </dl>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Package settings</h2>
+        <p class="card__subtitle">Update naming, SKU, and descriptive content.</p>
+      </div>
+    </header>
+    <form action="/shop/admin/package/{{ package.id }}/update" method="post" class="form-grid">
+      {% include "partials/csrf.html" %}
+      <div class="form-field">
+        <label class="form-label" for="package-name">Name</label>
+        <input class="form-input" id="package-name" name="name" value="{{ package.name }}" maxlength="255" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="package-sku">SKU</label>
+        <input class="form-input" id="package-sku" name="sku" value="{{ package.sku }}" maxlength="100" required />
+      </div>
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="package-description">Description</label>
+        <textarea class="form-input" id="package-description" name="description" rows="4">{{ package.description or '' }}</textarea>
+      </div>
+      <div class="form-field form-field--checkbox">
+        <label class="checkbox">
+          <input type="checkbox" name="archived" value="1" {% if package.archived %}checked{% endif %} />
+          <span>Archive package</span>
+        </label>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Save changes</button>
+      </div>
+    </form>
+  </section>
+</div>
+
+<section class="card card--panel">
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title">Package items</h2>
+      <p class="card__subtitle">Control the individual products that make up this package.</p>
+    </div>
+  </header>
+  <div class="table-wrapper">
+    <table class="table" data-table id="package-items-table">
+      <thead>
+        <tr>
+          <th scope="col" data-sort="string">Product</th>
+          <th scope="col" data-sort="string">SKU</th>
+          <th scope="col" data-sort="number">Quantity</th>
+          <th scope="col" data-sort="number">Stock</th>
+          <th scope="col" data-sort="string">Status</th>
+          <th scope="col" class="table__actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in package.items %}
+          <tr data-product-id="{{ item.product_id }}">
+            <td data-label="Product">{{ item.product_name }}</td>
+            <td data-label="SKU">{{ item.product_sku }}</td>
+            <td data-label="Quantity" data-value="{{ item.quantity }}">{{ item.quantity }}</td>
+            <td data-label="Stock" data-value="{{ item.product_stock }}">{{ item.product_stock }}</td>
+            <td data-label="Status">
+              {% if item.product_archived %}
+                <span class="badge badge--muted">Archived</span>
+              {% else %}
+                <span class="badge badge--success">Active</span>
+              {% endif %}
+            </td>
+            <td class="table__actions">
+              <div class="table__action-buttons">
+                <form action="/shop/admin/package/{{ package.id }}/items/{{ item.product_id }}/update" method="post" class="inline-form">
+                  {% include "partials/csrf.html" %}
+                  <label class="visually-hidden" for="quantity-{{ item.product_id }}">Quantity for {{ item.product_name }}</label>
+                  <input class="form-input form-input--sm" id="quantity-{{ item.product_id }}" type="number" min="1" name="quantity" value="{{ item.quantity }}" required />
+                  <button type="submit" class="button button--ghost">Update</button>
+                </form>
+                <form action="/shop/admin/package/{{ package.id }}/items/{{ item.product_id }}/remove" method="post" class="inline-form" data-confirm="Remove this product from the package?">
+                  {% include "partials/csrf.html" %}
+                  <button type="submit" class="button button--danger">Remove</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="6" class="table__empty">No products assigned to this package.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card card--panel">
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title">Add product to package</h2>
+      <p class="card__subtitle">Select products to include and specify the quantity per package.</p>
+    </div>
+  </header>
+  <form action="/shop/admin/package/{{ package.id }}/items/add" method="post" class="form-grid">
+    {% include "partials/csrf.html" %}
+    <div class="form-field">
+      <label class="form-label" for="package-product">Product</label>
+      <select class="form-input" id="package-product" name="product_id" required>
+        <option value="">Choose a product</option>
+        {% for product in products %}
+          <option value="{{ product.id }}">{{ product.name }} ({{ product.sku }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-field">
+      <label class="form-label" for="package-product-quantity">Quantity per package</label>
+      <input class="form-input" id="package-product-quantity" type="number" name="quantity" min="1" value="1" required />
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="button">Add product</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS shop_packages (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  sku VARCHAR(100) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  description TEXT NULL,
+  archived TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_shop_packages_sku (sku)
+);
+
+CREATE TABLE IF NOT EXISTS shop_package_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  package_id INT NOT NULL,
+  product_id INT NOT NULL,
+  quantity INT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_shop_package FOREIGN KEY (package_id) REFERENCES shop_packages(id) ON DELETE CASCADE,
+  CONSTRAINT fk_shop_package_product FOREIGN KEY (product_id) REFERENCES shop_products(id),
+  UNIQUE KEY uq_shop_package_product (package_id, product_id)
+);

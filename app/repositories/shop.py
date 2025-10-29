@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 import aiomysql
 
@@ -16,6 +16,11 @@ class ProductFilters:
     company_id: int | None = None
     category_id: int | None = None
     search_term: str | None = None
+
+
+@dataclass(slots=True)
+class PackageFilters:
+    include_archived: bool = False
 
 
 async def list_categories() -> list[dict[str, Any]]:
@@ -71,6 +76,232 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
 async def list_all_products(include_archived: bool = False) -> list[dict[str, Any]]:
     filters = ProductFilters(include_archived=include_archived)
     return await list_products(filters)
+
+
+async def list_packages(filters: PackageFilters) -> list[dict[str, Any]]:
+    query = [
+        "SELECT",
+        "    pkg.id,",
+        "    pkg.sku,",
+        "    pkg.name,",
+        "    pkg.description,",
+        "    pkg.archived,",
+        "    pkg.created_at,",
+        "    pkg.updated_at,",
+        "    COUNT(items.id) AS product_count",
+        "FROM shop_packages AS pkg",
+        "LEFT JOIN shop_package_items AS items ON items.package_id = pkg.id",
+    ]
+    params: list[Any] = []
+    conditions: list[str] = []
+    if not filters.include_archived:
+        conditions.append("pkg.archived = 0")
+    if conditions:
+        query.append("WHERE " + " AND ".join(conditions))
+    query.append("GROUP BY pkg.id")
+    query.append("ORDER BY pkg.name ASC")
+    sql = "\n".join(query)
+    rows = await db.fetch_all(sql, tuple(params) if params else None)
+    return [_normalise_package(row) for row in rows]
+
+
+async def get_package(package_id: int, *, include_archived: bool = False) -> dict[str, Any] | None:
+    sql = [
+        "SELECT",
+        "    pkg.id,",
+        "    pkg.sku,",
+        "    pkg.name,",
+        "    pkg.description,",
+        "    pkg.archived,",
+        "    pkg.created_at,",
+        "    pkg.updated_at,",
+        "    COUNT(items.id) AS product_count",
+        "FROM shop_packages AS pkg",
+        "LEFT JOIN shop_package_items AS items ON items.package_id = pkg.id",
+        "WHERE pkg.id = %s",
+    ]
+    params: list[Any] = [package_id]
+    if not include_archived:
+        sql.append("AND pkg.archived = 0")
+    sql.append("GROUP BY pkg.id")
+    row = await db.fetch_one("\n".join(sql), tuple(params))
+    return _normalise_package(row) if row else None
+
+
+async def get_package_by_sku(sku: str) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT id, sku, name, description, archived, created_at, updated_at FROM shop_packages WHERE sku = %s",
+        (sku,),
+    )
+    if not row:
+        return None
+    row["product_count"] = 0
+    return _normalise_package(row)
+
+
+async def create_package(*, sku: str, name: str, description: str | None = None) -> int:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                """
+                INSERT INTO shop_packages (sku, name, description)
+                VALUES (%s, %s, %s)
+                """,
+                (sku, name, description),
+            )
+            package_id = int(cursor.lastrowid)
+    return package_id
+
+
+async def update_package(
+    package_id: int,
+    *,
+    sku: str,
+    name: str,
+    description: str | None,
+) -> bool:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                """
+                UPDATE shop_packages
+                SET sku = %s,
+                    name = %s,
+                    description = %s
+                WHERE id = %s
+                """,
+                (sku, name, description, package_id),
+            )
+            return cursor.rowcount > 0
+
+
+async def set_package_archived(package_id: int, *, archived: bool) -> bool:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                "UPDATE shop_packages SET archived = %s WHERE id = %s",
+                (1 if archived else 0, package_id),
+            )
+            return cursor.rowcount > 0
+
+
+async def delete_package(package_id: int) -> bool:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                "DELETE FROM shop_packages WHERE id = %s",
+                (package_id,),
+            )
+            return cursor.rowcount > 0
+
+
+async def list_package_items(package_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT
+            items.package_id,
+            items.product_id,
+            items.quantity,
+            products.name AS product_name,
+            products.sku AS product_sku,
+            products.vendor_sku AS product_vendor_sku,
+            products.price AS product_price,
+            products.vip_price AS product_vip_price,
+            products.stock AS product_stock,
+            products.archived AS product_archived,
+            products.image_url AS product_image_url,
+            products.description AS product_description
+        FROM shop_package_items AS items
+        INNER JOIN shop_products AS products ON products.id = items.product_id
+        WHERE items.package_id = %s
+        ORDER BY products.name ASC
+        """,
+        (package_id,),
+    )
+    return [_normalise_package_item(row) for row in rows]
+
+
+async def list_package_items_for_packages(
+    package_ids: Sequence[int],
+) -> dict[int, list[dict[str, Any]]]:
+    identifiers = [int(identifier) for identifier in package_ids if int(identifier) > 0]
+    if not identifiers:
+        return {}
+    placeholders = ", ".join(["%s"] * len(identifiers))
+    rows = await db.fetch_all(
+        f"""
+        SELECT
+            items.package_id,
+            items.product_id,
+            items.quantity,
+            products.name AS product_name,
+            products.sku AS product_sku,
+            products.vendor_sku AS product_vendor_sku,
+            products.price AS product_price,
+            products.vip_price AS product_vip_price,
+            products.stock AS product_stock,
+            products.archived AS product_archived,
+            products.image_url AS product_image_url,
+            products.description AS product_description
+        FROM shop_package_items AS items
+        INNER JOIN shop_products AS products ON products.id = items.product_id
+        WHERE items.package_id IN ({placeholders})
+        ORDER BY items.package_id ASC, products.name ASC
+        """,
+        tuple(identifiers),
+    )
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        package_id = _coerce_int(row.get("package_id"))
+        grouped.setdefault(package_id, []).append(_normalise_package_item(row))
+    return grouped
+
+
+async def upsert_package_item(
+    *,
+    package_id: int,
+    product_id: int,
+    quantity: int,
+) -> None:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                """
+                INSERT INTO shop_package_items (package_id, product_id, quantity)
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    quantity = VALUES(quantity),
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (package_id, product_id, quantity),
+            )
+
+
+async def remove_package_item(package_id: int, product_id: int) -> None:
+    await db.execute(
+        "DELETE FROM shop_package_items WHERE package_id = %s AND product_id = %s",
+        (package_id, product_id),
+    )
+
+
+async def get_restricted_product_ids(
+    *,
+    company_id: int,
+    product_ids: Iterable[int],
+) -> set[int]:
+    identifiers = sorted({int(pid) for pid in product_ids if int(pid) > 0})
+    if not identifiers:
+        return set()
+    placeholders = ", ".join(["%s"] * len(identifiers))
+    rows = await db.fetch_all(
+        f"""
+        SELECT product_id
+        FROM shop_product_exclusions
+        WHERE company_id = %s AND product_id IN ({placeholders})
+        """,
+        tuple([company_id, *identifiers]),
+    )
+    return {_coerce_int(row.get("product_id")) for row in rows if row.get("product_id") is not None}
 
 
 async def list_product_restrictions() -> list[dict[str, Any]]:
@@ -520,6 +751,52 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     elif stock_at is not None:
         normalised["stock_at"] = str(stock_at)
     return normalised
+
+
+def _normalise_package(row: dict[str, Any]) -> dict[str, Any]:
+    record = dict(row)
+    record["id"] = _coerce_int(row.get("id"))
+    record["archived"] = bool(_coerce_int(row.get("archived"), default=0))
+    record["product_count"] = _coerce_int(row.get("product_count"), default=0)
+    record["created_at"] = _normalise_datetime(row.get("created_at"))
+    record["updated_at"] = _normalise_datetime(row.get("updated_at"))
+    return record
+
+
+def _normalise_package_item(row: dict[str, Any]) -> dict[str, Any]:
+    item = {
+        "package_id": _coerce_int(row.get("package_id")),
+        "product_id": _coerce_int(row.get("product_id")),
+        "quantity": max(_coerce_int(row.get("quantity"), default=1), 0),
+        "product_name": row.get("product_name"),
+        "product_sku": row.get("product_sku"),
+        "product_vendor_sku": row.get("product_vendor_sku"),
+        "product_archived": bool(_coerce_int(row.get("product_archived"), default=0)),
+        "product_image_url": row.get("product_image_url"),
+        "product_description": row.get("product_description"),
+    }
+    price = row.get("product_price")
+    if isinstance(price, Decimal):
+        item["product_price"] = price
+    elif price is None:
+        item["product_price"] = Decimal("0")
+    else:
+        item["product_price"] = Decimal(str(price))
+    vip_price = row.get("product_vip_price")
+    if isinstance(vip_price, Decimal):
+        item["product_vip_price"] = vip_price
+    elif vip_price is None:
+        item["product_vip_price"] = None
+    else:
+        item["product_vip_price"] = Decimal(str(vip_price))
+    stock = row.get("product_stock")
+    if isinstance(stock, Decimal):
+        item["product_stock"] = int(stock)
+    elif stock is None:
+        item["product_stock"] = 0
+    else:
+        item["product_stock"] = int(stock)
+    return item
 
 
 def _coerce_decimal(value: Any, *, default: float | None = None) -> float:
