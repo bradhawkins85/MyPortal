@@ -6652,6 +6652,42 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.post("/admin/tickets/{ticket_id}/ai/reprocess", response_class=JSONResponse)
+async def admin_reprocess_ticket_ai(ticket_id: int, request: Request):
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        return redirect
+
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    try:
+        await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    except Exception as exc:  # pragma: no cover - defensive against unexpected failures
+        log_error("Failed to queue ticket AI summary refresh", ticket_id=ticket_id, user_id=current_user.get("id"), error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to refresh AI summary.",
+        ) from exc
+
+    try:
+        await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    except Exception as exc:  # pragma: no cover - defensive against unexpected failures
+        log_error("Failed to queue ticket AI tags refresh", ticket_id=ticket_id, user_id=current_user.get("id"), error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to refresh AI tags.",
+        ) from exc
+
+    return JSONResponse(
+        {
+            "status": "queued",
+            "message": "AI summary and tags will be regenerated shortly.",
+        }
+    )
+
+
 @app.post("/admin/tickets/{ticket_id}/delete", response_class=HTMLResponse)
 async def admin_delete_ticket(ticket_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
