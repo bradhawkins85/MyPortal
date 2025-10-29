@@ -10,7 +10,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from html import escape
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qsl, quote, urlencode
 
 import aiomysql
@@ -2905,6 +2905,7 @@ async def shop_page(
 
         products = [product for product in products if _product_has_price(product)]
 
+    products = cast(list[dict[str, Any]], _serialise_for_json(products))
         if category_id is None:
             secrets.SystemRandom().shuffle(products)
 
