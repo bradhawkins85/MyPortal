@@ -224,6 +224,11 @@
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v19.5a.5.5 0 0 1-.74.44L14 20l-3.26 1.94A.5.5 0 0 1 10 21.5V19H7a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3zm9 7h-2V7a1 1 0 0 0-2 0v2H9a1 1 0 0 0 0 2h2v2a1 1 0 0 0 2 0v-2h2a1 1 0 0 0 0-2z"/></svg>
                   </span>
                   <span class="menu__label">Knowledge base admin</span>
+                <a href="/admin/forms" {% if current_path.startswith('/admin/forms') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h9l5 5v15H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm8 7h4.5L14 4.5V9z"/></svg>
+                  </span>
+                  <span class="menu__label">Forms admin</span>
                 </a>
               </li>
               <li class="menu__item">
@@ -280,14 +285,16 @@
                   <span class="menu__label">Webhook monitor</span>
                 </a>
               </li>
-              <li class="menu__item">
-                <a href="/admin/shop" {% if current_path.startswith('/admin/shop') %}aria-current="page"{% endif %}>
-                  <span class="menu__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false"><path d="M4 7h16l-1.5 12.5A2 2 0 0 1 16.52 21H7.48a2 2 0 0 1-1.98-1.5zM6 3h12a1 1 0 0 1 1 1v2H5V4a1 1 0 0 1 1-1z"/></svg>
-                  </span>
-                  <span class="menu__label">Shop admin</span>
-                </a>
-              </li>
+              {% if not current_path.startswith('/shop') %}
+                <li class="menu__item">
+                  <a href="/admin/shop" {% if current_path.startswith('/admin/shop') %}aria-current="page"{% endif %}>
+                    <span class="menu__icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false"><path d="M4 7h16l-1.5 12.5A2 2 0 0 1 16.52 21H7.48a2 2 0 0 1-1.98-1.5zM6 3h12a1 1 0 0 1 1 1v2H5V4a1 1 0 0 1 1-1z"/></svg>
+                    </span>
+                    <span class="menu__label">Shop admin</span>
+                  </a>
+                </li>
+              {% endif %}
               <li class="menu__item">
                 <a href="/admin/change-log" {% if current_path.startswith('/admin/change-log') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
@@ -334,8 +341,8 @@
               </svg>
             </button>
             <div class="header__title">
-              {% block header_title %}
-                <span class="header__title-text">{{ title | default('Dashboard') }}</span>
+              {% block header_title_content %}
+                {{ title | default('Dashboard') }}
               {% endblock %}
             </div>
           </div>

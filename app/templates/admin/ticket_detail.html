@@ -214,6 +214,14 @@
                     {% endif %}
                   </dd>
                 </div>
+                <div class="definition-list__item">
+                  <dt>Billable minutes</dt>
+                  <dd>{{ ticket_billable_minutes }}</dd>
+                </div>
+                <div class="definition-list__item">
+                  <dt>Non-billable minutes</dt>
+                  <dd>{{ ticket_non_billable_minutes }}</dd>
+                </div>
               </dl>
             </div>
           </article>
@@ -457,11 +465,33 @@
                   <input type="hidden" name="body" data-rich-text-value required />
                 </div>
               </div>
-              <div class="form-field form-field--checkbox">
-                <label class="checkbox">
-                  <input type="checkbox" name="isInternal" value="true" />
-                  <span>Mark as internal note</span>
-                </label>
+              <div class="form-field">
+                <label class="form-label" for="ticket-reply-minutes">Minutes spent</label>
+                <input
+                  id="ticket-reply-minutes"
+                  name="minutesSpent"
+                  class="form-input"
+                  type="number"
+                  min="0"
+                  max="1440"
+                  step="1"
+                  inputmode="numeric"
+                />
+                <p class="form-help">Log how many minutes this update required.</p>
+              </div>
+              <div class="form-grid form-grid--auto">
+                <div class="form-field form-field--checkbox">
+                  <label class="checkbox">
+                    <input type="checkbox" name="isInternal" value="true" />
+                    <span>Mark as internal note</span>
+                  </label>
+                </div>
+                <div class="form-field form-field--checkbox">
+                  <label class="checkbox">
+                    <input type="checkbox" name="isBillable" value="true" />
+                    <span>Billable</span>
+                  </label>
+                </div>
               </div>
               <div class="form-actions">
                 <button type="submit" class="button button--primary">Post reply</button>
@@ -488,6 +518,9 @@
                             <span class="badge badge--muted">Internal</span>
                           {% endif %}
                         </span>
+                        {% if reply.time_summary %}
+                          <span class="timeline__meta text-muted">{{ reply.time_summary }}</span>
+                        {% endif %}
                       </header>
                       <div class="timeline__body">
                         <div
