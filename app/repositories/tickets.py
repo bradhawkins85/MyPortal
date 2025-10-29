@@ -83,10 +83,12 @@ def _normalise_ticket(row: dict[str, Any]) -> TicketRecord:
 
 def _normalise_reply(row: dict[str, Any]) -> TicketRecord:
     record = dict(row)
-    for key in ("id", "ticket_id", "author_id"):
+    for key in ("id", "ticket_id", "author_id", "minutes_spent"):
         if key in record and record[key] is not None:
             record[key] = int(record[key])
     record["created_at"] = _make_aware(record.get("created_at"))
+    if "is_billable" in record:
+        record["is_billable"] = bool(record.get("is_billable"))
     return record
 
 
@@ -359,11 +361,22 @@ async def create_reply(
     author_id: int | None,
     body: str,
     is_internal: bool = False,
+    minutes_spent: int | None = None,
+    is_billable: bool = False,
     external_reference: str | None = None,
     created_at: datetime | None = None,
 ) -> TicketRecord:
-    columns = ["ticket_id", "author_id", "body", "is_internal"]
-    params: list[Any] = [ticket_id, author_id, body, 1 if is_internal else 0]
+    columns = ["ticket_id", "author_id", "body", "is_internal", "is_billable"]
+    params: list[Any] = [
+        ticket_id,
+        author_id,
+        body,
+        1 if is_internal else 0,
+        1 if is_billable else 0,
+    ]
+    if minutes_spent is not None:
+        columns.append("minutes_spent")
+        params.append(minutes_spent)
     if external_reference is not None:
         columns.append("external_reference")
         params.append(external_reference)
@@ -388,6 +401,8 @@ async def create_reply(
         "author_id": author_id,
         "body": body,
         "is_internal": 1 if is_internal else 0,
+        "minutes_spent": minutes_spent,
+        "is_billable": 1 if is_billable else 0,
         "external_reference": external_reference,
         "created_at": created_at,
     }

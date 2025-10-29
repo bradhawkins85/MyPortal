@@ -725,6 +725,21 @@ body {
   white-space: nowrap;
 }
 
+.header__title-content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-gap-tight);
+  min-width: 0;
+}
+
+.header__title-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .header__actions {
   display: flex;
   align-items: center;
@@ -1600,6 +1615,11 @@ body {
 .timeline__action {
   color: rgba(148, 163, 184, 0.9);
   font-size: 0.95rem;
+}
+
+.timeline__meta {
+  color: rgba(148, 163, 184, 0.75);
+  font-size: 0.9rem;
 }
 
 .timeline__body {

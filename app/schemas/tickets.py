@@ -38,6 +38,8 @@ class TicketUpdate(BaseModel):
 class TicketReplyCreate(BaseModel):
     body: str = Field(..., min_length=1)
     is_internal: bool = False
+    minutes_spent: Optional[int] = Field(default=None, ge=0)
+    is_billable: bool = False
 
 
 class TicketReply(BaseModel):
@@ -46,6 +48,8 @@ class TicketReply(BaseModel):
     author_id: Optional[int]
     body: str
     is_internal: bool
+    minutes_spent: Optional[int] = Field(default=None, ge=0)
+    is_billable: bool = False
     created_at: datetime
 
     class Config:
