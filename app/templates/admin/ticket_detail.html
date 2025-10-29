@@ -230,15 +230,6 @@
             </summary>
             <div class="card-collapsible__content">
               <div class="card__body">
-                <div
-                  class="rich-text-viewer"
-                  data-ticket-description-viewer
-                  {% if not description_html %}hidden{% endif %}
-                >
-                  {% if description_html %}
-                    {{ description_html | safe }}
-                  {% endif %}
-                </div>
                 <p
                   class="card__empty"
                   data-ticket-description-empty
@@ -253,7 +244,6 @@
                 {% endif %}
                 <input type="hidden" name="returnUrl" value="{{ ticket_return_url }}" />
                 <div class="form-field">
-                  <label class="form-label" for="ticket-description-editor">Edit description</label>
                   <textarea
                     id="ticket-description-editor"
                     name="description"
