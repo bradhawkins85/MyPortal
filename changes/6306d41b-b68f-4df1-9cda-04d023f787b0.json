@@ -1,0 +1,7 @@
+{
+  "guid": "6306d41b-b68f-4df1-9cda-04d023f787b0",
+  "occurred_at": "2025-10-29T05:09Z",
+  "change_type": "Fix",
+  "summary": "Renamed Automation & monitoring left navigation label to System Automation.",
+  "content_hash": "5f52784b971ad25f56b7f314d8c1aa1a0b545bcca0970117287d715d894ee633"
+}
