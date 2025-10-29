@@ -125,17 +125,6 @@
                     <td class="table__actions">
                       <div class="table__action-buttons">
                         <a class="button button--ghost" href="/admin/automations/{{ automation.id }}/edit">Edit</a>
-                        <form action="/admin/automations/{{ automation.id }}/status" method="post" class="inline-form">
-                          {% if csrf_token %}
-                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                          {% endif %}
-                          <label class="visually-hidden" for="automation-status-{{ automation.id }}">Status</label>
-                          <select id="automation-status-{{ automation.id }}" name="status" class="form-input form-input--compact">
-                            <option value="active" {% if automation.status == 'active' %}selected{% endif %}>Active</option>
-                            <option value="inactive" {% if automation.status != 'active' %}selected{% endif %}>Inactive</option>
-                          </select>
-                          <button type="submit" class="button button--ghost">Update</button>
-                        </form>
                         <form action="/admin/automations/{{ automation.id }}/execute" method="post" class="inline-form">
                           {% if csrf_token %}
                             <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
