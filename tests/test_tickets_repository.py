@@ -43,6 +43,18 @@ class _UpdateTicketDB:
         return self._row
 
 
+class _FetchReplyDB:
+    def __init__(self, row):
+        self.fetch_sql = None
+        self.fetch_params = None
+        self._row = row
+
+    async def fetch_one(self, sql, params):
+        self.fetch_sql = sql.strip()
+        self.fetch_params = params
+        return self._row
+
+
 class _BulkDeleteDB:
     def __init__(self, count):
         self.execute_sql = None
@@ -189,6 +201,76 @@ async def test_create_reply_falls_back_when_fetch_missing(monkeypatch):
     assert record["is_internal"] == 1
     assert record["minutes_spent"] is None
     assert record["is_billable"] is False
+
+
+@pytest.mark.anyio
+async def test_get_reply_by_id_fetches_normalised_record(monkeypatch):
+    fetched = {
+        "id": 15,
+        "ticket_id": 2,
+        "author_id": 7,
+        "body": "Reply",
+        "is_internal": 0,
+        "minutes_spent": "10",
+        "is_billable": 1,
+        "created_at": None,
+    }
+    dummy_db = _FetchReplyDB(fetched)
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    record = await tickets.get_reply_by_id(15)
+
+    assert dummy_db.fetch_sql == "SELECT * FROM ticket_replies WHERE id = %s"
+    assert dummy_db.fetch_params == (15,)
+    assert record["id"] == 15
+    assert record["minutes_spent"] == 10
+    assert record["is_billable"] is True
+
+
+@pytest.mark.anyio
+async def test_update_reply_updates_minutes_and_billable(monkeypatch):
+    fetched = {
+        "id": 7,
+        "ticket_id": 3,
+        "author_id": 4,
+        "body": "Reply",
+        "is_internal": 0,
+        "minutes_spent": 15,
+        "is_billable": 1,
+        "created_at": None,
+    }
+    dummy_db = _UpdateTicketDB(fetched)
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    record = await tickets.update_reply(7, minutes_spent=15, is_billable=True)
+
+    assert "UPDATE ticket_replies" in dummy_db.execute_sql
+    assert dummy_db.execute_params == (15, 1, 7)
+    assert dummy_db.fetch_sql == "SELECT * FROM ticket_replies WHERE id = %s"
+    assert record["minutes_spent"] == 15
+    assert record["is_billable"] is True
+
+
+@pytest.mark.anyio
+async def test_update_reply_clears_minutes(monkeypatch):
+    fetched = {
+        "id": 9,
+        "ticket_id": 5,
+        "author_id": 8,
+        "body": "Reply",
+        "is_internal": 0,
+        "minutes_spent": None,
+        "is_billable": 0,
+        "created_at": None,
+    }
+    dummy_db = _UpdateTicketDB(fetched)
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    record = await tickets.update_reply(9, minutes_spent=None)
+
+    assert "minutes_spent = NULL" in dummy_db.execute_sql
+    assert dummy_db.execute_params == (9,)
+    assert record["minutes_spent"] is None
 
 
 @pytest.mark.anyio
