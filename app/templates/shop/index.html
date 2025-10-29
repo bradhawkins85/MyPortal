@@ -122,9 +122,14 @@
                 </td>
                 <td data-label="Name">
                   <div class="package-name">
+                    {% set item_count = product.get('items', []) | sum(attribute='quantity') %}
+                    {% if item_count == 0 %}
+                      {% set item_count = product.product_count %}
+                    {% endif %}
                     <strong>{{ product.name }}</strong>
                     <p class="package-meta">
                       Includes {{ product.product_count }} {{ 'product' if product.product_count == 1 else 'products' }}
+                      ({{ item_count }} {{ 'item' if item_count == 1 else 'items' }})
                     </p>
                     <details class="package-details">
                       <summary>Included products</summary>
