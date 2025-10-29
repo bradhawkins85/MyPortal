@@ -255,8 +255,86 @@
     connect();
   }
 
+  function setupHeaderMenus() {
+    const menus = Array.from(document.querySelectorAll('[data-header-menu]'));
+    if (!menus.length) {
+      return;
+    }
+
+    const toggleLookup = new Map();
+
+    function getToggle(menu) {
+      if (toggleLookup.has(menu)) {
+        return toggleLookup.get(menu);
+      }
+      const toggle = menu.querySelector('[data-header-menu-toggle]');
+      if (toggle) {
+        toggleLookup.set(menu, toggle);
+      }
+      return toggle;
+    }
+
+    function updateToggle(menu) {
+      const toggle = getToggle(menu);
+      if (toggle) {
+        toggle.setAttribute('aria-expanded', menu.open ? 'true' : 'false');
+      }
+    }
+
+    function closeMenu(menu, options) {
+      const settings = options || {};
+      if (!menu.open) {
+        return;
+      }
+      menu.removeAttribute('open');
+      updateToggle(menu);
+      if (settings.focusToggle) {
+        const toggle = getToggle(menu);
+        if (toggle) {
+          try {
+            toggle.focus({ preventScroll: true });
+          } catch (error) {
+            toggle.focus();
+          }
+        }
+      }
+    }
+
+    menus.forEach((menu) => {
+      updateToggle(menu);
+
+      menu.addEventListener('toggle', () => {
+        if (menu.open) {
+          menus.forEach((other) => {
+            if (other !== menu) {
+              closeMenu(other);
+            }
+          });
+        }
+        updateToggle(menu);
+      });
+    });
+
+    document.addEventListener('click', (event) => {
+      menus.forEach((menu) => {
+        if (!menu.contains(event.target)) {
+          closeMenu(menu);
+        }
+      });
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' || event.key === 'Esc') {
+        menus.forEach((menu) => {
+          closeMenu(menu, { focusToggle: true });
+        });
+      }
+    });
+  }
+
   function initialise() {
     setupAutoRefresh();
+    setupHeaderMenus();
   }
 
   if (document.readyState === 'loading') {

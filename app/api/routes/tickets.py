@@ -273,6 +273,11 @@ async def update_ticket(
         pass
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
     await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
+    await tickets_service.emit_ticket_updated_event(
+        ticket_id,
+        actor_type="technician",
+        actor=current_user,
+    )
     return await _build_ticket_detail(ticket_id, current_user)
 
 
@@ -331,12 +336,19 @@ async def add_reply(
         author_id=session.user_id,
         body=sanitised_body.html,
         is_internal=payload.is_internal if has_helpdesk_access else False,
+        minutes_spent=payload.minutes_spent if has_helpdesk_access else None,
+        is_billable=payload.is_billable if has_helpdesk_access else False,
     )
     try:
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
     except RuntimeError:
         pass
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    await tickets_service.emit_ticket_updated_event(
+        ticket_id,
+        actor_type="technician" if has_helpdesk_access else "requester",
+        actor=current_user,
+    )
     updated_ticket = await tickets_repo.get_ticket(ticket_id)
     ticket_payload = updated_ticket or ticket
     ticket_response = TicketResponse(**ticket_payload)
@@ -356,5 +368,10 @@ async def update_watchers(
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     await tickets_repo.replace_watchers(ticket_id, payload.user_ids)
+    await tickets_service.emit_ticket_updated_event(
+        ticket_id,
+        actor_type="technician",
+        actor=current_user,
+    )
     return await _build_ticket_detail(ticket_id, current_user)
 

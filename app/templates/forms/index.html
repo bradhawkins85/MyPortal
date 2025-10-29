@@ -1,5 +1,12 @@
 {% extends "base.html" %}
 
+{% block header_title %}
+  <span class="header__title-text">{{ title | default('Forms') }}</span>
+  {% if is_super_admin %}
+    <a class="button button--ghost button--small header__title-button" href="/admin/forms">Forms admin</a>
+  {% endif %}
+{% endblock %}
+
 {% block content %}
 <div class="forms-layout">
   <section class="card card--panel forms-layout__menu">
