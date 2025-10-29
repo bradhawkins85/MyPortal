@@ -325,6 +325,7 @@
               {% block header_title_content %}
                 {{ title | default('Dashboard') }}
               {% endblock %}
+              {% endblock %}
             </div>
           </div>
           {% set has_authenticated_user = current_user is defined and current_user and current_user.get('id') %}
