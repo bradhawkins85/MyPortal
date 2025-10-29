@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 from collections.abc import Awaitable, Callable, Mapping as MappingABC, Mapping
 import re
@@ -168,14 +169,33 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
     return enriched
 
 
+def _normalise_reply_marker_line(value: str) -> str:
+    candidate = html.unescape(value).strip()
+    candidate = candidate.replace("\u200b", "").replace("\ufeff", "").replace("\xad", "")
+    while candidate.startswith(">"):
+        candidate = candidate[1:].lstrip()
+    while candidate.endswith(">"):
+        candidate = candidate[:-1].rstrip()
+    return candidate
+
+
 def _strip_reply_marker(text: str) -> str:
+    if not text:
+        return ""
+
     lines = text.splitlines()
-    for index in range(len(lines) - 1, -1, -1):
-        candidate = lines[index].strip()
+    cutoff = len(lines)
+    for index, raw_line in enumerate(lines):
+        candidate = _normalise_reply_marker_line(raw_line)
         if _REPLY_ABOVE_PATTERN.match(candidate):
-            lines = lines[:index]
+            cutoff = index
             break
-    return "\n".join(lines).strip()
+
+    trimmed = lines[:cutoff]
+    while trimmed and not trimmed[-1].strip():
+        trimmed.pop()
+
+    return "\n".join(trimmed).strip()
 
 
 def _strip_signature_block(text: str) -> str:
@@ -258,6 +278,7 @@ def _prepare_prompt_text(value: Any) -> str:
         flags=re.IGNORECASE,
     )
     text = re.sub(r"<[^>]+>", "", block_breaks)
+    text = html.unescape(text)
     text = text.replace("\xa0", " ")
     lines = [line.strip() for line in text.splitlines()]
     normalised = "\n".join(line for line in lines if line)
