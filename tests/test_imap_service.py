@@ -280,3 +280,11 @@ async def test_sync_account_does_not_mark_as_read_on_ticket_failure(monkeypatch)
     assert recorded_messages
     assert recorded_messages[0]["status"] == "error"
     assert account_updates and account_updates[0][0] == 7
+
+
+async def test_sync_account_skips_when_restart_pending(monkeypatch):
+    monkeypatch.setattr(imap.system_state, "is_restart_pending", lambda: True)
+
+    result = await imap.sync_account(9)
+
+    assert result == {"status": "skipped", "reason": "pending_restart"}

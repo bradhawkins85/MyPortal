@@ -8,13 +8,14 @@ from email.utils import getaddresses
 from typing import Any, Mapping
 
 from app.core.logging import log_error, log_info
+from app.repositories import companies as company_repo
 from app.repositories import imap_accounts as imap_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
-from app.repositories import companies as company_repo
 from app.repositories import staff as staff_repo
 from app.repositories import users as users_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import modules as modules_service
+from app.services import system_state
 from app.services import tickets as tickets_service
 from app.services.scheduler import scheduler_service
 
@@ -350,6 +351,12 @@ async def _record_message(
 
 
 async def sync_account(account_id: int) -> dict[str, Any]:
+    if system_state.is_restart_pending():
+        log_info(
+            "Skipping IMAP sync because system restart is pending",
+            account_id=account_id,
+        )
+        return {"status": "skipped", "reason": "pending_restart"}
     module = await modules_service.get_module("imap", redact=False)
     if not module or not module.get("enabled"):
         log_info("Skipping IMAP sync because module is disabled", account_id=account_id)
