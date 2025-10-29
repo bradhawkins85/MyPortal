@@ -17,9 +17,26 @@ paths now available include:
 - `ticket.ai_tags` for AI-generated categorisation
 - `ticket.watchers_count` for the number of subscribed users
 - `ticket.watchers[0].email` (and subsequent indexes) for individual watcher
-details
+  details
 - `ticket.latest_reply.body` and `ticket.latest_reply.author_email` for the most
-recent conversation entry
+  recent conversation entry
+- `ticket_update.actor_type` to identify whether the update originated from the
+  system, an automation, the requester, a watcher, or a technician
+- `ticket_update.actor_user_email` / `ticket_update.actor_user_display_name`
+  expose the email and display name of the updater when available
+
+## Ticket update actors
+
+Ticket automations include metadata that classifies who performed an update so
+filters can react to specific sources. The following actor types are emitted:
+
+| Actor type | Description |
+| --- | --- |
+| `system` | Updates applied by the platform (for example AI summaries). |
+| `automation` | Changes triggered by configured automation modules or imports. |
+| `requester` | Updates performed by the ticket requester. |
+| `watcher` | Updates performed by a user watching the ticket but not assigned. |
+| `technician` | Updates performed by helpdesk staff within the portal or API. |
 
 Arrays such as `ticket.watchers` can be indexed numerically. For example,
 matching `ticket.watchers[0].email` allows a workflow to react when the first
