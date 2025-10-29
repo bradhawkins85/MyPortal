@@ -358,97 +358,6 @@
     });
   }
 
-  function bindTicketStatusDropdowns() {
-    const containers = document.querySelectorAll('[data-ticket-status]');
-    if (!containers.length) {
-      return;
-    }
-
-    const documentHandlers = new WeakMap();
-
-    const closeContainer = (container) => {
-      if (!container) {
-        return;
-      }
-      const form = container.querySelector('[data-ticket-status-form]');
-      const toggle = container.querySelector('[data-ticket-status-toggle]');
-      if (form) {
-        form.hidden = true;
-      }
-      if (toggle) {
-        toggle.setAttribute('aria-expanded', 'false');
-      }
-      container.classList.remove('ticket-status--open');
-      const handler = documentHandlers.get(container);
-      if (handler) {
-        document.removeEventListener('click', handler);
-      }
-    };
-
-    const closeAll = (except) => {
-      containers.forEach((container) => {
-        if (container !== except) {
-          closeContainer(container);
-        }
-      });
-    };
-
-    containers.forEach((container) => {
-      const toggle = container.querySelector('[data-ticket-status-toggle]');
-      const form = container.querySelector('[data-ticket-status-form]');
-      if (!toggle || !form) {
-        return;
-      }
-
-      const select = form.querySelector('[data-ticket-status-select]');
-
-      const handleDocumentClick = (event) => {
-        if (!container.contains(event.target)) {
-          closeContainer(container);
-        }
-      };
-
-      documentHandlers.set(container, handleDocumentClick);
-      closeContainer(container);
-
-      toggle.addEventListener('click', (event) => {
-        event.preventDefault();
-        const isOpen = container.classList.contains('ticket-status--open');
-        if (isOpen) {
-          closeContainer(container);
-          return;
-        }
-        closeAll(container);
-        container.classList.add('ticket-status--open');
-        form.hidden = false;
-        toggle.setAttribute('aria-expanded', 'true');
-        window.setTimeout(() => {
-          document.addEventListener('click', handleDocumentClick);
-        }, 0);
-        if (select) {
-          window.requestAnimationFrame(() => {
-            select.focus();
-          });
-        }
-      });
-
-      form.addEventListener('submit', () => {
-        closeContainer(container);
-        toggle.focus();
-      });
-
-      if (select) {
-        select.addEventListener('keydown', (event) => {
-          if (event.key === 'Escape') {
-            event.stopPropagation();
-            closeContainer(container);
-            toggle.focus();
-          }
-        });
-      }
-    });
-  }
-
   function parsePermissions(value) {
     return value
       .split(',')
@@ -794,7 +703,6 @@
     bindSyncroTicketImportForms();
     bindSyncroCompanyImportForm();
     bindTicketBulkDelete();
-    bindTicketStatusDropdowns();
     bindTicketStatusAutoSubmit();
     bindRoleForm();
     bindCompanyAssignmentControls();
