@@ -709,7 +709,7 @@ body {
   align-items: center;
   gap: var(--space-gap-tight);
   flex-wrap: wrap;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .header__title-text {
