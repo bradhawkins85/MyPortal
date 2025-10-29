@@ -32,7 +32,10 @@ async def create_account(
 ) -> IMAPAccountResponse:
     data = payload.model_dump()
     data["password"] = payload.password.get_secret_value()
-    account = await imap_service.create_account(data)
+    try:
+        account = await imap_service.create_account(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return IMAPAccountResponse.model_validate(account)
 
 
@@ -86,3 +89,22 @@ async def sync_account(
 ) -> IMAPSyncResponse:
     result = await imap_service.sync_account(account_id)
     return IMAPSyncResponse.model_validate(result)
+
+
+@router.post(
+    "/accounts/{account_id}/clone",
+    response_model=IMAPAccountResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def clone_account(
+    account_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+) -> IMAPAccountResponse:
+    try:
+        account = await imap_service.clone_account(account_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return IMAPAccountResponse.model_validate(account)
