@@ -195,3 +195,23 @@ def test_render_prompt_ignores_signatures_and_reply_markers():
     assert "Sent from my iPhone" not in prompt
     assert "CONFIDENTIALITY NOTICE" not in prompt
     assert "Unauthorized viewing prohibited." not in prompt
+
+
+def test_strip_conversation_noise_removes_email_headers():
+    text = (
+        "Subject: Weekly Update\n"
+        "From: someone@example.com\n"
+        "Reply-To: reply@example.com\n"
+        "Date: Tue, 1 Jan 2024 10:00:00 +0000\n"
+        "Actual message body line one.\n"
+        "Another line."
+    )
+
+    cleaned = tickets_service._strip_conversation_noise(text)
+
+    assert "Subject:" not in cleaned
+    assert "From:" not in cleaned
+    assert "Reply-To:" not in cleaned
+    assert "Date:" not in cleaned
+    assert "Actual message body line one." in cleaned
+    assert "Another line." in cleaned
