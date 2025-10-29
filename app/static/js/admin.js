@@ -552,16 +552,19 @@
     });
   }
 
-  function bindAddCompanyModal() {
-    const modal = document.getElementById('add-company-modal');
-    const openButton = document.querySelector('[data-add-company-modal-open]');
-    if (!modal || !openButton) {
+  function bindModal({ modalId, triggerSelector }) {
+    const modal = document.getElementById(modalId);
+    const triggerButtons = triggerSelector
+      ? Array.from(document.querySelectorAll(triggerSelector))
+      : [];
+
+    if (!modal || triggerButtons.length === 0) {
       return;
     }
 
     const focusableSelector =
       'a[href], button:not([disabled]), textarea, input:not([type="hidden"]):not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    let previousActiveElement = null;
+    let activeTrigger = null;
 
     function getFocusableElements() {
       return Array.from(modal.querySelectorAll(focusableSelector)).filter((element) => {
@@ -600,25 +603,27 @@
 
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      const activeElement = document.activeElement;
+      const currentActive = document.activeElement;
 
       if (event.shiftKey) {
-        if (activeElement === first) {
+        if (currentActive === first) {
           event.preventDefault();
           last.focus();
         }
-      } else if (activeElement === last) {
+      } else if (currentActive === last) {
         event.preventDefault();
         first.focus();
       }
     }
 
-    function openModal() {
-      previousActiveElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    function openModal(trigger) {
+      activeTrigger = trigger instanceof HTMLElement ? trigger : null;
       modal.hidden = false;
       modal.classList.add('is-visible');
       modal.setAttribute('aria-hidden', 'false');
-      openButton.setAttribute('aria-expanded', 'true');
+      if (activeTrigger) {
+        activeTrigger.setAttribute('aria-expanded', 'true');
+      }
       document.addEventListener('keydown', handleKeydown);
       focusFirstElement();
     }
@@ -627,20 +632,23 @@
       modal.classList.remove('is-visible');
       modal.hidden = true;
       modal.setAttribute('aria-hidden', 'true');
-      openButton.setAttribute('aria-expanded', 'false');
       document.removeEventListener('keydown', handleKeydown);
-      if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
-        previousActiveElement.focus();
-      } else {
-        openButton.focus();
+
+      if (activeTrigger) {
+        activeTrigger.setAttribute('aria-expanded', 'false');
+        if (typeof activeTrigger.focus === 'function') {
+          activeTrigger.focus();
+        }
       }
+      activeTrigger = null;
     }
 
-    openButton.setAttribute('aria-expanded', 'false');
-
-    openButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      openModal();
+    triggerButtons.forEach((button) => {
+      button.setAttribute('aria-expanded', 'false');
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        openModal(button);
+      });
     });
 
     modal.addEventListener('click', (event) => {
@@ -649,8 +657,8 @@
       }
     });
 
-    modal.querySelectorAll('[data-modal-close]').forEach((button) => {
-      button.addEventListener('click', (event) => {
+    modal.querySelectorAll('[data-modal-close]').forEach((closeButton) => {
+      closeButton.addEventListener('click', (event) => {
         event.preventDefault();
         closeModal();
       });
@@ -665,6 +673,7 @@
     bindCompanyAssignmentControls();
     bindApiKeyCopyButtons();
     bindConfirmationButtons();
-    bindAddCompanyModal();
+    bindModal({ modalId: 'add-company-modal', triggerSelector: '[data-add-company-modal-open]' });
+    bindModal({ modalId: 'create-ticket-modal', triggerSelector: '[data-create-ticket-modal-open]' });
   });
 })();
