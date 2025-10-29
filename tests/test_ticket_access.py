@@ -16,7 +16,8 @@ from app.api.routes import auth as auth_routes
 from app.api.routes import tickets as tickets_routes
 from app.core.database import db
 from app import main as main_module
-from app.main import HELPDESK_PERMISSION_KEY, app, scheduler_service
+from app.main import app, scheduler_service
+from app.services.tickets import HELPDESK_PERMISSION_KEY
 from app.security.session import SessionData, session_manager
 
 
