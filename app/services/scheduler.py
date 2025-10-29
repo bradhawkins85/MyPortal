@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from asyncio.subprocess import PIPE
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ from app.core.logging import log_error, log_info
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.services import asset_importer
 from app.services import automations as automations_service
+from app.services import imap as imap_service
 from app.services import staff_importer
 from app.services import m365 as m365_service
 from app.services import products as products_service
@@ -162,6 +164,20 @@ class SchedulerService:
                 output = await self._run_system_update(force_restart=force_restart)
                 if output:
                     details = output
+            elif isinstance(command, str) and command.startswith("imap_sync:"):
+                try:
+                    account_id = int(command.split(":", 1)[1])
+                except (IndexError, ValueError):
+                    status = "skipped"
+                    details = "Invalid IMAP account reference"
+                    log_error(
+                        "Invalid IMAP sync command",
+                        task_id=task_id,
+                        command=command,
+                    )
+                else:
+                    result = await imap_service.sync_account(account_id)
+                    details = json.dumps(result, default=str) if result else None
             else:
                 status = "skipped"
                 details = "No handler registered for command"

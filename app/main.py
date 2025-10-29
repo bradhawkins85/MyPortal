@@ -52,6 +52,7 @@ from app.api.routes import (
     memberships,
     m365 as m365_api,
     mcp as mcp_api,
+    imap as imap_api,
     modules as modules_api,
     notifications,
     ports,
@@ -108,6 +109,7 @@ from app.services import change_log as change_log_service
 from app.services import company_domains
 from app.services import company_access
 from app.services import email as email_service
+from app.services import imap as imap_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import m365 as m365_service
 from app.services import modules as modules_service
@@ -440,6 +442,7 @@ app.include_router(scheduler_api.router)
 app.include_router(tickets_api.router)
 app.include_router(automations_api.router)
 app.include_router(modules_api.router)
+app.include_router(imap_api.router)
 app.include_router(mcp_api.router)
 app.include_router(system.router)
 app.include_router(uptimekuma.router)
@@ -7263,6 +7266,38 @@ async def _render_modules_dashboard(
     return response
 
 
+async def _render_imap_dashboard(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    editing_account_id: int | None = None,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    accounts = await imap_service.list_accounts()
+    editing_account = None
+    if editing_account_id is not None:
+        for account in accounts:
+            if account.get("id") == editing_account_id:
+                editing_account = account
+                break
+        if not editing_account:
+            editing_account = await imap_service.get_account(editing_account_id)
+    companies = await company_repo.list_companies()
+    extra = {
+        "title": "IMAP mailboxes",
+        "accounts": accounts,
+        "editing_account": editing_account,
+        "companies": companies,
+        "success_message": success_message,
+        "error_message": error_message,
+    }
+    response = await _render_template("admin/imap.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
+
+
 @app.get("/admin/modules", response_class=HTMLResponse)
 async def admin_modules_page(
     request: Request,
@@ -7318,6 +7353,219 @@ async def admin_update_module(slug: str, request: Request):
         )
     return RedirectResponse(
         url=f"/admin/modules?success=" + quote(f"Module {slug} updated."),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.get("/admin/modules/imap", response_class=HTMLResponse)
+async def admin_imap_accounts_page(
+    request: Request,
+    account_id: int | None = Query(default=None, alias="accountId"),
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _render_imap_dashboard(
+        request,
+        current_user,
+        editing_account_id=account_id,
+        success_message=_sanitize_message(success),
+        error_message=_sanitize_message(error),
+    )
+
+
+def _form_bool(form: Mapping[str, Any], key: str) -> bool:
+    value = form.get(key)
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "off"}
+    return bool(value)
+
+
+@app.post("/admin/modules/imap/accounts", response_class=HTMLResponse)
+async def admin_create_imap_account(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    data: dict[str, Any] = {
+        "name": form.get("name", ""),
+        "host": form.get("host", ""),
+        "port": form.get("port", ""),
+        "username": form.get("username", ""),
+        "password": form.get("password", ""),
+        "folder": form.get("folder", ""),
+        "schedule_cron": form.get("scheduleCron", ""),
+        "process_unread_only": _form_bool(form, "processUnreadOnly"),
+        "mark_as_read": _form_bool(form, "markAsRead"),
+        "active": _form_bool(form, "active"),
+    }
+    company_id = form.get("companyId")
+    if company_id not in (None, ""):
+        try:
+            data["company_id"] = int(company_id)
+        except (TypeError, ValueError):
+            return await _render_imap_dashboard(
+                request,
+                current_user,
+                success_message=None,
+                error_message="Company selection is invalid.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+    try:
+        account = await imap_service.create_account(data)
+    except ValueError as exc:
+        return await _render_imap_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to create IMAP account", error=str(exc))
+        return await _render_imap_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message="Unable to create the IMAP account. Please verify the configuration and try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    message = quote(f"Mailbox {account.get('name') or account.get('username') or 'created'} added.")
+    return RedirectResponse(
+        url=f"/admin/modules/imap?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/modules/imap/accounts/{account_id}", response_class=HTMLResponse)
+async def admin_update_imap_account(account_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    updates: dict[str, Any] = {}
+    for field in ("name", "host", "port", "username"):
+        if field in form:
+            value = form.get(field)
+            if value is None:
+                continue
+            if field == "port" and value == "":
+                continue
+            updates[field] = value
+    password_value = form.get("password")
+    if password_value:
+        updates["password"] = password_value
+    if "folder" in form:
+        updates["folder"] = form.get("folder")
+    if "scheduleCron" in form:
+        updates["schedule_cron"] = form.get("scheduleCron")
+    updates["process_unread_only"] = _form_bool(form, "processUnreadOnly")
+    updates["mark_as_read"] = _form_bool(form, "markAsRead")
+    updates["active"] = _form_bool(form, "active")
+    company_id = form.get("companyId")
+    if company_id in (None, ""):
+        updates["company_id"] = None
+    else:
+        try:
+            updates["company_id"] = int(company_id)
+        except (TypeError, ValueError):
+            return await _render_imap_dashboard(
+                request,
+                current_user,
+                editing_account_id=account_id,
+                success_message=None,
+                error_message="Company selection is invalid.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+    try:
+        account = await imap_service.update_account(account_id, updates)
+    except ValueError as exc:
+        return await _render_imap_dashboard(
+            request,
+            current_user,
+            editing_account_id=account_id,
+            success_message=None,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to update IMAP account", account_id=account_id, error=str(exc))
+        return await _render_imap_dashboard(
+            request,
+            current_user,
+            editing_account_id=account_id,
+            success_message=None,
+            error_message="Unable to update the IMAP account. Please review the settings and try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    message = quote(f"Mailbox {account.get('name') or account.get('username') or account_id} updated.")
+    return RedirectResponse(
+        url=f"/admin/modules/imap?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/modules/imap/accounts/{account_id}/delete", response_class=HTMLResponse)
+async def admin_delete_imap_account(account_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    account = await imap_service.get_account(account_id)
+    try:
+        await imap_service.delete_account(account_id)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to delete IMAP account", account_id=account_id, error=str(exc))
+        return await _render_imap_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message="Unable to delete the IMAP account at this time.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    label = account.get("name") if account else f"#{account_id}"
+    message = quote(f"Mailbox {label} deleted.")
+    return RedirectResponse(
+        url=f"/admin/modules/imap?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/modules/imap/accounts/{account_id}/sync", response_class=HTMLResponse)
+async def admin_sync_imap_account(account_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    result = await imap_service.sync_account(account_id)
+    status_value = str(result.get("status") or "").lower()
+    processed = int(result.get("processed") or 0)
+    error_count = len(result.get("errors") or [])
+    if status_value in {"error"}:
+        message = result.get("error") or "IMAP synchronisation failed."
+        return RedirectResponse(
+            url=f"/admin/modules/imap?error={quote(message)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    if status_value == "skipped":
+        message = result.get("reason") or "IMAP synchronisation skipped."
+        return RedirectResponse(
+            url=f"/admin/modules/imap?error={quote(message)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    if status_value == "completed_with_errors" and error_count:
+        message = quote(
+            f"IMAP sync completed with {error_count} issue{'s' if error_count != 1 else ''}. Imported {processed} messages."
+        )
+        return RedirectResponse(
+            url=f"/admin/modules/imap?success={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    message = quote(f"IMAP sync imported {processed} message{'s' if processed != 1 else ''}.")
+    return RedirectResponse(
+        url=f"/admin/modules/imap?success={message}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
