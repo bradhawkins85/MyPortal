@@ -310,7 +310,7 @@ else
 fi
 
 POST_PULL_HEAD=$(git rev-parse HEAD)
-FORCE_RESTART="${FORCE_RESTART:-0}"
+FORCE_RESTART="$(read_env_var "FORCE_RESTART" "0")"
 
 reset_project_permissions "$SERVICE_USER"
 
