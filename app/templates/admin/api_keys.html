@@ -3,6 +3,15 @@
 {% block header_title %}
   <div class="header__title-content">
     <span class="header__title-text">{{ title | default('API credentials') }}</span>
+    <button
+      type="button"
+      class="button button--primary button--small header__title-button"
+      data-create-api-key-modal-open
+      aria-haspopup="dialog"
+      aria-controls="create-api-key-modal"
+    >
+      Create key
+    </button>
   </div>
 {% endblock %}
 
@@ -133,30 +142,6 @@
         aria-label="Filter API keys"
         data-table-filter="api-keys-table"
       />
-      <form class="inline-form" method="post" action="/admin/api-keys">
-        {% for name, value in filter_state.items() %}
-          <input type="hidden" name="{{ name }}" value="{{ value }}" />
-        {% endfor %}
-        <div class="inline-form__fields">
-          <label class="visually-hidden" for="new-key-description">Description</label>
-          <input
-            class="form-input"
-            id="new-key-description"
-            name="description"
-            maxlength="255"
-            placeholder="Description (optional)"
-          />
-          <label class="visually-hidden" for="new-key-expiry">Expiry</label>
-          <input
-            class="form-input"
-            id="new-key-expiry"
-            name="expiry_date"
-            type="date"
-            placeholder="Expiry date"
-          />
-          <button type="submit" class="button">Create key</button>
-        </div>
-      </form>
     </div>
 
     <div class="table-wrapper">
@@ -428,6 +413,58 @@
       </table>
     </div>
   </section>
+</div>
+
+<div
+  class="modal"
+  id="create-api-key-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="create-api-key-title"
+  aria-hidden="true"
+  hidden
+>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close create API key form</span>
+      &times;
+    </button>
+    <h2 class="modal__title" id="create-api-key-title">Create API key</h2>
+    <p class="modal__subtitle">
+      Issue a new credential for system-to-system access. Provide an optional expiry to enforce automatic rotation.
+    </p>
+    <form method="post" action="/admin/api-keys" class="form" autocomplete="off">
+      {% include "partials/csrf.html" %}
+      {% for name, value in filter_state.items() %}
+        <input type="hidden" name="{{ name }}" value="{{ value }}" />
+      {% endfor %}
+      <div class="form-field">
+        <label class="form-label" for="modal-api-key-description">Description</label>
+        <input
+          class="form-input"
+          id="modal-api-key-description"
+          name="description"
+          maxlength="255"
+          placeholder="Service name, environment, or usage context"
+        />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="modal-api-key-expiry">Expiry date</label>
+        <input
+          class="form-input"
+          id="modal-api-key-expiry"
+          name="expiry_date"
+          type="date"
+          placeholder="YYYY-MM-DD"
+        />
+        <p class="form-hint">Leave blank to create a non-expiring credential.</p>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button button--primary">Create key</button>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      </div>
+    </form>
+  </div>
 </div>
 {% endblock %}
 
