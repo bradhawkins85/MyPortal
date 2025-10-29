@@ -11,6 +11,7 @@ Administrators can manage mailboxes at `/admin/modules/imap`. The workspace allo
 - Setting a mailbox priority to control processing order
 - Choosing to only process unread messages and whether to mark processed mail as read
 - Configuring a cron schedule per mailbox
+- Defining optional JSON filters that determine which emails each mailbox processes
 - Triggering manual synchronisation or deleting existing mailboxes
 - Cloning existing configurations to rapidly provision new mailboxes
 
@@ -29,6 +30,10 @@ All IMAP endpoints require super administrator access.
 | `POST` | `/api/imap/accounts/{accountId}/clone` | Duplicate an existing mailbox configuration. |
 
 Responses expose scheduled task identifiers and the last synchronisation timestamp so external tooling can audit ingestion.
+
+Mailbox payloads accept an optional `filter_query` object that contains the JSON rules for message selection. The web workspace
+and API both validate the filter structure; see [`docs/imap-filters.md`](./imap-filters.md) for the DSL, supported fields, and
+example recipes.
 
 ## Scheduling
 
