@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 
@@ -354,3 +355,79 @@ async def test_execute_automation_injects_system_variables(monkeypatch):
     parsed = datetime.fromisoformat(timestamp)
     assert parsed.tzinfo is not None
     assert parsed.utcoffset() == timezone.utc.utcoffset(parsed)
+
+
+@pytest.mark.anyio
+async def test_execute_automation_marks_failure_when_action_fails(monkeypatch):
+    captured_run: dict[str, Any] = {}
+    captured_errors: list[tuple[int, str | None]] = []
+
+    async def fake_trigger_module(module_slug, payload, *, background=False):
+        assert module_slug == "smtp"
+        assert background is False
+        return {"status": "failed", "last_error": "SMTP service declined to send message"}
+
+    async def fake_mark_started(*args, **kwargs):
+        return None
+
+    async def fake_record_run(**kwargs):
+        captured_run.update(kwargs)
+
+    async def fake_set_last_error(automation_id, message):
+        captured_errors.append((automation_id, message))
+
+    async def fake_set_next_run(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        automations_service.modules_service,
+        "trigger_module",
+        fake_trigger_module,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "mark_started",
+        fake_mark_started,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "record_run",
+        fake_record_run,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "set_last_error",
+        fake_set_last_error,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "set_next_run",
+        fake_set_next_run,
+    )
+
+    automation = {
+        "id": 310,
+        "kind": "event",
+        "action_module": "smtp",
+        "action_payload": {
+            "actions": [
+                {
+                    "module": "smtp",
+                    "payload": {"recipients": ["alerts@example.com"]},
+                }
+            ]
+        },
+    }
+
+    result = await automations_service._execute_automation(automation)
+
+    assert result["status"] == "failed"
+    assert "SMTP service declined" in (result.get("error") or "")
+
+    assert captured_run["status"] == "failed"
+    assert "SMTP service declined" in (captured_run.get("error_message") or "")
+    assert isinstance(captured_run.get("result_payload"), list)
+    assert captured_run["result_payload"][0]["status"] == "failed"
+    assert "SMTP service declined" in captured_run["result_payload"][0]["error"]
+
+    assert captured_errors[-1] == (310, captured_run.get("error_message"))
