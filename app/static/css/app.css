@@ -1973,11 +1973,19 @@ body {
   align-items: start;
 }
 
+.shop-layout--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .shop-layout__sidebar {
   position: sticky;
   top: 0;
   top: var(--layout-content-padding-top, 2rem);
   align-self: start;
+}
+
+.package-products .package-product + .package-product {
+  margin-top: var(--space-gap-base);
 }
 
 .shop-categories {
