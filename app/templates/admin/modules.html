@@ -124,7 +124,15 @@
                 </div>
                 <div class="form-field">
                   <label class="form-label" for="rmm-api-key">API key</label>
-                  <input id="rmm-api-key" name="settings.api_key" class="form-input" value="{{ settings.api_key or '' }}" />
+                  <input
+                    id="rmm-api-key"
+                    name="settings.api_key"
+                    class="form-input"
+                    type="password"
+                    autocomplete="off"
+                    placeholder="Enter a new API key"
+                  />
+                  <p class="form-help">Keys are stored securely. Leave blank to keep the existing value.</p>
                 </div>
                 <div class="form-field form-field--checkbox">
                   <label class="checkbox">
@@ -143,7 +151,15 @@
                 </div>
                 <div class="form-field">
                   <label class="form-label" for="ntfy-token">Auth token</label>
-                  <input id="ntfy-token" name="settings.auth_token" class="form-input" value="{{ settings.auth_token or '' }}" />
+                  <input
+                    id="ntfy-token"
+                    name="settings.auth_token"
+                    class="form-input"
+                    type="password"
+                    autocomplete="off"
+                    placeholder="Enter a new auth token"
+                  />
+                  <p class="form-help">Tokens are stored securely. Leave blank to keep the existing value.</p>
                 </div>
               {% elif module.slug == 'uptimekuma' %}
                 <div class="form-field">
