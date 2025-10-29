@@ -1,0 +1,7 @@
+{
+  "guid": "d8ecea80-d977-4e0f-b67c-687eea490b03",
+  "occurred_at": "2025-10-29T15:21Z",
+  "change_type": "Fix",
+  "summary": "Fixed shop package product modal by serializing package items for the popup.",
+  "content_hash": "60deb23a7bf19aa020c184a6606948469a574c8854b3b831e844db8d9ef9fde0"
+}
