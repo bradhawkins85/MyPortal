@@ -2048,6 +2048,13 @@ body {
   align-items: flex-end;
 }
 
+.cart-checkout__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-gap-tight);
+}
+
 .cart-summary {
   display: flex;
   justify-content: flex-end;
@@ -2061,13 +2068,13 @@ body {
 
 .cart-summary__totals dt {
   font-weight: 600;
-  color: #0f172a;
+  color: #fff;
 }
 
 .cart-summary__totals dd {
   margin: 0;
   font-weight: 700;
-  color: #0f172a;
+  color: #fff;
 }
 
 .cart-table__image img {
