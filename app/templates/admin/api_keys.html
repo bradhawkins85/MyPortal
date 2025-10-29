@@ -303,50 +303,57 @@
     </div>
   </section>
 
-  <section class="card card--panel admin-grid__full">
-    <header class="card__header card__header--stacked">
+  <details class="card card--panel card-collapsible admin-grid__full" data-correlation-panel>
+    <summary class="card__header card__header--collapsible">
       <div>
         <h2 class="card__title">Cross-service audit correlations</h2>
         <p class="card__subtitle">
           Correlate privileged activity across services to trace credential usage and follow-on automation.
         </p>
       </div>
-      <form method="get" class="filter-grid">
-        <input type="hidden" name="search" value="{{ filters.search }}" />
-        <input type="hidden" name="order_by" value="{{ filters.order_by }}" />
-        <input type="hidden" name="order_direction" value="{{ filters.order_direction }}" />
-        {% if filters.include_expired %}
-          <input type="hidden" name="include_expired" value="1" />
-        {% endif %}
-        <div class="form-field">
-          <label class="form-label" for="correlation-search">Search correlations</label>
-          <input
-            class="form-input"
-            id="correlation-search"
-            name="correlation_search"
-            value="{{ filters.correlation_search }}"
-            placeholder="Key fingerprint, company, or task"
-          />
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="correlation-service">Service filter</label>
-          <select class="form-input" id="correlation-service" name="service_filter">
-            <option value="">All services</option>
-            {% for option in service_options %}
-              <option value="{{ option.value }}" {% if option.value == filters.service_filter %}selected{% endif %}>
-                {{ option.label }}
-              </option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-actions form-actions--inline">
-          <button type="submit" class="button">Filter correlations</button>
-        </div>
-      </form>
-    </header>
+      <div class="card__collapsible-meta">
+        <span class="card__toggle-icon" aria-hidden="true"></span>
+      </div>
+    </summary>
 
-    <div class="table-wrapper">
-      <table class="table" id="correlations-table" data-table>
+    <div class="card-collapsible__content">
+      <header class="card__header card__header--stacked">
+        <form method="get" class="filter-grid">
+          <input type="hidden" name="search" value="{{ filters.search }}" />
+          <input type="hidden" name="order_by" value="{{ filters.order_by }}" />
+          <input type="hidden" name="order_direction" value="{{ filters.order_direction }}" />
+          {% if filters.include_expired %}
+            <input type="hidden" name="include_expired" value="1" />
+          {% endif %}
+          <div class="form-field">
+            <label class="form-label" for="correlation-search">Search correlations</label>
+            <input
+              class="form-input"
+              id="correlation-search"
+              name="correlation_search"
+              value="{{ filters.correlation_search }}"
+              placeholder="Key fingerprint, company, or task"
+            />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="correlation-service">Service filter</label>
+            <select class="form-input" id="correlation-service" name="service_filter">
+              <option value="">All services</option>
+              {% for option in service_options %}
+                <option value="{{ option.value }}" {% if option.value == filters.service_filter %}selected{% endif %}>
+                  {{ option.label }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-actions form-actions--inline">
+            <button type="submit" class="button">Filter correlations</button>
+          </div>
+        </form>
+      </header>
+
+      <div class="table-wrapper">
+        <table class="table" id="correlations-table" data-table>
         <thead>
           <tr>
             <th scope="col" data-sort="string">Signal</th>
@@ -425,9 +432,10 @@
             </tr>
           {% endif %}
         </tbody>
-      </table>
+        </table>
+      </div>
     </div>
-  </section>
+  </details>
 </div>
 {% endblock %}
 
