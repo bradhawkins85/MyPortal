@@ -69,7 +69,17 @@
                     <summary>Included products</summary>
                     <ul class="list list--bullet package-products">
                       {% for item in package["items"] %}
-                        <li class="package-product">{{ item.product_name }} ({{ item.product_sku }}) × {{ item.quantity }}</li>
+                        <li class="package-product">
+                          <button
+                            type="button"
+                            class="link-button package-product__button"
+                            data-package-product-details="{{ package.id }}:{{ item.product_id }}"
+                          >
+                            <span class="package-product__name">{{ item.product_name }}</span>
+                            <span class="package-product__sku">({{ item.product_sku }})</span>
+                            <span class="package-product__quantity">× {{ item.quantity }}</span>
+                          </button>
+                        </li>
                       {% endfor %}
                     </ul>
                   </details>
@@ -128,4 +138,32 @@
     </div>
   </section>
 </div>
+
+<div
+  class="modal"
+  id="package-product-details-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="package-product-details-title"
+  hidden
+>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close product details</span>
+      &times;
+    </button>
+    <div class="modal__body">
+      <h2 class="modal__title" id="package-product-details-title">Product details</h2>
+      <div id="package-product-details-body" class="modal__details"></div>
+    </div>
+  </div>
+</div>
+
+<script type="application/json" id="shop-package-items-data">{{ packages | tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/shop_packages.js" defer></script>
 {% endblock %}
