@@ -475,6 +475,8 @@ def test_non_admin_reply_forces_public_visibility(monkeypatch, active_session):
 
     async def fake_create_reply(**kwargs):
         assert kwargs["is_internal"] is False
+        assert kwargs.get("minutes_spent") is None
+        assert kwargs.get("is_billable") is False
         return {
             "id": 55,
             "ticket_id": ticket["id"],
@@ -776,6 +778,8 @@ def test_helpdesk_reply_preserves_internal_flag(monkeypatch, active_session):
 
     async def fake_create_reply(**kwargs):
         assert kwargs["is_internal"] is True
+        assert kwargs.get("minutes_spent") is None
+        assert kwargs.get("is_billable") is False
         return {
             "id": 91,
             "ticket_id": ticket["id"],
