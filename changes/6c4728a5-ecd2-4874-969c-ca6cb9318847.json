@@ -1,0 +1,7 @@
+{
+  "guid": "6c4728a5-ecd2-4874-969c-ca6cb9318847",
+  "occurred_at": "2025-10-29T12:28:20Z",
+  "change_type": "Fix",
+  "summary": "Corrected collapsed ticket replies to hide overflowed message content.",
+  "content_hash": "446cf06553772ec534f3091c2b58656f4c85408a99e90bda428693fed4295923"
+}
