@@ -355,7 +355,7 @@ For a hardened systemd configuration that runs MyPortal as a managed Linux servi
 
 ## Updating from GitHub
 
-Use the Python-focused automation scripts to stay current: `scripts/upgrade.sh` pulls the latest code and `scripts/restart.sh` reinstalls dependencies before restarting the ASGI service. If you prefer to run the steps manually, execute the following commands:
+Use the Python-focused automation scripts to stay current. `scripts/upgrade.sh` pulls the latest code and drops a restart flag at `var/state/restart_required.flag`. Schedule `scripts/process_update_flag.sh` from cron (see `deploy/cron/process_update_flag.cron`) to check for the flag every minute, reinstall dependencies, and restart the ASGI service when required. If you prefer to run the steps manually, execute the following commands:
 
 ```bash
 git pull origin main
