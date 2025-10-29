@@ -82,22 +82,26 @@
       </header>
 
       <div class="management__body">
-        <div class="management__stats">
+        <div class="management__stats" data-ticket-stats>
           <article class="stat-card">
             <h3 class="stat-card__title">Open tickets</h3>
-            <p class="stat-card__value">{{ ticket_status_counts.get('open', 0) }}</p>
+            <p class="stat-card__value" data-ticket-stat="open">{{ ticket_status_counts.get('open', 0) }}</p>
           </article>
           <article class="stat-card">
             <h3 class="stat-card__title">In progress</h3>
-            <p class="stat-card__value">{{ ticket_status_counts.get('in_progress', 0) + ticket_status_counts.get('pending', 0) }}</p>
+            <p class="stat-card__value" data-ticket-stat="in_progress">
+              {{ ticket_status_counts.get('in_progress', 0) + ticket_status_counts.get('pending', 0) }}
+            </p>
           </article>
           <article class="stat-card">
             <h3 class="stat-card__title">Resolved</h3>
-            <p class="stat-card__value">{{ ticket_status_counts.get('resolved', 0) + ticket_status_counts.get('closed', 0) }}</p>
+            <p class="stat-card__value" data-ticket-stat="resolved">
+              {{ ticket_status_counts.get('resolved', 0) + ticket_status_counts.get('closed', 0) }}
+            </p>
           </article>
           <article class="stat-card">
             <h3 class="stat-card__title">Total</h3>
-            <p class="stat-card__value">{{ ticket_total }}</p>
+            <p class="stat-card__value" data-ticket-stat="total">{{ ticket_total }}</p>
           </article>
         </div>
 
@@ -131,7 +135,22 @@
         </div>
 
         <div class="table-wrapper">
-          <table class="table" id="tickets-table" data-table data-bulk-delete-table>
+          <table
+            class="table"
+            id="tickets-table"
+            data-table
+            data-bulk-delete-table
+            data-table-refresh-url="{{ ticket_dashboard_endpoint or '' }}"
+            data-table-refresh-topics="{{ (ticket_refresh_topics or []) | join(',') }}"
+            data-table-refresh-handler="tickets"
+            data-table-refresh-success="Tickets updated."
+            data-table-refresh-error="Unable to refresh tickets automatically."
+            data-ticket-status-options='{{ ticket_available_statuses | tojson }}'
+            data-csrf-token="{{ csrf_token or '' }}"
+            data-can-bulk-delete="{{ 'true' if can_bulk_delete_tickets else 'false' }}"
+            data-bulk-delete-form-id="tickets-bulk-delete-form"
+            data-table-empty-label="No tickets found for the selected filters."
+          >
             <thead>
               <tr>
                 {% if can_bulk_delete_tickets %}
