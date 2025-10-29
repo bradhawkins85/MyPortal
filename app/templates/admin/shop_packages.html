@@ -11,35 +11,40 @@
 {% endblock %}
 
 {% block content %}
-<div class="admin-grid admin-grid--columns">
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
+<div class="admin-grid">
+  <details class="card card--panel card-collapsible admin-grid__full" data-create-package-panel>
+    <summary class="card__header card__header--collapsible card__header--stacked">
       <div>
         <h2 class="card__title">Create package</h2>
         <p class="card__subtitle">Bundle frequently ordered products together for quick ordering.</p>
       </div>
-    </header>
-    <form action="/shop/admin/package" method="post" class="form-grid">
-      {% include "partials/csrf.html" %}
-      <div class="form-field">
-        <label class="form-label" for="package-name">Name</label>
-        <input class="form-input" id="package-name" name="name" maxlength="255" required />
+      <div class="card__collapsible-meta" aria-hidden="true">
+        <span class="card__toggle-icon"></span>
       </div>
-      <div class="form-field">
-        <label class="form-label" for="package-sku">SKU</label>
-        <input class="form-input" id="package-sku" name="sku" maxlength="100" required />
-      </div>
-      <div class="form-field form-field--wide">
-        <label class="form-label" for="package-description">Description <span class="text-muted">(optional)</span></label>
-        <textarea class="form-input" id="package-description" name="description" rows="3"></textarea>
-      </div>
-      <div class="form-actions">
-        <button type="submit" class="button">Create package</button>
-      </div>
-    </form>
-  </section>
+    </summary>
+    <div class="card-collapsible__content">
+      <form action="/shop/admin/package" method="post" class="form-grid">
+        {% include "partials/csrf.html" %}
+        <div class="form-field">
+          <label class="form-label" for="package-name">Name</label>
+          <input class="form-input" id="package-name" name="name" maxlength="255" required />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="package-sku">SKU</label>
+          <input class="form-input" id="package-sku" name="sku" maxlength="100" required />
+        </div>
+        <div class="form-field form-field--wide">
+          <label class="form-label" for="package-description">Description <span class="text-muted">(optional)</span></label>
+          <textarea class="form-input" id="package-description" name="description" rows="3"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button">Create package</button>
+        </div>
+      </form>
+    </div>
+  </details>
 
-  <section class="card card--panel">
+  <section class="card card--panel admin-grid__full">
     <header class="card__header card__header--stacked">
       <div>
         <h2 class="card__title">Packages</h2>
