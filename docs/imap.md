@@ -33,6 +33,11 @@ Each mailbox stores its cron expression. When a mailbox is created or updated th
 
 Manual synchronisation is available through the API or the workspace actions.
 
+When a deployment marks a pending restart (for example while `scripts/upgrade.sh`
+is running) the importer temporarily pauses new IMAP fetches. The scheduler
+retries automatically once the restart flag clears so imports resume after the
+update completes.
+
 ## Ticket association
 
 During import the sender address is analysed to automatically associate the ticket with a company. The importer compares the sender's email domain with the configured company email domains and, when a match is found, links the ticket to that company. If the sender already exists as a staff contact for the matched company the ticket requester is also set accordingly. When no domain match exists the importer falls back to the company assigned to the mailbox configuration and still attempts to link the requester by email address.
