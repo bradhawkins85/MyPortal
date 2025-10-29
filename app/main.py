@@ -5099,7 +5099,7 @@ async def admin_automation(request: Request):
         company_options.append({"value": str(company_id), "label": f"Company #{company_id}"})
 
     extra = {
-        "title": "Automation & monitoring",
+        "title": "System Automation",
         "tasks": prepared_tasks,
         "command_options": command_options,
         "company_options": company_options,
