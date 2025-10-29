@@ -115,6 +115,7 @@ from app.services import m365 as m365_service
 from app.services import modules as modules_service
 from app.services import products as products_service
 from app.services import shop as shop_service
+from app.services import shop_packages as shop_packages_service
 from app.services import staff_importer
 from app.services import company_importer
 from app.services import ticket_importer
@@ -216,6 +217,10 @@ tags_metadata = [
         "description": "Permission-scoped articles with Ollama-assisted semantic search.",
     },
     {"name": "Shop", "description": "Product catalogue management and visibility controls."},
+    {
+        "name": "Shop Packages",
+        "description": "Pre-built bundles of products designed to simplify repeat ordering workflows.",
+    },
     {
         "name": "Tickets",
         "description": "Ticketing workspace with replies, watchers, and module-aligned categorisation.",
@@ -2842,6 +2847,43 @@ async def shop_page(
     return await _render_template("shop/index.html", request, user, extra=extra)
 
 
+@app.get(
+    "/shop/packages",
+    response_class=HTMLResponse,
+    summary="View available product packages",
+    tags=["Shop Packages"],
+)
+async def shop_packages_page(
+    request: Request,
+    cart_error: str | None = None,
+):
+    (
+        user,
+        _membership,
+        company,
+        company_id,
+        redirect,
+    ) = await _load_company_section_context(
+        request,
+        permission_field="can_access_shop",
+    )
+    if redirect:
+        return redirect
+
+    is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
+    packages = await shop_packages_service.load_company_packages(
+        company_id=company_id,
+        is_vip=is_vip,
+    )
+
+    extra = {
+        "title": "Shop packages",
+        "packages": packages,
+        "cart_error": cart_error,
+    }
+    return await _render_template("shop/packages.html", request, user, extra=extra)
+
+
 @app.post("/cart/add", response_class=RedirectResponse, include_in_schema=False)
 async def add_to_cart(request: Request) -> RedirectResponse:
     (
@@ -2915,6 +2957,132 @@ async def add_to_cart(request: Request) -> RedirectResponse:
     )
 
     return RedirectResponse(url=request.url_for("shop_page"), status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/cart/add-package", response_class=RedirectResponse, include_in_schema=False)
+async def add_package_to_cart(request: Request) -> RedirectResponse:
+    (
+        user,
+        _membership,
+        company,
+        company_id,
+        redirect,
+    ) = await _load_company_section_context(
+        request,
+        permission_field="can_access_cart",
+    )
+    if redirect:
+        return redirect
+
+    session = await session_manager.load_session(request)
+    if not session:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    package_id_raw = form.get("packageId")
+    quantity_raw = form.get("quantity")
+
+    try:
+        package_id = int(package_id_raw)
+    except (TypeError, ValueError):
+        return RedirectResponse(url=request.url_for("shop_packages_page"), status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        requested_quantity = int(quantity_raw) if quantity_raw is not None else 1
+    except (TypeError, ValueError):
+        requested_quantity = 1
+    if requested_quantity <= 0:
+        requested_quantity = 1
+
+    is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
+    packages = await shop_packages_service.load_company_packages(
+        company_id=company_id,
+        is_vip=is_vip,
+    )
+    selected_package = next((pkg for pkg in packages if int(pkg.get("id") or 0) == package_id), None)
+    if not selected_package or not selected_package.get("is_available"):
+        message = quote("Selected package is not currently available.")
+        return RedirectResponse(
+            url=f"{request.url_for('shop_packages_page')}?cart_error={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    items = list(selected_package.get("items") or [])
+    if not items:
+        message = quote("Package does not contain any products.")
+        return RedirectResponse(
+            url=f"{request.url_for('shop_packages_page')}?cart_error={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    cart_updates: list[tuple[int, int, Decimal, dict[str, Any]]] = []
+    for item in items:
+        product_id = int(item.get("product_id") or 0)
+        if product_id <= 0:
+            continue
+        quantity_per_package = int(item.get("quantity") or 0)
+        if quantity_per_package <= 0:
+            continue
+        required_quantity = quantity_per_package * requested_quantity
+        product = await shop_repo.get_product_by_id(
+            product_id,
+            company_id=company_id,
+        )
+        if not product:
+            message = quote("One or more products in the package are unavailable.")
+            return RedirectResponse(
+                url=f"{request.url_for('shop_packages_page')}?cart_error={message}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        stock_available = int(product.get("stock") or 0)
+        existing_item = await cart_repo.get_item(session.id, product_id)
+        existing_quantity = existing_item.get("quantity") if existing_item else 0
+        if stock_available <= 0 or existing_quantity + required_quantity > stock_available:
+            remaining = max(stock_available - existing_quantity, 0)
+            product_name = str(product.get("name") or "the product")
+            message = quote(
+                f"Cannot add package. {product_name} has only {remaining} left in stock."
+            )
+            return RedirectResponse(
+                url=f"{request.url_for('shop_packages_page')}?cart_error={message}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+
+        price_source = product.get("price")
+        if is_vip and product.get("vip_price") is not None:
+            price_source = product.get("vip_price")
+        unit_price = Decimal(str(price_source or 0))
+        new_quantity = existing_quantity + required_quantity
+        cart_updates.append(
+            (
+                product_id,
+                new_quantity,
+                unit_price,
+                product,
+            )
+        )
+
+    for product_id, new_quantity, unit_price, product in cart_updates:
+        await cart_repo.upsert_item(
+            session_id=session.id,
+            product_id=product_id,
+            quantity=new_quantity,
+            unit_price=unit_price,
+            name=str(product.get("name") or ""),
+            sku=str(product.get("sku") or ""),
+            vendor_sku=product.get("vendor_sku"),
+            description=product.get("description"),
+            image_url=product.get("image_url"),
+        )
+
+    log_info(
+        "Shop package added to cart",
+        package_id=package_id,
+        quantity=requested_quantity,
+        added_by=user.get("id") if user else None,
+    )
+
+    return RedirectResponse(url=request.url_for("shop_packages_page"), status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get("/cart", response_class=HTMLResponse, name="cart_page")
@@ -5524,6 +5692,340 @@ async def admin_delete_form(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
     await forms_repo.delete_form(form_id)
     return RedirectResponse(url="/admin/forms", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get(
+    "/admin/shop/packages",
+    response_class=HTMLResponse,
+    summary="Manage shop packages",
+    tags=["Shop Packages"],
+)
+async def admin_shop_packages_page(
+    request: Request,
+    show_archived: bool = Query(False, alias="showArchived"),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    packages = await shop_packages_service.load_admin_packages(
+        include_archived=show_archived,
+    )
+
+    extra = {
+        "title": "Package admin",
+        "packages": packages,
+        "show_archived": show_archived,
+    }
+    return await _render_template("admin/shop_packages.html", request, current_user, extra=extra)
+
+
+@app.get(
+    "/admin/shop/packages/{package_id}",
+    response_class=HTMLResponse,
+    summary="View shop package detail",
+    tags=["Shop Packages"],
+)
+async def admin_shop_package_detail(request: Request, package_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    package = await shop_packages_service.get_package_detail(package_id, include_archived=True)
+    if not package:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
+
+    products = await shop_repo.list_all_products(include_archived=False)
+
+    extra = {
+        "title": f"Manage package: {package['name']}",
+        "package": package,
+        "products": products,
+    }
+    return await _render_template("admin/shop_package_detail.html", request, current_user, extra=extra)
+
+
+@app.post(
+    "/shop/admin/package",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Create a shop package",
+    tags=["Shop Packages"],
+)
+async def admin_create_shop_package(
+    request: Request,
+    name: str = Form(...),
+    sku: str = Form(...),
+    description: str | None = Form(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    cleaned_name = name.strip()
+    cleaned_sku = sku.strip()
+    cleaned_description = description.strip() if description and description.strip() else None
+    if not cleaned_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Package name cannot be empty")
+    if not cleaned_sku:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Package SKU cannot be empty")
+
+    try:
+        package_id = await shop_repo.create_package(
+            sku=cleaned_sku,
+            name=cleaned_name,
+            description=cleaned_description,
+        )
+    except aiomysql.IntegrityError as exc:
+        if exc.args and exc.args[0] == 1062:
+            detail = "A package with that SKU already exists."
+        else:
+            detail = "Unable to create package."
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
+
+    log_info(
+        "Shop package created",
+        package_id=package_id,
+        sku=cleaned_sku,
+        name=cleaned_name,
+        created_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop/packages", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
+    "/shop/admin/package/{package_id}/update",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Update a shop package",
+    tags=["Shop Packages"],
+)
+async def admin_update_shop_package(
+    request: Request,
+    package_id: int,
+    name: str = Form(...),
+    sku: str = Form(...),
+    description: str | None = Form(default=None),
+    archived: str | None = Form(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    cleaned_name = name.strip()
+    cleaned_sku = sku.strip()
+    cleaned_description = description.strip() if description and description.strip() else None
+    if not cleaned_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Package name cannot be empty")
+    if not cleaned_sku:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Package SKU cannot be empty")
+
+    try:
+        updated = await shop_repo.update_package(
+            package_id,
+            sku=cleaned_sku,
+            name=cleaned_name,
+            description=cleaned_description,
+        )
+    except aiomysql.IntegrityError as exc:
+        if exc.args and exc.args[0] == 1062:
+            detail = "A package with that SKU already exists."
+        else:
+            detail = "Unable to update package."
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
+
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
+
+    archived_flag = bool(archived and archived != "0")
+    await shop_repo.set_package_archived(package_id, archived=archived_flag)
+
+    log_info(
+        "Shop package updated",
+        package_id=package_id,
+        sku=cleaned_sku,
+        archived=archived_flag,
+        updated_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(
+        url=f"/admin/shop/packages/{package_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post(
+    "/shop/admin/package/{package_id}/archive",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Archive or restore a shop package",
+    tags=["Shop Packages"],
+)
+async def admin_archive_shop_package(
+    request: Request,
+    package_id: int,
+    archived: str = Form(...),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    archived_flag = bool(archived and archived != "0")
+    package = await shop_repo.get_package(package_id, include_archived=True)
+    if not package:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
+
+    await shop_repo.set_package_archived(package_id, archived=archived_flag)
+
+    log_info(
+        "Shop package archived" if archived_flag else "Shop package restored",
+        package_id=package_id,
+        updated_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop/packages", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
+    "/shop/admin/package/{package_id}/delete",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Delete a shop package",
+    tags=["Shop Packages"],
+)
+async def admin_delete_shop_package(request: Request, package_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    package = await shop_repo.get_package(package_id, include_archived=True)
+    if not package:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
+
+    deleted = await shop_repo.delete_package(package_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
+
+    log_info(
+        "Shop package deleted",
+        package_id=package_id,
+        deleted_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop/packages", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
+    "/shop/admin/package/{package_id}/items/add",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Add a product to a shop package",
+    tags=["Shop Packages"],
+)
+async def admin_add_package_item(
+    request: Request,
+    package_id: int,
+    product_id: str = Form(...),
+    quantity: str = Form(...),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    try:
+        product_identifier = int(product_id)
+        quantity_value = int(quantity)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid product or quantity")
+
+    if quantity_value <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be at least 1")
+
+    product = await shop_repo.get_product_by_id(product_identifier, include_archived=True)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    await shop_repo.upsert_package_item(
+        package_id=package_id,
+        product_id=product_identifier,
+        quantity=quantity_value,
+    )
+
+    log_info(
+        "Shop package item added",
+        package_id=package_id,
+        product_id=product_identifier,
+        quantity=quantity_value,
+        added_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(
+        url=f"/admin/shop/packages/{package_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post(
+    "/shop/admin/package/{package_id}/items/{product_id}/update",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Update package item quantity",
+    tags=["Shop Packages"],
+)
+async def admin_update_package_item(
+    request: Request,
+    package_id: int,
+    product_id: int,
+    quantity: str = Form(...),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    try:
+        quantity_value = int(quantity)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid quantity")
+
+    if quantity_value <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be at least 1")
+
+    await shop_repo.upsert_package_item(
+        package_id=package_id,
+        product_id=product_id,
+        quantity=quantity_value,
+    )
+
+    log_info(
+        "Shop package item updated",
+        package_id=package_id,
+        product_id=product_id,
+        quantity=quantity_value,
+        updated_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(
+        url=f"/admin/shop/packages/{package_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post(
+    "/shop/admin/package/{package_id}/items/{product_id}/remove",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Remove product from package",
+    tags=["Shop Packages"],
+)
+async def admin_remove_package_item(
+    request: Request,
+    package_id: int,
+    product_id: int,
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    await shop_repo.remove_package_item(package_id, product_id)
+
+    log_info(
+        "Shop package item removed",
+        package_id=package_id,
+        product_id=product_id,
+        removed_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(
+        url=f"/admin/shop/packages/{package_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.get("/admin/shop", response_class=HTMLResponse)
