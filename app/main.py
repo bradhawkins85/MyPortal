@@ -2779,7 +2779,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
 @app.get("/shop", response_class=HTMLResponse)
 async def shop_page(
     request: Request,
-    category: int | None = None,
+    category: str | None = Query(None),
     show_out_of_stock: bool = Query(False, alias="showOutOfStock"),
     q: str | None = None,
     cart_error: str | None = None,
@@ -2798,48 +2798,121 @@ async def shop_page(
         return redirect
     search_term = (q or "").strip()
     effective_search = search_term or None
+    search_term_lower = effective_search.lower() if effective_search else None
 
-    category_id = category if category and category > 0 else None
-
-    filters = shop_repo.ProductFilters(
-        include_archived=False,
-        company_id=company_id,
-        category_id=category_id,
-        search_term=effective_search,
-    )
-
-    categories_task = asyncio.create_task(shop_repo.list_categories())
-    products_task = asyncio.create_task(shop_repo.list_products(filters))
-
-    categories = await categories_task
-    products = await products_task
-
-    if not show_out_of_stock:
-        products = [product for product in products if product.get("stock", 0) > 0]
+    category_param = category.strip() if isinstance(category, str) and category.strip() else None
+    show_packages = False
+    category_id: int | None = None
+    if category_param:
+        if category_param.lower() == "packages":
+            show_packages = True
+        else:
+            try:
+                parsed_category = int(category_param)
+            except (TypeError, ValueError):
+                parsed_category = None
+            if parsed_category is not None and parsed_category > 0:
+                category_id = parsed_category
 
     is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
-    if is_vip:
-        for product in products:
-            vip_price = product.get("vip_price")
-            if vip_price is not None:
-                product["price"] = vip_price
 
-    def _product_has_price(product: Mapping[str, Any]) -> bool:
-        raw_price = product.get("price")
-        if raw_price is None:
-            return False
-        try:
-            return Decimal(str(raw_price)) > 0
-        except (InvalidOperation, TypeError, ValueError):
-            return False
+    categories_task = asyncio.create_task(shop_repo.list_categories())
 
-    products = [product for product in products if _product_has_price(product)]
+    products: list[dict[str, Any]]
+    if show_packages:
+        packages = await shop_packages_service.load_company_packages(
+            company_id=company_id,
+            is_vip=is_vip,
+        )
+
+        def _package_matches_search(package: Mapping[str, Any]) -> bool:
+            if not search_term_lower:
+                return True
+            candidate_fields: list[str] = [
+                str(package.get("name") or ""),
+                str(package.get("sku") or ""),
+            ]
+            for item in package.get("items") or []:
+                candidate_fields.append(str(item.get("product_name") or ""))
+                candidate_fields.append(str(item.get("product_sku") or ""))
+            return any(search_term_lower in field.lower() for field in candidate_fields if field)
+
+        products = []
+        for package in packages:
+            if package.get("archived"):
+                continue
+            if package.get("is_restricted"):
+                continue
+            items = package.get("items") or []
+            if not items:
+                continue
+            if not _package_matches_search(package):
+                continue
+
+            stock_level = int(package.get("stock_level") or 0)
+            if not show_out_of_stock and stock_level <= 0:
+                continue
+
+            price_total = package.get("price_total")
+            try:
+                price_value = Decimal(str(price_total))
+            except (InvalidOperation, TypeError, ValueError):
+                continue
+            if price_value <= 0:
+                continue
+            products.append(
+                {
+                    "id": package.get("id"),
+                    "name": package.get("name"),
+                    "sku": package.get("sku"),
+                    "price": price_value,
+                    "stock": stock_level,
+                    "is_package": True,
+                    "items": items,
+                    "product_count": int(package.get("product_count") or 0),
+                }
+            )
+
+        products.sort(key=lambda entry: str(entry.get("name") or "").lower())
+    else:
+        filters = shop_repo.ProductFilters(
+            include_archived=False,
+            company_id=company_id,
+            category_id=category_id,
+            search_term=effective_search,
+        )
+
+        products_task = asyncio.create_task(shop_repo.list_products(filters))
+        products = await products_task
+
+        if not show_out_of_stock:
+            products = [product for product in products if product.get("stock", 0) > 0]
+
+        if is_vip:
+            for product in products:
+                vip_price = product.get("vip_price")
+                if vip_price is not None:
+                    product["price"] = vip_price
+
+        def _product_has_price(product: Mapping[str, Any]) -> bool:
+            raw_price = product.get("price")
+            if raw_price is None:
+                return False
+            try:
+                return Decimal(str(raw_price)) > 0
+            except (InvalidOperation, TypeError, ValueError):
+                return False
+
+        products = [product for product in products if _product_has_price(product)]
+
+    categories = await categories_task
 
     extra = {
         "title": "Shop",
         "categories": categories,
         "products": products,
-        "current_category": category_id,
+        "current_category": "packages" if show_packages else category_id,
+        "show_packages": show_packages,
         "show_out_of_stock": show_out_of_stock,
         "search_term": search_term,
         "cart_error": cart_error,
