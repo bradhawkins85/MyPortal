@@ -339,9 +339,6 @@ async def _execute_automation(
                         module_payload,
                         background=False,
                     )
-                    results.append(
-                        {"module": module_slug, "status": "succeeded", "result": action_result}
-                    )
                 except Exception as exc:  # pragma: no cover - network/runtime guard
                     status = "failed"
                     error_message = str(exc)
@@ -354,6 +351,40 @@ async def _execute_automation(
                         module=module_slug,
                         error=str(exc),
                     )
+                    break
+
+                if isinstance(action_result, Mapping):
+                    action_status_raw = action_result.get("status") or action_result.get("event_status")
+                    action_error = (
+                        action_result.get("error")
+                        or action_result.get("last_error")
+                        or None
+                    )
+                    action_reason = action_result.get("reason")
+                else:
+                    action_status_raw = None
+                    action_error = None
+                    action_reason = None
+
+                action_status = str(action_status_raw or "").strip().lower() or "unknown"
+
+                result_entry: dict[str, Any] = {
+                    "module": module_slug,
+                    "status": action_status,
+                    "result": action_result,
+                }
+                if action_error:
+                    result_entry["error"] = action_error
+                if action_reason:
+                    result_entry["reason"] = action_reason
+                results.append(result_entry)
+
+                if action_status in {"failed", "error"} or (
+                    action_status == "unknown" and action_error
+                ):
+                    status = "failed"
+                    if not error_message:
+                        error_message = str(action_error or "Module action failed")
                     break
             if status == "failed" and not error_message:
                 error_message = "One or more trigger actions failed"
