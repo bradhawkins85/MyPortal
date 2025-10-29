@@ -223,20 +223,25 @@
           {% set description_html = ticket.description_html if ticket.description_html is defined else '' %}
           {% set has_original_description = ticket.description is defined and ticket.description %}
           {% if description_html or has_original_description %}
-            <article class="card card--panel">
-              <header class="card__header">
+            <details class="card card--panel card-collapsible" data-ticket-description>
+              <summary class="card__header card__header--collapsible">
                 <h2 class="card__title">Description</h2>
-              </header>
-              <div class="card__body">
-                {% if description_html %}
-                  <div class="rich-text-viewer" data-ticket-description>
-                    {{ description_html | safe }}
-                  </div>
-                {% else %}
-                  <p class="card__empty">The ticket description does not contain displayable content.</p>
-                {% endif %}
+                <div class="card__collapsible-meta">
+                  <span class="card__toggle-icon" aria-hidden="true"></span>
+                </div>
+              </summary>
+              <div class="card-collapsible__content">
+                <div class="card__body">
+                  {% if description_html %}
+                    <div class="rich-text-viewer" data-ticket-description>
+                      {{ description_html | safe }}
+                    </div>
+                  {% else %}
+                    <p class="card__empty">The ticket description does not contain displayable content.</p>
+                  {% endif %}
+                </div>
               </div>
-            </article>
+            </details>
           {% endif %}
 
           {% if ticket.ai_summary or ticket.ai_summary_status %}

@@ -1,0 +1,7 @@
+{
+  "guid": "b96cb1eb-c1fe-426e-bd19-341074dfa444",
+  "occurred_at": "2025-10-29T05:20:30Z",
+  "change_type": "Feature",
+  "summary": "Import email bodies into ticket conversation and collapse description card by default",
+  "content_hash": "5ce2c27351581fb35e5b8add22581ee91cf64d9b30decb9e4b1e7631eb54fe7e"
+}
