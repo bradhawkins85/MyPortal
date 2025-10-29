@@ -6094,6 +6094,7 @@ async def _render_tickets_dashboard(
         "ticket_user_options": technician_users,
         "ticket_company_lookup": company_lookup,
         "ticket_user_lookup": user_lookup,
+        "can_bulk_delete_tickets": bool(user.get("is_super_admin")),
         "success_message": success_message,
         "error_message": error_message,
     }
@@ -6669,6 +6670,84 @@ async def admin_delete_ticket(ticket_id: int, request: Request):
         url=f"/admin/tickets?success={message}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+@app.post("/admin/tickets/bulk-delete", response_class=HTMLResponse)
+async def admin_bulk_delete_tickets(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    raw_ids = form.getlist("ticketIds")
+    ticket_ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_ids:
+        try:
+            identifier = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if identifier <= 0 or identifier in seen:
+            continue
+        seen.add(identifier)
+        ticket_ids.append(identifier)
+
+    if not ticket_ids:
+        return await _render_tickets_dashboard(
+            request,
+            current_user,
+            error_message="Select at least one ticket to delete.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        deleted_count = await tickets_repo.delete_tickets(ticket_ids)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to bulk delete tickets",
+            ticket_ids=ticket_ids,
+            error=str(exc),
+        )
+        return await _render_tickets_dashboard(
+            request,
+            current_user,
+            error_message="Unable to delete the selected tickets. Please try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    if deleted_count == 0:
+        return await _render_tickets_dashboard(
+            request,
+            current_user,
+            error_message="No matching tickets were found to delete.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+    log_info(
+        "Tickets bulk deleted",
+        deleted_count=deleted_count,
+        deleted_by=current_user.get("id") if current_user else None,
+        ticket_ids=ticket_ids,
+    )
+
+    message_suffix = "ticket" if deleted_count == 1 else "tickets"
+    redirect_message = f"Deleted {deleted_count} {message_suffix}."
+    if deleted_count < len(ticket_ids):
+        redirect_message = (
+            f"Deleted {deleted_count} {message_suffix}."
+            " Some selected tickets were not found."
+        )
+    message = quote(redirect_message)
+
+    return_url_raw = form.get("returnUrl")
+    return_url = str(return_url_raw) if isinstance(return_url_raw, str) else ""
+    if return_url and return_url.startswith("/") and not return_url.startswith("//"):
+        separator = "&" if "?" in return_url else "?"
+        destination = f"{return_url}{separator}success={message}"
+    else:
+        destination = f"/admin/tickets?success={message}"
+
+    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/admin/tickets/{ticket_id}/replies", response_class=HTMLResponse)

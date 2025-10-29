@@ -312,6 +312,47 @@ async def delete_ticket(ticket_id: int) -> None:
     await db.execute("DELETE FROM tickets WHERE id = %s", (ticket_id,))
 
 
+async def delete_tickets(ticket_ids: Iterable[int]) -> int:
+    """Delete multiple tickets by their identifiers.
+
+    Returns the number of tickets that were removed. Invalid identifiers are
+    ignored so callers can pass raw form values safely.
+    """
+
+    normalised_ids: list[int] = []
+    seen: set[int] = set()
+    for raw_id in ticket_ids:
+        try:
+            identifier = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if identifier <= 0 or identifier in seen:
+            continue
+        seen.add(identifier)
+        normalised_ids.append(identifier)
+
+    if not normalised_ids:
+        return 0
+
+    placeholders = ", ".join(["%s"] * len(normalised_ids))
+    params = tuple(normalised_ids)
+
+    existing = await db.fetch_one(
+        f"SELECT COUNT(*) AS total FROM tickets WHERE id IN ({placeholders})",
+        params,
+    )
+    await db.execute(
+        f"DELETE FROM tickets WHERE id IN ({placeholders})",
+        params,
+    )
+    if not existing:
+        return 0
+    try:
+        return int(existing.get("total") or 0)
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return 0
+
+
 async def create_reply(
     *,
     ticket_id: int,
