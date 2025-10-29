@@ -11,4 +11,5 @@ def test_upgrade_script_prefers_project_virtualenv():
     assert 'RESTART_FLAG_FILE' in contents
     assert 'Flagged pending dependency install and service restart' in contents
     assert 'FORCE_RESTART' in contents
+    assert 'FORCE_RESTART="$(read_env_var "FORCE_RESTART" "0")"' in contents
     assert 'flagging dependency install and service restart' in contents
