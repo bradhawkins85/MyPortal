@@ -39,7 +39,6 @@
               <th scope="col">Image</th>
               <th scope="col" data-sort="string">Name</th>
               <th scope="col" data-sort="string">SKU</th>
-              <th scope="col" data-sort="string">Description</th>
               <th scope="col" data-sort="number">Unit price</th>
               <th scope="col" data-sort="number">Quantity</th>
               <th scope="col" data-sort="number">Line total</th>
@@ -61,15 +60,17 @@
                     <span class="text-muted">—</span>
                   {% endif %}
                 </td>
-                <td data-label="Name">{{ item.product_name }}</td>
-                <td data-label="SKU">{{ item.product_sku }}</td>
-                <td data-label="Description">
-                  {% if item.product_description %}
-                    {{ item.product_description.replace('\n', '<br />') | safe }}
-                  {% else %}
-                    <span class="text-muted">—</span>
-                  {% endif %}
+                <td data-label="Name">
+                  <button
+                    type="button"
+                    class="link-button"
+                    data-cart-product-modal="{{ item.product_id }}"
+                    aria-haspopup="dialog"
+                  >
+                    {{ item.product_name }}
+                  </button>
                 </td>
+                <td data-label="SKU">{{ item.product_sku }}</td>
                 <td data-label="Unit price" data-value="{{ item.unit_price }}">${{ '%.2f'|format(item.unit_price) }}</td>
                 <td data-label="Quantity" data-value="{{ item.quantity }}">{{ item.quantity }}</td>
                 <td data-label="Line total" data-value="{{ item.line_total }}">${{ '%.2f'|format(item.line_total) }}</td>
@@ -111,9 +112,28 @@
     <p class="text-muted">Your cart is empty.</p>
   {% endif %}
 </section>
+
+<div
+  class="modal"
+  id="cart-product-details-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="cart-product-details-title"
+  hidden
+>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close aria-label="Close product details">
+      <span aria-hidden="true">&times;</span>
+    </button>
+    <h2 class="modal__title" id="cart-product-details-title">Product details</h2>
+    <div id="cart-product-details-body" class="modal__body"></div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
+  <script type="application/json" id="cart-items-data">{{ cart_items_payload | tojson }}</script>
   <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/cart.js" defer></script>
 {% endblock %}
