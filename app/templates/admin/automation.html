@@ -58,12 +58,8 @@
               <td class="table__actions">
                 <div class="table__action-buttons">
                   <button type="button" class="button button--ghost" data-task-edit>Edit</button>
-                  <button type="button" class="button button--ghost" data-task-toggle>
-                    {{ 'Disable' if task.active else 'Enable' }}
-                  </button>
                   <button type="button" class="button button--ghost" data-task-run>Run now</button>
                   <button type="button" class="button button--ghost" data-task-logs>View logs</button>
-                  <button type="button" class="button button--danger" data-task-delete>Delete</button>
                 </div>
               </td>
             </tr>
@@ -170,8 +166,19 @@
           </label>
         </div>
         <div class="form-actions">
-          <button type="submit" class="button">Save task</button>
-          <button type="button" class="button button--ghost" data-task-reset>Clear form</button>
+          <div class="form-actions__group">
+            <button type="submit" class="button">Save task</button>
+            <button type="button" class="button button--ghost" data-task-reset>Clear form</button>
+          </div>
+          <button
+            type="button"
+            class="button button--danger"
+            data-task-delete-modal
+            hidden
+            aria-hidden="true"
+          >
+            Delete task
+          </button>
         </div>
       </form>
     </div>

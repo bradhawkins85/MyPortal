@@ -1,0 +1,7 @@
+{
+  "guid": "67393e42-c430-40ed-a342-6ac18ecb046b",
+  "occurred_at": "2025-10-29T04:46Z",
+  "change_type": "Fix",
+  "summary": "Moved scheduled task deletion controls into the modal and removed inline disable toggle.",
+  "content_hash": "0f90d32bd1b5bf04ce6008072a9636fcbde6021d936c12fa0196af2f3f55872c"
+}
