@@ -49,11 +49,7 @@
               {% endif %}
               <header class="card__header card__header--module card__header--module-expanded">
                 <div class="card__module-info">
-                  <span class="card__module-icon" aria-hidden="true">{{ module.icon or '🔌' }}</span>
-                  <div>
-                    <h3 class="card__title">{{ module.name }}</h3>
-                    <p class="card__subtitle">{{ module.description }}</p>
-                  </div>
+                  <p class="card__subtitle">{{ module.description }}</p>
                 </div>
                 <div class="card__module-actions">
                   <form action="/admin/modules/{{ module.slug }}/test" method="post" class="card__module-test">

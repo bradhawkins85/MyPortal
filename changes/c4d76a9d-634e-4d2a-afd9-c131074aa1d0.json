@@ -1,0 +1,7 @@
+{
+  "guid": "c4d76a9d-634e-4d2a-afd9-c131074aa1d0",
+  "occurred_at": "2025-10-29T02:27Z",
+  "change_type": "Fix",
+  "summary": "Removed duplicate module icon and header from expanded admin module cards.",
+  "content_hash": "2a7304cddfad60f6582922e39ba5a1a5d8b2b42326bda7ae735f9d6a89d2de69"
+}
