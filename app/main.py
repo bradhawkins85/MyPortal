@@ -37,7 +37,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.openapi.docs import get_swagger_ui_html
 from itsdangerous import BadSignature, URLSafeSerializer
 from pydantic import ValidationError
-from starlette.datastructures import FormData
+from starlette.datastructures import FormData, URL
 
 from app.api.routes import (
     api_keys,
@@ -3166,6 +3166,8 @@ async def add_package_to_cart(request: Request) -> RedirectResponse:
 async def view_cart(
     request: Request,
     order_message: str | None = Query(None, alias="orderMessage"),
+    cart_error: str | None = Query(None, alias="cartError"),
+    cart_message: str | None = Query(None, alias="cartMessage"),
 ):
     (
         user,
@@ -3218,6 +3220,8 @@ async def view_cart(
         "cart_items": cart_items,
         "cart_total": total,
         "order_message": order_message,
+        "cart_error": cart_error,
+        "cart_message": cart_message,
         "cart_items_payload": cart_items_payload,
     }
     return await _render_template("shop/cart.html", request, user, extra=extra)
@@ -3340,6 +3344,156 @@ async def orders_page(
         "filters_active": bool(status_key or shipping_key),
     }
     return await _render_template("shop/orders.html", request, user, extra=extra)
+
+
+@app.post(
+    "/cart/update",
+    response_class=RedirectResponse,
+    name="cart_update_items",
+    include_in_schema=False,
+)
+async def update_cart_items(request: Request) -> RedirectResponse:
+    (
+        user,
+        membership,
+        company,
+        company_id,
+        redirect,
+    ) = await _load_company_section_context(
+        request,
+        permission_field="can_access_cart",
+    )
+    if redirect:
+        return redirect
+
+    session = await session_manager.load_session(request)
+    if not session:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    updates: dict[int, int] = {}
+    removals: set[int] = set()
+    invalid_entries = False
+    stock_conflicts: set[int] = set()
+    max_quantity = 9999
+
+    if isinstance(form, FormData):
+        items = form.multi_items()
+    else:
+        items = form.items()
+
+    for key, raw_value in items:
+        if not isinstance(key, str) or not key.startswith("quantity_"):
+            continue
+        suffix = key[len("quantity_") :]
+        try:
+            product_id = int(suffix)
+        except (TypeError, ValueError):
+            invalid_entries = True
+            continue
+
+        value: str | None
+        if isinstance(raw_value, (list, tuple)):
+            value = str(raw_value[0]).strip() if raw_value else None
+        else:
+            value = str(raw_value).strip() if raw_value is not None else None
+
+        try:
+            quantity = int(value) if value is not None else None
+        except (TypeError, ValueError):
+            invalid_entries = True
+            continue
+
+        if quantity is None:
+            invalid_entries = True
+            continue
+
+        if quantity <= 0:
+            removals.add(product_id)
+            continue
+
+        if quantity > max_quantity:
+            quantity = max_quantity
+            invalid_entries = True
+
+        updates[product_id] = quantity
+
+    updated_count = 0
+    for product_id, desired_quantity in updates.items():
+        if product_id in removals:
+            continue
+        existing = await cart_repo.get_item(session.id, product_id)
+        if not existing:
+            invalid_entries = True
+            removals.add(product_id)
+            continue
+
+        current_quantity = int(existing.get("quantity") or 0)
+        if current_quantity == desired_quantity:
+            continue
+
+        product = await shop_repo.get_product_by_id(
+            product_id,
+            company_id=company_id,
+        )
+        if not product:
+            invalid_entries = True
+            removals.add(product_id)
+            continue
+
+        raw_stock = product.get("stock")
+        try:
+            available_stock = int(raw_stock)
+        except (TypeError, ValueError):
+            available_stock = 0
+
+        if available_stock <= 0:
+            stock_conflicts.add(product_id)
+            removals.add(product_id)
+            invalid_entries = True
+            continue
+
+        if desired_quantity > available_stock:
+            stock_conflicts.add(product_id)
+            invalid_entries = True
+            continue
+
+        await cart_repo.update_item_quantity(
+            session_id=session.id,
+            product_id=product_id,
+            quantity=desired_quantity,
+        )
+        updated_count += 1
+
+    removed_count = 0
+    if removals:
+        await cart_repo.remove_items(session.id, removals)
+        removed_count = len(removals)
+
+    url = URL(str(request.url_for("cart_page")))
+    params: dict[str, str] = {}
+
+    if updated_count:
+        fragments = ["Quantities updated"]
+        if removed_count:
+            fragments.append("items removed")
+        params["cartMessage"] = ", ".join(fragments) + "."
+    elif removed_count and not stock_conflicts:
+        params["cartMessage"] = "Items removed."
+
+    if stock_conflicts:
+        params["cartError"] = "Unable to increase some quantities due to limited stock."
+    elif invalid_entries:
+        if "cartMessage" in params:
+            params["cartError"] = "Some quantities were adjusted."
+        else:
+            params["cartError"] = "No changes were applied. Please review the quantities entered."
+
+    redirect_url = url.include_query_params(**params) if params else url
+    return RedirectResponse(
+        url=str(redirect_url),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.post("/cart/remove", response_class=RedirectResponse, name="cart_remove_items", include_in_schema=False)
