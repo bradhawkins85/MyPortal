@@ -2,16 +2,14 @@
 
 {% set cart_allowed = (can_access_cart | default(false)) %}
 {% if not cart_allowed %}
-  {% set cart_allowed = (current_user and current_user.get('is_super_admin')) or (active_membership and active_membership.get('can_access_cart')) %}
+  {% set cart_allowed = (is_super_admin | default(current_user and current_user.get('is_super_admin'))) or (active_membership and active_membership.get('can_access_cart')) %}
 {% endif %}
 
+{% set is_shop_super_admin = is_super_admin | default(current_user and current_user.get('is_super_admin')) %}
+
 {% block header_title_content %}
-  {% set is_shop_super_admin = current_user is defined and current_user and current_user.get('is_super_admin') %}
   <div class="header__title-content">
     <span class="header__title-text">{{ super() }}</span>
-    {% if is_shop_super_admin %}
-      <a class="button button--ghost" href="/admin/shop">Shop admin</a>
-    {% endif %}
   </div>
 {% endblock %}
 
@@ -20,6 +18,9 @@
     <a class="button button--ghost" href="/cart">
       View cart{% if cart_summary.total_quantity %} ({{ cart_summary.total_quantity }}){% endif %}
     </a>
+  {% endif %}
+  {% if is_shop_super_admin %}
+    <a class="button button--ghost" href="/admin/shop">Shop admin</a>
   {% endif %}
 {% endblock %}
 

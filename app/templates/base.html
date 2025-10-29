@@ -219,22 +219,6 @@
                 </a>
               </li>
               <li class="menu__item">
-                <a href="/admin/forms" {% if current_path.startswith('/admin/forms') %}aria-current="page"{% endif %}>
-                  <span class="menu__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h9l5 5v15H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm8 7h4.5L14 4.5V9z"/></svg>
-                  </span>
-                  <span class="menu__label">Forms admin</span>
-                </a>
-              </li>
-              <li class="menu__item">
-                <a href="/admin/knowledge-base" {% if current_path.startswith('/admin/knowledge-base') %}aria-current="page"{% endif %}>
-                  <span class="menu__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v19.5a.5.5 0 0 1-.74.44L14 20l-3.26 1.94A.5.5 0 0 1 10 21.5V19H7a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3zm9 7h-2V7a1 1 0 0 0-2 0v2H9a1 1 0 0 0 0 2h2v2a1 1 0 0 0 2 0v-2h2a1 1 0 0 0 0-2z"/></svg>
-                  </span>
-                  <span class="menu__label">Knowledge base admin</span>
-                </a>
-              </li>
-              <li class="menu__item">
                 <a href="/admin/api-keys" {% if current_path.startswith('/admin/api-keys') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M7 10a5 5 0 0 1 9.58-2.15l4.47 4.47a1 1 0 0 1 0 1.41l-1.42 1.42a1 1 0 0 1-1.41 0l-.62-.62-1.41 1.41a1 1 0 0 1-1.41 0l-.59-.59-.59.59a1 1 0 0 1-1.41 0l-.88-.88A5 5 0 0 1 7 10zm5-3a3 3 0 1 0 2.85 4H16a1 1 0 0 1 .7.29l.91.91 1.42-1.42-1.56-1.56A1 1 0 0 1 18 9h.59l-1.28-1.28A5 5 0 0 0 12 7z"/></svg>
@@ -243,27 +227,7 @@
                 </a>
               </li>
             {% endif %}
-            {% if is_super_admin or (is_helpdesk_technician | default(false)) %}
-              {% if syncro_module_enabled %}
-                <li class="menu__item">
-                  <a href="/admin/tickets/syncro-import" {% if current_path.startswith('/admin/tickets/syncro-import') %}aria-current="page"{% endif %}>
-                    <span class="menu__icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" focusable="false"><path d="M4 4h16v4l-6 4v4l-4 4v-8L4 8z"/></svg>
-                    </span>
-                    <span class="menu__label">Syncro ticket import</span>
-                  </a>
-                </li>
-              {% endif %}
-            {% endif %}
             {% if is_super_admin %}
-              <li class="menu__item">
-                <a href="/admin/automations" {% if current_path.startswith('/admin/automations') %}aria-current="page"{% endif %}>
-                  <span class="menu__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false"><path d="M6 4a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm12 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM6 16a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm12 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM9 6h6a1 1 0 0 1 0 2H9a1 1 0 0 1 0-2zm-1 4a1 1 0 0 1 1-1h6a1 1 0 0 1 .8 1.6l-2.1 2.8a1 1 0 0 0-.2.6v1h1a1 1 0 0 1 0 2h-2a1 1 0 0 1-1-1v-2l-1.5-2H8a1 1 0 0 1-1-1zm1 6h6a1 1 0 0 1 0 2H9a1 1 0 0 1 0-2z"/></svg>
-                  </span>
-                  <span class="menu__label">Ticket automations</span>
-                </a>
-              </li>
               <li class="menu__item">
                 <a href="/admin/automation" {% if current_path.startswith('/admin/automation') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
@@ -288,16 +252,6 @@
                   <span class="menu__label">Webhook monitor</span>
                 </a>
               </li>
-              {% if not current_path.startswith('/shop') %}
-                <li class="menu__item">
-                  <a href="/admin/shop" {% if current_path.startswith('/admin/shop') %}aria-current="page"{% endif %}>
-                    <span class="menu__icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" focusable="false"><path d="M4 7h16l-1.5 12.5A2 2 0 0 1 16.52 21H7.48a2 2 0 0 1-1.98-1.5zM6 3h12a1 1 0 0 1 1 1v2H5V4a1 1 0 0 1 1-1z"/></svg>
-                    </span>
-                    <span class="menu__label">Shop admin</span>
-                  </a>
-                </li>
-              {% endif %}
               <li class="menu__item">
                 <a href="/admin/change-log" {% if current_path.startswith('/admin/change-log') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
@@ -344,8 +298,10 @@
               </svg>
             </button>
             <div class="header__title">
+              {% block header_title %}
               {% block header_title_content %}
                 {{ title | default('Dashboard') }}
+              {% endblock %}
               {% endblock %}
             </div>
           </div>
@@ -355,15 +311,17 @@
           {% endset %}
           {% if has_authenticated_user %}
             <div class="header__actions">
-              <a
-                class="button-link"
-                href="/docs"
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Open API documentation"
-              >
-                Swagger UI
-              </a>
+              {% if current_path is defined and current_path.startswith('/admin/api-keys') %}
+                <a
+                  class="button-link"
+                  href="/docs"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Open API documentation"
+                >
+                  Swagger UI
+                </a>
+              {% endif %}
               {{ header_actions_content }}
             </div>
           {% else %}
