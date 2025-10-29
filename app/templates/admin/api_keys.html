@@ -3,15 +3,18 @@
 {% block header_title %}
   <div class="header__title-content">
     <span class="header__title-text">{{ title | default('API credentials') }}</span>
-    <a
-      class="button button--ghost button--small header__title-button"
-      href="/docs"
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      Swagger UI
-    </a>
   </div>
+{% endblock %}
+
+{% block header_actions %}
+  <a
+    class="button button--ghost button--small"
+    href="/docs"
+    target="_blank"
+    rel="noopener noreferrer"
+  >
+    Swagger UI
+  </a>
 {% endblock %}
 
 {% block content %}
