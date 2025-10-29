@@ -87,13 +87,13 @@
     if (!button) {
       return;
     }
-    const icon = button.querySelector('[data-button-icon]');
-    const spinner = button.querySelector('[data-button-spinner]');
-    if (icon) {
-      icon.hidden = Boolean(isProcessing);
-    }
-    if (spinner) {
-      spinner.hidden = !isProcessing;
+    const label = button.querySelector('[data-button-label]');
+    if (label) {
+      const defaultLabel = button.dataset.defaultLabel || label.textContent || '';
+      if (!button.dataset.defaultLabel) {
+        button.dataset.defaultLabel = defaultLabel;
+      }
+      label.textContent = isProcessing ? 'Reprocessing AI summary and AI tags…' : button.dataset.defaultLabel;
     }
     button.classList.toggle('button--processing', Boolean(isProcessing));
     if (isProcessing) {
@@ -103,6 +103,20 @@
       button.removeAttribute('aria-busy');
       button.disabled = false;
     }
+  }
+
+  function updateTicketAiStatus(button, message, isError) {
+    const card = button ? button.closest('[data-ticket-ai-card]') : null;
+    const status = card ? card.querySelector('[data-ticket-ai-status]') : null;
+    if (!status) {
+      if (message && isError) {
+        alert(message);
+      }
+      return;
+    }
+    status.textContent = message || '';
+    status.hidden = !message;
+    status.classList.toggle('form-help--error', Boolean(isError));
   }
 
   function bindTicketAiRefresh() {
@@ -119,22 +133,22 @@
           return;
         }
 
-        let shouldReload = false;
         try {
           setButtonProcessing(button, true);
+          updateTicketAiStatus(button, 'Requesting AI regeneration. You can continue working while we update the summary.', false);
           await requestJson(`/admin/tickets/${ticketId}/ai/reprocess`, {
             method: 'POST',
             body: JSON.stringify({}),
           });
-          shouldReload = true;
+          updateTicketAiStatus(
+            button,
+            'AI summary and tags will be regenerated shortly. Refresh the ticket in a moment to review the updates.',
+            false,
+          );
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Unable to refresh AI summary and tags.';
-          alert(message);
+          updateTicketAiStatus(button, message, true);
         } finally {
-          if (shouldReload) {
-            window.location.reload();
-            return;
-          }
           setButtonProcessing(button, false);
         }
       });
