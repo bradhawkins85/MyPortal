@@ -1,0 +1,7 @@
+{
+  "guid": "e3174fa2-7b84-4f6c-afaa-005a8d0ff80a",
+  "occurred_at": "2025-10-29T14:32Z",
+  "change_type": "Fix",
+  "summary": "Stacked package admin layout and collapsed creation form by default.",
+  "content_hash": "c426853b116a3395090d007d50d273ed6ac46ca2eb54f9b010e6b0f80d5bb264"
+}
