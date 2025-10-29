@@ -149,6 +149,8 @@ async def test_create_reply_returns_inserted_record(monkeypatch):
         "author_id": 4,
         "body": "Reply",
         "is_internal": 0,
+        "minutes_spent": 15,
+        "is_billable": 1,
         "created_at": None,
     }
     dummy_db = _DummyTicketDB(fetched)
@@ -162,6 +164,8 @@ async def test_create_reply_returns_inserted_record(monkeypatch):
     )
 
     assert record["id"] == 42
+    assert record["minutes_spent"] == 15
+    assert record["is_billable"] is True
     assert dummy_db.fetch_sql == "SELECT * FROM ticket_replies WHERE id = %s"
     assert dummy_db.fetch_params == (42,)
 
@@ -183,6 +187,8 @@ async def test_create_reply_falls_back_when_fetch_missing(monkeypatch):
     assert record["author_id"] is None
     assert record["body"] == "Internal"
     assert record["is_internal"] == 1
+    assert record["minutes_spent"] is None
+    assert record["is_billable"] is False
 
 
 @pytest.mark.anyio
