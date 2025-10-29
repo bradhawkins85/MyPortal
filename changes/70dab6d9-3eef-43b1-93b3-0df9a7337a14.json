@@ -1,0 +1,7 @@
+{
+  "guid": "70dab6d9-3eef-43b1-93b3-0df9a7337a14",
+  "occurred_at": "2025-10-29T07:28Z",
+  "change_type": "Feature",
+  "summary": "Enabled helpdesk teams to edit ticket descriptions and replace them with AI summaries.",
+  "content_hash": "fce31ec31492fa5ec434ec4b60bde74e77f79aad165b3ce03a9750ea3e8eb76c"
+}
