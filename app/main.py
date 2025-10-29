@@ -5060,6 +5060,8 @@ async def admin_automation(request: Request):
         company_lookup[company_id] = str(company.get("name") or f"Company #{company_id}")
 
     prepared_tasks: list[dict[str, Any]] = []
+    global_tasks: list[dict[str, Any]] = []
+    company_tasks: list[dict[str, Any]] = []
     missing_company_ids: set[int] = set()
     for task in tasks:
         serialised_task = _serialise_mapping(task)
@@ -5082,6 +5084,10 @@ async def admin_automation(request: Request):
                     missing_company_ids.add(company_key)
         serialised_task["company_name"] = company_name
         prepared_tasks.append(serialised_task)
+        if company_id is None or company_name.lower() == "all companies":
+            global_tasks.append(serialised_task)
+        else:
+            company_tasks.append(serialised_task)
     command_options = [
         {"value": "sync_staff", "label": "Sync staff directory"},
         {"value": "sync_o365", "label": "Sync Microsoft 365 licenses"},
@@ -5101,6 +5107,8 @@ async def admin_automation(request: Request):
     extra = {
         "title": "System Automation",
         "tasks": prepared_tasks,
+        "global_tasks": global_tasks,
+        "company_tasks": company_tasks,
         "command_options": command_options,
         "company_options": company_options,
     }

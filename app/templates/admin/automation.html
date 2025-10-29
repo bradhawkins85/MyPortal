@@ -3,93 +3,185 @@
 {% block content %}
 <div class="admin-grid">
   <section class="card card--panel">
-    <header class="card__header card__header--actions">
+    <header class="card__header card__header--stacked">
       <div>
         <h2 class="card__title">Scheduled tasks</h2>
         <p class="card__subtitle">Create, monitor, and control background automation jobs.</p>
       </div>
-      <div class="card__controls">
-        <input
-          type="search"
-          class="form-input"
-          placeholder="Filter tasks"
-          aria-label="Filter scheduled tasks"
-          data-table-filter="tasks-table"
-        />
-        <button type="button" class="button" data-task-create>
-          New task
-        </button>
-      </div>
     </header>
-    <div class="table-wrapper">
-      <table class="table" id="tasks-table" data-table>
-        <thead>
-          <tr>
-            <th scope="col" data-sort="string">Name</th>
-            <th scope="col" data-sort="string">Command</th>
-            <th scope="col" data-sort="string">Company</th>
-            <th scope="col" data-sort="string">Cron</th>
-            <th scope="col" data-sort="string">Active</th>
-            <th scope="col" data-sort="date">Last run</th>
-            <th scope="col" data-sort="string">Status</th>
-            <th scope="col" class="table__actions">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for task in tasks %}
-            <tr data-task='{{ task | tojson }}'>
-              <td data-label="Name">{{ task.name }}</td>
-              <td data-label="Command">{{ task.command }}</td>
-              <td data-label="Company" data-value="{{ task.company_name }}">
-                {{ task.company_name }}
-              </td>
-              <td data-label="Cron">{{ task.cron }}</td>
-              <td data-label="Active">
-                <span class="tag {{ 'tag--success' if task.active else 'tag--muted' }}">{{ 'Yes' if task.active else 'No' }}</span>
-              </td>
-              <td data-label="Last run" data-value="{{ task.last_run_iso or '' }}">
-                {% if task.last_run_iso %}
-                  <span data-utc="{{ task.last_run_iso }}"></span>
-                {% else %}
-                  <span class="text-muted">Never</span>
-                {% endif %}
-              </td>
-              <td data-label="Status">{{ task.last_status or '—' }}</td>
-              <td class="table__actions">
-                <div class="table__action-buttons">
-                  <button type="button" class="button button--ghost" data-task-edit>Edit</button>
-                  <button type="button" class="button button--ghost" data-task-run>Run now</button>
-                  <button type="button" class="button button--ghost" data-task-logs>View logs</button>
-                </div>
-              </td>
-            </tr>
-          {% else %}
-            <tr>
-              <td colspan="8" class="table__empty">No tasks configured yet.</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <div class="table-pagination" data-pagination="tasks-table">
-      <div class="table-pagination__group">
-        <button
-          type="button"
-          class="button button--ghost table-pagination__button"
-          data-page-prev
-          disabled
-        >
-          Previous
-        </button>
-        <button
-          type="button"
-          class="button button--ghost table-pagination__button"
-          data-page-next
-        >
-          Next
-        </button>
-      </div>
-      <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+    {% set global_tasks = global_tasks | default([], true) %}
+    {% set company_tasks = company_tasks | default([], true) %}
+    <div class="card__body card__body--stacked">
+      <section>
+        <h3 class="card__subtitle">All companies</h3>
+        <p class="text-muted">Tasks that execute for every company profile.</p>
+        <div class="table-toolbar">
+          <input
+            type="search"
+            class="form-input"
+            placeholder="Filter all-company tasks"
+            aria-label="Filter all-company tasks"
+            data-table-filter="tasks-table-global"
+          />
+          <button type="button" class="button" data-task-create>
+            New task
+          </button>
+        </div>
+        <div class="table-wrapper">
+          <table class="table" id="tasks-table-global" data-table>
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string">Name</th>
+                <th scope="col" data-sort="string">Command</th>
+                <th scope="col" data-sort="string">Company</th>
+                <th scope="col" data-sort="string">Cron</th>
+                <th scope="col" data-sort="string">Active</th>
+                <th scope="col" data-sort="date">Last run</th>
+                <th scope="col" data-sort="string">Status</th>
+                <th scope="col" class="table__actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for task in global_tasks %}
+                <tr data-task='{{ task | tojson }}'>
+                  <td data-label="Name">{{ task.name }}</td>
+                  <td data-label="Command">{{ task.command }}</td>
+                  <td data-label="Company" data-value="{{ task.company_name }}">
+                    {{ task.company_name }}
+                  </td>
+                  <td data-label="Cron">{{ task.cron }}</td>
+                  <td data-label="Active">
+                    <span class="tag {{ 'tag--success' if task.active else 'tag--muted' }}">{{ 'Yes' if task.active else 'No' }}</span>
+                  </td>
+                  <td data-label="Last run" data-value="{{ task.last_run_iso or '' }}">
+                    {% if task.last_run_iso %}
+                      <span data-utc="{{ task.last_run_iso }}"></span>
+                    {% else %}
+                      <span class="text-muted">Never</span>
+                    {% endif %}
+                  </td>
+                  <td data-label="Status">{{ task.last_status or '—' }}</td>
+                  <td class="table__actions">
+                    <div class="table__action-buttons">
+                      <button type="button" class="button button--ghost" data-task-edit>Edit</button>
+                      <button type="button" class="button button--ghost" data-task-run>Run now</button>
+                      <button type="button" class="button button--ghost" data-task-logs>View logs</button>
+                    </div>
+                  </td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="8" class="table__empty">No global tasks configured yet.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="table-pagination" data-pagination="tasks-table-global">
+          <div class="table-pagination__group">
+            <button
+              type="button"
+              class="button button--ghost table-pagination__button"
+              data-page-prev
+              disabled
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              class="button button--ghost table-pagination__button"
+              data-page-next
+            >
+              Next
+            </button>
+          </div>
+          <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+        </div>
+      </section>
+      <section class="divider"></section>
+      <section>
+        <h3 class="card__subtitle">Company-specific</h3>
+        <p class="text-muted">Tasks targeted to individual companies.</p>
+        <div class="table-toolbar">
+          <input
+            type="search"
+            class="form-input"
+            placeholder="Filter company tasks"
+            aria-label="Filter company-specific tasks"
+            data-table-filter="tasks-table-company"
+          />
+        </div>
+        <div class="table-wrapper">
+          <table class="table" id="tasks-table-company" data-table>
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string">Name</th>
+                <th scope="col" data-sort="string">Command</th>
+                <th scope="col" data-sort="string">Company</th>
+                <th scope="col" data-sort="string">Cron</th>
+                <th scope="col" data-sort="string">Active</th>
+                <th scope="col" data-sort="date">Last run</th>
+                <th scope="col" data-sort="string">Status</th>
+                <th scope="col" class="table__actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for task in company_tasks %}
+                <tr data-task='{{ task | tojson }}'>
+                  <td data-label="Name">{{ task.name }}</td>
+                  <td data-label="Command">{{ task.command }}</td>
+                  <td data-label="Company" data-value="{{ task.company_name }}">
+                    {{ task.company_name }}
+                  </td>
+                  <td data-label="Cron">{{ task.cron }}</td>
+                  <td data-label="Active">
+                    <span class="tag {{ 'tag--success' if task.active else 'tag--muted' }}">{{ 'Yes' if task.active else 'No' }}</span>
+                  </td>
+                  <td data-label="Last run" data-value="{{ task.last_run_iso or '' }}">
+                    {% if task.last_run_iso %}
+                      <span data-utc="{{ task.last_run_iso }}"></span>
+                    {% else %}
+                      <span class="text-muted">Never</span>
+                    {% endif %}
+                  </td>
+                  <td data-label="Status">{{ task.last_status or '—' }}</td>
+                  <td class="table__actions">
+                    <div class="table__action-buttons">
+                      <button type="button" class="button button--ghost" data-task-edit>Edit</button>
+                      <button type="button" class="button button--ghost" data-task-run>Run now</button>
+                      <button type="button" class="button button--ghost" data-task-logs>View logs</button>
+                    </div>
+                  </td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="8" class="table__empty">No company-specific tasks configured yet.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="table-pagination" data-pagination="tasks-table-company">
+          <div class="table-pagination__group">
+            <button
+              type="button"
+              class="button button--ghost table-pagination__button"
+              data-page-prev
+              disabled
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              class="button button--ghost table-pagination__button"
+              data-page-next
+            >
+              Next
+            </button>
+          </div>
+          <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+        </div>
+      </section>
     </div>
   </section>
 </div>
