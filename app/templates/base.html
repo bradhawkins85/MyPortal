@@ -119,14 +119,6 @@
                 <span class="menu__label">Shop</span>
               </a>
             </li>
-            <li class="menu__item">
-              <a href="/shop/packages" {% if current_path.startswith('/shop/packages') %}aria-current="page"{% endif %}>
-                <span class="menu__icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" focusable="false"><path d="M3.2 7.6 11.5 12v9.5L3 17a1 1 0 0 1-.5-.86V8.37a1 1 0 0 1 .7-.97Zm17.6 0-8.3 4.4v9.5L21 17a1 1 0 0 0 .5-.86V8.37a1 1 0 0 0-.7-.97ZM12 2l8.7 4.6-8.2 4.34L3 6.6z"/></svg>
-                </span>
-                <span class="menu__label">Packages</span>
-              </a>
-            </li>
           {% endif %}
           {% if can_access_orders %}
             <li class="menu__item">

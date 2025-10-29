@@ -1,0 +1,7 @@
+{
+  "guid": "8d2f6b60-0f94-4a05-9e49-6ab5a29d8b25",
+  "occurred_at": "2025-02-14T10:00Z",
+  "change_type": "Fix",
+  "summary": "Removed the /shop/packages navigation link from the primary sidebar to declutter the customer menu.",
+  "content_hash": "ff763acf7a0b99bca8f9d9204a498ea45cd3318d97161fda2fc5fb2651b78488"
+}
