@@ -321,17 +321,6 @@
           {% endset %}
           {% if has_authenticated_user %}
             <div class="header__actions">
-              {% if current_path is defined and current_path.startswith('/admin/api-keys') %}
-                <a
-                  class="button-link"
-                  href="/docs"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Open API documentation"
-                >
-                  Swagger UI
-                </a>
-              {% endif %}
               {{ header_actions_content }}
             </div>
           {% else %}
