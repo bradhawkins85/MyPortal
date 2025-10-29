@@ -1,0 +1,7 @@
+{
+  "guid": "7627e5bd-2976-48ca-844d-2f0791411676",
+  "occurred_at": "2025-10-29T13:37Z",
+  "change_type": "Fix",
+  "summary": "Moved Shop admin button into header actions for right-aligned placement.",
+  "content_hash": "e70a294e923857e62248741f0a2a2d42f03c6b5bf195de9be95ece9e52592ed1"
+}
