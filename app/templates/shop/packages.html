@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% set cart_allowed = (can_access_cart | default(false)) %}
+{% if not cart_allowed %}
+  {% set cart_allowed = (is_super_admin | default(current_user and current_user.get('is_super_admin'))) or (active_membership and active_membership.get('can_access_cart')) %}
+{% endif %}
+
+{% set is_shop_super_admin = is_super_admin | default(current_user and current_user.get('is_super_admin')) %}
+
+{% block header_title_content %}
+  <div class="header__title-content">
+    <span class="header__title-text">{{ super() }}</span>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  <a class="button button--ghost" href="/shop">Products</a>
+  {% if cart_allowed %}
+    <a class="button button--ghost" href="/cart">
+      View cart{% if cart_summary.total_quantity %} ({{ cart_summary.total_quantity }}){% endif %}
+    </a>
+  {% endif %}
+  {% if is_shop_super_admin %}
+    <a class="button button--ghost" href="/admin/shop/packages">Package admin</a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+{% if cart_error %}
+  <div class="alert alert--error" role="alert">{{ cart_error }}</div>
+{% endif %}
+
+<div class="shop-layout">
+  <aside class="card card--panel shop-layout__sidebar">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Packages</h2>
+        <p class="card__subtitle">Curated bundles assembled by our team for repeat ordering.</p>
+      </div>
+    </header>
+    <div class="package-summary">
+      <p>Each package automatically keeps its price and stock in sync with the included products.</p>
+      <ul class="list list--bullet">
+        <li>Price equals the sum of the current product prices.</li>
+        <li>Stock reflects the lowest stocked product within the bundle.</li>
+        <li>Adding a package adds all contained products to your cart.</li>
+      </ul>
+    </div>
+  </aside>
+
+  <section class="card card--panel shop-layout__content">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Available packages</h2>
+        <p class="card__subtitle">Choose a package to automatically add multiple products to your order.</p>
+      </div>
+      <div class="card__controls shop-toolbar">
+        <input
+          type="search"
+          class="form-input card__control"
+          placeholder="Filter packages"
+          aria-label="Filter packages"
+          data-table-filter="shop-packages-table"
+        />
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table" id="shop-packages-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string">Name</th>
+            <th scope="col" data-sort="string">SKU</th>
+            <th scope="col" data-sort="number">Items</th>
+            <th scope="col" data-sort="number">Price</th>
+            <th scope="col" data-sort="number">Stock</th>
+            <th scope="col" class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for package in packages if package.is_available %}
+            <tr data-package-id="{{ package.id }}" data-stock="{{ package.stock_level }}">
+              <td data-label="Name">
+                <div class="package-name">
+                  <strong>{{ package.name }}</strong>
+                  <details class="package-details">
+                    <summary>Included products</summary>
+                    <ul class="list list--bullet">
+                      {% for item in package.items %}
+                        <li>{{ item.product_name }} ({{ item.product_sku }}) × {{ item.quantity }}</li>
+                      {% endfor %}
+                    </ul>
+                  </details>
+                </div>
+              </td>
+              <td data-label="SKU">{{ package.sku }}</td>
+              <td data-label="Items" data-value="{{ package.product_count }}">{{ package.product_count }}</td>
+              <td data-label="Price" data-value="{{ package.price_total }}">${{ '%.2f'|format(package.price_total) }}</td>
+              <td data-label="Stock" data-value="{{ package.stock_level }}">
+                <span class="badge {% if package.stock_level == 0 %}badge--danger{% elif package.stock_level < 5 %}badge--warning{% else %}badge--success{% endif %}">
+                  {{ package.stock_level }}
+                </span>
+              </td>
+              <td class="table__actions">
+                <div class="table__action-buttons">
+                  {% if package.stock_level > 0 %}
+                    {% if cart_allowed %}
+                      <form action="/cart/add-package" method="post" class="inline-form">
+                        {% include "partials/csrf.html" %}
+                        <input type="hidden" name="packageId" value="{{ package.id }}" />
+                        <label class="visually-hidden" for="package-qty-{{ package.id }}">Quantity for {{ package.name }}</label>
+                        <input
+                          class="form-input form-input--sm"
+                          id="package-qty-{{ package.id }}"
+                          type="number"
+                          name="quantity"
+                          min="1"
+                          max="{{ package.stock_level }}"
+                          value="1"
+                        />
+                        <button type="submit" class="button">Add to cart</button>
+                      </form>
+                    {% else %}
+                      <span class="badge badge--muted">Cart access required</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="badge badge--muted">Out of stock</span>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="6" class="table__empty">No packages are currently available.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="table-pagination" data-pagination="shop-packages-table">
+      <div class="table-pagination__group">
+        <button type="button" class="button button--ghost table-pagination__button" data-page-prev disabled>Previous</button>
+        <button type="button" class="button button--ghost table-pagination__button" data-page-next>Next</button>
+      </div>
+      <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+    </div>
+  </section>
+</div>
+{% endblock %}
