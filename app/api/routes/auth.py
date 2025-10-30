@@ -7,7 +7,7 @@ from typing import Any
 
 import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from loguru import logger
 
 from app.api.dependencies.auth import (
@@ -320,8 +320,20 @@ async def exit_impersonation(
             detail=str(exc),
         ) from exc
 
-    response_model = _build_login_response(restored_user, restored_session)
-    response = JSONResponse(content=response_model.model_dump(mode="json"))
+    accept_header = request.headers.get("accept", "").lower()
+    prefers_html = (
+        ("text/html" in accept_header or "application/xhtml+xml" in accept_header)
+        and "application/json" not in accept_header
+    )
+
+    if prefers_html:
+        response = RedirectResponse(
+            url="/admin/impersonation",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    else:
+        response_model = _build_login_response(restored_user, restored_session)
+        response = JSONResponse(content=response_model.model_dump(mode="json"))
     session_manager.apply_session_cookies(response, restored_session)
     request.state.session = restored_session
     request.state.active_company_id = restored_session.active_company_id
