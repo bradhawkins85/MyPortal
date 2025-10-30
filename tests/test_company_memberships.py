@@ -224,17 +224,48 @@ async def test_render_company_edit_page_includes_assign_form_data(monkeypatch):
         AsyncMock(return_value=[{"id": 3, "name": "Manager"}]),
     )
 
-    async def fake_list_users_for_company(company_id: int) -> list[dict[str, Any]]:
+    async def fake_list_staff_with_users(company_id: int) -> list[dict[str, Any]]:
         if company_id == 4:
-            return [{"id": 10, "email": "alpha@example.com"}]
+            return [
+                {
+                    "staff_id": 101,
+                    "first_name": "Alpha",
+                    "last_name": "One",
+                    "email": "alpha@example.com",
+                    "enabled": True,
+                    "user_id": 10,
+                },
+                {
+                    "staff_id": 102,
+                    "first_name": "Inactive",
+                    "last_name": "Person",
+                    "email": "inactive@example.com",
+                    "enabled": False,
+                    "user_id": None,
+                },
+            ]
         if company_id == 8:
             return [
-                {"id": 12, "email": "zeta@example.com"},
-                {"id": 11, "email": "beta@example.com"},
+                {
+                    "staff_id": 203,
+                    "first_name": "",
+                    "last_name": "",
+                    "email": "zeta@example.com",
+                    "enabled": True,
+                    "user_id": 12,
+                },
+                {
+                    "staff_id": 202,
+                    "first_name": "Beta",
+                    "last_name": "Person",
+                    "email": "beta@example.com",
+                    "enabled": True,
+                    "user_id": 11,
+                },
             ]
         return []
 
-    monkeypatch.setattr(main.user_repo, "list_users_for_company", fake_list_users_for_company)
+    monkeypatch.setattr(main.staff_repo, "list_staff_with_users", fake_list_staff_with_users)
 
     captured: dict[str, Any] = {}
 
@@ -266,14 +297,44 @@ async def test_render_company_edit_page_includes_assign_form_data(monkeypatch):
     extra = captured.get("extra", {})
     assert extra.get("assign_form", {}).get("company_id") == 8
     assert extra.get("assign_form", {}).get("user_id") == 11
+    assert extra.get("assign_form", {}).get("user_value") == "11"
     assert extra.get("assign_form", {}).get("staff_permission") == 3
     assert extra.get("assign_form", {}).get("permissions", {}).get("can_access_shop") is True
     assert extra.get("assign_user_options") == [
-        {"id": 11, "email": "beta@example.com"},
-        {"id": 12, "email": "zeta@example.com"},
+        {
+            "value": "11",
+            "label": "Beta Person (beta@example.com)",
+            "email": "beta@example.com",
+            "staff_id": 202,
+            "user_id": 11,
+            "has_user": True,
+        },
+        {
+            "value": "12",
+            "label": "zeta@example.com",
+            "email": "zeta@example.com",
+            "staff_id": 203,
+            "user_id": 12,
+            "has_user": True,
+        },
     ]
     assert extra.get("company_user_options", {}).get(4) == [
-        {"id": 10, "email": "alpha@example.com"}
+        {
+            "value": "10",
+            "label": "Alpha One (alpha@example.com)",
+            "email": "alpha@example.com",
+            "staff_id": 101,
+            "user_id": 10,
+            "has_user": True,
+        },
+        {
+            "value": "staff:102",
+            "label": "Inactive Person (inactive@example.com) (inactive) – invite required",
+            "email": "inactive@example.com",
+            "staff_id": 102,
+            "user_id": None,
+            "has_user": False,
+        },
     ]
 
 

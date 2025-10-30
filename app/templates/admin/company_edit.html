@@ -103,7 +103,7 @@
           autocomplete="off"
           data-company-assign-form
           data-initial-company-id="{{ assign_form.company_id }}"
-          data-initial-user-id="{{ assign_form.user_id or '' }}"
+          data-initial-user-id="{{ assign_form.user_value or '' }}"
         >
           {% include "partials/csrf.html" %}
           <input type="hidden" name="sourceCompanyId" value="{{ company.id }}" />
@@ -113,14 +113,20 @@
               <option
                 value=""
                 disabled
-                {% if not assign_form.user_id %}selected{% endif %}
+                {% if not assign_form.user_value %}selected{% endif %}
                 data-placeholder
               >
                 Select a user
               </option>
               {% for option in assign_user_options %}
-                <option value="{{ option.id }}" {% if option.id == assign_form.user_id %}selected{% endif %}>
-                  {{ option.email }}
+                <option
+                  value="{{ option.value }}"
+                  {% if option.value == assign_form.user_value %}selected{% endif %}
+                  {% if option.staff_id is not none %}data-staff-id="{{ option.staff_id }}"{% endif %}
+                  {% if option.user_id is not none %}data-user-id="{{ option.user_id }}"{% endif %}
+                  data-has-user="{% if option.has_user %}1{% else %}0{% endif %}"
+                >
+                  {{ option.label }}
                 </option>
               {% endfor %}
             </select>

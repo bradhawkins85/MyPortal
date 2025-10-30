@@ -1205,14 +1205,27 @@
         if (!entry || typeof entry !== 'object') {
           return;
         }
-        const { id, email } = entry;
-        if (id === undefined || email === undefined) {
+        const value = entry.value ?? entry.id;
+        const label = entry.label ?? entry.email;
+        if (value === undefined || label === undefined) {
           return;
         }
         const option = document.createElement('option');
-        option.value = String(id);
-        option.textContent = String(email);
-        if (desiredSelection && String(id) === String(desiredSelection)) {
+        option.value = String(value);
+        option.textContent = String(label);
+        if (entry.user_id !== undefined && entry.user_id !== null) {
+          option.dataset.userId = String(entry.user_id);
+        }
+        if (entry.staff_id !== undefined && entry.staff_id !== null) {
+          option.dataset.staffId = String(entry.staff_id);
+        }
+        if (entry.has_user !== undefined) {
+          option.dataset.hasUser = entry.has_user ? '1' : '0';
+          if (!entry.has_user) {
+            option.dataset.requiresInvite = '1';
+          }
+        }
+        if (desiredSelection && String(value) === String(desiredSelection)) {
           option.selected = true;
           hasSelection = true;
         }
@@ -1233,6 +1246,19 @@
     companySelect.addEventListener('change', () => {
       const selectedCompanyId = companySelect.value;
       populateUsers(selectedCompanyId, undefined);
+    });
+
+    userSelect.addEventListener('change', () => {
+      const selectedOption = userSelect.selectedOptions[0];
+      if (!selectedOption) {
+        return;
+      }
+      if (selectedOption.dataset.requiresInvite === '1') {
+        const staffName = selectedOption.textContent || 'This staff member';
+        alert(
+          `${staffName} does not have a portal account yet. Invite them from the staff page before assigning access.`,
+        );
+      }
     });
   }
 

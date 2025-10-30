@@ -1,0 +1,7 @@
+{
+  "guid": "4a9e8111-33b1-419c-a15e-55720d6408af",
+  "occurred_at": "2025-10-30T12:28Z",
+  "change_type": "Fix",
+  "summary": "Show company staff in the assign staff access dropdown and guide admins to invite missing portal users.",
+  "content_hash": "03b5d04bdd055381e71c6749ec7247246690845cb0204c00d34e6d9d91315dec"
+}
