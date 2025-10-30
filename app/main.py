@@ -1408,15 +1408,19 @@ def _parse_permission_lines(value: str | None) -> tuple[list[dict[str, Any]], li
         line = raw_line.strip()
         if not line:
             continue
-        if " " not in line:
+        slash_index = line.find("/")
+        if slash_index <= 0:
             errors.append(f"Line {index}: Enter values as 'METHOD /path'.")
             continue
-        method_part, path_part = line.split(None, 1)
-        path = path_part.strip()
+        method_part = line[:slash_index].strip()
+        path = line[slash_index:].strip()
         if not path.startswith("/"):
             errors.append(f"Line {index}: Paths must start with '/'.")
             continue
-        raw_methods = [token.strip().upper() for token in method_part.split(",")]
+        raw_methods = [
+            token.strip().upper()
+            for token in method_part.replace(",", " ").split()
+        ]
         methods = [token for token in raw_methods if token]
         if not methods:
             errors.append(f"Line {index}: Provide at least one HTTP method.")
@@ -6007,6 +6011,115 @@ async def admin_create_api_key_page(request: Request):
         status_message=status_message,
         errors=None,
         new_api_key=new_api_key,
+    )
+
+
+@app.post("/admin/api-keys/update", response_class=HTMLResponse)
+async def admin_update_api_key_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    filters = _extract_api_key_filters(form)
+    errors: list[str] = []
+    api_key_id_raw = form.get("api_key_id")
+    try:
+        api_key_id = int(api_key_id_raw)
+    except (TypeError, ValueError):
+        errors.append("Invalid API key identifier supplied for update.")
+        return await _render_api_keys_dashboard(
+            request,
+            current_user,
+            **filters,
+            status_message=None,
+            errors=errors,
+        )
+
+    existing = await api_key_repo.get_api_key_with_usage(api_key_id)
+    if not existing:
+        errors.append("API key not found or no longer available.")
+        return await _render_api_keys_dashboard(
+            request,
+            current_user,
+            **filters,
+            status_message=None,
+            errors=errors,
+        )
+
+    description_raw = form.get("description")
+    description_text = str(description_raw).strip() if description_raw is not None else ""
+    new_description = description_text or None
+
+    expiry_raw = form.get("expiry_date")
+    expiry_date = _parse_input_date(expiry_raw) if expiry_raw else None
+    if expiry_raw and expiry_date is None:
+        errors.append("Enter a valid expiry date in YYYY-MM-DD format.")
+
+    permissions_raw = form.get("permissions")
+    permissions_text = str(permissions_raw).strip() if permissions_raw is not None else ""
+    parsed_permissions, permission_errors = _parse_permission_lines(permissions_text)
+    errors.extend(permission_errors)
+
+    if errors:
+        return await _render_api_keys_dashboard(
+            request,
+            current_user,
+            **filters,
+            status_message=None,
+            errors=errors,
+        )
+
+    try:
+        updated = await api_key_repo.update_api_key(
+            api_key_id,
+            description=new_description,
+            expiry_date=expiry_date,
+            permissions=parsed_permissions,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to update API key from admin form",
+            api_key_id=api_key_id,
+            error=str(exc),
+        )
+        errors.append("Unable to save API key changes. Please try again.")
+        return await _render_api_keys_dashboard(
+            request,
+            current_user,
+            **filters,
+            status_message=None,
+            errors=errors,
+        )
+
+    await audit_service.log_action(
+        action="api_keys.update",
+        user_id=current_user.get("id"),
+        entity_type="api_key",
+        entity_id=api_key_id,
+        previous_value={
+            "description": existing.get("description"),
+            "expiry_date": existing.get("expiry_date").isoformat()
+            if isinstance(existing.get("expiry_date"), date)
+            else None,
+            "permissions": existing.get("permissions", []),
+        },
+        new_value={
+            "description": updated.get("description"),
+            "expiry_date": updated.get("expiry_date").isoformat()
+            if isinstance(updated.get("expiry_date"), date)
+            else None,
+            "permissions": updated.get("permissions", []),
+        },
+        request=request,
+    )
+
+    status_message = "API key changes saved."
+    return await _render_api_keys_dashboard(
+        request,
+        current_user,
+        **filters,
+        status_message=status_message,
+        errors=None,
     )
 
 
