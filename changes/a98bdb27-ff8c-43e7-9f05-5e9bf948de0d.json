@@ -1,0 +1,7 @@
+{
+  "guid": "a98bdb27-ff8c-43e7-9f05-5e9bf948de0d",
+  "occurred_at": "2025-10-30T13:14:19Z",
+  "change_type": "Fix",
+  "summary": "Moved the Add Company button into the page header for easier access.",
+  "content_hash": "fd78cc73f27e77dc053598088da0cb10309bdc55cb17a1621d87d7401dc2d8e4"
+}
