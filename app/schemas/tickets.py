@@ -151,6 +151,33 @@ class TicketDashboardResponse(BaseModel):
     filters: TicketSearchFilters
 
 
+class TicketStatusDefinitionModel(BaseModel):
+    tech_status: str = Field(alias="techStatus")
+    tech_label: str = Field(alias="techLabel")
+    public_status: str = Field(alias="publicStatus")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TicketStatusUpdateInput(BaseModel):
+    tech_label: str = Field(..., alias="techLabel", min_length=1, max_length=128)
+    public_status: str = Field(..., alias="publicStatus", min_length=1, max_length=128)
+    existing_slug: str | None = Field(default=None, alias="existingSlug", max_length=64)
+    tech_status: str | None = Field(default=None, alias="techStatus", max_length=64)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TicketStatusUpdateRequest(BaseModel):
+    statuses: list[TicketStatusUpdateInput] = Field(default_factory=list)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TicketStatusListResponse(BaseModel):
+    statuses: list[TicketStatusDefinitionModel] = Field(default_factory=list)
+
+
 class TicketWatcherUpdate(BaseModel):
     user_ids: list[int] = Field(default_factory=list)
 

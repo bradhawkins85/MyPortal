@@ -33,9 +33,11 @@ def _no_ticket_update_events(monkeypatch):
 
 
 def test_normalise_status_mapping():
-    assert ticket_importer._normalise_status("In Progress") == "in_progress"
-    assert ticket_importer._normalise_status("Waiting on customer") == "pending"
-    assert ticket_importer._normalise_status("Completed") == "resolved"
+    allowed = {"open", "in_progress", "pending", "resolved", "closed"}
+    default = "open"
+    assert ticket_importer._normalise_status("In Progress", allowed, default) == "in_progress"
+    assert ticket_importer._normalise_status("Waiting on customer", allowed, default) == "pending"
+    assert ticket_importer._normalise_status("Completed", allowed, default) == "resolved"
 
 
 def test_normalise_priority_mapping():
