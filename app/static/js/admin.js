@@ -1431,6 +1431,9 @@
     const usageCountElement = modal.querySelector('[data-api-key-usage-count]');
     const usageListElement = modal.querySelector('[data-api-key-usage-list]');
     const usageEmptyElement = modal.querySelector('[data-api-key-usage-empty]');
+    const accessElement = modal.querySelector('[data-api-key-access]');
+    const permissionsListElement = modal.querySelector('[data-api-key-permissions-list]');
+    const permissionsEmptyElement = modal.querySelector('[data-api-key-permissions-empty]');
     const rotateForm = modal.querySelector('[data-api-key-rotate-form]');
     const revokeForm = modal.querySelector('[data-api-key-revoke-form]');
     const rotateIdInput = modal.querySelector('[data-api-key-rotate-id]');
@@ -1438,6 +1441,9 @@
     const descriptionInput = rotateForm ? rotateForm.querySelector('#modal-rotate-description') : null;
     const expiryInput = rotateForm ? rotateForm.querySelector('#modal-rotate-expiry') : null;
     const retireInput = rotateForm ? rotateForm.querySelector('#modal-rotate-retire') : null;
+    const permissionsInput = rotateForm
+      ? rotateForm.querySelector('[data-api-key-rotate-permissions]')
+      : null;
 
     function formatDateTime(iso, fallbackText = '—') {
       if (!iso) {
@@ -1494,6 +1500,36 @@
       }
       usageListElement.hidden = true;
       usageEmptyElement.hidden = false;
+    }
+
+    function renderPermissionsList(permissions) {
+      if (!permissionsListElement || !permissionsEmptyElement) {
+        return;
+      }
+      permissionsListElement.innerHTML = '';
+      if (Array.isArray(permissions) && permissions.length > 0) {
+        permissionsListElement.hidden = false;
+        permissionsEmptyElement.hidden = true;
+        permissions.forEach((entry) => {
+          const item = document.createElement('li');
+          const label = document.createElement('span');
+          label.className = 'usage-list__ip';
+          const path = (entry.path || '').trim() || '/';
+          const methods = Array.isArray(entry.methods) && entry.methods.length > 0
+            ? entry.methods.join(', ')
+            : '—';
+          label.textContent = path;
+          const methodsElement = document.createElement('span');
+          methodsElement.className = 'usage-list__count';
+          methodsElement.textContent = methods;
+          item.appendChild(label);
+          item.appendChild(methodsElement);
+          permissionsListElement.appendChild(item);
+        });
+        return;
+      }
+      permissionsListElement.hidden = true;
+      permissionsEmptyElement.hidden = false;
     }
 
     function populateModal(trigger) {
@@ -1553,6 +1589,11 @@
       }
 
       renderUsageList(payload.usage);
+      renderPermissionsList(payload.permissions);
+
+      if (accessElement) {
+        accessElement.textContent = payload.access_summary || 'All endpoints';
+      }
 
       if (rotateIdInput) {
         rotateIdInput.value = payload.id || '';
@@ -1568,6 +1609,9 @@
       }
       if (retireInput) {
         retireInput.checked = true;
+      }
+      if (permissionsInput) {
+        permissionsInput.value = payload.permissions_text || '';
       }
       if (rotateForm) {
         rotateForm.dataset.apiKeyId = payload.id || '';

@@ -98,6 +98,7 @@ from app.repositories import webhook_events as webhook_events_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.repositories import issues as issues_repo
+from app.schemas.api_keys import ALLOWED_API_KEY_HTTP_METHODS
 from app.schemas.tickets import SyncroTicketImportRequest
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import encrypt_secret
@@ -1397,6 +1398,73 @@ def _extract_audit_service(action: Any) -> str:
     return text.split(".", 1)[0]
 
 
+def _parse_permission_lines(value: str | None) -> tuple[list[dict[str, Any]], list[str]]:
+    if value is None:
+        return [], []
+    entries: dict[str, set[str]] = {}
+    errors: list[str] = []
+    allowed_methods = ", ".join(sorted(ALLOWED_API_KEY_HTTP_METHODS))
+    for index, raw_line in enumerate(str(value).splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if " " not in line:
+            errors.append(f"Line {index}: Enter values as 'METHOD /path'.")
+            continue
+        method_part, path_part = line.split(None, 1)
+        path = path_part.strip()
+        if not path.startswith("/"):
+            errors.append(f"Line {index}: Paths must start with '/'.")
+            continue
+        raw_methods = [token.strip().upper() for token in method_part.split(",")]
+        methods = [token for token in raw_methods if token]
+        if not methods:
+            errors.append(f"Line {index}: Provide at least one HTTP method.")
+            continue
+        invalid = [token for token in methods if token not in ALLOWED_API_KEY_HTTP_METHODS]
+        if invalid:
+            errors.append(
+                f"Line {index}: Unsupported method(s) {', '.join(invalid)}. Allowed methods: {allowed_methods}."
+            )
+            continue
+        entries.setdefault(path, set()).update(methods)
+    parsed = [
+        {"path": path, "methods": sorted(methods)}
+        for path, methods in sorted(entries.items(), key=lambda item: item[0])
+    ]
+    return parsed, errors
+
+
+def _format_api_key_permissions(
+    permissions: list[dict[str, Any]] | None,
+) -> tuple[list[dict[str, Any]], str, str]:
+    display_entries: list[dict[str, Any]] = []
+    if permissions:
+        for entry in permissions:
+            path = str(entry.get("path", "")).strip()
+            methods = sorted(
+                {str(method).strip().upper() for method in entry.get("methods", []) if str(method).strip()}
+            )
+            if not path or not methods:
+                continue
+            display_entries.append({"path": path, "methods": methods})
+    display_entries.sort(key=lambda item: item["path"])
+    permissions_text = "\n".join(
+        f"{', '.join(entry['methods'])} {entry['path']}" for entry in display_entries
+    )
+    if display_entries:
+        summary_parts = [
+            f"{', '.join(entry['methods'])} {entry['path']}" for entry in display_entries[:2]
+        ]
+        remaining = len(display_entries) - 2
+        if remaining > 0:
+            summary_parts.append(f"+{remaining} more")
+        access_summary = ", ".join(summary_parts)
+    else:
+        access_summary = "All endpoints"
+    return display_entries, permissions_text, access_summary
+
+
 def _prepare_api_key_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
     today = date.today()
     prepared: list[dict[str, Any]] = []
@@ -1415,6 +1483,9 @@ def _prepare_api_key_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, An
                     "last_used_iso": _to_iso(entry.get("last_used_at")),
                 }
             )
+        display_permissions, permissions_text, access_summary = _format_api_key_permissions(
+            row.get("permissions")
+        )
         expiry_iso = None
         if isinstance(expiry, date):
             expiry_iso = datetime.combine(expiry, time.min, tzinfo=timezone.utc).isoformat()
@@ -1431,6 +1502,10 @@ def _prepare_api_key_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, An
                 "usage_count": row.get("usage_count", 0),
                 "is_expired": is_expired,
                 "usage": usage_entries,
+                "permissions": display_permissions,
+                "permissions_text": permissions_text,
+                "access_summary": access_summary,
+                "is_restricted": bool(display_permissions),
             }
         )
     stats = {
@@ -1572,6 +1647,7 @@ async def _render_api_keys_dashboard(
         "status_message": status_message,
         "errors": errors or [],
         "new_api_key": new_api_key,
+        "allowed_methods": sorted(ALLOWED_API_KEY_HTTP_METHODS),
     }
     return await _render_template("admin/api_keys.html", request, current_user, extra=extra)
 async def _load_license_context(
@@ -5829,9 +5905,13 @@ async def admin_create_api_key_page(request: Request):
     description = (str(form.get("description", "")).strip() or None)
     expiry_raw = form.get("expiry_date")
     expiry_date = _parse_input_date(expiry_raw) if expiry_raw else None
+    permissions_raw = form.get("permissions")
+    permissions_text = str(permissions_raw).strip() if permissions_raw is not None else ""
+    parsed_permissions, permission_errors = _parse_permission_lines(permissions_text)
     errors: list[str] = []
     if expiry_raw and expiry_date is None:
         errors.append("Enter an expiry date in YYYY-MM-DD format.")
+    errors.extend(permission_errors)
     if errors:
         return await _render_api_keys_dashboard(
             request,
@@ -5844,6 +5924,7 @@ async def admin_create_api_key_page(request: Request):
         raw_key, row = await api_key_repo.create_api_key(
             description=description,
             expiry_date=expiry_date,
+            permissions=parsed_permissions,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create API key from admin form", error=str(exc))
@@ -5863,8 +5944,12 @@ async def admin_create_api_key_page(request: Request):
         new_value={
             "description": description,
             "expiry_date": expiry_date.isoformat() if isinstance(expiry_date, date) else None,
+            "permissions": parsed_permissions,
         },
         request=request,
+    )
+    display_permissions, permissions_text_value, access_summary = _format_api_key_permissions(
+        row.get("permissions")
     )
     new_api_key = {
         "id": row["id"],
@@ -5876,6 +5961,9 @@ async def admin_create_api_key_page(request: Request):
             if row.get("expiry_date")
             else None
         ),
+        "permissions": display_permissions,
+        "permissions_text": permissions_text_value,
+        "access_summary": access_summary,
     }
     status_message = "New API key created. Store the value securely; it will not be shown again."
     return await _render_api_keys_dashboard(
@@ -5913,7 +6001,11 @@ async def admin_rotate_api_key_page(request: Request):
     expiry_date = _parse_input_date(expiry_raw) if expiry_raw else None
     if expiry_raw and expiry_date is None:
         errors.append("Enter a valid expiry date in YYYY-MM-DD format.")
+    permissions_raw = form.get("permissions")
+    permissions_text = str(permissions_raw).strip() if permissions_raw is not None else ""
+    parsed_permissions, permission_errors = _parse_permission_lines(permissions_text)
     retire_previous = _parse_bool(form.get("retire_previous"), default=True)
+    errors.extend(permission_errors)
     if errors:
         return await _render_api_keys_dashboard(
             request,
@@ -5934,10 +6026,12 @@ async def admin_rotate_api_key_page(request: Request):
         )
     final_description = description if description is not None else existing.get("description")
     final_expiry = expiry_date if expiry_date is not None else existing.get("expiry_date")
+    permissions = parsed_permissions if permissions_raw is not None else existing.get("permissions", [])
     try:
         raw_key, row = await api_key_repo.create_api_key(
             description=final_description,
             expiry_date=final_expiry,
+            permissions=permissions,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to rotate API key from admin form", api_key_id=api_key_id, error=str(exc))
@@ -5962,6 +6056,7 @@ async def admin_rotate_api_key_page(request: Request):
         new_value={
             "description": final_description,
             "expiry_date": final_expiry.isoformat() if isinstance(final_expiry, date) else None,
+            "permissions": permissions,
         },
         metadata=metadata,
         request=request,
@@ -5985,6 +6080,9 @@ async def admin_rotate_api_key_page(request: Request):
             metadata={"rotated_to": row["id"]},
             request=request,
         )
+    display_permissions, permissions_text_value, access_summary = _format_api_key_permissions(
+        row.get("permissions")
+    )
     new_api_key = {
         "id": row["id"],
         "value": raw_key,
@@ -5996,6 +6094,9 @@ async def admin_rotate_api_key_page(request: Request):
             else None
         ),
         "rotated_from": api_key_id,
+        "permissions": display_permissions,
+        "permissions_text": permissions_text_value,
+        "access_summary": access_summary,
     }
     status_message = (
         "API key rotated. Copy the replacement key below and distribute it to integrated services."
