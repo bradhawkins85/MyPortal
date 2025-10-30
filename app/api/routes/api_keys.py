@@ -31,6 +31,7 @@ def _format_response(row: dict) -> ApiKeyResponse:
         usage_count=row.get("usage_count", 0),
         key_preview=mask_api_key(row.get("key_prefix")),
         usage=row.get("usage", []),
+        permissions=row.get("permissions", []),
     )
 
 
@@ -69,6 +70,7 @@ async def create_api_key(
     raw_key, row = await api_key_repo.create_api_key(
         description=payload.description,
         expiry_date=payload.expiry_date,
+        permissions=[permission.model_dump() for permission in payload.permissions],
     )
     formatted = _format_response(row).model_dump()
     await audit_service.log_action(
@@ -79,6 +81,7 @@ async def create_api_key(
         new_value={
             "description": payload.description,
             "expiry_date": payload.expiry_date.isoformat() if payload.expiry_date else None,
+            "permissions": formatted.get("permissions", []),
         },
         request=request,
     )
@@ -136,9 +139,15 @@ async def rotate_api_key(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
     new_description = payload.description if payload.description is not None else existing.get("description")
     new_expiry = payload.expiry_date if payload.expiry_date is not None else existing.get("expiry_date")
+    permissions = (
+        [permission.model_dump() for permission in payload.permissions]
+        if payload.permissions is not None
+        else existing.get("permissions", [])
+    )
     raw_key, new_row = await api_key_repo.create_api_key(
         description=new_description,
         expiry_date=new_expiry,
+        permissions=permissions,
     )
     formatted = _format_response(new_row).model_dump()
     metadata = {
@@ -154,6 +163,7 @@ async def rotate_api_key(
         new_value={
             "description": new_description,
             "expiry_date": new_expiry.isoformat() if isinstance(new_expiry, date) else None,
+            "permissions": formatted.get("permissions", []),
         },
         metadata=metadata,
         request=request,

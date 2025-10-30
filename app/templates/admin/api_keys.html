@@ -130,6 +130,16 @@
           <p class="secret-card__hint">
             This value is only shown once. Update downstream services before rotating again.
           </p>
+          <p class="secret-card__hint">
+            Access scope: {{ new_api_key.access_summary or 'All endpoints' }}.
+          </p>
+          {% if new_api_key.permissions %}
+            <div class="tag-list">
+              {% for permission in new_api_key.permissions %}
+                <span class="tag">{{ permission.methods | join(', ') }} {{ permission.path }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
         </div>
       </section>
     {% endif %}
@@ -150,6 +160,7 @@
           <tr>
             <th scope="col" data-sort="string">Description</th>
             <th scope="col" data-sort="string">Preview</th>
+            <th scope="col" data-sort="string">Access scope</th>
             <th scope="col" data-sort="date">Created</th>
             <th scope="col" data-sort="date">Expiry</th>
             <th scope="col" data-sort="date">Last seen</th>
@@ -169,6 +180,13 @@
                   {% endif %}
                 </td>
                 <td data-label="Preview">{{ key.key_preview }}</td>
+                <td data-label="Access scope" data-value="{{ key.access_summary }}">
+                  {% if key.is_restricted %}
+                    {{ key.access_summary }}
+                  {% else %}
+                    <span class="badge badge--muted">Unrestricted</span>
+                  {% endif %}
+                </td>
                 <td data-label="Created" data-utc="{{ key.created_iso or '' }}" data-value="{{ key.created_iso or '' }}">
                   {{ key.created_iso or '—' }}
                 </td>
@@ -200,7 +218,11 @@
                     "last_seen_iso": key.last_seen_iso,
                     "usage_count": key.usage_count,
                     "usage": key.usage or [],
-                    "is_expired": key.is_expired
+                    "is_expired": key.is_expired,
+                    "permissions": key.permissions or [],
+                    "permissions_text": key.permissions_text or "",
+                    "access_summary": key.access_summary,
+                    "is_restricted": key.is_restricted
                   } %}
                   <div class="table__action-buttons">
                     <button
@@ -404,12 +426,22 @@
           <dt class="definition-list__label">Usage count</dt>
           <dd class="definition-list__value" data-api-key-usage-count>0</dd>
         </div>
+        <div class="definition-list__item">
+          <dt class="definition-list__label">Access scope</dt>
+          <dd class="definition-list__value" data-api-key-access>All endpoints</dd>
+        </div>
       </dl>
 
       <section aria-labelledby="api-key-usage-heading">
         <h3 id="api-key-usage-heading">Recent usage</h3>
         <p class="text-muted" data-api-key-usage-empty>No recorded usage yet.</p>
         <ul class="usage-list" data-api-key-usage-list hidden></ul>
+      </section>
+
+      <section aria-labelledby="api-key-permissions-heading">
+        <h3 id="api-key-permissions-heading">Endpoint access</h3>
+        <p class="text-muted" data-api-key-permissions-empty>All endpoints permitted.</p>
+        <ul class="usage-list" data-api-key-permissions-list hidden></ul>
       </section>
 
       <form
@@ -446,6 +478,21 @@
             />
             <p class="form-help">Defaults to the existing expiry.</p>
           </div>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="modal-rotate-permissions">Endpoint permissions</label>
+          <textarea
+            class="form-input"
+            id="modal-rotate-permissions"
+            name="permissions"
+            rows="4"
+            placeholder="Example: GET /api/orders"
+            data-api-key-rotate-permissions
+          ></textarea>
+          <p class="form-help">
+            One entry per line using "METHOD /path" (methods: {{ allowed_methods | join(', ') }}).
+            Leave blank to keep unrestricted access.
+          </p>
         </div>
         <div class="form-field form-field--checkbox">
           <label class="form-checkbox" for="modal-rotate-retire">
@@ -533,6 +580,20 @@
           placeholder="YYYY-MM-DD"
         />
         <p class="form-hint">Leave blank to create a non-expiring credential.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="modal-api-key-permissions">Endpoint permissions</label>
+        <textarea
+          class="form-input"
+          id="modal-api-key-permissions"
+          name="permissions"
+          rows="4"
+          placeholder="Example: GET /api/orders"
+        ></textarea>
+        <p class="form-hint">
+          One entry per line using "METHOD /path" (methods: {{ allowed_methods | join(', ') }}).
+          Leave blank to grant this key full access.
+        </p>
       </div>
       <div class="form-actions">
         <button type="submit" class="button button--primary">Create key</button>
