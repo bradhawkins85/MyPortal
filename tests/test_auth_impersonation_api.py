@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from fastapi import Request
+from fastapi import Request, status
 from fastapi.testclient import TestClient
 
 from app.api.dependencies import auth as auth_dependencies
@@ -215,4 +215,66 @@ def test_exit_impersonation_restores_original_session(monkeypatch, active_sessio
     payload = response.json()
     assert payload["user"]["id"] == restored_user["id"]
     assert payload["session"]["user_id"] == restored_session.user_id
+    assert applied_sessions == [restored_session.id]
+
+
+def test_exit_impersonation_redirects_for_html_accept(monkeypatch, active_session):
+    impersonated_session = SessionData(
+        id=41,
+        user_id=5,
+        session_token="impersonated",
+        csrf_token="csrf-imp",
+        created_at=active_session.created_at,
+        expires_at=active_session.expires_at,
+        last_seen_at=active_session.last_seen_at,
+        ip_address=None,
+        user_agent=None,
+        active_company_id=None,
+        pending_totp_secret=None,
+        impersonator_user_id=active_session.user_id,
+        impersonator_session_id=active_session.id,
+        impersonation_started_at=active_session.created_at,
+    )
+    restored_session = active_session
+    restored_user = {"id": active_session.user_id, "email": "admin@example.com"}
+
+    async def fake_end_impersonation(**kwargs):
+        return restored_user, restored_session
+
+    applied_sessions = []
+
+    def fake_apply_cookies(response, session):
+        applied_sessions.append(session.id)
+
+    monkeypatch.setattr(impersonation_service, "end_impersonation", fake_end_impersonation)
+    monkeypatch.setattr(session_manager, "apply_session_cookies", fake_apply_cookies)
+
+    async def fake_load_impersonated_session(request, *, allow_inactive=False):
+        request.state.session = impersonated_session
+        return impersonated_session
+
+    monkeypatch.setattr(session_manager, "load_session", fake_load_impersonated_session)
+
+    async def override_impersonated_session(request: Request):
+        request.state.session = impersonated_session
+        return impersonated_session
+
+    app.dependency_overrides[auth_dependencies.get_current_session] = override_impersonated_session
+
+    try:
+        with TestClient(app, follow_redirects=False) as client:
+            client.cookies.set(session_manager.session_cookie_name, impersonated_session.session_token)
+            client.cookies.set(session_manager.csrf_cookie_name, impersonated_session.csrf_token)
+            response = client.post(
+                "/auth/impersonation/exit",
+                headers={
+                    "X-CSRF-Token": impersonated_session.csrf_token,
+                    "Accept": "text/html,application/xhtml+xml",
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    assert response.headers["location"] == "/admin/impersonation"
     assert applied_sessions == [restored_session.id]

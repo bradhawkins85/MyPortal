@@ -1,0 +1,7 @@
+{
+  "guid": "d657312b-ddb0-4b6d-83c8-5de04f178435",
+  "occurred_at": "2025-10-30T14:24:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed exit impersonation to redirect administrators back to the dashboard when ending impersonation.",
+  "content_hash": "05d522464978489a8cff45ba58f9da4bf123e8da6cb5166aba351efbf5e3dfaf"
+}
