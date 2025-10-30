@@ -1388,6 +1388,34 @@
       });
     });
 
+    document.querySelectorAll('[data-remove-pending-assignment]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const { companyId, staffId } = button.dataset;
+        if (!companyId || !staffId) {
+          return;
+        }
+        if (!confirm('Cancel this pending staff access?')) {
+          return;
+        }
+        const row = button.closest('tr');
+        const formData = new FormData();
+        button.disabled = true;
+        try {
+          await requestForm(
+            `/admin/companies/assignment/${companyId}/${staffId}/pending/remove`,
+            formData,
+          );
+          if (row) {
+            row.remove();
+          }
+        } catch (error) {
+          alert(`Unable to cancel pending access: ${error.message}`);
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
+
     document.querySelectorAll('[data-remove-assignment]').forEach((button) => {
       button.addEventListener('click', async () => {
         const { companyId, userId } = button.dataset;
