@@ -50,6 +50,17 @@ def mock_startup(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def patch_pending_access(monkeypatch):
+    mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        auth_routes.staff_access_service,
+        "apply_pending_access_for_user",
+        mock,
+    )
+    return mock
+
+
 @pytest.fixture
 def active_session() -> SessionData:
     now = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)

@@ -241,6 +241,91 @@ async def test_admin_assign_user_to_company_prefers_source_company(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_admin_assign_user_to_company_queues_pending_access(monkeypatch):
+    request = _make_request("/admin/companies/assign")
+
+    form_mock = AsyncMock(
+        return_value={
+            "userId": "staff:202",
+            "companyId": "4",
+            "staffPermission": "2",
+            "can_manage_staff": "1",
+            "can_access_shop": "1",
+            "roleId": "3",
+        }
+    )
+    monkeypatch.setattr(request, "form", form_mock)
+
+    current_user = {"id": 1, "is_super_admin": True}
+    monkeypatch.setattr(
+        main,
+        "_require_super_admin_page",
+        AsyncMock(return_value=(current_user, None)),
+    )
+
+    staff_record = {
+        "id": 202,
+        "email": "pending@example.com",
+        "company_id": 4,
+    }
+    monkeypatch.setattr(
+        main.staff_repo,
+        "get_staff_by_id",
+        AsyncMock(return_value=staff_record),
+    )
+    monkeypatch.setattr(main.user_repo, "get_user_by_email", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        main.role_repo,
+        "get_role_by_id",
+        AsyncMock(return_value={"id": 3}),
+    )
+
+    upsert_mock = AsyncMock()
+    monkeypatch.setattr(
+        main.pending_staff_access_repo,
+        "upsert_assignment",
+        upsert_mock,
+    )
+
+    captured: dict[str, Any] = {}
+
+    def fake_redirect(*, company_id, success=None, error=None):
+        captured["company_id"] = company_id
+        captured["success"] = success
+        captured["error"] = error
+        return HTMLResponse("ok")
+
+    monkeypatch.setattr(main, "_company_edit_redirect", fake_redirect)
+
+    response = await main.admin_assign_user_to_company(request)
+
+    assert response.status_code == status.HTTP_200_OK
+    upsert_mock.assert_awaited_once()
+    assert upsert_mock.await_args.kwargs == {
+        "staff_id": 202,
+        "company_id": 4,
+        "staff_permission": 2,
+        "can_manage_staff": True,
+        "can_manage_licenses": False,
+        "can_manage_assets": False,
+        "can_manage_invoices": False,
+        "can_manage_office_groups": False,
+        "can_order_licenses": False,
+        "can_access_shop": True,
+        "can_access_cart": False,
+        "can_access_orders": False,
+        "can_access_forms": False,
+        "is_admin": False,
+        "role_id": 3,
+    }
+    assert captured.get("company_id") == 4
+    assert captured.get("success") == (
+        "Saved pending access for pending@example.com. Permissions will activate after sign-up."
+    )
+    assert captured.get("error") is None
+
+
+@pytest.mark.anyio("asyncio")
 async def test_admin_assign_user_to_company_uses_source_company_in_form_state(monkeypatch):
     request = _make_request("/admin/companies/assign")
 
@@ -337,6 +422,12 @@ async def test_render_company_edit_page_includes_assign_form_data(monkeypatch):
         AsyncMock(return_value=[{"id": 3, "name": "Manager"}]),
     )
 
+    monkeypatch.setattr(
+        main.pending_staff_access_repo,
+        "list_assignments_for_company",
+        AsyncMock(return_value=[]),
+    )
+
     async def fake_list_staff_with_users(company_id: int) -> list[dict[str, Any]]:
         if company_id == 4:
             return [
@@ -421,6 +512,7 @@ async def test_render_company_edit_page_includes_assign_form_data(monkeypatch):
             "staff_id": 202,
             "user_id": 11,
             "has_user": True,
+            "pending_access": False,
         },
         {
             "value": "12",
@@ -429,6 +521,7 @@ async def test_render_company_edit_page_includes_assign_form_data(monkeypatch):
             "staff_id": 203,
             "user_id": 12,
             "has_user": True,
+            "pending_access": False,
         },
     ]
     assert extra.get("company_user_options", {}).get(4) == [
@@ -439,6 +532,7 @@ async def test_render_company_edit_page_includes_assign_form_data(monkeypatch):
             "staff_id": 101,
             "user_id": 10,
             "has_user": True,
+            "pending_access": False,
         },
         {
             "value": "staff:102",
@@ -447,6 +541,7 @@ async def test_render_company_edit_page_includes_assign_form_data(monkeypatch):
             "staff_id": 102,
             "user_id": None,
             "has_user": False,
+            "pending_access": False,
         },
     ]
 
