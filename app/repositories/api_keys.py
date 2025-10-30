@@ -190,6 +190,30 @@ async def update_api_key_expiry(api_key_id: int, expiry_date: date | None) -> No
     )
 
 
+async def update_api_key(
+    api_key_id: int,
+    *,
+    description: str | None,
+    expiry_date: date | None,
+    permissions: PermissionMapping | None = None,
+) -> dict[str, Any]:
+    await db.execute(
+        """
+        UPDATE api_keys
+        SET description = %s,
+            expiry_date = %s
+        WHERE id = %s
+        """,
+        (description, expiry_date, api_key_id),
+    )
+    if permissions is not None:
+        await _replace_api_key_permissions(api_key_id, permissions)
+    updated = await get_api_key_with_usage(api_key_id)
+    if not updated:
+        raise RuntimeError(f"Failed to load API key {api_key_id} after update")
+    return updated
+
+
 async def get_api_key_record(api_key_value: str) -> dict[str, Any] | None:
     hashed = hash_api_key(api_key_value)
     row = await db.fetch_one(
