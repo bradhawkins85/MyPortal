@@ -59,14 +59,15 @@
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-company-email-domains">Email domains</label>
-            <textarea
+            <input
               id="edit-company-email-domains"
               name="emailDomains"
-              class="form-input form-input--textarea"
-              rows="1"
+              class="form-input"
+              type="text"
               placeholder="example.com, example.org"
-            >{{ form_data.email_domains }}</textarea>
-            <p class="form-help">Use commas or new lines to list domains. Domains are matched case-insensitively.</p>
+              value="{{ form_data.email_domains }}"
+            />
+            <p class="form-help">Use commas to list domains. Domains are matched case-insensitively.</p>
           </div>
           <div class="form-field form-field--checkbox">
             <label class="checkbox" for="edit-company-vip">
