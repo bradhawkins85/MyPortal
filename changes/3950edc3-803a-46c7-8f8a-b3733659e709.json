@@ -1,0 +1,7 @@
+{
+  "guid": "3950edc3-803a-46c7-8f8a-b3733659e709",
+  "occurred_at": "2025-10-30T14:16Z",
+  "change_type": "Fix",
+  "summary": "Resolved impersonation candidate lookup by removing legacy is_admin column reference.",
+  "content_hash": "139e72c10bbca152608907b3c65253f5e6c69ef7a2448459a6e48d2689668c20"
+}

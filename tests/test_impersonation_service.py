@@ -69,7 +69,6 @@ async def test_list_impersonatable_users_combines_memberships(monkeypatch):
                 "company_name": "Example Co",
                 "role_name": "Support",
                 "permissions": ["tickets.view"],
-                "is_admin": 0,
                 "is_super_admin": 0,
             }
         ]
