@@ -1415,6 +1415,175 @@
 
   }
 
+  function bindApiKeyEditModal() {
+    const modalId = 'edit-api-key-modal';
+    const modal = document.getElementById(modalId);
+    if (!modal) {
+      return;
+    }
+
+    const descriptionElement = modal.querySelector('[data-api-key-description]');
+    const descriptionTextElement = modal.querySelector('[data-api-key-description-text]');
+    const previewElement = modal.querySelector('[data-api-key-preview]');
+    const createdElement = modal.querySelector('[data-api-key-created]');
+    const expiryElement = modal.querySelector('[data-api-key-expiry]');
+    const lastSeenElement = modal.querySelector('[data-api-key-last-seen]');
+    const usageCountElement = modal.querySelector('[data-api-key-usage-count]');
+    const usageListElement = modal.querySelector('[data-api-key-usage-list]');
+    const usageEmptyElement = modal.querySelector('[data-api-key-usage-empty]');
+    const rotateForm = modal.querySelector('[data-api-key-rotate-form]');
+    const revokeForm = modal.querySelector('[data-api-key-revoke-form]');
+    const rotateIdInput = modal.querySelector('[data-api-key-rotate-id]');
+    const revokeIdInput = modal.querySelector('[data-api-key-revoke-id]');
+    const descriptionInput = rotateForm ? rotateForm.querySelector('#modal-rotate-description') : null;
+    const expiryInput = rotateForm ? rotateForm.querySelector('#modal-rotate-expiry') : null;
+    const retireInput = rotateForm ? rotateForm.querySelector('#modal-rotate-retire') : null;
+
+    function formatDateTime(iso, fallbackText = '—') {
+      if (!iso) {
+        return fallbackText;
+      }
+      const date = new Date(iso);
+      if (Number.isNaN(date.getTime())) {
+        return fallbackText;
+      }
+      return date.toLocaleString();
+    }
+
+    function normaliseDescription(payload) {
+      const description = (payload.description || '').trim();
+      if (description) {
+        return `“${description}”`;
+      }
+      const preview = (payload.key_preview || '').trim();
+      if (preview) {
+        return `key ${preview}`;
+      }
+      return 'this credential';
+    }
+
+    function renderUsageList(usage) {
+      if (!usageListElement || !usageEmptyElement) {
+        return;
+      }
+      usageListElement.innerHTML = '';
+      if (Array.isArray(usage) && usage.length > 0) {
+        usageListElement.hidden = false;
+        usageEmptyElement.hidden = true;
+        usage.forEach((entry) => {
+          const item = document.createElement('li');
+          const ip = document.createElement('span');
+          ip.className = 'usage-list__ip';
+          ip.textContent = entry.ip_address || 'Unknown';
+          const count = document.createElement('span');
+          count.className = 'usage-list__count';
+          count.textContent = String(entry.usage_count ?? 0);
+          const time = document.createElement('span');
+          time.className = 'usage-list__time';
+          if (entry.last_used_iso) {
+            time.textContent = formatDateTime(entry.last_used_iso, 'Never');
+          } else {
+            time.textContent = 'Never';
+          }
+          item.appendChild(ip);
+          item.appendChild(count);
+          item.appendChild(time);
+          usageListElement.appendChild(item);
+        });
+        return;
+      }
+      usageListElement.hidden = true;
+      usageEmptyElement.hidden = false;
+    }
+
+    function populateModal(trigger) {
+      if (!(trigger instanceof HTMLElement)) {
+        return;
+      }
+      const payloadRaw = trigger.getAttribute('data-api-key');
+      if (!payloadRaw) {
+        return;
+      }
+      let payload;
+      try {
+        payload = JSON.parse(payloadRaw);
+      } catch (error) {
+        console.error('Unable to parse API key payload', error);
+        return;
+      }
+
+      if (descriptionElement) {
+        const description = (payload.description || '').trim();
+        descriptionElement.textContent = description || '—';
+      }
+      if (descriptionTextElement) {
+        descriptionTextElement.textContent = normaliseDescription(payload);
+      }
+      if (previewElement) {
+        previewElement.textContent = payload.key_preview || '—';
+      }
+      if (createdElement) {
+        createdElement.textContent = formatDateTime(payload.created_iso);
+      }
+      if (expiryElement) {
+        expiryElement.textContent = '';
+        if (!payload.expiry_iso) {
+          expiryElement.textContent = 'No expiry';
+        } else {
+          expiryElement.textContent = formatDateTime(payload.expiry_iso);
+          if (payload.is_expired) {
+            const badge = document.createElement('span');
+            badge.className = 'badge badge--danger';
+            badge.textContent = 'Expired';
+            expiryElement.appendChild(document.createTextNode(' '));
+            expiryElement.appendChild(badge);
+          }
+        }
+      }
+      if (lastSeenElement) {
+        if (payload.last_seen_iso) {
+          lastSeenElement.textContent = formatDateTime(payload.last_seen_iso);
+        } else {
+          lastSeenElement.textContent = 'Never';
+        }
+      }
+      if (usageCountElement) {
+        const value = typeof payload.usage_count === 'number' ? payload.usage_count : Number(payload.usage_count) || 0;
+        usageCountElement.textContent = String(value);
+      }
+
+      renderUsageList(payload.usage);
+
+      if (rotateIdInput) {
+        rotateIdInput.value = payload.id || '';
+      }
+      if (revokeIdInput) {
+        revokeIdInput.value = payload.id || '';
+      }
+      if (descriptionInput) {
+        descriptionInput.value = '';
+      }
+      if (expiryInput) {
+        expiryInput.value = '';
+      }
+      if (retireInput) {
+        retireInput.checked = true;
+      }
+      if (rotateForm) {
+        rotateForm.dataset.apiKeyId = payload.id || '';
+      }
+      if (revokeForm) {
+        revokeForm.dataset.apiKeyId = payload.id || '';
+      }
+    }
+
+    bindModal({
+      modalId,
+      triggerSelector: '[data-edit-api-key-modal-open]',
+      onOpen: populateModal,
+    });
+  }
+
   function bindApiKeyCopyButtons() {
     document.querySelectorAll('[data-copy-api-key]').forEach((button) => {
       const value = button.getAttribute('data-copy-api-key');
@@ -1460,7 +1629,7 @@
     });
   }
 
-  function bindModal({ modalId, triggerSelector }) {
+  function bindModal({ modalId, triggerSelector, onOpen }) {
     const modal = document.getElementById(modalId);
     const triggerButtons = triggerSelector
       ? Array.from(document.querySelectorAll(triggerSelector))
@@ -1526,6 +1695,13 @@
 
     function openModal(trigger) {
       activeTrigger = trigger instanceof HTMLElement ? trigger : null;
+      if (typeof onOpen === 'function') {
+        try {
+          onOpen(activeTrigger, modal);
+        } catch (error) {
+          console.error('Error preparing modal', error);
+        }
+      }
       modal.hidden = false;
       modal.classList.add('is-visible');
       modal.setAttribute('aria-hidden', 'false');
@@ -1755,6 +1931,7 @@
     bindRoleForm();
     bindCompanyAssignForm();
     bindCompanyAssignmentControls();
+    bindApiKeyEditModal();
     bindApiKeyCopyButtons();
     bindConfirmationButtons();
     bindTicketStatusManager();
