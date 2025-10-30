@@ -750,6 +750,7 @@ body {
   align-items: center;
   gap: var(--space-gap-tight);
   min-width: 0;
+  width: 100%;
 }
 
 .header__title-text {
@@ -760,6 +761,10 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-gap-tight);
+}
+
+.header__title-content .header__title-button {
+  margin-left: auto;
 }
 
 .header__title > * {
