@@ -1358,6 +1358,10 @@ button.header-title-menu__link {
   gap: var(--space-gap-roomy);
 }
 
+.card__controls--align-end {
+  justify-content: flex-end;
+}
+
 .card__control {
   margin: 0;
 }

@@ -216,22 +216,26 @@
         </div>
       </details>
 
-      <section class="card card--panel admin-grid__full">
-        <header class="card__header card__header--stacked">
-          <div>
-            <h2 class="card__title">Company memberships</h2>
-            <p class="card__subtitle">Manage staff access and permissions for this company.</p>
-          </div>
-          <div class="card__controls">
-            <input
-              type="search"
-              class="form-input"
-              placeholder="Filter memberships"
-              aria-label="Filter memberships"
-              data-table-filter="company-assignments"
-            />
-          </div>
-        </header>
+    <details class="card card--panel card-collapsible admin-grid__full" data-company-memberships-panel>
+      <summary class="card__header card__header--collapsible card__header--stacked">
+        <div>
+          <h2 class="card__title">Company memberships</h2>
+          <p class="card__subtitle">Manage staff access and permissions for this company.</p>
+        </div>
+        <div class="card__collapsible-meta" aria-hidden="true">
+          <span class="card__toggle-icon"></span>
+        </div>
+      </summary>
+      <div class="card-collapsible__content">
+        <div class="card__controls card__controls--align-end">
+          <input
+            type="search"
+            class="form-input"
+            placeholder="Filter memberships"
+            aria-label="Filter memberships"
+            data-table-filter="company-assignments"
+          />
+        </div>
         <div class="table-wrapper">
           <table class="table" id="company-assignments" data-table>
             <thead>
@@ -369,7 +373,8 @@
             </tbody>
           </table>
         </div>
-      </section>
+      </div>
+    </details>
     {% endif %}
   </div>
   {% if is_super_admin %}
