@@ -7,6 +7,7 @@ import secrets
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
+from ipaddress import ip_network
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from html import escape
 from pathlib import Path, PurePosixPath
@@ -1435,6 +1436,25 @@ def _parse_permission_lines(value: str | None) -> tuple[list[dict[str, Any]], li
     return parsed, errors
 
 
+def _parse_ip_restriction_lines(value: str | None) -> tuple[list[str], list[str]]:
+    if value is None:
+        return [], []
+    entries: set[str] = set()
+    errors: list[str] = []
+    for index, raw_line in enumerate(str(value).splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            network = ip_network(line, strict=False)
+        except ValueError:
+            errors.append(f"Line {index}: Enter a valid IP address or CIDR range.")
+            continue
+        entries.add(network.with_prefixlen)
+    ordered = sorted(entries)
+    return ordered, errors
+
+
 def _format_api_key_permissions(
     permissions: list[dict[str, Any]] | None,
 ) -> tuple[list[dict[str, Any]], str, str]:
@@ -1465,6 +1485,42 @@ def _format_api_key_permissions(
     return display_entries, permissions_text, access_summary
 
 
+def _format_api_key_ip_restrictions(
+    restrictions: list[dict[str, Any]] | list[str] | None,
+) -> tuple[list[dict[str, str]], str, str]:
+    display_entries: list[dict[str, str]] = []
+    if restrictions:
+        for entry in restrictions:
+            if isinstance(entry, Mapping):
+                raw_value = entry.get("cidr")
+            else:
+                raw_value = entry
+            value = str(raw_value or "").strip()
+            if not value:
+                continue
+            try:
+                network = ip_network(value, strict=False)
+            except ValueError:
+                continue
+            canonical = network.with_prefixlen
+            if network.prefixlen == network.max_prefixlen:
+                label = network.network_address.compressed
+            else:
+                label = canonical
+            display_entries.append({"cidr": canonical, "label": label})
+    display_entries.sort(key=lambda item: item["label"])
+    text_value = "\n".join(item["label"] for item in display_entries)
+    if display_entries:
+        summary_parts = [item["label"] for item in display_entries[:2]]
+        remaining = len(display_entries) - 2
+        if remaining > 0:
+            summary_parts.append(f"+{remaining} more")
+        summary = ", ".join(summary_parts)
+    else:
+        summary = "Any IP address"
+    return display_entries, text_value, summary
+
+
 def _prepare_api_key_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
     today = date.today()
     prepared: list[dict[str, Any]] = []
@@ -1483,9 +1539,18 @@ def _prepare_api_key_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, An
                     "last_used_iso": _to_iso(entry.get("last_used_at")),
                 }
             )
-        display_permissions, permissions_text, access_summary = _format_api_key_permissions(
+        display_permissions, permissions_text, endpoint_summary = _format_api_key_permissions(
             row.get("permissions")
         )
+        display_ip_restrictions, ip_text, ip_summary = _format_api_key_ip_restrictions(
+            row.get("ip_restrictions")
+        )
+        if endpoint_summary and ip_summary:
+            access_summary = f"{endpoint_summary} • {ip_summary}"
+        elif endpoint_summary:
+            access_summary = endpoint_summary
+        else:
+            access_summary = ip_summary
         expiry_iso = None
         if isinstance(expiry, date):
             expiry_iso = datetime.combine(expiry, time.min, tzinfo=timezone.utc).isoformat()
@@ -1504,8 +1569,12 @@ def _prepare_api_key_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, An
                 "usage": usage_entries,
                 "permissions": display_permissions,
                 "permissions_text": permissions_text,
+                "ip_restrictions": display_ip_restrictions,
+                "ip_restrictions_text": ip_text,
+                "ip_summary": ip_summary,
+                "endpoint_summary": endpoint_summary,
                 "access_summary": access_summary,
-                "is_restricted": bool(display_permissions),
+                "is_restricted": bool(display_permissions or display_ip_restrictions),
             }
         )
     stats = {
@@ -5942,10 +6011,14 @@ async def admin_create_api_key_page(request: Request):
     permissions_raw = form.get("permissions")
     permissions_text = str(permissions_raw).strip() if permissions_raw is not None else ""
     parsed_permissions, permission_errors = _parse_permission_lines(permissions_text)
+    allowed_ips_raw = form.get("allowed_ips")
+    allowed_ips_text = str(allowed_ips_raw).strip() if allowed_ips_raw is not None else ""
+    parsed_ip_restrictions, ip_errors = _parse_ip_restriction_lines(allowed_ips_text)
     errors: list[str] = []
     if expiry_raw and expiry_date is None:
         errors.append("Enter an expiry date in YYYY-MM-DD format.")
     errors.extend(permission_errors)
+    errors.extend(ip_errors)
     if errors:
         return await _render_api_keys_dashboard(
             request,
@@ -5959,6 +6032,7 @@ async def admin_create_api_key_page(request: Request):
             description=description,
             expiry_date=expiry_date,
             permissions=parsed_permissions,
+            ip_restrictions=parsed_ip_restrictions,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create API key from admin form", error=str(exc))
@@ -5979,12 +6053,22 @@ async def admin_create_api_key_page(request: Request):
             "description": description,
             "expiry_date": expiry_date.isoformat() if isinstance(expiry_date, date) else None,
             "permissions": parsed_permissions,
+            "allowed_ips": parsed_ip_restrictions,
         },
         request=request,
     )
-    display_permissions, permissions_text_value, access_summary = _format_api_key_permissions(
+    display_permissions, permissions_text_value, endpoint_summary = _format_api_key_permissions(
         row.get("permissions")
     )
+    display_ip_restrictions, allowed_ips_text_value, ip_summary = _format_api_key_ip_restrictions(
+        row.get("ip_restrictions")
+    )
+    if endpoint_summary and ip_summary:
+        access_summary = f"{endpoint_summary} • {ip_summary}"
+    elif endpoint_summary:
+        access_summary = endpoint_summary
+    else:
+        access_summary = ip_summary
     new_api_key = {
         "id": row["id"],
         "value": raw_key,
@@ -5997,7 +6081,11 @@ async def admin_create_api_key_page(request: Request):
         ),
         "permissions": display_permissions,
         "permissions_text": permissions_text_value,
+        "ip_restrictions": display_ip_restrictions,
+        "ip_restrictions_text": allowed_ips_text_value,
         "access_summary": access_summary,
+        "ip_summary": ip_summary,
+        "endpoint_summary": endpoint_summary,
     }
     status_message = "New API key created. Store the value securely; it will not be shown again."
     return await _render_api_keys_dashboard(
@@ -6038,8 +6126,12 @@ async def admin_rotate_api_key_page(request: Request):
     permissions_raw = form.get("permissions")
     permissions_text = str(permissions_raw).strip() if permissions_raw is not None else ""
     parsed_permissions, permission_errors = _parse_permission_lines(permissions_text)
+    allowed_ips_raw = form.get("allowed_ips")
+    allowed_ips_text = str(allowed_ips_raw).strip() if allowed_ips_raw is not None else ""
+    parsed_ip_restrictions, ip_errors = _parse_ip_restriction_lines(allowed_ips_text)
     retire_previous = _parse_bool(form.get("retire_previous"), default=True)
     errors.extend(permission_errors)
+    errors.extend(ip_errors)
     if errors:
         return await _render_api_keys_dashboard(
             request,
@@ -6061,11 +6153,17 @@ async def admin_rotate_api_key_page(request: Request):
     final_description = description if description is not None else existing.get("description")
     final_expiry = expiry_date if expiry_date is not None else existing.get("expiry_date")
     permissions = parsed_permissions if permissions_raw is not None else existing.get("permissions", [])
+    ip_restrictions = (
+        parsed_ip_restrictions
+        if allowed_ips_raw is not None
+        else [entry.get("cidr") for entry in existing.get("ip_restrictions", [])]
+    )
     try:
         raw_key, row = await api_key_repo.create_api_key(
             description=final_description,
             expiry_date=final_expiry,
             permissions=permissions,
+            ip_restrictions=ip_restrictions,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to rotate API key from admin form", api_key_id=api_key_id, error=str(exc))
@@ -6091,6 +6189,7 @@ async def admin_rotate_api_key_page(request: Request):
             "description": final_description,
             "expiry_date": final_expiry.isoformat() if isinstance(final_expiry, date) else None,
             "permissions": permissions,
+            "allowed_ips": ip_restrictions,
         },
         metadata=metadata,
         request=request,
@@ -6114,9 +6213,18 @@ async def admin_rotate_api_key_page(request: Request):
             metadata={"rotated_to": row["id"]},
             request=request,
         )
-    display_permissions, permissions_text_value, access_summary = _format_api_key_permissions(
+    display_permissions, permissions_text_value, endpoint_summary = _format_api_key_permissions(
         row.get("permissions")
     )
+    display_ip_restrictions, allowed_ips_text_value, ip_summary = _format_api_key_ip_restrictions(
+        row.get("ip_restrictions")
+    )
+    if endpoint_summary and ip_summary:
+        access_summary = f"{endpoint_summary} • {ip_summary}"
+    elif endpoint_summary:
+        access_summary = endpoint_summary
+    else:
+        access_summary = ip_summary
     new_api_key = {
         "id": row["id"],
         "value": raw_key,
@@ -6130,7 +6238,11 @@ async def admin_rotate_api_key_page(request: Request):
         "rotated_from": api_key_id,
         "permissions": display_permissions,
         "permissions_text": permissions_text_value,
+        "ip_restrictions": display_ip_restrictions,
+        "ip_restrictions_text": allowed_ips_text_value,
         "access_summary": access_summary,
+        "ip_summary": ip_summary,
+        "endpoint_summary": endpoint_summary,
     }
     status_message = (
         "API key rotated. Copy the replacement key below and distribute it to integrated services."
