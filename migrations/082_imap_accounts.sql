@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS imap_accounts (
   active TINYINT(1) NOT NULL DEFAULT 1,
   scheduled_task_id INT NULL,
   last_synced_at DATETIME NULL,
-  created_at TIMESTAMP(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   updated_at TIMESTAMP(6) NULL DEFAULT NULL,
   FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE SET NULL,
   FOREIGN KEY (scheduled_task_id) REFERENCES scheduled_tasks(id) ON DELETE SET NULL
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS imap_account_messages (
   status VARCHAR(32) NOT NULL,
   error TEXT NULL,
   processed_at DATETIME NULL,
-  created_at TIMESTAMP(6) NOT NULL DEFAULT UTC_TIMESTAMP(6),
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   UNIQUE KEY uq_imap_account_messages_account_uid (account_id, message_uid),
   FOREIGN KEY (account_id) REFERENCES imap_accounts(id) ON DELETE CASCADE,
   FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE SET NULL
