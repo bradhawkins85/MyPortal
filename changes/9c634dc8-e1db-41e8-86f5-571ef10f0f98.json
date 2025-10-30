@@ -1,0 +1,7 @@
+{
+  "guid": "9c634dc8-e1db-41e8-86f5-571ef10f0f98",
+  "occurred_at": "2025-10-30T13:34Z",
+  "change_type": "Feature",
+  "summary": "Added REST API endpoints to view and update shop orders.",
+  "content_hash": "39df152470c5b674fd39441f908b8dafdb06da2c06819107b6d351ce03f7aa34"
+}
