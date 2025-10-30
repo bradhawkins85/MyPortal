@@ -191,61 +191,70 @@ def _serialise_for_json(value: Any) -> Any:
         return [_serialise_for_json(item) for item in value]
     return value
 tags_metadata = [
-    {"name": "Auth", "description": "Authentication, registration, and session management."},
-    {"name": "Users", "description": "User administration, profile management, and self-service endpoints."},
-    {"name": "Companies", "description": "Company catalogue and membership management."},
-    {"name": "Roles", "description": "Role definitions and access controls."},
-    {"name": "Memberships", "description": "Company membership workflows with approval tracking."},
-    {
-        "name": "Assets",
-        "description": "Device inventory, warranty status, and Syncro asset synchronisation endpoints.",
-    },
-    {
-        "name": "Staff",
-        "description": "Staff directory management, Syncro contact synchronisation, and verification workflows.",
-    },
-    {"name": "Audit Logs", "description": "Structured audit trail of privileged actions."},
     {
         "name": "API Keys",
         "description": "Super-admin management of API credentials with usage telemetry.",
     },
-    {"name": "Ports", "description": "Port catalogue, document storage, and pricing workflow APIs."},
-    {"name": "Invoices", "description": "Invoice catalogue, status tracking, and reconciliation APIs."},
-    {"name": "Licenses", "description": "Software license catalogue, assignments, and ordering workflows."},
+    {
+        "name": "Assets",
+        "description": "Device inventory, warranty status, and Syncro asset synchronisation endpoints.",
+    },
+    {"name": "Audit Logs", "description": "Structured audit trail of privileged actions."},
+    {"name": "Auth", "description": "Authentication, registration, and session management."},
+    {
+        "name": "Automations",
+        "description": "Workflow automations combining scheduling, event triggers, and module actions.",
+    },
+    {
+        "name": "ChatGPT MCP",
+        "description": "Expose secure Model Context Protocol tooling for ChatGPT ticket triage and updates.",
+    },
+    {"name": "Companies", "description": "Company catalogue and membership management."},
     {
         "name": "Forms",
         "description": "OpnForm publishing, company assignments, and secure embedding endpoints.",
     },
-    {"name": "Office365", "description": "Microsoft 365 credential management and synchronisation APIs."},
-    {"name": "Notifications", "description": "System-wide and user-specific notification feeds."},
+    {
+        "name": "Integration Modules",
+        "description": "Manage external module credentials for Ollama, SMTP, TacticalRMM, ntfy, and ChatGPT MCP.",
+    },
+    {"name": "Invoices", "description": "Invoice catalogue, status tracking, and reconciliation APIs."},
     {
         "name": "Knowledge Base",
         "description": "Permission-scoped articles with Ollama-assisted semantic search.",
     },
+    {
+        "name": "Licenses",
+        "description": "Software license catalogue, assignments, and ordering workflows.",
+    },
+    {
+        "name": "Memberships",
+        "description": "Company membership workflows with approval tracking.",
+    },
+    {"name": "Notifications", "description": "System-wide and user-specific notification feeds."},
+    {"name": "Office365", "description": "Microsoft 365 credential management and synchronisation APIs."},
+    {"name": "Ports", "description": "Port catalogue, document storage, and pricing workflow APIs."},
+    {"name": "Roles", "description": "Role definitions and access controls."},
     {"name": "Shop", "description": "Product catalogue management and visibility controls."},
     {
         "name": "Shop Packages",
         "description": "Pre-built bundles of products designed to simplify repeat ordering workflows.",
     },
     {
-        "name": "Tickets",
-        "description": "Ticketing workspace with replies, watchers, and module-aligned categorisation.",
-    },
-    {
-        "name": "Automations",
-        "description": "Workflow automations combining scheduling, event triggers, and module actions.",
-    },
-    {
-        "name": "Integration Modules",
-        "description": "Manage external module credentials for Ollama, SMTP, TacticalRMM, ntfy, and ChatGPT MCP.",
-    },
-    {
-        "name": "ChatGPT MCP",
-        "description": "Expose secure Model Context Protocol tooling for ChatGPT ticket triage and updates.",
+        "name": "Staff",
+        "description": "Staff directory management, Syncro contact synchronisation, and verification workflows.",
     },
     {
         "name": "System",
         "description": "Administrative system controls and realtime refresh notifications.",
+    },
+    {
+        "name": "Tickets",
+        "description": "Ticketing workspace with replies, watchers, and module-aligned categorisation.",
+    },
+    {
+        "name": "Users",
+        "description": "User administration, profile management, and self-service endpoints.",
     },
 ]
 app = FastAPI(

@@ -1,0 +1,7 @@
+{
+  "guid": "36dbe202-f7a5-44ac-9384-0b35139f4606",
+  "occurred_at": "2025-02-17T00:00Z",
+  "change_type": "Fix",
+  "summary": "Alphabetised Swagger UI tag ordering so sections render in predictable order.",
+  "content_hash": "d1a5cc5b6980ee7f42caa34c96e04f8ff5ac1dee9358ed75b18363f19fbf3d6f"
+}
