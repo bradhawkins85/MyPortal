@@ -757,6 +757,42 @@
     });
   }
 
+  function bindIssueStatusAutoSubmit() {
+    const forms = document.querySelectorAll('[data-issue-status-form]');
+    forms.forEach((form) => {
+      if (form.dataset.issueStatusBound === 'true') {
+        return;
+      }
+      const select = form.querySelector('[data-issue-status-select]');
+      if (!select) {
+        form.dataset.issueStatusBound = 'true';
+        return;
+      }
+
+      let hasSubmitted = false;
+
+      form.dataset.issueStatusBound = 'true';
+
+      form.addEventListener('submit', () => {
+        hasSubmitted = true;
+        select.disabled = true;
+        form.classList.add('inline-form--submitting');
+      });
+
+      select.addEventListener('change', () => {
+        if (hasSubmitted) {
+          return;
+        }
+        hasSubmitted = true;
+        if (typeof form.requestSubmit === 'function') {
+          form.requestSubmit();
+        } else {
+          form.submit();
+        }
+      });
+    });
+  }
+
   const ticketTableStateCache = new WeakMap();
   let ticketRefreshHandlerRegistered = false;
 
@@ -1494,6 +1530,7 @@
     bindSyncroCompanyImportForm();
     bindTicketBulkDelete();
     bindTicketStatusAutoSubmit();
+    bindIssueStatusAutoSubmit();
     registerTicketTableRefreshHandler();
     setupTableRealtimeRefreshControllers();
     bindTicketAiReplaceDescription();
