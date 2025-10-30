@@ -38,6 +38,7 @@ from app.security.passwords import verify_password
 from app.security.session import SessionData, ensure_datetime, session_manager
 from app.services import company_access
 from app.services import email as email_service
+from app.services import staff_access as staff_access_service
 
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -166,6 +167,8 @@ async def register(
             user_id=created["id"],
             company_id=matched_company_id,
         )
+
+    await staff_access_service.apply_pending_access_for_user(created)
 
     active_company_id = await _determine_active_company_id(created)
     session = await session_manager.create_session(

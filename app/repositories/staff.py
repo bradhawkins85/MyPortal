@@ -185,6 +185,19 @@ async def list_all_staff(
     return [_map_staff_row(row) for row in rows]
 
 
+async def list_staff_by_email(email: str) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name
+        FROM staff AS s
+        LEFT JOIN staff_verification_codes AS svc ON svc.staff_id = s.id
+        WHERE LOWER(s.email) = LOWER(%s)
+        """,
+        (email,),
+    )
+    return [_map_staff_row(row) for row in rows]
+
+
 async def list_departments(company_id: int) -> list[str]:
     rows = await db.fetch_all(
         """
