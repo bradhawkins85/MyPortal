@@ -199,6 +199,49 @@ body {
   line-height: 1.6;
 }
 
+.menu__item--impersonation {
+  padding: var(--space-gap-tight) var(--space-compact-inline);
+  background: rgba(148, 163, 184, 0.08);
+  border-radius: 0.75rem;
+}
+
+.impersonation-exit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+}
+
+.impersonation-exit__button {
+  width: 100%;
+  justify-content: center;
+}
+
+.impersonation-exit__context {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #fef2f2;
+  line-height: 1.4;
+}
+
+.impersonation-exit__separator {
+  margin: 0 0.35rem;
+}
+
+.impersonation-access-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.impersonation-access-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 .button,
 .button-link {
   border-radius: 0.75rem;

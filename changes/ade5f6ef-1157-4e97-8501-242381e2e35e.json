@@ -1,0 +1,7 @@
+{
+  "guid": "ade5f6ef-1157-4e97-8501-242381e2e35e",
+  "occurred_at": "2025-10-30T14:05Z",
+  "change_type": "Fix",
+  "summary": "Fixed impersonation exit API test harness to simulate active session cookies.",
+  "content_hash": "9c0a48212013e812bf737fcb69b1137c8a647484198fd128218fc0fadfdccbe7"
+}

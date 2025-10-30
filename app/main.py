@@ -125,6 +125,7 @@ from app.services import tickets as tickets_service
 from app.services import template_variables
 from app.services import webhook_monitor
 from app.services import issues as issues_service
+from app.services import impersonation as impersonation_service
 from app.services.realtime import refresh_notifier
 from app.services.sanitization import sanitize_rich_text
 from app.services.opnform import (
@@ -732,6 +733,23 @@ async def _build_base_context(
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     session = await session_manager.load_session(request)
+    impersonator_user = None
+    impersonation_started_at = None
+    is_impersonating = False
+    if session and session.impersonator_user_id is not None:
+        is_impersonating = True
+        impersonation_started_at = session.impersonation_started_at
+        cached_impersonator = getattr(request.state, "impersonator_profile", None)
+        if cached_impersonator and int(cached_impersonator.get("id", 0)) == session.impersonator_user_id:
+            impersonator_user = cached_impersonator
+        else:
+            try:
+                impersonator_user = await user_repo.get_user_by_id(session.impersonator_user_id)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("Failed to load impersonator user context", error=str(exc))
+                impersonator_user = None
+            else:
+                request.state.impersonator_profile = impersonator_user
     available_companies = getattr(request.state, "available_companies", None)
     if available_companies is None:
         available_companies = await company_access.list_accessible_companies(user)
@@ -800,6 +818,9 @@ async def _build_base_context(
         "integration_modules": module_lookup,
         "syncro_module_enabled": bool((module_lookup or {}).get("syncro", {}).get("enabled")),
         "enable_auto_refresh": bool(settings.enable_auto_refresh),
+        "is_impersonating": is_impersonating,
+        "impersonator_user": impersonator_user,
+        "impersonation_started_at": impersonation_started_at,
     }
     context.update(permission_flags)
     if extra:
@@ -1828,6 +1849,40 @@ def _sanitize_message(value: str | None) -> str | None:
     if not text:
         return None
     return text[:200]
+
+
+async def _render_impersonation_dashboard(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    error_message: str | None = None,
+    success_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    try:
+        candidates = await impersonation_service.list_impersonatable_users()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to enumerate impersonation candidates", error=str(exc))
+        candidates = []
+        if error_message is None:
+            error_message = "Unable to load impersonation candidates."
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "User impersonation",
+            "impersonation_candidates": candidates,
+            "impersonation_error": error_message,
+            "impersonation_success": success_message,
+        },
+    )
+    return templates.TemplateResponse(
+        "admin/impersonation.html",
+        context,
+        status_code=status_code,
+    )
 
 
 async def _get_company_management_scope(
@@ -4676,6 +4731,80 @@ async def admin_profile_page(request: Request):
         },
     )
     return templates.TemplateResponse("admin/profile.html", context)
+
+
+@app.get("/admin/impersonation", response_class=HTMLResponse)
+async def admin_impersonation_page(
+    request: Request,
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _render_impersonation_dashboard(
+        request,
+        current_user,
+        success_message=_sanitize_message(success),
+        error_message=_sanitize_message(error),
+    )
+
+
+@app.post("/admin/impersonation", response_class=HTMLResponse)
+async def admin_impersonation_start(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    target_value = form.get("userId") or form.get("user_id")
+    try:
+        target_user_id = int(str(target_value))
+    except (TypeError, ValueError):
+        return await _render_impersonation_dashboard(
+            request,
+            current_user,
+            error_message="Select a valid user to impersonate.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    actor_session = getattr(request.state, "session", None)
+    if actor_session is None:
+        actor_session = await session_manager.load_session(request)
+    if actor_session is None:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        _, impersonated_session = await impersonation_service.start_impersonation(
+            request=request,
+            actor_user=current_user,
+            actor_session=actor_session,
+            target_user_id=target_user_id,
+        )
+    except impersonation_service.SelfImpersonationError:
+        error_message = "You cannot impersonate your own account."
+        status_code = status.HTTP_400_BAD_REQUEST
+    except impersonation_service.AlreadyImpersonatingError:
+        error_message = "An impersonation session is already active."
+        status_code = status.HTTP_409_CONFLICT
+    except impersonation_service.NotImpersonatableError as exc:
+        error_message = str(exc)
+        status_code = status.HTTP_403_FORBIDDEN
+    else:
+        response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+        session_manager.apply_session_cookies(response, impersonated_session)
+        request.state.session = impersonated_session
+        request.state.active_company_id = impersonated_session.active_company_id
+        request.state.impersonator_user_id = impersonated_session.impersonator_user_id
+        request.state.impersonator_session_id = impersonated_session.impersonator_session_id
+        return response
+
+    return await _render_impersonation_dashboard(
+        request,
+        current_user,
+        error_message=_sanitize_message(error_message),
+        status_code=status_code,
+    )
 
 
 @app.get("/admin/companies", response_class=HTMLResponse)

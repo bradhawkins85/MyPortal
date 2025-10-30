@@ -19,6 +19,9 @@ async def create_session(
     ip_address: str | None,
     user_agent: str | None,
     pending_totp_secret: str | None = None,
+    impersonator_user_id: int | None = None,
+    impersonator_session_id: int | None = None,
+    impersonation_started_at: datetime | None = None,
 ) -> dict[str, Any]:
     await db.execute(
         """
@@ -32,8 +35,11 @@ async def create_session(
             last_seen_at,
             ip_address,
             user_agent,
-            pending_totp_secret
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            pending_totp_secret,
+            impersonator_user_id,
+            impersonator_session_id,
+            impersonation_started_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             user_id,
@@ -46,6 +52,9 @@ async def create_session(
             ip_address,
             user_agent,
             pending_totp_secret,
+            impersonator_user_id,
+            impersonator_session_id,
+            impersonation_started_at,
         ),
     )
     return await get_session_by_token(session_token)
@@ -54,6 +63,14 @@ async def create_session(
 async def get_session_by_token(token: str) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
         "SELECT * FROM user_sessions WHERE session_token = %s", (token,)
+    )
+    return row
+
+
+async def get_session_by_id(session_id: int) -> Optional[dict[str, Any]]:
+    row = await db.fetch_one(
+        "SELECT * FROM user_sessions WHERE id = %s",
+        (session_id,),
     )
     return row
 
@@ -70,6 +87,9 @@ async def update_session(
     pending_totp_secret: Any = _SENTINEL,
     is_active: Optional[bool] = None,
     active_company_id: Any = _SENTINEL,
+    impersonator_user_id: Any = _SENTINEL,
+    impersonator_session_id: Any = _SENTINEL,
+    impersonation_started_at: Any = _SENTINEL,
 ) -> None:
     updates: list[str] = []
     params: list[Any] = []
@@ -91,6 +111,15 @@ async def update_session(
     if active_company_id is not _SENTINEL:
         updates.append("active_company_id = %s")
         params.append(active_company_id)
+    if impersonator_user_id is not _SENTINEL:
+        updates.append("impersonator_user_id = %s")
+        params.append(impersonator_user_id)
+    if impersonator_session_id is not _SENTINEL:
+        updates.append("impersonator_session_id = %s")
+        params.append(impersonator_session_id)
+    if impersonation_started_at is not _SENTINEL:
+        updates.append("impersonation_started_at = %s")
+        params.append(impersonation_started_at)
     if not updates:
         return
     params.append(session_id)
