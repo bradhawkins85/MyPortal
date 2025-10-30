@@ -1464,6 +1464,7 @@
     const permissionsEmptyElement = modal.querySelector('[data-api-key-permissions-empty]');
     const ipListElement = modal.querySelector('[data-api-key-ips-list]');
     const ipEmptyElement = modal.querySelector('[data-api-key-ips-empty]');
+    const statusElement = modal.querySelector('[data-api-key-status]');
     const rotateForm = modal.querySelector('[data-api-key-rotate-form]');
     const revokeForm = modal.querySelector('[data-api-key-revoke-form]');
     const rotateIdInput = modal.querySelector('[data-api-key-rotate-id]');
@@ -1475,6 +1476,7 @@
       ? rotateForm.querySelector('[data-api-key-rotate-permissions]')
       : null;
     const ipsInput = rotateForm ? rotateForm.querySelector('[data-api-key-rotate-ips]') : null;
+    const enabledInput = rotateForm ? rotateForm.querySelector('[data-api-key-enabled]') : null;
 
     function formatDateTime(iso, fallbackText = '—') {
       if (!iso) {
@@ -1648,6 +1650,11 @@
         usageCountElement.textContent = String(value);
       }
 
+      if (statusElement) {
+        const enabled = payload.is_enabled !== false;
+        statusElement.textContent = enabled ? 'Enabled' : 'Disabled';
+      }
+
       renderUsageList(payload.usage);
       renderPermissionsList(payload.permissions);
       renderIpRestrictionsList(payload.ip_restrictions);
@@ -1689,6 +1696,9 @@
       }
       if (ipsInput) {
         ipsInput.value = payload.ip_restrictions_text || '';
+      }
+      if (enabledInput) {
+        enabledInput.checked = payload.is_enabled !== false;
       }
       if (rotateForm) {
         rotateForm.dataset.apiKeyId = payload.id || '';
