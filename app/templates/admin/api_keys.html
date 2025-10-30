@@ -133,10 +133,20 @@
           <p class="secret-card__hint">
             Access scope: {{ new_api_key.access_summary or 'All endpoints' }}.
           </p>
+          <p class="secret-card__hint">
+            Source IPs: {{ new_api_key.ip_summary or 'Any IP address' }}.
+          </p>
           {% if new_api_key.permissions %}
             <div class="tag-list">
               {% for permission in new_api_key.permissions %}
                 <span class="tag">{{ permission.methods | join(', ') }} {{ permission.path }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
+          {% if new_api_key.ip_restrictions %}
+            <div class="tag-list">
+              {% for restriction in new_api_key.ip_restrictions %}
+                <span class="tag">{{ restriction.label }}</span>
               {% endfor %}
             </div>
           {% endif %}
@@ -181,9 +191,9 @@
                 </td>
                 <td data-label="Preview">{{ key.key_preview }}</td>
                 <td data-label="Access scope" data-value="{{ key.access_summary }}">
-                  {% if key.is_restricted %}
-                    {{ key.access_summary }}
-                  {% else %}
+                  <div>{{ key.endpoint_summary or 'All endpoints' }}</div>
+                  <div class="text-muted">IPs: {{ key.ip_summary or 'Any IP address' }}</div>
+                  {% if not key.is_restricted %}
                     <span class="badge badge--muted">Unrestricted</span>
                   {% endif %}
                 </td>
@@ -221,7 +231,11 @@
                     "is_expired": key.is_expired,
                     "permissions": key.permissions or [],
                     "permissions_text": key.permissions_text or "",
+                    "ip_restrictions": key.ip_restrictions or [],
+                    "ip_restrictions_text": key.ip_restrictions_text or "",
                     "access_summary": key.access_summary,
+                    "endpoint_summary": key.endpoint_summary,
+                    "ip_summary": key.ip_summary,
                     "is_restricted": key.is_restricted
                   } %}
                   <div class="table__action-buttons">
@@ -444,6 +458,12 @@
         <ul class="usage-list" data-api-key-permissions-list hidden></ul>
       </section>
 
+      <section aria-labelledby="api-key-ips-heading">
+        <h3 id="api-key-ips-heading">Source IP restrictions</h3>
+        <p class="text-muted" data-api-key-ips-empty>Any IP address permitted.</p>
+        <ul class="usage-list" data-api-key-ips-list hidden></ul>
+      </section>
+
       <form
         method="post"
         action="/admin/api-keys/update"
@@ -492,6 +512,20 @@
           <p class="form-help">
             One entry per line using "METHOD /path" (methods: {{ allowed_methods | join(', ') }}).
             Leave blank to keep unrestricted access.
+          </p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="modal-rotate-ips">Source IP allow list</label>
+          <textarea
+            class="form-input"
+            id="modal-rotate-ips"
+            name="allowed_ips"
+            rows="3"
+            placeholder="203.0.113.10 or 203.0.113.0/24"
+            data-api-key-rotate-ips
+          ></textarea>
+          <p class="form-help">
+            One IP address or CIDR range per line. Leave blank to allow any IP address.
           </p>
         </div>
         <div class="form-field form-field--checkbox">
@@ -596,6 +630,19 @@
         <p class="form-hint">
           One entry per line using "METHOD /path" (methods: {{ allowed_methods | join(', ') }}).
           Leave blank to grant this key full access.
+        </p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="modal-api-key-ips">Source IP allow list</label>
+        <textarea
+          class="form-input"
+          id="modal-api-key-ips"
+          name="allowed_ips"
+          rows="3"
+          placeholder="203.0.113.10 or 203.0.113.0/24"
+        ></textarea>
+        <p class="form-hint">
+          One IP address or CIDR range per line. Leave blank to allow requests from any IP address.
         </p>
       </div>
       <div class="form-actions">
