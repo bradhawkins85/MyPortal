@@ -1,9 +1,9 @@
 CREATE TABLE IF NOT EXISTS issue_definitions (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     description TEXT NULL,
-    created_by BIGINT UNSIGNED NULL,
-    updated_by BIGINT UNSIGNED NULL,
+    created_by INT NULL,
+    updated_by INT NULL,
     created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     UNIQUE KEY uniq_issue_definitions_name (name),
@@ -13,12 +13,12 @@ CREATE TABLE IF NOT EXISTS issue_definitions (
 );
 
 CREATE TABLE IF NOT EXISTS issue_company_statuses (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    issue_id BIGINT UNSIGNED NOT NULL,
-    company_id BIGINT UNSIGNED NOT NULL,
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    issue_id INT NOT NULL,
+    company_id INT NOT NULL,
     status VARCHAR(32) NOT NULL,
     notes TEXT NULL,
-    updated_by BIGINT UNSIGNED NULL,
+    updated_by INT NULL,
     created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     UNIQUE KEY uniq_issue_company (issue_id, company_id),
