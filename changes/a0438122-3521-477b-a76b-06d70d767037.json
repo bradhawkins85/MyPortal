@@ -1,0 +1,7 @@
+{
+  "guid": "a0438122-3521-477b-a76b-06d70d767037",
+  "occurred_at": "2025-10-30T13:17Z",
+  "change_type": "Fix",
+  "summary": "Collapsed the assign staff access controls by default and reduced the email domain field height on the company editor.",
+  "content_hash": "b85303ac523da910e798d99de9f43c081a36bc0886a8854ca10a3806b4279fda"
+}
