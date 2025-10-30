@@ -806,17 +806,37 @@
     try {
       const parsed = JSON.parse(table.dataset.ticketStatusOptions || '[]');
       if (Array.isArray(parsed)) {
-        statusOptions = parsed.map((value) => String(value));
+        statusOptions = parsed
+          .map((item) => {
+            if (!item || typeof item !== 'object') {
+              return null;
+            }
+            const value = String(item.tech_status || item.techStatus || '').trim();
+            if (!value) {
+              return null;
+            }
+            const label = String(item.tech_label || item.techLabel || '')
+              .trim()
+              || value.replace(/_/g, ' ');
+            return { value, label };
+          })
+          .filter(Boolean);
       }
     } catch (error) {
       statusOptions = [];
     }
     if (!statusOptions.length) {
-      statusOptions = ['open', 'in_progress', 'pending', 'resolved', 'closed'];
+      statusOptions = [
+        { value: 'open', label: 'Open' },
+        { value: 'in_progress', label: 'In progress' },
+        { value: 'pending', label: 'Pending' },
+        { value: 'resolved', label: 'Resolved' },
+        { value: 'closed', label: 'Closed' },
+      ];
     }
 
-    const statusLabels = statusOptions.reduce((acc, value) => {
-      acc[value] = value.replace(/_/g, ' ');
+    const statusLabels = statusOptions.reduce((acc, option) => {
+      acc[option.value] = option.label;
       return acc;
     }, {});
 
@@ -944,8 +964,10 @@
       select.className = 'form-input form-input--compact';
       select.setAttribute('data-ticket-status-select', '');
 
-      const uniqueOptions = Array.from(new Set([...statusOptions, normalisedStatus]));
-      uniqueOptions.forEach((option) => {
+      const optionValues = Array.from(
+        new Set([...statusOptions.map((option) => option.value), normalisedStatus])
+      );
+      optionValues.forEach((option) => {
         const optionElement = document.createElement('option');
         optionElement.value = option;
         optionElement.textContent = statusLabels[option] || option.replace(/_/g, ' ');
@@ -1551,6 +1573,175 @@
     });
   }
 
+  function bindTicketStatusManager() {
+    const modal = document.getElementById('edit-ticket-statuses-modal');
+    if (!modal) {
+      return;
+    }
+
+    const form = modal.querySelector('[data-ticket-statuses-form]');
+    const list = form ? form.querySelector('[data-statuses-list]') : null;
+    const template = modal.querySelector('#ticket-status-row-template');
+    const errorContainer = modal.querySelector('[data-status-error]');
+
+    if (!form || !list || !template) {
+      return;
+    }
+
+    function clearError() {
+      if (errorContainer) {
+        errorContainer.hidden = true;
+        errorContainer.textContent = '';
+      }
+    }
+
+    function showError(message) {
+      if (errorContainer) {
+        errorContainer.textContent = message;
+        errorContainer.hidden = false;
+      }
+    }
+
+    function updateRowIdentifiers() {
+      const rows = Array.from(list.querySelectorAll('[data-status-row]'));
+      rows.forEach((row, index) => {
+        const labels = Array.from(row.querySelectorAll('label'));
+        const techInput = row.querySelector('input[name="techLabel"]');
+        const publicInput = row.querySelector('input[name="publicLabel"]');
+        if (techInput) {
+          const techId = `status-tech-${index}`;
+          techInput.id = techId;
+          if (labels[0]) {
+            labels[0].setAttribute('for', techId);
+          }
+        }
+        if (publicInput) {
+          const publicId = `status-public-${index}`;
+          publicInput.id = publicId;
+          if (labels[1]) {
+            labels[1].setAttribute('for', publicId);
+          }
+        }
+      });
+    }
+
+    function updateRemoveButtons() {
+      const rows = Array.from(list.querySelectorAll('[data-status-row]'));
+      const disableRemoval = rows.length <= 1;
+      rows.forEach((row) => {
+        const removeButton = row.querySelector('[data-status-remove]');
+        if (removeButton) {
+          removeButton.disabled = disableRemoval;
+        }
+      });
+    }
+
+    function createRow() {
+      if (template instanceof HTMLTemplateElement) {
+        const fragment = template.content.firstElementChild;
+        if (fragment) {
+          return fragment.cloneNode(true);
+        }
+      }
+      return template.firstElementChild.cloneNode(true);
+    }
+
+    function addStatusRow() {
+      const row = createRow();
+      const techInput = row.querySelector('input[name="techLabel"]');
+      const publicInput = row.querySelector('input[name="publicLabel"]');
+      const slugInput = row.querySelector('input[name="existingSlug"]');
+      if (techInput) {
+        techInput.value = '';
+      }
+      if (publicInput) {
+        publicInput.value = '';
+      }
+      if (slugInput) {
+        slugInput.value = '';
+      }
+      list.appendChild(row);
+      updateRowIdentifiers();
+      updateRemoveButtons();
+      clearError();
+      if (techInput) {
+        techInput.focus();
+      }
+    }
+
+    function removeStatusRow(button) {
+      const row = button.closest('[data-status-row]');
+      if (!row) {
+        return;
+      }
+      const rows = list.querySelectorAll('[data-status-row]');
+      if (rows.length <= 1) {
+        return;
+      }
+      row.remove();
+      updateRowIdentifiers();
+      updateRemoveButtons();
+      clearError();
+    }
+
+    form.addEventListener('click', (event) => {
+      const addTrigger = event.target.closest('[data-add-status]');
+      if (addTrigger) {
+        event.preventDefault();
+        addStatusRow();
+        return;
+      }
+      const removeTrigger = event.target.closest('[data-status-remove]');
+      if (removeTrigger) {
+        event.preventDefault();
+        removeStatusRow(removeTrigger);
+      }
+    });
+
+    form.addEventListener('input', () => {
+      clearError();
+    });
+
+    form.addEventListener('submit', (event) => {
+      clearError();
+      const rows = Array.from(list.querySelectorAll('[data-status-row]'));
+      const seen = new Set();
+      for (const row of rows) {
+        const techInput = row.querySelector('input[name="techLabel"]');
+        const publicInput = row.querySelector('input[name="publicLabel"]');
+        if (techInput) {
+          techInput.value = techInput.value.trim();
+        }
+        if (publicInput) {
+          publicInput.value = publicInput.value.trim();
+        }
+        if (!techInput || !techInput.value) {
+          continue;
+        }
+        const slug = techInput.value
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '_')
+          .replace(/^_+|_+$/g, '');
+        if (!slug) {
+          showError('Tech status labels must include letters or numbers.');
+          techInput.focus();
+          event.preventDefault();
+          return;
+        }
+        if (seen.has(slug)) {
+          showError('Tech status values must be unique.');
+          techInput.focus();
+          event.preventDefault();
+          return;
+        }
+        seen.add(slug);
+      }
+    });
+
+    updateRowIdentifiers();
+    updateRemoveButtons();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     bindSyncroTicketImportForms();
     bindSyncroCompanyImportForm();
@@ -1566,8 +1757,10 @@
     bindCompanyAssignmentControls();
     bindApiKeyCopyButtons();
     bindConfirmationButtons();
+    bindTicketStatusManager();
     bindModal({ modalId: 'add-company-modal', triggerSelector: '[data-add-company-modal-open]' });
     bindModal({ modalId: 'create-ticket-modal', triggerSelector: '[data-create-ticket-modal-open]' });
     bindModal({ modalId: 'create-api-key-modal', triggerSelector: '[data-create-api-key-modal-open]' });
+    bindModal({ modalId: 'edit-ticket-statuses-modal', triggerSelector: '[data-edit-ticket-statuses-open]' });
   });
 })();

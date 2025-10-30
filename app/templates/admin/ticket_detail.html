@@ -33,9 +33,10 @@
           {% set ai_status_label = ai_status_lower.replace('_', ' ') | title %}
           {% set tag_status_value = ticket.ai_tags_status if ticket.ai_tags_status is not none else 'skipped' %}
           {% set tag_status_lower = tag_status_value | lower %}
+          {% set ticket_status_label = ticket_status_label_map.get(ticket_status, ticket_status.replace('_', ' ').title()) %}
           <p class="management__subtitle">
             Ticket #{{ ticket.id }}
-            <span class="badge {{ status_badge_map.get(ticket_status, 'badge--muted') }}">{{ ticket_status.replace('_', ' ') }}</span>
+            <span class="badge {{ status_badge_map.get(ticket_status, 'badge--muted') }}">{{ ticket_status_label }}</span>
           </p>
         </div>
         <div class="management__header-actions">
@@ -70,10 +71,12 @@
               <div class="form-field">
                 <label class="form-label" for="ticket-status-detail">Status</label>
                 <select id="ticket-status-detail" name="status" class="form-input">
-                  {% for status_option in ticket_available_statuses %}
-                    {% set status_value = status_option.lower() %}
-                    <option value="{{ status_value }}" {% if status_value == ticket_status.lower() %}selected{% endif %}>
-                      {{ status_option.replace('_', ' ') }}
+                  {% if ticket_status not in ticket_status_label_map %}
+                    <option value="{{ ticket_status }}" selected>{{ ticket_status_label }}</option>
+                  {% endif %}
+                  {% for status_option in ticket_status_definitions %}
+                    <option value="{{ status_option.tech_status }}" {% if status_option.tech_status == ticket_status %}selected{% endif %}>
+                      {{ status_option.tech_label }}
                     </option>
                   {% endfor %}
                 </select>

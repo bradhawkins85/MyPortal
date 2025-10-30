@@ -31,10 +31,14 @@ async def test_create_ticket_triggers_automations(monkeypatch):
         recorded["context"] = context
         return []
 
+    async def fake_resolve_status(value):
+        return value or "open"
+
     monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
     monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
     monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
+    monkeypatch.setattr(tickets_service, "resolve_status_or_default", fake_resolve_status)
 
     ticket = await tickets_service.create_ticket(
         subject="Printer offline",
@@ -76,10 +80,14 @@ async def test_create_ticket_can_skip_automations(monkeypatch):
         called = True
         return []
 
+    async def fake_resolve_status(value):
+        return value or "open"
+
     monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
     monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
     monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
+    monkeypatch.setattr(tickets_service, "resolve_status_or_default", fake_resolve_status)
 
     ticket = await tickets_service.create_ticket(
         subject="Laptop setup",
@@ -119,10 +127,14 @@ async def test_create_ticket_truncates_long_description(monkeypatch):
     async def fake_get_user(user_id):
         return None
 
+    async def fake_resolve_status(value):
+        return value or "open"
+
     monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
     monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
     monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
+    monkeypatch.setattr(tickets_service, "resolve_status_or_default", fake_resolve_status)
 
     long_description = "A" * (tickets_service._MAX_TICKET_DESCRIPTION_BYTES + 512)
 

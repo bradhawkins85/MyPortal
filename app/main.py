@@ -7060,12 +7060,29 @@ async def _render_tickets_dashboard(
     dashboard_endpoint = "/api/tickets/dashboard"
     if query_params:
         dashboard_endpoint = f"{dashboard_endpoint}?{urlencode(query_params)}"
+    status_definitions_payload = [
+        {
+            "tech_status": definition.tech_status,
+            "tech_label": definition.tech_label,
+            "public_status": definition.public_status,
+        }
+        for definition in dashboard.status_definitions
+    ]
+    status_label_map = {
+        definition.tech_status: definition.tech_label for definition in dashboard.status_definitions
+    }
+    public_status_map = {
+        definition.tech_status: definition.public_status for definition in dashboard.status_definitions
+    }
     extra = {
         "title": "Ticketing workspace",
         "tickets": dashboard.tickets,
         "ticket_total": dashboard.total,
         "ticket_status_counts": dashboard.status_counts,
         "ticket_available_statuses": dashboard.available_statuses,
+        "ticket_status_definitions": status_definitions_payload,
+        "ticket_status_label_map": status_label_map,
+        "ticket_public_status_map": public_status_map,
         "ticket_filters": {"status": status_filter, "module": module_filter},
         "ticket_modules": dashboard.modules,
         "ticket_company_options": dashboard.companies,
@@ -7214,9 +7231,13 @@ async def _render_ticket_detail(
         watcher_user = user_lookup.get(watcher.get("user_id"))
         enriched_watchers.append({**watcher, "user": watcher_user})
 
-    available_statuses = sorted(
-        {"open", "in_progress", "pending", "resolved", "closed", ticket.get("status") or "open"}
-    )
+    status_definitions = await tickets_service.list_status_definitions()
+    status_label_map = {definition.tech_status: definition.tech_label for definition in status_definitions}
+    public_status_map = {definition.tech_status: definition.public_status for definition in status_definitions}
+    available_statuses = [definition.tech_status for definition in status_definitions]
+    ticket_status_slug = ticket.get("status") or "open"
+    if ticket_status_slug not in available_statuses:
+        available_statuses.append(ticket_status_slug)
 
     companies = await company_repo.list_companies()
     technician_users = await membership_repo.list_users_with_permission(
@@ -7273,6 +7294,16 @@ async def _render_ticket_detail(
         "ticket_billable_minutes": total_billable_minutes,
         "ticket_non_billable_minutes": total_non_billable_minutes,
         "ticket_available_statuses": available_statuses,
+        "ticket_status_definitions": [
+            {
+                "tech_status": definition.tech_status,
+                "tech_label": definition.tech_label,
+                "public_status": definition.public_status,
+            }
+            for definition in status_definitions
+        ],
+        "ticket_status_label_map": status_label_map,
+        "ticket_public_status_map": public_status_map,
         "ticket_company_options": companies,
         "ticket_user_options": technician_users,
         "ticket_requester_options": requester_options,
@@ -7743,7 +7774,7 @@ async def admin_create_ticket(request: Request):
     description = (str(form.get("description", "")).strip() or None)
     priority = (str(form.get("priority", "")).strip() or "normal")
     module_slug = (str(form.get("moduleSlug", "")).strip() or None)
-    status_value = (str(form.get("status", "")).strip() or "open")
+    status_raw = str(form.get("status", "")).strip()
     company_raw = form.get("companyId")
     assigned_raw = form.get("assignedUserId")
     try:
@@ -7762,6 +7793,10 @@ async def admin_create_ticket(request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     try:
+        if status_raw:
+            status_value = await tickets_service.validate_status_choice(status_raw)
+        else:
+            status_value = await tickets_service.resolve_status_or_default(None)
         created = await tickets_service.create_ticket(
             subject=subject,
             description=description,
@@ -7780,11 +7815,18 @@ async def admin_create_ticket(request: Request):
         await tickets_service.refresh_ticket_ai_tags(created["id"])
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create ticket", error=str(exc))
+        if isinstance(exc, ValueError):
+            error_detail = str(exc)
+            status_code_value = status.HTTP_400_BAD_REQUEST
+        else:
+            log_error("Failed to create ticket", error=str(exc))
+            error_detail = "Unable to create ticket. Please try again."
+            status_code_value = status.HTTP_500_INTERNAL_SERVER_ERROR
         return await _render_tickets_dashboard(
             request,
             current_user,
-            error_message="Unable to create ticket. Please try again.",
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_message=error_detail,
+            status_code=status_code_value,
         )
     return RedirectResponse(
         url="/admin/tickets?success=" + quote("Ticket created."),
@@ -7798,22 +7840,25 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
     if redirect:
         return redirect
     form = await request.form()
-    status_value = str(form.get("status", "")).strip()
+    status_raw = str(form.get("status", "")).strip()
     return_url_raw = form.get("returnUrl")
     return_url = str(return_url_raw).strip() if isinstance(return_url_raw, str) else None
-    if not status_value:
+    try:
+        status_value = await tickets_service.validate_status_choice(status_raw)
+    except ValueError as exc:
+        error_message = str(exc)
         if return_url and return_url.startswith(f"/admin/tickets/{ticket_id}"):
             return await _render_ticket_detail(
                 request,
                 current_user,
                 ticket_id=ticket_id,
-                error_message="Select a status to apply.",
+                error_message=error_message,
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
         return await _render_tickets_dashboard(
             request,
             current_user,
-            error_message="Select a status to apply.",
+            error_message=error_message,
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     ticket = await tickets_repo.get_ticket(ticket_id)
@@ -7834,6 +7879,49 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
         separator = "&" if "?" in return_url else "?"
         destination = f"{return_url}{separator}success={message}"
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/admin/tickets/statuses", response_class=HTMLResponse)
+async def admin_replace_ticket_statuses(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    tech_labels = form.getlist("techLabel")
+    public_labels = form.getlist("publicLabel")
+    existing_slugs = form.getlist("existingSlug")
+
+    statuses: list[dict[str, Any]] = []
+    max_length = max(len(tech_labels), len(public_labels), len(existing_slugs))
+    for index in range(max_length):
+        tech_label = tech_labels[index] if index < len(tech_labels) else ""
+        public_status = public_labels[index] if index < len(public_labels) else ""
+        existing_slug = existing_slugs[index] if index < len(existing_slugs) else None
+        if not tech_label and not public_status:
+            continue
+        statuses.append(
+            {
+                "techLabel": tech_label,
+                "publicStatus": public_status,
+                "existingSlug": existing_slug,
+            }
+        )
+
+    try:
+        await tickets_service.replace_ticket_statuses(statuses)
+    except ValueError as exc:
+        return await _render_tickets_dashboard(
+            request,
+            current_user,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return RedirectResponse(
+        url="/admin/tickets?success=" + quote("Ticket statuses updated."),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.post("/admin/tickets/{ticket_id}/description", response_class=HTMLResponse)
@@ -7953,7 +8041,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     def _clean_text(value: Any) -> str:
         return str(value).strip() if isinstance(value, str) else ""
 
-    status_value = _clean_text(form.get("status")).lower()
+    status_raw = _clean_text(form.get("status"))
     priority_value = _clean_text(form.get("priority")).lower()
     requester_raw = form.get("requesterId")
     assigned_raw = form.get("assignedUserId")
@@ -7963,15 +8051,19 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     return_url_raw = form.get("returnUrl")
     return_url = _clean_text(return_url_raw)
 
-    allowed_statuses = {"open", "in_progress", "pending", "resolved", "closed", (ticket.get("status") or "open").lower()}
-    if status_value not in allowed_statuses:
-        return await _render_ticket_detail(
-            request,
-            current_user,
-            ticket_id=ticket_id,
-            error_message="Select a valid status.",
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
+    if status_raw:
+        try:
+            status_value = await tickets_service.validate_status_choice(status_raw)
+        except ValueError as exc:
+            return await _render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message=str(exc),
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+    else:
+        status_value = ticket.get("status") or await tickets_service.resolve_status_or_default(None)
 
     default_priorities = {"urgent", "high", "normal", "low"}
     ticket_priority = (ticket.get("priority") or "normal").lower()
