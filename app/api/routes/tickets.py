@@ -28,6 +28,9 @@ from app.schemas.tickets import (
     TicketReplyResponse,
     TicketResponse,
     TicketSearchFilters,
+    TicketStatusDefinitionModel,
+    TicketStatusListResponse,
+    TicketStatusUpdateRequest,
     TicketUpdate,
     TicketWatcher,
     TicketWatcherUpdate,
@@ -206,6 +209,42 @@ async def get_ticket_dashboard(
     )
 
 
+@router.get("/statuses", response_model=TicketStatusListResponse)
+async def list_ticket_statuses_endpoint(
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TicketStatusListResponse:
+    definitions = await tickets_service.list_status_definitions()
+    items = [
+        TicketStatusDefinitionModel(
+            tech_status=definition.tech_status,
+            tech_label=definition.tech_label,
+            public_status=definition.public_status,
+        )
+        for definition in definitions
+    ]
+    return TicketStatusListResponse(statuses=items)
+
+
+@router.put("/statuses", response_model=TicketStatusListResponse)
+async def replace_ticket_statuses_endpoint(
+    payload: TicketStatusUpdateRequest,
+    current_user: dict = Depends(require_super_admin),
+) -> TicketStatusListResponse:
+    try:
+        definitions = await tickets_service.replace_ticket_statuses(payload.statuses)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    items = [
+        TicketStatusDefinitionModel(
+            tech_status=definition.tech_status,
+            tech_label=definition.tech_label,
+            public_status=definition.public_status,
+        )
+        for definition in definitions
+    ]
+    return TicketStatusListResponse(statuses=items)
+
+
 @router.post("/", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
 async def create_ticket(
     payload: TicketCreate,
@@ -235,7 +274,19 @@ async def create_ticket(
         requester_id = payload.requester_id
     assigned_user_id = payload.assigned_user_id if has_helpdesk_access else None
     priority = payload.priority if has_helpdesk_access else "normal"
-    status_value = payload.status if has_helpdesk_access else "open"
+    if has_helpdesk_access:
+        if payload.status:
+            try:
+                status_value = await tickets_service.validate_status_choice(payload.status)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
+        else:
+            status_value = await tickets_service.resolve_status_or_default(None)
+    else:
+        status_value = await tickets_service.resolve_status_or_default("open")
     category = payload.category if has_helpdesk_access else None
     module_slug = payload.module_slug if has_helpdesk_access else None
     external_reference = payload.external_reference if has_helpdesk_access else None
@@ -278,6 +329,11 @@ async def update_ticket(
     fields = payload.model_dump(exclude_unset=True)
     description_marker = object()
     description_value = fields.pop("description", description_marker)
+    if "status" in fields and fields["status"] is not None:
+        try:
+            fields["status"] = await tickets_service.validate_status_choice(fields["status"])
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if fields:
         await tickets_repo.update_ticket(ticket_id, **fields)
     if description_value is not description_marker:

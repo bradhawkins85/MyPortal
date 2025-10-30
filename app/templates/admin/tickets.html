@@ -3,7 +3,8 @@
 {% block header_title %}
   {% set show_ticket_automations = is_super_admin %}
   {% set show_syncro_import = syncro_module_enabled and (is_super_admin or (is_helpdesk_technician | default(false))) %}
-  {% set show_ticket_tools = show_ticket_automations or show_syncro_import %}
+  {% set show_ticket_status_editor = is_super_admin %}
+  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor %}
   <div class="header-title-menu">
     <span class="header-title-menu__label">Ticketing workspace</span>
     {% if show_ticket_tools %}
@@ -24,6 +25,20 @@
           {% if show_syncro_import %}
             <li class="header-title-menu__item" role="none">
               <a href="/admin/tickets/syncro-import" class="header-title-menu__link" role="menuitem">Syncro ticket import</a>
+            </li>
+          {% endif %}
+          {% if show_ticket_status_editor %}
+            <li class="header-title-menu__item" role="none">
+              <button
+                type="button"
+                class="header-title-menu__link"
+                role="menuitem"
+                data-edit-ticket-statuses-open
+                aria-haspopup="dialog"
+                aria-controls="edit-ticket-statuses-modal"
+              >
+                Edit statuses
+              </button>
             </li>
           {% endif %}
         </ul>
@@ -65,8 +80,17 @@
             <label class="visually-hidden" for="ticket-filter-status">Status</label>
             <select id="ticket-filter-status" name="status" class="form-input">
               <option value="">All statuses</option>
+              {% set status_namespace = namespace(seen=[]) %}
+              {% for status_option in ticket_status_definitions %}
+                {% set option_value = status_option.tech_status %}
+                <option value="{{ option_value }}" {% if ticket_filters.status == option_value %}selected{% endif %}>{{ status_option.tech_label }}</option>
+                {% set status_namespace.seen = status_namespace.seen + [option_value] %}
+              {% endfor %}
               {% for status_option in ticket_available_statuses %}
-                <option value="{{ status_option }}" {% if ticket_filters.status == status_option %}selected{% endif %}>{{ status_option.replace('_', ' ') }}</option>
+                {% if status_option not in status_namespace.seen %}
+                  {% set fallback_label = ticket_status_label_map.get(status_option, status_option.replace('_', ' ').title()) %}
+                  <option value="{{ status_option }}" {% if ticket_filters.status == status_option %}selected{% endif %}>{{ fallback_label }}</option>
+                {% endif %}
               {% endfor %}
             </select>
             <label class="visually-hidden" for="ticket-filter-module">Module</label>
@@ -145,7 +169,7 @@
             data-table-refresh-handler="tickets"
             data-table-refresh-success="Tickets updated."
             data-table-refresh-error="Unable to refresh tickets automatically."
-            data-ticket-status-options='{{ ticket_available_statuses | tojson }}'
+            data-ticket-status-options='{{ ticket_status_definitions | tojson }}'
             data-csrf-token="{{ csrf_token or '' }}"
             data-can-bulk-delete="{{ 'true' if can_bulk_delete_tickets else 'false' }}"
             data-bulk-delete-form-id="tickets-bulk-delete-form"
@@ -198,7 +222,7 @@
                       <a href="/admin/tickets/{{ ticket.id }}">{{ ticket.subject }}</a>
                     </td>
                     {% set ticket_status = (ticket.status or 'open') %}
-                    {% set status_label = ticket_status.replace('_', ' ').title() %}
+                    {% set status_label = ticket_status_label_map.get(ticket_status, ticket_status.replace('_', ' ').title()) %}
                     {% set status_badge_map = {
                       'open': 'badge--warning',
                       'in_progress': 'badge--warning',
@@ -227,8 +251,11 @@
                             class="form-input form-input--compact"
                             data-ticket-status-select
                           >
-                            {% for status_option in ticket_available_statuses %}
-                              <option value="{{ status_option }}" {% if status_option == (ticket.status or 'open') %}selected{% endif %}>{{ status_option.replace('_', ' ') }}</option>
+                            {% if ticket_status not in ticket_status_label_map %}
+                              <option value="{{ ticket_status }}" selected>{{ status_label }}</option>
+                            {% endif %}
+                            {% for status_option in ticket_status_definitions %}
+                              <option value="{{ status_option.tech_status }}" {% if status_option.tech_status == ticket_status %}selected{% endif %}>{{ status_option.tech_label }}</option>
                             {% endfor %}
                           </select>
                         </form>
@@ -300,11 +327,17 @@
           <div class="form-field">
             <label class="form-label" for="modal-ticket-status">Initial status</label>
             <select id="modal-ticket-status" name="status" class="form-input">
-              <option value="open" selected>Open</option>
-              <option value="in_progress">In progress</option>
-              <option value="pending">Pending</option>
-              <option value="resolved">Resolved</option>
-              <option value="closed">Closed</option>
+              {% if ticket_status_definitions %}
+                {% for status_option in ticket_status_definitions %}
+                  <option value="{{ status_option.tech_status }}" {% if loop.first %}selected{% endif %}>{{ status_option.tech_label }}</option>
+                {% endfor %}
+              {% else %}
+                <option value="open" selected>Open</option>
+                <option value="in_progress">In progress</option>
+                <option value="pending">Pending</option>
+                <option value="resolved">Resolved</option>
+                <option value="closed">Closed</option>
+              {% endif %}
             </select>
           </div>
         </div>
@@ -360,6 +393,119 @@
           <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div
+    class="modal"
+    id="edit-ticket-statuses-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="edit-ticket-statuses-title"
+    aria-hidden="true"
+    hidden
+  >
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-modal-close>
+        <span class="visually-hidden">Close ticket status editor</span>
+        &times;
+      </button>
+      <h2 class="modal__title" id="edit-ticket-statuses-title">Edit ticket statuses</h2>
+      <p class="modal__subtitle">Define the technician-facing labels and public labels for each ticket status.</p>
+      <div class="alert alert--error" role="alert" data-status-error hidden></div>
+      <form action="/admin/tickets/statuses" method="post" class="form" data-ticket-statuses-form>
+        {% include "partials/csrf.html" %}
+        <div class="table-wrapper">
+          <table class="table table--compact" data-ticket-statuses-table>
+            <thead>
+              <tr>
+                <th scope="col">Tech status (technician label)</th>
+                <th scope="col">Public status (customer label)</th>
+                <th scope="col" class="table__actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody data-statuses-list>
+              {% if ticket_status_definitions %}
+                {% for status_option in ticket_status_definitions %}
+                  <tr data-status-row>
+                    <td data-label="Tech status">
+                      <label class="visually-hidden" for="status-tech-{{ loop.index0 }}">Tech status</label>
+                      <input
+                        id="status-tech-{{ loop.index0 }}"
+                        name="techLabel"
+                        class="form-input"
+                        maxlength="128"
+                        value="{{ status_option.tech_label }}"
+                        required
+                      />
+                      <input type="hidden" name="existingSlug" value="{{ status_option.tech_status }}" />
+                    </td>
+                    <td data-label="Public status">
+                      <label class="visually-hidden" for="status-public-{{ loop.index0 }}">Public status</label>
+                      <input
+                        id="status-public-{{ loop.index0 }}"
+                        name="publicLabel"
+                        class="form-input"
+                        maxlength="128"
+                        value="{{ status_option.public_status }}"
+                        required
+                      />
+                    </td>
+                    <td class="table__actions">
+                      <button
+                        type="button"
+                        class="button button--ghost"
+                        data-status-remove
+                        {% if ticket_status_definitions | length <= 1 %}disabled{% endif %}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr data-status-row>
+                  <td data-label="Tech status">
+                    <label class="visually-hidden" for="status-tech-0">Tech status</label>
+                    <input id="status-tech-0" name="techLabel" class="form-input" maxlength="128" required />
+                    <input type="hidden" name="existingSlug" value="" />
+                  </td>
+                  <td data-label="Public status">
+                    <label class="visually-hidden" for="status-public-0">Public status</label>
+                    <input id="status-public-0" name="publicLabel" class="form-input" maxlength="128" required />
+                  </td>
+                  <td class="table__actions">
+                    <button type="button" class="button button--ghost" data-status-remove disabled>Remove</button>
+                  </td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+        <div class="form-actions form-actions--secondary">
+          <button type="button" class="button button--ghost" data-add-status>Add status</button>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">Save changes</button>
+          <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        </div>
+      </form>
+      <template id="ticket-status-row-template">
+        <tr data-status-row>
+          <td data-label="Tech status">
+            <label class="visually-hidden">Tech status</label>
+            <input name="techLabel" class="form-input" maxlength="128" required />
+            <input type="hidden" name="existingSlug" value="" />
+          </td>
+          <td data-label="Public status">
+            <label class="visually-hidden">Public status</label>
+            <input name="publicLabel" class="form-input" maxlength="128" required />
+          </td>
+          <td class="table__actions">
+            <button type="button" class="button button--ghost" data-status-remove>Remove</button>
+          </td>
+        </tr>
+      </template>
     </div>
   </div>
 {% endblock %}

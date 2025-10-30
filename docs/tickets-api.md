@@ -59,3 +59,62 @@ The endpoint returns the updated ticket and reply record. The reply payload incl
 
 * Minute updates immediately refresh billable and non-billable totals in the technician workspace.
 * Clients should include the `X-CSRF-Token` header with the value from the session cookie or `<meta name="csrf-token">` when making requests from the web UI.
+
+## List ticket statuses
+
+`GET /api/tickets/statuses` returns the available ticket statuses that technicians can assign in the helpdesk. The endpoint is available to authenticated users with the `helpdesk.technician` permission (super admins are implicitly granted access).
+
+### Response
+
+The response contains the canonical status slug (`techStatus`), the technician-facing label (`techLabel`), and the public label (`publicStatus`).
+
+```json
+{
+  "statuses": [
+    {
+      "techStatus": "open",
+      "techLabel": "Open",
+      "publicStatus": "Open"
+    },
+    {
+      "techStatus": "pending_vendor",
+      "techLabel": "Pending vendor",
+      "publicStatus": "Waiting on vendor"
+    }
+  ]
+}
+```
+
+## Replace ticket statuses
+
+`PUT /api/tickets/statuses` updates the catalogue of available ticket statuses. Only super admins may call this endpoint. Updates are applied transactionally—if a validation error occurs no changes are persisted.
+
+### Request body
+
+Provide an array of status objects. Each object must include a technician label (`techLabel`). Public labels default to the technician label when omitted. When renaming or adjusting an existing status include the `existingSlug` of the status being replaced.
+
+```json
+{
+  "statuses": [
+    {
+      "techLabel": "Open",
+      "publicStatus": "Open",
+      "existingSlug": "open"
+    },
+    {
+      "techLabel": "Pending vendor",
+      "publicStatus": "Waiting on vendor"
+    }
+  ]
+}
+```
+
+### Validation rules
+
+* Technician labels must be unique once normalised to their slug form. Two labels that produce the same slug (for example, "Pending Vendor" and "pending_vendor") cannot exist simultaneously.
+* Technician and public labels must be between 1 and 128 characters.
+* Public labels may be duplicated, allowing multiple internal statuses to surface the same customer-facing label.
+
+### Response
+
+The endpoint returns the saved definitions using the technician and public labels provided. Slugs are derived automatically and always returned in lowercase snake case.
