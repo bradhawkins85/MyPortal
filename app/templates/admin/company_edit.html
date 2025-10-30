@@ -108,6 +108,22 @@
           {% include "partials/csrf.html" %}
           <input type="hidden" name="sourceCompanyId" value="{{ company.id }}" />
           <div class="form-field">
+            <label class="form-label" for="assign-company">Company</label>
+            <select
+              id="assign-company"
+              name="companyId"
+              class="form-input"
+              required
+              data-company-select
+            >
+              {% for managed in managed_companies %}
+                <option value="{{ managed.id }}" {% if managed.id == assign_form.company_id %}selected{% endif %}>
+                  {{ managed.name }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
             <label class="form-label" for="assign-user">User</label>
             <select id="assign-user" name="userId" class="form-input" required data-user-select>
               <option
@@ -127,22 +143,6 @@
                   data-has-user="{% if option.has_user %}1{% else %}0{% endif %}"
                 >
                   {{ option.label }}
-                </option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="assign-company">Company</label>
-            <select
-              id="assign-company"
-              name="companyId"
-              class="form-input"
-              required
-              data-company-select
-            >
-              {% for managed in managed_companies %}
-                <option value="{{ managed.id }}" {% if managed.id == assign_form.company_id %}selected{% endif %}>
-                  {{ managed.name }}
                 </option>
               {% endfor %}
             </select>
