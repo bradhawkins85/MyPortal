@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import date, datetime, timezone
 from typing import Any
+
+PermissionMapping = Sequence[dict[str, Any]]
 
 from app.core.database import db
 from app.security.api_keys import GeneratedApiKey, generate_api_key, hash_api_key
@@ -33,7 +35,10 @@ def _to_utc(dt: datetime | str | None) -> datetime | None:
 
 
 async def create_api_key(
-    *, description: str | None, expiry_date: date | None
+    *,
+    description: str | None,
+    expiry_date: date | None,
+    permissions: PermissionMapping | None = None,
 ) -> tuple[str, dict[str, Any]]:
     generated: GeneratedApiKey = generate_api_key()
     await db.execute(
@@ -57,6 +62,8 @@ async def create_api_key(
         raise RuntimeError("Failed to fetch inserted API key record")
     row["created_at"] = _to_utc(row.get("created_at"))
     row["last_used_at"] = _to_utc(row.get("last_used_at"))
+    stored_permissions = await _replace_api_key_permissions(row["id"], permissions or [])
+    row["permissions"] = stored_permissions
     return generated.value, row
 
 
@@ -113,6 +120,7 @@ async def list_api_keys_with_usage(
     rows = await db.fetch_all(sql, tuple(params))
     key_ids = [row["id"] for row in rows]
     usage_map = await _fetch_usage_by_key(key_ids)
+    permission_map = await _fetch_permissions_by_key(key_ids)
     normalised: list[dict[str, Any]] = []
     for row in rows:
         info = dict(row)
@@ -123,6 +131,7 @@ async def list_api_keys_with_usage(
         info["last_used_at"] = _to_utc(info.get("last_used_at"))
         info["last_seen_at"] = _to_utc(info.get("last_seen_at"))
         info["usage"] = usage_map.get(row["id"], [])
+        info["permissions"] = permission_map.get(row["id"], [])
         normalised.append(info)
     return normalised
 
@@ -158,6 +167,7 @@ async def get_api_key_with_usage(api_key_id: int) -> dict[str, Any] | None:
     if not row:
         return None
     usage_map = await _fetch_usage_by_key([api_key_id])
+    permission_map = await _fetch_permissions_by_key([api_key_id])
     info = dict(row)
     usage_count = info.get("usage_count")
     info["usage_count"] = int(usage_count or 0)
@@ -165,6 +175,7 @@ async def get_api_key_with_usage(api_key_id: int) -> dict[str, Any] | None:
     info["last_used_at"] = _to_utc(info.get("last_used_at"))
     info["last_seen_at"] = _to_utc(info.get("last_seen_at"))
     info["usage"] = usage_map.get(api_key_id, [])
+    info["permissions"] = permission_map.get(api_key_id, [])
     return info
 
 
@@ -194,6 +205,8 @@ async def get_api_key_record(api_key_value: str) -> dict[str, Any] | None:
         return None
     row["created_at"] = _to_utc(row.get("created_at"))
     row["last_used_at"] = _to_utc(row.get("last_used_at"))
+    permission_map = await _fetch_permissions_by_key([row["id"]])
+    row["permissions"] = permission_map.get(row["id"], [])
     return row
 
 
@@ -237,3 +250,62 @@ async def _fetch_usage_by_key(key_ids: Iterable[int]) -> dict[int, list[dict[str
             }
         )
     return usage
+
+
+async def _fetch_permissions_by_key(key_ids: Iterable[int]) -> dict[int, list[dict[str, Any]]]:
+    ids = list(key_ids)
+    if not ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(ids))
+    rows = await db.fetch_all(
+        f"""
+        SELECT api_key_id, route, method
+        FROM api_key_endpoint_permissions
+        WHERE api_key_id IN ({placeholders})
+        ORDER BY route ASC, method ASC
+        """,
+        tuple(ids),
+    )
+    permissions: dict[int, dict[str, set[str]]] = {}
+    for row in rows:
+        key_id = row["api_key_id"]
+        route = str(row["route"])
+        method = str(row["method"]).upper()
+        route_methods = permissions.setdefault(key_id, {}).setdefault(route, set())
+        route_methods.add(method)
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for key_id, route_map in permissions.items():
+        grouped[key_id] = [
+            {"path": route, "methods": sorted(methods)}
+            for route, methods in sorted(route_map.items(), key=lambda item: item[0])
+        ]
+    return grouped
+
+
+async def _replace_api_key_permissions(
+    api_key_id: int, permissions: PermissionMapping
+) -> list[dict[str, Any]]:
+    async with db.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "DELETE FROM api_key_endpoint_permissions WHERE api_key_id = %s",
+                (api_key_id,),
+            )
+            values: list[tuple[int, str, str]] = []
+            for entry in permissions:
+                path = str(entry.get("path", "")).strip()
+                methods = entry.get("methods") or []
+                if not path or not methods:
+                    continue
+                for method in methods:
+                    values.append((api_key_id, path, str(method).upper()))
+            if values:
+                await cursor.executemany(
+                    """
+                    INSERT INTO api_key_endpoint_permissions (api_key_id, route, method)
+                    VALUES (%s, %s, %s)
+                    """,
+                    values,
+                )
+    permission_map = await _fetch_permissions_by_key([api_key_id])
+    return permission_map.get(api_key_id, [])
