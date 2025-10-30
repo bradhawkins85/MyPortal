@@ -1,0 +1,7 @@
+{
+  "guid": "8dbf9393-358d-48d4-a7d3-ecf5ac910971",
+  "occurred_at": "2025-10-30T12:54Z",
+  "change_type": "Fix",
+  "summary": "Restore MariaDB compatibility by using CURRENT_TIMESTAMP defaults in migration DDL.",
+  "content_hash": "1c33c0224d60a757b166d7a8d06ee0b59d305ee11ab604f58e2088bdb3ce8315"
+}
