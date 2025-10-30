@@ -47,6 +47,7 @@ from app.api.routes import (
     companies,
     forms as forms_api,
     invoices as invoices_api,
+    issues as issues_api,
     knowledge_base as knowledge_base_api,
     licenses as licenses_api,
     memberships,
@@ -94,6 +95,7 @@ from app.repositories import integration_modules as integration_modules_repo
 from app.repositories import webhook_events as webhook_events_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
+from app.repositories import issues as issues_repo
 from app.schemas.tickets import SyncroTicketImportRequest
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import encrypt_secret
@@ -122,6 +124,7 @@ from app.services import ticket_importer
 from app.services import tickets as tickets_service
 from app.services import template_variables
 from app.services import webhook_monitor
+from app.services import issues as issues_service
 from app.services.realtime import refresh_notifier
 from app.services.sanitization import sanitize_rich_text
 from app.services.opnform import (
@@ -441,6 +444,7 @@ app.include_router(ports.router)
 app.include_router(notifications.router)
 app.include_router(staff_api.router)
 app.include_router(invoices_api.router)
+app.include_router(issues_api.router)
 app.include_router(audit_logs.router)
 app.include_router(api_keys.router)
 app.include_router(scheduler_api.router)
@@ -7281,6 +7285,395 @@ async def _render_ticket_detail(
     response = await _render_template("admin/ticket_detail.html", request, user, extra=extra)
     response.status_code = status_code
     return response
+
+
+def _get_current_user_id(user: Mapping[str, Any] | None) -> int | None:
+    if not user:
+        return None
+    try:
+        return int(user.get("id"))  # type: ignore[arg-type]
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _format_issue_overview_for_template(
+    overview: issues_service.IssueOverview,
+) -> dict[str, Any]:
+    assignments = []
+    for assignment in overview.assignments:
+        assignments.append(
+            {
+                "assignment_id": assignment.assignment_id,
+                "issue_id": assignment.issue_id,
+                "company_id": assignment.company_id,
+                "company_name": assignment.company_name,
+                "status": assignment.status,
+                "status_label": assignment.status_label,
+                "updated_at_iso": assignment.updated_at_iso,
+            }
+        )
+    return {
+        "issue_id": overview.issue_id,
+        "name": overview.name,
+        "description": overview.description,
+        "created_at_iso": overview.created_at_iso,
+        "updated_at_iso": overview.updated_at_iso,
+        "assignments": assignments,
+        "assignment_count": len(assignments),
+    }
+
+
+@app.get("/admin/issues", response_class=HTMLResponse)
+async def admin_issue_tracker(
+    request: Request,
+    search: str | None = Query(default=None, max_length=255),
+    status: str | None = Query(default=None, max_length=32),
+    company_id: int | None = Query(default=None, alias="companyId"),
+    issue_id: int | None = Query(default=None, alias="issueId"),
+):
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        return redirect
+
+    search_term = search.strip() if search else ""
+    company_filter: int | None = None
+    if company_id is not None:
+        try:
+            company_filter = int(company_id)
+        except (TypeError, ValueError):
+            company_filter = None
+
+    status_filter: str | None = None
+    if status:
+        try:
+            status_filter = issues_service.normalise_status(status)
+        except ValueError:
+            status_filter = None
+
+    overviews = await issues_service.build_issue_overview(
+        search=search_term,
+        status=status_filter,
+        company_id=company_filter,
+    )
+    issues_payload = [_format_issue_overview_for_template(item) for item in overviews]
+
+    editing_issue: dict[str, Any] | None = None
+    edit_error: str | None = None
+    if issue_id:
+        lookup = await issues_service.get_issue_overview(issue_id)
+        if lookup:
+            editing_issue = _format_issue_overview_for_template(lookup)
+        else:
+            edit_error = "Selected issue could not be found."
+
+    companies = await company_repo.list_companies()
+    company_options: list[dict[str, Any]] = []
+    for record in companies:
+        raw_id = record.get("id")
+        name = (record.get("name") or "").strip()
+        try:
+            option_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        company_options.append(
+            {
+                "id": option_id,
+                "name": name or f"Company #{option_id}",
+            }
+        )
+    company_options.sort(key=lambda item: item["name"].lower())
+
+    if editing_issue:
+        assigned_company_ids = {
+            assignment.get("company_id")
+            for assignment in editing_issue.get("assignments", [])
+            if assignment.get("company_id") is not None
+        }
+        available_companies = [
+            option for option in company_options if option["id"] not in assigned_company_ids
+        ]
+        editing_issue["available_companies"] = available_companies
+
+    issue_status_options = [
+        {"value": value, "label": label} for value, label in issues_service.STATUS_OPTIONS
+    ]
+
+    success_message = request.query_params.get("success")
+    error_message = request.query_params.get("error") or edit_error
+
+    extra = {
+        "title": "Issue tracker",
+        "issues": issues_payload,
+        "issue_count": len(issues_payload),
+        "issue_status_options": issue_status_options,
+        "selected_status": status_filter,
+        "selected_company_id": company_filter,
+        "search_term": search_term,
+        "company_options": company_options,
+        "editing_issue": editing_issue,
+        "success_message": success_message,
+        "error_message": error_message,
+    }
+
+    response = await _render_template("admin/issues.html", request, current_user, extra=extra)
+    return response
+
+
+@app.post(
+    "/admin/issues",
+    response_class=HTMLResponse,
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Create an issue record",
+)
+async def admin_create_issue(
+    request: Request,
+    name: str = Form(...),
+    description: str | None = Form(default=None),
+    company_ids: list[int] | None = Form(default=None),
+    initial_status: str = Form(default=issues_service.DEFAULT_STATUS, alias="initialStatus"),
+):
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        return redirect
+
+    cleaned_name = name.strip()
+    cleaned_description = description.strip() if description and description.strip() else None
+    if not cleaned_name:
+        url = f"/admin/issues?error={quote('Issue name is required.')}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        await issues_service.ensure_issue_name_available(cleaned_name)
+    except ValueError as exc:
+        url = f"/admin/issues?error={quote(str(exc))}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+    user_id = _get_current_user_id(current_user)
+    try:
+        issue_record = await issues_repo.create_issue(
+            name=cleaned_name,
+            description=cleaned_description,
+            created_by=user_id,
+        )
+    except aiomysql.IntegrityError as exc:
+        detail = "Issue name already exists." if exc.args and exc.args[0] == 1062 else "Unable to create issue."
+        url = f"/admin/issues?error={quote(detail)}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+    issue_id = issue_record.get("issue_id")
+    try:
+        issue_id_int = int(issue_id) if issue_id is not None else None
+    except (TypeError, ValueError):
+        issue_id_int = None
+    if issue_id_int is None:
+        url = f"/admin/issues?error={quote('Issue identifier missing.')}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        status_value = issues_service.normalise_status(initial_status)
+    except ValueError:
+        status_value = issues_service.DEFAULT_STATUS
+
+    selected_companies: list[int] = []
+    if company_ids:
+        if isinstance(company_ids, list):
+            for raw in company_ids:
+                try:
+                    selected_companies.append(int(raw))
+                except (TypeError, ValueError):
+                    continue
+        else:
+            try:
+                selected_companies.append(int(company_ids))
+            except (TypeError, ValueError):
+                selected_companies = []
+
+    for company_id_value in selected_companies:
+        company = await company_repo.get_company_by_id(company_id_value)
+        if not company:
+            continue
+        await issues_repo.assign_issue_to_company(
+            issue_id=issue_id_int,
+            company_id=company_id_value,
+            status=status_value,
+            updated_by=user_id,
+        )
+
+    log_info(
+        "Issue created via admin",
+        issue_id=issue_id_int,
+        name=cleaned_name,
+        created_by=user_id,
+    )
+    url = f"/admin/issues?success={quote('Issue created.')}"
+    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
+    "/admin/issues/{issue_id}/update",
+    response_class=HTMLResponse,
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Update issue details",
+)
+async def admin_update_issue(
+    issue_id: int,
+    request: Request,
+    name: str = Form(...),
+    description: str | None = Form(default=None),
+    new_company_ids: list[int] | None = Form(default=None, alias="newCompanyIds"),
+    new_company_status: str = Form(default=issues_service.DEFAULT_STATUS, alias="newCompanyStatus"),
+):
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        return redirect
+
+    issue = await issues_repo.get_issue_by_id(issue_id)
+    if not issue:
+        url = f"/admin/issues?error={quote('Issue not found.')}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+    cleaned_name = name.strip()
+    cleaned_description = description.strip() if description and description.strip() else None
+    if not cleaned_name:
+        url = f"/admin/issues?issueId={issue_id}&error={quote('Issue name is required.')}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+    updates: dict[str, Any] = {}
+    if cleaned_name != (issue.get("name") or ""):
+        try:
+            await issues_service.ensure_issue_name_available(cleaned_name, exclude_issue_id=issue_id)
+        except ValueError as exc:
+            url = f"/admin/issues?issueId={issue_id}&error={quote(str(exc))}"
+            return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        updates["name"] = cleaned_name
+
+    if cleaned_description != (issue.get("description") or None):
+        updates["description"] = cleaned_description
+
+    if updates:
+        updates["updated_by"] = _get_current_user_id(current_user)
+        try:
+            await issues_repo.update_issue(issue_id, **updates)
+        except aiomysql.IntegrityError as exc:
+            detail = "Issue name already exists." if exc.args and exc.args[0] == 1062 else "Unable to update issue."
+            url = f"/admin/issues?issueId={issue_id}&error={quote(detail)}"
+            return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        status_value = issues_service.normalise_status(new_company_status)
+    except ValueError:
+        status_value = issues_service.DEFAULT_STATUS
+
+    selected_companies: list[int] = []
+    if new_company_ids:
+        if isinstance(new_company_ids, list):
+            for raw in new_company_ids:
+                try:
+                    selected_companies.append(int(raw))
+                except (TypeError, ValueError):
+                    continue
+        else:
+            try:
+                selected_companies.append(int(new_company_ids))
+            except (TypeError, ValueError):
+                selected_companies = []
+
+    for company_id_value in selected_companies:
+        company = await company_repo.get_company_by_id(company_id_value)
+        if not company:
+            continue
+        await issues_repo.assign_issue_to_company(
+            issue_id=issue_id,
+            company_id=company_id_value,
+            status=status_value,
+            updated_by=_get_current_user_id(current_user),
+        )
+
+    log_info(
+        "Issue updated via admin",
+        issue_id=issue_id,
+        updated_by=_get_current_user_id(current_user),
+    )
+    url = f"/admin/issues?issueId={issue_id}&success={quote('Issue updated.')}"
+    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
+    "/admin/issues/{issue_id}/assignments/{assignment_id}/status",
+    response_class=HTMLResponse,
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Update assignment status",
+)
+async def admin_update_issue_assignment_status(
+    issue_id: int,
+    assignment_id: int,
+    request: Request,
+    status_value: str = Form(..., alias="status"),
+    return_url: str | None = Form(default=None, alias="returnUrl"),
+):
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        return redirect
+
+    try:
+        normalised_status = issues_service.normalise_status(status_value)
+    except ValueError:
+        url = f"/admin/issues?issueId={issue_id}&error={quote('Invalid status selection.')}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        await issues_repo.update_assignment_status(
+            assignment_id,
+            status=normalised_status,
+            updated_by=_get_current_user_id(current_user),
+        )
+    except ValueError:
+        url = f"/admin/issues?issueId={issue_id}&error={quote('Assignment not found.')}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+    log_info(
+        "Issue assignment status updated",
+        issue_id=issue_id,
+        assignment_id=assignment_id,
+        status=normalised_status,
+        updated_by=_get_current_user_id(current_user),
+    )
+
+    destination = return_url or f"/admin/issues?issueId={issue_id}&success={quote('Status updated.')}"
+    if "success=" not in destination:
+        separator = "&" if "?" in destination else "?"
+        destination = f"{destination}{separator}success={quote('Status updated.')}"
+    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
+    "/admin/issues/{issue_id}/assignments/{assignment_id}/delete",
+    response_class=HTMLResponse,
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Remove company assignment from issue",
+)
+async def admin_delete_issue_assignment(
+    issue_id: int,
+    assignment_id: int,
+    request: Request,
+    return_url: str | None = Form(default=None, alias="returnUrl"),
+):
+    current_user, redirect = await _require_helpdesk_page(request)
+    if redirect:
+        return redirect
+
+    await issues_repo.delete_assignment(assignment_id)
+    log_info(
+        "Issue assignment removed",
+        issue_id=issue_id,
+        assignment_id=assignment_id,
+        removed_by=_get_current_user_id(current_user),
+    )
+
+    destination = return_url or f"/admin/issues?issueId={issue_id}"
+    separator = "&" if "?" in destination else "?"
+    destination = f"{destination}{separator}success={quote('Assignment removed.')}"
+    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get("/admin/tickets", response_class=HTMLResponse)

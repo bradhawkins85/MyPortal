@@ -65,7 +65,8 @@
           {% set can_manage_licenses = (can_manage_licenses | default(false)) or is_super_admin or membership.get('can_manage_licenses') %}
           {% set can_manage_invoices = (can_manage_invoices | default(false)) or is_super_admin or membership.get('can_manage_invoices') %}
           {% set can_manage_staff = (can_manage_staff | default(false)) or is_super_admin or membership.get('can_manage_staff') or (staff_permission > 0) %}
-          {% set has_company_section = can_access_tickets or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_invoices or can_manage_staff %}
+          {% set can_manage_issues = is_super_admin or (is_helpdesk_technician | default(false)) %}
+          {% set has_company_section = can_access_tickets or can_manage_issues or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_invoices or can_manage_staff %}
           {% set is_company_admin = membership.get('is_admin') %}
           {% set has_admin_access = is_super_admin or is_company_admin %}
           <li class="menu__item">
@@ -107,6 +108,16 @@
                   <svg viewBox="0 0 24 24" focusable="false"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2.17a.83.83 0 0 1-.83.83 1.5 1.5 0 0 0 0 3 .83.83 0 0 1 .83.83V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2.17A.83.83 0 0 1 4.83 15a1.5 1.5 0 0 0 0-3A.83.83 0 0 1 4 11.17zM9 9v6h6V9z"/></svg>
                 </span>
                 <span class="menu__label">Tickets</span>
+              </a>
+            </li>
+          {% endif %}
+          {% if can_manage_issues %}
+            <li class="menu__item">
+              <a href="/admin/issues" {% if current_path.startswith('/admin/issues') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M5 3a2 2 0 0 0-2 2v14l5-3 5 3 5-3 3 1.8V5a2 2 0 0 0-2-2H5zm2 4h10v2H7zm0 4h6v2H7z"/></svg>
+                </span>
+                <span class="menu__label">Issue tracker</span>
               </a>
             </li>
           {% endif %}
