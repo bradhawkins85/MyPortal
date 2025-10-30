@@ -61,6 +61,34 @@ prepare_git_environment() {
   echo "Redirected Git configuration to ${fallback_home} because the default HOME directory is not writable." >&2
 }
 
+AUTO_FALLBACK=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --auto-fallback)
+      AUTO_FALLBACK=1
+      shift
+      ;;
+    --help|-h)
+      cat <<'USAGE'
+Usage: upgrade.sh [--auto-fallback]
+
+Fetch and apply the latest application code from the configured Git remote.
+
+Options:
+  --auto-fallback  Indicates the script is running as part of an automated
+                   recovery path. The script will avoid signalling the
+                   external restart helpers so the caller can manage restarts.
+USAGE
+      exit 0
+      ;;
+    *)
+      echo "Error: Unknown option '$1'" >&2
+      exit 1
+      ;;
+  esac
+done
+
 prepare_git_environment
 
 detect_python_interpreter() {
@@ -316,10 +344,18 @@ reset_project_permissions "$SERVICE_USER"
 
 if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
   echo "Repository updated to $POST_PULL_HEAD."
-  mark_restart_required
+  if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
+    mark_restart_required
+  else
+    echo "Auto-fallback mode detected; skipping restart flag because caller will relaunch the service." >&2
+  fi
 elif [[ "$FORCE_RESTART" == "1" ]]; then
   echo "No repository changes detected but FORCE_RESTART=1; flagging dependency install and service restart."
-  mark_restart_required
+  if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
+    mark_restart_required
+  else
+    echo "Auto-fallback mode detected; caller responsible for restart handling." >&2
+  fi
 else
   echo "No changes detected from remote."
 fi

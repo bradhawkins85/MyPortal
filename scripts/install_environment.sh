@@ -144,6 +144,9 @@ install_dependencies() {
 
 ensure_env_file
 ensure_env_default "ENABLE_AUTO_REFRESH" "false"
+ensure_env_default "UVICORN_AUTO_UPDATE_ENABLED" "true"
+ensure_env_default "UVICORN_AUTO_UPDATE_ATTEMPTS" "2"
+ensure_env_default "UVICORN_AUTO_UPDATE_RETRY_DELAY" "5"
 ensure_virtualenv
 install_dependencies
 
