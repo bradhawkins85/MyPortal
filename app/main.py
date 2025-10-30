@@ -685,6 +685,25 @@ def _parse_int_in_range(value: Any, *, default: int, minimum: int, maximum: int)
     return parsed
 
 
+def _parse_staff_selection(value: Any) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    if lowered.startswith("staff:"):
+        candidate = text.split(":", 1)[1].strip()
+    elif lowered.startswith("s-"):
+        candidate = text[2:].strip()
+    else:
+        return None
+    try:
+        return int(candidate)
+    except ValueError:
+        return None
+
+
 def _request_prefers_json(request: Request) -> bool:
     accept = (request.headers.get("accept") or "").lower()
     if "application/json" in accept:
@@ -1973,15 +1992,53 @@ async def _render_company_edit_page(
                 managed_company_id = int(raw_id)
             except (TypeError, ValueError):
                 continue
-            rows = await user_repo.list_users_for_company(managed_company_id)
+            staff_rows = await staff_repo.list_staff_with_users(managed_company_id)
             options: list[dict[str, Any]] = []
-            for row in rows:
-                user_id = row.get("id")
+            for row in staff_rows:
+                staff_id = row.get("staff_id")
                 email = (row.get("email") or "").strip()
-                if user_id is None or not email:
+                if staff_id is None or not email:
                     continue
-                options.append({"id": int(user_id), "email": email})
-            options.sort(key=lambda item: item["email"].lower())
+                first_name = (row.get("first_name") or "").strip()
+                last_name = (row.get("last_name") or "").strip()
+                name_parts = [part for part in (first_name, last_name) if part]
+                has_name = bool(name_parts)
+                label: str
+                if has_name and email:
+                    label = f"{' '.join(name_parts)} ({email})"
+                elif has_name:
+                    label = " ".join(name_parts)
+                else:
+                    label = email
+                user_id_value = row.get("user_id")
+                has_user = user_id_value is not None
+                option_value: str
+                if has_user:
+                    try:
+                        numeric_user_id = int(user_id_value)
+                    except (TypeError, ValueError):
+                        numeric_user_id = None
+                else:
+                    numeric_user_id = None
+                if numeric_user_id is not None:
+                    option_value = str(numeric_user_id)
+                else:
+                    option_value = f"staff:{int(staff_id)}"
+                if not row.get("enabled", True):
+                    label = f"{label} (inactive)"
+                if numeric_user_id is None:
+                    label = f"{label} – invite required"
+                options.append(
+                    {
+                        "value": option_value,
+                        "label": label,
+                        "email": email,
+                        "staff_id": int(staff_id),
+                        "user_id": numeric_user_id,
+                        "has_user": numeric_user_id is not None,
+                    }
+                )
+            options.sort(key=lambda item: item.get("label", "").lower())
             company_user_options[managed_company_id] = options
 
     def _string_value(key: str, default: str) -> str:
@@ -2060,7 +2117,20 @@ async def _render_company_edit_page(
         return default
 
     assign_company_id = _assign_int("company_id", company_id) or company_id
-    assign_user_id = _assign_int("user_id")
+    raw_assign_user_value: str = ""
+    if "user_value" in assign_values:
+        value = assign_values.get("user_value")
+        raw_assign_user_value = str(value).strip() if value is not None else ""
+    elif "user_id" in assign_values:
+        value = assign_values.get("user_id")
+        raw_assign_user_value = str(value).strip() if value is not None else ""
+    assign_user_value = raw_assign_user_value
+    assign_user_id: int | None = None
+    if assign_user_value:
+        try:
+            assign_user_id = int(assign_user_value)
+        except ValueError:
+            assign_user_id = None
     assign_role_id = _assign_int("role_id")
     assign_staff_permission = _assign_int("staff_permission", 0) or 0
     if assign_staff_permission < 0:
@@ -2080,6 +2150,7 @@ async def _render_company_edit_page(
     assign_form = {
         "company_id": assign_company_id,
         "user_id": assign_user_id,
+        "user_value": assign_user_value,
         "role_id": assign_role_id,
         "staff_permission": assign_staff_permission,
         "can_manage_staff": assign_can_manage_staff,
@@ -4713,7 +4784,8 @@ async def admin_assign_user_to_company(request: Request):
 
     assign_form_state: dict[str, Any] = {
         "company_id": company_id_raw,
-        "user_id": user_id_raw,
+        "user_value": user_id_raw,
+        "user_id": None,
         "role_id": role_raw,
         "staff_permission": staff_permission_raw,
         "can_manage_staff": "can_manage_staff" in form_keys,
@@ -4746,7 +4818,6 @@ async def admin_assign_user_to_company(request: Request):
         )
 
     try:
-        user_id = int(user_id_raw)
         company_id = int(company_id_raw)
     except (TypeError, ValueError):
         return await _assign_error(
@@ -4754,16 +4825,55 @@ async def admin_assign_user_to_company(request: Request):
         )
 
     assign_form_state["company_id"] = company_id
-    assign_form_state["user_id"] = user_id
 
-    user_record = await user_repo.get_user_by_id(user_id)
+    user_identifier = (user_id_raw or "").strip()
+    parsed_user_id: int | None = None
+    user_record: dict[str, Any] | None = None
+    staff_record: dict[str, Any] | None = None
+    staff_selection_id = _parse_staff_selection(user_identifier)
+    if staff_selection_id is not None:
+        staff_record = await staff_repo.get_staff_by_id(staff_selection_id)
+        if not staff_record:
+            return await _assign_error(
+                "Selected staff member could not be found.",
+                status.HTTP_404_NOT_FOUND,
+            )
+        email = (staff_record.get("email") or "").strip()
+        if not email:
+            return await _assign_error(
+                "Selected staff member does not have an email address.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        user_record = await user_repo.get_user_by_email(email)
+        if not user_record or int(user_record.get("company_id") or 0) != int(
+            staff_record.get("company_id") or 0
+        ):
+            return await _assign_error(
+                "Selected staff member does not have a portal account yet. Invite them from the staff page before assigning access.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        parsed_user_id = int(user_record.get("id"))
+    else:
+        try:
+            parsed_user_id = int(user_identifier)
+        except (TypeError, ValueError):
+            return await _assign_error(
+                "Select both a user and a company.", status.HTTP_400_BAD_REQUEST
+            )
+
+    assign_form_state["user_id"] = parsed_user_id
+    if not assign_form_state.get("user_value"):
+        assign_form_state["user_value"] = user_identifier
+
+    if user_record is None:
+        user_record = await user_repo.get_user_by_id(parsed_user_id)
     company_record = await company_repo.get_company_by_id(company_id)
     if not user_record or not company_record:
         return await _assign_error(
             "User or company not found.", status.HTTP_404_NOT_FOUND
         )
 
-    existing_assignment = await user_company_repo.get_user_company(user_id, company_id)
+    existing_assignment = await user_company_repo.get_user_company(parsed_user_id, company_id)
 
     try:
         staff_permission = (
@@ -4801,7 +4911,7 @@ async def admin_assign_user_to_company(request: Request):
     assign_form_state["can_manage_staff"] = can_manage_staff
 
     assign_kwargs: dict[str, Any] = {
-        "user_id": user_id,
+        "user_id": parsed_user_id,
         "company_id": company_id,
         "staff_permission": staff_permission,
         "can_manage_staff": can_manage_staff,
@@ -4826,7 +4936,9 @@ async def admin_assign_user_to_company(request: Request):
                 "Selected role could not be found.",
                 status.HTTP_404_NOT_FOUND,
             )
-        membership = await membership_repo.get_membership_by_company_user(company_id, user_id)
+        membership = await membership_repo.get_membership_by_company_user(
+            company_id, parsed_user_id
+        )
         if membership:
             membership_id = membership.get("id")
             if membership_id is not None and membership.get("role_id") != role_id:
