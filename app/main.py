@@ -56,6 +56,7 @@ from app.api.routes import (
     imap as imap_api,
     modules as modules_api,
     notifications,
+    orders as orders_api,
     ports,
     scheduler as scheduler_api,
     roles,
@@ -444,6 +445,7 @@ app.include_router(memberships.router)
 app.include_router(m365_api.router)
 app.include_router(ports.router)
 app.include_router(notifications.router)
+app.include_router(orders_api.router)
 app.include_router(staff_api.router)
 app.include_router(invoices_api.router)
 app.include_router(issues_api.router)
