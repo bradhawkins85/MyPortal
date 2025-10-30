@@ -89,6 +89,7 @@ from app.repositories import shop as shop_repo
 from app.repositories import cart as cart_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import staff as staff_repo
+from app.repositories import pending_staff_access as pending_staff_access_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import automations as automation_repo
 from app.repositories import integration_modules as integration_modules_repo
@@ -119,6 +120,7 @@ from app.services import products as products_service
 from app.services import shop as shop_service
 from app.services import shop_packages as shop_packages_service
 from app.services import staff_importer
+from app.services import staff_access as staff_access_service
 from app.services import company_importer
 from app.services import ticket_importer
 from app.services import tickets as tickets_service
@@ -1997,6 +1999,14 @@ async def _render_company_edit_page(
             except (TypeError, ValueError):
                 continue
             staff_rows = await staff_repo.list_staff_with_users(managed_company_id)
+            pending_assignments = await pending_staff_access_repo.list_assignments_for_company(
+                managed_company_id
+            )
+            pending_lookup = {
+                entry.get("staff_id"): entry
+                for entry in pending_assignments
+                if entry.get("staff_id") is not None
+            }
             options: list[dict[str, Any]] = []
             for row in staff_rows:
                 staff_id = row.get("staff_id")
@@ -2030,8 +2040,12 @@ async def _render_company_edit_page(
                     option_value = f"staff:{int(staff_id)}"
                 if not row.get("enabled", True):
                     label = f"{label} (inactive)"
+                pending_assignment = pending_lookup.get(int(staff_id))
                 if numeric_user_id is None:
-                    label = f"{label} – invite required"
+                    if pending_assignment:
+                        label = f"{label} – access pending sign-up"
+                    else:
+                        label = f"{label} – invite required"
                 options.append(
                     {
                         "value": option_value,
@@ -2040,6 +2054,7 @@ async def _render_company_edit_page(
                         "staff_id": int(staff_id),
                         "user_id": numeric_user_id,
                         "has_user": numeric_user_id is not None,
+                        "pending_access": bool(pending_assignment),
                     }
                 )
             options.sort(key=lambda item: item.get("label", "").lower())
@@ -4567,6 +4582,7 @@ async def invite_staff_member(staff_id: int, request: Request):
         mobile_phone=staff.get("mobile_phone"),
         company_id=staff.get("company_id"),
     )
+    await staff_access_service.apply_pending_access_for_user(created_user)
     await user_repo.update_user(created_user["id"], force_password_change=1)
     await user_company_repo.upsert_user_company(
         user_id=created_user["id"],
@@ -4833,6 +4849,7 @@ async def admin_assign_user_to_company(request: Request):
     parsed_user_id: int | None = None
     user_record: dict[str, Any] | None = None
     staff_record: dict[str, Any] | None = None
+    existing_assignment: dict[str, Any] | None = None
     staff_selection_id = _parse_staff_selection(user_identifier)
     if staff_selection_id is not None:
         staff_record = await staff_repo.get_staff_by_id(staff_selection_id)
@@ -4847,15 +4864,97 @@ async def admin_assign_user_to_company(request: Request):
                 "Selected staff member does not have an email address.",
                 status.HTTP_400_BAD_REQUEST,
             )
-        user_record = await user_repo.get_user_by_email(email)
-        if not user_record or int(user_record.get("company_id") or 0) != int(
-            staff_record.get("company_id") or 0
-        ):
+        staff_company_raw = staff_record.get("company_id")
+        try:
+            staff_company_id = int(staff_company_raw)
+        except (TypeError, ValueError):
+            staff_company_id = None
+        if staff_company_id is not None and staff_company_id != company_id:
             return await _assign_error(
-                "Selected staff member does not have a portal account yet. Invite them from the staff page before assigning access.",
+                "Selected staff member belongs to a different company.",
                 status.HTTP_400_BAD_REQUEST,
             )
-        parsed_user_id = int(user_record.get("id"))
+
+        user_record = await user_repo.get_user_by_email(email)
+        if user_record and int(user_record.get("company_id") or 0) == company_id:
+            parsed_user_id = int(user_record.get("id"))
+            existing_assignment = await user_company_repo.get_user_company(
+                parsed_user_id, company_id
+            )
+        else:
+            try:
+                staff_permission = (
+                    int(staff_permission_raw)
+                    if staff_permission_raw is not None
+                    else 0
+                )
+            except (TypeError, ValueError):
+                return await _assign_error(
+                    "Select a valid staff permission level.",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            if staff_permission < 0:
+                staff_permission = 0
+            if staff_permission > 3:
+                staff_permission = 3
+
+            permission_values: dict[str, bool] = {}
+            for column in _COMPANY_PERMISSION_COLUMNS:
+                field = column.get("field")
+                if not field:
+                    continue
+                permission_values[field] = (
+                    _parse_bool(form.get(field)) if field in form_keys else False
+                )
+
+            if "can_manage_staff" in form_keys:
+                can_manage_staff_value = _parse_bool(form.get("can_manage_staff"))
+            else:
+                can_manage_staff_value = False
+
+            role_id_value: int | None = None
+            if role_raw:
+                try:
+                    role_id_value = int(role_raw)
+                except (TypeError, ValueError):
+                    return await _assign_error(
+                        "Select a valid role for the membership.",
+                        status.HTTP_400_BAD_REQUEST,
+                    )
+                role_record = await role_repo.get_role_by_id(role_id_value)
+                if not role_record:
+                    return await _assign_error(
+                        "Selected role could not be found.",
+                        status.HTTP_404_NOT_FOUND,
+                    )
+
+            await pending_staff_access_repo.upsert_assignment(
+                staff_id=int(staff_record.get("id")),
+                company_id=company_id,
+                staff_permission=staff_permission,
+                can_manage_staff=can_manage_staff_value,
+                can_manage_licenses=permission_values.get("can_manage_licenses", False),
+                can_manage_assets=permission_values.get("can_manage_assets", False),
+                can_manage_invoices=permission_values.get("can_manage_invoices", False),
+                can_manage_office_groups=permission_values.get(
+                    "can_manage_office_groups", False
+                ),
+                can_order_licenses=permission_values.get("can_order_licenses", False),
+                can_access_shop=permission_values.get("can_access_shop", False),
+                can_access_cart=permission_values.get("can_access_cart", False),
+                can_access_orders=permission_values.get("can_access_orders", False),
+                can_access_forms=permission_values.get("can_access_forms", False),
+                is_admin=permission_values.get("is_admin", False),
+                role_id=role_id_value,
+            )
+
+            success_message = (
+                f"Saved pending access for {email}. Permissions will activate after sign-up."
+            )
+            return _company_edit_redirect(
+                company_id=company_id,
+                success=success_message,
+            )
     else:
         try:
             parsed_user_id = int(user_identifier)
@@ -4868,7 +4967,7 @@ async def admin_assign_user_to_company(request: Request):
     if not assign_form_state.get("user_value"):
         assign_form_state["user_value"] = user_identifier
 
-    if user_record is None:
+    if user_record is None and parsed_user_id is not None:
         user_record = await user_repo.get_user_by_id(parsed_user_id)
     company_record = await company_repo.get_company_by_id(company_id)
     if not user_record or not company_record:
@@ -4876,7 +4975,10 @@ async def admin_assign_user_to_company(request: Request):
             "User or company not found.", status.HTTP_404_NOT_FOUND
         )
 
-    existing_assignment = await user_company_repo.get_user_company(parsed_user_id, company_id)
+    if existing_assignment is None and parsed_user_id is not None:
+        existing_assignment = await user_company_repo.get_user_company(
+            parsed_user_id, company_id
+        )
 
     try:
         staff_permission = (
@@ -4923,6 +5025,16 @@ async def admin_assign_user_to_company(request: Request):
         assign_kwargs[field] = value
 
     await user_company_repo.assign_user_to_company(**assign_kwargs)
+
+    if staff_record and staff_record.get("id") is not None:
+        try:
+            staff_id_int = int(staff_record.get("id"))
+        except (TypeError, ValueError):
+            staff_id_int = None
+        if staff_id_int is not None:
+            await pending_staff_access_repo.delete_assignment(
+                staff_id=staff_id_int, company_id=company_id
+            )
 
     if role_raw:
         try:
@@ -5108,6 +5220,7 @@ async def admin_create_company_user(request: Request):
         last_name=last_name,
         company_id=company_id,
     )
+    await staff_access_service.apply_pending_access_for_user(created_user)
     await user_repo.update_user(created_user["id"], force_password_change=1)
     await user_company_repo.assign_user_to_company(
         user_id=created_user["id"],
@@ -5173,6 +5286,7 @@ async def admin_invite_company_user(request: Request):
         last_name=last_name,
         company_id=company_id,
     )
+    await staff_access_service.apply_pending_access_for_user(created_user)
     await user_repo.update_user(created_user["id"], force_password_change=1)
     await user_company_repo.assign_user_to_company(
         user_id=created_user["id"],
