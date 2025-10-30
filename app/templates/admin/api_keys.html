@@ -191,89 +191,26 @@
                 </td>
                 <td data-label="Usage" data-value="{{ key.usage_count }}">{{ key.usage_count }}</td>
                 <td class="table__actions">
+                  {% set modal_payload = {
+                    "id": key.id,
+                    "description": key.description or "",
+                    "key_preview": key.key_preview,
+                    "created_iso": key.created_iso,
+                    "expiry_iso": key.expiry_iso,
+                    "last_seen_iso": key.last_seen_iso,
+                    "usage_count": key.usage_count,
+                    "usage": key.usage or [],
+                    "is_expired": key.is_expired
+                  } %}
                   <div class="table__action-buttons">
-                    <details class="details details--inline">
-                      <summary>Usage &amp; rotate</summary>
-                      <div class="inline-panel">
-                        <h4 class="inline-panel__title">Recent usage</h4>
-                        {% if key.usage %}
-                          <ul class="usage-list">
-                            {% for usage in key.usage %}
-                              <li>
-                                <span class="usage-list__ip">{{ usage.ip_address }}</span>
-                                <span class="usage-list__count">{{ usage.usage_count }}</span>
-                                <span class="usage-list__time">
-                                  {% if usage.last_used_iso %}
-                                    <span data-utc="{{ usage.last_used_iso }}"></span>
-                                  {% else %}
-                                    Never
-                                  {% endif %}
-                                </span>
-                              </li>
-                            {% endfor %}
-                          </ul>
-                        {% else %}
-                          <p class="text-muted">No recorded usage yet.</p>
-                        {% endif %}
-                        <form class="inline-form inline-form--stacked" method="post" action="/admin/api-keys/rotate">
-                          {% for name, value in filter_state.items() %}
-                            <input type="hidden" name="{{ name }}" value="{{ value }}" />
-                          {% endfor %}
-                          <input type="hidden" name="api_key_id" value="{{ key.id }}" />
-                          <div class="form-grid">
-                            <div class="form-field">
-                              <label class="form-label" for="rotate-description-{{ key.id }}">New description</label>
-                              <input
-                                class="form-input"
-                                id="rotate-description-{{ key.id }}"
-                                name="description"
-                                maxlength="255"
-                                placeholder="Leave blank to keep current"
-                              />
-                            </div>
-                            <div class="form-field">
-                              <label class="form-label" for="rotate-expiry-{{ key.id }}">New expiry</label>
-                              <input
-                                class="form-input"
-                                id="rotate-expiry-{{ key.id }}"
-                                name="expiry_date"
-                                type="date"
-                                placeholder="YYYY-MM-DD"
-                              />
-                              <p class="form-help">Defaults to the existing expiry.</p>
-                            </div>
-                          </div>
-                          <div class="form-field form-field--checkbox">
-                            <label class="form-checkbox" for="rotate-retire-{{ key.id }}">
-                              <input
-                                type="checkbox"
-                                id="rotate-retire-{{ key.id }}"
-                                name="retire_previous"
-                                value="1"
-                                checked
-                              />
-                              <span>Immediately retire the previous key</span>
-                            </label>
-                          </div>
-                          <div class="form-actions form-actions--inline">
-                            <button type="submit" class="button">Rotate key</button>
-                          </div>
-                        </form>
-                      </div>
-                    </details>
-                    <form class="inline-form" method="post" action="/admin/api-keys/delete">
-                      {% for name, value in filter_state.items() %}
-                        <input type="hidden" name="{{ name }}" value="{{ value }}" />
-                      {% endfor %}
-                      <input type="hidden" name="api_key_id" value="{{ key.id }}" />
-                      <button
-                        type="submit"
-                        class="button button--danger"
-                        data-confirm="Revoke this API key? Downstream services using it will lose access."
-                      >
-                        Revoke
-                      </button>
-                    </form>
+                    <button
+                      type="button"
+                      class="button button--ghost"
+                      data-edit-api-key-modal-open
+                      data-api-key='{{ modal_payload | tojson | e }}'
+                    >
+                      Edit
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -421,6 +358,136 @@
       </div>
     </div>
   </details>
+</div>
+
+<div
+  class="modal"
+  id="edit-api-key-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="edit-api-key-title"
+  aria-hidden="true"
+  hidden
+>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close edit API key</span>
+      &times;
+    </button>
+    <h2 class="modal__title" id="edit-api-key-title">Edit API key</h2>
+    <div class="modal__body">
+      <p class="modal__subtitle">
+        Manage usage, rotation, and revocation for <span data-api-key-description-text>this credential</span>.
+      </p>
+      <dl class="definition-list">
+        <div class="definition-list__item">
+          <dt class="definition-list__label">Description</dt>
+          <dd class="definition-list__value" data-api-key-description>—</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt class="definition-list__label">Preview</dt>
+          <dd class="definition-list__value" data-api-key-preview>—</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt class="definition-list__label">Created</dt>
+          <dd class="definition-list__value" data-api-key-created>—</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt class="definition-list__label">Expiry</dt>
+          <dd class="definition-list__value" data-api-key-expiry>—</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt class="definition-list__label">Last seen</dt>
+          <dd class="definition-list__value" data-api-key-last-seen>—</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt class="definition-list__label">Usage count</dt>
+          <dd class="definition-list__value" data-api-key-usage-count>0</dd>
+        </div>
+      </dl>
+
+      <section aria-labelledby="api-key-usage-heading">
+        <h3 id="api-key-usage-heading">Recent usage</h3>
+        <p class="text-muted" data-api-key-usage-empty>No recorded usage yet.</p>
+        <ul class="usage-list" data-api-key-usage-list hidden></ul>
+      </section>
+
+      <form
+        method="post"
+        action="/admin/api-keys/rotate"
+        class="form"
+        data-api-key-rotate-form
+        autocomplete="off"
+      >
+        {% include "partials/csrf.html" %}
+        {% for name, value in filter_state.items() %}
+          <input type="hidden" name="{{ name }}" value="{{ value }}" />
+        {% endfor %}
+        <input type="hidden" name="api_key_id" value="" data-api-key-rotate-id />
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="modal-rotate-description">New description</label>
+            <input
+              class="form-input"
+              id="modal-rotate-description"
+              name="description"
+              maxlength="255"
+              placeholder="Leave blank to keep current"
+            />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="modal-rotate-expiry">New expiry</label>
+            <input
+              class="form-input"
+              id="modal-rotate-expiry"
+              name="expiry_date"
+              type="date"
+              placeholder="YYYY-MM-DD"
+            />
+            <p class="form-help">Defaults to the existing expiry.</p>
+          </div>
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="form-checkbox" for="modal-rotate-retire">
+            <input
+              type="checkbox"
+              id="modal-rotate-retire"
+              name="retire_previous"
+              value="1"
+              checked
+            />
+            <span>Immediately retire the previous key</span>
+          </label>
+        </div>
+        <div class="form-actions form-actions--inline">
+          <button type="submit" class="button">Rotate key</button>
+          <button type="button" class="button button--ghost" data-modal-close>Close</button>
+        </div>
+      </form>
+
+      <form
+        method="post"
+        action="/admin/api-keys/delete"
+        class="form"
+        data-api-key-revoke-form
+      >
+        {% include "partials/csrf.html" %}
+        {% for name, value in filter_state.items() %}
+          <input type="hidden" name="{{ name }}" value="{{ value }}" />
+        {% endfor %}
+        <input type="hidden" name="api_key_id" value="" data-api-key-revoke-id />
+        <div class="form-actions">
+          <button
+            type="submit"
+            class="button button--danger"
+            data-confirm="Revoke this API key? Downstream services using it will lose access."
+          >
+            Revoke key
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
 <div
