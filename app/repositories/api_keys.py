@@ -116,6 +116,9 @@ async def list_api_keys_with_usage(
     normalised: list[dict[str, Any]] = []
     for row in rows:
         info = dict(row)
+        # Normalise numeric aggregation results that may come back as Decimals.
+        usage_count = info.get("usage_count")
+        info["usage_count"] = int(usage_count or 0)
         info["created_at"] = _to_utc(info.get("created_at"))
         info["last_used_at"] = _to_utc(info.get("last_used_at"))
         info["last_seen_at"] = _to_utc(info.get("last_seen_at"))
@@ -156,6 +159,8 @@ async def get_api_key_with_usage(api_key_id: int) -> dict[str, Any] | None:
         return None
     usage_map = await _fetch_usage_by_key([api_key_id])
     info = dict(row)
+    usage_count = info.get("usage_count")
+    info["usage_count"] = int(usage_count or 0)
     info["created_at"] = _to_utc(info.get("created_at"))
     info["last_used_at"] = _to_utc(info.get("last_used_at"))
     info["last_seen_at"] = _to_utc(info.get("last_seen_at"))
@@ -227,7 +232,7 @@ async def _fetch_usage_by_key(key_ids: Iterable[int]) -> dict[int, list[dict[str
         usage.setdefault(key_id, []).append(
             {
                 "ip_address": row["ip_address"],
-                "usage_count": row["usage_count"],
+                "usage_count": int(row.get("usage_count") or 0),
                 "last_used_at": _to_utc(row.get("last_used_at")),
             }
         )
