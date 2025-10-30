@@ -34,6 +34,7 @@ def _format_response(row: dict) -> ApiKeyResponse:
         key_preview=mask_api_key(row.get("key_prefix")),
         usage=row.get("usage", []),
         permissions=row.get("permissions", []),
+        allowed_ips=row.get("ip_restrictions", []),
     )
 
 
@@ -73,6 +74,7 @@ async def create_api_key(
         description=payload.description,
         expiry_date=payload.expiry_date,
         permissions=[permission.model_dump() for permission in payload.permissions],
+        ip_restrictions=[entry.cidr for entry in payload.allowed_ips],
     )
     formatted = _format_response(row).model_dump()
     await audit_service.log_action(
@@ -84,6 +86,7 @@ async def create_api_key(
             "description": payload.description,
             "expiry_date": payload.expiry_date.isoformat() if payload.expiry_date else None,
             "permissions": formatted.get("permissions", []),
+            "allowed_ips": [entry.cidr for entry in payload.allowed_ips],
         },
         request=request,
     )
@@ -212,10 +215,16 @@ async def rotate_api_key(
         if payload.permissions is not None
         else existing.get("permissions", [])
     )
+    allowed_ips = (
+        [entry.cidr for entry in payload.allowed_ips]
+        if payload.allowed_ips is not None
+        else [entry.get("cidr") for entry in existing.get("ip_restrictions", [])]
+    )
     raw_key, new_row = await api_key_repo.create_api_key(
         description=new_description,
         expiry_date=new_expiry,
         permissions=permissions,
+        ip_restrictions=allowed_ips,
     )
     formatted = _format_response(new_row).model_dump()
     metadata = {
@@ -232,6 +241,9 @@ async def rotate_api_key(
             "description": new_description,
             "expiry_date": new_expiry.isoformat() if isinstance(new_expiry, date) else None,
             "permissions": formatted.get("permissions", []),
+            "allowed_ips": [entry.cidr for entry in payload.allowed_ips]
+            if payload.allowed_ips is not None
+            else [entry.get("cidr") for entry in existing.get("ip_restrictions", [])],
         },
         metadata=metadata,
         request=request,

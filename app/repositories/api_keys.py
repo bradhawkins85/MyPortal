@@ -39,6 +39,7 @@ async def create_api_key(
     description: str | None,
     expiry_date: date | None,
     permissions: PermissionMapping | None = None,
+    ip_restrictions: Sequence[str] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     generated: GeneratedApiKey = generate_api_key()
     await db.execute(
@@ -63,7 +64,11 @@ async def create_api_key(
     row["created_at"] = _to_utc(row.get("created_at"))
     row["last_used_at"] = _to_utc(row.get("last_used_at"))
     stored_permissions = await _replace_api_key_permissions(row["id"], permissions or [])
+    stored_ip_restrictions = await _replace_api_key_ip_restrictions(
+        row["id"], ip_restrictions or []
+    )
     row["permissions"] = stored_permissions
+    row["ip_restrictions"] = stored_ip_restrictions
     return generated.value, row
 
 
@@ -121,6 +126,7 @@ async def list_api_keys_with_usage(
     key_ids = [row["id"] for row in rows]
     usage_map = await _fetch_usage_by_key(key_ids)
     permission_map = await _fetch_permissions_by_key(key_ids)
+    ip_restriction_map = await _fetch_ip_restrictions_by_key(key_ids)
     normalised: list[dict[str, Any]] = []
     for row in rows:
         info = dict(row)
@@ -132,6 +138,7 @@ async def list_api_keys_with_usage(
         info["last_seen_at"] = _to_utc(info.get("last_seen_at"))
         info["usage"] = usage_map.get(row["id"], [])
         info["permissions"] = permission_map.get(row["id"], [])
+        info["ip_restrictions"] = ip_restriction_map.get(row["id"], [])
         normalised.append(info)
     return normalised
 
@@ -168,6 +175,7 @@ async def get_api_key_with_usage(api_key_id: int) -> dict[str, Any] | None:
         return None
     usage_map = await _fetch_usage_by_key([api_key_id])
     permission_map = await _fetch_permissions_by_key([api_key_id])
+    ip_restriction_map = await _fetch_ip_restrictions_by_key([api_key_id])
     info = dict(row)
     usage_count = info.get("usage_count")
     info["usage_count"] = int(usage_count or 0)
@@ -176,6 +184,7 @@ async def get_api_key_with_usage(api_key_id: int) -> dict[str, Any] | None:
     info["last_seen_at"] = _to_utc(info.get("last_seen_at"))
     info["usage"] = usage_map.get(api_key_id, [])
     info["permissions"] = permission_map.get(api_key_id, [])
+    info["ip_restrictions"] = ip_restriction_map.get(api_key_id, [])
     return info
 
 
@@ -231,6 +240,8 @@ async def get_api_key_record(api_key_value: str) -> dict[str, Any] | None:
     row["last_used_at"] = _to_utc(row.get("last_used_at"))
     permission_map = await _fetch_permissions_by_key([row["id"]])
     row["permissions"] = permission_map.get(row["id"], [])
+    ip_restriction_map = await _fetch_ip_restrictions_by_key([row["id"]])
+    row["ip_restrictions"] = ip_restriction_map.get(row["id"], [])
     return row
 
 
@@ -333,3 +344,55 @@ async def _replace_api_key_permissions(
                 )
     permission_map = await _fetch_permissions_by_key([api_key_id])
     return permission_map.get(api_key_id, [])
+
+
+async def _fetch_ip_restrictions_by_key(key_ids: Iterable[int]) -> dict[int, list[dict[str, Any]]]:
+    ids = list(key_ids)
+    if not ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(ids))
+    rows = await db.fetch_all(
+        f"""
+        SELECT api_key_id, cidr
+        FROM api_key_ip_restrictions
+        WHERE api_key_id IN ({placeholders})
+        ORDER BY cidr ASC
+        """,
+        tuple(ids),
+    )
+    restrictions: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        key_id = row["api_key_id"]
+        restrictions.setdefault(key_id, []).append({"cidr": row["cidr"]})
+    return restrictions
+
+
+async def _replace_api_key_ip_restrictions(
+    api_key_id: int, restrictions: Sequence[str]
+) -> list[dict[str, Any]]:
+    async with db.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "DELETE FROM api_key_ip_restrictions WHERE api_key_id = %s",
+                (api_key_id,),
+            )
+            values: list[tuple[int, str]] = []
+            seen: set[str] = set()
+            for entry in restrictions:
+                cidr = str(entry or "").strip()
+                if not cidr:
+                    continue
+                if cidr in seen:
+                    continue
+                seen.add(cidr)
+                values.append((api_key_id, cidr))
+            if values:
+                await cursor.executemany(
+                    """
+                    INSERT INTO api_key_ip_restrictions (api_key_id, cidr)
+                    VALUES (%s, %s)
+                    """,
+                    values,
+                )
+    restriction_map = await _fetch_ip_restrictions_by_key([api_key_id])
+    return restriction_map.get(api_key_id, [])

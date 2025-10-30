@@ -117,3 +117,44 @@ def test_unrestricted_keys_allow_all_routes(test_app, usage_calls, monkeypatch):
 
     assert response.status_code == 200
     assert usage_calls == [(4, "testclient")]
+
+
+def test_ip_restriction_blocks_unlisted_address(test_app, usage_calls, monkeypatch):
+    async def fake_get_api_key_record(_: str):
+        return {
+            "id": 5,
+            "permissions": [],
+            "ip_restrictions": [{"cidr": "203.0.113.0/24"}],
+        }
+
+    monkeypatch.setattr(api_key_repo, "get_api_key_record", fake_get_api_key_record)
+
+    with TestClient(test_app) as client:
+        response = client.get(
+            "/protected",
+            headers={"x-api-key": "key", "x-forwarded-for": "198.51.100.10"},
+        )
+
+    assert response.status_code == 403
+    assert usage_calls == []
+
+
+def test_ip_restriction_allows_listed_address(test_app, usage_calls, monkeypatch):
+    async def fake_get_api_key_record(_: str):
+        return {
+            "id": 6,
+            "permissions": [],
+            "ip_restrictions": [{"cidr": "203.0.113.0/24"}],
+        }
+
+    monkeypatch.setattr(api_key_repo, "get_api_key_record", fake_get_api_key_record)
+
+    with TestClient(test_app) as client:
+        response = client.get(
+            "/protected",
+            headers={"x-api-key": "key", "x-forwarded-for": "203.0.113.9"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert usage_calls == [(6, "203.0.113.9")]
