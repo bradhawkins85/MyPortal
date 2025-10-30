@@ -14,6 +14,7 @@ from app.core.logging import log_error
 from app.repositories import tickets as tickets_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
+from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories.tickets import TicketRecord
 from app.services import automations as automations_service
 from app.repositories import users as user_repo
@@ -102,6 +103,160 @@ _TICKET_UPDATE_ACTOR_LABELS: dict[str, str] = {
 
 _MAX_TICKET_DESCRIPTION_BYTES = 65_535
 _TRUNCATION_NOTICE = "\n\n[Message truncated due to size]"
+
+
+@dataclass(slots=True)
+class TicketStatusDefinition:
+    tech_status: str
+    tech_label: str
+    public_status: str
+
+
+def _build_status_definitions(records: Sequence[Mapping[str, Any]]) -> list[TicketStatusDefinition]:
+    definitions: list[TicketStatusDefinition] = []
+    for record in records:
+        slug = str(record.get("tech_status") or "").strip().lower()
+        if not slug:
+            continue
+        label = str(record.get("tech_label") or "").strip() or slug.replace("_", " ").title()
+        public_status = str(record.get("public_status") or "").strip() or label
+        definitions.append(
+            TicketStatusDefinition(
+                tech_status=slug,
+                tech_label=label,
+                public_status=public_status,
+            )
+        )
+    return definitions
+
+
+def _default_status_records() -> list[dict[str, str]]:
+    return [
+        {
+            "tech_status": item["tech_status"],
+            "tech_label": item["tech_label"],
+            "public_status": item["public_status"],
+        }
+        for item in ticket_status_repo.DEFAULT_STATUS_DEFINITIONS
+    ]
+
+
+async def list_status_definitions() -> list[TicketStatusDefinition]:
+    try:
+        records = await ticket_status_repo.list_statuses()
+    except RuntimeError as exc:
+        if "Database pool not initialised" in str(exc):
+            records = _default_status_records()
+        else:
+            raise
+    if not records:
+        try:
+            records = await ticket_status_repo.ensure_default_statuses()
+        except RuntimeError as exc:
+            if "Database pool not initialised" in str(exc):
+                records = _default_status_records()
+            else:
+                raise
+    if not records:
+        records = _default_status_records()
+    return _build_status_definitions(records)
+
+
+async def get_status_label_map() -> dict[str, str]:
+    return {definition.tech_status: definition.tech_label for definition in await list_status_definitions()}
+
+
+async def get_public_status_map() -> dict[str, str]:
+    return {definition.tech_status: definition.public_status for definition in await list_status_definitions()}
+
+
+async def replace_ticket_statuses(status_inputs: Sequence[Mapping[str, Any]]) -> list[TicketStatusDefinition]:
+    if not status_inputs:
+        raise ValueError("At least one ticket status must be provided.")
+
+    cleaned: list[dict[str, Any]] = []
+    seen_slugs: set[str] = set()
+    encountered_originals: set[str] = set()
+
+    for index, definition in enumerate(status_inputs):
+        tech_label = str(
+            definition.get("tech_label")
+            or definition.get("techLabel")
+            or definition.get("label")
+            or ""
+        ).strip()
+        if not tech_label:
+            raise ValueError("Tech status labels cannot be empty.")
+        if len(tech_label) > 128:
+            raise ValueError("Tech status labels must be 128 characters or fewer.")
+
+        public_status = str(
+            definition.get("public_status")
+            or definition.get("publicStatus")
+            or ""
+        ).strip()
+        if not public_status:
+            public_status = tech_label
+        if len(public_status) > 128:
+            raise ValueError("Public status labels must be 128 characters or fewer.")
+
+        original_slug_raw = str(
+            definition.get("original_slug")
+            or definition.get("existing_slug")
+            or definition.get("existingSlug")
+            or definition.get("tech_status")
+            or definition.get("techStatus")
+            or ""
+        ).strip()
+
+        slug = ticket_status_repo.slugify_status_label(tech_label)
+        if not slug:
+            raise ValueError("Tech status labels must include letters or numbers.")
+
+        original_slug = (
+            ticket_status_repo.slugify_status_label(original_slug_raw)
+            if original_slug_raw
+            else None
+        )
+
+        if original_slug and original_slug in encountered_originals:
+            raise ValueError("Tech status values must be unique.")
+        if slug in seen_slugs and (original_slug is None or slug != original_slug):
+            raise ValueError("Tech status values must be unique.")
+        if original_slug:
+            encountered_originals.add(original_slug)
+        seen_slugs.add(slug)
+
+        cleaned.append(
+            {
+                "tech_status": slug,
+                "tech_label": tech_label,
+                "public_status": public_status,
+                "original_slug": original_slug or slug,
+            }
+        )
+
+    records = await ticket_status_repo.replace_statuses(cleaned)
+    return _build_status_definitions(records)
+
+
+async def validate_status_choice(value: str) -> str:
+    slug = ticket_status_repo.slugify_status_label(value)
+    if not slug:
+        raise ValueError("Select a status to apply.")
+    if not await ticket_status_repo.status_exists(slug):
+        raise ValueError("Select a valid status to apply.")
+    return slug
+
+
+async def resolve_status_or_default(value: str | None) -> str:
+    slug = ticket_status_repo.slugify_status_label(value or "")
+    if slug and await ticket_status_repo.status_exists(slug):
+        return slug
+    definitions = await list_status_definitions()
+    if definitions:
+        return definitions[0].tech_status
+    return "open"
 
 
 def _truncate_description(description: str | None) -> str | None:
@@ -748,6 +903,8 @@ async def create_ticket(
 ) -> TicketRecord:
     """Create a ticket and emit the corresponding automation event."""
 
+    status_slug = await resolve_status_or_default(status)
+
     ticket = await tickets_repo.create_ticket(
         subject=subject,
         description=_truncate_description(description),
@@ -755,7 +912,7 @@ async def create_ticket(
         company_id=company_id,
         assigned_user_id=assigned_user_id,
         priority=priority,
-        status=status,
+        status=status_slug,
         category=category,
         module_slug=module_slug,
         external_reference=external_reference,
@@ -1144,6 +1301,7 @@ class TicketDashboardState:
     total: int
     status_counts: Counter[str]
     available_statuses: list[str]
+    status_definitions: list[TicketStatusDefinition]
     modules: list[Mapping[str, Any]]
     companies: list[Mapping[str, Any]]
     technicians: list[Mapping[str, Any]]
@@ -1206,6 +1364,8 @@ async def load_dashboard_state(
         requester_id=requester_id,
         limit=limit,
     )
+    status_definitions = await list_status_definitions()
+    definition_slugs = [definition.tech_status for definition in status_definitions]
     total = await tickets_repo.count_tickets(
         status=status_filter,
         module_slug=module_filter,
@@ -1215,10 +1375,16 @@ async def load_dashboard_state(
         requester_id=requester_id,
     )
 
-    status_counts = Counter((str(ticket.get("status") or "open")).lower() for ticket in tickets)
-    available_statuses = sorted(
-        {"open", "in_progress", "pending", "resolved", "closed", *status_counts.keys()}
-    )
+    status_counts: Counter[str] = Counter()
+    for ticket in tickets:
+        slug = ticket_status_repo.slugify_status_label(ticket.get("status") or "")
+        if not slug and definition_slugs:
+            slug = definition_slugs[0]
+        elif not slug:
+            slug = "open"
+        status_counts[slug] += 1
+
+    available_statuses = sorted({*definition_slugs, *status_counts.keys()})
 
     modules = await modules_service.list_modules()
     companies = await company_repo.list_companies()
@@ -1248,6 +1414,7 @@ async def load_dashboard_state(
         total=total,
         status_counts=status_counts,
         available_statuses=available_statuses,
+        status_definitions=status_definitions,
         modules=modules,
         companies=companies,
         technicians=technicians,
