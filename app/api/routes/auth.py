@@ -10,7 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from app.api.dependencies.auth import get_current_session, get_current_user
+from app.api.dependencies.auth import (
+    get_current_session,
+    get_current_user,
+    require_super_admin,
+)
 from app.api.dependencies.database import require_database
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
@@ -19,6 +23,7 @@ from app.repositories import companies as company_repo
 from app.repositories import users as user_repo
 from app.repositories import user_companies as user_company_repo
 from app.schemas.auth import (
+    ImpersonationRequest,
     LoginRequest,
     LoginResponse,
     PasswordChangeRequest,
@@ -37,6 +42,7 @@ from app.schemas.users import UserResponse
 from app.security.passwords import verify_password
 from app.security.session import SessionData, ensure_datetime, session_manager
 from app.services import company_access
+from app.services import impersonation as impersonation_service
 from app.services import email as email_service
 
 
@@ -57,6 +63,9 @@ def _serialize_session(session: SessionData) -> SessionInfo:
         user_agent=session.user_agent,
         csrf_token=session.csrf_token,
         active_company_id=session.active_company_id,
+        impersonator_user_id=session.impersonator_user_id,
+        impersonator_session_id=session.impersonator_session_id,
+        impersonation_started_at=session.impersonation_started_at,
     )
 
 
@@ -236,6 +245,87 @@ async def login(
     response = JSONResponse(content=response_model.model_dump(mode="json"))
     session_manager.apply_session_cookies(response, session)
     _log_login_success(request, user)
+    return response
+
+
+@router.post(
+    "/impersonate",
+    response_model=LoginResponse,
+    summary="Begin impersonating a user with assigned permissions",
+)
+async def impersonate_user(
+    payload: ImpersonationRequest,
+    request: Request,
+    current_user: dict = Depends(require_super_admin),
+    session: SessionData = Depends(get_current_session),
+) -> Response:
+    try:
+        target_user, impersonated_session = await impersonation_service.start_impersonation(
+            request=request,
+            actor_user=current_user,
+            actor_session=session,
+            target_user_id=payload.user_id,
+        )
+    except impersonation_service.SelfImpersonationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except impersonation_service.AlreadyImpersonatingError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except impersonation_service.NotImpersonatableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+
+    response_model = _build_login_response(target_user, impersonated_session)
+    response = JSONResponse(content=response_model.model_dump(mode="json"))
+    session_manager.apply_session_cookies(response, impersonated_session)
+    request.state.session = impersonated_session
+    request.state.active_company_id = impersonated_session.active_company_id
+    request.state.impersonator_user_id = impersonated_session.impersonator_user_id
+    request.state.impersonator_session_id = impersonated_session.impersonator_session_id
+    return response
+
+
+@router.post(
+    "/impersonation/exit",
+    response_model=LoginResponse,
+    summary="Exit impersonation mode and restore the original session",
+)
+async def exit_impersonation(
+    request: Request,
+    session: SessionData = Depends(get_current_session),
+) -> Response:
+    try:
+        restored_user, restored_session = await impersonation_service.end_impersonation(
+            request=request,
+            session=session,
+        )
+    except impersonation_service.NotImpersonatingError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except impersonation_service.OriginalSessionUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    response_model = _build_login_response(restored_user, restored_session)
+    response = JSONResponse(content=response_model.model_dump(mode="json"))
+    session_manager.apply_session_cookies(response, restored_session)
+    request.state.session = restored_session
+    request.state.active_company_id = restored_session.active_company_id
+    if hasattr(request.state, "impersonator_user_id"):
+        request.state.impersonator_user_id = None
+    if hasattr(request.state, "impersonator_session_id"):
+        request.state.impersonator_session_id = None
     return response
 
 
