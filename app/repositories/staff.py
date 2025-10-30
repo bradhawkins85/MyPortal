@@ -117,6 +117,50 @@ async def list_enabled_staff_users(company_id: int) -> List[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+async def list_staff_with_users(company_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT
+            s.id AS staff_id,
+            s.first_name,
+            s.last_name,
+            s.email,
+            s.enabled,
+            u.id AS user_id
+        FROM staff AS s
+        LEFT JOIN users AS u
+            ON u.company_id = s.company_id
+           AND LOWER(u.email) = LOWER(s.email)
+        WHERE s.company_id = %s
+        ORDER BY s.last_name, s.first_name, s.email
+        """,
+        (company_id,),
+    )
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        staff_id = row.get("staff_id")
+        email = (row.get("email") or "").strip()
+        if staff_id is None or not email:
+            continue
+        entry: dict[str, Any] = {
+            "staff_id": int(staff_id),
+            "first_name": (row.get("first_name") or "").strip(),
+            "last_name": (row.get("last_name") or "").strip(),
+            "email": email,
+            "enabled": bool(row.get("enabled")),
+        }
+        user_id = row.get("user_id")
+        if user_id is not None:
+            try:
+                entry["user_id"] = int(user_id)
+            except (TypeError, ValueError):
+                entry["user_id"] = None
+        else:
+            entry["user_id"] = None
+        results.append(entry)
+    return results
+
+
 async def list_all_staff(
     *, account_action: str | None = None, email: str | None = None
 ) -> list[dict[str, Any]]:
