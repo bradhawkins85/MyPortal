@@ -1,0 +1,7 @@
+{
+  "guid": "7c9d6f25-1d58-479a-ab6b-4038eaae13c9",
+  "occurred_at": "2025-10-30T13:14:32Z",
+  "change_type": "Fix",
+  "summary": "Move the Create key action to the right edge of the API credentials header for consistent alignment.",
+  "content_hash": "478e39d8f3efb985819256359bffe7ebabdddc0342886eeb007419e7331ef48c"
+}
