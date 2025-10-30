@@ -1,0 +1,7 @@
+{
+  "guid": "054e0114-900f-4702-9eeb-c69755de1af1",
+  "occurred_at": "2025-10-30T12:13:43Z",
+  "change_type": "Feature",
+  "summary": "Auto paginated the Current staff table to size rows dynamically based on the viewport height",
+  "content_hash": "db110fce1061339f15daaf6569c60ff00bff087bd2acf713ca579f0cb51a99c4"
+}
