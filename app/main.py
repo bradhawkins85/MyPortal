@@ -4787,7 +4787,7 @@ async def admin_assign_user_to_company(request: Request):
     staff_permission_raw = form.get("staffPermission") or form.get("staff_permission")
 
     assign_form_state: dict[str, Any] = {
-        "company_id": company_id_raw,
+        "company_id": source_company_raw or company_id_raw,
         "user_value": user_id_raw,
         "user_id": None,
         "role_id": role_raw,
@@ -4799,35 +4799,34 @@ async def admin_assign_user_to_company(request: Request):
         if field:
             assign_form_state[field] = field in form_keys
 
-    source_company_id: int | None = None
+    resolved_company_id: int | None = None
     for raw_value in (source_company_raw, company_id_raw):
         if raw_value is None:
             continue
         try:
-            source_company_id = int(raw_value)
+            resolved_company_id = int(raw_value)
             break
         except (TypeError, ValueError):
             continue
 
     async def _assign_error(message: str, status_code: int) -> HTMLResponse | RedirectResponse:
-        if source_company_id is None:
+        if resolved_company_id is None:
             return _companies_redirect(error=message)
         return await _render_company_edit_page(
             request,
             current_user,
-            company_id=source_company_id,
+            company_id=resolved_company_id,
             assign_form_values=assign_form_state,
             error_message=message,
             status_code=status_code,
         )
 
-    try:
-        company_id = int(company_id_raw)
-    except (TypeError, ValueError):
+    if resolved_company_id is None:
         return await _assign_error(
             "Select both a user and a company.", status.HTTP_400_BAD_REQUEST
         )
 
+    company_id = resolved_company_id
     assign_form_state["company_id"] = company_id
 
     user_identifier = (user_id_raw or "").strip()

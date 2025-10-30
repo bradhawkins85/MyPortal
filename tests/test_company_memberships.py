@@ -186,6 +186,119 @@ async def test_admin_assign_user_to_company_preserves_existing_permissions(monke
 
 
 @pytest.mark.anyio("asyncio")
+async def test_admin_assign_user_to_company_prefers_source_company(monkeypatch):
+    request = _make_request("/admin/companies/assign")
+
+    form_mock = AsyncMock(
+        return_value={
+            "userId": "7",
+            "companyId": "8",
+            "sourceCompanyId": "4",
+            "staffPermission": "1",
+        }
+    )
+    monkeypatch.setattr(request, "form", form_mock)
+
+    current_user = {"id": 1, "is_super_admin": True}
+    monkeypatch.setattr(
+        main,
+        "_require_super_admin_page",
+        AsyncMock(return_value=(current_user, None)),
+    )
+
+    user_mock = AsyncMock(return_value={"id": 7, "email": "user@example.com"})
+    monkeypatch.setattr(main.user_repo, "get_user_by_id", user_mock)
+
+    company_mock = AsyncMock(return_value={"id": 4, "name": "Example Co"})
+    monkeypatch.setattr(main.company_repo, "get_company_by_id", company_mock)
+
+    existing_assignment_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        main.user_company_repo,
+        "get_user_company",
+        existing_assignment_mock,
+    )
+
+    assign_mock = AsyncMock()
+    monkeypatch.setattr(main.user_company_repo, "assign_user_to_company", assign_mock)
+
+    response = await main.admin_assign_user_to_company(request)
+
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    location = response.headers.get("location")
+    assert location is not None
+    parsed = urlparse(location)
+    assert parsed.path == "/admin/companies/4/edit"
+    params = parse_qs(parsed.query)
+    assert params.get("success") == [
+        "Updated access for user@example.com at Example Co"
+    ]
+
+    assert existing_assignment_mock.await_args.args == (7, 4)
+    assign_kwargs = assign_mock.await_args.kwargs
+    assert assign_kwargs.get("company_id") == 4
+    assert assign_kwargs.get("user_id") == 7
+
+
+@pytest.mark.anyio("asyncio")
+async def test_admin_assign_user_to_company_uses_source_company_in_form_state(monkeypatch):
+    request = _make_request("/admin/companies/assign")
+
+    form_mock = AsyncMock(
+        return_value={
+            "userId": "7",
+            "companyId": "8",
+            "sourceCompanyId": "4",
+            "staffPermission": "1",
+        }
+    )
+    monkeypatch.setattr(request, "form", form_mock)
+
+    current_user = {"id": 1, "is_super_admin": True}
+    monkeypatch.setattr(
+        main,
+        "_require_super_admin_page",
+        AsyncMock(return_value=(current_user, None)),
+    )
+
+    monkeypatch.setattr(main.user_repo, "get_user_by_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        main.company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": 4, "name": "Example Co"}),
+    )
+
+    captured: dict[str, Any] = {}
+
+    async def fake_render_company_edit_page(
+        request_obj,
+        user_obj,
+        *,
+        company_id,
+        form_values=None,
+        assign_form_values=None,
+        success_message=None,
+        error_message=None,
+        status_code=status.HTTP_200_OK,
+    ) -> HTMLResponse:
+        captured["company_id"] = company_id
+        captured["assign_form_values"] = assign_form_values
+        captured["error_message"] = error_message
+        captured["status_code"] = status_code
+        return HTMLResponse("error", status_code=status_code)
+
+    monkeypatch.setattr(main, "_render_company_edit_page", fake_render_company_edit_page)
+
+    response = await main.admin_assign_user_to_company(request)
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert captured.get("company_id") == 4
+    assign_form_values = captured.get("assign_form_values", {})
+    assert assign_form_values.get("company_id") == 4
+    assert assign_form_values.get("user_id") == 7
+
+
+@pytest.mark.anyio("asyncio")
 async def test_render_company_edit_page_includes_assign_form_data(monkeypatch):
     request = _make_request("/admin/companies/4/edit")
     current_user = {"id": 1, "is_super_admin": True}
