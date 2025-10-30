@@ -221,7 +221,6 @@ async def list_impersonatable_memberships() -> list[dict[str, Any]]:
             m.id AS membership_id,
             m.user_id,
             m.company_id,
-            m.is_admin,
             m.status,
             u.email,
             u.first_name,
