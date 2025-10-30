@@ -105,14 +105,16 @@
     </form>
   </section>
 
-  <section class="card card--panel">
-    <header class="card__header">
+  <details class="card card--panel card-collapsible" data-roles-admin-menu>
+    <summary class="card__header card__header--collapsible">
       <div>
         <h2 class="card__title">Roles administration menu</h2>
         <p class="card__subtitle">Understand how the administration menu supports secure, least-privilege access control.</p>
       </div>
-    </header>
-    <div class="card__body card__body--stacked">
+      <span class="card__toggle-icon" aria-hidden="true"></span>
+    </summary>
+    <div class="card-collapsible__content">
+      <div class="card__body card__body--stacked">
       <p>
         The Roles administration menu is the central hub for defining reusable permission sets that can be applied to any
         company membership. Super administrators can review every existing role in the table above, inspect its granted
@@ -164,8 +166,9 @@
         </div>
       </dl>
       <p class="text-muted">New permissions will be documented here as they become available.</p>
+      </div>
     </div>
-  </section>
+  </details>
 </div>
 {% endblock %}
 
