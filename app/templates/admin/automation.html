@@ -1,5 +1,20 @@
 {% extends "base.html" %}
 
+{% block header_title %}
+  <div class="header__title-content">
+    <span class="header__title-text">{{ title | default('System Automation') }}</span>
+    <button
+      type="button"
+      class="button button--primary button--small header__title-button"
+      data-task-create
+      aria-haspopup="dialog"
+      aria-controls="task-editor-modal"
+    >
+      New task
+    </button>
+  </div>
+{% endblock %}
+
 {% block content %}
 <div class="admin-grid">
   <section class="card card--panel">
@@ -23,9 +38,6 @@
             aria-label="Filter all-company tasks"
             data-table-filter="tasks-table-global"
           />
-          <button type="button" class="button" data-task-create>
-            New task
-          </button>
         </div>
         <div class="table-wrapper">
           <table class="table" id="tasks-table-global" data-table>
