@@ -214,6 +214,33 @@ async def list_users_with_permission(permission: str) -> List[dict[str, Any]]:
     return sorted(eligible_users.values(), key=_sort_key)
 
 
+async def list_impersonatable_memberships() -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT
+            m.id AS membership_id,
+            m.user_id,
+            m.company_id,
+            m.is_admin,
+            m.status,
+            u.email,
+            u.first_name,
+            u.last_name,
+            u.is_super_admin,
+            c.name AS company_name,
+            r.name AS role_name,
+            r.permissions
+        FROM company_memberships AS m
+        INNER JOIN users AS u ON u.id = m.user_id
+        INNER JOIN roles AS r ON r.id = m.role_id
+        LEFT JOIN companies AS c ON c.id = m.company_id
+        WHERE LOWER(m.status) = 'active'
+        ORDER BY LOWER(u.email), u.id, c.name
+        """,
+    )
+    return [dict(row) for row in rows]
+
+
 def _normalise_membership(row: dict[str, Any]) -> dict[str, Any]:
     permissions_raw = row.get("permissions")
     permissions: list[str]
