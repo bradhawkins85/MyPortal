@@ -1,0 +1,7 @@
+{
+  "guid": "92a6f31f-eaa0-4099-aa07-ba823b4944b9",
+  "occurred_at": "2025-10-30T14:21:00Z",
+  "change_type": "Feature",
+  "summary": "Added IP allow list enforcement for API keys with admin tooling updates",
+  "content_hash": "6c55d54f70b79672ac3c7157b71f7ddeced9b860c90aeff29fe0504be8b9963e"
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from ipaddress import ip_network
 from typing import Optional
 
 from pydantic import BaseModel, Field, model_validator
@@ -42,10 +43,27 @@ class ApiKeyEndpointPermission(BaseModel):
         return self
 
 
+class ApiKeyIpRestriction(BaseModel):
+    cidr: str = Field(..., min_length=3, max_length=64)
+
+    @model_validator(mode="after")
+    def _normalise(self) -> "ApiKeyIpRestriction":
+        value = self.cidr.strip()
+        if not value:
+            raise ValueError("IP restriction entries cannot be blank")
+        try:
+            network = ip_network(value, strict=False)
+        except ValueError as exc:  # pragma: no cover - validation guard
+            raise ValueError("Enter a valid IP address or CIDR range") from exc
+        self.cidr = network.with_prefixlen
+        return self
+
+
 class ApiKeyCreateRequest(BaseModel):
     description: Optional[str] = Field(default=None, max_length=255)
     expiry_date: Optional[date]
     permissions: list[ApiKeyEndpointPermission] = Field(default_factory=list)
+    allowed_ips: list[ApiKeyIpRestriction] = Field(default_factory=list)
 
 
 class ApiKeyRotateRequest(BaseModel):
@@ -53,6 +71,7 @@ class ApiKeyRotateRequest(BaseModel):
     expiry_date: Optional[date]
     retire_previous: bool = True
     permissions: Optional[list[ApiKeyEndpointPermission]] = None
+    allowed_ips: Optional[list[ApiKeyIpRestriction]] = None
 
 
 class ApiKeyResponse(BaseModel):
@@ -66,6 +85,7 @@ class ApiKeyResponse(BaseModel):
     key_preview: str = Field(..., max_length=64)
     usage: list[ApiKeyUsageEntry] = Field(default_factory=list)
     permissions: list[ApiKeyEndpointPermission] = Field(default_factory=list)
+    allowed_ips: list[ApiKeyIpRestriction] = Field(default_factory=list)
 
 
 class ApiKeyDetailResponse(ApiKeyResponse):

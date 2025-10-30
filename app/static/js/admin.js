@@ -1462,6 +1462,8 @@
     const accessElement = modal.querySelector('[data-api-key-access]');
     const permissionsListElement = modal.querySelector('[data-api-key-permissions-list]');
     const permissionsEmptyElement = modal.querySelector('[data-api-key-permissions-empty]');
+    const ipListElement = modal.querySelector('[data-api-key-ips-list]');
+    const ipEmptyElement = modal.querySelector('[data-api-key-ips-empty]');
     const rotateForm = modal.querySelector('[data-api-key-rotate-form]');
     const revokeForm = modal.querySelector('[data-api-key-revoke-form]');
     const rotateIdInput = modal.querySelector('[data-api-key-rotate-id]');
@@ -1472,6 +1474,7 @@
     const permissionsInput = rotateForm
       ? rotateForm.querySelector('[data-api-key-rotate-permissions]')
       : null;
+    const ipsInput = rotateForm ? rotateForm.querySelector('[data-api-key-rotate-ips]') : null;
 
     function formatDateTime(iso, fallbackText = '—') {
       if (!iso) {
@@ -1560,6 +1563,35 @@
       permissionsEmptyElement.hidden = false;
     }
 
+    function renderIpRestrictionsList(restrictions) {
+      if (!ipListElement || !ipEmptyElement) {
+        return;
+      }
+      ipListElement.innerHTML = '';
+      if (Array.isArray(restrictions) && restrictions.length > 0) {
+        ipListElement.hidden = false;
+        ipEmptyElement.hidden = true;
+        restrictions.forEach((entry) => {
+          const item = document.createElement('li');
+          const label = document.createElement('span');
+          label.className = 'usage-list__ip';
+          const display = (entry && (entry.label || entry.cidr)) || '';
+          label.textContent = display || '—';
+          item.appendChild(label);
+          if (entry && entry.cidr && entry.cidr !== display) {
+            const cidrElement = document.createElement('span');
+            cidrElement.className = 'usage-list__count';
+            cidrElement.textContent = entry.cidr;
+            item.appendChild(cidrElement);
+          }
+          ipListElement.appendChild(item);
+        });
+        return;
+      }
+      ipListElement.hidden = true;
+      ipEmptyElement.hidden = false;
+    }
+
     function populateModal(trigger) {
       if (!(trigger instanceof HTMLElement)) {
         return;
@@ -1618,9 +1650,23 @@
 
       renderUsageList(payload.usage);
       renderPermissionsList(payload.permissions);
+      renderIpRestrictionsList(payload.ip_restrictions);
 
       if (accessElement) {
-        accessElement.textContent = payload.access_summary || 'All endpoints';
+        const endpointText = (payload.endpoint_summary || payload.access_summary || '').trim();
+        const ipText = (payload.ip_summary || '').trim();
+        if (endpointText || ipText) {
+          const parts = [];
+          if (endpointText) {
+            parts.push(endpointText);
+          }
+          if (ipText) {
+            parts.push(`IPs: ${ipText}`);
+          }
+          accessElement.textContent = parts.join(' • ');
+        } else {
+          accessElement.textContent = 'All endpoints • IPs: Any IP address';
+        }
       }
 
       if (rotateIdInput) {
@@ -1640,6 +1686,9 @@
       }
       if (permissionsInput) {
         permissionsInput.value = payload.permissions_text || '';
+      }
+      if (ipsInput) {
+        ipsInput.value = payload.ip_restrictions_text || '';
       }
       if (rotateForm) {
         rotateForm.dataset.apiKeyId = payload.id || '';
