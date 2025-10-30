@@ -26,6 +26,19 @@ async def list_users() -> List[dict[str, Any]]:
     return list(rows)
 
 
+async def list_users_for_company(company_id: int) -> List[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT id, email
+        FROM users
+        WHERE company_id = %s
+        ORDER BY LOWER(email), id
+        """,
+        (company_id,),
+    )
+    return [dict(row) for row in rows]
+
+
 async def create_user(
     *,
     email: str,

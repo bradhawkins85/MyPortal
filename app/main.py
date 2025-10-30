@@ -1909,17 +1909,6 @@ async def _render_companies_dashboard(
             }
         )
 
-    user_options: list[dict[str, Any]] = []
-    if is_super_admin:
-        raw_users = await user_repo.list_users()
-        for record in raw_users:
-            user_id = record.get("id")
-            email = (record.get("email") or "").strip()
-            if user_id is None or not email:
-                continue
-            user_options.append({"id": user_id, "email": email})
-        user_options.sort(key=lambda item: item["email"].lower())
-
     extra = {
         "title": "Company administration",
         "managed_companies": managed_companies,
@@ -1933,7 +1922,6 @@ async def _render_companies_dashboard(
         "error_message": error_message,
         "temporary_password": temporary_password,
         "invited_email": invited_email,
-        "user_options": user_options,
     }
 
     response = await _render_template("admin/companies.html", request, user, extra=extra)
@@ -1947,6 +1935,7 @@ async def _render_company_edit_page(
     *,
     company_id: int,
     form_values: Mapping[str, Any] | None = None,
+    assign_form_values: Mapping[str, Any] | None = None,
     success_message: str | None = None,
     error_message: str | None = None,
     status_code: int = status.HTTP_200_OK,
@@ -1959,6 +1948,7 @@ async def _render_company_edit_page(
 
     assignments: list[dict[str, Any]] = []
     role_options: list[dict[str, Any]] = []
+    company_user_options: dict[int, list[dict[str, Any]]] = {}
     if is_super_admin:
         assignments = await user_company_repo.list_assignments(company_id)
 
@@ -1976,6 +1966,23 @@ async def _render_company_edit_page(
                     "is_system": bool(record.get("is_system")),
                 }
             )
+
+        for managed in managed_companies:
+            raw_id = managed.get("id")
+            try:
+                managed_company_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            rows = await user_repo.list_users_for_company(managed_company_id)
+            options: list[dict[str, Any]] = []
+            for row in rows:
+                user_id = row.get("id")
+                email = (row.get("email") or "").strip()
+                if user_id is None or not email:
+                    continue
+                options.append({"id": int(user_id), "email": email})
+            options.sort(key=lambda item: item["email"].lower())
+            company_user_options[managed_company_id] = options
 
     def _string_value(key: str, default: str) -> str:
         if not form_values or key not in form_values:
@@ -2014,6 +2021,71 @@ async def _render_company_edit_page(
     else:
         preview_domains = list(company_record.get("email_domains") or [])
 
+    assign_values = assign_form_values or {}
+
+    def _assign_int(key: str, default: int | None = None) -> int | None:
+        if key not in assign_values:
+            return default
+        value = assign_values.get(key)
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return default
+            try:
+                return int(text)
+            except ValueError:
+                return default
+        return default
+
+    def _assign_bool(key: str, default: bool = False) -> bool:
+        if key not in assign_values:
+            return default
+        value = assign_values.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            candidate = value.strip().lower()
+            if not candidate:
+                return False
+            return candidate in {"1", "true", "yes", "on"}
+        return default
+
+    assign_company_id = _assign_int("company_id", company_id) or company_id
+    assign_user_id = _assign_int("user_id")
+    assign_role_id = _assign_int("role_id")
+    assign_staff_permission = _assign_int("staff_permission", 0) or 0
+    if assign_staff_permission < 0:
+        assign_staff_permission = 0
+    if assign_staff_permission > 3:
+        assign_staff_permission = 3
+    assign_can_manage_staff = _assign_bool("can_manage_staff", False)
+    assign_permissions: dict[str, bool] = {}
+    for column in _COMPANY_PERMISSION_COLUMNS:
+        field = column.get("field")
+        if not field:
+            continue
+        assign_permissions[field] = _assign_bool(field, False)
+
+    assign_user_options = company_user_options.get(assign_company_id, []) if is_super_admin else []
+
+    assign_form = {
+        "company_id": assign_company_id,
+        "user_id": assign_user_id,
+        "role_id": assign_role_id,
+        "staff_permission": assign_staff_permission,
+        "can_manage_staff": assign_can_manage_staff,
+        "permissions": assign_permissions,
+    }
+
     extra = {
         "title": f"Edit {company_record.get('name') or 'company'}",
         "company": company_record,
@@ -2027,6 +2099,9 @@ async def _render_company_edit_page(
         "success_message": success_message,
         "error_message": error_message,
         "email_domain_preview": preview_domains,
+        "assign_form": assign_form,
+        "company_user_options": company_user_options,
+        "assign_user_options": assign_user_options,
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
@@ -4629,48 +4704,80 @@ async def admin_assign_user_to_company(request: Request):
     if redirect:
         return redirect
     form = await request.form()
+    form_keys = set(form.keys())
     user_id_raw = form.get("userId") or form.get("user_id")
     company_id_raw = form.get("companyId") or form.get("company_id")
+    source_company_raw = form.get("sourceCompanyId") or form.get("source_company_id")
+    role_raw = form.get("roleId") or form.get("role_id")
+    staff_permission_raw = form.get("staffPermission") or form.get("staff_permission")
+
+    assign_form_state: dict[str, Any] = {
+        "company_id": company_id_raw,
+        "user_id": user_id_raw,
+        "role_id": role_raw,
+        "staff_permission": staff_permission_raw,
+        "can_manage_staff": "can_manage_staff" in form_keys,
+    }
+    for column in _COMPANY_PERMISSION_COLUMNS:
+        field = column.get("field")
+        if field:
+            assign_form_state[field] = field in form_keys
+
+    source_company_id: int | None = None
+    for raw_value in (source_company_raw, company_id_raw):
+        if raw_value is None:
+            continue
+        try:
+            source_company_id = int(raw_value)
+            break
+        except (TypeError, ValueError):
+            continue
+
+    async def _assign_error(message: str, status_code: int) -> HTMLResponse | RedirectResponse:
+        if source_company_id is None:
+            return _companies_redirect(error=message)
+        return await _render_company_edit_page(
+            request,
+            current_user,
+            company_id=source_company_id,
+            assign_form_values=assign_form_state,
+            error_message=message,
+            status_code=status_code,
+        )
+
     try:
         user_id = int(user_id_raw)
         company_id = int(company_id_raw)
     except (TypeError, ValueError):
-        response = await _render_companies_dashboard(
-            request,
-            current_user,
-            error_message="Select both a user and a company.",
-            status_code=status.HTTP_400_BAD_REQUEST,
+        return await _assign_error(
+            "Select both a user and a company.", status.HTTP_400_BAD_REQUEST
         )
-        return response
+
+    assign_form_state["company_id"] = company_id
+    assign_form_state["user_id"] = user_id
+
     user_record = await user_repo.get_user_by_id(user_id)
     company_record = await company_repo.get_company_by_id(company_id)
     if not user_record or not company_record:
-        response = await _render_companies_dashboard(
-            request,
-            current_user,
-            error_message="User or company not found.",
-            status_code=status.HTTP_404_NOT_FOUND,
+        return await _assign_error(
+            "User or company not found.", status.HTTP_404_NOT_FOUND
         )
-        return response
-    existing_assignment = await user_company_repo.get_user_company(user_id, company_id)
-    form_keys = set(form.keys())
 
-    staff_permission_raw = form.get("staffPermission") or form.get("staff_permission")
+    existing_assignment = await user_company_repo.get_user_company(user_id, company_id)
+
     try:
-        staff_permission = int(staff_permission_raw) if staff_permission_raw is not None else 0
-    except (TypeError, ValueError):
-        response = await _render_companies_dashboard(
-            request,
-            current_user,
-            selected_company_id=company_id,
-            error_message="Select a valid staff permission level.",
-            status_code=status.HTTP_400_BAD_REQUEST,
+        staff_permission = (
+            int(staff_permission_raw) if staff_permission_raw is not None else 0
         )
-        return response
+    except (TypeError, ValueError):
+        return await _assign_error(
+            "Select a valid staff permission level.", status.HTTP_400_BAD_REQUEST
+        )
     if staff_permission < 0:
         staff_permission = 0
     if staff_permission > 3:
         staff_permission = 3
+    assign_form_state["staff_permission"] = staff_permission
 
     permission_values: dict[str, bool] = {}
     for column in _COMPANY_PERMISSION_COLUMNS:
@@ -4683,6 +4790,7 @@ async def admin_assign_user_to_company(request: Request):
             permission_values[field] = bool(existing_assignment.get(field, False))
         else:
             permission_values[field] = False
+        assign_form_state[field] = permission_values[field]
 
     if "can_manage_staff" in form_keys:
         can_manage_staff = _parse_bool(form.get("can_manage_staff"))
@@ -4690,6 +4798,7 @@ async def admin_assign_user_to_company(request: Request):
         can_manage_staff = bool(existing_assignment.get("can_manage_staff", False))
     else:
         can_manage_staff = False
+    assign_form_state["can_manage_staff"] = can_manage_staff
 
     assign_kwargs: dict[str, Any] = {
         "user_id": user_id,
@@ -4702,36 +4811,28 @@ async def admin_assign_user_to_company(request: Request):
 
     await user_company_repo.assign_user_to_company(**assign_kwargs)
 
-    role_raw = form.get("roleId") or form.get("role_id")
     if role_raw:
         try:
             role_id = int(role_raw)
         except (TypeError, ValueError):
-            response = await _render_companies_dashboard(
-                request,
-                current_user,
-                selected_company_id=company_id,
-                error_message="Select a valid role for the membership.",
-                status_code=status.HTTP_400_BAD_REQUEST,
+            return await _assign_error(
+                "Select a valid role for the membership.",
+                status.HTTP_400_BAD_REQUEST,
             )
-            return response
+        assign_form_state["role_id"] = role_id
         role_record = await role_repo.get_role_by_id(role_id)
         if not role_record:
-            response = await _render_companies_dashboard(
-                request,
-                current_user,
-                selected_company_id=company_id,
-                error_message="Selected role could not be found.",
-                status_code=status.HTTP_404_NOT_FOUND,
+            return await _assign_error(
+                "Selected role could not be found.",
+                status.HTTP_404_NOT_FOUND,
             )
-            return response
         membership = await membership_repo.get_membership_by_company_user(company_id, user_id)
         if membership:
             membership_id = membership.get("id")
             if membership_id is not None and membership.get("role_id") != role_id:
                 await membership_repo.update_membership(int(membership_id), role_id=role_id)
 
-    return _companies_redirect(
+    return _company_edit_redirect(
         company_id=company_id,
         success=(
             f"Updated access for {user_record.get('email')} at {company_record.get('name')}"
