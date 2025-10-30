@@ -1,0 +1,7 @@
+{
+  "guid": "b1ade309-da4c-4613-8c1f-6e65374362dd",
+  "occurred_at": "2025-10-30T14:09:49Z",
+  "change_type": "Feature",
+  "summary": "Collapse company memberships panel by default in admin company editor.",
+  "content_hash": "f1add5b4c9c1469b017b31507bd7b84eae3b1fde68cc8fc952adf722203a7a66"
+}
