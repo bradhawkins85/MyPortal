@@ -63,7 +63,7 @@
               id="edit-company-email-domains"
               name="emailDomains"
               class="form-input form-input--textarea"
-              rows="3"
+              rows="1"
               placeholder="example.com, example.org"
             >{{ form_data.email_domains }}</textarea>
             <p class="form-help">Use commas or new lines to list domains. Domains are matched case-insensitively.</p>
@@ -87,128 +87,133 @@
       </div>
     </section>
     {% if is_super_admin %}
-      <section class="card card--panel admin-grid__full">
-        <header class="card__header card__header--stacked">
+      <details class="card card--panel card-collapsible admin-grid__full">
+        <summary class="card__header card__header--collapsible card__header--stacked">
           <div>
             <h2 class="card__title">Assign staff access</h2>
             <p class="card__subtitle">
               Grant or update company permissions for existing team members without sending invitations.
             </p>
           </div>
-        </header>
-        <form
-          action="/admin/companies/assign"
-          method="post"
-          class="form-grid"
-          autocomplete="off"
-          data-company-assign-form
-          data-initial-company-id="{{ assign_form.company_id }}"
-          data-initial-user-id="{{ assign_form.user_value or '' }}"
-        >
-          {% include "partials/csrf.html" %}
-          <input type="hidden" name="sourceCompanyId" value="{{ company.id }}" />
-          <div class="form-field">
-            <label class="form-label" for="assign-company">Company</label>
-            <select
-              id="assign-company"
-              name="companyId"
-              class="form-input"
-              required
-              data-company-select
-            >
-              {% for managed in managed_companies %}
-                <option value="{{ managed.id }}" {% if managed.id == assign_form.company_id %}selected{% endif %}>
-                  {{ managed.name }}
-                </option>
-              {% endfor %}
-            </select>
+          <div class="card__collapsible-meta" aria-hidden="true">
+            <span class="card__toggle-icon"></span>
           </div>
-          <div class="form-field">
-            <label class="form-label" for="assign-user">User</label>
-            <select id="assign-user" name="userId" class="form-input" required data-user-select>
-              <option
-                value=""
-                disabled
-                {% if not assign_form.user_value %}selected{% endif %}
-                data-placeholder
-              >
-                Select a user
-              </option>
-              {% for option in assign_user_options %}
-                <option
-                  value="{{ option.value }}"
-                  {% if option.value == assign_form.user_value %}selected{% endif %}
-                  {% if option.staff_id is not none %}data-staff-id="{{ option.staff_id }}"{% endif %}
-                  {% if option.user_id is not none %}data-user-id="{{ option.user_id }}"{% endif %}
-                  data-has-user="{% if option.has_user %}1{% else %}0{% endif %}"
-                >
-                  {{ option.label }}
-                </option>
-              {% endfor %}
-            </select>
-          </div>
-          {% if role_options %}
+        </summary>
+        <div class="card-collapsible__content">
+          <form
+            action="/admin/companies/assign"
+            method="post"
+            class="form-grid"
+            autocomplete="off"
+            data-company-assign-form
+            data-initial-company-id="{{ assign_form.company_id }}"
+            data-initial-user-id="{{ assign_form.user_value or '' }}"
+          >
+            {% include "partials/csrf.html" %}
+            <input type="hidden" name="sourceCompanyId" value="{{ company.id }}" />
             <div class="form-field">
-              <label class="form-label" for="assign-role">Membership role</label>
-              <select id="assign-role" name="role_id" class="form-input">
-                <option value="" {% if not assign_form.role_id %}selected{% endif %}>Default membership role</option>
-                {% for role in role_options %}
-                  <option value="{{ role.id }}" {% if role.id == assign_form.role_id %}selected{% endif %}>
-                    {{ role.name }}
+              <label class="form-label" for="assign-company">Company</label>
+              <select
+                id="assign-company"
+                name="companyId"
+                class="form-input"
+                required
+                data-company-select
+              >
+                {% for managed in managed_companies %}
+                  <option value="{{ managed.id }}" {% if managed.id == assign_form.company_id %}selected{% endif %}>
+                    {{ managed.name }}
                   </option>
                 {% endfor %}
               </select>
             </div>
-          {% endif %}
-          <div class="form-field">
-            <label class="form-label" for="assign-staff-permission">Staff access level</label>
-            <select id="assign-staff-permission" name="staffPermission" class="form-input">
-              {% for option in staff_permission_options %}
-                <option value="{{ option.value }}" {% if option.value == assign_form.staff_permission %}selected{% endif %}>
-                  {{ option.label }}
+            <div class="form-field">
+              <label class="form-label" for="assign-user">User</label>
+              <select id="assign-user" name="userId" class="form-input" required data-user-select>
+                <option
+                  value=""
+                  disabled
+                  {% if not assign_form.user_value %}selected{% endif %}
+                  data-placeholder
+                >
+                  Select a user
                 </option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="form-field form-field--checkbox">
-            <label class="checkbox" for="assign-manage-staff">
-              <input
-                id="assign-manage-staff"
-                type="checkbox"
-                name="can_manage_staff"
-                value="1"
-                {% if assign_form.can_manage_staff %}checked{% endif %}
-              />
-              <span>Allow manual staff management</span>
-            </label>
-            <p class="form-help">
-              Enable to give management controls without requiring an elevated staff access tier.
-            </p>
-          </div>
-          <div class="form-field form-field--wide">
-            <span class="form-label">Company permissions</span>
-            <div class="form-grid">
-              {% for column in permission_columns %}
-                <div class="form-field form-field--checkbox">
-                  <label class="checkbox" for="assign-{{ column.field }}">
-                    <input
-                      id="assign-{{ column.field }}"
-                      type="checkbox"
-                      name="{{ column.field }}"
-                      value="1"
-                      {% if assign_form.permissions.get(column.field) %}checked{% endif %}
-                    />
-                    <span>{{ column.label }}</span>
-                  </label>
-                </div>
-              {% endfor %}
+                {% for option in assign_user_options %}
+                  <option
+                    value="{{ option.value }}"
+                    {% if option.value == assign_form.user_value %}selected{% endif %}
+                    {% if option.staff_id is not none %}data-staff-id="{{ option.staff_id }}"{% endif %}
+                    {% if option.user_id is not none %}data-user-id="{{ option.user_id }}"{% endif %}
+                    data-has-user="{% if option.has_user %}1{% else %}0{% endif %}"
+                  >
+                    {{ option.label }}
+                  </option>
+                {% endfor %}
+              </select>
             </div>
-          </div>
-          <div class="form-actions form-field--wide">
-            <button type="submit" class="button">Save access</button>
-          </div>
-        </form>
-      </section>
+            {% if role_options %}
+              <div class="form-field">
+                <label class="form-label" for="assign-role">Membership role</label>
+                <select id="assign-role" name="role_id" class="form-input">
+                  <option value="" {% if not assign_form.role_id %}selected{% endif %}>Default membership role</option>
+                  {% for role in role_options %}
+                    <option value="{{ role.id }}" {% if role.id == assign_form.role_id %}selected{% endif %}>
+                      {{ role.name }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+            {% endif %}
+            <div class="form-field">
+              <label class="form-label" for="assign-staff-permission">Staff access level</label>
+              <select id="assign-staff-permission" name="staffPermission" class="form-input">
+                {% for option in staff_permission_options %}
+                  <option value="{{ option.value }}" {% if option.value == assign_form.staff_permission %}selected{% endif %}>
+                    {{ option.label }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-field form-field--checkbox">
+              <label class="checkbox" for="assign-manage-staff">
+                <input
+                  id="assign-manage-staff"
+                  type="checkbox"
+                  name="can_manage_staff"
+                  value="1"
+                  {% if assign_form.can_manage_staff %}checked{% endif %}
+                />
+                <span>Allow manual staff management</span>
+              </label>
+              <p class="form-help">
+                Enable to give management controls without requiring an elevated staff access tier.
+              </p>
+            </div>
+            <div class="form-field form-field--wide">
+              <span class="form-label">Company permissions</span>
+              <div class="form-grid">
+                {% for column in permission_columns %}
+                  <div class="form-field form-field--checkbox">
+                    <label class="checkbox" for="assign-{{ column.field }}">
+                      <input
+                        id="assign-{{ column.field }}"
+                        type="checkbox"
+                        name="{{ column.field }}"
+                        value="1"
+                        {% if assign_form.permissions.get(column.field) %}checked{% endif %}
+                      />
+                      <span>{{ column.label }}</span>
+                    </label>
+                  </div>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="form-actions form-field--wide">
+              <button type="submit" class="button">Save access</button>
+            </div>
+          </form>
+        </div>
+      </details>
 
       <section class="card card--panel admin-grid__full">
         <header class="card__header card__header--stacked">
