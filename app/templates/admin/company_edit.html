@@ -86,10 +86,129 @@
         </form>
       </div>
     </section>
+    {% if is_super_admin %}
+      <section class="card card--panel admin-grid__full">
+        <header class="card__header card__header--stacked">
+          <div>
+            <h2 class="card__title">Company memberships</h2>
+            <p class="card__subtitle">Manage staff access and permissions for this company.</p>
+          </div>
+          <div class="card__controls">
+            <input
+              type="search"
+              class="form-input"
+              placeholder="Filter memberships"
+              aria-label="Filter memberships"
+              data-table-filter="company-assignments"
+            />
+          </div>
+        </header>
+        <div class="table-wrapper">
+          <table class="table" id="company-assignments" data-table>
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string">User</th>
+                <th scope="col" data-sort="string">Role</th>
+                <th scope="col" data-sort="string">Staff</th>
+                {% for column in permission_columns %}
+                  <th scope="col" data-sort="string">{{ column.label }}</th>
+                {% endfor %}
+                <th scope="col" class="table__actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if assignments %}
+                {% for assignment in assignments %}
+                  <tr>
+                    <td data-label="User">
+                      <div class="stacked">
+                        <strong>{{ assignment.email }}</strong>
+                        <span class="text-muted">{{ assignment.first_name or '' }} {{ assignment.last_name or '' }}</span>
+                      </div>
+                    </td>
+                    <td data-label="Role">
+                      {% if assignment.membership_id and role_options %}
+                        <select
+                          class="form-input"
+                          data-membership-role
+                          data-company-id="{{ assignment.company_id }}"
+                          data-user-id="{{ assignment.user_id }}"
+                          data-membership-id="{{ assignment.membership_id }}"
+                          data-current-role="{{ assignment.membership_role_id or '' }}"
+                        >
+                          {% for role in role_options %}
+                            <option value="{{ role.id }}" {% if role.id == assignment.membership_role_id %}selected{% endif %}>
+                              {{ role.name }}
+                            </option>
+                          {% endfor %}
+                        </select>
+                      {% elif assignment.membership_id %}
+                        <span>{{ assignment.membership_role_name or 'Role unavailable' }}</span>
+                      {% else %}
+                        <span class="text-muted">No membership record</span>
+                      {% endif %}
+                    </td>
+                    <td data-label="Staff">
+                      <select
+                        class="form-input"
+                        data-staff-permission
+                        data-company-id="{{ assignment.company_id }}"
+                        data-user-id="{{ assignment.user_id }}"
+                      >
+                        {% for option in staff_permission_options %}
+                          <option value="{{ option.value }}" {% if option.value == assignment.staff_permission %}selected{% endif %}>
+                            {{ option.label }}
+                          </option>
+                        {% endfor %}
+                      </select>
+                    </td>
+                    {% for column in permission_columns %}
+                      {% set field = column.field %}
+                      <td data-label="{{ column.label }}">
+                        <label class="checkbox">
+                          <input
+                            type="checkbox"
+                            data-company-permission
+                            data-company-id="{{ assignment.company_id }}"
+                            data-user-id="{{ assignment.user_id }}"
+                            data-field="{{ field }}"
+                            {% if assignment[field] %}checked{% endif %}
+                          />
+                          <span class="visually-hidden">Toggle {{ column.label }}</span>
+                        </label>
+                      </td>
+                    {% endfor %}
+                    <td class="table__actions">
+                      <button
+                        type="button"
+                        class="button button--danger"
+                        data-remove-assignment
+                        data-company-id="{{ assignment.company_id }}"
+                        data-user-id="{{ assignment.user_id }}"
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  {% set empty_columns = 4 + permission_columns|length %}
+                  <td colspan="{{ empty_columns }}" class="table__empty">
+                    No memberships are assigned to this company yet.
+                  </td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
   </div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
   <script src="/static/js/admin.js" defer></script>
 {% endblock %}

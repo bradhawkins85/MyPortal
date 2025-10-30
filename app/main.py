@@ -1957,6 +1957,26 @@ async def _render_company_edit_page(
 
     is_super_admin, managed_companies, _ = await _get_company_management_scope(request, user)
 
+    assignments: list[dict[str, Any]] = []
+    role_options: list[dict[str, Any]] = []
+    if is_super_admin:
+        assignments = await user_company_repo.list_assignments(company_id)
+
+        role_rows = await role_repo.list_roles()
+        for record in role_rows:
+            role_id = record.get("id")
+            name = (record.get("name") or "").strip()
+            if role_id is None or not name:
+                continue
+            role_options.append(
+                {
+                    "id": int(role_id),
+                    "name": name,
+                    "description": (record.get("description") or "").strip(),
+                    "is_system": bool(record.get("is_system")),
+                }
+            )
+
     def _string_value(key: str, default: str) -> str:
         if not form_values or key not in form_values:
             return default
@@ -2000,6 +2020,10 @@ async def _render_company_edit_page(
         "form_data": form_data,
         "managed_companies": managed_companies,
         "is_super_admin": is_super_admin,
+        "assignments": assignments,
+        "permission_columns": _COMPANY_PERMISSION_COLUMNS,
+        "staff_permission_options": _STAFF_PERMISSION_OPTIONS,
+        "role_options": role_options,
         "success_message": success_message,
         "error_message": error_message,
         "email_domain_preview": preview_domains,
