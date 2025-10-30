@@ -1,10 +1,12 @@
 import json
 from typing import Any
 from unittest.mock import AsyncMock
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi import status
 from starlette.requests import Request
+from starlette.responses import HTMLResponse
 
 from app import main
 from app.repositories import company_memberships as membership_repo
@@ -156,6 +158,14 @@ async def test_admin_assign_user_to_company_preserves_existing_permissions(monke
     response = await main.admin_assign_user_to_company(request)
 
     assert response.status_code == status.HTTP_303_SEE_OTHER
+    location = response.headers.get("location")
+    assert location is not None
+    parsed = urlparse(location)
+    assert parsed.path == "/admin/companies/4/edit"
+    params = parse_qs(parsed.query)
+    assert params.get("success") == [
+        "Updated access for user@example.com at Example Co"
+    ]
     assign_mock.assert_awaited_once()
     assert assign_mock.await_args.kwargs == {
         "user_id": 7,
@@ -173,6 +183,98 @@ async def test_admin_assign_user_to_company_preserves_existing_permissions(monke
         "can_order_licenses": True,
         "is_admin": True,
     }
+
+
+@pytest.mark.anyio("asyncio")
+async def test_render_company_edit_page_includes_assign_form_data(monkeypatch):
+    request = _make_request("/admin/companies/4/edit")
+    current_user = {"id": 1, "is_super_admin": True}
+
+    company_record = {
+        "id": 4,
+        "name": "Example Co",
+        "email_domains": [],
+        "syncro_company_id": None,
+        "xero_id": None,
+        "is_vip": 0,
+    }
+    monkeypatch.setattr(
+        main.company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value=company_record),
+    )
+
+    managed_companies = [
+        {"id": 4, "name": "Example Co"},
+        {"id": 8, "name": "Other Co"},
+    ]
+    monkeypatch.setattr(
+        main,
+        "_get_company_management_scope",
+        AsyncMock(return_value=(True, managed_companies, {})),
+    )
+    monkeypatch.setattr(
+        main.user_company_repo,
+        "list_assignments",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        main.role_repo,
+        "list_roles",
+        AsyncMock(return_value=[{"id": 3, "name": "Manager"}]),
+    )
+
+    async def fake_list_users_for_company(company_id: int) -> list[dict[str, Any]]:
+        if company_id == 4:
+            return [{"id": 10, "email": "alpha@example.com"}]
+        if company_id == 8:
+            return [
+                {"id": 12, "email": "zeta@example.com"},
+                {"id": 11, "email": "beta@example.com"},
+            ]
+        return []
+
+    monkeypatch.setattr(main.user_repo, "list_users_for_company", fake_list_users_for_company)
+
+    captured: dict[str, Any] = {}
+
+    async def fake_render_template(template_name, request_obj, user_obj, *, extra):
+        captured["template"] = template_name
+        captured["extra"] = extra
+        return HTMLResponse("ok")
+
+    monkeypatch.setattr(main, "_render_template", fake_render_template)
+
+    assign_form_values = {
+        "company_id": "8",
+        "user_id": "11",
+        "staff_permission": "3",
+        "role_id": "3",
+        "can_manage_staff": True,
+        "can_access_shop": True,
+    }
+
+    response = await main._render_company_edit_page(
+        request,
+        current_user,
+        company_id=4,
+        assign_form_values=assign_form_values,
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert captured.get("template") == "admin/company_edit.html"
+    extra = captured.get("extra", {})
+    assert extra.get("assign_form", {}).get("company_id") == 8
+    assert extra.get("assign_form", {}).get("user_id") == 11
+    assert extra.get("assign_form", {}).get("staff_permission") == 3
+    assert extra.get("assign_form", {}).get("permissions", {}).get("can_access_shop") is True
+    assert extra.get("assign_user_options") == [
+        {"id": 11, "email": "beta@example.com"},
+        {"id": 12, "email": "zeta@example.com"},
+    ]
+    assert extra.get("company_user_options", {}).get(4) == [
+        {"id": 10, "email": "alpha@example.com"}
+    ]
 
 
 def test_membership_update_accepts_camel_case_alias():
