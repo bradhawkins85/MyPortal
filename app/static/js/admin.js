@@ -18,6 +18,25 @@
     return getCookie('myportal_session_csrf');
   }
 
+  function parseJsonScript(elementId, fallbackValue) {
+    if (!elementId) {
+      return fallbackValue;
+    }
+    const element = document.getElementById(elementId);
+    if (!element) {
+      return fallbackValue;
+    }
+    const textContent = element.textContent || element.innerText || '';
+    if (!textContent || !textContent.trim()) {
+      return fallbackValue;
+    }
+    try {
+      return JSON.parse(textContent);
+    } catch (error) {
+      return fallbackValue;
+    }
+  }
+
   async function requestJson(url, options) {
     const config = options || {};
     const csrfToken = getCsrfToken();
@@ -1137,6 +1156,86 @@
     });
   }
 
+  function bindCompanyAssignForm() {
+    const form = document.querySelector('[data-company-assign-form]');
+    if (!form) {
+      return;
+    }
+
+    const companySelect = form.querySelector('[data-company-select]');
+    const userSelect = form.querySelector('[data-user-select]');
+    if (!companySelect || !userSelect) {
+      return;
+    }
+
+    const optionsMap = parseJsonScript('company-assign-user-options', {});
+    if (!optionsMap || typeof optionsMap !== 'object') {
+      return;
+    }
+
+    const placeholderOption = userSelect.querySelector('[data-placeholder]') || null;
+    const initialCompanyId = form.getAttribute('data-initial-company-id') || companySelect.value || '';
+    const initialUserId = form.getAttribute('data-initial-user-id');
+
+    function getOptionsForCompany(companyId) {
+      const key = String(companyId || '').trim();
+      if (!key) {
+        return [];
+      }
+      const value = optionsMap[key];
+      return Array.isArray(value) ? value : [];
+    }
+
+    function populateUsers(companyId, targetSelection) {
+      const options = getOptionsForCompany(companyId);
+      const desiredSelection =
+        targetSelection !== undefined && targetSelection !== null
+          ? String(targetSelection)
+          : userSelect.value;
+
+      Array.from(userSelect.options).forEach((option) => {
+        if (option.hasAttribute('data-placeholder')) {
+          return;
+        }
+        option.remove();
+      });
+
+      let hasSelection = false;
+      options.forEach((entry) => {
+        if (!entry || typeof entry !== 'object') {
+          return;
+        }
+        const { id, email } = entry;
+        if (id === undefined || email === undefined) {
+          return;
+        }
+        const option = document.createElement('option');
+        option.value = String(id);
+        option.textContent = String(email);
+        if (desiredSelection && String(id) === String(desiredSelection)) {
+          option.selected = true;
+          hasSelection = true;
+        }
+        userSelect.appendChild(option);
+      });
+
+      if (!hasSelection) {
+        if (placeholderOption) {
+          placeholderOption.selected = true;
+        } else {
+          userSelect.value = '';
+        }
+      }
+    }
+
+    populateUsers(initialCompanyId, initialUserId ?? undefined);
+
+    companySelect.addEventListener('change', () => {
+      const selectedCompanyId = companySelect.value;
+      populateUsers(selectedCompanyId, undefined);
+    });
+  }
+
   function bindCompanyAssignmentControls() {
     document.querySelectorAll('[data-company-permission]').forEach((input) => {
       input.addEventListener('change', async () => {
@@ -1400,6 +1499,7 @@
     bindTicketAiReplaceDescription();
     bindTicketAiRefresh();
     bindRoleForm();
+    bindCompanyAssignForm();
     bindCompanyAssignmentControls();
     bindApiKeyCopyButtons();
     bindConfirmationButtons();
