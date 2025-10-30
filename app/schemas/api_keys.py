@@ -64,6 +64,7 @@ class ApiKeyCreateRequest(BaseModel):
     expiry_date: Optional[date]
     permissions: list[ApiKeyEndpointPermission] = Field(default_factory=list)
     allowed_ips: list[ApiKeyIpRestriction] = Field(default_factory=list)
+    is_enabled: bool = True
 
 
 class ApiKeyRotateRequest(BaseModel):
@@ -78,6 +79,7 @@ class ApiKeyUpdateRequest(BaseModel):
     description: Optional[str] = Field(default=None, max_length=255)
     expiry_date: Optional[date] = None
     permissions: Optional[list[ApiKeyEndpointPermission]] = None
+    is_enabled: Optional[bool] = None
 
 
 class ApiKeyResponse(BaseModel):
@@ -92,6 +94,7 @@ class ApiKeyResponse(BaseModel):
     usage: list[ApiKeyUsageEntry] = Field(default_factory=list)
     permissions: list[ApiKeyEndpointPermission] = Field(default_factory=list)
     allowed_ips: list[ApiKeyIpRestriction] = Field(default_factory=list)
+    is_enabled: bool = True
 
 
 class ApiKeyDetailResponse(ApiKeyResponse):
