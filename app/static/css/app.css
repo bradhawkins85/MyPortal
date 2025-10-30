@@ -752,6 +752,14 @@ body {
   min-width: 0;
 }
 
+.header__title-content--spread {
+  width: 100%;
+}
+
+.header__title-content--spread .header__title-button {
+  margin-inline-start: auto;
+}
+
 .header__title-text {
   flex: 1 1 auto;
   min-width: 0;
