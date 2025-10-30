@@ -252,10 +252,24 @@
                       <div class="stacked">
                         <strong>{{ assignment.email }}</strong>
                         <span class="text-muted">{{ assignment.first_name or '' }} {{ assignment.last_name or '' }}</span>
+                        {% if assignment.is_pending %}
+                          <span class="badge badge--warning">Pending staff access</span>
+                          {% if assignment.pending_requires_account %}
+                            <span class="text-muted">Awaiting portal account</span>
+                          {% endif %}
+                        {% endif %}
                       </div>
                     </td>
                     <td data-label="Role">
-                      {% if assignment.membership_id and role_options %}
+                      {% if assignment.is_pending %}
+                        {% if assignment.membership_role_name %}
+                          <span>{{ assignment.membership_role_name }}</span>
+                        {% elif assignment.membership_role_id %}
+                          <span>Role ID {{ assignment.membership_role_id }}</span>
+                        {% else %}
+                          <span class="text-muted">Pending role assignment</span>
+                        {% endif %}
+                      {% elif assignment.membership_id and role_options %}
                         <select
                           class="form-input"
                           data-membership-role
@@ -277,18 +291,22 @@
                       {% endif %}
                     </td>
                     <td data-label="Staff">
-                      <select
-                        class="form-input"
-                        data-staff-permission
-                        data-company-id="{{ assignment.company_id }}"
-                        data-user-id="{{ assignment.user_id }}"
-                      >
-                        {% for option in staff_permission_options %}
-                          <option value="{{ option.value }}" {% if option.value == assignment.staff_permission %}selected{% endif %}>
-                            {{ option.label }}
-                          </option>
-                        {% endfor %}
-                      </select>
+                      {% if assignment.is_pending %}
+                        <span class="text-muted">{{ assignment.staff_permission_label }}</span>
+                      {% else %}
+                        <select
+                          class="form-input"
+                          data-staff-permission
+                          data-company-id="{{ assignment.company_id }}"
+                          data-user-id="{{ assignment.user_id }}"
+                        >
+                          {% for option in staff_permission_options %}
+                            <option value="{{ option.value }}" {% if option.value == assignment.staff_permission %}selected{% endif %}>
+                              {{ option.label }}
+                            </option>
+                          {% endfor %}
+                        </select>
+                      {% endif %}
                     </td>
                     {% for column in permission_columns %}
                       {% set field = column.field %}
@@ -296,10 +314,13 @@
                         <label class="checkbox">
                           <input
                             type="checkbox"
-                            data-company-permission
-                            data-company-id="{{ assignment.company_id }}"
-                            data-user-id="{{ assignment.user_id }}"
-                            data-field="{{ field }}"
+                            {% if not assignment.is_pending %}
+                              data-company-permission
+                              data-company-id="{{ assignment.company_id }}"
+                              data-user-id="{{ assignment.user_id }}"
+                              data-field="{{ field }}"
+                            {% endif %}
+                            {% if assignment.is_pending %}disabled{% endif %}
                             {% if assignment[field] %}checked{% endif %}
                           />
                           <span class="visually-hidden">Toggle {{ column.label }}</span>
@@ -307,15 +328,19 @@
                       </td>
                     {% endfor %}
                     <td class="table__actions">
-                      <button
-                        type="button"
-                        class="button button--danger"
-                        data-remove-assignment
-                        data-company-id="{{ assignment.company_id }}"
-                        data-user-id="{{ assignment.user_id }}"
-                      >
-                        Remove
-                      </button>
+                      {% if assignment.is_pending %}
+                        <span class="text-muted">Pending sign-up</span>
+                      {% else %}
+                        <button
+                          type="button"
+                          class="button button--danger"
+                          data-remove-assignment
+                          data-company-id="{{ assignment.company_id }}"
+                          data-user-id="{{ assignment.user_id }}"
+                        >
+                          Remove
+                        </button>
+                      {% endif %}
                     </td>
                   </tr>
                 {% endfor %}

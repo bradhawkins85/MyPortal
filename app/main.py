@@ -2042,22 +2042,33 @@ async def _render_company_edit_page(
     company_user_options: dict[int, list[dict[str, Any]]] = {}
     if is_super_admin:
         assignments = await user_company_repo.list_assignments(company_id)
+        for entry in assignments:
+            entry["is_pending"] = False
+            entry["pending_requires_account"] = False
 
         role_rows = await role_repo.list_roles()
+        role_lookup: dict[int, str] = {}
         for record in role_rows:
             role_id = record.get("id")
             name = (record.get("name") or "").strip()
             if role_id is None or not name:
                 continue
+            try:
+                role_id_int = int(role_id)
+            except (TypeError, ValueError):
+                continue
+            role_lookup[role_id_int] = name
             role_options.append(
                 {
-                    "id": int(role_id),
+                    "id": role_id_int,
                     "name": name,
                     "description": (record.get("description") or "").strip(),
                     "is_system": bool(record.get("is_system")),
                 }
             )
 
+        staff_directory: dict[int, list[dict[str, Any]]] = {}
+        pending_assignments_map: dict[int, list[dict[str, Any]]] = {}
         for managed in managed_companies:
             raw_id = managed.get("id")
             try:
@@ -2065,9 +2076,11 @@ async def _render_company_edit_page(
             except (TypeError, ValueError):
                 continue
             staff_rows = await staff_repo.list_staff_with_users(managed_company_id)
+            staff_directory[managed_company_id] = staff_rows
             pending_assignments = await pending_staff_access_repo.list_assignments_for_company(
                 managed_company_id
             )
+            pending_assignments_map[managed_company_id] = pending_assignments
             pending_lookup = {
                 entry.get("staff_id"): entry
                 for entry in pending_assignments
@@ -2125,6 +2138,118 @@ async def _render_company_edit_page(
                 )
             options.sort(key=lambda item: item.get("label", "").lower())
             company_user_options[managed_company_id] = options
+
+        permission_label_lookup: dict[int, str] = {}
+        for option in _STAFF_PERMISSION_OPTIONS:
+            value = option.get("value")
+            label = option.get("label")
+            if value is None or label is None:
+                continue
+            try:
+                permission_label_lookup[int(value)] = str(label)
+            except (TypeError, ValueError):
+                continue
+
+        pending_entries = pending_assignments_map.get(company_id)
+        if pending_entries is None:
+            pending_entries = await pending_staff_access_repo.list_assignments_for_company(
+                company_id
+            )
+        staff_rows_current = staff_directory.get(company_id)
+        if staff_rows_current is None:
+            staff_rows_current = await staff_repo.list_staff_with_users(company_id)
+        staff_lookup: dict[int, dict[str, Any]] = {}
+        for staff_entry in staff_rows_current:
+            staff_id = staff_entry.get("staff_id")
+            if staff_id is None:
+                continue
+            try:
+                staff_lookup[int(staff_id)] = staff_entry
+            except (TypeError, ValueError):
+                continue
+
+        existing_user_ids: set[int] = set()
+        for assignment in assignments:
+            user_id = assignment.get("user_id")
+            if user_id is None:
+                continue
+            try:
+                existing_user_ids.add(int(user_id))
+            except (TypeError, ValueError):
+                continue
+
+        for pending_entry in pending_entries or []:
+            staff_id_raw = pending_entry.get("staff_id")
+            if staff_id_raw is None:
+                continue
+            try:
+                staff_id_int = int(staff_id_raw)
+            except (TypeError, ValueError):
+                continue
+
+            staff_info = staff_lookup.get(staff_id_int, {})
+            user_id_value: int | None = None
+            if staff_info.get("user_id") is not None:
+                try:
+                    user_id_value = int(staff_info.get("user_id"))
+                except (TypeError, ValueError):
+                    user_id_value = None
+            if user_id_value is not None and user_id_value in existing_user_ids:
+                continue
+
+            email = (staff_info.get("email") or "").strip()
+            if not email:
+                email = f"Staff #{staff_id_int}"
+            first_name = (staff_info.get("first_name") or "").strip()
+            last_name = (staff_info.get("last_name") or "").strip()
+
+            role_id_raw = pending_entry.get("role_id")
+            role_id_value: int | None = None
+            if role_id_raw is not None:
+                try:
+                    role_id_value = int(role_id_raw)
+                except (TypeError, ValueError):
+                    role_id_value = None
+
+            try:
+                staff_permission_value = int(pending_entry.get("staff_permission") or 0)
+            except (TypeError, ValueError):
+                staff_permission_value = 0
+
+            pending_record: dict[str, Any] = {
+                "company_id": pending_entry.get("company_id") or company_id,
+                "user_id": user_id_value,
+                "staff_id": staff_id_int,
+                "email": email,
+                "first_name": first_name,
+                "last_name": last_name,
+                "membership_id": None,
+                "membership_role_id": role_id_value,
+                "membership_role_name": role_lookup.get(role_id_value) if role_id_value is not None else None,
+                "staff_permission": staff_permission_value,
+                "staff_permission_label": permission_label_lookup.get(
+                    staff_permission_value, permission_label_lookup.get(0, "No staff access")
+                ),
+                "can_manage_staff": bool(pending_entry.get("can_manage_staff", False)),
+                "is_pending": True,
+                "pending_requires_account": user_id_value is None,
+            }
+
+            for column in _COMPANY_PERMISSION_COLUMNS:
+                field = column.get("field")
+                if not field:
+                    continue
+                pending_record[field] = bool(pending_entry.get(field, False))
+
+            assignments.append(pending_record)
+
+        assignments.sort(
+            key=lambda item: (
+                (item.get("email") or "").lower(),
+                1 if item.get("is_pending") else 0,
+                item.get("user_id") or 0,
+            )
+        )
 
     def _string_value(key: str, default: str) -> str:
         if not form_values or key not in form_values:
