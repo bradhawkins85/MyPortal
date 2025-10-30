@@ -1,0 +1,7 @@
+{
+  "guid": "a5717234-30c5-447f-9bc2-ab5d97dd39d1",
+  "occurred_at": "2025-10-30T13:01Z",
+  "change_type": "Fix",
+  "summary": "Matched the Edit statuses ticket tool button styling to the Ticket automations link for consistent menu visuals.",
+  "content_hash": "4d4619216bdf47e581361491489c5e3094be0aee26976e6e7df9e11bbe650b1f"
+}
