@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if success_message or error_message %}
+    <div class="alert-stack">
+      {% if success_message %}
+        <div class="alert" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% set return_url = request.url.path %}
+  {% if request.url.query %}
+    {% set return_url = return_url ~ '?' ~ request.url.query %}
+  {% endif %}
+
+  <div class="management" data-layout>
+    <aside class="management__sidebar">
+      {% if editing_issue %}
+        <h2 class="management__heading">Update issue</h2>
+        <p class="management__intro">
+          Adjust the shared identifier and description for this issue, or link it to additional companies.
+        </p>
+        <form action="/admin/issues/{{ editing_issue.issue_id }}/update" method="post" class="form management__form">
+          {% include "partials/csrf.html" %}
+          <div class="form-field">
+            <label class="form-label" for="issue-name">Issue name</label>
+            <input id="issue-name" name="name" class="form-input" value="{{ editing_issue.name }}" maxlength="255" required />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="issue-description">Description</label>
+            <textarea
+              id="issue-description"
+              name="description"
+              class="form-input form-input--textarea"
+              rows="4"
+              maxlength="2000"
+              placeholder="Optional summary to help technicians recognise the issue"
+            >{{ editing_issue.description or '' }}</textarea>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="issue-new-company">Assign additional companies</label>
+            <select
+              id="issue-new-company"
+              name="newCompanyIds"
+              class="form-input"
+              multiple
+              size="6"
+            >
+              {% if editing_issue.available_companies %}
+                {% for option in editing_issue.available_companies %}
+                  <option value="{{ option.id }}">{{ option.name }}</option>
+                {% endfor %}
+              {% else %}
+                <option value="" disabled>No more companies available</option>
+              {% endif %}
+            </select>
+            <p class="form-help">Hold Ctrl or Cmd to select multiple companies to assign simultaneously.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="issue-new-status">Initial status for new companies</label>
+            <select id="issue-new-status" name="newCompanyStatus" class="form-input">
+              {% for option in issue_status_options %}
+                <option value="{{ option.value }}">{{ option.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="button button--primary">Save changes</button>
+            <a class="button button--ghost" href="/admin/issues">Cancel</a>
+          </div>
+        </form>
+      {% else %}
+        <h2 class="management__heading">Create issue</h2>
+        <p class="management__intro">
+          Define a new shared issue identifier and optionally link it to one or more companies with an initial status.
+        </p>
+        <form action="/admin/issues" method="post" class="form management__form">
+          {% include "partials/csrf.html" %}
+          <div class="form-field">
+            <label class="form-label" for="issue-create-name">Issue name</label>
+            <input id="issue-create-name" name="name" class="form-input" maxlength="255" required />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="issue-create-description">Description</label>
+            <textarea
+              id="issue-create-description"
+              name="description"
+              class="form-input form-input--textarea"
+              rows="4"
+              maxlength="2000"
+              placeholder="Optional summary to help technicians recognise the issue"
+            ></textarea>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="issue-create-companies">Assign companies</label>
+            <select
+              id="issue-create-companies"
+              name="companyIds"
+              class="form-input"
+              multiple
+              size="6"
+            >
+              {% for option in company_options %}
+                <option value="{{ option.id }}">{{ option.name }}</option>
+              {% endfor %}
+            </select>
+            <p class="form-help">Hold Ctrl or Cmd to select multiple companies.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="issue-create-status">Initial status</label>
+            <select id="issue-create-status" name="initialStatus" class="form-input">
+              {% for option in issue_status_options %}
+                <option value="{{ option.value }}">{{ option.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="button button--primary">Create issue</button>
+          </div>
+        </form>
+      {% endif %}
+    </aside>
+
+    <section class="management__content">
+      <header class="management__header">
+        <div>
+          <h1 class="management__title">Issue tracker</h1>
+          <p class="management__subtitle">
+            Track shared issues across companies, update statuses, and coordinate technician progress from a single workspace.
+          </p>
+        </div>
+        <form method="get" class="management__filters">
+          <label class="visually-hidden" for="issue-filter-status">Filter by status</label>
+          <select id="issue-filter-status" name="status" class="form-input">
+            <option value="">All statuses</option>
+            {% for option in issue_status_options %}
+              <option value="{{ option.value }}" {% if option.value == selected_status %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+          <label class="visually-hidden" for="issue-filter-company">Filter by company</label>
+          <select id="issue-filter-company" name="companyId" class="form-input">
+            <option value="">All companies</option>
+            {% for option in company_options %}
+              <option value="{{ option.id }}" {% if option.id == selected_company_id %}selected{% endif %}>{{ option.name }}</option>
+            {% endfor %}
+          </select>
+          <label class="visually-hidden" for="issue-filter-search">Search issues</label>
+          <input
+            id="issue-filter-search"
+            type="search"
+            name="search"
+            class="form-input"
+            placeholder="Search issues"
+            value="{{ search_term }}"
+          />
+          <div class="form-actions form-actions--inline">
+            <button type="submit" class="button">Apply filters</button>
+            <a class="button button--ghost" href="/admin/issues">Reset</a>
+          </div>
+        </form>
+      </header>
+
+      <div class="management__body">
+        <div class="management__toolbar">
+          <div class="management__toolbar-search">
+            <input
+              type="search"
+              class="form-input"
+              placeholder="Filter table"
+              aria-label="Filter issues table"
+              data-table-filter="issues-table"
+            />
+          </div>
+          <div class="management__toolbar-meta">
+            <span class="text-muted">{{ issue_count }} entries</span>
+          </div>
+        </div>
+
+        <div class="table-wrapper">
+          <table class="table" id="issues-table" data-table>
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string">Issue</th>
+                <th scope="col" data-sort="string">Company</th>
+                <th scope="col" data-sort="string">Status</th>
+                <th scope="col" data-sort="string">Updated</th>
+                <th scope="col" class="table__actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if issues %}
+                {% for issue in issues %}
+                  {% if issue.assignments %}
+                    {% for assignment in issue.assignments %}
+                      <tr>
+                        <td data-label="Issue" data-value="{{ issue.name|lower }}">
+                          <strong>{{ issue.name }}</strong>
+                          {% if issue.description %}
+                            <div class="table__meta">{{ issue.description }}</div>
+                          {% endif %}
+                        </td>
+                        <td data-label="Company" data-value="{{ assignment.company_name or '' }}">
+                          {% if assignment.company_name %}
+                            {{ assignment.company_name }}
+                          {% else %}
+                            <span class="text-muted">Unassigned</span>
+                          {% endif %}
+                        </td>
+                        <td data-label="Status" data-value="{{ assignment.status }}">
+                          <form
+                            action="/admin/issues/{{ issue.issue_id }}/assignments/{{ assignment.assignment_id }}/status"
+                            method="post"
+                            class="inline-form"
+                            data-issue-status-form
+                          >
+                            {% include "partials/csrf.html" %}
+                            <input type="hidden" name="returnUrl" value="{{ return_url }}" />
+                            <label class="visually-hidden" for="issue-status-{{ assignment.assignment_id }}">Status</label>
+                            <select
+                              id="issue-status-{{ assignment.assignment_id }}"
+                              name="status"
+                              class="form-input form-input--dense"
+                              data-issue-status-select
+                            >
+                              {% for option in issue_status_options %}
+                                <option value="{{ option.value }}" {% if option.value == assignment.status %}selected{% endif %}>{{ option.label }}</option>
+                              {% endfor %}
+                            </select>
+                          </form>
+                        </td>
+                        <td data-label="Updated">
+                          {% if assignment.updated_at_iso %}
+                            <span data-utc="{{ assignment.updated_at_iso }}">{{ assignment.updated_at_iso }}</span>
+                          {% else %}
+                            <span class="text-muted">—</span>
+                          {% endif %}
+                        </td>
+                        <td class="table__actions">
+                          <div class="table__action-buttons">
+                            <a class="button button--ghost" href="/admin/issues?issueId={{ issue.issue_id }}">Edit</a>
+                            {% if assignment.assignment_id %}
+                              <form
+                                action="/admin/issues/{{ issue.issue_id }}/assignments/{{ assignment.assignment_id }}/delete"
+                                method="post"
+                                class="inline-form"
+                              >
+                                {% include "partials/csrf.html" %}
+                                <input type="hidden" name="returnUrl" value="{{ return_url }}" />
+                                <button type="submit" class="button button--ghost button--danger">Remove</button>
+                              </form>
+                            {% endif %}
+                          </div>
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  {% else %}
+                    <tr>
+                      <td data-label="Issue" data-value="{{ issue.name|lower }}">
+                        <strong>{{ issue.name }}</strong>
+                        {% if issue.description %}
+                          <div class="table__meta">{{ issue.description }}</div>
+                        {% endif %}
+                      </td>
+                      <td data-label="Company"><span class="text-muted">No companies assigned</span></td>
+                      <td data-label="Status"><span class="tag tag--muted">N/A</span></td>
+                      <td data-label="Updated"><span class="text-muted">—</span></td>
+                      <td class="table__actions">
+                        <div class="table__action-buttons">
+                          <a class="button button--ghost" href="/admin/issues?issueId={{ issue.issue_id }}">Edit</a>
+                        </div>
+                      </td>
+                    </tr>
+                  {% endif %}
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="5" class="table__empty">No issues match the selected filters.</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+        <div class="table-pagination" data-pagination="issues-table">
+          <div class="table-pagination__group">
+            <button type="button" class="button button--ghost table-pagination__button" data-page-prev disabled>Previous</button>
+            <button type="button" class="button button--ghost table-pagination__button" data-page-next>Next</button>
+          </div>
+          <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+        </div>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/admin.js" defer></script>
+{% endblock %}
