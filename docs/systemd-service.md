@@ -73,7 +73,7 @@ User=myportal
 Group=myportal
 WorkingDirectory=/opt/myportal
 EnvironmentFile=/etc/myportal.env
-ExecStart=/opt/myportal/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+ExecStart=/opt/myportal/scripts/start_with_auto_update.sh /opt/myportal/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 ExecReload=/bin/kill -s HUP $MAINPID
 Restart=always
 RestartSec=5
@@ -90,6 +90,12 @@ WantedBy=multi-user.target
 
 Key points:
 
+- `start_with_auto_update.sh` wraps the Uvicorn process. When startup
+  fails, it runs `scripts/upgrade.sh --auto-fallback` to pull the latest
+  code (using credentials from `.env` when present) before trying again.
+  Configure behaviour via `UVICORN_AUTO_UPDATE_ENABLED`,
+  `UVICORN_AUTO_UPDATE_ATTEMPTS`, and
+  `UVICORN_AUTO_UPDATE_RETRY_DELAY` in the environment file.
 - `Type=notify` allows Uvicorn to report readiness to systemd. Remove the
   directive if you are not using Uvicorn's `--factory` or `--lifespan`
   support.
