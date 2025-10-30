@@ -55,6 +55,12 @@ class ApiKeyRotateRequest(BaseModel):
     permissions: Optional[list[ApiKeyEndpointPermission]] = None
 
 
+class ApiKeyUpdateRequest(BaseModel):
+    description: Optional[str] = Field(default=None, max_length=255)
+    expiry_date: Optional[date] = None
+    permissions: Optional[list[ApiKeyEndpointPermission]] = None
+
+
 class ApiKeyResponse(BaseModel):
     id: int
     description: Optional[str]

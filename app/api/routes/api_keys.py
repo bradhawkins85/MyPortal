@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
@@ -13,6 +14,7 @@ from app.schemas.api_keys import (
     ApiKeyDetailResponse,
     ApiKeyResponse,
     ApiKeyRotateRequest,
+    ApiKeyUpdateRequest,
 )
 from app.security.api_keys import mask_api_key
 from app.services import audit as audit_service
@@ -124,6 +126,72 @@ async def delete_api_key(
         request=request,
     )
     return None
+
+
+@router.patch("/{api_key_id}", response_model=ApiKeyResponse)
+async def update_api_key(
+    api_key_id: int,
+    payload: ApiKeyUpdateRequest,
+    request: Request,
+    _: None = Depends(require_database),
+    user: dict = Depends(require_super_admin),
+) -> ApiKeyResponse:
+    existing = await api_key_repo.get_api_key_with_usage(api_key_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
+
+    fields_set = payload.model_fields_set
+
+    if "description" in fields_set:
+        raw_description = (payload.description or "").strip()
+        new_description = raw_description or None
+    else:
+        new_description = existing.get("description")
+
+    if "expiry_date" in fields_set:
+        new_expiry = payload.expiry_date
+    else:
+        new_expiry = existing.get("expiry_date")
+
+    if "permissions" in fields_set:
+        permissions_payload = [
+            permission.model_dump() for permission in (payload.permissions or [])
+        ]
+        permissions_argument: list[dict[str, Any]] | None = permissions_payload
+    else:
+        permissions_payload = existing.get("permissions", [])
+        permissions_argument = None
+
+    updated = await api_key_repo.update_api_key(
+        api_key_id,
+        description=new_description,
+        expiry_date=new_expiry,
+        permissions=permissions_argument,
+    )
+
+    await audit_service.log_action(
+        action="api_keys.update",
+        user_id=user.get("id"),
+        entity_type="api_key",
+        entity_id=api_key_id,
+        previous_value={
+            "description": existing.get("description"),
+            "expiry_date": existing.get("expiry_date").isoformat()
+            if isinstance(existing.get("expiry_date"), date)
+            else None,
+            "permissions": existing.get("permissions", []),
+        },
+        new_value={
+            "description": updated.get("description"),
+            "expiry_date": updated.get("expiry_date").isoformat()
+            if isinstance(updated.get("expiry_date"), date)
+            else None,
+            "permissions": updated.get("permissions", []),
+        },
+        request=request,
+    )
+
+    return _format_response(updated)
 
 
 @router.post("/{api_key_id}/rotate", response_model=ApiKeyCreateResponse)

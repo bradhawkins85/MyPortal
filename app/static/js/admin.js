@@ -1630,10 +1630,10 @@
         revokeIdInput.value = payload.id || '';
       }
       if (descriptionInput) {
-        descriptionInput.value = '';
+        descriptionInput.value = (payload.description || '').trim();
       }
       if (expiryInput) {
-        expiryInput.value = '';
+        expiryInput.value = payload.expiry_date || '';
       }
       if (retireInput) {
         retireInput.checked = true;
