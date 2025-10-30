@@ -51,6 +51,25 @@
         </div>
         {% endif %}
         <ul class="menu">
+          {% if is_impersonating %}
+            <li class="menu__item menu__item--impersonation" data-impersonation-banner>
+              <form action="/auth/impersonation/exit" method="post" class="impersonation-exit">
+                {% if csrf_token %}
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                {% endif %}
+                <button type="submit" class="button button--danger impersonation-exit__button">
+                  Exit Impersonation
+                </button>
+                <p class="impersonation-exit__context">
+                  Viewing as {{ current_user.first_name or current_user.email }}
+                  {% if impersonator_user %}
+                    <span class="impersonation-exit__separator">•</span>
+                    Started by {{ impersonator_user.first_name or impersonator_user.email }}
+                  {% endif %}
+                </p>
+              </form>
+            </li>
+          {% endif %}
           {% block sidebar_menu %}
           {% set current_path = request.url.path if request is defined else '' %}
           {% set membership = active_membership or {} %}
@@ -202,6 +221,16 @@
                 <span class="menu__label">My profile</span>
               </a>
             </li>
+            {% if is_super_admin %}
+              <li class="menu__item">
+                <a href="/admin/impersonation" {% if current_path.startswith('/admin/impersonation') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M5 3a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4h-2V4H7v16h10v-3h2v4a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M16.59 11 14 13.59 15.41 15 21 9.41 15.41 4 14 5.41 16.59 8H9v2z"/></svg>
+                  </span>
+                  <span class="menu__label">Impersonation</span>
+                </a>
+              </li>
+            {% endif %}
             {% if is_super_admin %}
               <li class="menu__item">
                 <a href="/admin/companies" {% if current_path.startswith('/admin/companies') %}aria-current="page"{% endif %}>

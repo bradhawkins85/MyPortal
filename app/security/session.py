@@ -24,6 +24,9 @@ class SessionData:
     user_agent: str | None
     active_company_id: int | None = None
     pending_totp_secret: str | None = None
+    impersonator_user_id: int | None = None
+    impersonator_session_id: int | None = None
+    impersonation_started_at: datetime | None = None
 
 
 class SessionManager:
@@ -42,6 +45,8 @@ class SessionManager:
         request: Request,
         *,
         active_company_id: int | None = None,
+        impersonator_user_id: int | None = None,
+        impersonator_session_id: int | None = None,
     ) -> SessionData:
         now = datetime.utcnow()
         expires_at = now + self.session_ttl
@@ -63,6 +68,9 @@ class SessionManager:
             last_seen_at=now,
             ip_address=ip_address,
             user_agent=user_agent,
+            impersonator_user_id=impersonator_user_id,
+            impersonator_session_id=impersonator_session_id,
+            impersonation_started_at=now if impersonator_user_id is not None else None,
         )
         return self._map_session(record)
 
@@ -98,6 +106,10 @@ class SessionManager:
         session.last_seen_at = now
         request.state.session = session
         request.state.active_company_id = session.active_company_id
+        if session.impersonator_user_id is not None:
+            request.state.impersonator_user_id = session.impersonator_user_id
+        if session.impersonator_session_id is not None:
+            request.state.impersonator_session_id = session.impersonator_session_id
         return session
 
     async def refresh_csrf(self, session: SessionData) -> SessionData:
@@ -121,6 +133,10 @@ class SessionManager:
     async def set_active_company(self, session: SessionData, company_id: int | None) -> None:
         await auth_repo.update_session(session.id, active_company_id=company_id)
         session.active_company_id = company_id
+
+    def hydrate_session(self, record: dict[str, Any]) -> SessionData:
+        """Create session data from a database record without mutating state."""
+        return self._map_session(record)
 
     def apply_session_cookies(self, response: Response, session: SessionData) -> None:
         max_age = int(self.session_ttl.total_seconds())
@@ -166,6 +182,21 @@ class SessionManager:
                 else None
             ),
             pending_totp_secret=pending_secret,
+            impersonator_user_id=(
+                int(record["impersonator_user_id"])
+                if record.get("impersonator_user_id") is not None
+                else None
+            ),
+            impersonator_session_id=(
+                int(record["impersonator_session_id"])
+                if record.get("impersonator_session_id") is not None
+                else None
+            ),
+            impersonation_started_at=(
+                ensure_datetime(record.get("impersonation_started_at"))
+                if record.get("impersonation_started_at")
+                else None
+            ),
         )
 
 

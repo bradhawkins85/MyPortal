@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <div class="admin-grid admin-grid--columns">
+    <section class="card card--panel admin-grid__full">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Impersonate a user</h2>
+          <p class="card__subtitle">
+            Select an account with assigned permissions to preview the portal experience from their perspective.
+          </p>
+        </div>
+        <div class="card__controls">
+          <input
+            type="search"
+            class="form-input"
+            placeholder="Filter users"
+            aria-label="Filter users"
+            data-table-filter="impersonation-table"
+          />
+        </div>
+      </header>
+      {% if impersonation_success or impersonation_error %}
+        <div class="stacked" style="gap: 0.75rem; margin-bottom: 1.25rem;">
+          {% if impersonation_success %}
+            <div class="alert" role="status">{{ impersonation_success }}</div>
+          {% endif %}
+          {% if impersonation_error %}
+            <div class="alert alert--error" role="alert">{{ impersonation_error }}</div>
+          {% endif %}
+        </div>
+      {% endif %}
+      <div class="table-wrapper">
+        <table class="table" id="impersonation-table" data-table>
+          <thead>
+            <tr>
+              <th scope="col" data-sort="string">Name</th>
+              <th scope="col" data-sort="string">Email</th>
+              <th scope="col" data-sort="string">Access summary</th>
+              <th scope="col" class="table__actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for candidate in impersonation_candidates %}
+              {% set is_self = candidate.id == current_user.id %}
+              {% set name_parts = [] %}
+              {% if candidate.first_name %}
+                {% set _ = name_parts.append(candidate.first_name) %}
+              {% endif %}
+              {% if candidate.last_name %}
+                {% set _ = name_parts.append(candidate.last_name) %}
+              {% endif %}
+              {% set display_name = " ".join(name_parts) if name_parts else None %}
+              {% set memberships = candidate.memberships or [] %}
+              <tr data-candidate-id="{{ candidate.id }}">
+                <td data-label="Name" data-sort-value="{{ display_name or candidate.email }}">
+                  {% if display_name %}
+                    {{ display_name }}
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                  {% if candidate.is_super_admin %}
+                    <span class="tag tag--muted" style="margin-left: 0.35rem;">Super admin</span>
+                  {% endif %}
+                </td>
+                <td data-label="Email" data-sort-value="{{ candidate.email or '' }}">
+                  {{ candidate.email or '—' }}
+                </td>
+                <td data-label="Access summary">
+                  {% if memberships %}
+                    <ul class="impersonation-access-list">
+                      {% for membership in memberships %}
+                        {% set company_label = membership.company_name or ('Company #' ~ membership.company_id) %}
+                        {% set role_label = membership.role_name or 'Assigned role' %}
+                        <li>
+                          {{ role_label }}
+                          {% if company_label %}
+                            <span class="text-muted">@ {{ company_label }}</span>
+                          {% endif %}
+                          {% if membership.permissions %}
+                            <span class="tag tag--muted">{{ membership.permissions|length }} permissions</span>
+                          {% elif membership.is_admin %}
+                            <span class="tag tag--muted">Company admin</span>
+                          {% endif %}
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  {% elif candidate.is_super_admin %}
+                    <span class="tag tag--muted">Global access</span>
+                  {% else %}
+                    <span class="text-muted">No assigned permissions</span>
+                  {% endif %}
+                </td>
+                <td class="table__actions">
+                  <form action="/admin/impersonation" method="post" class="inline-form">
+                    {% include "partials/csrf.html" %}
+                    <input type="hidden" name="userId" value="{{ candidate.id }}" />
+                    <button
+                      type="submit"
+                      class="button"
+                      {% if is_self %}disabled{% endif %}
+                    >
+                      Impersonate
+                    </button>
+                  </form>
+                </td>
+              </tr>
+            {% else %}
+              <tr>
+                <td colspan="4" class="table__empty">No eligible users were found.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="table-pagination" data-pagination="impersonation-table">
+        <div class="table-pagination__group">
+          <button type="button" class="button button--ghost table-pagination__button" data-page-prev disabled>
+            Previous
+          </button>
+          <button type="button" class="button button--ghost table-pagination__button" data-page-next>
+            Next
+          </button>
+        </div>
+        <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+{% endblock %}

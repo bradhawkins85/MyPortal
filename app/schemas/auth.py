@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from datetime import datetime
 from typing import Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -56,6 +57,9 @@ class SessionInfo(BaseModel):
     user_agent: Optional[str] = None
     csrf_token: str
     active_company_id: Optional[int] = None
+    impersonator_user_id: Optional[int] = None
+    impersonator_session_id: Optional[int] = None
+    impersonation_started_at: Optional[datetime] = None
 
 
 class LoginResponse(BaseModel):
@@ -65,6 +69,17 @@ class LoginResponse(BaseModel):
 
 class SessionResponse(LoginResponse):
     pass
+
+
+class ImpersonationRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_id: int = Field(
+        validation_alias=AliasChoices("user_id", "userId"),
+        serialization_alias="user_id",
+        description="Identifier of the user to impersonate.",
+        ge=1,
+    )
 
 
 class PasswordResetRequest(BaseModel):
