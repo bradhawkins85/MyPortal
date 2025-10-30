@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+ALLOWED_API_KEY_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
 
 
 class ApiKeyUsageEntry(BaseModel):
@@ -12,15 +14,45 @@ class ApiKeyUsageEntry(BaseModel):
     last_used_at: Optional[datetime]
 
 
+class ApiKeyEndpointPermission(BaseModel):
+    path: str = Field(..., min_length=1, max_length=255)
+    methods: list[str] = Field(default_factory=list, min_length=1)
+
+    @model_validator(mode="after")
+    def _normalise(self) -> "ApiKeyEndpointPermission":
+        path_value = self.path.strip()
+        if not path_value.startswith("/"):
+            raise ValueError("Paths must start with a forward slash")
+        normalised_methods: list[str] = []
+        seen: set[str] = set()
+        for raw in self.methods:
+            method = str(raw).strip().upper()
+            if not method:
+                continue
+            if method not in ALLOWED_API_KEY_HTTP_METHODS:
+                allowed = ", ".join(sorted(ALLOWED_API_KEY_HTTP_METHODS))
+                raise ValueError(f"Unsupported HTTP method '{method}'. Allowed methods: {allowed}.")
+            if method not in seen:
+                normalised_methods.append(method)
+                seen.add(method)
+        if not normalised_methods:
+            raise ValueError("At least one HTTP method must be provided")
+        self.path = path_value
+        self.methods = sorted(normalised_methods)
+        return self
+
+
 class ApiKeyCreateRequest(BaseModel):
     description: Optional[str] = Field(default=None, max_length=255)
     expiry_date: Optional[date]
+    permissions: list[ApiKeyEndpointPermission] = Field(default_factory=list)
 
 
 class ApiKeyRotateRequest(BaseModel):
     description: Optional[str] = Field(default=None, max_length=255)
     expiry_date: Optional[date]
     retire_previous: bool = True
+    permissions: Optional[list[ApiKeyEndpointPermission]] = None
 
 
 class ApiKeyResponse(BaseModel):
@@ -33,6 +65,7 @@ class ApiKeyResponse(BaseModel):
     usage_count: int = 0
     key_preview: str = Field(..., max_length=64)
     usage: list[ApiKeyUsageEntry] = Field(default_factory=list)
+    permissions: list[ApiKeyEndpointPermission] = Field(default_factory=list)
 
 
 class ApiKeyDetailResponse(ApiKeyResponse):

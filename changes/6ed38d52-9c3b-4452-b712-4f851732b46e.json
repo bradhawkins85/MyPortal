@@ -1,0 +1,7 @@
+{
+  "guid": "6ed38d52-9c3b-4452-b712-4f851732b46e",
+  "occurred_at": "2025-10-30T14:00Z",
+  "change_type": "Feature",
+  "summary": "Added endpoint-scoped API key permissions and admin management tools.",
+  "content_hash": "d7d2d253ec8c49cf9bb0d4b813028425706bf79ee3695d6bca87bb13a4c30846"
+}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from fastapi import Depends, HTTPException, Request, status
 
 from app.api.dependencies.database import require_database
@@ -23,6 +25,25 @@ async def require_api_key(
         ip_address = request.client.host
     else:
         ip_address = ""
+    permissions: Sequence[dict[str, Sequence[str]]] = record.get("permissions") or []
+    if permissions:
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", request.url.path)
+        method = request.method.upper()
+        allowed = False
+        for entry in permissions:
+            path = entry.get("path")
+            methods = {str(value).upper() for value in entry.get("methods", [])}
+            if not path or not methods:
+                continue
+            if route_path == path and (method in methods or (method == "HEAD" and "GET" in methods)):
+                allowed = True
+                break
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="API key not permitted for this endpoint",
+            )
     await api_key_repo.record_api_key_usage(record["id"], ip_address or "unknown")
     request.state.api_key_id = record["id"]
     return record
