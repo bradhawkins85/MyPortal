@@ -329,7 +329,20 @@
                     {% endfor %}
                     <td class="table__actions">
                       {% if assignment.is_pending %}
-                        <span class="text-muted">Pending sign-up</span>
+                        <div class="stacked">
+                          <span class="text-muted">Pending sign-up</span>
+                          {% if assignment.staff_id %}
+                            <button
+                              type="button"
+                              class="button button--danger button--small"
+                              data-remove-pending-assignment
+                              data-company-id="{{ assignment.company_id }}"
+                              data-staff-id="{{ assignment.staff_id }}"
+                            >
+                              Cancel pending access
+                            </button>
+                          {% endif %}
+                        </div>
                       {% else %}
                         <button
                           type="button"

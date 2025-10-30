@@ -103,6 +103,43 @@ async def test_admin_update_company_permission_toggles(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_admin_remove_pending_company_assignment(monkeypatch):
+    request = _make_request("/admin/companies/assignment/5/9/pending/remove")
+
+    current_user = {"id": 10, "is_super_admin": True}
+    monkeypatch.setattr(
+        main,
+        "_require_super_admin_page",
+        AsyncMock(return_value=(current_user, None)),
+    )
+
+    pending_record = {"staff_id": 9, "company_id": 5, "staff_permission": 2}
+    get_mock = AsyncMock(return_value=pending_record)
+    monkeypatch.setattr(
+        main.pending_staff_access_repo,
+        "get_assignment",
+        get_mock,
+    )
+
+    delete_mock = AsyncMock()
+    monkeypatch.setattr(
+        main.pending_staff_access_repo,
+        "delete_assignment",
+        delete_mock,
+    )
+
+    log_mock = AsyncMock()
+    monkeypatch.setattr(main.audit_service, "log_action", log_mock)
+
+    response = await main.admin_remove_pending_company_assignment(5, 9, request)
+
+    assert response.status_code == status.HTTP_200_OK
+    get_mock.assert_awaited_once_with(staff_id=9, company_id=5)
+    delete_mock.assert_awaited_once_with(staff_id=9, company_id=5)
+    log_mock.assert_awaited_once()
+
+
+@pytest.mark.anyio("asyncio")
 async def test_admin_assign_user_to_company_preserves_existing_permissions(monkeypatch):
     request = _make_request("/admin/companies/assign")
 

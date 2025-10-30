@@ -5674,6 +5674,40 @@ async def admin_update_membership_role(company_id: int, user_id: int, request: R
     )
 
 
+@app.post("/admin/companies/assignment/{company_id}/{staff_id}/pending/remove")
+async def admin_remove_pending_company_assignment(
+    company_id: int, staff_id: int, request: Request
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    pending_assignment = await pending_staff_access_repo.get_assignment(
+        staff_id=staff_id, company_id=company_id
+    )
+    if not pending_assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pending staff access not found",
+        )
+
+    await pending_staff_access_repo.delete_assignment(
+        staff_id=staff_id, company_id=company_id
+    )
+
+    await audit_service.log_action(
+        action="pending_staff_access.removed",
+        user_id=current_user.get("id"),
+        entity_type="pending_staff_access",
+        entity_id=staff_id,
+        previous_value=pending_assignment,
+        new_value=None,
+        request=request,
+    )
+
+    return JSONResponse({"success": True})
+
+
 @app.post("/admin/companies/assignment/{company_id}/{user_id}/remove")
 async def admin_remove_company_assignment(company_id: int, user_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
