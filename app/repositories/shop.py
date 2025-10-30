@@ -497,6 +497,7 @@ async def list_order_summaries(company_id: int) -> list[dict[str, Any]]:
         """
         SELECT
             order_number,
+            company_id,
             MAX(order_date) AS order_date,
             MAX(status) AS status,
             MAX(shipping_status) AS shipping_status,
@@ -506,12 +507,75 @@ async def list_order_summaries(company_id: int) -> list[dict[str, Any]]:
             MAX(eta) AS eta
         FROM shop_orders
         WHERE company_id = %s
-        GROUP BY order_number
+        GROUP BY order_number, company_id
         ORDER BY order_date DESC
         """,
         (company_id,),
     )
     return [_normalise_order_summary(row) for row in rows]
+
+
+async def get_order_summary(order_number: str, company_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        """
+        SELECT
+            order_number,
+            company_id,
+            MAX(order_date) AS order_date,
+            MAX(status) AS status,
+            MAX(shipping_status) AS shipping_status,
+            MAX(notes) AS notes,
+            MAX(po_number) AS po_number,
+            MAX(consignment_id) AS consignment_id,
+            MAX(eta) AS eta
+        FROM shop_orders
+        WHERE order_number = %s AND company_id = %s
+        GROUP BY order_number, company_id
+        """,
+        (order_number, company_id),
+    )
+    if not row:
+        return None
+    return _normalise_order_summary(row)
+
+
+async def update_order(
+    order_number: str,
+    company_id: int,
+    **updates: Any,
+) -> dict[str, Any] | None:
+    existing = await get_order_summary(order_number, company_id)
+    if not existing:
+        return None
+
+    if not updates:
+        return existing
+
+    allowed_fields = {
+        "status",
+        "shipping_status",
+        "notes",
+        "po_number",
+        "consignment_id",
+        "eta",
+    }
+    updates = {key: value for key, value in updates.items() if key in allowed_fields}
+    if not updates:
+        return existing
+
+    if "eta" in updates:
+        updates["eta"] = _ensure_naive_utc(updates["eta"])
+
+    if updates:
+        set_clause = ", ".join(f"{column} = %s" for column in updates)
+        params: list[Any] = list(updates.values())
+        params.extend([order_number, company_id])
+        await db.execute(
+            f"UPDATE shop_orders SET {set_clause} WHERE order_number = %s AND company_id = %s",
+            tuple(params),
+        )
+
+    return await get_order_summary(order_number, company_id)
 
 
 async def list_order_items(order_number: str, company_id: int) -> list[dict[str, Any]]:
@@ -860,9 +924,34 @@ def _normalise_datetime(value: Any) -> str | None:
     return parsed.isoformat()
 
 
+def _ensure_naive_utc(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc).replace(tzinfo=None)
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    if isinstance(value, date):
+        combined = datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+        return combined.replace(tzinfo=None)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError("Invalid datetime value for eta") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed.replace(tzinfo=None)
+
+
 def _normalise_order_summary(row: dict[str, Any]) -> dict[str, Any]:
     summary = dict(row)
     summary["order_number"] = str(row.get("order_number") or "").strip()
+    summary["company_id"] = _coerce_optional_int(row.get("company_id"))
     summary["status"] = str(row.get("status") or "").strip()
     summary["shipping_status"] = str(row.get("shipping_status") or "").strip()
     summary["notes"] = row.get("notes")
@@ -876,6 +965,8 @@ def _normalise_order_summary(row: dict[str, Any]) -> dict[str, Any]:
 def _normalise_order_item(row: dict[str, Any]) -> dict[str, Any]:
     normalised = dict(row)
     normalised["id"] = _coerce_optional_int(row.get("id"))
+    normalised["company_id"] = _coerce_optional_int(row.get("company_id"))
+    normalised["user_id"] = _coerce_optional_int(row.get("user_id"))
     normalised["product_id"] = _coerce_optional_int(row.get("product_id"))
     normalised["quantity"] = _coerce_int(row.get("quantity"), default=0)
     price = row.get("price")
