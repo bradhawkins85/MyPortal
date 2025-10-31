@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from app.services import automations as automations_service
+from app.services import message_templates as message_templates_service
 from app.services.automations import calculate_next_run
 
 
@@ -279,6 +280,89 @@ async def test_execute_automation_supports_constant_tokens(monkeypatch):
     assert payload["title"] == "high priority"
 
 
+@pytest.mark.anyio
+async def test_execute_automation_supports_message_templates(monkeypatch):
+    captured: list[dict[str, object]] = []
+
+    async def fake_trigger_module(module_slug, payload, *, background=False):
+        captured.append(payload)
+        return {"status": "ok"}
+
+    async def fake_mark_started(*args, **kwargs):
+        return None
+
+    async def fake_record_run(**kwargs):
+        return None
+
+    async def fake_set_last_error(*args, **kwargs):
+        return None
+
+    async def fake_set_next_run(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        automations_service.modules_service,
+        "trigger_module",
+        fake_trigger_module,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "mark_started",
+        fake_mark_started,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "record_run",
+        fake_record_run,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "set_last_error",
+        fake_set_last_error,
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "set_next_run",
+        fake_set_next_run,
+    )
+
+    template_records = [
+        {
+            "id": 1,
+            "slug": "welcome_email",
+            "name": "Welcome Email",
+            "description": None,
+            "content_type": "text/plain",
+            "content": "Hello {{ticket.requester.email}} from {{ APP_NAME }}",
+            "created_at": None,
+            "updated_at": None,
+        }
+    ]
+
+    monkeypatch.setattr(
+        message_templates_service,
+        "iter_templates",
+        lambda: template_records,
+    )
+
+    context = {"ticket": {"id": 41, "requester": {"email": "alice@example.com"}}}
+    automation = {
+        "id": 63,
+        "kind": "event",
+        "action_module": "ntfy",
+        "action_payload": {
+            "title": "Welcome notification",
+            "message": "{{ TEMPLATE_WELCOME_EMAIL }}",
+        },
+    }
+
+    result = await automations_service._execute_automation(automation, context=context)
+
+    assert result["status"] == "succeeded"
+    assert captured
+    payload = captured[0]
+    assert payload["title"] == "Welcome notification"
+    assert "alice@example.com" in payload["message"]
 @pytest.mark.anyio
 async def test_execute_automation_injects_system_variables(monkeypatch):
     from app.core.config import get_settings
