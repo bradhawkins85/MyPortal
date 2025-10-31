@@ -98,24 +98,115 @@
           <th scope="col" data-sort="string">Product</th>
           <th scope="col" data-sort="string">SKU</th>
           <th scope="col" data-sort="number">Quantity</th>
-          <th scope="col" data-sort="number">Stock</th>
-          <th scope="col" data-sort="string">Status</th>
+          <th scope="col" data-sort="number">Stock (resolved)</th>
+          <th scope="col" data-sort="string">Fulfilment</th>
+          <th scope="col" data-sort="string">Alternates</th>
           <th scope="col" class="table__actions">Actions</th>
         </tr>
       </thead>
       <tbody>
         {% for item in package["items"] %}
+          {% set resolved = item.resolved_product %}
+          {% set primary_product = item.primary_product if item.primary_product is defined else None %}
+          {% set resolved_stock = resolved.product_stock if resolved else item.product_stock %}
+          {% set available_packages = item.available_stock_for_quantity %}
+          {% set alternate_ids = item.alternates | map(attribute='product_id') | list %}
           <tr data-product-id="{{ item.product_id }}">
-            <td data-label="Product">{{ item.product_name }}</td>
+            <td data-label="Product">
+              <div>{{ item.product_name }}</div>
+              {% if item.product_archived %}
+                <span class="badge badge--muted">Primary archived</span>
+              {% endif %}
+            </td>
             <td data-label="SKU">{{ item.product_sku }}</td>
             <td data-label="Quantity" data-value="{{ item.quantity }}">{{ item.quantity }}</td>
-            <td data-label="Stock" data-value="{{ item.product_stock }}">{{ item.product_stock }}</td>
-            <td data-label="Status">
-              {% if item.product_archived %}
-                <span class="badge badge--muted">Archived</span>
-              {% else %}
-                <span class="badge badge--success">Active</span>
+            <td data-label="Stock (resolved)" data-value="{{ resolved_stock }}">
+              <span class="badge {% if resolved_stock <= 0 %}badge--danger{% elif resolved_stock < 5 %}badge--warning{% else %}badge--success{% endif %}">
+                {{ resolved_stock }}
+              </span>
+              {% if available_packages is not none %}
+                <div class="text-muted text-sm">Supports {{ available_packages }} package{% if available_packages != 1 %}s{% endif %}</div>
               {% endif %}
+            </td>
+            <td data-label="Fulfilment">
+              {% if resolved %}
+                <div><strong>{{ resolved.product_name }}</strong></div>
+                <div class="text-muted text-sm">{{ resolved.product_sku }}</div>
+                {% if item.is_substituted %}
+                  <span class="badge badge--info">Using alternate</span>
+                {% else %}
+                  <span class="badge badge--success">Using primary</span>
+                {% endif %}
+                {% if item.resolved_is_restricted %}
+                  <span class="badge badge--warning">Restricted</span>
+                {% endif %}
+                {% if primary_product and item.is_substituted %}
+                  <div class="text-muted text-sm">
+                    Original: {{ primary_product.product_name }}{% if primary_product.product_sku %} ({{ primary_product.product_sku }}){% endif %}
+                  </div>
+                {% endif %}
+              {% else %}
+                <span class="badge badge--muted">Unavailable</span>
+              {% endif %}
+            </td>
+            <td data-label="Alternates">
+              {% if item.alternates %}
+                <ul class="list list--unstyled package-alternates">
+                  {% for alt in item.alternates %}
+                    <li class="package-alternates__item">
+                      <div class="package-alternates__info">
+                        <span>{{ alt.product_name }} ({{ alt.product_sku }})</span>
+                        <span class="badge badge--muted">Priority {{ alt.priority }}</span>
+                      </div>
+                      <form
+                        action="/shop/admin/package/{{ package.id }}/items/{{ item.product_id }}/alternates/{{ alt.product_id }}/remove"
+                        method="post"
+                        class="inline-form"
+                        data-confirm="Remove this alternate product?"
+                      >
+                        {% include "partials/csrf.html" %}
+                        <button type="submit" class="button button--danger button--small">Remove</button>
+                      </form>
+                    </li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <span class="text-muted">No alternates configured.</span>
+              {% endif %}
+              <details class="package-alternates__add">
+                <summary>Add alternate product</summary>
+                <form
+                  action="/shop/admin/package/{{ package.id }}/items/{{ item.product_id }}/alternates/add"
+                  method="post"
+                  class="inline-form package-alternates__form"
+                >
+                  {% include "partials/csrf.html" %}
+                  {% set options = namespace(has_options=False) %}
+                  <label class="visually-hidden" for="alternate-{{ item.product_id }}">Alternate product</label>
+                  <select class="form-input form-input--sm" id="alternate-{{ item.product_id }}" name="alternate_product_id" required>
+                    <option value="">Choose a product</option>
+                    {% for product in products %}
+                      {% if product.id != item.product_id and product.id not in alternate_ids %}
+                        {% set options.has_options = True %}
+                        <option value="{{ product.id }}">{{ product.name }} ({{ product.sku }})</option>
+                      {% endif %}
+                    {% endfor %}
+                  </select>
+                  <label class="visually-hidden" for="priority-{{ item.product_id }}">Alternate priority</label>
+                  <input
+                    class="form-input form-input--sm"
+                    id="priority-{{ item.product_id }}"
+                    type="number"
+                    name="priority"
+                    value="{{ item.alternates|length }}"
+                    min="0"
+                  />
+                  <button type="submit" class="button button--ghost button--small" {% if not options.has_options %}disabled{% endif %}>Add</button>
+                </form>
+                {% if not options.has_options %}
+                  <p class="text-muted text-sm">All available products are already assigned.</p>
+                {% endif %}
+              </details>
             </td>
             <td class="table__actions">
               <div class="table__action-buttons">
@@ -134,7 +225,7 @@
           </tr>
         {% else %}
           <tr>
-            <td colspan="6" class="table__empty">No products assigned to this package.</td>
+            <td colspan="7" class="table__empty">No products assigned to this package.</td>
           </tr>
         {% endfor %}
       </tbody>
