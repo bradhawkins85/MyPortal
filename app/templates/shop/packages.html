@@ -69,15 +69,21 @@
                     <summary>Included products</summary>
                     <ul class="list list--bullet package-products">
                       {% for item in package["items"] %}
+                        {% set resolved = item.resolved_product %}
+                        {% set display_name = resolved.product_name if resolved else item.product_name %}
+                        {% set display_sku = resolved.product_sku if resolved else item.product_sku %}
                         <li class="package-product">
                           <button
                             type="button"
                             class="link-button package-product__button"
-                            data-package-product-details="{{ package.id }}:{{ item.product_id }}"
+                            data-package-product-details="{{ package.id }}:{{ item.id }}"
                           >
-                            <span class="package-product__name">{{ item.product_name }}</span>
-                            <span class="package-product__sku">({{ item.product_sku }})</span>
+                            <span class="package-product__name">{{ display_name }}</span>
+                            <span class="package-product__sku">({{ display_sku }})</span>
                             <span class="package-product__quantity">× {{ item.quantity }}</span>
+                            {% if item.is_substituted %}
+                              <span class="badge badge--info package-product__badge">Alternate</span>
+                            {% endif %}
                           </button>
                         </li>
                       {% endfor %}

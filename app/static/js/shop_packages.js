@@ -115,6 +115,34 @@
 
     container.appendChild(createDetailRow('Availability', describeStock(item.product_stock)));
 
+    const selection = item.is_substituted ? 'Alternate product in use' : 'Primary product in use';
+    container.appendChild(createDetailRow('Selection', selection));
+
+    if (item.available_stock_for_quantity !== null && item.available_stock_for_quantity !== undefined) {
+      container.appendChild(
+        createDetailRow(
+          'Packages supported by current stock',
+          Number(item.available_stock_for_quantity),
+        ),
+      );
+    }
+
+    if (item.is_substituted && item.primary_product) {
+      const original = item.primary_product;
+      const originalParts = [];
+      if (original.product_name) {
+        originalParts.push(original.product_name);
+      }
+      if (original.product_sku) {
+        originalParts.push(`(${original.product_sku})`);
+      }
+      if (originalParts.length) {
+        container.appendChild(
+          createDetailRow('Original product', originalParts.join(' ')),
+        );
+      }
+    }
+
     if (item.product_description) {
       const descriptionTitle = document.createElement('h3');
       descriptionTitle.className = 'modal__subtitle';
@@ -149,12 +177,39 @@
         if (!item) {
           return;
         }
-        const productId = item.product_id != null ? String(item.product_id) : '';
-        const key = `${packageId}:${productId}`;
-        itemsByKey.set(key, {
+        const itemId = item.id != null ? String(item.id) : '';
+        const resolved = item.resolved_product || {};
+        const resolvedProductId =
+          resolved.product_id != null ? resolved.product_id : item.product_id;
+        const entry = {
           package_id: pkg.id,
           package_name: pkg.name,
           ...item,
+          product_id: resolvedProductId,
+          product_name: resolved.product_name || item.product_name,
+          product_sku: resolved.product_sku || item.product_sku,
+          product_vendor_sku:
+            resolved.product_vendor_sku || item.product_vendor_sku,
+          product_price:
+            resolved.product_price != null
+              ? resolved.product_price
+              : item.product_price,
+          product_vip_price:
+            resolved.product_vip_price != null
+              ? resolved.product_vip_price
+              : item.product_vip_price,
+          product_stock:
+            resolved.product_stock != null
+              ? resolved.product_stock
+              : item.product_stock,
+          product_image_url:
+            resolved.product_image_url || item.product_image_url,
+          product_description:
+            resolved.product_description || item.product_description,
+        };
+        const key = `${packageId}:${itemId}`;
+        itemsByKey.set(key, {
+          ...entry,
         });
       });
     });
