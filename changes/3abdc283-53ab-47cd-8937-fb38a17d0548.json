@@ -1,0 +1,7 @@
+{
+  "guid": "3abdc283-53ab-47cd-8937-fb38a17d0548",
+  "occurred_at": "2025-10-31T22:49:34Z",
+  "change_type": "Feature",
+  "summary": "Added automatic alternate product substitutions for shop packages with admin controls and migration support.",
+  "content_hash": "6a61e0dbce3adae1e4b5120aa54e943cf8ce7dd1c4507d6b516a5c5ba2881326"
+}
