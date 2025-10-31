@@ -1,0 +1,7 @@
+{
+  "guid": "8999b22a-8f5b-4bba-a649-9fbbd24b267e",
+  "occurred_at": "2025-10-30T22:38Z",
+  "change_type": "Feature",
+  "summary": "Added admin controls to enable or disable API keys and clarified rotation options.",
+  "content_hash": "9f3dc9742abe54f8b633035bfb139d1398b217e5c67ee8a71839899ee5878735"
+}

@@ -40,12 +40,13 @@ async def create_api_key(
     expiry_date: date | None,
     permissions: PermissionMapping | None = None,
     ip_restrictions: Sequence[str] | None = None,
+    is_enabled: bool = True,
 ) -> tuple[str, dict[str, Any]]:
     generated: GeneratedApiKey = generate_api_key()
     await db.execute(
         """
-        INSERT INTO api_keys (api_key, key_prefix, description, expiry_date, created_at)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO api_keys (api_key, key_prefix, description, expiry_date, created_at, is_enabled)
+        VALUES (%s, %s, %s, %s, %s, %s)
         """,
         (
             generated.hashed,
@@ -53,6 +54,7 @@ async def create_api_key(
             description,
             expiry_date,
             datetime.utcnow(),
+            1 if is_enabled else 0,
         ),
     )
     row = await db.fetch_one(
@@ -63,6 +65,7 @@ async def create_api_key(
         raise RuntimeError("Failed to fetch inserted API key record")
     row["created_at"] = _to_utc(row.get("created_at"))
     row["last_used_at"] = _to_utc(row.get("last_used_at"))
+    row["is_enabled"] = bool(row.get("is_enabled", True))
     stored_permissions = await _replace_api_key_permissions(row["id"], permissions or [])
     stored_ip_restrictions = await _replace_api_key_ip_restrictions(
         row["id"], ip_restrictions or []
@@ -105,6 +108,7 @@ async def list_api_keys_with_usage(
             ak.created_at,
             ak.last_used_at,
             ak.key_prefix,
+            ak.is_enabled,
             COALESCE(SUM(aku.usage_count), 0) AS usage_count,
             GREATEST(
                 COALESCE(MAX(aku.last_used_at), '1970-01-01 00:00:00'),
@@ -119,7 +123,8 @@ async def list_api_keys_with_usage(
             ak.expiry_date,
             ak.created_at,
             ak.last_used_at,
-            ak.key_prefix
+            ak.key_prefix,
+            ak.is_enabled
         ORDER BY {column} {direction}, ak.id ASC
     """
     rows = await db.fetch_all(sql, tuple(params))
@@ -136,6 +141,7 @@ async def list_api_keys_with_usage(
         info["created_at"] = _to_utc(info.get("created_at"))
         info["last_used_at"] = _to_utc(info.get("last_used_at"))
         info["last_seen_at"] = _to_utc(info.get("last_seen_at"))
+        info["is_enabled"] = bool(info.get("is_enabled", True))
         info["usage"] = usage_map.get(row["id"], [])
         info["permissions"] = permission_map.get(row["id"], [])
         info["ip_restrictions"] = ip_restriction_map.get(row["id"], [])
@@ -167,7 +173,8 @@ async def get_api_key_with_usage(api_key_id: int) -> dict[str, Any] | None:
             ak.expiry_date,
             ak.created_at,
             ak.last_used_at,
-            ak.key_prefix
+            ak.key_prefix,
+            ak.is_enabled
         """,
         (api_key_id,),
     )
@@ -182,6 +189,7 @@ async def get_api_key_with_usage(api_key_id: int) -> dict[str, Any] | None:
     info["created_at"] = _to_utc(info.get("created_at"))
     info["last_used_at"] = _to_utc(info.get("last_used_at"))
     info["last_seen_at"] = _to_utc(info.get("last_seen_at"))
+    info["is_enabled"] = bool(info.get("is_enabled", True))
     info["usage"] = usage_map.get(api_key_id, [])
     info["permissions"] = permission_map.get(api_key_id, [])
     info["ip_restrictions"] = ip_restriction_map.get(api_key_id, [])
@@ -205,15 +213,21 @@ async def update_api_key(
     description: str | None,
     expiry_date: date | None,
     permissions: PermissionMapping | None = None,
+    is_enabled: bool | None = None,
 ) -> dict[str, Any]:
+    fields = ["description = %s", "expiry_date = %s"]
+    params: list[Any] = [description, expiry_date]
+    if is_enabled is not None:
+        fields.append("is_enabled = %s")
+        params.append(1 if is_enabled else 0)
+    params.append(api_key_id)
     await db.execute(
-        """
+        f"""
         UPDATE api_keys
-        SET description = %s,
-            expiry_date = %s
+        SET {', '.join(fields)}
         WHERE id = %s
         """,
-        (description, expiry_date, api_key_id),
+        tuple(params),
     )
     if permissions is not None:
         await _replace_api_key_permissions(api_key_id, permissions)
@@ -231,6 +245,7 @@ async def get_api_key_record(api_key_value: str) -> dict[str, Any] | None:
         FROM api_keys
         WHERE api_key = %s
           AND (expiry_date IS NULL OR expiry_date >= CURRENT_DATE())
+          AND is_enabled = 1
         """,
         (hashed,),
     )
@@ -238,6 +253,7 @@ async def get_api_key_record(api_key_value: str) -> dict[str, Any] | None:
         return None
     row["created_at"] = _to_utc(row.get("created_at"))
     row["last_used_at"] = _to_utc(row.get("last_used_at"))
+    row["is_enabled"] = bool(row.get("is_enabled", True))
     permission_map = await _fetch_permissions_by_key([row["id"]])
     row["permissions"] = permission_map.get(row["id"], [])
     ip_restriction_map = await _fetch_ip_restrictions_by_key([row["id"]])
