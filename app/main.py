@@ -53,6 +53,7 @@ from app.api.routes import (
     licenses as licenses_api,
     memberships,
     m365 as m365_api,
+    message_templates as message_templates_api,
     mcp as mcp_api,
     imap as imap_api,
     modules as modules_api,
@@ -72,6 +73,7 @@ from uuid import uuid4
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
 from app.core.logging import configure_logging, log_error, log_info
+from loguru import logger
 from app.repositories import audit_logs as audit_repo
 from app.repositories import api_keys as api_key_repo
 from app.repositories import auth as auth_repo
@@ -119,6 +121,7 @@ from app.services import imap as imap_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import m365 as m365_service
 from app.services import modules as modules_service
+from app.services import message_templates as message_templates_service
 from app.services import products as products_service
 from app.services import shop as shop_service
 from app.services import shop_packages as shop_packages_service
@@ -234,6 +237,10 @@ tags_metadata = [
         "name": "Memberships",
         "description": "Company membership workflows with approval tracking.",
     },
+    {
+        "name": "Message Templates",
+        "description": "Reusable email and message bodies for automations and integrations.",
+    },
     {"name": "Notifications", "description": "System-wide and user-specific notification feeds."},
     {"name": "Office365", "description": "Microsoft 365 credential management and synchronisation APIs."},
     {"name": "Ports", "description": "Port catalogue, document storage, and pricing workflow APIs."},
@@ -270,6 +277,14 @@ app = FastAPI(
     openapi_url=None,
     openapi_tags=tags_metadata,
 )
+
+
+@app.on_event("startup")
+async def _load_message_template_cache() -> None:
+    try:
+        await message_templates_service.refresh_cache()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("Failed to preload message templates", error=str(exc))
 
 SWAGGER_UI_PATH = settings.swagger_ui_url or "/docs"
 PROTECTED_OPENAPI_PATH = "/internal/openapi.json"
@@ -455,6 +470,7 @@ app.include_router(knowledge_base_api.router)
 app.include_router(roles.router)
 app.include_router(memberships.router)
 app.include_router(m365_api.router)
+app.include_router(message_templates_api.router)
 app.include_router(ports.router)
 app.include_router(notifications.router)
 app.include_router(orders_api.router)
