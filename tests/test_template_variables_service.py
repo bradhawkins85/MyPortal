@@ -1,4 +1,5 @@
 from app.services import template_variables
+from app.services import message_templates as message_templates_service
 
 
 def test_build_template_replacements_and_apply():
@@ -43,3 +44,33 @@ def test_apply_template_variables_handles_missing_values():
         replacements,
     )
     assert result == "--"
+
+
+def test_template_replacements_include_message_templates(monkeypatch):
+    template_records = [
+        {
+            "id": 1,
+            "slug": "greeting",
+            "name": "Greeting",
+            "description": None,
+            "content_type": "text/plain",
+            "content": "Hello {{user.firstName}}",
+            "created_at": None,
+            "updated_at": None,
+        }
+    ]
+
+    monkeypatch.setattr(
+        message_templates_service,
+        "iter_templates",
+        lambda: template_records,
+    )
+
+    context = template_variables.TemplateContext(
+        user=template_variables.TemplateContextUser(first_name="Sam"),
+    )
+
+    replacements = template_variables.build_template_replacement_map(context)
+
+    assert replacements["{{TEMPLATE_GREETING}}"] == "Hello Sam"
+    assert replacements["{{template.greeting}}"] == "Hello Sam"

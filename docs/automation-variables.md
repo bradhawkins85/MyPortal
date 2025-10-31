@@ -66,5 +66,18 @@ emails or webhook requests). Newly added tokens include:
 | `{{ TICKET_LATEST_REPLY_AUTHOR_EMAIL }}` | Email for the author of the latest reply. |
 | `{{ TICKET_LATEST_REPLY_AUTHOR_DISPLAY_NAME }}` | Display name for the latest reply author. |
 
+## Message templates
+
+Reusable snippets such as email bodies or webhook payloads can be defined as
+message templates. Reference a template anywhere variables are supported using
+either the uppercase or dotted token form:
+
+- `{{ TEMPLATE_WELCOME_EMAIL }}`
+- `{{ template.welcome_email }}`
+
+Template content itself may include other variables like `{{ ticket.id }}` or
+`{{ APP_NAME }}`. During automation execution the template is rendered with the
+same context as the surrounding payload before being substituted.
+
 All tokens resolve to empty strings when the underlying value is missing, so
 payloads can safely reference them without additional guards.

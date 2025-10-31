@@ -1,0 +1,7 @@
+{
+  "guid": "b6368ace-48e8-443a-9ed5-846cafbaa2ab",
+  "occurred_at": "2025-10-31T12:31Z",
+  "change_type": "Feature",
+  "summary": "Introduced reusable message templates with API management and automation interpolation support.",
+  "content_hash": "aaf3a8a6e7f664c3328c6236cbf6555a16d5630874ca11b7e5b1c92af13d05ae"
+}
