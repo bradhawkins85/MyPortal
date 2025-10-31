@@ -199,6 +199,7 @@ async def list_package_items(package_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """
         SELECT
+            items.id AS item_id,
             items.package_id,
             items.product_id,
             items.quantity,
@@ -218,7 +219,9 @@ async def list_package_items(package_id: int) -> list[dict[str, Any]]:
         """,
         (package_id,),
     )
-    return [_normalise_package_item(row) for row in rows]
+    items = [_normalise_package_item(row) for row in rows]
+    await _attach_package_item_alternates(items)
+    return items
 
 
 async def list_package_items_for_packages(
@@ -231,6 +234,7 @@ async def list_package_items_for_packages(
     rows = await db.fetch_all(
         f"""
         SELECT
+            items.id AS item_id,
             items.package_id,
             items.product_id,
             items.quantity,
@@ -250,10 +254,67 @@ async def list_package_items_for_packages(
         """,
         tuple(identifiers),
     )
+    items = [_normalise_package_item(row) for row in rows]
+    await _attach_package_item_alternates(items)
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for item in items:
+        package_id = _coerce_int(item.get("package_id"))
+        grouped.setdefault(package_id, []).append(item)
+    return grouped
+
+
+async def _attach_package_item_alternates(items: list[dict[str, Any]]) -> None:
+    identifiers: list[int] = []
+    for item in items:
+        item_id = _coerce_int(item.get("id"), default=0)
+        if item_id > 0:
+            identifiers.append(item_id)
+        else:
+            item.setdefault("alternates", [])
+    if not identifiers:
+        return
+    alternates_map = await list_package_item_alternates_for_items(identifiers)
+    for item in items:
+        item_id = _coerce_int(item.get("id"), default=0)
+        item["alternates"] = alternates_map.get(item_id, [])
+
+
+async def list_package_item_alternates_for_items(
+    item_ids: Sequence[int],
+) -> dict[int, list[dict[str, Any]]]:
+    identifiers = [int(identifier) for identifier in item_ids if int(identifier) > 0]
+    if not identifiers:
+        return {}
+    placeholders = ", ".join(["%s"] * len(identifiers))
+    rows = await db.fetch_all(
+        f"""
+        SELECT
+            alternates.id AS alternate_id,
+            alternates.package_item_id,
+            alternates.alternate_product_id,
+            alternates.priority,
+            products.name AS product_name,
+            products.sku AS product_sku,
+            products.vendor_sku AS product_vendor_sku,
+            products.price AS product_price,
+            products.vip_price AS product_vip_price,
+            products.stock AS product_stock,
+            products.archived AS product_archived,
+            products.image_url AS product_image_url,
+            products.description AS product_description
+        FROM shop_package_item_alternates AS alternates
+        INNER JOIN shop_products AS products ON products.id = alternates.alternate_product_id
+        WHERE alternates.package_item_id IN ({placeholders})
+        ORDER BY alternates.package_item_id ASC, alternates.priority ASC, products.name ASC
+        """,
+        tuple(identifiers),
+    )
     grouped: dict[int, list[dict[str, Any]]] = {}
     for row in rows:
-        package_id = _coerce_int(row.get("package_id"))
-        grouped.setdefault(package_id, []).append(_normalise_package_item(row))
+        package_item_id = _coerce_int(row.get("package_item_id"))
+        grouped.setdefault(package_item_id, []).append(
+            _normalise_package_item_alternate(row)
+        )
     return grouped
 
 
@@ -282,6 +343,59 @@ async def remove_package_item(package_id: int, product_id: int) -> None:
         "DELETE FROM shop_package_items WHERE package_id = %s AND product_id = %s",
         (package_id, product_id),
     )
+
+
+async def upsert_package_item_alternate(
+    *,
+    package_id: int,
+    product_id: int,
+    alternate_product_id: int,
+    priority: int,
+) -> bool:
+    row = await db.fetch_one(
+        """
+        SELECT id
+        FROM shop_package_items
+        WHERE package_id = %s AND product_id = %s
+        LIMIT 1
+        """,
+        (package_id, product_id),
+    )
+    if not row:
+        return False
+    item_id = _coerce_int(row.get("id"), default=0)
+    if item_id <= 0:
+        return False
+    await db.execute(
+        """
+        INSERT INTO shop_package_item_alternates (package_item_id, alternate_product_id, priority)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            priority = VALUES(priority),
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (item_id, alternate_product_id, priority),
+    )
+    return True
+
+
+async def remove_package_item_alternate(
+    package_id: int, product_id: int, alternate_product_id: int
+) -> bool:
+    async with db.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                DELETE alternates
+                FROM shop_package_item_alternates AS alternates
+                INNER JOIN shop_package_items AS items ON items.id = alternates.package_item_id
+                WHERE items.package_id = %s
+                  AND items.product_id = %s
+                  AND alternates.alternate_product_id = %s
+                """,
+                (package_id, product_id, alternate_product_id),
+            )
+            return cursor.rowcount > 0
 
 
 async def get_restricted_product_ids(
@@ -829,6 +943,7 @@ def _normalise_package(row: dict[str, Any]) -> dict[str, Any]:
 
 def _normalise_package_item(row: dict[str, Any]) -> dict[str, Any]:
     item = {
+        "id": _coerce_int(row.get("item_id"), default=0),
         "package_id": _coerce_int(row.get("package_id")),
         "product_id": _coerce_int(row.get("product_id")),
         "quantity": max(_coerce_int(row.get("quantity"), default=1), 0),
@@ -860,7 +975,45 @@ def _normalise_package_item(row: dict[str, Any]) -> dict[str, Any]:
         item["product_stock"] = 0
     else:
         item["product_stock"] = int(stock)
+    item["alternates"] = []
     return item
+
+
+def _normalise_package_item_alternate(row: dict[str, Any]) -> dict[str, Any]:
+    alternate = {
+        "id": _coerce_int(row.get("alternate_id"), default=0),
+        "package_item_id": _coerce_int(row.get("package_item_id")),
+        "product_id": _coerce_int(row.get("alternate_product_id")),
+        "priority": _coerce_int(row.get("priority"), default=0),
+        "product_name": row.get("product_name"),
+        "product_sku": row.get("product_sku"),
+        "product_vendor_sku": row.get("product_vendor_sku"),
+        "product_archived": bool(_coerce_int(row.get("product_archived"), default=0)),
+        "product_image_url": row.get("product_image_url"),
+        "product_description": row.get("product_description"),
+    }
+    price = row.get("product_price")
+    if isinstance(price, Decimal):
+        alternate["product_price"] = price
+    elif price is None:
+        alternate["product_price"] = Decimal("0")
+    else:
+        alternate["product_price"] = Decimal(str(price))
+    vip_price = row.get("product_vip_price")
+    if isinstance(vip_price, Decimal):
+        alternate["product_vip_price"] = vip_price
+    elif vip_price is None:
+        alternate["product_vip_price"] = None
+    else:
+        alternate["product_vip_price"] = Decimal(str(vip_price))
+    stock = row.get("product_stock")
+    if isinstance(stock, Decimal):
+        alternate["product_stock"] = int(stock)
+    elif stock is None:
+        alternate["product_stock"] = 0
+    else:
+        alternate["product_stock"] = int(stock)
+    return alternate
 
 
 def _coerce_decimal(value: Any, *, default: float | None = None) -> float:

@@ -3651,9 +3651,14 @@ async def add_package_to_cart(request: Request) -> RedirectResponse:
 
     cart_updates: list[tuple[int, int, Decimal, dict[str, Any]]] = []
     for item in items:
-        product_id = int(item.get("product_id") or 0)
+        resolved = item.get("resolved_product") or {}
+        product_id = int(resolved.get("product_id") or 0)
         if product_id <= 0:
-            continue
+            message = quote("One or more products in the package are unavailable.")
+            return RedirectResponse(
+                url=f"{request.url_for('shop_packages_page')}?cart_error={message}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
         quantity_per_package = int(item.get("quantity") or 0)
         if quantity_per_package <= 0:
             continue
@@ -7264,6 +7269,109 @@ async def admin_update_package_item(
         quantity=quantity_value,
         updated_by=current_user["id"] if current_user else None,
     )
+    return RedirectResponse(
+        url=f"/admin/shop/packages/{package_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post(
+    "/shop/admin/package/{package_id}/items/{product_id}/alternates/add",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Add an alternate product for a package item",
+    tags=["Shop Packages"],
+)
+async def admin_add_package_item_alternate(
+    request: Request,
+    package_id: int,
+    product_id: int,
+    alternate_product_id: str = Form(...),
+    priority: str = Form("0"),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    try:
+        alternate_id = int(alternate_product_id)
+        primary_id = int(product_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid product selection")
+
+    if primary_id == alternate_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Alternate product must differ from the primary product",
+        )
+
+    try:
+        priority_value = int(priority) if priority is not None else 0
+    except (TypeError, ValueError):
+        priority_value = 0
+
+    alternate_product = await shop_repo.get_product_by_id(
+        alternate_id,
+        include_archived=True,
+    )
+    if not alternate_product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alternate product not found")
+
+    success = await shop_repo.upsert_package_item_alternate(
+        package_id=package_id,
+        product_id=primary_id,
+        alternate_product_id=alternate_id,
+        priority=priority_value,
+    )
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package item not found")
+
+    log_info(
+        "Shop package alternate assigned",
+        package_id=package_id,
+        product_id=primary_id,
+        alternate_product_id=alternate_id,
+        priority=priority_value,
+        added_by=current_user["id"] if current_user else None,
+    )
+
+    return RedirectResponse(
+        url=f"/admin/shop/packages/{package_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post(
+    "/shop/admin/package/{package_id}/items/{product_id}/alternates/{alternate_product_id}/remove",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Remove an alternate product from a package item",
+    tags=["Shop Packages"],
+)
+async def admin_remove_package_item_alternate(
+    request: Request,
+    package_id: int,
+    product_id: int,
+    alternate_product_id: int,
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    removed = await shop_repo.remove_package_item_alternate(
+        package_id,
+        product_id,
+        alternate_product_id,
+    )
+    if not removed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alternate product not found")
+
+    log_info(
+        "Shop package alternate removed",
+        package_id=package_id,
+        product_id=product_id,
+        alternate_product_id=alternate_product_id,
+        removed_by=current_user["id"] if current_user else None,
+    )
+
     return RedirectResponse(
         url=f"/admin/shop/packages/{package_id}",
         status_code=status.HTTP_303_SEE_OTHER,
