@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Mapping, Sequence
-import json
-import re
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
@@ -14,7 +12,7 @@ from loguru import logger
 from app.core.database import db
 from app.repositories import automations as automation_repo
 from app.services import modules as modules_service
-from app.services import system_variables
+from app.services import value_templates
 
 
 TRIGGER_EVENTS: list[dict[str, str]] = [
@@ -33,109 +31,6 @@ def list_trigger_events() -> list[dict[str, str]]:
 
 
 _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
-
-_TOKEN_PATTERN = re.compile(r"\{\{\s*([^\s{}]+)\s*\}\}")
-
-
-def _build_constant_token_map(context: Mapping[str, Any] | None) -> dict[str, Any]:
-    ticket: Mapping[str, Any] | None = None
-    if isinstance(context, Mapping):
-        possible_ticket = context.get("ticket")
-        if isinstance(possible_ticket, Mapping):
-            ticket = possible_ticket
-
-    tokens: dict[str, Any] = dict(system_variables.get_system_variables(ticket=ticket))
-    if context:
-        tokens.update(system_variables.build_context_variables(context))
-    return tokens
-
-
-def _coerce_template_value(value: Any) -> Any:
-    if value is None:
-        return ""
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc).isoformat()
-        return value.astimezone(timezone.utc).isoformat()
-    if isinstance(value, date) and not isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, time):
-        return value.isoformat()
-    if isinstance(value, (int, float, bool, str)):
-        return value
-    return value
-
-
-def _stringify_template_value(value: Any) -> str:
-    coerced = _coerce_template_value(value)
-    if isinstance(coerced, str):
-        return coerced
-    if isinstance(coerced, (int, float, bool)):
-        return str(coerced)
-    if coerced is None or coerced == "":
-        return ""
-    if isinstance(coerced, Mapping):
-        try:
-            return json.dumps(coerced)
-        except TypeError:
-            return str(coerced)
-    if isinstance(coerced, Sequence) and not isinstance(coerced, (str, bytes, bytearray)):
-        try:
-            return json.dumps(coerced)
-        except TypeError:
-            return str(coerced)
-    return str(coerced)
-
-
-def _interpolate_string(
-    value: str,
-    context: Mapping[str, Any] | None,
-    *,
-    legacy_tokens: Mapping[str, Any] | None = None,
-) -> Any:
-    if not context and not legacy_tokens:
-        return value
-    token_map = legacy_tokens or {}
-    stripped = value.strip()
-    single_match = _TOKEN_PATTERN.fullmatch(stripped)
-    if single_match:
-        token_name = single_match.group(1)
-        resolved = _resolve_context_value(context, token_name)
-        if resolved is None and token_name in token_map:
-            resolved = token_map[token_name]
-        return _coerce_template_value(resolved)
-
-    def _replace(match: re.Match[str]) -> str:
-        token_name = match.group(1)
-        resolved = _resolve_context_value(context, token_name)
-        if resolved is None and token_name in token_map:
-            resolved = token_map[token_name]
-        return _stringify_template_value(resolved)
-
-    return _TOKEN_PATTERN.sub(_replace, value)
-
-
-def _interpolate_payload(
-    value: Any,
-    context: Mapping[str, Any] | None,
-    *,
-    legacy_tokens: Mapping[str, Any] | None = None,
-) -> Any:
-    if legacy_tokens is None:
-        legacy_tokens = _build_constant_token_map(context)
-    if isinstance(value, str):
-        return _interpolate_string(value, context, legacy_tokens=legacy_tokens)
-    if isinstance(value, Mapping):
-        return {
-            key: _interpolate_payload(item, context, legacy_tokens=legacy_tokens)
-            for key, item in value.items()
-        }
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [
-            _interpolate_payload(item, context, legacy_tokens=legacy_tokens)
-            for item in value
-        ]
-    return value
 
 
 def _normalise_actions(actions: Any) -> list[dict[str, Any]]:
@@ -330,7 +225,7 @@ async def _execute_automation(
                     if isinstance(payload_source, Mapping)
                     else {}
                 )
-                module_payload = _interpolate_payload(module_payload, context)
+                module_payload = value_templates.render_value(module_payload, context)
                 if context:
                     module_payload.setdefault("context", context)
                 try:
@@ -394,7 +289,7 @@ async def _execute_automation(
                 payload = {}
             module_slug = automation.get("action_module")
             if module_slug:
-                module_payload = _interpolate_payload(dict(payload), context)
+                module_payload = value_templates.render_value(dict(payload), context)
                 if context:
                     module_payload.setdefault("context", context)
                 result_payload = await modules_service.trigger_module(

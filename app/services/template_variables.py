@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Dict
 from urllib.parse import quote
 
+from app.services import value_templates
+
 
 @dataclass(slots=True)
 class TemplateContextUser:
@@ -133,11 +135,45 @@ def _build_portal_replacements(context: TemplateContext) -> Dict[str, str]:
     return replacements
 
 
+def _context_to_mapping(context: TemplateContext) -> dict[str, Any]:
+    mapping: dict[str, Any] = {}
+    if context.user:
+        mapping["user"] = {
+            "id": context.user.id,
+            "email": context.user.email,
+            "first_name": context.user.first_name,
+            "firstName": context.user.first_name,
+            "last_name": context.user.last_name,
+            "lastName": context.user.last_name,
+        }
+    if context.company:
+        mapping["company"] = {
+            "id": context.company.id,
+            "name": context.company.name,
+            "syncro_customer_id": context.company.syncro_customer_id,
+            "syncroId": context.company.syncro_customer_id,
+        }
+    if context.portal:
+        mapping["portal"] = {
+            "base_url": context.portal.base_url,
+            "baseUrl": context.portal.base_url,
+            "login_url": context.portal.login_url,
+            "loginUrl": context.portal.login_url,
+        }
+    return mapping
+
+
 def build_template_replacement_map(context: TemplateContext) -> Dict[str, str]:
     replacements: Dict[str, str] = {}
     replacements.update(_build_user_replacements(context))
     replacements.update(_build_company_replacements(context))
     replacements.update(_build_portal_replacements(context))
+
+    context_mapping = _context_to_mapping(context)
+    base_tokens = value_templates.build_base_token_map(context_mapping or None)
+    template_tokens = value_templates.build_template_token_map(context_mapping or None, base_tokens=base_tokens)
+    for token_name, value in template_tokens.items():
+        replacements[f"{{{{{token_name}}}}}"] = value
     return replacements
 
 
