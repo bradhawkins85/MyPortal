@@ -1529,11 +1529,18 @@ def _prepare_api_key_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, An
     today = date.today()
     prepared: list[dict[str, Any]] = []
     active_count = 0
+    disabled_count = 0
+    expired_count = 0
     for row in rows:
         expiry = row.get("expiry_date")
         is_expired = bool(expiry and isinstance(expiry, date) and expiry < today)
-        if not is_expired:
+        is_enabled = bool(row.get("is_enabled", True))
+        if is_expired:
+            expired_count += 1
+        elif is_enabled:
             active_count += 1
+        else:
+            disabled_count += 1
         usage_entries: list[dict[str, Any]] = []
         for entry in row.get("usage", []) or []:
             usage_entries.append(
@@ -1579,12 +1586,14 @@ def _prepare_api_key_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, An
                 "endpoint_summary": endpoint_summary,
                 "access_summary": access_summary,
                 "is_restricted": bool(display_permissions or display_ip_restrictions),
+                "is_enabled": is_enabled,
             }
         )
     stats = {
         "total": len(prepared),
         "active": active_count,
-        "expired": len(prepared) - active_count,
+        "expired": expired_count,
+        "disabled": disabled_count,
     }
     return prepared, stats
 
@@ -6023,6 +6032,9 @@ async def admin_create_api_key_page(request: Request):
         errors.append("Enter an expiry date in YYYY-MM-DD format.")
     errors.extend(permission_errors)
     errors.extend(ip_errors)
+    is_enabled = True
+    if "is_enabled_present" in form:
+        is_enabled = str(form.get("is_enabled")) == "1"
     if errors:
         return await _render_api_keys_dashboard(
             request,
@@ -6037,6 +6049,7 @@ async def admin_create_api_key_page(request: Request):
             expiry_date=expiry_date,
             permissions=parsed_permissions,
             ip_restrictions=parsed_ip_restrictions,
+            is_enabled=is_enabled,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create API key from admin form", error=str(exc))
@@ -6058,6 +6071,7 @@ async def admin_create_api_key_page(request: Request):
             "expiry_date": expiry_date.isoformat() if isinstance(expiry_date, date) else None,
             "permissions": parsed_permissions,
             "allowed_ips": parsed_ip_restrictions,
+            "is_enabled": is_enabled,
         },
         request=request,
     )
@@ -6090,6 +6104,7 @@ async def admin_create_api_key_page(request: Request):
         "access_summary": access_summary,
         "ip_summary": ip_summary,
         "endpoint_summary": endpoint_summary,
+        "is_enabled": bool(row.get("is_enabled", True)),
     }
     status_message = "New API key created. Store the value securely; it will not be shown again."
     return await _render_api_keys_dashboard(
@@ -6148,6 +6163,10 @@ async def admin_update_api_key_page(request: Request):
     parsed_permissions, permission_errors = _parse_permission_lines(permissions_text)
     errors.extend(permission_errors)
 
+    is_enabled_argument: bool | None = None
+    if "is_enabled_present" in form:
+        is_enabled_argument = str(form.get("is_enabled")) == "1"
+
     if errors:
         return await _render_api_keys_dashboard(
             request,
@@ -6157,12 +6176,18 @@ async def admin_update_api_key_page(request: Request):
             errors=errors,
         )
 
+    update_kwargs: dict[str, Any] = {
+        "description": new_description,
+        "expiry_date": expiry_date,
+        "permissions": parsed_permissions,
+    }
+    if is_enabled_argument is not None:
+        update_kwargs["is_enabled"] = is_enabled_argument
+
     try:
         updated = await api_key_repo.update_api_key(
             api_key_id,
-            description=new_description,
-            expiry_date=expiry_date,
-            permissions=parsed_permissions,
+            **update_kwargs,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error(
@@ -6190,6 +6215,7 @@ async def admin_update_api_key_page(request: Request):
             if isinstance(existing.get("expiry_date"), date)
             else None,
             "permissions": existing.get("permissions", []),
+            "is_enabled": bool(existing.get("is_enabled", True)),
         },
         new_value={
             "description": updated.get("description"),
@@ -6197,6 +6223,7 @@ async def admin_update_api_key_page(request: Request):
             if isinstance(updated.get("expiry_date"), date)
             else None,
             "permissions": updated.get("permissions", []),
+            "is_enabled": bool(updated.get("is_enabled", True)),
         },
         request=request,
     )

@@ -42,6 +42,10 @@
           <span class="stat__value">{{ api_key_stats.active }}</span>
         </div>
         <div class="stat">
+          <span class="stat__label">Disabled</span>
+          <span class="stat__value">{{ api_key_stats.disabled }}</span>
+        </div>
+        <div class="stat">
           <span class="stat__label">Expired</span>
           <span class="stat__value">{{ api_key_stats.expired }}</span>
         </div>
@@ -136,6 +140,9 @@
           <p class="secret-card__hint">
             Source IPs: {{ new_api_key.ip_summary or 'Any IP address' }}.
           </p>
+          {% if not new_api_key.is_enabled %}
+            <p class="secret-card__hint">Status: Disabled until manually enabled.</p>
+          {% endif %}
           {% if new_api_key.permissions %}
             <div class="tag-list">
               {% for permission in new_api_key.permissions %}
@@ -188,6 +195,9 @@
                   {% else %}
                     <span class="text-muted">—</span>
                   {% endif %}
+                  {% if not key.is_enabled %}
+                    <span class="badge badge--warning">Disabled</span>
+                  {% endif %}
                 </td>
                 <td data-label="Preview">{{ key.key_preview }}</td>
                 <td data-label="Access scope" data-value="{{ key.access_summary }}">
@@ -236,7 +246,8 @@
                     "access_summary": key.access_summary,
                     "endpoint_summary": key.endpoint_summary,
                     "ip_summary": key.ip_summary,
-                    "is_restricted": key.is_restricted
+                    "is_restricted": key.is_restricted,
+                    "is_enabled": key.is_enabled
                   } %}
                   <div class="table__action-buttons">
                     <button
@@ -441,6 +452,10 @@
           <dd class="definition-list__value" data-api-key-usage-count>0</dd>
         </div>
         <div class="definition-list__item">
+          <dt class="definition-list__label">Status</dt>
+          <dd class="definition-list__value" data-api-key-status>Enabled</dd>
+        </div>
+        <div class="definition-list__item">
           <dt class="definition-list__label">Access scope</dt>
           <dd class="definition-list__value" data-api-key-access>All endpoints</dd>
         </div>
@@ -476,6 +491,7 @@
           <input type="hidden" name="{{ name }}" value="{{ value }}" />
         {% endfor %}
         <input type="hidden" name="api_key_id" value="" data-api-key-rotate-id />
+        <input type="hidden" name="is_enabled_present" value="1" />
         <div class="form-grid">
           <div class="form-field">
             <label class="form-label" for="modal-rotate-description">New description</label>
@@ -529,6 +545,20 @@
           </p>
         </div>
         <div class="form-field form-field--checkbox">
+          <label class="form-checkbox" for="modal-rotate-enabled">
+            <input
+              type="checkbox"
+              id="modal-rotate-enabled"
+              name="is_enabled"
+              value="1"
+              data-api-key-enabled
+              checked
+            />
+            <span>Key is enabled</span>
+          </label>
+          <p class="form-help">Disable to pause access without revoking the credential.</p>
+        </div>
+        <div class="form-field form-field--checkbox">
           <label class="form-checkbox" for="modal-rotate-retire">
             <input
               type="checkbox"
@@ -537,13 +567,14 @@
               value="1"
               checked
             />
-            <span>Immediately retire the previous key</span>
+            <span>Retire previous key after rotation</span>
           </label>
         </div>
         <div class="form-actions form-actions--inline">
           <button type="submit" class="button button--primary">Save changes</button>
           <button type="button" class="button button--ghost" data-modal-close>Close</button>
         </div>
+        <p class="form-help">Immediately retire the previous key.</p>
         <div class="form-actions">
           <button type="submit" class="button" formaction="/admin/api-keys/rotate">Rotate key</button>
         </div>
@@ -597,6 +628,7 @@
       {% for name, value in filter_state.items() %}
         <input type="hidden" name="{{ name }}" value="{{ value }}" />
       {% endfor %}
+      <input type="hidden" name="is_enabled_present" value="1" />
       <div class="form-field">
         <label class="form-label" for="modal-api-key-description">Description</label>
         <input
@@ -644,6 +676,19 @@
         <p class="form-hint">
           One IP address or CIDR range per line. Leave blank to allow requests from any IP address.
         </p>
+      </div>
+      <div class="form-field form-field--checkbox">
+        <label class="form-checkbox" for="modal-api-key-enabled">
+          <input
+            id="modal-api-key-enabled"
+            name="is_enabled"
+            type="checkbox"
+            value="1"
+            checked
+          />
+          <span>Enable key immediately</span>
+        </label>
+        <p class="form-hint">Uncheck to issue the credential in a disabled state.</p>
       </div>
       <div class="form-actions">
         <button type="submit" class="button button--primary">Create key</button>

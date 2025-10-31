@@ -35,6 +35,7 @@ def _format_response(row: dict) -> ApiKeyResponse:
         usage=row.get("usage", []),
         permissions=row.get("permissions", []),
         allowed_ips=row.get("ip_restrictions", []),
+        is_enabled=bool(row.get("is_enabled", True)),
     )
 
 
@@ -75,6 +76,7 @@ async def create_api_key(
         expiry_date=payload.expiry_date,
         permissions=[permission.model_dump() for permission in payload.permissions],
         ip_restrictions=[entry.cidr for entry in payload.allowed_ips],
+        is_enabled=payload.is_enabled,
     )
     formatted = _format_response(row).model_dump()
     await audit_service.log_action(
@@ -87,6 +89,7 @@ async def create_api_key(
             "expiry_date": payload.expiry_date.isoformat() if payload.expiry_date else None,
             "permissions": formatted.get("permissions", []),
             "allowed_ips": [entry.cidr for entry in payload.allowed_ips],
+            "is_enabled": payload.is_enabled,
         },
         request=request,
     )
@@ -165,11 +168,24 @@ async def update_api_key(
         permissions_payload = existing.get("permissions", [])
         permissions_argument = None
 
+    if "is_enabled" in fields_set:
+        is_enabled_argument = (
+            None if payload.is_enabled is None else bool(payload.is_enabled)
+        )
+    else:
+        is_enabled_argument = None
+
+    update_kwargs: dict[str, Any] = {
+        "description": new_description,
+        "expiry_date": new_expiry,
+        "permissions": permissions_argument,
+    }
+    if is_enabled_argument is not None:
+        update_kwargs["is_enabled"] = is_enabled_argument
+
     updated = await api_key_repo.update_api_key(
         api_key_id,
-        description=new_description,
-        expiry_date=new_expiry,
-        permissions=permissions_argument,
+        **update_kwargs,
     )
 
     await audit_service.log_action(
@@ -183,6 +199,7 @@ async def update_api_key(
             if isinstance(existing.get("expiry_date"), date)
             else None,
             "permissions": existing.get("permissions", []),
+            "is_enabled": bool(existing.get("is_enabled", True)),
         },
         new_value={
             "description": updated.get("description"),
@@ -190,6 +207,7 @@ async def update_api_key(
             if isinstance(updated.get("expiry_date"), date)
             else None,
             "permissions": updated.get("permissions", []),
+            "is_enabled": bool(updated.get("is_enabled", True)),
         },
         request=request,
     )
