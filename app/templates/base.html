@@ -121,8 +121,16 @@
             <li class="menu__divider" role="presentation"></li>
           {% endif %}
           {% if can_access_tickets %}
+            {% set show_admin_tickets = (is_helpdesk_technician | default(false)) or (is_super_admin | default(false)) %}
+            {% if show_admin_tickets %}
+              {% set ticket_href = '/admin/tickets' %}
+              {% set ticket_active = current_path.startswith('/admin/tickets') and not current_path.startswith('/admin/tickets/syncro-import') %}
+            {% else %}
+              {% set ticket_href = '/tickets' %}
+              {% set ticket_active = current_path.startswith('/tickets') %}
+            {% endif %}
             <li class="menu__item">
-              <a href="/admin/tickets" {% if current_path.startswith('/admin/tickets') and not current_path.startswith('/admin/tickets/syncro-import') %}aria-current="page"{% endif %}>
+              <a href="{{ ticket_href }}" {% if ticket_active %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" focusable="false"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2.17a.83.83 0 0 1-.83.83 1.5 1.5 0 0 0 0 3 .83.83 0 0 1 .83.83V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2.17A.83.83 0 0 1 4.83 15a1.5 1.5 0 0 0 0-3A.83.83 0 0 1 4 11.17zM9 9v6h6V9z"/></svg>
                 </span>
