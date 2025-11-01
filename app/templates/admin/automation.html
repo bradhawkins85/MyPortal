@@ -27,20 +27,28 @@
     {% set global_tasks = global_tasks | default([], true) %}
     {% set company_tasks = company_tasks | default([], true) %}
     <div class="card__body card__body--stacked">
-      <section>
-        <h3 class="card__subtitle">All companies</h3>
-        <p class="text-muted">Tasks that execute for every company profile.</p>
-        <div class="table-toolbar">
-          <input
-            type="search"
-            class="form-input"
-            placeholder="Filter all-company tasks"
-            aria-label="Filter all-company tasks"
-            data-table-filter="tasks-table-global"
-          />
-        </div>
-        <div class="table-wrapper">
-          <table class="table" id="tasks-table-global" data-table>
+      <details class="card-collapsible" data-automation-section="global" open>
+        <summary class="card__header card__header--collapsible">
+          <div>
+            <h3 class="card__subtitle">All companies</h3>
+            <p class="text-muted">Tasks that execute for every company profile.</p>
+          </div>
+          <div class="card__collapsible-meta" aria-hidden="true">
+            <span class="card__toggle-icon" aria-hidden="true"></span>
+          </div>
+        </summary>
+        <div class="card-collapsible__content">
+          <div class="table-toolbar">
+            <input
+              type="search"
+              class="form-input"
+              placeholder="Filter all-company tasks"
+              aria-label="Filter all-company tasks"
+              data-table-filter="tasks-table-global"
+            />
+          </div>
+          <div class="table-wrapper">
+            <table class="table" id="tasks-table-global" data-table>
             <thead>
               <tr>
                 <th scope="col" data-sort="string">Name</th>
@@ -87,44 +95,53 @@
                 </tr>
               {% endfor %}
             </tbody>
-          </table>
-        </div>
-        <div class="table-pagination" data-pagination="tasks-table-global">
-          <div class="table-pagination__group">
-            <button
-              type="button"
-              class="button button--ghost table-pagination__button"
-              data-page-prev
-              disabled
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              class="button button--ghost table-pagination__button"
-              data-page-next
-            >
-              Next
-            </button>
+            </table>
           </div>
-          <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+          <div class="table-pagination" data-pagination="tasks-table-global">
+            <div class="table-pagination__group">
+              <button
+                type="button"
+                class="button button--ghost table-pagination__button"
+                data-page-prev
+                disabled
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                class="button button--ghost table-pagination__button"
+                data-page-next
+              >
+                Next
+              </button>
+            </div>
+            <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+          </div>
         </div>
-      </section>
+      </details>
       <section class="divider"></section>
-      <section>
-        <h3 class="card__subtitle">Company-specific</h3>
-        <p class="text-muted">Tasks targeted to individual companies.</p>
-        <div class="table-toolbar">
-          <input
-            type="search"
-            class="form-input"
-            placeholder="Filter company tasks"
-            aria-label="Filter company-specific tasks"
-            data-table-filter="tasks-table-company"
-          />
-        </div>
-        <div class="table-wrapper">
-          <table class="table" id="tasks-table-company" data-table>
+      <details class="card-collapsible" data-automation-section="company" open>
+        <summary class="card__header card__header--collapsible">
+          <div>
+            <h3 class="card__subtitle">Company-specific</h3>
+            <p class="text-muted">Tasks targeted to individual companies.</p>
+          </div>
+          <div class="card__collapsible-meta" aria-hidden="true">
+            <span class="card__toggle-icon" aria-hidden="true"></span>
+          </div>
+        </summary>
+        <div class="card-collapsible__content">
+          <div class="table-toolbar">
+            <input
+              type="search"
+              class="form-input"
+              placeholder="Filter company tasks"
+              aria-label="Filter company-specific tasks"
+              data-table-filter="tasks-table-company"
+            />
+          </div>
+          <div class="table-wrapper">
+            <table class="table" id="tasks-table-company" data-table>
             <thead>
               <tr>
                 <th scope="col" data-sort="string">Name</th>
@@ -171,29 +188,30 @@
                 </tr>
               {% endfor %}
             </tbody>
-          </table>
-        </div>
-        <div class="table-pagination" data-pagination="tasks-table-company">
-          <div class="table-pagination__group">
-            <button
-              type="button"
-              class="button button--ghost table-pagination__button"
-              data-page-prev
-              disabled
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              class="button button--ghost table-pagination__button"
-              data-page-next
-            >
-              Next
-            </button>
+            </table>
           </div>
-          <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+          <div class="table-pagination" data-pagination="tasks-table-company">
+            <div class="table-pagination__group">
+              <button
+                type="button"
+                class="button button--ghost table-pagination__button"
+                data-page-prev
+                disabled
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                class="button button--ghost table-pagination__button"
+                data-page-next
+              >
+                Next
+              </button>
+            </div>
+            <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+          </div>
         </div>
-      </section>
+      </details>
     </div>
   </section>
 </div>

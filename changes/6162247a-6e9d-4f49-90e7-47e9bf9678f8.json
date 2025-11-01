@@ -1,0 +1,7 @@
+{
+  "guid": "6162247a-6e9d-4f49-90e7-47e9bf9678f8",
+  "occurred_at": "2025-11-01T06:17Z",
+  "change_type": "Feature",
+  "summary": "Enabled collapsible sections for scheduled task tables with default expansion.",
+  "content_hash": "5d192d4d455aa70c132d5bee2352eec6d695253053943fe494dbcd647e85dc7d"
+}
