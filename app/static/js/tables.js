@@ -91,9 +91,13 @@
       this.externalRefreshListener = () => {
         this.refreshRows();
       };
+      this.layoutRefreshListener = () => {
+        this.handleResize();
+      };
 
       if (this.table) {
         this.table.addEventListener('table:rows-updated', this.externalRefreshListener);
+        this.table.addEventListener('table:layout-change', this.layoutRefreshListener);
       }
 
       this.updateFilterState();
