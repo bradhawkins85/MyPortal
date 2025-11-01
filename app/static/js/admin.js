@@ -2211,5 +2211,6 @@
     bindModal({ modalId: 'create-api-key-modal', triggerSelector: '[data-create-api-key-modal-open]' });
     bindModal({ modalId: 'create-issue-modal', triggerSelector: '[data-create-issue-modal-open]' });
     bindModal({ modalId: 'edit-ticket-statuses-modal', triggerSelector: '[data-edit-ticket-statuses-open]' });
+    bindModal({ modalId: 'import-product-modal', triggerSelector: '[data-import-product-modal-open]' });
   });
 })();

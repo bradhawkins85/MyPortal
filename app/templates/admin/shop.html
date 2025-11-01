@@ -1,173 +1,34 @@
 {% extends "base.html" %}
 
+{% block header_title %}
+  <div class="header__title-content">
+    <span class="header__title-text">Shop admin</span>
+    <div class="header__title-actions">
+      <a class="button button--ghost button--small header__title-button" href="/admin/shop/categories">
+        Product categories
+      </a>
+      <a class="button button--primary button--small header__title-button" href="/admin/shop/products/new">
+        Add product
+      </a>
+      <button
+        type="button"
+        class="button button--ghost button--small header__title-button"
+        data-import-product-modal-open
+        aria-haspopup="dialog"
+        aria-controls="import-product-modal"
+      >
+        Import product
+      </button>
+    </div>
+  </div>
+{% endblock %}
+
 {% block header_actions %}
   <a class="button button--ghost" href="/admin/shop/packages">Package admin</a>
 {% endblock %}
 
 {% block content %}
-<div class="admin-grid admin-grid--columns">
-  <section class="card card--panel">
-    <details
-      class="card-collapsible"
-      id="product-categories-collapsible"
-      data-empty="{{ 'true' if categories|length == 0 else 'false' }}"
-    >
-      <summary class="card__header card__header--collapsible">
-        <div>
-          <h2 class="card__title">Product categories</h2>
-          <p class="card__subtitle">Group products for faster browsing and targeted visibility rules.</p>
-        </div>
-        <div class="card__collapsible-meta">
-          <span class="badge badge--muted">{{ categories|length }} total</span>
-          <span class="card__toggle-icon" aria-hidden="true"></span>
-        </div>
-      </summary>
-      <div class="card-collapsible__content" id="product-categories-panel">
-        <form action="/shop/admin/category" method="post" class="form-grid">
-          {% if csrf_token %}
-          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-          {% endif %}
-          <div class="form-field form-field--wide">
-            <label class="form-label" for="category-name">Category name</label>
-            <input class="form-input" id="category-name" name="name" required />
-          </div>
-          <div class="form-actions">
-            <button type="submit" class="button">Add category</button>
-          </div>
-        </form>
-        <ul class="category-list">
-          {% for category in categories %}
-            <li class="category-list__item">
-              <span>{{ category.name }}</span>
-              <form action="/shop/admin/category/{{ category.id }}/delete" method="post" class="inline-form" data-confirm="Delete this category?">
-                {% if csrf_token %}
-                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                {% endif %}
-                <button type="submit" class="button button--danger">Delete</button>
-              </form>
-            </li>
-          {% else %}
-            <li class="category-list__item category-list__item--empty">No categories defined.</li>
-          {% endfor %}
-        </ul>
-      </div>
-    </details>
-  </section>
-
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Import product</h2>
-        <p class="card__subtitle">Pull catalogue data from upstream vendors via their SKU.</p>
-      </div>
-    </header>
-    <form action="/shop/admin/product/import" method="post" class="form-grid">
-      {% if csrf_token %}
-      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-      {% endif %}
-      <div class="form-field">
-        <label class="form-label" for="import-vendor-sku">Vendor SKU</label>
-        <input class="form-input" id="import-vendor-sku" name="vendor_sku" required />
-      </div>
-      <div class="form-actions">
-        <button type="submit" class="button">Import</button>
-      </div>
-    </form>
-  </section>
-</div>
-
 <div class="admin-grid">
-  <section class="card card--panel">
-    <details class="card-collapsible" id="product-create-collapsible">
-      <summary class="card__header card__header--collapsible card__header--stacked">
-        <div>
-          <h2 class="card__title">Add product</h2>
-          <p class="card__subtitle">Create catalogue items with pricing, imagery, and stock levels.</p>
-        </div>
-        <div class="card__collapsible-meta">
-          <span class="card__toggle-icon" aria-hidden="true"></span>
-        </div>
-      </summary>
-      <div class="card-collapsible__content">
-        <form action="/shop/admin/product" method="post" enctype="multipart/form-data" class="form-grid">
-          {% if csrf_token %}
-          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-          {% endif %}
-          <div class="form-field">
-            <label class="form-label" for="product-name">Name</label>
-            <input class="form-input" id="product-name" name="name" required />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="product-sku">SKU</label>
-            <input class="form-input" id="product-sku" name="sku" required />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="product-vendor-sku">Vendor SKU</label>
-            <input class="form-input" id="product-vendor-sku" name="vendor_sku" required />
-          </div>
-          <div class="form-field form-field--wide">
-            <label class="form-label" for="product-cross-sell">Cross-sell products</label>
-            <select
-              class="form-input form-input--multiselect"
-              id="product-cross-sell"
-              name="cross_sell_product_ids"
-              multiple
-              size="6"
-              data-recommendation-select="cross"
-              disabled
-            >
-              <option value="" disabled selected>Select a category to choose products</option>
-            </select>
-            <p class="form-helper">Suggest complementary items from the same category.</p>
-          </div>
-          <div class="form-field form-field--wide">
-            <label class="form-label" for="product-upsell">Up-sell products</label>
-            <select
-              class="form-input form-input--multiselect"
-              id="product-upsell"
-              name="upsell_product_ids"
-              multiple
-              size="6"
-              data-recommendation-select="upsell"
-              disabled
-            >
-              <option value="" disabled selected>Select a category to choose products</option>
-            </select>
-            <p class="form-helper">Highlight upgrade paths within the same category.</p>
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="product-price">Price</label>
-            <input class="form-input" id="product-price" name="price" type="number" step="0.01" required />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="product-vip-price">VIP price</label>
-            <input class="form-input" id="product-vip-price" name="vip_price" type="number" step="0.01" />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="product-stock">Stock</label>
-            <input class="form-input" id="product-stock" name="stock" type="number" required />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="product-category">Category</label>
-            <select class="form-input" id="product-category" name="category_id">
-              <option value="">No category</option>
-              {% for category in categories %}
-                <option value="{{ category.id }}">{{ category.name }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="product-image">Image</label>
-            <input class="form-input" id="product-image" name="image" type="file" accept="image/*" />
-          </div>
-          <div class="form-actions">
-            <button type="submit" class="button">Add product</button>
-          </div>
-        </form>
-      </div>
-    </details>
-  </section>
-
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
       <div>
@@ -259,6 +120,37 @@
       </table>
     </div>
   </section>
+</div>
+
+<div
+  class="modal"
+  id="import-product-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="import-product-modal-title"
+  hidden
+>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close product import</span>
+      &times;
+    </button>
+    <h2 class="modal__title" id="import-product-modal-title">Import product</h2>
+    <p class="modal__subtitle">Pull catalogue data from upstream vendors via their SKU.</p>
+    <form action="/shop/admin/product/import" method="post" class="form-grid">
+      {% if csrf_token %}
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+      {% endif %}
+      <div class="form-field">
+        <label class="form-label" for="import-vendor-sku">Vendor SKU</label>
+        <input class="form-input" id="import-vendor-sku" name="vendor_sku" required />
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Import</button>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <div class="modal" id="product-edit-modal" role="dialog" aria-modal="true" hidden>
