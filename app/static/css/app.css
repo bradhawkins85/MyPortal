@@ -1515,8 +1515,14 @@ button.header-title-menu__link {
 }
 
 .admin-grid--columns {
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
   align-items: flex-start;
+}
+
+@media (min-width: 1500px) {
+  .admin-grid--columns {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  }
 }
 
 .stats-grid {
