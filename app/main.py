@@ -574,6 +574,16 @@ async def _has_issue_tracker_access(user: Mapping[str, Any], request: Request | 
         except Exception as exc:  # pragma: no cover - defensive fallback for tests without DB
             log_error("Failed to determine issue tracker access", error=str(exc))
             result = False
+        if not result:
+            try:
+                assignments = await user_company_repo.list_companies_for_user(user_id_int)
+            except Exception as exc:  # pragma: no cover - defensive fallback for tests without DB
+                log_error(
+                    "Failed to evaluate direct issue tracker access",
+                    error=str(exc),
+                )
+                assignments = []
+            result = any(bool(assignment.get("can_manage_issues")) for assignment in assignments)
     if request is not None:
         request.state.has_issue_tracker_access = bool(result)
     return bool(result)
@@ -2069,6 +2079,7 @@ _COMPANY_PERMISSION_COLUMNS: list[dict[str, str]] = [
     {"field": "can_manage_licenses", "label": "Licenses"},
     {"field": "can_manage_invoices", "label": "Invoices"},
     {"field": "can_manage_office_groups", "label": "Office groups"},
+    {"field": "can_manage_issues", "label": "Issue tracker"},
     {"field": "can_order_licenses", "label": "Order licenses"},
     {"field": "is_admin", "label": "Company admin"},
 ]
@@ -5777,6 +5788,7 @@ async def admin_assign_user_to_company(request: Request):
                 can_manage_office_groups=permission_values.get(
                     "can_manage_office_groups", False
                 ),
+                can_manage_issues=permission_values.get("can_manage_issues", False),
                 can_order_licenses=permission_values.get("can_order_licenses", False),
                 can_access_shop=permission_values.get("can_access_shop", False),
                 can_access_cart=permission_values.get("can_access_cart", False),
