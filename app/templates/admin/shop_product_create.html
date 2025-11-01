@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block header_title %}
+  <div class="header__title-content">
+    <span class="header__title-text">Add product</span>
+    <a class="button button--ghost button--small header__title-button" href="/admin/shop">
+      Back to shop
+    </a>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  <a class="button button--ghost" href="/admin/shop/packages">Package admin</a>
+{% endblock %}
+
+{% block content %}
+  <div class="admin-grid">
+    <section class="card card--panel admin-grid__full">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Create a product</h2>
+          <p class="card__subtitle">
+            Create catalogue items with pricing, imagery, and stock levels.
+          </p>
+        </div>
+      </header>
+      <div class="card__body card__body--stacked">
+        <form action="/shop/admin/product" method="post" enctype="multipart/form-data" class="form-grid">
+          {% if csrf_token %}
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+          {% endif %}
+          <div class="form-field">
+            <label class="form-label" for="product-name">Name</label>
+            <input class="form-input" id="product-name" name="name" required />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="product-sku">SKU</label>
+            <input class="form-input" id="product-sku" name="sku" required />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="product-vendor-sku">Vendor SKU</label>
+            <input class="form-input" id="product-vendor-sku" name="vendor_sku" required />
+          </div>
+          <div class="form-field form-field--wide">
+            <label class="form-label" for="product-cross-sell">Cross-sell products</label>
+            <select
+              class="form-input form-input--multiselect"
+              id="product-cross-sell"
+              name="cross_sell_product_ids"
+              multiple
+              size="6"
+              data-recommendation-select="cross"
+              disabled
+            >
+              <option value="" disabled selected>Select a category to choose products</option>
+            </select>
+            <p class="form-helper">Suggest complementary items from the same category.</p>
+          </div>
+          <div class="form-field form-field--wide">
+            <label class="form-label" for="product-upsell">Up-sell products</label>
+            <select
+              class="form-input form-input--multiselect"
+              id="product-upsell"
+              name="upsell_product_ids"
+              multiple
+              size="6"
+              data-recommendation-select="upsell"
+              disabled
+            >
+              <option value="" disabled selected>Select a category to choose products</option>
+            </select>
+            <p class="form-helper">Highlight upgrade paths within the same category.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="product-price">Price</label>
+            <input class="form-input" id="product-price" name="price" type="number" step="0.01" required />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="product-vip-price">VIP price</label>
+            <input class="form-input" id="product-vip-price" name="vip_price" type="number" step="0.01" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="product-stock">Stock</label>
+            <input class="form-input" id="product-stock" name="stock" type="number" required />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="product-category">Category</label>
+            <select class="form-input" id="product-category" name="category_id">
+              <option value="">No category</option>
+              {% for category in categories %}
+                <option value="{{ category.id }}">{{ category.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="product-image">Image</label>
+            <input class="form-input" id="product-image" name="image" type="file" accept="image/*" />
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="button">Add product</button>
+            <a class="button button--ghost" href="/admin/shop">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </section>
+  </div>
+  <script type="application/json" id="admin-products-data">{{ products | tojson }}</script>
+  <script type="application/json" id="admin-product-restrictions">{{ product_restrictions | tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/shop_admin.js" defer></script>
+{% endblock %}

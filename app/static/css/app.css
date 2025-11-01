@@ -805,6 +805,19 @@ body {
   width: 100%;
 }
 
+.header__title-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-gap-tight);
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.header__title-actions .header__title-button {
+  margin-left: 0;
+}
+
 .header__title-content--spread {
   width: 100%;
 }

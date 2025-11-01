@@ -30,6 +30,7 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from fastapi.params import Form as FormField
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -2106,6 +2107,43 @@ async def _validate_recommendation_product_ids(
         validated.append(candidate_id)
 
     return sorted(validated)
+
+
+async def _resolve_related_product_id_by_sku(sku: str | None) -> int | None:
+    """Look up a related product identifier from a SKU value."""
+
+    if sku in (None, ""):
+        return None
+
+    candidate = str(sku).strip()
+    if not candidate:
+        return None
+
+    product = await shop_repo.get_product_by_sku(candidate, include_archived=True)
+    if not product:
+        return None
+
+    try:
+        product_id = int(product.get("id") or 0)
+    except (TypeError, ValueError):
+        return None
+
+    return product_id or None
+
+
+def _normalise_related_product_inputs(raw: Any) -> list[int | str]:
+    """Normalise related product identifiers from mixed FastAPI form inputs."""
+
+    if isinstance(raw, FormField):
+        raw = raw.default
+
+    if raw in (None, ""):
+        return []
+
+    if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
+        return list(raw)
+
+    return [raw]
 
 
 async def _render_impersonation_dashboard(
@@ -7797,6 +7835,52 @@ async def admin_shop_page(
     return await _render_template("admin/shop.html", request, current_user, extra=extra)
 
 
+@app.get("/admin/shop/categories", response_class=HTMLResponse)
+async def admin_shop_categories_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    categories = await shop_repo.list_categories()
+
+    extra = {
+        "title": "Product categories",
+        "categories": categories,
+    }
+    return await _render_template("admin/shop_categories.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/shop/products/new", response_class=HTMLResponse)
+async def admin_shop_product_create_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    categories_task = asyncio.create_task(shop_repo.list_categories())
+    products_task = asyncio.create_task(
+        shop_repo.list_products(shop_repo.ProductFilters(include_archived=False))
+    )
+    restrictions_task = asyncio.create_task(shop_repo.list_product_restrictions())
+
+    categories, products, restrictions = await asyncio.gather(
+        categories_task, products_task, restrictions_task
+    )
+
+    restrictions_map: dict[int, list[dict[str, Any]]] = {}
+    for restriction in restrictions:
+        restrictions_map.setdefault(restriction["product_id"], []).append(restriction)
+
+    extra = {
+        "title": "Add product",
+        "categories": categories,
+        "products": products,
+        "product_restrictions": restrictions_map,
+    }
+    return await _render_template(
+        "admin/shop_product_create.html", request, current_user, extra=extra
+    )
+
+
 @app.post(
     "/shop/admin/category",
     status_code=status.HTTP_303_SEE_OTHER,
@@ -7830,7 +7914,7 @@ async def admin_create_shop_category(
         name=cleaned_name,
         created_by=current_user["id"] if current_user else None,
     )
-    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/admin/shop/categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post(
@@ -7857,7 +7941,7 @@ async def admin_delete_shop_category(request: Request, category_id: int):
         category_id=category_id,
         deleted_by=current_user["id"] if current_user else None,
     )
-    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/admin/shop/categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post(
@@ -8036,6 +8120,8 @@ async def admin_update_shop_product(
     features: str | None = Form(default=None),
     cross_sell_product_ids: list[int] | None = Form(default=None),
     upsell_product_ids: list[int] | None = Form(default=None),
+    cross_sell_sku: str | None = Form(default=None),
+    upsell_sku: str | None = Form(default=None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -8138,14 +8224,24 @@ async def admin_update_shop_product(
         else:
             await image.close()
 
+    cross_sell_candidates = _normalise_related_product_inputs(cross_sell_product_ids)
+    resolved_cross_id = await _resolve_related_product_id_by_sku(cross_sell_sku)
+    if resolved_cross_id:
+        cross_sell_candidates.append(resolved_cross_id)
+
     cross_sell_ids = await _validate_recommendation_product_ids(
-        cross_sell_product_ids,
+        cross_sell_candidates,
         category_id=category_value,
         field_label="Cross-sell",
         disallow_product_id=product_id,
     )
+    upsell_candidates = _normalise_related_product_inputs(upsell_product_ids)
+    resolved_upsell_id = await _resolve_related_product_id_by_sku(upsell_sku)
+    if resolved_upsell_id:
+        upsell_candidates.append(resolved_upsell_id)
+
     upsell_ids = await _validate_recommendation_product_ids(
-        upsell_product_ids,
+        upsell_candidates,
         category_id=category_value,
         field_label="Up-sell",
         disallow_product_id=product_id,
