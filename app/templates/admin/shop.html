@@ -100,13 +100,35 @@
         <label class="form-label" for="product-vendor-sku">Vendor SKU</label>
         <input class="form-input" id="product-vendor-sku" name="vendor_sku" required />
       </div>
-      <div class="form-field">
-        <label class="form-label" for="product-cross-sell-sku">Cross-sell SKU</label>
-        <input class="form-input" id="product-cross-sell-sku" name="cross_sell_sku" />
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="product-cross-sell">Cross-sell products</label>
+        <select
+          class="form-input form-input--multiselect"
+          id="product-cross-sell"
+          name="cross_sell_product_ids"
+          multiple
+          size="6"
+          data-recommendation-select="cross"
+          disabled
+        >
+          <option value="" disabled selected>Select a category to choose products</option>
+        </select>
+        <p class="form-helper">Suggest complementary items from the same category.</p>
       </div>
-      <div class="form-field">
-        <label class="form-label" for="product-upsell-sku">Up-sell SKU</label>
-        <input class="form-input" id="product-upsell-sku" name="upsell_sku" />
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="product-upsell">Up-sell products</label>
+        <select
+          class="form-input form-input--multiselect"
+          id="product-upsell"
+          name="upsell_product_ids"
+          multiple
+          size="6"
+          data-recommendation-select="upsell"
+          disabled
+        >
+          <option value="" disabled selected>Select a category to choose products</option>
+        </select>
+        <p class="form-helper">Highlight upgrade paths within the same category.</p>
       </div>
       <div class="form-field">
         <label class="form-label" for="product-price">Price</label>
@@ -256,13 +278,31 @@
         <label class="form-label" for="edit-product-vendor">Vendor SKU</label>
         <input class="form-input" id="edit-product-vendor" name="vendor_sku" required />
       </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-product-cross-sell">Cross-sell SKU</label>
-        <input class="form-input" id="edit-product-cross-sell" name="cross_sell_sku" />
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="edit-product-cross-sell">Cross-sell products</label>
+        <select
+          class="form-input form-input--multiselect"
+          id="edit-product-cross-sell"
+          name="cross_sell_product_ids"
+          multiple
+          size="6"
+          data-recommendation-select="cross"
+        >
+        </select>
+        <p class="form-helper">Choose add-ons from the same category as this product.</p>
       </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-product-upsell">Up-sell SKU</label>
-        <input class="form-input" id="edit-product-upsell" name="upsell_sku" />
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="edit-product-upsell">Up-sell products</label>
+        <select
+          class="form-input form-input--multiselect"
+          id="edit-product-upsell"
+          name="upsell_product_ids"
+          multiple
+          size="6"
+          data-recommendation-select="upsell"
+        >
+        </select>
+        <p class="form-helper">Offer upgrade paths that remain in the same category.</p>
       </div>
       <div class="form-field form-field--wide">
         <label class="form-label" for="edit-product-description">Description</label>
