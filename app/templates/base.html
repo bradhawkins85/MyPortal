@@ -275,6 +275,14 @@
                 </a>
               </li>
               <li class="menu__item">
+                <a href="/admin/message-templates" {% if current_path.startswith('/admin/message-templates') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M4 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v16l-4-3-4 3-4-3-4 3z"/><path d="M7 6h10v2H7zm0 4h10v2H7zm0 4h6v2H7z"/></svg>
+                  </span>
+                  <span class="menu__label">Message templates</span>
+                </a>
+              </li>
+              <li class="menu__item">
                 <a href="/admin/webhooks" {% if current_path.startswith('/admin/webhooks') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M4 4a2 2 0 0 1 2-2h3a2 2 0 0 1 1.73 1H13a2 2 0 0 1 1.73 1H18a2 2 0 0 1 2 2v3a2 2 0 0 1-1 1.73V13a2 2 0 0 1-1 1.73V18a2 2 0 0 1-2 2h-3a2 2 0 0 1-1.73-1H11a2 2 0 0 1-1.73 1H6a2 2 0 0 1-2-2v-3a2 2 0 0 1 1-1.73V11a2 2 0 0 1 1-1.73V6a2 2 0 0 1-2-2zm2 0v3.5a1.5 1.5 0 0 0 0 3V14a1.5 1.5 0 0 0 0 3V18h3.5a1.5 1.5 0 0 0 3 0H16a1.5 1.5 0 0 0 3 0v-3.5a1.5 1.5 0 0 0 0-3V6a1.5 1.5 0 0 0-3 0h-3.5a1.5 1.5 0 0 0-3 0z"/></svg>

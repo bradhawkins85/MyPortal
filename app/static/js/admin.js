@@ -1133,6 +1133,155 @@
       .filter((item) => item.length > 0);
   }
 
+  function getTemplatePayload(scriptId) {
+    if (!scriptId) {
+      return null;
+    }
+    const element = document.getElementById(scriptId);
+    if (!element) {
+      return null;
+    }
+    const text = element.textContent || element.innerText || '';
+    if (!text.trim()) {
+      return null;
+    }
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function bindMessageTemplateForm() {
+    const form = document.getElementById('message-template-form');
+    if (!form) {
+      return;
+    }
+
+    const idField = form.querySelector('#message-template-id');
+    const slugField = form.querySelector('#message-template-slug');
+    const nameField = form.querySelector('#message-template-name');
+    const descriptionField = form.querySelector('#message-template-description');
+    const contentTypeField = form.querySelector('#message-template-content-type');
+    const contentField = form.querySelector('#message-template-content');
+    const submitButton = form.querySelector('[data-template-submit]');
+    const formTitle = document.querySelector('[data-template-form-title]');
+    const resetButton = document.querySelector('[data-template-reset]');
+
+    function setFormState(mode, payload) {
+      if (mode === 'edit' && payload) {
+        idField.value = payload.id || '';
+        slugField.value = payload.slug || '';
+        nameField.value = payload.name || '';
+        descriptionField.value = payload.description || '';
+        contentTypeField.value = payload.content_type || 'text/plain';
+        contentField.value = payload.content || '';
+        if (formTitle) {
+          formTitle.textContent = 'Edit template';
+        }
+        if (submitButton) {
+          submitButton.textContent = 'Update template';
+        }
+      } else {
+        idField.value = '';
+        slugField.value = '';
+        nameField.value = '';
+        descriptionField.value = '';
+        contentTypeField.value = 'text/plain';
+        contentField.value = '';
+        if (formTitle) {
+          formTitle.textContent = 'New template';
+        }
+        if (submitButton) {
+          submitButton.textContent = 'Save template';
+        }
+      }
+    }
+
+    async function handleSubmit(event) {
+      event.preventDefault();
+      const templateId = idField.value.trim();
+      const payload = {
+        slug: slugField.value.trim(),
+        name: nameField.value.trim(),
+        description: descriptionField.value.trim() || null,
+        content_type: contentTypeField.value,
+        content: contentField.value,
+      };
+
+      const method = templateId ? 'PUT' : 'POST';
+      const url = templateId
+        ? `/api/message-templates/${encodeURIComponent(templateId)}`
+        : '/api/message-templates/';
+
+      if (submitButton) {
+        submitButton.disabled = true;
+      }
+
+      try {
+        await requestJson(url, { method, body: JSON.stringify(payload) });
+        const message = templateId ? 'Template updated.' : 'Template created.';
+        window.location.href = `/admin/message-templates?success=${encodeURIComponent(message)}`;
+      } catch (error) {
+        alert(`Unable to save template: ${error.message}`);
+      } finally {
+        if (submitButton) {
+          submitButton.disabled = false;
+        }
+      }
+    }
+
+    form.addEventListener('submit', handleSubmit);
+
+    if (resetButton) {
+      resetButton.addEventListener('click', () => {
+        setFormState('create');
+        slugField.focus();
+      });
+    }
+
+    document.querySelectorAll('[data-template-edit]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const row = button.closest('tr');
+        if (!row) {
+          return;
+        }
+        const payload = getTemplatePayload(row.dataset.templateJson);
+        if (!payload) {
+          return;
+        }
+        setFormState('edit', payload);
+        slugField.focus();
+      });
+    });
+
+    document.querySelectorAll('[data-template-delete]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const row = button.closest('tr');
+        if (!row) {
+          return;
+        }
+        const templateId = row.dataset.templateId;
+        if (!templateId) {
+          return;
+        }
+        const payload = getTemplatePayload(row.dataset.templateJson);
+        const templateName = payload?.name || row.querySelector('[data-label="Name"]')?.textContent || 'this template';
+        if (!confirm(`Delete ${templateName.trim()}? This action cannot be undone.`)) {
+          return;
+        }
+        try {
+          await requestJson(`/api/message-templates/${encodeURIComponent(templateId)}`, { method: 'DELETE' });
+          window.location.href = `/admin/message-templates?success=${encodeURIComponent('Template deleted.')}`;
+        } catch (error) {
+          alert(`Unable to delete template: ${error.message}`);
+        }
+      });
+    });
+
+    setFormState('create');
+  }
+
   function bindRoleForm() {
     const form = document.getElementById('role-form');
     if (!form) {
@@ -2059,6 +2208,7 @@
     setupTableRealtimeRefreshControllers();
     bindTicketAiReplaceDescription();
     bindTicketAiRefresh();
+    bindMessageTemplateForm();
     bindRoleForm();
     bindCompanyAssignForm();
     bindCompanyAssignmentControls();

@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if success_message or error_message %}
+    <div class="alert-stack">
+      {% if success_message %}
+        <div class="alert" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="admin-grid">
+    <section class="card card--panel" aria-labelledby="message-templates-heading">
+      <header class="card__header card__header--actions">
+        <div>
+          <h2 class="card__title" id="message-templates-heading">Message templates</h2>
+          <p class="card__subtitle">
+            Maintain reusable email and notification bodies for automations, integrations, and bulk messaging.
+          </p>
+        </div>
+        <form method="get" class="card__controls card__controls--compact" aria-label="Filter message templates">
+          <input type="search" class="form-input" name="search" value="{{ filters.search or '' }}" placeholder="Search templates" aria-label="Search templates" />
+          <label class="visually-hidden" for="content-type-filter">Content type</label>
+          <select id="content-type-filter" class="form-input" name="content_type">
+            <option value="">All content types</option>
+            {% for option in content_type_options %}
+              <option value="{{ option.value }}" {% if option.value == filters.content_type %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="button">Apply</button>
+        </form>
+      </header>
+      <div class="table-wrapper">
+        <table class="table" id="message-templates-table" data-table>
+          <thead>
+            <tr>
+              <th scope="col" data-sort="string">Slug</th>
+              <th scope="col" data-sort="string">Name</th>
+              <th scope="col" data-sort="string">Description</th>
+              <th scope="col" data-sort="string">Content type</th>
+              <th scope="col" data-sort="date">Updated</th>
+              <th scope="col" class="table__actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for template in templates %}
+              <tr
+                data-template-id="{{ template.id }}"
+                data-template-json="message-template-{{ template.id }}-data"
+              >
+                <td data-label="Slug">{{ template.slug }}</td>
+                <td data-label="Name">{{ template.name }}</td>
+                <td data-label="Description">{{ template.description or '—' }}</td>
+                <td data-label="Content type">{{ template.content_type }}</td>
+                <td data-label="Updated" data-value="{{ template.updated_at_iso or '' }}">
+                  {% if template.updated_at_iso %}
+                    <span data-utc="{{ template.updated_at_iso }}"></span>
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+                <td class="table__actions">
+                  <div class="table__action-buttons">
+                    <button type="button" class="button button--ghost" data-template-edit>Edit</button>
+                    <button type="button" class="button button--danger" data-template-delete>Delete</button>
+                  </div>
+                </td>
+              </tr>
+              <script type="application/json" id="message-template-{{ template.id }}-data" hidden>
+                {{ {
+                  "id": template.id,
+                  "slug": template.slug,
+                  "name": template.name,
+                  "description": template.description,
+                  "content_type": template.content_type,
+                  "content": template.content
+                } | tojson }}
+              </script>
+            {% else %}
+              <tr>
+                <td colspan="6" class="table__empty">No message templates have been created yet.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card card--panel" aria-labelledby="message-template-form-heading">
+      <header class="card__header card__header--actions">
+        <div>
+          <h2 class="card__title" id="message-template-form-heading" data-template-form-title>New template</h2>
+          <p class="card__subtitle">
+            Provide a unique slug, friendly name, and body content. You can reuse templates anywhere template variables are supported.
+          </p>
+        </div>
+        <button type="button" class="button button--ghost" data-template-reset>
+          Clear form
+        </button>
+      </header>
+      <form id="message-template-form" class="form" autocomplete="off" novalidate>
+        <input type="hidden" id="message-template-id" name="template_id" />
+        <div class="form-field">
+          <label class="form-label" for="message-template-slug">Slug</label>
+          <input
+            class="form-input"
+            id="message-template-slug"
+            name="slug"
+            maxlength="120"
+            pattern="^[a-z0-9](?:[a-z0-9._-]{0,118}[a-z0-9])?$"
+            required
+            placeholder="welcome.email"
+            aria-describedby="message-template-slug-help"
+          />
+          <p class="form-help" id="message-template-slug-help">
+            Lowercase letters, numbers, dots, underscores, and hyphens only.
+          </p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="message-template-name">Name</label>
+          <input class="form-input" id="message-template-name" name="name" maxlength="255" required />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="message-template-description">Description</label>
+          <textarea
+            class="form-input form-input--textarea"
+            id="message-template-description"
+            name="description"
+            rows="3"
+          ></textarea>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="message-template-content-type">Content type</label>
+          <select class="form-input" id="message-template-content-type" name="content_type">
+            {% for option in content_type_options %}
+              <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="message-template-content">Content</label>
+          <textarea
+            class="form-input form-input--textarea"
+            id="message-template-content"
+            name="content"
+            rows="12"
+            required
+            aria-describedby="message-template-content-help"
+          ></textarea>
+          <p class="form-help" id="message-template-content-help">
+            Supports template variables like <code>{{ '{{ user.first_name }}' }}</code> and <code>{{ '{{ company.name }}' }}</code>.
+          </p>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary" data-template-submit>Save template</button>
+        </div>
+      </form>
+    </section>
+
+    <details class="card card--panel card-collapsible">
+      <summary class="card__header card__header--collapsible">
+        <div>
+          <h2 class="card__title">Using template variables</h2>
+          <p class="card__subtitle">Reference automation context safely across email and notification templates.</p>
+        </div>
+        <span class="card__toggle-icon" aria-hidden="true"></span>
+      </summary>
+      <div class="card-collapsible__content">
+        <div class="card__body card__body--stacked">
+          <p>
+            Templates can include any variable exposed by the automation or integration invoking them. Common variables include
+            <code>{{ '{{ user.first_name }}' }}</code>, <code>{{ '{{ company.name }}' }}</code>, and <code>{{ '{{ portal.url }}' }}</code>.
+            HTML templates render exactly as provided, so remember to sanitise any untrusted data before storing it in a template.
+          </p>
+          <p>
+            Review the <a href="/docs/message-templates" target="_blank" rel="noopener">message template documentation</a> for
+            a full list of supported tokens and implementation guidance.
+          </p>
+        </div>
+      </div>
+    </details>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/admin.js" defer></script>
+{% endblock %}
