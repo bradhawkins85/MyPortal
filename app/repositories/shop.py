@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import defaultdict
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Iterable, Sequence
@@ -37,15 +38,9 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
     query_parts: list[str] = [
         "SELECT",
         "    p.*,",
-        "    c.name AS category_name,",
-        "    cross_sell.sku AS cross_sell_product_sku,",
-        "    cross_sell.name AS cross_sell_product_name,",
-        "    upsell.sku AS upsell_product_sku,",
-        "    upsell.name AS upsell_product_name",
+        "    c.name AS category_name",
         "FROM shop_products AS p",
         "LEFT JOIN shop_categories AS c ON c.id = p.category_id",
-        "LEFT JOIN shop_products AS cross_sell ON cross_sell.id = p.cross_sell_product_id",
-        "LEFT JOIN shop_products AS upsell ON upsell.id = p.upsell_product_id",
     ]
     params: list[Any] = []
 
@@ -78,7 +73,9 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
     sql = " ".join(query_parts)
 
     rows = await db.fetch_all(sql, tuple(params) if params else None)
-    return [_normalise_product(row) for row in rows]
+    products = [_normalise_product(row) for row in rows]
+    await _populate_product_recommendations(products)
+    return products
 
 
 async def list_all_products(include_archived: bool = False) -> list[dict[str, Any]]:
@@ -100,15 +97,9 @@ async def list_products_by_ids(
     query_parts: list[str] = [
         "SELECT",
         "    p.*,",
-        "    c.name AS category_name,",
-        "    cross_sell.sku AS cross_sell_product_sku,",
-        "    cross_sell.name AS cross_sell_product_name,",
-        "    upsell.sku AS upsell_product_sku,",
-        "    upsell.name AS upsell_product_name",
+        "    c.name AS category_name",
         "FROM shop_products AS p",
         "LEFT JOIN shop_categories AS c ON c.id = p.category_id",
-        "LEFT JOIN shop_products AS cross_sell ON cross_sell.id = p.cross_sell_product_id",
-        "LEFT JOIN shop_products AS upsell ON upsell.id = p.upsell_product_id",
     ]
     params: list[Any] = []
     if company_id is not None:
@@ -129,7 +120,9 @@ async def list_products_by_ids(
 
     params.extend(identifiers)
     rows = await db.fetch_all(" ".join(query_parts), tuple(params))
-    return [_normalise_product(row) for row in rows]
+    products = [_normalise_product(row) for row in rows]
+    await _populate_product_recommendations(products)
+    return products
 
 
 async def list_packages(filters: PackageFilters) -> list[dict[str, Any]]:
@@ -512,15 +505,9 @@ async def get_product_by_id(
     query = [
         "SELECT",
         "    p.*,",
-        "    c.name AS category_name,",
-        "    cross_sell.sku AS cross_sell_product_sku,",
-        "    cross_sell.name AS cross_sell_product_name,",
-        "    upsell.sku AS upsell_product_sku,",
-        "    upsell.name AS upsell_product_name",
+        "    c.name AS category_name",
         "FROM shop_products AS p",
         "LEFT JOIN shop_categories AS c ON c.id = p.category_id",
-        "LEFT JOIN shop_products AS cross_sell ON cross_sell.id = p.cross_sell_product_id",
-        "LEFT JOIN shop_products AS upsell ON upsell.id = p.upsell_product_id",
     ]
     params: list[Any] = []
     if company_id is not None:
@@ -536,7 +523,11 @@ async def get_product_by_id(
         query.append("AND e.product_id IS NULL")
     sql = " ".join(query)
     row = await db.fetch_one(sql, tuple(params))
-    return _normalise_product(row) if row else None
+    if not row:
+        return None
+    product = _normalise_product(row)
+    await _populate_product_recommendations([product])
+    return product
 
 
 async def get_product_by_sku(
@@ -547,15 +538,9 @@ async def get_product_by_sku(
     sql = [
         "SELECT",
         "    p.*,",
-        "    c.name AS category_name,",
-        "    cross_sell.sku AS cross_sell_product_sku,",
-        "    cross_sell.name AS cross_sell_product_name,",
-        "    upsell.sku AS upsell_product_sku,",
-        "    upsell.name AS upsell_product_name",
+        "    c.name AS category_name",
         "FROM shop_products AS p",
         "LEFT JOIN shop_categories AS c ON c.id = p.category_id",
-        "LEFT JOIN shop_products AS cross_sell ON cross_sell.id = p.cross_sell_product_id",
-        "LEFT JOIN shop_products AS upsell ON upsell.id = p.upsell_product_id",
         "WHERE p.sku = %s",
     ]
     params: list[Any] = [sku]
@@ -563,7 +548,11 @@ async def get_product_by_sku(
         sql.append("AND p.archived = 0")
     sql.append("LIMIT 1")
     row = await db.fetch_one(" ".join(sql), tuple(params))
-    return _normalise_product(row) if row else None
+    if not row:
+        return None
+    product = _normalise_product(row)
+    await _populate_product_recommendations([product])
+    return product
 
 
 async def create_product(
@@ -577,16 +566,16 @@ async def create_product(
     vip_price: Decimal | None = None,
     category_id: int | None = None,
     image_url: str | None = None,
-    cross_sell_product_id: int | None = None,
-    upsell_product_id: int | None = None,
+    cross_sell_product_ids: Iterable[int] | None = None,
+    upsell_product_ids: Iterable[int] | None = None,
 ) -> dict[str, Any]:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
             await cursor.execute(
                 """
                 INSERT INTO shop_products
-                    (name, sku, vendor_sku, description, image_url, price, vip_price, stock, category_id, cross_sell_product_id, upsell_product_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (name, sku, vendor_sku, description, image_url, price, vip_price, stock, category_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     name,
@@ -598,11 +587,14 @@ async def create_product(
                     vip_price,
                     stock,
                     category_id,
-                    cross_sell_product_id,
-                    upsell_product_id,
                 ),
             )
             product_id = int(cursor.lastrowid)
+    await replace_product_recommendations(
+        product_id,
+        cross_sell_ids=cross_sell_product_ids,
+        upsell_ids=upsell_product_ids,
+    )
     product = await get_product_by_id(product_id)
     if not product:
         raise RuntimeError("Failed to create product")
@@ -830,8 +822,8 @@ async def update_product(
     vip_price: Decimal | None,
     category_id: int | None,
     image_url: str | None,
-    cross_sell_product_id: int | None,
-    upsell_product_id: int | None,
+    cross_sell_product_ids: Iterable[int] | None,
+    upsell_product_ids: Iterable[int] | None,
 ) -> dict[str, Any] | None:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -847,9 +839,7 @@ async def update_product(
                     price = %s,
                     vip_price = %s,
                     stock = %s,
-                    category_id = %s,
-                    cross_sell_product_id = %s,
-                    upsell_product_id = %s
+                    category_id = %s
                 WHERE id = %s
                 """,
                 (
@@ -862,11 +852,14 @@ async def update_product(
                     vip_price,
                     stock,
                     category_id,
-                    cross_sell_product_id,
-                    upsell_product_id,
                     product_id,
                 ),
             )
+    await replace_product_recommendations(
+        product_id,
+        cross_sell_ids=cross_sell_product_ids,
+        upsell_ids=upsell_product_ids,
+    )
     return await get_product_by_id(product_id, include_archived=True)
 
 
@@ -878,6 +871,118 @@ async def set_product_archived(product_id: int, *, archived: bool) -> bool:
                 (1 if archived else 0, product_id),
             )
             return cursor.rowcount > 0
+
+
+async def replace_product_recommendations(
+    product_id: int,
+    *,
+    cross_sell_ids: Iterable[int] | None = None,
+    upsell_ids: Iterable[int] | None = None,
+) -> None:
+    cross_ids = sorted({int(pid) for pid in (cross_sell_ids or []) if int(pid) > 0 and int(pid) != product_id})
+    upsell_ids_clean = sorted({int(pid) for pid in (upsell_ids or []) if int(pid) > 0 and int(pid) != product_id})
+
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await conn.begin()
+            try:
+                await cursor.execute(
+                    "DELETE FROM shop_product_cross_sells WHERE product_id = %s",
+                    (product_id,),
+                )
+                if cross_ids:
+                    await cursor.executemany(
+                        "INSERT INTO shop_product_cross_sells (product_id, related_product_id) VALUES (%s, %s)",
+                        [(product_id, related_id) for related_id in cross_ids],
+                    )
+
+                await cursor.execute(
+                    "DELETE FROM shop_product_upsells WHERE product_id = %s",
+                    (product_id,),
+                )
+                if upsell_ids_clean:
+                    await cursor.executemany(
+                        "INSERT INTO shop_product_upsells (product_id, related_product_id) VALUES (%s, %s)",
+                        [(product_id, related_id) for related_id in upsell_ids_clean],
+                    )
+            except Exception:
+                await conn.rollback()
+                raise
+            else:
+                await conn.commit()
+
+
+async def _populate_product_recommendations(products: list[dict[str, Any]]) -> None:
+    product_ids = [
+        _coerce_int(product.get("id"), default=0)
+        for product in products
+        if product.get("id") is not None
+    ]
+    identifiers = [pid for pid in product_ids if pid > 0]
+    if not identifiers:
+        for product in products:
+            product.setdefault("cross_sell_products", [])
+            product.setdefault("cross_sell_product_ids", [])
+            product.setdefault("upsell_products", [])
+            product.setdefault("upsell_product_ids", [])
+        return
+
+    cross_map = await _fetch_recommendation_map("shop_product_cross_sells", identifiers)
+    upsell_map = await _fetch_recommendation_map("shop_product_upsells", identifiers)
+
+    for product in products:
+        product_id = _coerce_int(product.get("id"), default=0)
+        cross_entries = cross_map.get(product_id, [])
+        upsell_entries = upsell_map.get(product_id, [])
+        product["cross_sell_products"] = cross_entries
+        product["cross_sell_product_ids"] = [entry["id"] for entry in cross_entries]
+        product["upsell_products"] = upsell_entries
+        product["upsell_product_ids"] = [entry["id"] for entry in upsell_entries]
+
+
+async def _fetch_recommendation_map(
+    table_name: str, product_ids: Sequence[int]
+) -> dict[int, list[dict[str, Any]]]:
+    ids = sorted({int(pid) for pid in product_ids if int(pid) > 0})
+    if not ids:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(ids))
+    rows = await db.fetch_all(
+        f"""
+        SELECT
+            rel.product_id,
+            rel.related_product_id,
+            p.name,
+            p.sku,
+            p.archived,
+            p.category_id,
+            c.name AS category_name
+        FROM {table_name} AS rel
+        JOIN shop_products AS p ON p.id = rel.related_product_id
+        LEFT JOIN shop_categories AS c ON c.id = p.category_id
+        WHERE rel.product_id IN ({placeholders})
+        ORDER BY p.name ASC
+        """,
+        tuple(ids),
+    )
+
+    mapping: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        product_id = _coerce_int(row.get("product_id"), default=0)
+        related_id = _coerce_int(row.get("related_product_id"), default=0)
+        if product_id <= 0 or related_id <= 0:
+            continue
+        entry = {
+            "id": related_id,
+            "name": row.get("name"),
+            "sku": row.get("sku"),
+            "category_id": _coerce_optional_int(row.get("category_id")),
+            "category_name": row.get("category_name"),
+            "archived": bool(_coerce_int(row.get("archived"), default=0)),
+        }
+        mapping[product_id].append(entry)
+    return mapping
 
 
 async def replace_product_exclusions(
@@ -990,16 +1095,6 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     normalised = dict(row)
     normalised["id"] = _coerce_int(row.get("id"))
     normalised["category_id"] = _coerce_optional_int(row.get("category_id"))
-    normalised["cross_sell_product_id"] = _coerce_optional_int(
-        row.get("cross_sell_product_id")
-    )
-    normalised["upsell_product_id"] = _coerce_optional_int(
-        row.get("upsell_product_id")
-    )
-    normalised["cross_sell_product_sku"] = row.get("cross_sell_product_sku")
-    normalised["cross_sell_product_name"] = row.get("cross_sell_product_name")
-    normalised["upsell_product_sku"] = row.get("upsell_product_sku")
-    normalised["upsell_product_name"] = row.get("upsell_product_name")
     normalised["price"] = _coerce_decimal(row.get("price"), default=0.0)
     normalised["vip_price"] = _coerce_optional_decimal(row.get("vip_price"))
     normalised["buy_price"] = _coerce_optional_decimal(row.get("buy_price"))
@@ -1018,6 +1113,10 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
         normalised["stock_at"] = stock_at.isoformat()
     elif stock_at is not None:
         normalised["stock_at"] = str(stock_at)
+    normalised.setdefault("cross_sell_products", [])
+    normalised.setdefault("cross_sell_product_ids", [])
+    normalised.setdefault("upsell_products", [])
+    normalised.setdefault("upsell_product_ids", [])
     return normalised
 
 
