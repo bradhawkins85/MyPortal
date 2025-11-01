@@ -74,7 +74,7 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
 
     rows = await db.fetch_all(sql, tuple(params) if params else None)
     products = [_normalise_product(row) for row in rows]
-    return await _attach_features_to_products(products)
+    products = await _attach_features_to_products(products)
     await _populate_product_recommendations(products)
     return products
 
@@ -156,7 +156,7 @@ async def list_products_by_ids(
     params.extend(identifiers)
     rows = await db.fetch_all(" ".join(query_parts), tuple(params))
     products = [_normalise_product(row) for row in rows]
-    return await _attach_features_to_products(products)
+    products = await _attach_features_to_products(products)
     await _populate_product_recommendations(products)
     return products
 
