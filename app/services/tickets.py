@@ -900,14 +900,16 @@ async def create_ticket(
     external_reference: str | None,
     ticket_number: str | None = None,
     trigger_automations: bool = True,
+    initial_reply_author_id: int | None = None,
 ) -> TicketRecord:
     """Create a ticket and emit the corresponding automation event."""
 
     status_slug = await resolve_status_or_default(status)
+    truncated_description = _truncate_description(description)
 
     ticket = await tickets_repo.create_ticket(
         subject=subject,
-        description=_truncate_description(description),
+        description=truncated_description,
         requester_id=requester_id,
         company_id=company_id,
         assigned_user_id=assigned_user_id,
@@ -918,6 +920,36 @@ async def create_ticket(
         external_reference=external_reference,
         ticket_number=ticket_number,
     )
+
+    ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
+    author_id: int | None = None
+    if initial_reply_author_id is not None:
+        try:
+            author_id = int(initial_reply_author_id)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            author_id = None
+    if (
+        isinstance(ticket_id, int)
+        and ticket_id > 0
+        and isinstance(truncated_description, str)
+        and truncated_description
+        and author_id is not None
+        and author_id > 0
+    ):
+        try:
+            await tickets_repo.create_reply(
+                ticket_id=ticket_id,
+                author_id=author_id,
+                body=truncated_description,
+                is_internal=False,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to record initial ticket conversation entry",
+                ticket_id=ticket_id,
+                error=str(exc),
+            )
+
     enriched_ticket = await _enrich_ticket_context(ticket)
 
     if trigger_automations:
