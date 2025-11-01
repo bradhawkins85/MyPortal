@@ -179,6 +179,7 @@ async def test_admin_assign_user_to_company_preserves_existing_permissions(monke
         "can_manage_licenses": False,
         "can_manage_invoices": True,
         "can_manage_office_groups": False,
+        "can_manage_issues": False,
         "can_order_licenses": True,
         "is_admin": True,
         "can_manage_staff": True,
@@ -217,6 +218,7 @@ async def test_admin_assign_user_to_company_preserves_existing_permissions(monke
         "can_manage_licenses": False,
         "can_manage_invoices": True,
         "can_manage_office_groups": False,
+        "can_manage_issues": False,
         "can_order_licenses": True,
         "is_admin": True,
     }
@@ -347,6 +349,7 @@ async def test_admin_assign_user_to_company_queues_pending_access(monkeypatch):
         "can_manage_assets": False,
         "can_manage_invoices": False,
         "can_manage_office_groups": False,
+        "can_manage_issues": False,
         "can_order_licenses": False,
         "can_access_shop": True,
         "can_access_cart": False,

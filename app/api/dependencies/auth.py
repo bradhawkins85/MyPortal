@@ -66,6 +66,12 @@ async def require_issue_tracker_access(current_user: dict = Depends(get_current_
         user_id_int, issues_service.ISSUE_TRACKER_PERMISSION_KEY
     )
     if not has_permission:
+        try:
+            assignments = await user_company_repo.list_companies_for_user(user_id_int)
+        except Exception:  # pragma: no cover - defensive guard against DB issues
+            assignments = []
+        has_permission = any(bool(entry.get("can_manage_issues")) for entry in assignments)
+    if not has_permission:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Issue tracker access required",

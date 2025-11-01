@@ -55,6 +55,7 @@ def company_admin_context(monkeypatch):
         "can_manage_assets": False,
         "can_manage_licenses": False,
         "can_manage_invoices": True,
+        "can_manage_issues": False,
         "can_manage_staff": False,
         "staff_permission": 2,
     }

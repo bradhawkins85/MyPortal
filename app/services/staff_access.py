@@ -48,6 +48,7 @@ async def apply_pending_access_for_user(user: dict[str, Any]) -> None:
             can_manage_assets=assignment.get("can_manage_assets", False),
             can_manage_invoices=assignment.get("can_manage_invoices", False),
             can_manage_office_groups=assignment.get("can_manage_office_groups", False),
+            can_manage_issues=assignment.get("can_manage_issues", False),
             can_order_licenses=assignment.get("can_order_licenses", False),
             can_access_shop=assignment.get("can_access_shop", False),
             can_access_cart=assignment.get("can_access_cart", False),
