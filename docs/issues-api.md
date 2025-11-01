@@ -1,6 +1,6 @@
 # Issue Tracker API
 
-The Issue Tracker API exposes CRUD-style endpoints that allow technicians and automation clients to manage shared issues and the status of each company assignment. All endpoints require an authenticated session with helpdesk technician access or super-admin privileges. Requests must include a valid CSRF token when invoked from browser contexts.
+The Issue Tracker API exposes CRUD-style endpoints that allow technicians and automation clients to manage shared issues and the status of each company assignment. All endpoints require an authenticated session with the Issue Tracker permission (`issue_tracker.access`) or super-admin privileges. Requests must include a valid CSRF token when invoked from browser contexts.
 
 ## Base Path
 
@@ -10,7 +10,7 @@ The Issue Tracker API exposes CRUD-style endpoints that allow technicians and au
 
 ## Authentication
 
-These endpoints require a valid session cookie. API clients should authenticate using the standard session workflow before making requests. Responses will return HTTP 401 if the session is missing or expired, and HTTP 403 if the user lacks helpdesk technician permissions.
+These endpoints require a valid session cookie. API clients should authenticate using the standard session workflow before making requests. Responses will return HTTP 401 if the session is missing or expired, and HTTP 403 if the user lacks the Issue Tracker permission.
 
 ## List issues
 
