@@ -4871,6 +4871,7 @@ async def portal_create_ticket(request: Request):
             module_slug=None,
             external_reference=None,
             trigger_automations=True,
+            initial_reply_author_id=requester_id,
         )
         await tickets_repo.add_watcher(ticket["id"], requester_id)
         try:
@@ -10010,6 +10011,7 @@ async def admin_create_ticket(request: Request):
             module_slug=module_slug,
             external_reference=str(form.get("externalReference", "")).strip() or None,
             trigger_automations=True,
+            initial_reply_author_id=current_user.get("id"),
         )
         await tickets_repo.add_watcher(created["id"], current_user.get("id"))
         await tickets_service.refresh_ticket_ai_summary(created["id"])

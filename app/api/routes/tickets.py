@@ -316,6 +316,7 @@ async def create_ticket(
         module_slug=module_slug,
         external_reference=external_reference,
         trigger_automations=True,
+        initial_reply_author_id=session.user_id,
     )
     await tickets_repo.add_watcher(ticket["id"], session.user_id)
     try:
