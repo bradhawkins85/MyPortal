@@ -1298,6 +1298,11 @@ _NOTIFICATION_READ_OPTIONS: list[tuple[str, str]] = [
 
 _NOTIFICATION_PAGE_SIZES: list[int] = [10, 25, 50, 100]
 
+_MESSAGE_TEMPLATE_CONTENT_TYPES: tuple[tuple[str, str], ...] = (
+    ("text/plain", "Plain text"),
+    ("text/html", "HTML"),
+)
+
 _ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
     {"key": "name", "label": "Name", "sort": "string"},
     {"key": "type", "label": "Type", "sort": "string"},
@@ -6598,6 +6603,62 @@ async def admin_roles(request: Request):
         "roles": roles_list,
     }
     return await _render_template("admin/roles.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/message-templates", response_class=HTMLResponse)
+async def admin_message_templates(
+    request: Request,
+    search: str | None = Query(default=None),
+    content_type: str | None = Query(default=None),
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    search_value = (search or "").strip()
+    if len(search_value) > 120:
+        search_value = search_value[:120]
+    content_type_value = (content_type or "").strip().lower()
+    if content_type_value not in {value for value, _ in _MESSAGE_TEMPLATE_CONTENT_TYPES}:
+        content_type_value = ""
+
+    try:
+        template_records = await message_templates_service.list_templates(
+            search=search_value or None,
+            content_type=content_type_value or None,
+            limit=500,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to load message templates", error=str(exc))
+        template_records = []
+
+    templates_payload: list[dict[str, Any]] = []
+    for record in template_records:
+        prepared = dict(record)
+        prepared["created_at_iso"] = _to_iso(record.get("created_at"))
+        prepared["updated_at_iso"] = _to_iso(record.get("updated_at"))
+        templates_payload.append(prepared)
+
+    content_type_options = [
+        {"value": value, "label": label}
+        for value, label in _MESSAGE_TEMPLATE_CONTENT_TYPES
+    ]
+
+    extra = {
+        "title": "Message templates",
+        "templates": templates_payload,
+        "filters": {
+            "search": search_value,
+            "content_type": content_type_value or "",
+        },
+        "content_type_options": content_type_options,
+        "success_message": _sanitize_message(success),
+        "error_message": _sanitize_message(error),
+    }
+
+    return await _render_template("admin/message_templates.html", request, current_user, extra=extra)
 
 
 @app.get("/admin/automation", response_class=HTMLResponse)
