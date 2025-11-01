@@ -81,6 +81,8 @@ async def test_render_portal_tickets_page_formats_results(monkeypatch):
     assert response.status_code == status.HTTP_200_OK
     list_mock.assert_awaited_once()
     count_mock.assert_awaited_once()
+    assert list_mock.await_args.kwargs["status"] == ["open"]
+    assert count_mock.await_args.kwargs["status"] == ["open"]
     assert captured["template"] == "tickets/index.html"
 
     extra = captured["extra"]
@@ -107,6 +109,105 @@ async def test_render_portal_tickets_page_formats_results(monkeypatch):
     ]
     option_labels = {option["value"]: option["label"] for option in extra["status_options"]}
     assert option_labels == {"open": "Open", "closed": "Closed"}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_render_portal_tickets_page_merges_duplicate_status_labels(monkeypatch):
+    request = _make_request()
+    user = {"id": 9, "company_id": 77}
+
+    statuses = [
+        TicketStatusDefinition(
+            tech_status="waiting_on_client",
+            tech_label="Waiting on client",
+            public_status="Waiting on client",
+        ),
+        TicketStatusDefinition(
+            tech_status="pending_client",
+            tech_label="Pending client",
+            public_status="Waiting on client",
+        ),
+        TicketStatusDefinition(
+            tech_status="open",
+            tech_label="Open",
+            public_status="Open",
+        ),
+    ]
+
+    listed_tickets = [
+        {
+            "id": 71,
+            "subject": "Need more info",
+            "status": "waiting_on_client",
+            "priority": "normal",
+            "company_id": 77,
+            "updated_at": datetime(2025, 3, 10, 8, 15, tzinfo=timezone.utc),
+            "created_at": datetime(2025, 3, 9, 11, 0, tzinfo=timezone.utc),
+        },
+        {
+            "id": 72,
+            "subject": "Customer replied",
+            "status": "pending_client",
+            "priority": "high",
+            "company_id": 77,
+            "updated_at": datetime(2025, 3, 10, 9, 0, tzinfo=timezone.utc),
+            "created_at": datetime(2025, 3, 9, 12, 30, tzinfo=timezone.utc),
+        },
+    ]
+
+    combined_value = "pending_client,waiting_on_client"
+
+    monkeypatch.setattr(
+        main.company_access,
+        "list_accessible_companies",
+        AsyncMock(return_value=[{"company_id": 77, "company_name": "Example"}]),
+    )
+    list_mock = AsyncMock(return_value=listed_tickets)
+    count_mock = AsyncMock(return_value=2)
+    monkeypatch.setattr(main.tickets_repo, "list_tickets_for_user", list_mock)
+    monkeypatch.setattr(main.tickets_repo, "count_tickets_for_user", count_mock)
+    monkeypatch.setattr(main.tickets_service, "list_status_definitions", AsyncMock(return_value=statuses))
+
+    captured: dict[str, Any] = {}
+
+    async def fake_render_template(template_name, request_obj, user_obj, *, extra):
+        captured["template"] = template_name
+        captured["extra"] = extra
+        return HTMLResponse("OK")
+
+    monkeypatch.setattr(main, "_render_template", fake_render_template)
+
+    response = await main._render_portal_tickets_page(
+        request,
+        user,
+        status_filter=combined_value,
+    )
+
+    assert isinstance(response, HTMLResponse)
+    assert response.status_code == status.HTTP_200_OK
+    list_mock.assert_awaited_once()
+    count_mock.assert_awaited_once()
+    assert list_mock.await_args.kwargs["status"] == [
+        "pending_client",
+        "waiting_on_client",
+    ]
+    assert count_mock.await_args.kwargs["status"] == [
+        "pending_client",
+        "waiting_on_client",
+    ]
+
+    extra = captured["extra"]
+    assert extra["status_filter"] == combined_value
+    assert extra["filters_active"] is True
+    assert extra["status_summary"] == [
+        {"slug": combined_value, "label": "Waiting on client", "count": 2}
+    ]
+
+    option_values = extra["status_options"]
+    assert option_values == [
+        {"value": "open", "label": "Open"},
+        {"value": combined_value, "label": "Waiting on client"},
+    ]
 
 
 @pytest.mark.anyio("asyncio")
