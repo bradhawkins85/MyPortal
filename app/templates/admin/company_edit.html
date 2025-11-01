@@ -496,13 +496,26 @@
               </select>
             </div>
             <div class="form-field">
-              <label class="form-label" for="task-company">Company</label>
-              <select class="form-input" id="task-company" name="companyId">
-                {% for option in automation_company_options %}
-                  <option value="{{ option.value }}">{{ option.label }}</option>
-                {% endfor %}
-              </select>
+              <label class="form-label" for="task-company-display">Company</label>
+              <input
+                class="form-input"
+                id="task-company-display"
+                type="text"
+                value="{{ (automation_company_options[0].label if automation_company_options else 'All companies') }}"
+                readonly
+                aria-readonly="true"
+                tabindex="-1"
+              />
               <p class="form-help">Automations created here run only for this company.</p>
+              <input
+                type="hidden"
+                id="task-company"
+                name="companyId"
+                value="{{ (automation_company_options[0].value if automation_company_options else '') }}"
+                data-company-name="{{ (automation_company_options[0].label if automation_company_options else 'All companies') }}"
+                data-default-value="{{ (automation_company_options[0].value if automation_company_options else '') }}"
+                data-default-name="{{ (automation_company_options[0].label if automation_company_options else 'All companies') }}"
+              />
             </div>
             <div class="form-field">
               <label class="form-label" for="task-cron">Cron expression</label>

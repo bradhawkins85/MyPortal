@@ -399,6 +399,29 @@
     return document.getElementById(id);
   }
 
+  function getCompanyContext() {
+    const field = query('task-company');
+    if (!field) {
+      return { value: '', label: 'All companies' };
+    }
+    const tag = field.tagName ? field.tagName.toUpperCase() : '';
+    if (tag === 'SELECT' && field.options && field.options.length > 0) {
+      const option = field.options[field.selectedIndex];
+      const label = option ? option.textContent.trim() : '';
+      return {
+        value: field.value ? String(field.value) : '',
+        label: label || 'All companies',
+      };
+    }
+    const dataset = field.dataset || {};
+    const defaultValue = dataset.defaultValue || '';
+    const defaultName = dataset.defaultName || 'All companies';
+    return {
+      value: field.value ? String(field.value) : defaultValue,
+      label: dataset.companyName || defaultName || 'All companies',
+    };
+  }
+
   function randomDailyCron() {
     const minute = Math.floor(Math.random() * 60);
     const hour = Math.floor(Math.random() * 24);
@@ -414,14 +437,8 @@
 
   function generateTaskName() {
     const commandField = query('task-command');
-    const companyField = query('task-company');
-    let companyName = 'All companies';
-    if (companyField && companyField.options.length > 0) {
-      const option = companyField.options[companyField.selectedIndex];
-      if (option) {
-        companyName = option.textContent.trim() || companyName;
-      }
-    }
+    const companyContext = getCompanyContext();
+    const companyName = companyContext.label || 'All companies';
     let commandName = 'Task';
     if (commandField && commandField.options.length > 0) {
       const option = commandField.options[commandField.selectedIndex];
@@ -492,6 +509,8 @@
     const idField = query('task-id');
     const commandField = query('task-command');
     const companyField = query('task-company');
+    const companyDisplayField = query('task-company-display');
+    const defaults = getCompanyContext();
     const cronField = query('task-cron');
     const descriptionField = query('task-description');
     const maxRetriesField = query('task-max-retries');
@@ -525,10 +544,19 @@
     const rawCompanyValue =
       taskData.company_id ?? taskData.companyId ?? taskData.company ?? '';
     if (companyField) {
-      companyField.value =
-        rawCompanyValue === null || rawCompanyValue === undefined
-          ? ''
+      const dataset = companyField.dataset || {};
+      const defaultValue = dataset.defaultValue || defaults.value;
+      const defaultName = dataset.defaultName || defaults.label;
+      const resolvedCompanyValue =
+        rawCompanyValue === null || rawCompanyValue === undefined || rawCompanyValue === ''
+          ? defaultValue
           : String(rawCompanyValue);
+      companyField.value = resolvedCompanyValue;
+      const companyName = taskData.company_name || taskData.companyName || dataset.companyName || defaultName;
+      companyField.dataset.companyName = companyName || defaultName;
+      if (companyDisplayField) {
+        companyDisplayField.value = companyName || defaultName;
+      }
     }
 
     const commandValue = taskData.command || '';
@@ -537,7 +565,13 @@
       commandField.value = commandField.options[0].value;
     }
 
-    if (companyField && !companyField.value && companyField.options.length > 0) {
+    if (
+      companyField &&
+      !companyField.value &&
+      companyField.tagName &&
+      companyField.tagName.toUpperCase() === 'SELECT' &&
+      companyField.options.length > 0
+    ) {
       companyField.value = '';
     }
 
