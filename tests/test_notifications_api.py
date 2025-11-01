@@ -493,5 +493,8 @@ def test_event_types_endpoint_merges_sources(monkeypatch, active_session):
     assert "custom.event" in data
     assert "db.recorded" in data
     assert "general" in data
-    assert "billing.invoice_overdue" in data
+    assert "billing.invoice_overdue" not in data
+    assert "billing.payment_received" not in data
+    assert "webhook.failed" not in data
+    assert "webhook.retried" not in data
     assert len(data) == len(set(data))
