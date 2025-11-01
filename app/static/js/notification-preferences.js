@@ -40,19 +40,41 @@
     const seen = new Set();
     const normalised = [];
     list.forEach((item) => {
-      const eventType = (item && item.event_type ? String(item.event_type) : '').trim();
+      if (!item) {
+        return;
+      }
+      const eventType = (item.event_type ? String(item.event_type) : '').trim();
       if (!eventType || seen.has(eventType)) {
         return;
       }
       seen.add(eventType);
+      const allowInApp = Boolean(item.allow_channel_in_app ?? true);
+      const allowEmail = Boolean(item.allow_channel_email ?? false);
+      const allowSms = Boolean(item.allow_channel_sms ?? false);
+      const defaultInApp = Boolean(item.default_channel_in_app ?? true);
+      const defaultEmail = Boolean(item.default_channel_email ?? false);
+      const defaultSms = Boolean(item.default_channel_sms ?? false);
       normalised.push({
         event_type: eventType,
-        channel_in_app: Boolean(item.channel_in_app),
-        channel_email: Boolean(item.channel_email),
-        channel_sms: Boolean(item.channel_sms),
+        display_name: (item.display_name ? String(item.display_name) : eventType).trim() || eventType,
+        description: item.description ? String(item.description) : '',
+        channel_in_app: allowInApp && Boolean(item.channel_in_app ?? defaultInApp),
+        channel_email: allowEmail && Boolean(item.channel_email ?? defaultEmail),
+        channel_sms: allowSms && Boolean(item.channel_sms ?? defaultSms),
+        allow_channel_in_app: allowInApp,
+        allow_channel_email: allowEmail,
+        allow_channel_sms: allowSms,
+        default_channel_in_app: defaultInApp,
+        default_channel_email: defaultEmail,
+        default_channel_sms: defaultSms,
+        is_user_visible: Boolean(item.is_user_visible ?? true),
       });
     });
-    normalised.sort((a, b) => a.event_type.localeCompare(b.event_type));
+    normalised.sort((a, b) => {
+      const aLabel = (a.display_name || a.event_type).toLowerCase();
+      const bLabel = (b.display_name || b.event_type).toLowerCase();
+      return aLabel.localeCompare(bLabel);
+    });
     return normalised;
   }
 
@@ -68,14 +90,17 @@
         if (!eventType) {
           return null;
         }
+        const allowInApp = row.getAttribute('data-allow-in-app') === '1';
+        const allowEmail = row.getAttribute('data-allow-email') === '1';
+        const allowSms = row.getAttribute('data-allow-sms') === '1';
         const inApp = row.querySelector('[data-channel="channel_in_app"]');
         const email = row.querySelector('[data-channel="channel_email"]');
         const sms = row.querySelector('[data-channel="channel_sms"]');
         return {
           event_type: eventType,
-          channel_in_app: inApp ? Boolean(inApp.checked) : true,
-          channel_email: email ? Boolean(email.checked) : false,
-          channel_sms: sms ? Boolean(sms.checked) : false,
+          channel_in_app: allowInApp ? Boolean(inApp && inApp.checked) : false,
+          channel_email: allowEmail ? Boolean(email && email.checked) : false,
+          channel_sms: allowSms ? Boolean(sms && sms.checked) : false,
         };
       })
       .filter(Boolean);
@@ -104,30 +129,68 @@
       const clone = template.content.firstElementChild.cloneNode(true);
       clone.setAttribute('data-event-type', item.event_type);
       clone.setAttribute('data-default', defaultSet.has(item.event_type) ? '1' : '0');
+      clone.setAttribute('data-allow-in-app', item.allow_channel_in_app ? '1' : '0');
+      clone.setAttribute('data-allow-email', item.allow_channel_email ? '1' : '0');
+      clone.setAttribute('data-allow-sms', item.allow_channel_sms ? '1' : '0');
+      clone.setAttribute('data-default-in-app', item.default_channel_in_app ? '1' : '0');
+      clone.setAttribute('data-default-email', item.default_channel_email ? '1' : '0');
+      clone.setAttribute('data-default-sms', item.default_channel_sms ? '1' : '0');
       const name = clone.querySelector('.notification-preference__name');
+      const description = clone.querySelector('.notification-preference__description');
       const hidden = clone.querySelector('[data-preference-event]');
       if (name) {
-        name.textContent = item.event_type;
+        name.textContent = item.display_name || item.event_type;
+      }
+      if (description) {
+        if (item.description) {
+          description.textContent = item.description;
+          description.hidden = false;
+        } else {
+          description.textContent = '';
+          description.hidden = true;
+        }
       }
       if (hidden) {
         hidden.value = item.event_type;
       }
-      const inApp = clone.querySelector('[data-channel="channel_in_app"]');
-      const email = clone.querySelector('[data-channel="channel_email"]');
-      const sms = clone.querySelector('[data-channel="channel_sms"]');
-      if (inApp) {
-        inApp.checked = Boolean(item.channel_in_app);
-      }
-      if (email) {
-        email.checked = Boolean(item.channel_email);
-      }
-      if (sms) {
-        sms.checked = Boolean(item.channel_sms);
-      }
-      const removeButton = clone.querySelector('[data-preferences-remove]');
-      if (removeButton && defaultSet.has(item.event_type)) {
-        removeButton.disabled = true;
-      }
+
+      const updateChannel = (channel, allowed, enabled) => {
+        const wrapper = clone.querySelector(`[data-channel-wrapper="${channel}"]`);
+        if (!wrapper) {
+          return;
+        }
+        const toggle = wrapper.querySelector('[data-channel-toggle]');
+        const disabledLabel = wrapper.querySelector('[data-channel-disabled]');
+        const input = wrapper.querySelector('[data-channel]');
+        if (allowed) {
+          if (toggle) {
+            toggle.hidden = false;
+          }
+          if (disabledLabel) {
+            disabledLabel.hidden = true;
+          }
+          if (input) {
+            input.disabled = false;
+            input.checked = Boolean(enabled);
+          }
+        } else {
+          if (toggle) {
+            toggle.hidden = true;
+          }
+          if (disabledLabel) {
+            disabledLabel.hidden = false;
+          }
+          if (input) {
+            input.checked = false;
+            input.disabled = true;
+          }
+        }
+      };
+
+      updateChannel('channel_in_app', item.allow_channel_in_app, item.channel_in_app);
+      updateChannel('channel_email', item.allow_channel_email, item.channel_email);
+      updateChannel('channel_sms', item.allow_channel_sms, item.channel_sms);
+
       fragment.appendChild(clone);
     });
 

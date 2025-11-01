@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from copy import deepcopy
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,7 +9,9 @@ from fastapi.testclient import TestClient
 from app.api.dependencies import auth as auth_dependencies
 from app.api.dependencies import database as database_dependencies
 from app.core.database import db
+from app.core.notifications import DEFAULT_NOTIFICATION_EVENTS
 from app.main import app, notifications_repo, scheduler_service
+from app.services import notification_event_settings as event_settings_service
 from app.repositories import notification_preferences as preferences_repo
 from app.security.session import SessionData, session_manager
 
@@ -73,6 +76,31 @@ def _make_notification_record(**overrides):
     }
     base.update(overrides)
     return base
+
+
+def _build_event_setting(event_type: str) -> dict[str, object]:
+    base = deepcopy(DEFAULT_NOTIFICATION_EVENTS.get(event_type, {}))
+    return {
+        "event_type": event_type,
+        "display_name": base.get("display_name") or event_type,
+        "description": base.get("description"),
+        "message_template": base.get("message_template") or "{{ message }}",
+        "is_user_visible": base.get("is_user_visible", True),
+        "allow_channel_in_app": base.get("allow_channel_in_app", True),
+        "allow_channel_email": base.get("allow_channel_email", False),
+        "allow_channel_sms": base.get("allow_channel_sms", False),
+        "default_channel_in_app": base.get("default_channel_in_app", True),
+        "default_channel_email": base.get("default_channel_email", False),
+        "default_channel_sms": base.get("default_channel_sms", False),
+        "module_actions": base.get("module_actions") or [],
+    }
+
+
+_DEFAULT_EVENT_TYPES_FOR_TESTS = [
+    "general",
+    "shop.shipping_status_updated",
+    "shop.stock_notification",
+]
 
 
 def test_create_notification_requires_super_admin(monkeypatch, active_session):
@@ -152,8 +180,16 @@ def test_list_notification_preferences_merges_defaults(monkeypatch, active_sessi
         assert user_id == active_session.user_id
         return ["custom.event"]
 
+    async def fake_list_event_settings(include_hidden=True):
+        return [_build_event_setting(event) for event in _DEFAULT_EVENT_TYPES_FOR_TESTS]
+
+    async def fake_get_event_setting(event_type):
+        return _build_event_setting(event_type)
+
     monkeypatch.setattr(preferences_repo, "list_preferences", fake_list_preferences)
     monkeypatch.setattr(notifications_repo, "list_event_types", fake_list_event_types)
+    monkeypatch.setattr(event_settings_service, "list_event_settings", fake_list_event_settings)
+    monkeypatch.setattr(event_settings_service, "get_event_setting", fake_get_event_setting)
 
     app.dependency_overrides[database_dependencies.require_database] = lambda: None
     app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
@@ -169,9 +205,14 @@ def test_list_notification_preferences_merges_defaults(monkeypatch, active_sessi
 
     assert response.status_code == 200
     data = response.json()
-    assert any(item["event_type"] == "general" for item in data)
-    assert any(item["event_type"] == "custom.event" for item in data)
-    assert any(item["event_type"] == "shop.shipping_status_updated" for item in data)
+    event_types = {item["event_type"] for item in data}
+    assert "general" in event_types
+    assert "custom.event" in event_types
+    assert "shop.shipping_status_updated" in event_types
+    assert "shop.stock_notification" in event_types
+    general = next(item for item in data if item["event_type"] == "general")
+    assert general["allow_channel_in_app"] is True
+    assert general["display_name"]
 
 
 def test_update_notification_preferences_persists_changes(monkeypatch, active_session):
@@ -198,8 +239,16 @@ def test_update_notification_preferences_persists_changes(monkeypatch, active_se
     async def fake_list_event_types(user_id):
         return []
 
+    async def fake_list_event_settings(include_hidden=True):
+        return [_build_event_setting(event) for event in _DEFAULT_EVENT_TYPES_FOR_TESTS]
+
+    async def fake_get_event_setting(event_type):
+        return _build_event_setting(event_type)
+
     monkeypatch.setattr(preferences_repo, "upsert_preferences", fake_upsert_preferences)
     monkeypatch.setattr(notifications_repo, "list_event_types", fake_list_event_types)
+    monkeypatch.setattr(event_settings_service, "list_event_settings", fake_list_event_settings)
+    monkeypatch.setattr(event_settings_service, "get_event_setting", fake_get_event_setting)
 
     app.dependency_overrides[database_dependencies.require_database] = lambda: None
     app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
@@ -230,13 +279,21 @@ def test_update_notification_preferences_persists_changes(monkeypatch, active_se
 
     assert response.status_code == 200
     assert received["user_id"] == active_session.user_id
-    assert received["preferences"] == payload["preferences"]
+    assert received["preferences"] == [
+        {
+            "event_type": "custom.event",
+            "channel_in_app": False,
+            "channel_email": False,
+            "channel_sms": False,
+        }
+    ]
     data = response.json()
-    assert any(item["event_type"] == "general" for item in data)
-    assert any(
-        item["event_type"] == "custom.event" and not item["channel_in_app"] and item["channel_email"]
-        for item in data
-    )
+    event_types = {item["event_type"] for item in data}
+    assert "general" in event_types
+    custom = next(item for item in data if item["event_type"] == "custom.event")
+    assert custom["channel_in_app"] is False
+    assert custom["channel_email"] is False
+    assert "allow_channel_in_app" in custom
 
 
 def test_mark_notification_read_denies_other_users(monkeypatch, active_session):
