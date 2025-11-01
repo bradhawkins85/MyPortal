@@ -6,7 +6,7 @@ from app.api.dependencies.auth import get_current_user
 from app.schemas.agent import AgentQueryRequest, AgentQueryResponse
 from app.services import agent as agent_service
 
-router = APIRouter(prefix="/agent", tags=["Agent"])
+router = APIRouter(prefix="/api/agent", tags=["Agent"])
 
 
 @router.post("/query", response_model=AgentQueryResponse)
