@@ -123,6 +123,7 @@ from app.services import imap as imap_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import m365 as m365_service
 from app.services import modules as modules_service
+from app.services import notification_event_settings as event_settings_service
 from app.services import message_templates as message_templates_service
 from app.services import products as products_service
 from app.services import shop as shop_service
@@ -4830,8 +4831,12 @@ async def notification_settings_page(request: Request):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User session invalid")
 
     stored_preferences = await notification_preferences_repo.list_preferences(user_id)
+    is_super_admin = bool(user.get("is_super_admin"))
+    base_settings = await event_settings_service.list_event_settings(include_hidden=True)
+    settings_map = {item["event_type"]: item for item in base_settings}
+
     event_types = merge_event_types(
-        DEFAULT_NOTIFICATION_EVENT_TYPES,
+        settings_map.keys(),
         [preference.get("event_type") for preference in stored_preferences],
         await notifications_repo.list_event_types(user_id=user_id),
     )
@@ -4839,15 +4844,80 @@ async def notification_settings_page(request: Request):
     mapped = {pref.get("event_type"): pref for pref in stored_preferences if pref.get("event_type")}
     preferences: list[dict[str, Any]] = []
     for event_type in event_types:
+        setting = settings_map.get(event_type)
+        if not setting:
+            setting = await event_settings_service.get_event_setting(event_type)
+            settings_map[event_type] = setting
+        if not is_super_admin and not bool(setting.get("is_user_visible", True)):
+            continue
         pref = mapped.get(event_type) or {}
+        allow_in_app = bool(setting.get("allow_channel_in_app", True))
+        allow_email = bool(setting.get("allow_channel_email", False))
+        allow_sms = bool(setting.get("allow_channel_sms", False))
+        channel_in_app = bool(pref.get("channel_in_app", setting.get("default_channel_in_app", True))) and allow_in_app
+        channel_email = bool(pref.get("channel_email", setting.get("default_channel_email", False))) and allow_email
+        channel_sms = bool(pref.get("channel_sms", setting.get("default_channel_sms", False))) and allow_sms
+        description_value = setting.get("description")
+        if isinstance(description_value, str):
+            description_value = description_value.strip() or None
         preferences.append(
             {
                 "event_type": event_type,
-                "channel_in_app": bool(pref.get("channel_in_app", True)),
-                "channel_email": bool(pref.get("channel_email", False)),
-                "channel_sms": bool(pref.get("channel_sms", False)),
+                "display_name": str(setting.get("display_name") or event_type),
+                "description": description_value,
+                "channel_in_app": channel_in_app,
+                "channel_email": channel_email,
+                "channel_sms": channel_sms,
+                "allow_channel_in_app": allow_in_app,
+                "allow_channel_email": allow_email,
+                "allow_channel_sms": allow_sms,
+                "default_channel_in_app": bool(setting.get("default_channel_in_app", True)),
+                "default_channel_email": bool(setting.get("default_channel_email", False)),
+                "default_channel_sms": bool(setting.get("default_channel_sms", False)),
+                "is_user_visible": bool(setting.get("is_user_visible", True)),
             }
         )
+
+    modules = await modules_service.list_modules()
+    modules_payload = _serialise_for_json(modules)
+    event_settings_payload = [
+        {
+            "event_type": item.get("event_type"),
+            "display_name": item.get("display_name"),
+            "description": item.get("description"),
+            "message_template": item.get("message_template"),
+            "is_user_visible": bool(item.get("is_user_visible", True)),
+            "allow_channel_in_app": bool(item.get("allow_channel_in_app", True)),
+            "allow_channel_email": bool(item.get("allow_channel_email", False)),
+            "allow_channel_sms": bool(item.get("allow_channel_sms", False)),
+            "default_channel_in_app": bool(item.get("default_channel_in_app", True)),
+            "default_channel_email": bool(item.get("default_channel_email", False)),
+            "default_channel_sms": bool(item.get("default_channel_sms", False)),
+            "module_actions": _serialise_for_json(item.get("module_actions") or []),
+        }
+        for item in base_settings
+    ]
+
+    if is_super_admin:
+        menu_events = [
+            {
+                "event_type": item.get("event_type"),
+                "display_name": item.get("display_name") or item.get("event_type"),
+                "description": item.get("description"),
+                "is_user_visible": bool(item.get("is_user_visible", True)),
+            }
+            for item in event_settings_payload
+        ]
+    else:
+        menu_events = [
+            {
+                "event_type": item.get("event_type"),
+                "display_name": item.get("display_name") or item.get("event_type"),
+                "description": item.get("description"),
+                "is_user_visible": bool(item.get("is_user_visible", True)),
+            }
+            for item in preferences
+        ]
 
     extra = {
         "title": "Notification settings",
@@ -4859,6 +4929,11 @@ async def notification_settings_page(request: Request):
             "channel_sms": "Send a text message to your mobile number",
         },
         "default_event_types": set(DEFAULT_NOTIFICATION_EVENT_TYPES),
+        "is_super_admin": is_super_admin,
+        "event_settings": event_settings_payload,
+        "event_settings_endpoint": "/api/notifications/events/settings",
+        "modules": modules_payload,
+        "event_menu": menu_events,
     }
 
     return await _render_template("notifications/settings.html", request, user, extra=extra)

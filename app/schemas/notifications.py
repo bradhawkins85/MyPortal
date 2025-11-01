@@ -43,6 +43,33 @@ class NotificationPreference(BaseModel):
 
 
 class NotificationPreferenceResponse(NotificationPreference):
+    display_name: str = Field(..., description="Human readable event name")
+    description: Optional[str] = Field(
+        default=None, description="Contextual description for the notification event."
+    )
+    allow_channel_in_app: bool = Field(
+        True, description="Whether the event supports delivery to the in-app feed."
+    )
+    allow_channel_email: bool = Field(
+        False, description="Whether the event supports delivery by email."
+    )
+    allow_channel_sms: bool = Field(
+        False, description="Whether the event supports delivery by SMS."
+    )
+    default_channel_in_app: bool = Field(
+        True, description="Default in-app preference defined by the super administrator."
+    )
+    default_channel_email: bool = Field(
+        False, description="Default email preference defined by the super administrator."
+    )
+    default_channel_sms: bool = Field(
+        False, description="Default SMS preference defined by the super administrator."
+    )
+    is_user_visible: bool = Field(
+        True,
+        description="Whether the notification event is available for users to configure.",
+    )
+
     class Config:
         from_attributes = True
 
@@ -53,6 +80,40 @@ class NotificationPreferenceUpdateRequest(BaseModel):
         max_length=100,
         description="Complete set of notification preferences to persist for the current user.",
     )
+
+
+class NotificationEventModuleAction(BaseModel):
+    module: str = Field(..., max_length=150)
+    payload: Optional[Any] = None
+
+
+class NotificationEventSettingResponse(BaseModel):
+    event_type: str = Field(..., max_length=150)
+    display_name: str = Field(..., max_length=150)
+    description: Optional[str] = None
+    message_template: str = Field(..., description="Template used to render the notification message.")
+    is_user_visible: bool = True
+    allow_channel_in_app: bool = True
+    allow_channel_email: bool = False
+    allow_channel_sms: bool = False
+    default_channel_in_app: bool = True
+    default_channel_email: bool = False
+    default_channel_sms: bool = False
+    module_actions: list[NotificationEventModuleAction] = Field(default_factory=list)
+
+
+class NotificationEventSettingUpdate(BaseModel):
+    display_name: str = Field(..., max_length=150)
+    description: Optional[str] = None
+    message_template: str = Field(..., description="Template used to render the notification message.")
+    is_user_visible: bool = True
+    allow_channel_in_app: bool = True
+    allow_channel_email: bool = False
+    allow_channel_sms: bool = False
+    default_channel_in_app: bool = True
+    default_channel_email: bool = False
+    default_channel_sms: bool = False
+    module_actions: list[NotificationEventModuleAction] = Field(default_factory=list)
 
 
 class NotificationSummaryResponse(BaseModel):
