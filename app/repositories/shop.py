@@ -22,6 +22,7 @@ class ProductFilters:
 @dataclass(slots=True)
 class PackageFilters:
     include_archived: bool = False
+    search_term: str | None = None
 
 
 async def list_categories() -> list[dict[str, Any]]:
@@ -179,6 +180,11 @@ async def list_packages(filters: PackageFilters) -> list[dict[str, Any]]:
     conditions: list[str] = []
     if not filters.include_archived:
         conditions.append("pkg.archived = 0")
+    if filters.search_term:
+        search = f"%{filters.search_term.strip()}%"
+        if search.strip("%"):
+            conditions.append("(pkg.name LIKE %s OR pkg.sku LIKE %s OR pkg.description LIKE %s)")
+            params.extend([search, search, search])
     if conditions:
         query.append("WHERE " + " AND ".join(conditions))
     query.append("GROUP BY pkg.id")
