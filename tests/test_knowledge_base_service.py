@@ -126,6 +126,44 @@ async def test_search_articles_returns_ollama_summary(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_search_articles_skips_irrelevant_results(monkeypatch):
+    articles = [
+        _article_factory(slug="backup-procedures", title="Backup procedures", summary="Nightly backup steps"),
+        _article_factory(
+            id=7,
+            slug="network-hardening",
+            title="Network hardening",
+            summary="Firewall lockdowns",
+            content="<p>Follow the VPN hardening checklist.</p>",
+            ai_tags=["vpn", "firewall"],
+        ),
+    ]
+
+    monkeypatch.setattr(
+        knowledge_base_service.kb_repo,
+        "list_articles",
+        AsyncMock(return_value=articles),
+    )
+
+    async def _fail_trigger(*args, **kwargs):  # pragma: no cover - should not be called
+        raise AssertionError("Ollama should not run without matches")
+
+    monkeypatch.setattr(
+        knowledge_base_service.modules_service,
+        "trigger_module",
+        AsyncMock(side_effect=_fail_trigger),
+    )
+
+    context = await knowledge_base_service.build_access_context({"id": 2, "is_super_admin": False})
+    result = await knowledge_base_service.search_articles("vpn", context, use_ollama=False)
+
+    slugs = [item["slug"] for item in result["results"]]
+    assert "network-hardening" in slugs
+    assert "backup-procedures" not in slugs
+    assert result["ollama_status"] == "skipped"
+
+
+@pytest.mark.anyio("asyncio")
 async def test_create_article_generates_ai_tags(monkeypatch):
     captured: dict[str, Any] = {}
 
