@@ -1,0 +1,7 @@
+{
+  "guid": "44851fb0-1424-4a06-b420-ab0d10376cbf",
+  "occurred_at": "2025-11-01T13:09:00Z",
+  "change_type": "Fix",
+  "summary": "Marked ticket subject column as essential for mobile views to restore visibility.",
+  "content_hash": "e562e8433ef6b400f18377c24ea0622ec003caf3eed6b2fcbf9ef7134f05db5c"
+}
