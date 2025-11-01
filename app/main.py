@@ -2043,28 +2043,69 @@ def _sanitize_message(value: str | None) -> str | None:
     return text[:200]
 
 
-async def _resolve_related_product_id_by_sku(
-    sku_value: str | None,
+async def _validate_recommendation_product_ids(
+    raw_ids: Sequence[int | str] | None,
     *,
+    category_id: int | None,
     field_label: str,
     disallow_product_id: int | None = None,
-) -> int | None:
-    sku = (sku_value or "").strip()
-    if not sku:
-        return None
-    product = await shop_repo.get_product_by_sku(sku, include_archived=False)
-    if not product:
+) -> list[int]:
+    values: list[int] = []
+    for raw in raw_ids or []:
+        if raw in (None, ""):
+            continue
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid {field_label.lower()} selection submitted",
+            )
+        if value <= 0:
+            continue
+        values.append(value)
+
+    unique_ids = sorted(set(values))
+    if not unique_ids:
+        return []
+
+    if category_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{field_label} SKU does not match an active product",
+            detail=f"{field_label} products require selecting a category first",
         )
-    product_id = int(product.get("id") or 0)
-    if disallow_product_id is not None and product_id == disallow_product_id:
+
+    candidates = await shop_repo.list_products_by_ids(unique_ids, include_archived=False)
+    found_ids = {int(candidate.get("id") or 0) for candidate in candidates}
+    missing = [str(value) for value in unique_ids if value not in found_ids]
+    if missing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{field_label} SKU cannot reference the same product",
+            detail=f"{field_label} selection is no longer available",
         )
-    return product_id
+
+    validated: list[int] = []
+    for candidate in candidates:
+        candidate_id = int(candidate.get("id") or 0)
+        if disallow_product_id is not None and candidate_id == disallow_product_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{field_label} products cannot include the item being edited",
+            )
+        candidate_category = candidate.get("category_id")
+        if candidate_category != category_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{field_label} products must match the selected category",
+            )
+        if bool(candidate.get("archived")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{field_label} selection is archived and cannot be used",
+            )
+        validated.append(candidate_id)
+
+    return sorted(validated)
 
 
 async def _render_impersonation_dashboard(
@@ -3826,20 +3867,22 @@ async def view_cart(
         for product in base_products:
             base_id = int(product.get("id") or 0)
             base_name = str(product.get("name") or "")
-            cross_id_raw = product.get("cross_sell_product_id")
-            upsell_id_raw = product.get("upsell_product_id")
-            try:
-                cross_id = int(cross_id_raw) if cross_id_raw is not None else 0
-            except (TypeError, ValueError):
-                cross_id = 0
-            try:
-                upsell_id = int(upsell_id_raw) if upsell_id_raw is not None else 0
-            except (TypeError, ValueError):
-                upsell_id = 0
-            if cross_id > 0 and cross_id not in cart_product_id_set and cross_id != base_id:
-                cross_sell_targets.setdefault(cross_id, []).append(base_name)
-            if upsell_id > 0 and upsell_id not in cart_product_id_set and upsell_id != base_id:
-                upsell_targets.setdefault(upsell_id, []).append(base_name)
+            for entry in product.get("cross_sell_products", []) or []:
+                target_id = int(entry.get("id") or 0)
+                if (
+                    target_id > 0
+                    and target_id not in cart_product_id_set
+                    and target_id != base_id
+                ):
+                    cross_sell_targets.setdefault(target_id, []).append(base_name)
+            for entry in product.get("upsell_products", []) or []:
+                target_id = int(entry.get("id") or 0)
+                if (
+                    target_id > 0
+                    and target_id not in cart_product_id_set
+                    and target_id != base_id
+                ):
+                    upsell_targets.setdefault(target_id, []).append(base_name)
 
         target_ids = sorted(set(cross_sell_targets) | set(upsell_targets))
         if target_ids:
@@ -7724,8 +7767,8 @@ async def admin_create_shop_product(
     vip_price: str | None = Form(default=None),
     category_id: str | None = Form(default=None),
     image: UploadFile | None = File(default=None),
-    cross_sell_sku: str | None = Form(default=None),
-    upsell_sku: str | None = Form(default=None),
+    cross_sell_product_ids: list[int] | None = Form(default=None),
+    upsell_product_ids: list[int] | None = Form(default=None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -7776,12 +7819,14 @@ async def admin_create_shop_product(
         if not category:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected category does not exist")
 
-    cross_sell_product_id = await _resolve_related_product_id_by_sku(
-        cross_sell_sku,
+    cross_sell_ids = await _validate_recommendation_product_ids(
+        cross_sell_product_ids,
+        category_id=category_value,
         field_label="Cross-sell",
     )
-    upsell_product_id = await _resolve_related_product_id_by_sku(
-        upsell_sku,
+    upsell_ids = await _validate_recommendation_product_ids(
+        upsell_product_ids,
+        category_id=category_value,
         field_label="Up-sell",
     )
 
@@ -7807,8 +7852,8 @@ async def admin_create_shop_product(
             vip_price=vip_decimal,
             category_id=category_value,
             image_url=image_url,
-            cross_sell_product_id=cross_sell_product_id,
-            upsell_product_id=upsell_product_id,
+            cross_sell_product_ids=cross_sell_ids,
+            upsell_product_ids=upsell_ids,
         )
     except aiomysql.IntegrityError as exc:
         if stored_path:
@@ -7851,9 +7896,9 @@ async def admin_update_shop_product(
     vip_price: str | None = Form(default=None),
     category_id: str | None = Form(default=None),
     image: UploadFile | None = File(default=None),
-    cross_sell_sku: str | None = Form(default=None),
-    upsell_sku: str | None = Form(default=None),
     features: str | None = Form(default=None),
+    cross_sell_product_ids: list[int] | None = Form(default=None),
+    upsell_product_ids: list[int] | None = Form(default=None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -7956,13 +8001,15 @@ async def admin_update_shop_product(
         else:
             await image.close()
 
-    cross_sell_product_id = await _resolve_related_product_id_by_sku(
-        cross_sell_sku,
+    cross_sell_ids = await _validate_recommendation_product_ids(
+        cross_sell_product_ids,
+        category_id=category_value,
         field_label="Cross-sell",
         disallow_product_id=product_id,
     )
-    upsell_product_id = await _resolve_related_product_id_by_sku(
-        upsell_sku,
+    upsell_ids = await _validate_recommendation_product_ids(
+        upsell_product_ids,
+        category_id=category_value,
         field_label="Up-sell",
         disallow_product_id=product_id,
     )
@@ -7979,8 +8026,8 @@ async def admin_update_shop_product(
             vip_price=vip_decimal,
             category_id=category_value,
             image_url=image_url,
-            cross_sell_product_id=cross_sell_product_id,
-            upsell_product_id=upsell_product_id,
+            cross_sell_product_ids=cross_sell_ids,
+            upsell_product_ids=upsell_ids,
         )
     except aiomysql.IntegrityError as exc:
         if stored_path:
