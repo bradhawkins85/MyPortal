@@ -14,6 +14,7 @@ from app.services import modules as modules_service
 _KB_RESULT_LIMIT = 5
 _TICKET_RESULT_LIMIT = 5
 _PRODUCT_RESULT_LIMIT = 5
+_PACKAGE_RESULT_LIMIT = 5
 _MAX_SNIPPET_LENGTH = 320
 
 
@@ -113,7 +114,7 @@ async def execute_agent_query(
             "event_id": None,
             "message": "Query must not be empty.",
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "sources": {"knowledge_base": [], "tickets": [], "products": []},
+            "sources": {"knowledge_base": [], "tickets": [], "products": [], "packages": []},
             "context": {"companies": []},
         }
 
@@ -195,6 +196,7 @@ async def execute_agent_query(
             )
 
     product_sources: list[dict[str, Any]] = []
+    package_sources: list[dict[str, Any]] = []
     include_products = _can_access_shop(resolved_memberships, is_super_admin=is_super_admin)
     if include_products:
         company_scope: int | None = None
@@ -244,6 +246,29 @@ async def execute_agent_query(
                     "price": price_display,
                     "description": _truncate(product.get("description")),
                     "recommendations": recommendations,
+                }
+            )
+
+        package_filters = shop_repo.PackageFilters(
+            include_archived=False,
+            search_term=query_text,
+        )
+        try:
+            packages = await shop_repo.list_packages(package_filters)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            log_error("Agent package lookup failed", error=str(exc))
+            packages = []
+        for package in packages[:_PACKAGE_RESULT_LIMIT]:
+            name_value = package.get("name")
+            if not isinstance(name_value, str) or not name_value.strip():
+                name_value = f"Package #{package.get('id')}"
+            package_sources.append(
+                {
+                    "id": package.get("id"),
+                    "name": name_value.strip(),
+                    "sku": package.get("sku"),
+                    "description": _truncate(package.get("description")),
+                    "product_count": package.get("product_count"),
                 }
             )
 
@@ -300,6 +325,25 @@ async def execute_agent_query(
             context_sections.append("- " + " — ".join(parts))
         context_sections.append("")
 
+    if package_sources:
+        context_sections.append("Hardware bundles and service packages available to the user:")
+        for package in package_sources:
+            parts = [
+                f"[Package:{package['sku']}] {package['name']}" if package.get("sku") else package.get("name", "Package"),
+            ]
+            count_value = package.get("product_count")
+            try:
+                count_int = int(count_value)
+            except (TypeError, ValueError):
+                count_int = None
+            if count_int is not None and count_int >= 0:
+                plural = "item" if count_int == 1 else "items"
+                parts.append(f"Includes {count_int} {plural}")
+            if package.get("description"):
+                parts.append(package["description"])
+            context_sections.append("- " + " — ".join(parts))
+        context_sections.append("")
+
     if len(context_sections) == 6:  # only preamble, query, and blank line
         context_sections.append("No portal records matched the query. Explain the absence to the user.")
 
@@ -352,6 +396,7 @@ async def execute_agent_query(
             "knowledge_base": knowledge_base_sources,
             "tickets": ticket_sources,
             "products": product_sources,
+            "packages": package_sources,
         },
         "context": {"companies": company_context},
     }
