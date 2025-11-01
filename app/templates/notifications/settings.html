@@ -7,17 +7,45 @@
 {% endblock %}
 
 {% block content %}
-<div class="page-grid">
-  <section class="card card--panel">
-    <header class="card__header card__header--actions">
+<div class="notification-settings">
+  <aside class="card card--panel notification-settings__sidebar">
+    <header class="card__header">
       <div>
-        <h2 class="card__title">Delivery preferences</h2>
-        <p class="card__subtitle">
-          Control which notification event types reach your in-app feed, email inbox, and mobile device.
-        </p>
+        <h2 class="card__title">Notification events</h2>
+        <p class="card__subtitle">Choose an event to review orchestration rules.</p>
       </div>
-      <div class="card__controls">
+    </header>
+    <nav class="notification-settings__menu">
+      <ul class="menu" data-notification-event-menu>
+        {% for event in event_menu %}
+          <li class="menu__item">
+            <button
+              type="button"
+              class="menu__link"
+              data-event-select
+              data-event-id="{{ event.event_type }}"
+              data-event-visible="{{ 1 if event.is_user_visible else 0 }}"
+            >
+              <span class="menu__icon" aria-hidden="true">{% if event.is_user_visible %}🔔{% else %}🛠️{% endif %}</span>
+              <span class="menu__label">{{ event.display_name }}</span>
+            </button>
+          </li>
+        {% else %}
+          <li class="menu__item menu__item--empty">No events configured yet.</li>
+        {% endfor %}
+      </ul>
+    </nav>
+  </aside>
+  <div class="notification-settings__main">
+    <header class="notification-settings__header">
+      <div>
+        <h1 class="page-title">Delivery orchestration</h1>
+        <p class="page-subtitle">Fine-tune delivery channels and automation actions for every event.</p>
+      </div>
+      <div class="notification-settings__filters">
+        <label class="sr-only" for="notification-preferences-filter">Filter events</label>
         <input
+          id="notification-preferences-filter"
           type="search"
           class="input"
           placeholder="Filter event types"
@@ -26,139 +54,288 @@
         />
       </div>
     </header>
-    <form
-      class="form"
-      data-notification-preferences-form
-      data-endpoint="{{ preferences_endpoint }}"
-    >
-      <fieldset class="form__group">
-        <legend class="visually-hidden">Notification preference editor</legend>
-        <div class="alert alert--success" data-preferences-success hidden role="status">
-          Notification preferences saved successfully.
-        </div>
-        <div class="alert alert--error" data-preferences-error hidden role="alert"></div>
-        <div class="form__group form__group--inline">
-          <div class="form__field">
-            <label for="notification-new-event">Add custom event type</label>
-            <input
-              type="text"
-              id="notification-new-event"
-              class="input"
-              placeholder="e.g. security.login_alert"
-              maxlength="100"
-              data-preferences-new-event
-            />
+    <div class="notification-settings__content">
+      {% if is_super_admin %}
+        <section class="card card--panel notification-settings__admin" data-notification-admin>
+          <header class="card__header card__header--actions">
+            <div>
+              <h2 class="card__title">Super admin configuration</h2>
+              <p class="card__subtitle">Configure channel defaults, end-user visibility, and automation actions.</p>
+            </div>
+            <div class="card__controls">
+              <button type="button" class="button button--ghost" data-event-settings-reset>Reset</button>
+              <button type="button" class="button button--primary" data-event-settings-save>Save configuration</button>
+            </div>
+          </header>
+          <div class="card__body">
+            <form
+              class="form notification-event-form"
+              data-event-settings-form
+              data-endpoint="{{ event_settings_endpoint }}"
+              data-modules='{{ modules | tojson }}'
+              data-settings='{{ event_settings | tojson }}'
+            >
+              <input type="hidden" data-event-type />
+              <div class="alert alert--success" data-event-settings-success hidden role="status"></div>
+              <div class="alert alert--error" data-event-settings-error hidden role="alert"></div>
+              <div class="form__group form__group--columns">
+                <div class="form__field">
+                  <label for="event-settings-display-name">Display name</label>
+                  <input
+                    type="text"
+                    id="event-settings-display-name"
+                    class="input"
+                    maxlength="150"
+                    required
+                    data-event-display-name
+                  />
+                </div>
+                <div class="form__field">
+                  <label for="event-settings-description">Description</label>
+                  <textarea
+                    id="event-settings-description"
+                    class="input"
+                    rows="2"
+                    maxlength="255"
+                    data-event-description
+                  ></textarea>
+                </div>
+              </div>
+              <div class="form__group">
+                <label for="event-settings-template">Message template</label>
+                <textarea
+                  id="event-settings-template"
+                  class="input"
+                  rows="4"
+                  data-event-message-template
+                  required
+                ></textarea>
+                <p class="form-help">
+                  Use double braces to interpolate context values, e.g. <code>{{ '{{ metadata.product_name }}' }}</code>.
+                </p>
+              </div>
+              <fieldset class="form__group notification-event-form__channels">
+                <legend>Channel availability</legend>
+                <div class="notification-event-form__channel">
+                  <label class="checkbox">
+                    <input type="checkbox" data-event-allow-in-app />
+                    <span>Allow in-app delivery</span>
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" data-event-default-in-app />
+                    <span>Enable in-app by default</span>
+                  </label>
+                </div>
+                <div class="notification-event-form__channel">
+                  <label class="checkbox">
+                    <input type="checkbox" data-event-allow-email />
+                    <span>Allow email delivery</span>
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" data-event-default-email />
+                    <span>Enable email by default</span>
+                  </label>
+                </div>
+                <div class="notification-event-form__channel">
+                  <label class="checkbox">
+                    <input type="checkbox" data-event-allow-sms />
+                    <span>Allow SMS delivery</span>
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" data-event-default-sms />
+                    <span>Enable SMS by default</span>
+                  </label>
+                </div>
+              </fieldset>
+              <div class="form__group">
+                <label class="checkbox">
+                  <input type="checkbox" data-event-visible />
+                  <span>Allow end users to manage this event</span>
+                </label>
+              </div>
+              <div class="form__group">
+                <label class="form-label">Module actions</label>
+                <p class="form-help">
+                  Automatically trigger module integrations after this notification is emitted.
+                </p>
+                <div class="automation-actions" data-event-action-list></div>
+                <button type="button" class="button button--ghost" data-event-action-add>Add action</button>
+                <p class="form-help" data-event-action-error hidden></p>
+              </div>
+            </form>
           </div>
-          <div class="form__field form__field--actions">
-            <button type="button" class="button" data-preferences-add>Add event type</button>
+        </section>
+      {% endif %}
+      <section class="card card--panel notification-settings__preferences">
+        <header class="card__header">
+          <div>
+            <h2 class="card__title">Delivery preferences</h2>
+            <p class="card__subtitle">
+              Control which channels deliver each notification using the defaults supplied by your super administrators.
+            </p>
           </div>
-        </div>
-        <div class="table-wrapper">
-          <table class="table" id="notification-preferences-table" data-table>
-            <thead>
-              <tr>
-                <th scope="col" data-sort="string">Event type</th>
-                <th scope="col" data-sort="string">In-app feed</th>
-                <th scope="col" data-sort="string">Email</th>
-                <th scope="col" data-sort="string">SMS</th>
-                <th scope="col" class="table__actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody data-preferences-body data-defaults='{{ default_event_types | list | tojson }}'>
-              {% for preference in preferences %}
-                {% set event_type = preference.event_type %}
-                <tr data-event-type="{{ event_type }}" data-default="{{ 1 if event_type in default_event_types else 0 }}">
-                  <td data-label="Event type">
-                    <div class="notification-preference__event">
-                      <span class="notification-preference__name">{{ event_type }}</span>
-                      <input type="hidden" value="{{ event_type }}" data-preference-event />
-                    </div>
-                  </td>
-                  <td data-label="In-app feed">
-                    <label class="toggle">
-                      <input type="checkbox" data-channel="channel_in_app" {% if preference.channel_in_app %}checked{% endif %} />
-                      <span>Enabled</span>
-                    </label>
-                    <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_in_app }}</div>
-                  </td>
-                  <td data-label="Email">
-                    <label class="toggle">
-                      <input type="checkbox" data-channel="channel_email" {% if preference.channel_email %}checked{% endif %} />
-                      <span>Enabled</span>
-                    </label>
-                    <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_email }}</div>
-                  </td>
-                  <td data-label="SMS">
-                    <label class="toggle">
-                      <input type="checkbox" data-channel="channel_sms" {% if preference.channel_sms %}checked{% endif %} />
-                      <span>Enabled</span>
-                    </label>
-                    <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_sms }}</div>
-                  </td>
-                  <td class="table__actions">
-                    <div class="table__action-buttons">
-                      <button
-                        type="button"
-                        class="button button--ghost"
-                        data-preferences-remove
-                        {% if event_type in default_event_types %}disabled{% endif %}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              {% else %}
+        </header>
+        <form
+          class="form"
+          data-notification-preferences-form
+          data-endpoint="{{ preferences_endpoint }}"
+        >
+          <div class="alert alert--success" data-preferences-success hidden role="status">
+            Notification preferences saved successfully.
+          </div>
+          <div class="alert alert--error" data-preferences-error hidden role="alert"></div>
+          <div class="table-wrapper">
+            <table class="table" id="notification-preferences-table" data-table>
+              <thead>
                 <tr>
-                  <td colspan="5" class="table__empty">No notification events are available yet.</td>
+                  <th scope="col" data-sort="string">Event</th>
+                  <th scope="col" data-sort="string">In-app</th>
+                  <th scope="col" data-sort="string">Email</th>
+                  <th scope="col" data-sort="string">SMS</th>
                 </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </fieldset>
-      <footer class="form__actions">
-        <button type="submit" class="button button--primary">Save preferences</button>
-        <button type="reset" class="button button--ghost" data-preferences-reset>Reset changes</button>
-      </footer>
-    </form>
-  </section>
+              </thead>
+              <tbody data-preferences-body data-defaults='{{ default_event_types | list | tojson }}'>
+                {% for preference in preferences %}
+                  <tr
+                    data-event-type="{{ preference.event_type }}"
+                    data-allow-in-app="{{ 1 if preference.allow_channel_in_app else 0 }}"
+                    data-allow-email="{{ 1 if preference.allow_channel_email else 0 }}"
+                    data-allow-sms="{{ 1 if preference.allow_channel_sms else 0 }}"
+                    data-default-in-app="{{ 1 if preference.default_channel_in_app else 0 }}"
+                    data-default-email="{{ 1 if preference.default_channel_email else 0 }}"
+                    data-default-sms="{{ 1 if preference.default_channel_sms else 0 }}"
+                  >
+                    <td data-label="Event">
+                      <div class="notification-preference__event">
+                        <span class="notification-preference__name">{{ preference.display_name }}</span>
+                        {% if preference.description %}
+                          <span class="notification-preference__description">{{ preference.description }}</span>
+                        {% endif %}
+                        <input type="hidden" value="{{ preference.event_type }}" data-preference-event />
+                      </div>
+                    </td>
+                    <td data-label="In-app">
+                      <div class="notification-preference__channel" data-channel-wrapper="channel_in_app">
+                        <label class="toggle" data-channel-toggle {% if not preference.allow_channel_in_app %}hidden{% endif %}>
+                          <input
+                            type="checkbox"
+                            data-channel="channel_in_app"
+                            {% if preference.channel_in_app %}checked{% endif %}
+                          />
+                          <span>Enabled</span>
+                        </label>
+                        <span class="text-muted" data-channel-disabled {% if preference.allow_channel_in_app %}hidden{% endif %}>Disabled</span>
+                      </div>
+                      <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_in_app }}</div>
+                    </td>
+                    <td data-label="Email">
+                      <div class="notification-preference__channel" data-channel-wrapper="channel_email">
+                        <label class="toggle" data-channel-toggle {% if not preference.allow_channel_email %}hidden{% endif %}>
+                          <input
+                            type="checkbox"
+                            data-channel="channel_email"
+                            {% if preference.channel_email %}checked{% endif %}
+                          />
+                          <span>Enabled</span>
+                        </label>
+                        <span class="text-muted" data-channel-disabled {% if preference.allow_channel_email %}hidden{% endif %}>Disabled</span>
+                      </div>
+                      <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_email }}</div>
+                    </td>
+                    <td data-label="SMS">
+                      <div class="notification-preference__channel" data-channel-wrapper="channel_sms">
+                        <label class="toggle" data-channel-toggle {% if not preference.allow_channel_sms %}hidden{% endif %}>
+                          <input
+                            type="checkbox"
+                            data-channel="channel_sms"
+                            {% if preference.channel_sms %}checked{% endif %}
+                          />
+                          <span>Enabled</span>
+                        </label>
+                        <span class="text-muted" data-channel-disabled {% if preference.allow_channel_sms %}hidden{% endif %}>Disabled</span>
+                      </div>
+                      <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_sms }}</div>
+                    </td>
+                  </tr>
+                {% else %}
+                  <tr>
+                    <td colspan="4" class="table__empty">No notification events are available yet.</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <footer class="form__actions">
+            <button type="submit" class="button button--primary">Save preferences</button>
+            <button type="reset" class="button button--ghost" data-preferences-reset>Reset changes</button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  </div>
 </div>
 <template id="notification-preference-row">
-  <tr data-event-type="" data-default="0">
-    <td data-label="Event type">
+  <tr
+    data-event-type=""
+    data-allow-in-app="1"
+    data-allow-email="0"
+    data-allow-sms="0"
+    data-default-in-app="1"
+    data-default-email="0"
+    data-default-sms="0"
+  >
+    <td data-label="Event">
       <div class="notification-preference__event">
         <span class="notification-preference__name"></span>
         <input type="hidden" value="" data-preference-event />
       </div>
     </td>
-    <td data-label="In-app feed">
-      <label class="toggle">
-        <input type="checkbox" data-channel="channel_in_app" checked />
-        <span>Enabled</span>
-      </label>
+    <td data-label="In-app">
+      <div class="notification-preference__channel" data-channel-wrapper="channel_in_app">
+        <label class="toggle" data-channel-toggle>
+          <input type="checkbox" data-channel="channel_in_app" checked />
+          <span>Enabled</span>
+        </label>
+        <span class="text-muted" data-channel-disabled hidden>Disabled</span>
+      </div>
       <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_in_app }}</div>
     </td>
     <td data-label="Email">
-      <label class="toggle">
-        <input type="checkbox" data-channel="channel_email" />
-        <span>Enabled</span>
-      </label>
+      <div class="notification-preference__channel" data-channel-wrapper="channel_email">
+        <label class="toggle" data-channel-toggle>
+          <input type="checkbox" data-channel="channel_email" />
+          <span>Enabled</span>
+        </label>
+        <span class="text-muted" data-channel-disabled hidden>Disabled</span>
+      </div>
       <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_email }}</div>
     </td>
     <td data-label="SMS">
-      <label class="toggle">
-        <input type="checkbox" data-channel="channel_sms" />
-        <span>Enabled</span>
-      </label>
+      <div class="notification-preference__channel" data-channel-wrapper="channel_sms">
+        <label class="toggle" data-channel-toggle>
+          <input type="checkbox" data-channel="channel_sms" />
+          <span>Enabled</span>
+        </label>
+        <span class="text-muted" data-channel-disabled hidden>Disabled</span>
+      </div>
       <div class="text-muted notification-preference__hint">{{ channel_descriptions.channel_sms }}</div>
     </td>
-    <td class="table__actions">
-      <div class="table__action-buttons">
-        <button type="button" class="button button--ghost" data-preferences-remove>Remove</button>
-      </div>
-    </td>
   </tr>
+</template>
+<template id="notification-event-action-row">
+  <div class="automation-action" data-action-row>
+    <div class="automation-action__field">
+      <select class="form-input" data-action-module>
+        <option value="">Select module</option>
+      </select>
+    </div>
+    <div class="automation-action__field">
+      <textarea class="form-input" rows="3" placeholder='{"topic": "alerts"}' data-action-payload></textarea>
+    </div>
+    <div class="automation-action__field automation-action__field--actions">
+      <button type="button" class="button button--ghost" data-action-remove>Remove</button>
+    </div>
+  </div>
 </template>
 {% endblock %}
 
@@ -166,4 +343,5 @@
   {{ super() }}
   <script src="/static/js/tables.js" defer></script>
   <script src="/static/js/notification-preferences.js" defer></script>
+  <script src="/static/js/notification-event-settings.js" defer></script>
 {% endblock %}
