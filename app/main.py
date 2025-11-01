@@ -6704,6 +6704,62 @@ async def admin_message_templates(
     return await _render_template("admin/message_templates.html", request, current_user, extra=extra)
 
 
+@app.get("/admin/message-templates/new", response_class=HTMLResponse)
+async def admin_message_templates_new(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    content_type_options = [
+        {"value": value, "label": label}
+        for value, label in _MESSAGE_TEMPLATE_CONTENT_TYPES
+    ]
+
+    extra = {
+        "title": "New message template",
+        "page_title": "New message template",
+        "form_heading": "New template",
+        "submit_label": "Save template",
+        "show_reset_button": True,
+        "template": {},
+        "content_type_options": content_type_options,
+        "default_content_type": "text/plain",
+    }
+
+    return await _render_template("admin/message_template_form.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/message-templates/{template_id}/edit", response_class=HTMLResponse)
+async def admin_message_templates_edit(request: Request, template_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    template_record = await message_templates_service.get_template(template_id)
+    if not template_record:
+        message = "Template not found."
+        encoded = urlencode({"error": message})
+        return RedirectResponse(url=f"/admin/message-templates?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+
+    content_type_options = [
+        {"value": value, "label": label}
+        for value, label in _MESSAGE_TEMPLATE_CONTENT_TYPES
+    ]
+
+    extra = {
+        "title": f"Edit {template_record.get('name') or 'template'}",
+        "page_title": "Edit message template",
+        "form_heading": "Edit template",
+        "submit_label": "Update template",
+        "show_reset_button": False,
+        "template": template_record,
+        "content_type_options": content_type_options,
+        "default_content_type": template_record.get("content_type") or "text/plain",
+    }
+
+    return await _render_template("admin/message_template_form.html", request, current_user, extra=extra)
+
+
 @app.get("/admin/automation", response_class=HTMLResponse)
 async def admin_automation(request: Request):
     current_user, redirect = await _require_super_admin_page(request)

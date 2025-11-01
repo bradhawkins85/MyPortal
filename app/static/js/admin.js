@@ -1240,21 +1240,12 @@
       });
     }
 
-    document.querySelectorAll('[data-template-edit]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const row = button.closest('tr');
-        if (!row) {
-          return;
-        }
-        const payload = getTemplatePayload(row.dataset.templateJson);
-        if (!payload) {
-          return;
-        }
-        setFormState('edit', payload);
-        slugField.focus();
-      });
-    });
+    if (!idField.value) {
+      setFormState('create');
+    }
+  }
 
+  function bindMessageTemplateDeleteButtons() {
     document.querySelectorAll('[data-template-delete]').forEach((button) => {
       button.addEventListener('click', async () => {
         const row = button.closest('tr');
@@ -1278,8 +1269,6 @@
         }
       });
     });
-
-    setFormState('create');
   }
 
   function bindRoleForm() {
@@ -2209,6 +2198,7 @@
     bindTicketAiReplaceDescription();
     bindTicketAiRefresh();
     bindMessageTemplateForm();
+    bindMessageTemplateDeleteButtons();
     bindRoleForm();
     bindCompanyAssignForm();
     bindCompanyAssignmentControls();
