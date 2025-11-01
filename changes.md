@@ -1,3 +1,4 @@
+- 2025-12-27, 10:15 UTC, Fix, Corrected the agent API route to /api/agent/query so dashboard requests reach the service without 404 errors
 - 2025-10-30, 00:55 UTC, Fix, Normalised shop package payloads before JSON serialisation so the packages category renders without server errors
 - 2025-10-23, 01:20 UTC, Feature, Added super admin deletion controls for scheduled and event automations with confirmation prompts and audit logging
 - 2025-10-29, 10:45 UTC, Fix, Redacted TacticalRMM and ntfy credentials in module management while keeping stored keys when left blank
