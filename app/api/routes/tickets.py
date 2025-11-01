@@ -69,8 +69,13 @@ async def _build_ticket_detail(ticket_id: int, current_user: dict) -> TicketDeta
         current_user_id_int = int(current_user_id)
     except (TypeError, ValueError):
         current_user_id_int = None
-    if not has_helpdesk_access and requester_id != current_user_id_int:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    if not has_helpdesk_access:
+        if requester_id != current_user_id_int:
+            is_watcher = False
+            if current_user_id_int is not None:
+                is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int)
+            if not is_watcher:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
     replies = await tickets_repo.list_replies(
         ticket_id, include_internal=has_helpdesk_access
@@ -115,33 +120,42 @@ async def list_tickets(
     current_user: dict = Depends(get_current_user),
 ) -> TicketListResponse:
     has_helpdesk_access = await _has_helpdesk_permission(current_user)
-    requester_id: int | None = None
     if not has_helpdesk_access:
         try:
-            requester_id = int(current_user["id"])
+            current_user_id = int(current_user["id"])
         except (TypeError, ValueError):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
-        company_id = None
-        assigned_user_id = None
-        module_slug = None
-    tickets = await tickets_repo.list_tickets(
-        status=status_filter,
-        module_slug=module_slug,
-        company_id=company_id,
-        assigned_user_id=assigned_user_id,
-        search=search,
-        limit=limit,
-        offset=offset,
-        requester_id=requester_id,
-    )
-    total = await tickets_repo.count_tickets(
-        status=status_filter,
-        module_slug=module_slug,
-        company_id=company_id,
-        assigned_user_id=assigned_user_id,
-        search=search,
-        requester_id=requester_id,
-    )
+        tickets = await tickets_repo.list_tickets_for_user(
+            current_user_id,
+            search=search,
+            status=status_filter,
+            limit=limit,
+            offset=offset,
+        )
+        total = await tickets_repo.count_tickets_for_user(
+            current_user_id,
+            search=search,
+            status=status_filter,
+        )
+    else:
+        tickets = await tickets_repo.list_tickets(
+            status=status_filter,
+            module_slug=module_slug,
+            company_id=company_id,
+            assigned_user_id=assigned_user_id,
+            search=search,
+            limit=limit,
+            offset=offset,
+            requester_id=None,
+        )
+        total = await tickets_repo.count_tickets(
+            status=status_filter,
+            module_slug=module_slug,
+            company_id=company_id,
+            assigned_user_id=assigned_user_id,
+            search=search,
+            requester_id=None,
+        )
     return TicketListResponse(
         items=[TicketResponse(**ticket) for ticket in tickets],
         total=total,

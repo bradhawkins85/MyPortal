@@ -321,8 +321,8 @@ def test_non_admin_ticket_listing_scoped_to_requester(monkeypatch):
     now = datetime(2025, 1, 2, 9, 30, tzinfo=timezone.utc)
     captured: dict[str, dict] = {}
 
-    async def fake_list_tickets(**kwargs):
-        captured["list"] = kwargs
+    async def fake_list_tickets_for_user(user_id: int, **kwargs):
+        captured["list"] = {"user_id": user_id, **kwargs}
         return [
             {
                 "id": 10,
@@ -342,12 +342,16 @@ def test_non_admin_ticket_listing_scoped_to_requester(monkeypatch):
             }
         ]
 
-    async def fake_count_tickets(**kwargs):
-        captured["count"] = kwargs
+    async def fake_count_tickets_for_user(user_id: int, **kwargs):
+        captured["count"] = {"user_id": user_id, **kwargs}
         return 1
 
-    monkeypatch.setattr(tickets_routes.tickets_repo, "list_tickets", fake_list_tickets)
-    monkeypatch.setattr(tickets_routes.tickets_repo, "count_tickets", fake_count_tickets)
+    monkeypatch.setattr(
+        tickets_routes.tickets_repo, "list_tickets_for_user", fake_list_tickets_for_user
+    )
+    monkeypatch.setattr(
+        tickets_routes.tickets_repo, "count_tickets_for_user", fake_count_tickets_for_user
+    )
 
     permission_calls: dict[str, bool] = {}
 
@@ -385,11 +389,10 @@ def test_non_admin_ticket_listing_scoped_to_requester(monkeypatch):
 
     assert response.status_code == 200
     assert permission_calls.get("called") is True
-    assert captured["list"]["requester_id"] == 5
-    assert captured["list"]["company_id"] is None
-    assert captured["list"]["assigned_user_id"] is None
-    assert captured["list"]["module_slug"] is None
-    assert captured["count"]["requester_id"] == 5
+    assert captured["list"]["user_id"] == 5
+    assert captured["list"]["status"] == "open"
+    assert captured["count"]["user_id"] == 5
+    assert captured["count"]["status"] == "open"
     data = response.json()
     assert data["total"] == 1
     assert len(data["items"]) == 1
@@ -423,9 +426,15 @@ def test_non_admin_cannot_view_other_ticket(monkeypatch):
     async def fake_list_watchers(*args, **kwargs):
         raise AssertionError("Watchers should not be fetched for forbidden tickets")
 
+    async def fake_is_ticket_watcher(ticket_id: int, user_id: int) -> bool:
+        assert ticket_id == 1
+        assert user_id == 5
+        return False
+
     monkeypatch.setattr(tickets_routes.tickets_repo, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(tickets_routes.tickets_repo, "list_replies", fake_list_replies)
     monkeypatch.setattr(tickets_routes.tickets_repo, "list_watchers", fake_list_watchers)
+    monkeypatch.setattr(tickets_routes.tickets_repo, "is_ticket_watcher", fake_is_ticket_watcher)
 
     async def fake_has_helpdesk_permission(current_user: dict) -> bool:
         assert current_user["id"] == 5
@@ -460,6 +469,68 @@ def test_non_admin_cannot_view_other_ticket(monkeypatch):
         app.dependency_overrides.clear()
 
     assert response.status_code == 404
+
+
+def test_watcher_can_view_ticket(monkeypatch):
+    now = datetime(2025, 1, 3, 8, 45, tzinfo=timezone.utc)
+
+    async def fake_get_ticket(ticket_id: int):
+        return {
+            "id": ticket_id,
+            "subject": "Other ticket",
+            "description": "",
+            "status": "open",
+            "priority": "normal",
+            "category": None,
+            "module_slug": None,
+            "company_id": None,
+            "requester_id": 99,
+            "assigned_user_id": None,
+            "external_reference": None,
+            "created_at": now,
+            "updated_at": now,
+            "closed_at": None,
+        }
+
+    async def fake_list_replies(ticket_id: int, include_internal: bool):
+        assert include_internal is False
+        return []
+
+    async def fake_is_ticket_watcher(ticket_id: int, user_id: int) -> bool:
+        assert ticket_id == 1
+        assert user_id == 5
+        return True
+
+    monkeypatch.setattr(tickets_routes.tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(tickets_routes.tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(tickets_routes.tickets_repo, "is_ticket_watcher", fake_is_ticket_watcher)
+
+    async def fake_has_helpdesk_permission(current_user: dict) -> bool:
+        assert current_user["id"] == 5
+        return False
+
+    monkeypatch.setattr(
+        tickets_routes,
+        "_has_helpdesk_permission",
+        fake_has_helpdesk_permission,
+    )
+
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": 5,
+        "email": "user@example.com",
+        "is_super_admin": False,
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/tickets/1")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == 1
+    assert body["requester_id"] == 99
 
 
 def test_non_admin_reply_forces_public_visibility(monkeypatch, active_session):
