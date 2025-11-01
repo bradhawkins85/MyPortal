@@ -191,7 +191,14 @@
                   </th>
                 {% endif %}
                 <th scope="col" data-sort="int" class="tickets-table__column tickets-table__column--id">ID</th>
-                <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--subject">Subject</th>
+                <th
+                  scope="col"
+                  data-sort="string"
+                  data-mobile-priority="essential"
+                  class="tickets-table__column tickets-table__column--subject"
+                >
+                  Subject
+                </th>
                 <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--status">Status</th>
                 <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--priority">Priority</th>
                 <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--company">Company</th>
@@ -221,7 +228,11 @@
                       </td>
                     {% endif %}
                     <td data-label="ID" class="tickets-table__cell tickets-table__cell--id">{{ ticket.id }}</td>
-                    <td data-label="Subject" class="tickets-table__cell tickets-table__cell--subject">
+                    <td
+                      data-label="Subject"
+                      data-mobile-priority="essential"
+                      class="tickets-table__cell tickets-table__cell--subject"
+                    >
                       <a href="/admin/tickets/{{ ticket.id }}">{{ ticket.subject }}</a>
                     </td>
                     {% set ticket_status = (ticket.status or 'open') %}

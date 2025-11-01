@@ -1368,18 +1368,18 @@ _MESSAGE_TEMPLATE_CONTENT_TYPES: tuple[tuple[str, str], ...] = (
 )
 
 _ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
-    {"key": "name", "label": "Name", "sort": "string"},
+    {"key": "name", "label": "Name", "sort": "string", "priority": "essential"},
     {"key": "type", "label": "Type", "sort": "string"},
     {"key": "serial_number", "label": "Serial number", "sort": "string"},
-    {"key": "status", "label": "Status", "sort": "string"},
+    {"key": "status", "label": "Status", "sort": "string", "priority": "essential"},
     {"key": "os_name", "label": "OS name", "sort": "string"},
     {"key": "cpu_name", "label": "CPU", "sort": "string"},
     {"key": "ram_gb", "label": "RAM (GB)", "sort": "number"},
     {"key": "hdd_size", "label": "Storage", "sort": "string"},
-    {"key": "last_sync", "label": "Last sync", "sort": "date"},
+    {"key": "last_sync", "label": "Last sync", "sort": "date", "priority": "essential"},
     {"key": "motherboard_manufacturer", "label": "Motherboard", "sort": "string"},
     {"key": "form_factor", "label": "Form factor", "sort": "string"},
-    {"key": "last_user", "label": "Last user", "sort": "string"},
+    {"key": "last_user", "label": "Last user", "sort": "string", "priority": "essential"},
     {"key": "approx_age", "label": "Approx age", "sort": "number"},
     {"key": "performance_score", "label": "Performance score", "sort": "number"},
     {"key": "warranty_status", "label": "Warranty status", "sort": "string"},
