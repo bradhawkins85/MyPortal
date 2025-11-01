@@ -73,6 +73,29 @@ class _BulkDeleteDB:
         self.execute_params = params
 
 
+class _ListTicketsDB:
+    def __init__(self):
+        self.fetch_sql = None
+        self.fetch_params = None
+
+    async def fetch_all(self, sql, params):
+        self.fetch_sql = sql.strip()
+        self.fetch_params = params
+        return []
+
+
+class _CountTicketsDB:
+    def __init__(self, count):
+        self.fetch_sql = None
+        self.fetch_params = None
+        self._count = count
+
+    async def fetch_one(self, sql, params):
+        self.fetch_sql = sql.strip()
+        self.fetch_params = params
+        return {"count": self._count}
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
@@ -308,6 +331,49 @@ async def test_get_ticket_by_external_reference(monkeypatch):
     assert record is not None
     assert record["id"] == 7
     assert record["ai_tags"] == ["sample"]
+
+
+@pytest.mark.anyio
+async def test_list_tickets_for_user_supports_multiple_statuses(monkeypatch):
+    dummy_db = _ListTicketsDB()
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    await tickets.list_tickets_for_user(
+        5,
+        status=["waiting_on_client", "pending_client"],
+    )
+
+    assert "t.status IN (%s, %s)" in dummy_db.fetch_sql
+    assert dummy_db.fetch_params == (
+        5,
+        5,
+        5,
+        "waiting_on_client",
+        "pending_client",
+        25,
+        0,
+    )
+
+
+@pytest.mark.anyio
+async def test_count_tickets_for_user_supports_multiple_statuses(monkeypatch):
+    dummy_db = _CountTicketsDB(count=3)
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    total = await tickets.count_tickets_for_user(
+        8,
+        status=("pending_review", "in_progress"),
+    )
+
+    assert total == 3
+    assert "t.status IN (%s, %s)" in dummy_db.fetch_sql
+    assert dummy_db.fetch_params == (
+        8,
+        8,
+        8,
+        "pending_review",
+        "in_progress",
+    )
 
 
 @pytest.mark.anyio
