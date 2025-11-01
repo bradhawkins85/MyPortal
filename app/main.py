@@ -3617,14 +3617,17 @@ async def add_to_cart(request: Request) -> RedirectResponse:
         upgrade_raw = form.get("upgradeFrom")
         if upgrade_raw is not None:
             upgrade_from_values = [upgrade_raw]
-    upgrade_source_ids: set[int] = set()
+    upgrade_source_candidates: list[int] = []
+    seen_upgrade_sources: set[int] = set()
     for raw_value in upgrade_from_values:
         try:
-            resolved = int(raw_value)
+            resolved = int(str(raw_value))
         except (TypeError, ValueError):
             continue
-        if resolved > 0:
-            upgrade_source_ids.add(resolved)
+        if resolved <= 0 or resolved in seen_upgrade_sources:
+            continue
+        upgrade_source_candidates.append(resolved)
+        seen_upgrade_sources.add(resolved)
 
     try:
         product_id = int(product_id_raw)
@@ -3653,12 +3656,16 @@ async def add_to_cart(request: Request) -> RedirectResponse:
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    valid_upgrade_sources: set[int] = set()
-    if upgrade_source_ids:
+    existing = await cart_repo.get_item(session.id, product_id)
+    existing_quantity = existing.get("quantity") if existing else 0
+
+    selected_upgrade_source: int | None = None
+    if upgrade_source_candidates:
         source_products = await shop_repo.list_products_by_ids(
-            upgrade_source_ids,
+            upgrade_source_candidates,
             company_id=company_id,
         )
+        valid_upgrade_sources: dict[int, set[int]] = {}
         for source_product in source_products:
             try:
                 source_id = int(source_product.get("id") or 0)
@@ -3674,12 +3681,21 @@ async def add_to_cart(request: Request) -> RedirectResponse:
                     continue
                 if resolved_related > 0:
                     related_ids.add(resolved_related)
-            if product_id in related_ids:
-                valid_upgrade_sources.add(source_id)
+            if related_ids:
+                valid_upgrade_sources[source_id] = related_ids
+
+        if valid_upgrade_sources:
+            for candidate in upgrade_source_candidates:
+                related = valid_upgrade_sources.get(candidate)
+                if not related or product_id not in related:
+                    continue
+                existing_source = await cart_repo.get_item(session.id, candidate)
+                if not existing_source:
+                    continue
+                selected_upgrade_source = candidate
+                break
 
     available_stock = int(product.get("stock") or 0)
-    existing = await cart_repo.get_item(session.id, product_id)
-    existing_quantity = existing.get("quantity") if existing else 0
     if available_stock <= 0 or existing_quantity + requested_quantity > available_stock:
         remaining = max(available_stock - existing_quantity, 0)
         message = quote(f"Cannot add item. Only {remaining} left in stock.")
@@ -3695,8 +3711,8 @@ async def add_to_cart(request: Request) -> RedirectResponse:
     unit_price = Decimal(str(price_source or 0))
     new_quantity = existing_quantity + requested_quantity
 
-    if valid_upgrade_sources:
-        await cart_repo.remove_items(session.id, valid_upgrade_sources)
+    if selected_upgrade_source is not None:
+        await cart_repo.remove_items(session.id, [selected_upgrade_source])
 
     await cart_repo.upsert_item(
         session_id=session.id,
@@ -3711,7 +3727,7 @@ async def add_to_cart(request: Request) -> RedirectResponse:
     )
 
     cart_url = request.url_for("cart_page")
-    if valid_upgrade_sources:
+    if selected_upgrade_source is not None:
         cart_message = quote("Upgrade applied.")
     else:
         cart_message = quote("Item added to cart.")
