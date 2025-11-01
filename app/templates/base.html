@@ -343,9 +343,27 @@
           {% set header_actions_content %}
             {% block header_actions %}{% endblock %}
           {% endset %}
+          {% set trimmed_header_actions = header_actions_content | trim %}
           {% if has_authenticated_user %}
-            <div class="header__actions">
-              {{ header_actions_content }}
+            <div class="header__actions" data-header-actions>
+              <button
+                type="button"
+                class="button button--ghost header__action"
+                data-force-refresh
+                title="Force the browser to fetch the latest version of the application"
+              >
+                <span class="button__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path
+                      d="M21 4.5a1 1 0 0 0-1-1h-5a1 1 0 0 0 0 2h2.59l-1.2 1.2a8 8 0 1 0 2.47 8.2 1 1 0 0 0-1.88-.68 6 6 0 1 1-1.86-6.13L14 9a1 1 0 0 0 1.41 1.41l4-4A1 1 0 0 0 21 5z"
+                    />
+                  </svg>
+                </span>
+                <span class="button__label">Refresh app</span>
+              </button>
+              {% if trimmed_header_actions %}
+                {{ header_actions_content }}
+              {% endif %}
             </div>
           {% else %}
             {{ header_actions_content }}
