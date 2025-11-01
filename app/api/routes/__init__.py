@@ -1,4 +1,5 @@
 from . import (
+    agent,
     api_keys,
     audit_logs,
     auth,
@@ -28,6 +29,7 @@ from . import (
 )
 
 __all__ = [
+    "agent",
     "api_keys",
     "audit_logs",
     "auth",

@@ -42,6 +42,7 @@ from pydantic import ValidationError
 from starlette.datastructures import FormData, URL
 
 from app.api.routes import (
+    agent,
     api_keys,
     audit_logs,
     auth,
@@ -229,6 +230,10 @@ tags_metadata = [
     {
         "name": "Knowledge Base",
         "description": "Permission-scoped articles with Ollama-assisted semantic search.",
+    },
+    {
+        "name": "Agent",
+        "description": "AI-assisted portal agent powered by the Ollama module with permission-aware context.",
     },
     {
         "name": "Licenses",
@@ -463,6 +468,7 @@ async def authenticated_swagger_ui(request: Request) -> Response:
     )
 
 app.include_router(auth.router)
+app.include_router(agent.router)
 app.include_router(users.router)
 app.include_router(companies.router)
 app.include_router(licenses_api.router)
