@@ -1,0 +1,7 @@
+{
+  "guid": "49de45d1-b067-45af-a084-8121907a409c",
+  "occurred_at": "2025-11-01T11:05Z",
+  "change_type": "Feature",
+  "summary": "Added dashboard agent powered by Ollama with API endpoint and documentation.",
+  "content_hash": "de5e63ecb74531ccecd35e7c3179eb6e7b16707bcd42749c8a8a0a8dc34870d0"
+}
