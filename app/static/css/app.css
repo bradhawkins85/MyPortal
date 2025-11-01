@@ -1796,11 +1796,15 @@ button.header-title-menu__link {
 
 .table-pagination {
   margin-top: var(--space-gap-roomy);
-  display: flex;
+  display: none;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-gap-roomy);
+}
+
+.table-pagination--active {
+  display: flex;
 }
 
 .table-pagination__group {
@@ -1877,6 +1881,31 @@ button.header-title-menu__link {
   padding: var(--space-gap-tight) var(--space-gap-base);
   text-align: left;
   border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+@media (max-width: 720px) {
+  .table-wrapper {
+    overflow-x: visible;
+  }
+
+  .table {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .table th,
+  .table td {
+    white-space: normal;
+    word-break: break-word;
+    padding: var(--space-gap-tight) var(--space-gap-tight);
+  }
+}
+
+@media (max-width: 720px) and (orientation: portrait) {
+  .table [data-mobile-hidden='true'] {
+    display: none !important;
+  }
 }
 
 .table th {
