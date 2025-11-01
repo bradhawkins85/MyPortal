@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block header_title %}
+  <div class="header__title-content">
+    <span class="header__title-text">Product categories</span>
+    <a class="button button--ghost button--small header__title-button" href="/admin/shop">
+      Back to shop
+    </a>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  <a class="button button--ghost" href="/admin/shop/packages">Package admin</a>
+{% endblock %}
+
+{% block content %}
+  <div class="admin-grid admin-grid--columns">
+    <section class="card card--panel admin-grid__full">
+      <details
+        class="card-collapsible"
+        id="product-categories-collapsible"
+        data-empty="{{ 'true' if categories|length == 0 else 'false' }}"
+        open
+      >
+        <summary class="card__header card__header--collapsible">
+          <div>
+            <h2 class="card__title">Categories</h2>
+            <p class="card__subtitle">
+              Group products for faster browsing and targeted visibility rules.
+            </p>
+          </div>
+          <div class="card__collapsible-meta">
+            <span class="badge badge--muted">{{ categories|length }} total</span>
+            <span class="card__toggle-icon" aria-hidden="true"></span>
+          </div>
+        </summary>
+        <div class="card-collapsible__content" id="product-categories-panel">
+          <form action="/shop/admin/category" method="post" class="form-grid">
+            {% if csrf_token %}
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+            {% endif %}
+            <div class="form-field form-field--wide">
+              <label class="form-label" for="category-name">Category name</label>
+              <input class="form-input" id="category-name" name="name" required />
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="button">Add category</button>
+            </div>
+          </form>
+          <ul class="category-list">
+            {% for category in categories %}
+              <li class="category-list__item">
+                <span>{{ category.name }}</span>
+                <form
+                  action="/shop/admin/category/{{ category.id }}/delete"
+                  method="post"
+                  class="inline-form"
+                  data-confirm="Delete this category?"
+                >
+                  {% if csrf_token %}
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                  {% endif %}
+                  <button type="submit" class="button button--danger">Delete</button>
+                </form>
+              </li>
+            {% else %}
+              <li class="category-list__item category-list__item--empty">No categories defined.</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </details>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/shop_admin.js" defer></script>
+{% endblock %}

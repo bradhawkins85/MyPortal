@@ -1,0 +1,7 @@
+{
+  "guid": "7a431583-cdb6-4b3c-8f91-2dff8e6fe394",
+  "occurred_at": "2025-11-01T06:11Z",
+  "change_type": "Feature",
+  "summary": "Split shop admin workflows into dedicated pages with modal-based import controls.",
+  "content_hash": "808f6024e7a52ec68e78a2c4fd2b6008824b60ee34d2d3387cf247098cc31e2d"
+}
