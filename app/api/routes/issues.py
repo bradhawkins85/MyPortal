@@ -4,7 +4,7 @@ from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from app.api.dependencies.auth import require_helpdesk_technician
+from app.api.dependencies.auth import require_issue_tracker_access
 from app.api.dependencies.database import require_database
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
@@ -84,7 +84,7 @@ async def list_issues(
     company_id: int | None = Query(default=None, ge=1, alias="companyId"),
     company_name: str | None = Query(default=None, alias="companyName", max_length=255),
     _: None = Depends(require_database),
-    current_user: dict[str, Any] = Depends(require_helpdesk_technician),
+    current_user: dict[str, Any] = Depends(require_issue_tracker_access),
 ) -> IssueListResponse:
     del current_user  # Access control handled by dependency
     resolved_company_id = company_id
@@ -128,7 +128,7 @@ async def list_issues(
 async def create_issue(
     payload: IssueCreate,
     _: None = Depends(require_database),
-    current_user: dict[str, Any] = Depends(require_helpdesk_technician),
+    current_user: dict[str, Any] = Depends(require_issue_tracker_access),
 ) -> IssueResponse:
     user_id = _extract_user_id(current_user)
     try:
@@ -187,7 +187,7 @@ async def create_issue(
 async def update_issue_status(
     payload: IssueStatusUpdate,
     _: None = Depends(require_database),
-    current_user: dict[str, Any] = Depends(require_helpdesk_technician),
+    current_user: dict[str, Any] = Depends(require_issue_tracker_access),
 ) -> IssueStatusResponse:
     user_id = _extract_user_id(current_user)
     try:
@@ -230,7 +230,7 @@ async def update_issue(
     issue_name: str,
     payload: IssueUpdate,
     _: None = Depends(require_database),
-    current_user: dict[str, Any] = Depends(require_helpdesk_technician),
+    current_user: dict[str, Any] = Depends(require_issue_tracker_access),
 ) -> IssueResponse:
     issue = await issues_repo.get_issue_by_name(issue_name)
     if not issue or issue.get("issue_id") is None:

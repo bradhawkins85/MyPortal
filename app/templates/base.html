@@ -84,7 +84,7 @@
           {% set can_manage_licenses = (can_manage_licenses | default(false)) or is_super_admin or membership.get('can_manage_licenses') %}
           {% set can_manage_invoices = (can_manage_invoices | default(false)) or is_super_admin or membership.get('can_manage_invoices') %}
           {% set can_manage_staff = (can_manage_staff | default(false)) or is_super_admin or membership.get('can_manage_staff') or (staff_permission > 0) %}
-          {% set can_manage_issues = is_super_admin or (is_helpdesk_technician | default(false)) %}
+          {% set can_manage_issues = has_issue_tracker_access | default(is_super_admin or (is_helpdesk_technician | default(false))) %}
           {% set has_company_section = can_access_tickets or can_manage_issues or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_invoices or can_manage_staff %}
           {% set is_company_admin = membership.get('is_admin') %}
           {% set has_admin_access = is_super_admin or is_company_admin %}

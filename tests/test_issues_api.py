@@ -66,7 +66,7 @@ def active_session(monkeypatch):
 
 def _override_dependencies(active_session):
     app.dependency_overrides[database_dependencies.require_database] = lambda: None
-    app.dependency_overrides[auth_dependencies.require_helpdesk_technician] = lambda: {
+    app.dependency_overrides[auth_dependencies.require_issue_tracker_access] = lambda: {
         "id": active_session.user_id,
         "email": "tech@example.com",
         "is_super_admin": False,

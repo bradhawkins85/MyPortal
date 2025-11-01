@@ -18,6 +18,7 @@ STATUS_OPTIONS: list[tuple[str, str]] = [
 ]
 
 DEFAULT_STATUS = "new"
+ISSUE_TRACKER_PERMISSION_KEY = "issue_tracker.access"
 _STATUS_LOOKUP = {value: label for value, label in STATUS_OPTIONS}
 
 
