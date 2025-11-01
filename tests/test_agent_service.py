@@ -60,6 +60,16 @@ async def test_execute_agent_query_returns_sources(monkeypatch):
         }
     ]
 
+    package_rows = [
+        {
+            "id": 91,
+            "name": "Remote Office Bundle",
+            "sku": "PKG-100",
+            "description": "Includes workstation, monitors, and accessories",
+            "product_count": 4,
+        }
+    ]
+
     monkeypatch.setattr(
         agent_service.knowledge_base_service,
         "build_access_context",
@@ -79,6 +89,11 @@ async def test_execute_agent_query_returns_sources(monkeypatch):
         agent_service.shop_repo,
         "list_products",
         AsyncMock(return_value=product_rows),
+    )
+    monkeypatch.setattr(
+        agent_service.shop_repo,
+        "list_packages",
+        AsyncMock(return_value=package_rows),
     )
 
     async def fake_trigger(slug, payload, *, background):
@@ -109,6 +124,7 @@ async def test_execute_agent_query_returns_sources(monkeypatch):
     assert result["sources"]["knowledge_base"][0]["slug"] == "network-guide"
     assert result["sources"]["tickets"][0]["id"] == 42
     assert result["sources"]["products"][0]["sku"] == "HW-001"
+    assert result["sources"]["packages"][0]["sku"] == "PKG-100"
     assert result["context"]["companies"][0]["company_id"] == 1
 
 

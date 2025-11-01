@@ -94,6 +94,25 @@
     return `${label}${meta}`;
   }
 
+  function formatPackageSource(item) {
+    const sku = item.sku ? escapeHtml(item.sku) : null;
+    const name = escapeHtml(item.name || (sku ? sku : 'Package'));
+    const description = item.description ? escapeHtml(item.description) : null;
+    const productCount = typeof item.product_count === 'number' ? item.product_count : Number.parseInt(item.product_count, 10);
+    const label = sku ? `[${sku}] ${name}` : name;
+    const metaParts = [];
+    if (!Number.isNaN(productCount) && Number.isFinite(productCount)) {
+      const count = Math.max(0, productCount);
+      const plural = count === 1 ? 'item' : 'items';
+      metaParts.push(`Includes ${count} ${plural}`);
+    }
+    if (description) {
+      metaParts.push(description);
+    }
+    const meta = metaParts.length ? `<div class="agent-sources__meta">${metaParts.join('<br />')}</div>` : '';
+    return `${label}${meta}`;
+  }
+
   function renderSources(container, sources) {
     if (!container) {
       return;
@@ -113,6 +132,9 @@
     }
     if (Array.isArray(sources.products)) {
       groups.push(createSourceList('Products', sources.products, formatProductSource));
+    }
+    if (Array.isArray(sources.packages)) {
+      groups.push(createSourceList('Packages', sources.packages, formatPackageSource));
     }
 
     const usable = groups.filter((group) => group);
