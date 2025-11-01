@@ -88,6 +88,88 @@
       </div>
     </section>
     {% if is_super_admin %}
+      <details class="card card--panel card-collapsible admin-grid__full" data-company-automations open>
+        <summary class="card__header card__header--collapsible card__header--stacked">
+          <div>
+            <h2 class="card__title">Company automations</h2>
+            <p class="card__subtitle">Schedule and monitor automations dedicated to this company.</p>
+          </div>
+          <div class="card__collapsible-meta" aria-hidden="true">
+            <span class="card__toggle-icon"></span>
+          </div>
+        </summary>
+        <div class="card-collapsible__content">
+          <div class="card__controls">
+            <input
+              type="search"
+              class="form-input"
+              placeholder="Filter automations"
+              aria-label="Filter company automations"
+              data-table-filter="company-automation-tasks"
+            />
+            <button type="button" class="button button--primary" data-task-create>New automation</button>
+          </div>
+          <div class="table-wrapper">
+            <table class="table" id="company-automation-tasks" data-table>
+              <thead>
+                <tr>
+                  <th scope="col" data-sort="string">Name</th>
+                  <th scope="col" data-sort="string">Command</th>
+                  <th scope="col" data-sort="string">Cron</th>
+                  <th scope="col" data-sort="string">Active</th>
+                  <th scope="col" data-sort="date">Last run</th>
+                  <th scope="col" data-sort="string">Status</th>
+                  <th scope="col" class="table__actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if company_automation_tasks %}
+                  {% for task in company_automation_tasks %}
+                    <tr data-task='{{ task | tojson }}'>
+                      <td data-label="Name">{{ task.name }}</td>
+                      <td data-label="Command">{{ task.command }}</td>
+                      <td data-label="Cron">{{ task.cron }}</td>
+                      <td data-label="Active">
+                        <span class="tag {{ 'tag--success' if task.active else 'tag--muted' }}">{{ 'Yes' if task.active else 'No' }}</span>
+                      </td>
+                      <td data-label="Last run" data-value="{{ task.last_run_iso or '' }}">
+                        {% if task.last_run_iso %}
+                          <span data-utc="{{ task.last_run_iso }}"></span>
+                        {% else %}
+                          <span class="text-muted">Never</span>
+                        {% endif %}
+                      </td>
+                      <td data-label="Status">{{ task.last_status or '—' }}</td>
+                      <td class="table__actions">
+                        <div class="table__action-buttons">
+                          <button type="button" class="button button--ghost" data-task-edit>Edit</button>
+                          <button type="button" class="button button--ghost" data-task-run>Run now</button>
+                          <button type="button" class="button button--ghost" data-task-logs>View logs</button>
+                        </div>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr>
+                    <td colspan="7" class="table__empty">No automations are configured for this company yet.</td>
+                  </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+          <div class="table-pagination" data-pagination="company-automation-tasks">
+            <div class="table-pagination__group">
+              <button type="button" class="button button--ghost table-pagination__button" data-page-prev disabled>
+                Previous
+              </button>
+              <button type="button" class="button button--ghost table-pagination__button" data-page-next>
+                Next
+              </button>
+            </div>
+            <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+          </div>
+        </div>
+      </details>
       <details class="card card--panel card-collapsible admin-grid__full">
         <summary class="card__header card__header--collapsible card__header--stacked">
           <div>
@@ -381,6 +463,136 @@
     <script type="application/json" id="company-assign-user-options">
       {{ company_user_options | tojson | safe }}
     </script>
+    <div class="modal" id="task-editor-modal" role="dialog" aria-modal="true" hidden>
+      <div class="modal__content" role="document">
+        <button type="button" class="modal__close" data-modal-close>
+          <span class="visually-hidden">Close automation editor</span>
+        </button>
+        <h2 class="modal__title">Company automation</h2>
+        <div class="modal__body">
+          <form id="scheduled-task-form" class="form" autocomplete="off">
+            <input type="hidden" name="task_id" id="task-id" />
+            <div class="form-field">
+              <label class="form-label" for="task-name-display">Automation name</label>
+              <input
+                class="form-input"
+                id="task-name-display"
+                type="text"
+                value=""
+                readonly
+                aria-readonly="true"
+                tabindex="-1"
+                data-initial-focus
+              />
+              <p class="form-help">Generated from the selected command for this company.</p>
+              <input type="hidden" id="task-name" name="name" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="task-command">Command</label>
+              <select class="form-input" id="task-command" name="command" required>
+                {% for option in automation_command_options %}
+                  <option value="{{ option.value }}">{{ option.label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="task-company">Company</label>
+              <select class="form-input" id="task-company" name="companyId">
+                {% for option in automation_company_options %}
+                  <option value="{{ option.value }}">{{ option.label }}</option>
+                {% endfor %}
+              </select>
+              <p class="form-help">Automations created here run only for this company.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="task-cron">Cron expression</label>
+              <input
+                class="form-input"
+                id="task-cron"
+                name="cron"
+                required
+                placeholder="0 2 * * *"
+                pattern="^[^\s]+(\s+[^\s]+){4,5}$"
+              />
+              <p class="form-help">Crontab syntax in UTC. Use five fields for minute through weekday.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="task-description">Description</label>
+              <textarea class="form-input form-input--textarea" id="task-description" name="description" rows="3"></textarea>
+            </div>
+            <div class="form-field form-field--inline">
+              <label class="form-label" for="task-max-retries">Max retries</label>
+              <input class="form-input" id="task-max-retries" name="maxRetries" type="number" min="0" value="12" />
+            </div>
+            <div class="form-field form-field--inline">
+              <label class="form-label" for="task-backoff">Retry backoff (seconds)</label>
+              <input class="form-input" id="task-backoff" name="retryBackoffSeconds" type="number" min="30" value="300" />
+            </div>
+            <div class="form-field form-field--checkbox">
+              <label class="form-checkbox">
+                <input type="checkbox" id="task-active" name="active" checked />
+                <span>Automation active</span>
+              </label>
+            </div>
+            <div class="form-actions">
+              <div class="form-actions__group">
+                <button type="submit" class="button">Save automation</button>
+                <button type="button" class="button button--ghost" data-task-reset>Clear form</button>
+              </div>
+              <button
+                type="button"
+                class="button button--danger"
+                data-task-delete-modal
+                hidden
+                aria-hidden="true"
+              >
+                Delete automation
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="modal" id="task-logs-modal" role="dialog" aria-modal="true" hidden>
+      <div class="modal__content" role="document">
+        <button type="button" class="modal__close" data-modal-close>
+          <span class="visually-hidden">Close automation logs</span>
+        </button>
+        <h2 class="modal__title" id="task-logs-title">Automation run history</h2>
+        <div class="modal__body">
+          <p id="task-logs-description" class="modal__subtitle text-muted">
+            View the most recent executions for this automation. All timestamps are displayed in your local timezone.
+          </p>
+          <div class="modal__controls">
+            <input
+              type="search"
+              class="form-input"
+              placeholder="Filter runs"
+              aria-label="Filter automation runs"
+              data-table-filter="task-logs-table"
+            />
+          </div>
+          <div class="table-wrapper">
+            <table class="table" id="task-logs-table" data-table>
+              <thead>
+                <tr>
+                  <th scope="col" data-sort="string">Status</th>
+                  <th scope="col" data-sort="date">Started</th>
+                  <th scope="col" data-sort="date">Finished</th>
+                  <th scope="col" data-sort="number">Duration (ms)</th>
+                  <th scope="col" data-sort="string">Details</th>
+                </tr>
+              </thead>
+              <tbody id="task-logs-body">
+                <tr>
+                  <td colspan="5" class="table__empty" id="task-logs-empty">Select an automation to view its recent runs.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
   {% endif %}
 {% endblock %}
 
@@ -388,4 +600,7 @@
   {{ super() }}
   <script src="/static/js/tables.js" defer></script>
   <script src="/static/js/admin.js" defer></script>
+  {% if is_super_admin %}
+    <script src="/static/js/automation.js" defer></script>
+  {% endif %}
 {% endblock %}

@@ -120,98 +120,10 @@
         </div>
       </details>
       <section class="divider"></section>
-      <details class="card-collapsible" data-automation-section="company" open>
-        <summary class="card__header card__header--collapsible">
-          <div>
-            <h3 class="card__subtitle">Company-specific</h3>
-            <p class="text-muted">Tasks targeted to individual companies.</p>
-          </div>
-          <div class="card__collapsible-meta" aria-hidden="true">
-            <span class="card__toggle-icon" aria-hidden="true"></span>
-          </div>
-        </summary>
-        <div class="card-collapsible__content">
-          <div class="table-toolbar">
-            <input
-              type="search"
-              class="form-input"
-              placeholder="Filter company tasks"
-              aria-label="Filter company-specific tasks"
-              data-table-filter="tasks-table-company"
-            />
-          </div>
-          <div class="table-wrapper">
-            <table class="table" id="tasks-table-company" data-table>
-            <thead>
-              <tr>
-                <th scope="col" data-sort="string">Name</th>
-                <th scope="col" data-sort="string">Command</th>
-                <th scope="col" data-sort="string">Company</th>
-                <th scope="col" data-sort="string">Cron</th>
-                <th scope="col" data-sort="string">Active</th>
-                <th scope="col" data-sort="date">Last run</th>
-                <th scope="col" data-sort="string">Status</th>
-                <th scope="col" class="table__actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for task in company_tasks %}
-                <tr data-task='{{ task | tojson }}'>
-                  <td data-label="Name">{{ task.name }}</td>
-                  <td data-label="Command">{{ task.command }}</td>
-                  <td data-label="Company" data-value="{{ task.company_name }}">
-                    {{ task.company_name }}
-                  </td>
-                  <td data-label="Cron">{{ task.cron }}</td>
-                  <td data-label="Active">
-                    <span class="tag {{ 'tag--success' if task.active else 'tag--muted' }}">{{ 'Yes' if task.active else 'No' }}</span>
-                  </td>
-                  <td data-label="Last run" data-value="{{ task.last_run_iso or '' }}">
-                    {% if task.last_run_iso %}
-                      <span data-utc="{{ task.last_run_iso }}"></span>
-                    {% else %}
-                      <span class="text-muted">Never</span>
-                    {% endif %}
-                  </td>
-                  <td data-label="Status">{{ task.last_status or '—' }}</td>
-                  <td class="table__actions">
-                    <div class="table__action-buttons">
-                      <button type="button" class="button button--ghost" data-task-edit>Edit</button>
-                      <button type="button" class="button button--ghost" data-task-run>Run now</button>
-                      <button type="button" class="button button--ghost" data-task-logs>View logs</button>
-                    </div>
-                  </td>
-                </tr>
-              {% else %}
-                <tr>
-                  <td colspan="8" class="table__empty">No company-specific tasks configured yet.</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-            </table>
-          </div>
-          <div class="table-pagination" data-pagination="tasks-table-company">
-            <div class="table-pagination__group">
-              <button
-                type="button"
-                class="button button--ghost table-pagination__button"
-                data-page-prev
-                disabled
-              >
-                Previous
-              </button>
-              <button
-                type="button"
-                class="button button--ghost table-pagination__button"
-                data-page-next
-              >
-                Next
-              </button>
-            </div>
-            <p class="table-pagination__status" data-page-info aria-live="polite"></p>
-          </div>
-        </div>
-      </details>
+      <div class="alert alert--info" role="status">
+        Company-specific automations now live on each company's edit page. Select a company from the
+        directory to view and manage its scheduled tasks.
+      </div>
     </div>
   </section>
 </div>

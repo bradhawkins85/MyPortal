@@ -2639,6 +2639,55 @@ async def _render_company_edit_page(
 
     assign_user_options = company_user_options.get(assign_company_id, []) if is_super_admin else []
 
+    company_automation_tasks: list[dict[str, Any]] = []
+    automation_command_options: list[dict[str, str]] = []
+    automation_company_options: list[dict[str, str]] = []
+
+    if is_super_admin:
+        automation_command_options = [
+            {"value": "sync_staff", "label": "Sync staff directory"},
+            {"value": "sync_o365", "label": "Sync Microsoft 365 licenses"},
+        ]
+        default_command_values = {option["value"] for option in automation_command_options}
+
+        try:
+            tasks = await scheduled_tasks_repo.list_tasks()
+        except Exception:  # pragma: no cover - fallback to keep page rendering
+            tasks = []
+
+        existing_commands: set[str] = set()
+        for task in tasks:
+            command_value = task.get("command")
+            if command_value:
+                existing_commands.add(str(command_value))
+
+            raw_company_id = task.get("company_id")
+            try:
+                task_company_id = int(raw_company_id) if raw_company_id is not None else None
+            except (TypeError, ValueError):
+                task_company_id = None
+
+            if task_company_id != company_id:
+                continue
+
+            serialised_task = _serialise_mapping(task)
+            serialised_task["last_run_iso"] = _to_iso(task.get("last_run_at"))
+            serialised_task["company_name"] = (company_record.get("name") or "").strip() or f"Company #{company_id}"
+            company_automation_tasks.append(serialised_task)
+
+        for command in sorted(existing_commands):
+            if command and command not in default_command_values:
+                automation_command_options.append({"value": command, "label": command})
+
+        automation_company_options = [
+            {
+                "value": str(company_id),
+                "label": (company_record.get("name") or "").strip() or f"Company #{company_id}",
+            }
+        ]
+
+        company_automation_tasks.sort(key=lambda item: (item.get("name") or "").lower())
+
     assign_form = {
         "company_id": assign_company_id,
         "user_id": assign_user_id,
@@ -2665,6 +2714,9 @@ async def _render_company_edit_page(
         "assign_form": assign_form,
         "company_user_options": company_user_options,
         "assign_user_options": assign_user_options,
+        "company_automation_tasks": company_automation_tasks,
+        "automation_command_options": automation_command_options,
+        "automation_company_options": automation_company_options,
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
@@ -6915,7 +6967,6 @@ async def admin_automation(request: Request):
 
     prepared_tasks: list[dict[str, Any]] = []
     global_tasks: list[dict[str, Any]] = []
-    company_tasks: list[dict[str, Any]] = []
     missing_company_ids: set[int] = set()
     for task in tasks:
         serialised_task = _serialise_mapping(task)
@@ -6940,8 +6991,6 @@ async def admin_automation(request: Request):
         prepared_tasks.append(serialised_task)
         if company_id is None or company_name.lower() == "all companies":
             global_tasks.append(serialised_task)
-        else:
-            company_tasks.append(serialised_task)
     command_options = [
         {"value": "sync_staff", "label": "Sync staff directory"},
         {"value": "sync_o365", "label": "Sync Microsoft 365 licenses"},
@@ -6962,7 +7011,6 @@ async def admin_automation(request: Request):
         "title": "System Automation",
         "tasks": prepared_tasks,
         "global_tasks": global_tasks,
-        "company_tasks": company_tasks,
         "command_options": command_options,
         "company_options": company_options,
     }
