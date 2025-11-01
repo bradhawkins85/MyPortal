@@ -1,0 +1,7 @@
+{
+  "guid": "56d9ec77-1f24-44ee-a43e-e680fc2956c9",
+  "occurred_at": "2025-11-01T13:30Z",
+  "change_type": "Fix",
+  "summary": "Merged duplicate portal ticket statuses on the customer view and ensured filters cover all backend IDs.",
+  "content_hash": "dd5b25eec81839745dd36d626ba9e56e9189eb25d95fa523c3cbc9272b0ad6a5"
+}
