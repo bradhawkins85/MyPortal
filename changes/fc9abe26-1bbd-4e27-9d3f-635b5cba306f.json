@@ -1,0 +1,7 @@
+{
+  "guid": "fc9abe26-1bbd-4e27-9d3f-635b5cba306f",
+  "occurred_at": "2025-11-01T06:00Z",
+  "change_type": "Fix",
+  "summary": "Removed template variables guidance panel from message templates admin page.",
+  "content_hash": "cc03834c881f9baa77088d2d59c842b855c29f2283fcfba9379f3d13f4f70b7f"
+}
