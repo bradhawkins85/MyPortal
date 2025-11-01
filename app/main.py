@@ -490,6 +490,7 @@ app.include_router(system.router)
 app.include_router(uptimekuma.router)
 
 HELPDESK_PERMISSION_KEY = tickets_service.HELPDESK_PERMISSION_KEY
+ISSUE_TRACKER_PERMISSION_KEY = issues_service.ISSUE_TRACKER_PERMISSION_KEY
 
 
 
@@ -551,6 +552,33 @@ async def _is_helpdesk_technician(user: Mapping[str, Any], request: Request | No
     return bool(result)
 
 
+async def _has_issue_tracker_access(user: Mapping[str, Any], request: Request | None = None) -> bool:
+    if user.get("is_super_admin"):
+        if request is not None:
+            request.state.has_issue_tracker_access = True
+        return True
+    if request is not None:
+        cached = getattr(request.state, "has_issue_tracker_access", None)
+        if cached is not None:
+            return bool(cached)
+    user_id = user.get("id")
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        result = False
+    else:
+        try:
+            result = await membership_repo.user_has_permission(
+                user_id_int, ISSUE_TRACKER_PERMISSION_KEY
+            )
+        except Exception as exc:  # pragma: no cover - defensive fallback for tests without DB
+            log_error("Failed to determine issue tracker access", error=str(exc))
+            result = False
+    if request is not None:
+        request.state.has_issue_tracker_access = bool(result)
+    return bool(result)
+
+
 async def _require_helpdesk_page(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
     user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -560,6 +588,21 @@ async def _require_helpdesk_page(request: Request) -> tuple[dict[str, Any] | Non
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Helpdesk technician privileges required",
+        )
+    return user, None
+
+
+async def _require_issue_tracker_access(
+    request: Request,
+) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return None, redirect
+    has_access = await _has_issue_tracker_access(user, request)
+    if not has_access:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Issue tracker access required",
         )
     return user, None
 
@@ -804,6 +847,7 @@ async def _build_base_context(
     is_super_admin = bool(user.get("is_super_admin"))
     staff_permission_level = int(membership_data.get("staff_permission") or 0)
     is_helpdesk_technician = await _is_helpdesk_technician(user, request)
+    has_issue_tracker_access = await _has_issue_tracker_access(user, request)
 
     def _has_permission(flag: str) -> bool:
         return bool(membership_data.get(flag))
@@ -821,6 +865,7 @@ async def _build_base_context(
             or _has_permission("can_manage_staff")
             or staff_permission_level > 0
         ),
+        "can_manage_issues": has_issue_tracker_access,
     }
 
     module_lookup = getattr(request.state, "module_lookup", None)
@@ -853,6 +898,7 @@ async def _build_base_context(
         "is_impersonating": is_impersonating,
         "impersonator_user": impersonator_user,
         "impersonation_started_at": impersonation_started_at,
+        "has_issue_tracker_access": has_issue_tracker_access,
     }
     context.update(permission_flags)
     if extra:
@@ -8807,7 +8853,7 @@ async def admin_issue_tracker(
     company_id: int | None = Query(default=None, alias="companyId"),
     issue_id: int | None = Query(default=None, alias="issueId"),
 ):
-    current_user, redirect = await _require_helpdesk_page(request)
+    current_user, redirect = await _require_issue_tracker_access(request)
     if redirect:
         return redirect
 
@@ -8908,7 +8954,7 @@ async def admin_create_issue(
     company_ids: list[int] | None = Form(default=None),
     initial_status: str = Form(default=issues_service.DEFAULT_STATUS, alias="initialStatus"),
 ):
-    current_user, redirect = await _require_helpdesk_page(request)
+    current_user, redirect = await _require_issue_tracker_access(request)
     if redirect:
         return redirect
 
@@ -8999,7 +9045,7 @@ async def admin_update_issue(
     new_company_ids: list[int] | None = Form(default=None, alias="newCompanyIds"),
     new_company_status: str = Form(default=issues_service.DEFAULT_STATUS, alias="newCompanyStatus"),
 ):
-    current_user, redirect = await _require_helpdesk_page(request)
+    current_user, redirect = await _require_issue_tracker_access(request)
     if redirect:
         return redirect
 
@@ -9087,7 +9133,7 @@ async def admin_update_issue_assignment_status(
     status_value: str = Form(..., alias="status"),
     return_url: str | None = Form(default=None, alias="returnUrl"),
 ):
-    current_user, redirect = await _require_helpdesk_page(request)
+    current_user, redirect = await _require_issue_tracker_access(request)
     if redirect:
         return redirect
 
@@ -9134,7 +9180,7 @@ async def admin_delete_issue_assignment(
     request: Request,
     return_url: str | None = Form(default=None, alias="returnUrl"),
 ):
-    current_user, redirect = await _require_helpdesk_page(request)
+    current_user, redirect = await _require_issue_tracker_access(request)
     if redirect:
         return redirect
 
