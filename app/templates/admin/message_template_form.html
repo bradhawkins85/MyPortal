@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block header_title %}
+  <div class="header__title-content header__title-content--spread">
+    <span class="header__title-text">{{ page_title }}</span>
+    <a class="button button--ghost button--small header__title-button" href="/admin/message-templates">Back to templates</a>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <section class="card card--panel" aria-labelledby="message-template-form-heading">
+    <header class="card__header card__header--actions">
+      <div>
+        <h2 class="card__title" id="message-template-form-heading" data-template-form-title>{{ form_heading }}</h2>
+        <p class="card__subtitle">
+          Provide a unique slug, friendly name, and body content. You can reuse templates anywhere template variables are supported.
+        </p>
+      </div>
+      {% if show_reset_button %}
+        <button type="button" class="button button--ghost" data-template-reset>
+          Clear form
+        </button>
+      {% endif %}
+    </header>
+    <form id="message-template-form" class="form" autocomplete="off" novalidate>
+      <input type="hidden" id="message-template-id" name="template_id" value="{{ template.id or '' }}" />
+      <div class="form-field">
+        <label class="form-label" for="message-template-slug">Slug</label>
+        <input
+          class="form-input"
+          id="message-template-slug"
+          name="slug"
+          maxlength="120"
+          pattern="^[a-z0-9](?:[a-z0-9._-]{0,118}[a-z0-9])?$"
+          required
+          placeholder="welcome.email"
+          aria-describedby="message-template-slug-help"
+          value="{{ template.slug or '' }}"
+        />
+        <p class="form-help" id="message-template-slug-help">
+          Lowercase letters, numbers, dots, underscores, and hyphens only.
+        </p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="message-template-name">Name</label>
+        <input
+          class="form-input"
+          id="message-template-name"
+          name="name"
+          maxlength="255"
+          required
+          value="{{ template.name or '' }}"
+        />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="message-template-description">Description</label>
+        <textarea
+          class="form-input form-input--textarea"
+          id="message-template-description"
+          name="description"
+          rows="3"
+        >{{ template.description or '' }}</textarea>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="message-template-content-type">Content type</label>
+        <select class="form-input" id="message-template-content-type" name="content_type">
+          {% for option in content_type_options %}
+            <option value="{{ option.value }}" {% if option.value == (template.content_type or default_content_type) %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="message-template-content">Content</label>
+        <textarea
+          class="form-input form-input--textarea"
+          id="message-template-content"
+          name="content"
+          rows="12"
+          required
+          aria-describedby="message-template-content-help"
+        >{{ template.content or '' }}</textarea>
+        <p class="form-help" id="message-template-content-help">
+          Supports template variables like <code>{{ '{{ user.first_name }}' }}</code> and <code>{{ '{{ company.name }}' }}</code>.
+        </p>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button button--primary" data-template-submit>{{ submit_label }}</button>
+        <a class="button button--ghost" href="/admin/message-templates">Cancel</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/admin.js" defer></script>
+{% endblock %}
