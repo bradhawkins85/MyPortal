@@ -78,10 +78,18 @@
         <thead>
           <tr>
             {% for column in columns %}
-              <th scope="col" data-column="{{ column.key }}" data-sort="{{ column.sort }}">{{ column.label }}</th>
+              {% set mobile_priority = column.priority %}
+              <th
+                scope="col"
+                data-column="{{ column.key }}"
+                data-sort="{{ column.sort }}"
+                {% if mobile_priority %}data-mobile-priority="{{ mobile_priority }}"{% endif %}
+              >
+                {{ column.label }}
+              </th>
             {% endfor %}
             {% if is_super_admin %}
-              <th scope="col" class="table__actions">Actions</th>
+              <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
             {% endif %}
           </tr>
         </thead>
@@ -91,12 +99,23 @@
               {% for column in columns %}
                 {% set key = column.key %}
                 {% set value = asset.get(key) %}
+                {% set mobile_priority = column.priority %}
                 {% if key in ['ram_gb', 'approx_age', 'performance_score'] %}
-                  <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ asset.get(key ~ '_sort', '') }}">
+                  <td
+                    data-label="{{ column.label }}"
+                    data-column="{{ key }}"
+                    data-value="{{ asset.get(key ~ '_sort', '') }}"
+                    {% if mobile_priority %}data-mobile-priority="{{ mobile_priority }}"{% endif %}
+                  >
                     {% if value %}{{ value }}{% else %}<span class="text-muted">—</span>{% endif %}
                   </td>
                 {% elif key == 'last_sync' %}
-                  <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ asset.get('last_sync_sort', '') }}">
+                  <td
+                    data-label="{{ column.label }}"
+                    data-column="{{ key }}"
+                    data-value="{{ asset.get('last_sync_sort', '') }}"
+                    {% if mobile_priority %}data-mobile-priority="{{ mobile_priority }}"{% endif %}
+                  >
                     {% if asset.last_sync_iso %}
                       <span data-utc="{{ asset.last_sync_iso }}">{{ asset.last_sync or asset.last_sync_iso }}</span>
                     {% else %}
@@ -104,7 +123,12 @@
                     {% endif %}
                   </td>
                 {% elif key == 'warranty_end_date' %}
-                  <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ asset.get('warranty_end_sort', '') }}">
+                  <td
+                    data-label="{{ column.label }}"
+                    data-column="{{ key }}"
+                    data-value="{{ asset.get('warranty_end_sort', '') }}"
+                    {% if mobile_priority %}data-mobile-priority="{{ mobile_priority }}"{% endif %}
+                  >
                     {% if asset.warranty_end_date %}
                       {{ asset.warranty_end_date }}
                     {% else %}
@@ -112,13 +136,18 @@
                     {% endif %}
                   </td>
                 {% else %}
-                  <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ value or '' }}">
+                  <td
+                    data-label="{{ column.label }}"
+                    data-column="{{ key }}"
+                    data-value="{{ value or '' }}"
+                    {% if mobile_priority %}data-mobile-priority="{{ mobile_priority }}"{% endif %}
+                  >
                     {% if value %}{{ value }}{% else %}<span class="text-muted">—</span>{% endif %}
                   </td>
                 {% endif %}
               {% endfor %}
               {% if is_super_admin %}
-                <td class="table__actions">
+                <td class="table__actions" data-mobile-priority="essential">
                   <button type="button" class="button button--danger button--small asset-delete-button" data-asset-id="{{ asset.id }}">
                     Delete
                   </button>

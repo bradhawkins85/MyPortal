@@ -1,0 +1,7 @@
+{
+  "guid": "f517b8c2-aaad-4a61-b466-3315e3c8ac1d",
+  "occurred_at": "2025-11-01T12:59:00Z",
+  "change_type": "Feature",
+  "summary": "Improved table responsiveness on mobile and removed built-in pagination controls.",
+  "content_hash": "a52611a4a22b35085a9f7774bd88adb85997ef17fca8170100805c2825a42de8"
+}

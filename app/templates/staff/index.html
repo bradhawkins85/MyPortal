@@ -92,14 +92,14 @@
       <table class="table" id="staff-table" data-table>
         <thead>
           <tr>
-            <th scope="col" data-sort="string">First name</th>
-            <th scope="col" data-sort="string">Last name</th>
-            <th scope="col" data-sort="string">Email</th>
-            <th scope="col" data-sort="string">Mobile</th>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">First name</th>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">Last name</th>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">Email</th>
+            <th scope="col" data-sort="string" data-mobile-priority="supporting">Mobile</th>
             <th scope="col" data-sort="string">Code</th>
-            <th scope="col" data-sort="date">Onboarded</th>
-            <th scope="col" data-sort="string">Enabled</th>
-            <th scope="col" class="table__actions">Actions</th>
+            <th scope="col" data-sort="date" data-mobile-priority="supporting">Onboarded</th>
+            <th scope="col" data-sort="string" data-mobile-priority="supporting">Enabled</th>
+            <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
           </tr>
         </thead>
         <tbody>
