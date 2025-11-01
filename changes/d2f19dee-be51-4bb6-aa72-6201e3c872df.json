@@ -1,0 +1,7 @@
+{
+  "guid": "d2f19dee-be51-4bb6-aa72-6201e3c872df",
+  "occurred_at": "2025-11-01T06:37Z",
+  "change_type": "Feature",
+  "summary": "Moved company-specific automations to each company edit page.",
+  "content_hash": "ba12503352eca1334c9c96abf6b9bf7b73e88eaada269adf8fadb40378846105"
+}
