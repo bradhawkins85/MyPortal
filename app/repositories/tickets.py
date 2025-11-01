@@ -224,7 +224,9 @@ async def list_tickets_for_user(
     *,
     company_ids: Sequence[int] | None = None,
     search: str | None = None,
+    status: str | None = None,
     limit: int = 25,
+    offset: int = 0,
 ) -> list[TicketRecord]:
     """Return recent tickets requested by or watched by the specified user."""
 
@@ -242,6 +244,10 @@ async def list_tickets_for_user(
     conditions = ["(t.requester_id = %s OR tw.user_id = %s)"]
     params.extend([user_id, user_id])
 
+    if status:
+        conditions.append("t.status = %s")
+        params.append(status)
+
     if company_filters:
         placeholders = ", ".join(["%s"] * len(company_filters))
         conditions.append(f"t.company_id IN ({placeholders})")
@@ -257,11 +263,57 @@ async def list_tickets_for_user(
 
     query_parts.append("WHERE " + " AND ".join(conditions))
     query_parts.append("ORDER BY t.updated_at DESC")
-    query_parts.append("LIMIT %s")
-    params.append(int(max(1, limit)))
+    query_parts.append("LIMIT %s OFFSET %s")
+    params.extend([int(max(1, limit)), int(max(0, offset))])
 
     rows = await db.fetch_all(" ".join(query_parts), tuple(params))
     return [_normalise_ticket(row) for row in rows]
+
+
+async def count_tickets_for_user(
+    user_id: int,
+    *,
+    company_ids: Sequence[int] | None = None,
+    search: str | None = None,
+    status: str | None = None,
+) -> int:
+    """Return the number of tickets requested by or watched by the specified user."""
+
+    if user_id <= 0:
+        return 0
+
+    company_filters = [int(cid) for cid in (company_ids or []) if int(cid) > 0]
+
+    query_parts = [
+        "SELECT COUNT(DISTINCT t.id) AS count FROM tickets AS t",
+        "LEFT JOIN ticket_watchers AS tw ON tw.ticket_id = t.id AND tw.user_id = %s",
+    ]
+    params: list[Any] = [user_id]
+
+    conditions = ["(t.requester_id = %s OR tw.user_id = %s)"]
+    params.extend([user_id, user_id])
+
+    if status:
+        conditions.append("t.status = %s")
+        params.append(status)
+
+    if company_filters:
+        placeholders = ", ".join(["%s"] * len(company_filters))
+        conditions.append(f"t.company_id IN ({placeholders})")
+        params.extend(company_filters)
+
+    search_term = (search or "").strip().lower()
+    if search_term:
+        like = f"%{search_term}%"
+        conditions.append(
+            "(LOWER(t.subject) LIKE %s OR LOWER(COALESCE(t.description, '')) LIKE %s)"
+        )
+        params.extend([like, like])
+
+    query_parts.append("WHERE " + " AND ".join(conditions))
+
+    row = await db.fetch_one(" ".join(query_parts), tuple(params))
+    return int(row["count"]) if row else 0
 
 
 async def count_tickets(
@@ -307,6 +359,16 @@ async def count_tickets(
 async def get_ticket(ticket_id: int) -> TicketRecord | None:
     row = await db.fetch_one("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
     return _normalise_ticket(row) if row else None
+
+
+async def is_ticket_watcher(ticket_id: int, user_id: int) -> bool:
+    if ticket_id <= 0 or user_id <= 0:
+        return False
+    row = await db.fetch_one(
+        "SELECT 1 FROM ticket_watchers WHERE ticket_id = %s AND user_id = %s LIMIT 1",
+        (ticket_id, user_id),
+    )
+    return bool(row)
 
 
 async def get_ticket_by_external_reference(external_reference: str) -> TicketRecord | None:
