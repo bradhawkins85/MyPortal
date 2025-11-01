@@ -205,6 +205,179 @@
     const visibilityForm = document.getElementById('product-visibility-form');
     const previewImage = document.getElementById('edit-product-preview');
     const editIdField = document.getElementById('edit-product-id');
+    const featuresTable = document.getElementById('edit-product-features-table');
+    const featuresTableBody = featuresTable ? featuresTable.querySelector('tbody') : null;
+    const featuresDataInput = document.getElementById('edit-product-features-data');
+    const addFeatureButton = document.getElementById('add-product-feature');
+
+    function dispatchFeatureTableUpdate() {
+      if (!featuresTable) {
+        return;
+      }
+      featuresTable.dispatchEvent(new CustomEvent('table:rows-updated', { bubbles: true }));
+    }
+
+    function getFeatureRows() {
+      if (!featuresTableBody) {
+        return [];
+      }
+      return Array.from(featuresTableBody.querySelectorAll('tr[data-feature-row="true"]'));
+    }
+
+    function refreshFeatureInput() {
+      if (!featuresDataInput) {
+        dispatchFeatureTableUpdate();
+        return;
+      }
+      const rows = getFeatureRows();
+      const payload = rows.map((row, index) => {
+        const nameInput = row.querySelector('input[data-feature-name]');
+        const valueInput = row.querySelector('input[data-feature-value]');
+        return {
+          name: nameInput ? nameInput.value.trim() : '',
+          value: valueInput ? valueInput.value.trim() : '',
+          position: index,
+        };
+      });
+      featuresDataInput.value = JSON.stringify(payload);
+      dispatchFeatureTableUpdate();
+    }
+
+    function clearFeatureTable() {
+      if (featuresTableBody) {
+        featuresTableBody.innerHTML = '';
+      }
+    }
+
+    function addEmptyFeatureRow() {
+      if (!featuresTableBody) {
+        return;
+      }
+      const row = document.createElement('tr');
+      row.dataset.emptyRow = 'true';
+      const cell = document.createElement('td');
+      cell.colSpan = 3;
+      cell.className = 'table__empty';
+      cell.textContent = 'No features added yet.';
+      row.appendChild(cell);
+      featuresTableBody.appendChild(row);
+      dispatchFeatureTableUpdate();
+    }
+
+    function removeEmptyFeatureRow() {
+      if (!featuresTableBody) {
+        return;
+      }
+      const emptyRow = featuresTableBody.querySelector('tr[data-empty-row="true"]');
+      if (emptyRow) {
+        emptyRow.remove();
+      }
+    }
+
+    function createFeatureRow(feature) {
+      if (!featuresTableBody) {
+        return null;
+      }
+      const safeFeature = feature && typeof feature === 'object' ? feature : {};
+      const nameValue = typeof safeFeature.name === 'string' ? safeFeature.name : '';
+      const valueValue = typeof safeFeature.value === 'string' ? safeFeature.value : '';
+
+      const row = document.createElement('tr');
+      row.dataset.featureRow = 'true';
+      if (safeFeature.id != null) {
+        row.dataset.featureId = String(safeFeature.id);
+      }
+
+      const nameCell = document.createElement('td');
+      nameCell.setAttribute('data-label', 'Feature');
+      nameCell.dataset.value = nameValue;
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'form-input';
+      nameInput.required = true;
+      nameInput.placeholder = 'Feature name';
+      nameInput.value = nameValue;
+      nameInput.setAttribute('data-feature-name', 'true');
+      nameInput.addEventListener('input', () => {
+        nameCell.dataset.value = nameInput.value.trim();
+        refreshFeatureInput();
+      });
+      nameCell.appendChild(nameInput);
+
+      const valueCell = document.createElement('td');
+      valueCell.setAttribute('data-label', 'Value');
+      valueCell.dataset.value = valueValue;
+      const valueInput = document.createElement('input');
+      valueInput.type = 'text';
+      valueInput.className = 'form-input';
+      valueInput.placeholder = 'Feature value';
+      valueInput.value = valueValue;
+      valueInput.setAttribute('data-feature-value', 'true');
+      valueInput.addEventListener('input', () => {
+        valueCell.dataset.value = valueInput.value.trim();
+        refreshFeatureInput();
+      });
+      valueCell.appendChild(valueInput);
+
+      const actionsCell = document.createElement('td');
+      actionsCell.className = 'table__actions';
+      const removeButton = document.createElement('button');
+      removeButton.type = 'button';
+      removeButton.className = 'button button--ghost button--small button--danger';
+      removeButton.textContent = 'Remove';
+      removeButton.setAttribute('aria-label', 'Remove feature');
+      removeButton.addEventListener('click', () => {
+        row.remove();
+        if (!getFeatureRows().length) {
+          addEmptyFeatureRow();
+        }
+        refreshFeatureInput();
+      });
+      actionsCell.appendChild(removeButton);
+
+      row.appendChild(nameCell);
+      row.appendChild(valueCell);
+      row.appendChild(actionsCell);
+
+      return row;
+    }
+
+    function addFeatureRow(feature) {
+      if (!featuresTableBody) {
+        return;
+      }
+      removeEmptyFeatureRow();
+      const row = createFeatureRow(feature);
+      if (!row) {
+        return;
+      }
+      featuresTableBody.appendChild(row);
+      refreshFeatureInput();
+      const nameInput = row.querySelector('input[data-feature-name]');
+      if (nameInput) {
+        nameInput.focus();
+        nameInput.select();
+      }
+    }
+
+    function renderFeatureRows(features) {
+      if (!featuresTableBody) {
+        return;
+      }
+      clearFeatureTable();
+      const items = Array.isArray(features) ? features : [];
+      if (items.length) {
+        items.forEach((item) => {
+          const row = createFeatureRow(item);
+          if (row) {
+            featuresTableBody.appendChild(row);
+          }
+        });
+      } else {
+        addEmptyFeatureRow();
+      }
+      refreshFeatureInput();
+    }
 
     bindModalDismissal(editModal);
     bindModalDismissal(visibilityModal);
@@ -263,6 +436,7 @@
             previewImage.hidden = true;
           }
         }
+        renderFeatureRows(product.features || []);
         openModal(editModal);
       });
     });
@@ -283,5 +457,17 @@
         openModal(visibilityModal);
       });
     });
+
+    if (addFeatureButton) {
+      addFeatureButton.addEventListener('click', () => {
+        addFeatureRow({ name: '', value: '' });
+      });
+    }
+
+    if (editForm) {
+      editForm.addEventListener('submit', () => {
+        refreshFeatureInput();
+      });
+    }
   });
 })();

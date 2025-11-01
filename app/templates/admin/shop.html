@@ -329,6 +329,33 @@
           {% endfor %}
         </select>
       </div>
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="edit-product-features-filter">Features</label>
+        <div class="form-actions form-actions--inline">
+          <input
+            type="search"
+            class="form-input"
+            id="edit-product-features-filter"
+            placeholder="Filter features"
+            aria-label="Filter features"
+            data-table-filter="edit-product-features-table"
+          />
+          <button type="button" class="button" id="add-product-feature">Add feature</button>
+        </div>
+        <div class="table-wrapper">
+          <table class="table" id="edit-product-features-table" data-table>
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string">Feature</th>
+                <th scope="col" data-sort="string">Value</th>
+                <th scope="col" class="table__actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <input type="hidden" name="features" id="edit-product-features-data" value="[]" />
+      </div>
       <div class="form-field">
         <label class="form-label" for="edit-product-image">Image</label>
         <input class="form-input" id="edit-product-image" name="image" type="file" accept="image/*" />
