@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from app.core.database import db
 
@@ -216,6 +216,51 @@ async def list_tickets(
         """,
         tuple(params),
     )
+    return [_normalise_ticket(row) for row in rows]
+
+
+async def list_tickets_for_user(
+    user_id: int,
+    *,
+    company_ids: Sequence[int] | None = None,
+    search: str | None = None,
+    limit: int = 25,
+) -> list[TicketRecord]:
+    """Return recent tickets requested by or watched by the specified user."""
+
+    if user_id <= 0:
+        return []
+
+    company_filters = [int(cid) for cid in (company_ids or []) if int(cid) > 0]
+
+    query_parts = [
+        "SELECT DISTINCT t.* FROM tickets AS t",
+        "LEFT JOIN ticket_watchers AS tw ON tw.ticket_id = t.id AND tw.user_id = %s",
+    ]
+    params: list[Any] = [user_id]
+
+    conditions = ["(t.requester_id = %s OR tw.user_id = %s)"]
+    params.extend([user_id, user_id])
+
+    if company_filters:
+        placeholders = ", ".join(["%s"] * len(company_filters))
+        conditions.append(f"t.company_id IN ({placeholders})")
+        params.extend(company_filters)
+
+    search_term = (search or "").strip().lower()
+    if search_term:
+        like = f"%{search_term}%"
+        conditions.append(
+            "(LOWER(t.subject) LIKE %s OR LOWER(COALESCE(t.description, '')) LIKE %s)"
+        )
+        params.extend([like, like])
+
+    query_parts.append("WHERE " + " AND ".join(conditions))
+    query_parts.append("ORDER BY t.updated_at DESC")
+    query_parts.append("LIMIT %s")
+    params.append(int(max(1, limit)))
+
+    rows = await db.fetch_all(" ".join(query_parts), tuple(params))
     return [_normalise_ticket(row) for row in rows]
 
 

@@ -3,6 +3,48 @@
 {% block content %}
 {% set overview = overview or {} %}
 <div class="dashboard">
+  <section class="dashboard__section dashboard__section--agent">
+    <div class="card card--panel agent-panel" data-agent-panel>
+      <div class="agent-panel__header">
+        <h2 class="agent-panel__title">Agent</h2>
+        <p class="agent-panel__subtitle">
+          Ask the MyPortal agent for summaries across knowledge base articles, your tickets, and available hardware.
+        </p>
+      </div>
+      <form class="agent-panel__form" data-agent-form novalidate>
+        <label class="agent-panel__label" for="agent-query">Ask the agent</label>
+        <div class="agent-panel__controls">
+          <input
+            id="agent-query"
+            name="query"
+            class="agent-panel__input"
+            type="search"
+            placeholder="Search for setup steps, ticket history, or device recommendations…"
+            maxlength="2000"
+            required
+            data-agent-input
+          />
+          <button type="submit" class="button button--primary agent-panel__submit" data-agent-submit>
+            Ask
+          </button>
+        </div>
+        <p class="agent-panel__hint">
+          The agent only replies with information that is available to you inside MyPortal.
+        </p>
+      </form>
+      <div class="agent-panel__status" data-agent-status aria-live="polite"></div>
+      <div class="agent-panel__results" data-agent-results hidden>
+        <article class="agent-answer" data-agent-answer hidden>
+          <h3 class="agent-answer__heading">Answer</h3>
+          <div class="agent-answer__body" data-agent-answer-body></div>
+        </article>
+        <section class="agent-sources" data-agent-sources hidden>
+          <h3 class="agent-sources__heading">Sources</h3>
+          <div class="agent-sources__lists" data-agent-source-lists></div>
+        </section>
+      </div>
+    </div>
+  </section>
   <section class="dashboard__section">
     <div class="dashboard__section-header">
       <h1 class="dashboard__title">Consolidated overview</h1>
@@ -112,4 +154,9 @@
     {% endif %}
   </section>
 </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/agent.js" defer></script>
 {% endblock %}

@@ -641,7 +641,13 @@ def _render_prompt(query: str, articles: list[Mapping[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-async def search_articles(query: str, context: ArticleAccessContext, *, limit: int = 8) -> dict[str, Any]:
+async def search_articles(
+    query: str,
+    context: ArticleAccessContext,
+    *,
+    limit: int = 8,
+    use_ollama: bool = True,
+) -> dict[str, Any]:
     candidates = await kb_repo.list_articles(include_unpublished=context.is_super_admin)
     visible: list[dict[str, Any]] = []
     lowered = query.lower()
@@ -682,7 +688,7 @@ async def search_articles(query: str, context: ArticleAccessContext, *, limit: i
     ollama_status = "skipped"
     ollama_model: str | None = None
     ollama_summary: str | None = None
-    if results:
+    if results and use_ollama:
         prompt_articles = visible[: min(3, len(visible))]
         prompt = _render_prompt(query, prompt_articles)
         try:
