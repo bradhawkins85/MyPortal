@@ -30,10 +30,10 @@ The MyPortal agent provides a permission-aware assistant that searches knowledge
 
 ## API endpoint
 
-The agent can be accessed programmatically through the new `/agent/query` endpoint.
+The agent can be accessed programmatically through the `/api/agent/query` endpoint.
 
 ```http
-POST /agent/query
+POST /api/agent/query
 Content-Type: application/json
 
 {
