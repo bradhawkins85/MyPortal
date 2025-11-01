@@ -59,34 +59,6 @@
     const container = document.body;
     submitOnChange(container);
 
-    const categoriesCollapsible = document.getElementById('product-categories-collapsible');
-    const CATEGORIES_STORAGE_KEY = 'shopAdminCategoriesExpanded';
-    if (categoriesCollapsible) {
-      const isEmpty = categoriesCollapsible.dataset.empty === 'true';
-      try {
-        const stored = window.localStorage.getItem(CATEGORIES_STORAGE_KEY);
-        if (stored === 'true') {
-          categoriesCollapsible.open = true;
-        } else if (stored === 'false') {
-          categoriesCollapsible.open = false;
-        } else if (isEmpty) {
-          categoriesCollapsible.open = true;
-        }
-      } catch (error) {
-        console.warn('Unable to read saved category toggle state', error);
-      }
-      categoriesCollapsible.addEventListener('toggle', () => {
-        try {
-          window.localStorage.setItem(
-            CATEGORIES_STORAGE_KEY,
-            categoriesCollapsible.open ? 'true' : 'false',
-          );
-        } catch (error) {
-          console.warn('Unable to persist category toggle state', error);
-        }
-      });
-    }
-
     const products = parseJson('admin-products-data', []);
     const restrictions = parseJson('admin-product-restrictions', {});
     const productsById = new Map(products.map((product) => [product.id, product]));
