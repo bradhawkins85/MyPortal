@@ -1,0 +1,7 @@
+{
+  "guid": "9ea25288-600e-47fc-a986-eac3ad594278",
+  "occurred_at": "2025-11-01T11:15Z",
+  "change_type": "Fix",
+  "summary": "Restored the sidebar menu to a vertical stack on small screens so mobile navigation stays usable",
+  "content_hash": "b39a27d687c872a510d1bbf0d39a6546d30c7d605690c2f758e06dbeac3fee90"
+}
