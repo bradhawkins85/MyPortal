@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import html
 import json
 import re
+from collections import Counter
 from typing import Any, Iterable, Mapping, Sequence
 
 import bleach
@@ -54,6 +55,7 @@ _ALLOWED_ATTRIBUTES: Mapping[str, Sequence[str]] = {
 _ALLOWED_PROTOCOLS: Sequence[str] = ("http", "https", "mailto")
 
 _TAG_JSON_PATTERN = re.compile(r"\[[^\]]*\]")
+_WORD_PATTERN = re.compile(r"[A-Za-z0-9]+")
 
 
 def _sanitise_html(value: str) -> str:
@@ -641,6 +643,58 @@ def _render_prompt(query: str, articles: list[Mapping[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _tokenise(text: str) -> list[str]:
+    if not text:
+        return []
+    return _WORD_PATTERN.findall(text.lower())
+
+
+def _score_article(article: Mapping[str, Any], *, query: str, tokens: Sequence[str]) -> int:
+    if not tokens:
+        return 0
+
+    haystack_parts: list[str] = []
+    title = article.get("title") or ""
+    summary = article.get("summary") or ""
+    content = article.get("content") or ""
+    slug = article.get("slug") or ""
+    ai_tags = article.get("ai_tags") or []
+    sections = article.get("sections") or []
+
+    for value in (title, summary, content, slug):
+        if isinstance(value, str):
+            haystack_parts.append(value.lower())
+
+    if isinstance(ai_tags, Sequence) and not isinstance(ai_tags, (str, bytes)):
+        for tag in ai_tags:
+            if isinstance(tag, str):
+                haystack_parts.append(tag.lower())
+
+    if isinstance(sections, Sequence) and not isinstance(sections, (str, bytes)):
+        for section in sections:
+            if isinstance(section, Mapping):
+                heading = section.get("heading")
+                if isinstance(heading, str):
+                    haystack_parts.append(heading.lower())
+
+    haystack_text = " ".join(haystack_parts)
+    if not haystack_text:
+        return 0
+
+    score = 0
+    query_lower = query.lower()
+    if query_lower and query_lower in haystack_text:
+        score += max(len(query_lower), 4)
+
+    haystack_tokens = Counter(_tokenise(haystack_text))
+    for token in tokens:
+        occurrences = haystack_tokens.get(token, 0)
+        if occurrences:
+            score += min(occurrences, 3)
+
+    return score
+
+
 async def search_articles(
     query: str,
     context: ArticleAccessContext,
@@ -650,27 +704,24 @@ async def search_articles(
 ) -> dict[str, Any]:
     candidates = await kb_repo.list_articles(include_unpublished=context.is_super_admin)
     visible: list[dict[str, Any]] = []
-    lowered = query.lower()
+    tokens = _tokenise(query)
+    scored: list[tuple[int, float, Mapping[str, Any]]] = []
     for article in candidates:
         if not article.get("is_published") and not context.is_super_admin:
             continue
         if not _article_visible(article, context):
             continue
-        content = str(article.get("content") or "")
-        summary = article.get("summary") or ""
-        haystack = " ".join([article.get("title") or "", summary, content]).lower()
-        if lowered in haystack:
-            visible.append(article)
-    if not visible:
-        # fall back to most recent visible articles when no text match is found
-        for article in candidates:
-            if len(visible) >= limit:
-                break
-            if not article.get("is_published") and not context.is_super_admin:
-                continue
-            if _article_visible(article, context):
-                visible.append(article)
-    visible = visible[:limit]
+        score = _score_article(article, query=query, tokens=tokens)
+        if score <= 0:
+            continue
+        updated = article.get("updated_at_utc") or article.get("updated_at")
+        updated_ts = 0.0
+        if isinstance(updated, datetime):
+            updated_ts = updated.timestamp()
+        scored.append((score, updated_ts, article))
+
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    visible = [dict(item[2]) for item in scored[:limit]]
     results: list[dict[str, Any]] = []
     for article in visible:
         content = str(article.get("content") or "")
