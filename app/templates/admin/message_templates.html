@@ -97,29 +97,6 @@
         </table>
       </div>
     </section>
-
-    <details class="card card--panel card-collapsible">
-      <summary class="card__header card__header--collapsible">
-        <div>
-          <h2 class="card__title">Using template variables</h2>
-          <p class="card__subtitle">Reference automation context safely across email and notification templates.</p>
-        </div>
-        <span class="card__toggle-icon" aria-hidden="true"></span>
-      </summary>
-      <div class="card-collapsible__content">
-        <div class="card__body card__body--stacked">
-          <p>
-            Templates can include any variable exposed by the automation or integration invoking them. Common variables include
-            <code>{{ '{{ user.first_name }}' }}</code>, <code>{{ '{{ company.name }}' }}</code>, and <code>{{ '{{ portal.url }}' }}</code>.
-            HTML templates render exactly as provided, so remember to sanitise any untrusted data before storing it in a template.
-          </p>
-          <p>
-            Review the <a href="/docs/message-templates" target="_blank" rel="noopener">message template documentation</a> for
-            a full list of supported tokens and implementation guidance.
-          </p>
-        </div>
-      </div>
-    </details>
   </div>
 {% endblock %}
 
