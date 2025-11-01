@@ -7853,6 +7853,7 @@ async def admin_update_shop_product(
     image: UploadFile | None = File(default=None),
     cross_sell_sku: str | None = Form(default=None),
     upsell_sku: str | None = Form(default=None),
+    features: str | None = Form(default=None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -7875,6 +7876,39 @@ async def admin_update_shop_product(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vendor SKU cannot be empty")
 
     description_value = description.strip() if description else None
+
+    feature_payload: list[dict[str, Any]] | None = None
+    if features not in (None, ""):
+        try:
+            raw_features = json.loads(features)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid feature payload",
+            ) from exc
+        if not isinstance(raw_features, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid feature payload",
+            )
+        parsed_features: list[dict[str, Any]] = []
+        for index, entry in enumerate(raw_features):
+            if not isinstance(entry, Mapping):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid feature payload",
+                )
+            name_value = str(entry.get("name") or "").strip()
+            value_value = str(entry.get("value") or "").strip()
+            if not name_value:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Feature name cannot be empty",
+                )
+            parsed_features.append(
+                {"name": name_value, "value": value_value, "position": index}
+            )
+        feature_payload = parsed_features
 
     try:
         price_decimal = Decimal(price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -7956,15 +7990,39 @@ async def admin_update_shop_product(
         else:
             detail = "Unable to update product."
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
-    except Exception:
+    except Exception as exc:
         if stored_path:
             stored_path.unlink(missing_ok=True)
-        raise
+        log_error(
+            "Failed to update product",
+            product_id=product_id,
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to update product",
+        ) from exc
 
     if not updated:
         if stored_path:
             stored_path.unlink(missing_ok=True)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    if feature_payload is not None:
+        try:
+            await shop_repo.replace_product_features(product_id, feature_payload)
+        except Exception as exc:  # pragma: no cover - safety
+            if stored_path:
+                stored_path.unlink(missing_ok=True)
+            log_error(
+                "Failed to update product features",
+                product_id=product_id,
+                error=str(exc),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Unable to update product features",
+            ) from exc
 
     if stored_path and previous_image_url and previous_image_url != updated.get("image_url"):
         try:
