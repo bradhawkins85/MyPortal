@@ -76,7 +76,12 @@
           >
             New ticket
           </button>
-          <form method="get" class="management__filters">
+        </div>
+      </header>
+
+      <div class="management__body">
+        <div class="ticket-dashboard__overview">
+          <form method="get" class="management__filters ticket-dashboard__filters">
             <label class="visually-hidden" for="ticket-filter-status">Status</label>
             <select id="ticket-filter-status" name="status" class="form-input">
               <option value="">All statuses</option>
@@ -102,31 +107,29 @@
             </select>
             <button type="submit" class="button">Apply filters</button>
           </form>
-        </div>
-      </header>
 
-      <div class="management__body">
-        <div class="management__stats" data-ticket-stats>
-          <article class="stat-card">
-            <h3 class="stat-card__title">Open tickets</h3>
-            <p class="stat-card__value" data-ticket-stat="open">{{ ticket_status_counts.get('open', 0) }}</p>
-          </article>
-          <article class="stat-card">
-            <h3 class="stat-card__title">In progress</h3>
-            <p class="stat-card__value" data-ticket-stat="in_progress">
-              {{ ticket_status_counts.get('in_progress', 0) + ticket_status_counts.get('pending', 0) }}
-            </p>
-          </article>
-          <article class="stat-card">
-            <h3 class="stat-card__title">Resolved</h3>
-            <p class="stat-card__value" data-ticket-stat="resolved">
-              {{ ticket_status_counts.get('resolved', 0) + ticket_status_counts.get('closed', 0) }}
-            </p>
-          </article>
-          <article class="stat-card">
-            <h3 class="stat-card__title">Total</h3>
-            <p class="stat-card__value" data-ticket-stat="total">{{ ticket_total }}</p>
-          </article>
+          <div class="ticket-dashboard__stats management__stats" data-ticket-stats>
+            <article class="stat-card">
+              <h3 class="stat-card__title">Open tickets</h3>
+              <p class="stat-card__value" data-ticket-stat="open">{{ ticket_status_counts.get('open', 0) }}</p>
+            </article>
+            <article class="stat-card">
+              <h3 class="stat-card__title">In progress</h3>
+              <p class="stat-card__value" data-ticket-stat="in_progress">
+                {{ ticket_status_counts.get('in_progress', 0) + ticket_status_counts.get('pending', 0) }}
+              </p>
+            </article>
+            <article class="stat-card">
+              <h3 class="stat-card__title">Resolved</h3>
+              <p class="stat-card__value" data-ticket-stat="resolved">
+                {{ ticket_status_counts.get('resolved', 0) + ticket_status_counts.get('closed', 0) }}
+              </p>
+            </article>
+            <article class="stat-card">
+              <h3 class="stat-card__title">Total</h3>
+              <p class="stat-card__value" data-ticket-stat="total">{{ ticket_total }}</p>
+            </article>
+          </div>
         </div>
 
         <div class="management__toolbar">
@@ -160,7 +163,7 @@
 
         <div class="table-wrapper">
           <table
-            class="table"
+            class="table tickets-table"
             id="tickets-table"
             data-table
             data-bulk-delete-table
@@ -178,7 +181,7 @@
             <thead>
               <tr>
                 {% if can_bulk_delete_tickets %}
-                  <th scope="col" class="table__select">
+                  <th scope="col" class="table__select tickets-table__column tickets-table__column--select">
                     <input
                       type="checkbox"
                       aria-label="Select all tickets"
@@ -187,14 +190,14 @@
                     />
                   </th>
                 {% endif %}
-                <th scope="col" data-sort="int">ID</th>
-                <th scope="col" data-sort="string">Subject</th>
-                <th scope="col" data-sort="string">Status</th>
-                <th scope="col" data-sort="string">Priority</th>
-                <th scope="col" data-sort="string">Company</th>
-                <th scope="col" data-sort="string">Assigned</th>
-                <th scope="col" data-sort="string">Updated</th>
-                <th scope="col" class="table__actions">Actions</th>
+                <th scope="col" data-sort="int" class="tickets-table__column tickets-table__column--id">ID</th>
+                <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--subject">Subject</th>
+                <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--status">Status</th>
+                <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--priority">Priority</th>
+                <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--company">Company</th>
+                <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--assigned">Assigned</th>
+                <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--updated">Updated</th>
+                <th scope="col" class="table__actions tickets-table__column tickets-table__column--actions">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -206,7 +209,7 @@
                   {% set assigned = user_lookup.get(ticket.assigned_user_id) %}
                   <tr>
                     {% if can_bulk_delete_tickets %}
-                      <td data-label="Select" class="table__select">
+                      <td data-label="Select" class="table__select tickets-table__cell tickets-table__cell--select">
                         <input
                           type="checkbox"
                           name="ticketIds"
@@ -217,8 +220,8 @@
                         />
                       </td>
                     {% endif %}
-                    <td data-label="ID">{{ ticket.id }}</td>
-                    <td data-label="Subject">
+                    <td data-label="ID" class="tickets-table__cell tickets-table__cell--id">{{ ticket.id }}</td>
+                    <td data-label="Subject" class="tickets-table__cell tickets-table__cell--subject">
                       <a href="/admin/tickets/{{ ticket.id }}">{{ ticket.subject }}</a>
                     </td>
                     {% set ticket_status = (ticket.status or 'open') %}
@@ -230,7 +233,7 @@
                       'resolved': 'badge--success',
                       'closed': 'badge--muted'
                     } %}
-                    <td data-label="Status" data-value="{{ ticket_status }}">
+                    <td data-label="Status" data-value="{{ ticket_status }}" class="tickets-table__cell tickets-table__cell--status">
                       <div class="ticket-status">
                         <span class="visually-hidden" id="ticket-status-label-{{ ticket.id }}">Ticket status</span>
                         <form
@@ -261,11 +264,11 @@
                         </form>
                       </div>
                     </td>
-                    <td data-label="Priority">{{ ticket.priority or 'normal' }}</td>
-                    <td data-label="Company">{{ company.name if company else (ticket.company_id or '—') }}</td>
-                    <td data-label="Assigned">{{ assigned.email if assigned else '—' }}</td>
-                    <td data-label="Updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
-                    <td class="table__actions">
+                    <td data-label="Priority" class="tickets-table__cell tickets-table__cell--priority">{{ ticket.priority or 'normal' }}</td>
+                    <td data-label="Company" class="tickets-table__cell tickets-table__cell--company">{{ company.name if company else (ticket.company_id or '—') }}</td>
+                    <td data-label="Assigned" class="tickets-table__cell tickets-table__cell--assigned">{{ assigned.email if assigned else '—' }}</td>
+                    <td data-label="Updated" class="tickets-table__cell tickets-table__cell--updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
+                    <td class="table__actions tickets-table__cell tickets-table__cell--actions">
                       <a href="/admin/tickets/{{ ticket.id }}" class="button button--ghost">Open</a>
                     </td>
                   </tr>
