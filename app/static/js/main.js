@@ -263,12 +263,10 @@
 
     const hasServiceWorker = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
     const hasCacheAPI = typeof window !== 'undefined' && 'caches' in window;
+    const supportsEnhancedRefresh = hasServiceWorker || hasCacheAPI;
 
-    if (!hasServiceWorker && !hasCacheAPI) {
-      trigger.disabled = true;
-      trigger.setAttribute('aria-disabled', 'true');
-      trigger.title = 'Force refresh is not supported in this browser';
-      return;
+    if (!supportsEnhancedRefresh) {
+      trigger.title = 'Reloads the app to request the latest files';
     }
 
     const toast = createToastController(document.querySelector('[data-global-toast]'));
@@ -410,9 +408,14 @@
       trigger.disabled = true;
       trigger.setAttribute('aria-busy', 'true');
 
-      toast.show('Refreshing the application and clearing cached assets…', {
-        variant: 'info',
-      });
+      toast.show(
+        supportsEnhancedRefresh
+          ? 'Refreshing the application and clearing cached assets…'
+          : 'Refreshing the application with a clean request…',
+        {
+          variant: 'info',
+        },
+      );
 
       let hadError = false;
       try {
@@ -428,8 +431,13 @@
           variant: 'warning',
           autoHideMs: 6000,
         });
-      } else {
+      } else if (supportsEnhancedRefresh) {
         toast.show('Cached assets cleared. Reloading with the latest version…', {
+          variant: 'success',
+          autoHideMs: 4000,
+        });
+      } else {
+        toast.show('Reloading the application to request the latest files…', {
           variant: 'success',
           autoHideMs: 4000,
         });
