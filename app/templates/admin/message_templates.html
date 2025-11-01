@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 
+{% block header_title %}
+  <div class="header__title-content header__title-content--spread">
+    <span class="header__title-text">Message templates</span>
+    <a class="button button--primary button--small header__title-button" href="/admin/message-templates/new">
+      New template
+    </a>
+  </div>
+{% endblock %}
+
 {% block content %}
   {% if success_message or error_message %}
     <div class="alert-stack">
@@ -64,7 +73,7 @@
                 </td>
                 <td class="table__actions">
                   <div class="table__action-buttons">
-                    <button type="button" class="button button--ghost" data-template-edit>Edit</button>
+                    <a class="button button--ghost" href="/admin/message-templates/{{ template.id }}/edit">Edit</a>
                     <button type="button" class="button button--danger" data-template-delete>Delete</button>
                   </div>
                 </td>
@@ -87,77 +96,6 @@
           </tbody>
         </table>
       </div>
-    </section>
-
-    <section class="card card--panel" aria-labelledby="message-template-form-heading">
-      <header class="card__header card__header--actions">
-        <div>
-          <h2 class="card__title" id="message-template-form-heading" data-template-form-title>New template</h2>
-          <p class="card__subtitle">
-            Provide a unique slug, friendly name, and body content. You can reuse templates anywhere template variables are supported.
-          </p>
-        </div>
-        <button type="button" class="button button--ghost" data-template-reset>
-          Clear form
-        </button>
-      </header>
-      <form id="message-template-form" class="form" autocomplete="off" novalidate>
-        <input type="hidden" id="message-template-id" name="template_id" />
-        <div class="form-field">
-          <label class="form-label" for="message-template-slug">Slug</label>
-          <input
-            class="form-input"
-            id="message-template-slug"
-            name="slug"
-            maxlength="120"
-            pattern="^[a-z0-9](?:[a-z0-9._-]{0,118}[a-z0-9])?$"
-            required
-            placeholder="welcome.email"
-            aria-describedby="message-template-slug-help"
-          />
-          <p class="form-help" id="message-template-slug-help">
-            Lowercase letters, numbers, dots, underscores, and hyphens only.
-          </p>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="message-template-name">Name</label>
-          <input class="form-input" id="message-template-name" name="name" maxlength="255" required />
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="message-template-description">Description</label>
-          <textarea
-            class="form-input form-input--textarea"
-            id="message-template-description"
-            name="description"
-            rows="3"
-          ></textarea>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="message-template-content-type">Content type</label>
-          <select class="form-input" id="message-template-content-type" name="content_type">
-            {% for option in content_type_options %}
-              <option value="{{ option.value }}">{{ option.label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="message-template-content">Content</label>
-          <textarea
-            class="form-input form-input--textarea"
-            id="message-template-content"
-            name="content"
-            rows="12"
-            required
-            aria-describedby="message-template-content-help"
-          ></textarea>
-          <p class="form-help" id="message-template-content-help">
-            Supports template variables like <code>{{ '{{ user.first_name }}' }}</code> and <code>{{ '{{ company.name }}' }}</code>.
-          </p>
-        </div>
-        <div class="form-actions">
-          <button type="submit" class="button button--primary" data-template-submit>Save template</button>
-        </div>
-      </form>
     </section>
 
     <details class="card card--panel card-collapsible">
