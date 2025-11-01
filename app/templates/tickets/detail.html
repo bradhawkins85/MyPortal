@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+
+{% block header_actions %}
+  <a class="button button--ghost" href="/tickets">All tickets</a>
+{% endblock %}
+
+{% block content %}
+  {% if success_message or error_message %}
+    <div class="alert-stack">
+      {% if success_message %}
+        <div class="alert" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="management management--single">
+    <section class="management__content">
+      <header class="management__header">
+        <div>
+          <h1 class="management__title">{{ ticket.subject or 'Ticket' }}</h1>
+          <p class="management__subtitle">
+            Ticket #{{ ticket.id }}
+            <span class="badge {{ ticket.status_badge }}">{{ ticket.status_label }}</span>
+          </p>
+        </div>
+        <div class="management__header-actions">
+          <a class="button button--ghost" href="/tickets">Back to tickets</a>
+        </div>
+      </header>
+      <div class="management__body management__body--columns">
+        <div class="management__column management__column--details">
+          <article class="card card--panel">
+            <header class="card__header">
+              <h2 class="card__title">Ticket details</h2>
+            </header>
+            <div class="card__body">
+              <dl class="description-list">
+                <div class="description-list__row">
+                  <dt>Status</dt>
+                  <dd><span class="badge {{ ticket.status_badge }}">{{ ticket.status_label }}</span></dd>
+                </div>
+                <div class="description-list__row">
+                  <dt>Priority</dt>
+                  <dd>{{ ticket.priority_label }}</dd>
+                </div>
+                {% if ticket.company_name %}
+                  <div class="description-list__row">
+                    <dt>Company</dt>
+                    <dd>{{ ticket.company_name }}</dd>
+                  </div>
+                {% endif %}
+                {% if ticket.requester_label %}
+                  <div class="description-list__row">
+                    <dt>Requester</dt>
+                    <dd>{{ ticket.requester_label }}</dd>
+                  </div>
+                {% endif %}
+                {% if ticket.assigned_label %}
+                  <div class="description-list__row">
+                    <dt>Assigned to</dt>
+                    <dd>{{ ticket.assigned_label }}</dd>
+                  </div>
+                {% endif %}
+                <div class="description-list__row">
+                  <dt>Created</dt>
+                  <dd>
+                    {% if ticket.created_iso %}
+                      <span data-utc="{{ ticket.created_iso }}"></span>
+                    {% else %}
+                      <span class="text-muted">—</span>
+                    {% endif %}
+                  </dd>
+                </div>
+                <div class="description-list__row">
+                  <dt>Updated</dt>
+                  <dd>
+                    {% if ticket.updated_iso %}
+                      <span data-utc="{{ ticket.updated_iso }}"></span>
+                    {% else %}
+                      <span class="text-muted">—</span>
+                    {% endif %}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          </article>
+        </div>
+        <div class="management__column management__column--timeline">
+          <article class="card card--panel">
+            <header class="card__header">
+              <h2 class="card__title">Description</h2>
+            </header>
+            <div class="card__body">
+              {% if ticket.description_has_content %}
+                <div class="rich-text-viewer">{{ ticket.description_html | safe }}</div>
+              {% else %}
+                <p class="card__empty">No description has been provided yet.</p>
+              {% endif %}
+            </div>
+          </article>
+
+          <article class="card card--panel">
+            <header class="card__header">
+              <h2 class="card__title">Reply</h2>
+            </header>
+            <div class="card__body">
+              {% if can_reply %}
+                {% if reply_error %}
+                  <div class="alert alert--error" role="alert">{{ reply_error }}</div>
+                {% endif %}
+                <form action="/tickets/{{ ticket.id }}/replies" method="post" class="form" novalidate>
+                  {% include "partials/csrf.html" %}
+                  <div class="form-field">
+                    <label class="form-label" for="ticket-reply-body">Message</label>
+                    <textarea
+                      id="ticket-reply-body"
+                      name="body"
+                      class="form-input form-input--textarea"
+                      rows="5"
+                      required
+                    >{{ reply_body }}</textarea>
+                  </div>
+                  <div class="form-actions">
+                    <button type="submit" class="button button--primary">Post reply</button>
+                  </div>
+                </form>
+              {% elif is_watcher %}
+                <p class="text-muted">You're watching this ticket. Reach out to the requester if you need to add further context.</p>
+              {% else %}
+                <p class="text-muted">Only the original requester can reply to this ticket.</p>
+              {% endif %}
+            </div>
+          </article>
+
+          <article class="card card--panel" id="conversation">
+            <header class="card__header">
+              <h2 class="card__title">Conversation history</h2>
+            </header>
+            <div class="card__body">
+              {% if ticket_replies %}
+                <div class="timeline" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
+                  {% for reply in ticket_replies %}
+                    <article class="timeline__event">
+                      <header class="timeline__header">
+                        <div class="timeline__header-main">
+                          <span class="timeline__timestamp">
+                            {% if reply.created_iso %}
+                              <span data-utc="{{ reply.created_iso }}"></span>
+                            {% else %}
+                              <span class="text-muted">—</span>
+                            {% endif %}
+                          </span>
+                          <span class="timeline__action">
+                            {{ reply.author_label }}
+                            {% if reply.is_internal %}
+                              <span class="badge badge--muted">Internal</span>
+                            {% endif %}
+                          </span>
+                          {% if reply.time_summary %}
+                            <span class="timeline__meta text-muted">{{ reply.time_summary }}</span>
+                          {% endif %}
+                        </div>
+                      </header>
+                      <div class="timeline__body">
+                        {% if reply.has_content %}
+                          <div class="timeline__message" data-timeline-message>
+                            <div class="rich-text-viewer timeline__message-content" data-timeline-message-content>
+                              {{ reply.body_html | safe }}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            class="button button--ghost button--small timeline__message-toggle"
+                            data-timeline-message-toggle
+                            data-more-label="Show more"
+                            data-less-label="Show less"
+                            hidden
+                            aria-expanded="false"
+                          >
+                            Show more
+                          </button>
+                        {% else %}
+                          <p class="text-muted">No content provided.</p>
+                        {% endif %}
+                      </div>
+                    </article>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <p class="card__empty">No replies have been posted yet.</p>
+              {% endif %}
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/ticket_detail.js" defer></script>
+{% endblock %}

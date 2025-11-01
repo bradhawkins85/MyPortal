@@ -132,3 +132,4 @@ async def test_build_base_context_includes_cart_permission(monkeypatch):
 
     assert context["can_access_cart"] is True
     assert context["can_access_shop"] is True
+    assert context["can_access_tickets"] is True

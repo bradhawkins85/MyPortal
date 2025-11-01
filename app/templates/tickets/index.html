@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block header_actions %}
+  <a class="button button--primary" href="#new-ticket">New ticket</a>
+{% endblock %}
+
+{% block content %}
+  {% if success_message or error_message %}
+    <div class="alert-stack">
+      {% if success_message %}
+        <div class="alert" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <section class="card card--panel">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Ticket overview</h2>
+        {% if filters_active %}
+          <p class="card__subtitle">Showing filtered results from your recorded tickets.</p>
+        {% else %}
+          <p class="card__subtitle">Track the latest support conversations raised for your active companies.</p>
+        {% endif %}
+      </div>
+    </header>
+    <div class="card__body">
+      {% if status_summary %}
+        <ul class="status-list" role="list">
+          {% for item in status_summary %}
+            <li class="status-list__item" role="listitem">
+              <span class="status-list__label">{{ item.label }}</span>
+              <span class="status-list__value">{{ item.count }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="card__empty">No tickets have been recorded yet. Create a ticket to start a new conversation.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Ticket history</h2>
+        <p class="card__subtitle">Search and filter tickets you have raised or are watching.</p>
+      </div>
+      <div class="card__controls tickets-toolbar">
+        <form method="get" class="tickets-toolbar__form" autocomplete="off">
+          <div class="tickets-toolbar__field">
+            <label class="form-label" for="tickets-status-filter">Status</label>
+            <select id="tickets-status-filter" name="status" class="form-input">
+              <option value="">All statuses</option>
+              {% for option in status_options %}
+                <option value="{{ option.value }}" {% if status_filter and status_filter == option.value %}selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="tickets-toolbar__actions">
+            <button type="submit" class="button">Apply filters</button>
+            {% if filters_active %}
+              <a class="button button--ghost" href="{{ request.url.path }}">Clear</a>
+            {% endif %}
+          </div>
+        </form>
+        <input
+          type="search"
+          class="form-input tickets-toolbar__search"
+          placeholder="Quick filter tickets"
+          name="q"
+          value="{{ search_term or '' }}"
+          aria-label="Filter tickets"
+          data-table-filter="tickets-table"
+        />
+      </div>
+    </header>
+    {% if filters_active and not tickets %}
+      <div class="alert alert--info" role="status">No tickets match the selected filters. Try adjusting the status or search keywords.</div>
+    {% endif %}
+    <div class="table-wrapper">
+      <table class="table" id="tickets-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="int">Ticket</th>
+            <th scope="col" data-sort="string">Subject</th>
+            <th scope="col" data-sort="string">Status</th>
+            <th scope="col" data-sort="string">Priority</th>
+            <th scope="col" data-sort="string">Company</th>
+            <th scope="col" data-sort="date">Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if tickets %}
+            {% for ticket in tickets %}
+              <tr>
+                <td data-label="Ticket">#{{ ticket.id }}</td>
+                <td data-label="Subject">
+                  <a href="/tickets/{{ ticket.id }}">{{ ticket.subject or 'Untitled ticket' }}</a>
+                </td>
+                <td data-label="Status">
+                  <span class="badge {{ ticket.status_badge }}">{{ ticket.status_label }}</span>
+                </td>
+                <td data-label="Priority">{{ ticket.priority_label }}</td>
+                <td data-label="Company">{{ ticket.company_name or '—' }}</td>
+                <td data-label="Updated" data-value="{{ ticket.updated_iso or '' }}">
+                  {% if ticket.updated_iso %}
+                    <span data-utc="{{ ticket.updated_iso }}"></span>
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="6" class="table__empty">No tickets available.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card card--panel" id="new-ticket">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Create a ticket</h2>
+        <p class="card__subtitle">Raise a new support request and the team will follow up with updates.</p>
+      </div>
+    </header>
+    <div class="card__body">
+      <form action="/tickets" method="post" class="form" novalidate>
+        {% include "partials/csrf.html" %}
+        <div class="form-field">
+          <label class="form-label" for="ticket-subject">Subject</label>
+          <input
+            id="ticket-subject"
+            name="subject"
+            class="form-input"
+            maxlength="255"
+            required
+            value="{{ form_values.subject if form_values else '' }}"
+          />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="ticket-description">Description</label>
+          <textarea
+            id="ticket-description"
+            name="description"
+            class="form-input form-input--textarea"
+            rows="6"
+            placeholder="Describe the issue, impact, and any troubleshooting already attempted."
+          >{{ form_values.description if form_values else '' }}</textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">Submit ticket</button>
+        </div>
+      </form>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+{% endblock %}
