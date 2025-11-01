@@ -255,6 +255,198 @@
     connect();
   }
 
+  function setupForceRefresh() {
+    const trigger = document.querySelector('[data-force-refresh]');
+    if (!trigger) {
+      return;
+    }
+
+    const hasServiceWorker = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
+    const hasCacheAPI = typeof window !== 'undefined' && 'caches' in window;
+
+    if (!hasServiceWorker && !hasCacheAPI) {
+      trigger.disabled = true;
+      trigger.setAttribute('aria-disabled', 'true');
+      trigger.title = 'Force refresh is not supported in this browser';
+      return;
+    }
+
+    const toast = createToastController(document.querySelector('[data-global-toast]'));
+    let busy = false;
+
+    function waitForServiceWorkerMessage(expectedType, timeoutMs) {
+      if (!hasServiceWorker || !navigator.serviceWorker || typeof navigator.serviceWorker.addEventListener !== 'function') {
+        return Promise.resolve(null);
+      }
+
+      const timeout = typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : 7000;
+
+      return new Promise((resolve) => {
+        let settled = false;
+        let timeoutId = null;
+
+        function cleanup() {
+          if (timeoutId !== null) {
+            window.clearTimeout(timeoutId);
+            timeoutId = null;
+          }
+          navigator.serviceWorker.removeEventListener('message', handleMessage);
+        }
+
+        function handleMessage(event) {
+          const data = event && event.data;
+          if (!data || data.type !== expectedType) {
+            return;
+          }
+          settled = true;
+          cleanup();
+          resolve(data);
+        }
+
+        navigator.serviceWorker.addEventListener('message', handleMessage);
+        timeoutId = window.setTimeout(() => {
+          if (!settled) {
+            cleanup();
+            resolve(null);
+          }
+        }, timeout);
+      });
+    }
+
+    async function clearServiceWorkerCaches() {
+      if (!hasServiceWorker || !navigator.serviceWorker) {
+        return;
+      }
+
+      let registrations = [];
+      try {
+        registrations = await navigator.serviceWorker.getRegistrations();
+      } catch (error) {
+        throw error;
+      }
+
+      if (registrations.length) {
+        await Promise.allSettled(
+          registrations.map((registration) => {
+            try {
+              return registration.update();
+            } catch (error) {
+              return Promise.reject(error);
+            }
+          })
+        );
+      }
+
+      const activeWorkers = registrations
+        .map((registration) => registration.active)
+        .filter((worker) => Boolean(worker));
+
+      const controller = navigator.serviceWorker.controller;
+      const acknowledgement = controller ? waitForServiceWorkerMessage('CACHE_CLEARED', 7000) : Promise.resolve(null);
+
+      const recipients = controller ? [controller] : activeWorkers;
+      if (recipients.length) {
+        recipients.forEach((worker) => {
+          try {
+            worker.postMessage({ type: 'CLEAR_CACHE' });
+          } catch (error) {
+            // Ignore message delivery errors so the refresh flow can continue.
+          }
+        });
+      }
+
+      await acknowledgement;
+
+      registrations.forEach((registration) => {
+        if (registration.waiting) {
+          try {
+            registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+          } catch (error) {
+            // Ignore failures when nudging waiting workers.
+          }
+        }
+      });
+    }
+
+    async function clearWindowCaches() {
+      if (!hasCacheAPI || !window.caches || typeof window.caches.keys !== 'function') {
+        return;
+      }
+
+      const keys = await window.caches.keys();
+      if (!Array.isArray(keys) || !keys.length) {
+        return;
+      }
+
+      await Promise.allSettled(keys.map((key) => window.caches.delete(key)));
+    }
+
+    async function performForceRefresh() {
+      let hadError = false;
+
+      try {
+        await clearServiceWorkerCaches();
+      } catch (error) {
+        console.error('Failed to clear service worker caches', error);
+        hadError = true;
+      }
+
+      try {
+        await clearWindowCaches();
+      } catch (error) {
+        console.error('Failed to clear Cache Storage entries', error);
+        hadError = true;
+      }
+
+      return { hadError };
+    }
+
+    trigger.addEventListener('click', async () => {
+      if (busy) {
+        return;
+      }
+
+      busy = true;
+      trigger.disabled = true;
+      trigger.setAttribute('aria-busy', 'true');
+
+      toast.show('Refreshing the application and clearing cached assets…', {
+        variant: 'info',
+      });
+
+      let hadError = false;
+      try {
+        const result = await performForceRefresh();
+        hadError = result.hadError;
+      } catch (error) {
+        console.error('Force refresh encountered an unexpected error', error);
+        hadError = true;
+      }
+
+      if (hadError) {
+        toast.show('Encountered issues clearing cached assets. Reloading to request the latest files…', {
+          variant: 'warning',
+          autoHideMs: 6000,
+        });
+      } else {
+        toast.show('Cached assets cleared. Reloading with the latest version…', {
+          variant: 'success',
+          autoHideMs: 4000,
+        });
+      }
+
+      window.setTimeout(() => {
+        try {
+          const currentUrl = new URL(window.location.href);
+          currentUrl.searchParams.set('_refresh', Date.now().toString(36));
+          window.location.replace(currentUrl.toString());
+        } catch (error) {
+          window.location.reload();
+        }
+      }, 700);
+    });
+  }
+
   function setupHeaderMenus() {
     const menus = Array.from(document.querySelectorAll('[data-header-menu]'));
     if (!menus.length) {
@@ -334,6 +526,7 @@
 
   function initialise() {
     setupAutoRefresh();
+    setupForceRefresh();
     setupHeaderMenus();
   }
 
