@@ -142,6 +142,72 @@
   {% endif %}
 </section>
 
+{% set recommendations = cart_recommendations or {'cross_sell': [], 'upsell': []} %}
+{% set cross_recommendations = recommendations.cross_sell %}
+{% set upsell_recommendations = recommendations.upsell %}
+{% if cart_items and (cross_recommendations or upsell_recommendations) %}
+  <section class="card card--panel cart-recommendations">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Recommended add-ons</h2>
+        <p class="card__subtitle">Boost your order with curated upgrades and companion products.</p>
+      </div>
+    </header>
+
+    {% if upsell_recommendations %}
+      <div class="cart-recommendations__section">
+        <h3 class="cart-recommendations__heading">Upgrade options</h3>
+        <div class="cart-recommendations__grid">
+          {% for item in upsell_recommendations %}
+            <article class="cart-recommendations__item">
+              {% if item.image_url %}
+                <img src="{{ item.image_url }}" alt="" class="cart-recommendations__image" loading="lazy" />
+              {% endif %}
+              <h4 class="cart-recommendations__name">{{ item.name }}</h4>
+              <p class="cart-recommendations__price">${{ '%.2f'|format(item.price) }}</p>
+              {% if item.source_names %}
+                <p class="cart-recommendations__meta">Upgrade for {{ item.source_names | join(', ') }}</p>
+              {% endif %}
+              <form action="{{ request.url_for('add_to_cart') }}" method="post" class="cart-recommendations__form">
+                {% include "partials/csrf.html" %}
+                <input type="hidden" name="productId" value="{{ item.product_id }}" />
+                <input type="hidden" name="quantity" value="1" />
+                <button type="submit" class="button button--primary">Upgrade</button>
+              </form>
+            </article>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
+    {% if cross_recommendations %}
+      <div class="cart-recommendations__section">
+        <h3 class="cart-recommendations__heading">Suggested add-ons</h3>
+        <div class="cart-recommendations__grid">
+          {% for item in cross_recommendations %}
+            <article class="cart-recommendations__item">
+              {% if item.image_url %}
+                <img src="{{ item.image_url }}" alt="" class="cart-recommendations__image" loading="lazy" />
+              {% endif %}
+              <h4 class="cart-recommendations__name">{{ item.name }}</h4>
+              <p class="cart-recommendations__price">${{ '%.2f'|format(item.price) }}</p>
+              {% if item.source_names %}
+                <p class="cart-recommendations__meta">Pairs with {{ item.source_names | join(', ') }}</p>
+              {% endif %}
+              <form action="{{ request.url_for('add_to_cart') }}" method="post" class="cart-recommendations__form">
+                {% include "partials/csrf.html" %}
+                <input type="hidden" name="productId" value="{{ item.product_id }}" />
+                <input type="hidden" name="quantity" value="1" />
+                <button type="submit" class="button">Add</button>
+              </form>
+            </article>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+  </section>
+{% endif %}
+
 <div
   class="modal"
   id="cart-product-details-modal"
