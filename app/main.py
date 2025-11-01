@@ -2038,6 +2038,30 @@ def _sanitize_message(value: str | None) -> str | None:
     return text[:200]
 
 
+async def _resolve_related_product_id_by_sku(
+    sku_value: str | None,
+    *,
+    field_label: str,
+    disallow_product_id: int | None = None,
+) -> int | None:
+    sku = (sku_value or "").strip()
+    if not sku:
+        return None
+    product = await shop_repo.get_product_by_sku(sku, include_archived=False)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_label} SKU does not match an active product",
+        )
+    product_id = int(product.get("id") or 0)
+    if disallow_product_id is not None and product_id == disallow_product_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_label} SKU cannot reference the same product",
+        )
+    return product_id
+
+
 async def _render_impersonation_dashboard(
     request: Request,
     user: dict[str, Any],
@@ -3752,6 +3776,7 @@ async def view_cart(
     cart_items: list[dict[str, Any]] = []
     total = Decimal("0")
     cart_items_payload: list[dict[str, Any]] = []
+    cart_product_ids: list[int] = []
     for item in items:
         unit_price = item.get("unit_price")
         if not isinstance(unit_price, Decimal):
@@ -3763,6 +3788,13 @@ async def view_cart(
         hydrated["unit_price"] = unit_price
         hydrated["line_total"] = line_total
         cart_items.append(hydrated)
+        product_identifier = hydrated.get("product_id")
+        try:
+            resolved_product_id = int(product_identifier)
+        except (TypeError, ValueError):
+            resolved_product_id = 0
+        if resolved_product_id > 0:
+            cart_product_ids.append(resolved_product_id)
         cart_items_payload.append(
             {
                 "product_id": hydrated.get("product_id"),
@@ -3777,6 +3809,86 @@ async def view_cart(
             }
         )
 
+    recommendations: dict[str, list[dict[str, Any]]] = {"cross_sell": [], "upsell": []}
+    if cart_product_ids:
+        base_products = await shop_repo.list_products_by_ids(
+            cart_product_ids,
+            company_id=company_id,
+        )
+        cart_product_id_set = {pid for pid in cart_product_ids}
+        cross_sell_targets: dict[int, list[str]] = {}
+        upsell_targets: dict[int, list[str]] = {}
+        for product in base_products:
+            base_id = int(product.get("id") or 0)
+            base_name = str(product.get("name") or "")
+            cross_id_raw = product.get("cross_sell_product_id")
+            upsell_id_raw = product.get("upsell_product_id")
+            try:
+                cross_id = int(cross_id_raw) if cross_id_raw is not None else 0
+            except (TypeError, ValueError):
+                cross_id = 0
+            try:
+                upsell_id = int(upsell_id_raw) if upsell_id_raw is not None else 0
+            except (TypeError, ValueError):
+                upsell_id = 0
+            if cross_id > 0 and cross_id not in cart_product_id_set and cross_id != base_id:
+                cross_sell_targets.setdefault(cross_id, []).append(base_name)
+            if upsell_id > 0 and upsell_id not in cart_product_id_set and upsell_id != base_id:
+                upsell_targets.setdefault(upsell_id, []).append(base_name)
+
+        target_ids = sorted(set(cross_sell_targets) | set(upsell_targets))
+        if target_ids:
+            related_products = await shop_repo.list_products_by_ids(
+                target_ids,
+                company_id=company_id,
+            )
+            related_map = {int(prod.get("id") or 0): prod for prod in related_products}
+            is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
+
+            def _prepare_recommendation(
+                *,
+                target_id: int,
+                source_names: list[str],
+                kind: str,
+            ) -> None:
+                product = related_map.get(target_id)
+                if not product:
+                    return
+                try:
+                    stock_level = int(product.get("stock") or 0)
+                except (TypeError, ValueError):
+                    stock_level = 0
+                if stock_level <= 0:
+                    return
+                price_source = product.get("price")
+                if is_vip and product.get("vip_price") is not None:
+                    price_source = product.get("vip_price")
+                try:
+                    price_value = Decimal(str(price_source or 0)).quantize(
+                        Decimal("0.01"),
+                        rounding=ROUND_HALF_UP,
+                    )
+                except (InvalidOperation, TypeError, ValueError):
+                    price_value = Decimal("0.00")
+                entry = {
+                    "product_id": target_id,
+                    "name": product.get("name"),
+                    "sku": product.get("sku"),
+                    "image_url": product.get("image_url"),
+                    "price": price_value,
+                    "source_names": sorted({name for name in source_names if name}),
+                    "kind": kind,
+                }
+                recommendations.setdefault(kind, []).append(entry)
+
+            for target_id, names in cross_sell_targets.items():
+                _prepare_recommendation(target_id=target_id, source_names=names, kind="cross_sell")
+            for target_id, names in upsell_targets.items():
+                _prepare_recommendation(target_id=target_id, source_names=names, kind="upsell")
+
+            for bucket in recommendations.values():
+                bucket.sort(key=lambda item: str(item.get("name") or "").lower())
+
     extra = {
         "title": "Cart",
         "cart_items": cart_items,
@@ -3785,6 +3897,7 @@ async def view_cart(
         "cart_error": cart_error,
         "cart_message": cart_message,
         "cart_items_payload": cart_items_payload,
+        "cart_recommendations": recommendations,
     }
     return await _render_template("shop/cart.html", request, user, extra=extra)
 
@@ -7550,6 +7663,8 @@ async def admin_create_shop_product(
     vip_price: str | None = Form(default=None),
     category_id: str | None = Form(default=None),
     image: UploadFile | None = File(default=None),
+    cross_sell_sku: str | None = Form(default=None),
+    upsell_sku: str | None = Form(default=None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -7600,6 +7715,15 @@ async def admin_create_shop_product(
         if not category:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected category does not exist")
 
+    cross_sell_product_id = await _resolve_related_product_id_by_sku(
+        cross_sell_sku,
+        field_label="Cross-sell",
+    )
+    upsell_product_id = await _resolve_related_product_id_by_sku(
+        upsell_sku,
+        field_label="Up-sell",
+    )
+
     image_url: str | None = None
     stored_path: Path | None = None
     if image is not None:
@@ -7622,6 +7746,8 @@ async def admin_create_shop_product(
             vip_price=vip_decimal,
             category_id=category_value,
             image_url=image_url,
+            cross_sell_product_id=cross_sell_product_id,
+            upsell_product_id=upsell_product_id,
         )
     except aiomysql.IntegrityError as exc:
         if stored_path:
@@ -7664,6 +7790,8 @@ async def admin_update_shop_product(
     vip_price: str | None = Form(default=None),
     category_id: str | None = Form(default=None),
     image: UploadFile | None = File(default=None),
+    cross_sell_sku: str | None = Form(default=None),
+    upsell_sku: str | None = Form(default=None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -7733,6 +7861,17 @@ async def admin_update_shop_product(
         else:
             await image.close()
 
+    cross_sell_product_id = await _resolve_related_product_id_by_sku(
+        cross_sell_sku,
+        field_label="Cross-sell",
+        disallow_product_id=product_id,
+    )
+    upsell_product_id = await _resolve_related_product_id_by_sku(
+        upsell_sku,
+        field_label="Up-sell",
+        disallow_product_id=product_id,
+    )
+
     try:
         updated = await shop_repo.update_product(
             product_id,
@@ -7745,6 +7884,8 @@ async def admin_update_shop_product(
             vip_price=vip_decimal,
             category_id=category_value,
             image_url=image_url,
+            cross_sell_product_id=cross_sell_product_id,
+            upsell_product_id=upsell_product_id,
         )
     except aiomysql.IntegrityError as exc:
         if stored_path:
