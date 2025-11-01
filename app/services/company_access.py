@@ -85,6 +85,7 @@ def _build_super_admin_membership(company: Mapping[str, Any]) -> dict[str, Any]:
         "can_manage_office_groups",
         "can_manage_assets",
         "can_manage_invoices",
+        "can_manage_issues",
         "can_order_licenses",
         "can_access_shop",
         "can_access_cart",

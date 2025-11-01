@@ -10,6 +10,7 @@ _BOOLEAN_FIELDS = {
     "can_manage_assets",
     "can_manage_invoices",
     "can_manage_office_groups",
+    "can_manage_issues",
     "can_order_licenses",
     "can_access_shop",
     "can_access_cart",
@@ -47,6 +48,7 @@ async def upsert_assignment(
     can_manage_assets: bool = False,
     can_manage_invoices: bool = False,
     can_manage_office_groups: bool = False,
+    can_manage_issues: bool = False,
     can_order_licenses: bool = False,
     can_access_shop: bool = False,
     can_access_cart: bool = False,
@@ -69,6 +71,7 @@ async def upsert_assignment(
             can_manage_assets,
             can_manage_invoices,
             can_manage_office_groups,
+            can_manage_issues,
             can_order_licenses,
             can_access_shop,
             can_access_cart,
@@ -77,7 +80,7 @@ async def upsert_assignment(
             is_admin,
             role_id
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON DUPLICATE KEY UPDATE
             staff_permission = VALUES(staff_permission),
@@ -86,6 +89,7 @@ async def upsert_assignment(
             can_manage_assets = VALUES(can_manage_assets),
             can_manage_invoices = VALUES(can_manage_invoices),
             can_manage_office_groups = VALUES(can_manage_office_groups),
+            can_manage_issues = VALUES(can_manage_issues),
             can_order_licenses = VALUES(can_order_licenses),
             can_access_shop = VALUES(can_access_shop),
             can_access_cart = VALUES(can_access_cart),
@@ -103,6 +107,7 @@ async def upsert_assignment(
             1 if can_manage_assets else 0,
             1 if can_manage_invoices else 0,
             1 if can_manage_office_groups else 0,
+            1 if can_manage_issues else 0,
             1 if can_order_licenses else 0,
             1 if can_access_shop else 0,
             1 if can_access_cart else 0,
