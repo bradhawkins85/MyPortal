@@ -1,0 +1,7 @@
+{
+  "guid": "616d1a11-cd25-4ce5-a5f6-87438a68aa34",
+  "occurred_at": "2025-11-01T11:50Z",
+  "change_type": "Fix",
+  "summary": "Refined knowledge base search scoring so the agent no longer suggests unrelated articles",
+  "content_hash": "0d25609abf5288d55c43a8f16aec4b5b3c3830a7943c89522da91a695b49fb7b"
+}
