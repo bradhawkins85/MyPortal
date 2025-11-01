@@ -664,6 +664,15 @@ body {
   min-height: 140px;
 }
 
+.form-input--multiselect {
+  min-height: 160px;
+  padding: 0.5rem;
+}
+
+.form-input--multiselect option {
+  padding: 0.25rem 0.5rem;
+}
+
 .form-actions--stacked {
   justify-content: flex-start;
 }
@@ -2187,7 +2196,13 @@ button.header-title-menu__link {
 .cart-recommendations__grid {
   display: grid;
   gap: calc(var(--space-gap-base) * 1.5);
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+@media (min-width: 1200px) {
+  .cart-recommendations__grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
 }
 
 .cart-recommendations__item {
