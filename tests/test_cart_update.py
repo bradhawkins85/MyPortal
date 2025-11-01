@@ -231,3 +231,134 @@ def test_update_cart_exceeds_stock(monkeypatch, active_session, cart_context):
     assert "cartMessage" not in params
     assert recorded_updates == []
     assert recorded_removals == []
+
+
+def test_add_to_cart_redirects_to_cart(monkeypatch, active_session, cart_context):
+    recorded_upserts: list[tuple[int, int, int]] = []
+    recorded_removals: list[tuple[int, set[int]]] = []
+
+    async def fake_get_product_by_id(product_id, company_id=None):
+        return {
+            "id": product_id,
+            "stock": 10,
+            "price": "25.00",
+            "name": "Upgrade Bundle",
+            "sku": "UPG-001",
+        }
+
+    async def fake_get_item(session_id, product_id):
+        return None
+
+    async def fake_upsert_item(
+        *,
+        session_id,
+        product_id,
+        quantity,
+        unit_price,
+        name,
+        sku,
+        vendor_sku,
+        description,
+        image_url,
+    ):
+        recorded_upserts.append((session_id, product_id, quantity))
+
+    async def fake_remove_items(session_id, product_ids):
+        recorded_removals.append((session_id, set(product_ids)))
+
+    monkeypatch.setattr(main_module.shop_repo, "get_product_by_id", fake_get_product_by_id)
+    monkeypatch.setattr(main_module.cart_repo, "get_item", fake_get_item)
+    monkeypatch.setattr(main_module.cart_repo, "upsert_item", fake_upsert_item)
+    monkeypatch.setattr(main_module.cart_repo, "remove_items", fake_remove_items)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/cart/add",
+            data={
+                "productId": "5",
+                "quantity": "2",
+                "_csrf": active_session.csrf_token,
+            },
+        )
+
+    assert response.status_code == 303
+    location = response.headers.get("location")
+    assert location is not None
+    parsed = urlparse(location)
+    assert parsed.path == "/cart"
+    params = parse_qs(parsed.query)
+    assert params.get("cartMessage") == ["Item added to cart."]
+    assert recorded_upserts == [(active_session.id, 5, 2)]
+    assert recorded_removals == []
+
+
+def test_add_to_cart_upgrade_removes_original(monkeypatch, active_session, cart_context):
+    recorded_upserts: list[tuple[int, int, int]] = []
+    recorded_removals: list[tuple[int, set[int]]] = []
+    recorded_sources: list[set[int]] = []
+
+    async def fake_get_product_by_id(product_id, company_id=None):
+        return {
+            "id": product_id,
+            "stock": 5,
+            "price": "30.00",
+            "name": "Premium Upgrade",
+            "sku": "PREM-001",
+        }
+
+    async def fake_get_item(session_id, product_id):
+        return None
+
+    async def fake_upsert_item(
+        *,
+        session_id,
+        product_id,
+        quantity,
+        unit_price,
+        name,
+        sku,
+        vendor_sku,
+        description,
+        image_url,
+    ):
+        recorded_upserts.append((session_id, product_id, quantity))
+
+    async def fake_remove_items(session_id, product_ids):
+        recorded_removals.append((session_id, set(product_ids)))
+
+    async def fake_list_products_by_ids(product_ids, company_id=None):
+        recorded_sources.append(set(product_ids))
+        return [
+            {
+                "id": 7,
+                "upsell_product_ids": [5],
+            }
+        ]
+
+    monkeypatch.setattr(main_module.shop_repo, "get_product_by_id", fake_get_product_by_id)
+    monkeypatch.setattr(main_module.cart_repo, "get_item", fake_get_item)
+    monkeypatch.setattr(main_module.cart_repo, "upsert_item", fake_upsert_item)
+    monkeypatch.setattr(main_module.cart_repo, "remove_items", fake_remove_items)
+    monkeypatch.setattr(main_module.shop_repo, "list_products_by_ids", fake_list_products_by_ids)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/cart/add",
+            data={
+                "productId": "5",
+                "quantity": "1",
+                "upgradeFrom": "7",
+                "_csrf": active_session.csrf_token,
+            },
+        )
+
+    assert response.status_code == 303
+    location = response.headers.get("location")
+    assert location is not None
+    parsed = urlparse(location)
+    assert parsed.path == "/cart"
+    params = parse_qs(parsed.query)
+    assert params.get("cartMessage") == ["Upgrade applied."]
+    assert recorded_upserts == [(active_session.id, 5, 1)]
+    assert recorded_removals == [(active_session.id, {7})]
+    assert recorded_sources == [{7}]

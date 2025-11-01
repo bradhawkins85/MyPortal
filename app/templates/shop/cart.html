@@ -172,6 +172,11 @@
                 {% include "partials/csrf.html" %}
                 <input type="hidden" name="productId" value="{{ item.product_id }}" />
                 <input type="hidden" name="quantity" value="1" />
+                {% if item.source_product_ids %}
+                  {% for source_id in item.source_product_ids %}
+                    <input type="hidden" name="upgradeFrom" value="{{ source_id }}" />
+                  {% endfor %}
+                {% endif %}
                 <button type="submit" class="button button--primary">Upgrade</button>
               </form>
             </article>

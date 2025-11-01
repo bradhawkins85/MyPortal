@@ -3610,11 +3610,30 @@ async def add_to_cart(request: Request) -> RedirectResponse:
     form = await request.form()
     product_id_raw = form.get("productId")
     quantity_raw = form.get("quantity")
+    upgrade_from_values: Sequence[str] = []
+    if isinstance(form, FormData):
+        upgrade_from_values = form.getlist("upgradeFrom")
+    else:
+        upgrade_raw = form.get("upgradeFrom")
+        if upgrade_raw is not None:
+            upgrade_from_values = [upgrade_raw]
+    upgrade_source_ids: set[int] = set()
+    for raw_value in upgrade_from_values:
+        try:
+            resolved = int(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if resolved > 0:
+            upgrade_source_ids.add(resolved)
 
     try:
         product_id = int(product_id_raw)
     except (TypeError, ValueError):
-        return RedirectResponse(url=request.url_for("shop_page"), status_code=status.HTTP_303_SEE_OTHER)
+        message = quote("Invalid product selection.")
+        return RedirectResponse(
+            url=f"{request.url_for('cart_page')}?cartError={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     try:
         requested_quantity = int(quantity_raw) if quantity_raw is not None else 1
@@ -3628,7 +3647,35 @@ async def add_to_cart(request: Request) -> RedirectResponse:
         company_id=company_id,
     )
     if not product:
-        return RedirectResponse(url=request.url_for("shop_page"), status_code=status.HTTP_303_SEE_OTHER)
+        message = quote("Product is unavailable.")
+        return RedirectResponse(
+            url=f"{request.url_for('cart_page')}?cartError={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    valid_upgrade_sources: set[int] = set()
+    if upgrade_source_ids:
+        source_products = await shop_repo.list_products_by_ids(
+            upgrade_source_ids,
+            company_id=company_id,
+        )
+        for source_product in source_products:
+            try:
+                source_id = int(source_product.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if source_id <= 0:
+                continue
+            related_ids: set[int] = set()
+            for related_id in source_product.get("upsell_product_ids") or []:
+                try:
+                    resolved_related = int(related_id)
+                except (TypeError, ValueError):
+                    continue
+                if resolved_related > 0:
+                    related_ids.add(resolved_related)
+            if product_id in related_ids:
+                valid_upgrade_sources.add(source_id)
 
     available_stock = int(product.get("stock") or 0)
     existing = await cart_repo.get_item(session.id, product_id)
@@ -3637,7 +3684,7 @@ async def add_to_cart(request: Request) -> RedirectResponse:
         remaining = max(available_stock - existing_quantity, 0)
         message = quote(f"Cannot add item. Only {remaining} left in stock.")
         return RedirectResponse(
-            url=f"{request.url_for('shop_page')}?cart_error={message}",
+            url=f"{request.url_for('cart_page')}?cartError={message}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
@@ -3647,6 +3694,9 @@ async def add_to_cart(request: Request) -> RedirectResponse:
         price_source = product.get("vip_price")
     unit_price = Decimal(str(price_source or 0))
     new_quantity = existing_quantity + requested_quantity
+
+    if valid_upgrade_sources:
+        await cart_repo.remove_items(session.id, valid_upgrade_sources)
 
     await cart_repo.upsert_item(
         session_id=session.id,
@@ -3660,7 +3710,15 @@ async def add_to_cart(request: Request) -> RedirectResponse:
         image_url=product.get("image_url"),
     )
 
-    return RedirectResponse(url=request.url_for("shop_page"), status_code=status.HTTP_303_SEE_OTHER)
+    cart_url = request.url_for("cart_page")
+    if valid_upgrade_sources:
+        cart_message = quote("Upgrade applied.")
+    else:
+        cart_message = quote("Item added to cart.")
+    return RedirectResponse(
+        url=f"{cart_url}?cartMessage={cart_message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.post("/cart/add-package", response_class=RedirectResponse, include_in_schema=False)
@@ -3862,8 +3920,8 @@ async def view_cart(
             company_id=company_id,
         )
         cart_product_id_set = {pid for pid in cart_product_ids}
-        cross_sell_targets: dict[int, list[str]] = {}
-        upsell_targets: dict[int, list[str]] = {}
+        cross_sell_targets: dict[int, set[str]] = {}
+        upsell_targets: dict[int, dict[str, set[str] | set[int]]] = {}
         for product in base_products:
             base_id = int(product.get("id") or 0)
             base_name = str(product.get("name") or "")
@@ -3874,7 +3932,7 @@ async def view_cart(
                     and target_id not in cart_product_id_set
                     and target_id != base_id
                 ):
-                    cross_sell_targets.setdefault(target_id, []).append(base_name)
+                    cross_sell_targets.setdefault(target_id, set()).add(base_name)
             for entry in product.get("upsell_products", []) or []:
                 target_id = int(entry.get("id") or 0)
                 if (
@@ -3882,7 +3940,12 @@ async def view_cart(
                     and target_id not in cart_product_id_set
                     and target_id != base_id
                 ):
-                    upsell_targets.setdefault(target_id, []).append(base_name)
+                    bucket = upsell_targets.setdefault(
+                        target_id,
+                        {"names": set(), "ids": set()},
+                    )
+                    bucket["names"].add(base_name)
+                    bucket["ids"].add(base_id)
 
         target_ids = sorted(set(cross_sell_targets) | set(upsell_targets))
         if target_ids:
@@ -3896,7 +3959,8 @@ async def view_cart(
             def _prepare_recommendation(
                 *,
                 target_id: int,
-                source_names: list[str],
+                source_names: Iterable[str],
+                source_ids: Iterable[int] | None = None,
                 kind: str,
             ) -> None:
                 product = related_map.get(target_id)
@@ -3925,14 +3989,31 @@ async def view_cart(
                     "image_url": product.get("image_url"),
                     "price": price_value,
                     "source_names": sorted({name for name in source_names if name}),
+                    "source_product_ids": sorted(
+                        {
+                            int(pid)
+                            for pid in (source_ids or [])
+                            if isinstance(pid, int) and pid > 0
+                        }
+                    ),
                     "kind": kind,
                 }
                 recommendations.setdefault(kind, []).append(entry)
 
             for target_id, names in cross_sell_targets.items():
-                _prepare_recommendation(target_id=target_id, source_names=names, kind="cross_sell")
-            for target_id, names in upsell_targets.items():
-                _prepare_recommendation(target_id=target_id, source_names=names, kind="upsell")
+                _prepare_recommendation(
+                    target_id=target_id,
+                    source_names=names,
+                    source_ids=None,
+                    kind="cross_sell",
+                )
+            for target_id, payload in upsell_targets.items():
+                _prepare_recommendation(
+                    target_id=target_id,
+                    source_names=payload.get("names", set()),
+                    source_ids=payload.get("ids", set()),
+                    kind="upsell",
+                )
 
             for bucket in recommendations.values():
                 bucket.sort(key=lambda item: str(item.get("name") or "").lower())
