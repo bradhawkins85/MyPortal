@@ -510,6 +510,11 @@
     const commandField = query('task-command');
     const companyField = query('task-company');
     const companyDisplayField = query('task-company-display');
+    if (companyDisplayField) {
+      companyDisplayField.readOnly = true;
+      companyDisplayField.setAttribute('aria-readonly', 'true');
+      companyDisplayField.setAttribute('tabindex', '-1');
+    }
     const defaults = getCompanyContext();
     const cronField = query('task-cron');
     const descriptionField = query('task-description');

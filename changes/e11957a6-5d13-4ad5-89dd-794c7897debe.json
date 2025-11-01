@@ -1,0 +1,7 @@
+{
+  "guid": "e11957a6-5d13-4ad5-89dd-794c7897debe",
+  "occurred_at": "2024-04-26T15:30Z",
+  "change_type": "Fix",
+  "summary": "Locked the task-company-display field on automation forms to prevent manual edits.",
+  "content_hash": "ab5e62f77a4ea825dbb3c19405704d7dbcd042fd454c734a551fecc07839bfc4"
+}
