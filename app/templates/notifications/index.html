@@ -109,16 +109,16 @@
       <table class="table table--notifications" id="notifications-table" data-table>
         <thead>
           <tr>
-            <th scope="col" class="table__checkbox">
+            <th scope="col" class="table__checkbox" data-mobile-priority="supporting">
               <label class="visually-hidden" for="notifications-select-all">Select all notifications</label>
               <input type="checkbox" id="notifications-select-all" data-notification-select-all />
             </th>
-            <th scope="col" data-sort="string">Event</th>
-            <th scope="col" data-sort="string">Message</th>
-            <th scope="col" data-sort="date">Created</th>
-            <th scope="col" data-sort="date">Read at</th>
-            <th scope="col" data-sort="string">Status</th>
-            <th scope="col" class="table__actions">Actions</th>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">Event</th>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">Message</th>
+            <th scope="col" data-sort="date" data-mobile-priority="essential">Created</th>
+            <th scope="col" data-sort="date" data-mobile-priority="supporting">Read at</th>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">Status</th>
+            <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
           </tr>
         </thead>
         <tbody>

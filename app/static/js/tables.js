@@ -73,7 +73,8 @@
       const parsedMax = maxPageSizeAttr ? Number.parseInt(maxPageSizeAttr, 10) : NaN;
       this.maxPageSize = Number.isNaN(parsedMax) || parsedMax <= 0 ? null : parsedMax;
       this.rowHeight = 0;
-      this.paginationElement = table.id
+      this.shouldPaginate = table.hasAttribute('data-table-paginate');
+      this.paginationElement = this.shouldPaginate && table.id
         ? document.querySelector(`[data-pagination="${table.id}"]`)
         : null;
       this.infoElement = this.paginationElement
@@ -95,17 +96,108 @@
         this.handleResize();
       };
 
+      this.mobileQuery = (typeof window !== 'undefined' && window.matchMedia)
+        ? window.matchMedia('(max-width: 720px) and (orientation: portrait)')
+        : null;
+      this.mobileResizeListener = () => {
+        this.applyMobileLayout();
+      };
+      this.mobileConfig = this.buildMobileConfig();
+
       if (this.table) {
         this.table.addEventListener('table:rows-updated', this.externalRefreshListener);
         this.table.addEventListener('table:layout-change', this.layoutRefreshListener);
       }
 
+      if (typeof window !== 'undefined') {
+        window.addEventListener('resize', this.mobileResizeListener);
+      }
+      if (this.mobileQuery) {
+        if (typeof this.mobileQuery.addEventListener === 'function') {
+          this.mobileQuery.addEventListener('change', this.mobileResizeListener);
+        } else if (typeof this.mobileQuery.addListener === 'function') {
+          this.mobileQuery.addListener(this.mobileResizeListener);
+        }
+      }
+
       this.updateFilterState();
+      if (this.paginationElement) {
+        this.paginationElement.classList.add('table-pagination--active');
+      }
+
       if (this.paginationElement) {
         this.initPagination();
       } else {
         this.render();
       }
+
+      this.applyMobileLayout();
+    }
+
+    buildMobileConfig() {
+      if (!this.table) {
+        return [];
+      }
+      const headerRow = this.table.tHead ? this.table.tHead.rows[0] : null;
+      if (!headerRow) {
+        return [];
+      }
+      return Array.from(headerRow.children).map((header, index) => {
+        const explicit = (header.getAttribute('data-mobile-priority') || '').toLowerCase();
+        let priority;
+        if (explicit === 'essential' || explicit === 'supporting') {
+          priority = explicit;
+        } else if (header.classList.contains('table__actions')) {
+          priority = 'essential';
+        } else if (index < 2) {
+          priority = 'essential';
+        } else {
+          priority = 'supporting';
+        }
+        header.dataset.mobilePriority = priority;
+        return { index, priority };
+      });
+    }
+
+    applyMobileLayout() {
+      if (!this.table || !this.mobileConfig) {
+        return;
+      }
+      const portraitActive = this.mobileQuery
+        ? this.mobileQuery.matches
+        : (typeof window !== 'undefined' ? window.innerWidth <= 720 : false);
+      const rows = [];
+      if (this.table.tHead) {
+        rows.push(...this.table.tHead.rows);
+      }
+      if (this.table.tBodies) {
+        Array.from(this.table.tBodies).forEach((tbody) => {
+          rows.push(...tbody.rows);
+        });
+      }
+      if (this.table.tFoot) {
+        rows.push(...this.table.tFoot.rows);
+      }
+      rows.forEach((row) => {
+        this.mobileConfig.forEach(({ index, priority }) => {
+          const cell = row.children[index];
+          if (!cell) {
+            return;
+          }
+          const override = (cell.getAttribute('data-mobile-priority') || '').toLowerCase();
+          let effectivePriority = priority;
+          if (override === 'essential' || override === 'supporting') {
+            effectivePriority = override;
+          } else if (cell.classList.contains('table__actions')) {
+            effectivePriority = 'essential';
+          }
+          if (portraitActive && effectivePriority !== 'essential') {
+            cell.setAttribute('data-mobile-hidden', 'true');
+          } else {
+            cell.removeAttribute('data-mobile-hidden');
+          }
+        });
+      });
     }
 
     updateFilterState() {
@@ -212,6 +304,7 @@
           startDisplay: totalFiltered > 0 ? 1 : 0,
           endDisplay: totalFiltered,
         });
+        this.applyMobileLayout();
         return;
       }
 
@@ -234,6 +327,7 @@
           startDisplay: 0,
           endDisplay: 0,
         });
+        this.applyMobileLayout();
         return;
       }
 
@@ -270,6 +364,7 @@
         startDisplay: displayStart,
         endDisplay: displayEnd,
       });
+      this.applyMobileLayout();
     }
 
     dispatchRenderEvent(detail) {
