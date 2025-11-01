@@ -171,6 +171,7 @@
     }
     applyFilters();
 
+    const importModal = document.getElementById('import-product-modal');
     const editModal = document.getElementById('product-edit-modal');
     const visibilityModal = document.getElementById('product-visibility-modal');
     const editForm = document.getElementById('product-edit-form');
@@ -351,8 +352,23 @@
       refreshFeatureInput();
     }
 
+    bindModalDismissal(importModal);
     bindModalDismissal(editModal);
     bindModalDismissal(visibilityModal);
+
+    if (importModal) {
+      const importSkuInput = importModal.querySelector('#import-vendor-sku');
+      document.querySelectorAll('[data-import-product-modal-open]').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          openModal(importModal);
+          if (importSkuInput && typeof importSkuInput.focus === 'function') {
+            importSkuInput.focus();
+            importSkuInput.select();
+          }
+        });
+      });
+    }
 
     container.querySelectorAll('[data-product-edit]').forEach((button) => {
       button.addEventListener('click', () => {
