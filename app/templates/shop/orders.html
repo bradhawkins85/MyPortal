@@ -104,15 +104,15 @@
       <table class="table" id="orders-table" data-table>
         <thead>
           <tr>
-            <th scope="col" data-sort="string">Order</th>
-            <th scope="col" data-sort="string">PO Number</th>
-            <th scope="col" data-sort="string">Status</th>
-            <th scope="col" data-sort="string">Shipping</th>
-            <th scope="col" data-sort="date">Placed</th>
-            <th scope="col" data-sort="date">ETA</th>
-            <th scope="col" data-sort="string">Notes</th>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">Order</th>
+            <th scope="col" data-sort="string" data-mobile-priority="supporting">PO Number</th>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">Status</th>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">Shipping</th>
+            <th scope="col" data-sort="date" data-mobile-priority="essential">Placed</th>
+            <th scope="col" data-sort="date" data-mobile-priority="supporting">ETA</th>
+            <th scope="col" data-sort="string" data-mobile-priority="supporting">Notes</th>
             {% if current_user and current_user.is_super_admin %}
-              <th scope="col" data-sort="string">Consignment</th>
+              <th scope="col" data-sort="string" data-mobile-priority="supporting">Consignment</th>
             {% endif %}
           </tr>
         </thead>
