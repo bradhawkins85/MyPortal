@@ -1826,6 +1826,52 @@ button.header-title-menu__link {
   min-width: 680px;
 }
 
+.tickets-table {
+  min-width: 680px;
+}
+
+.tickets-table__cell,
+.tickets-table__column {
+  vertical-align: middle;
+}
+
+@media (max-width: 640px) {
+  .tickets-table {
+    min-width: 0;
+  }
+
+  .tickets-table__column--select,
+  .tickets-table__cell--select,
+  .tickets-table__column--status,
+  .tickets-table__cell--status,
+  .tickets-table__column--priority,
+  .tickets-table__cell--priority,
+  .tickets-table__column--company,
+  .tickets-table__cell--company,
+  .tickets-table__column--assigned,
+  .tickets-table__cell--assigned,
+  .tickets-table__column--updated,
+  .tickets-table__cell--updated,
+  .tickets-table__column--actions,
+  .tickets-table__cell--actions {
+    display: none;
+  }
+
+  .tickets-table__cell--subject {
+    white-space: normal;
+  }
+
+  .tickets-table__cell--subject a {
+    display: inline-block;
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .tickets-table__cell--id {
+    white-space: nowrap;
+  }
+}
+
 .table th,
 .table td {
   padding: var(--space-gap-tight) var(--space-gap-base);
@@ -3832,6 +3878,38 @@ button.header-title-menu__link {
 
 .management__bulk-delete [data-bulk-delete-count] {
   font-size: 0.85rem;
+}
+
+.ticket-dashboard__overview {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.ticket-dashboard__filters {
+  align-items: stretch;
+}
+
+.ticket-dashboard__filters .form-input {
+  min-width: 0;
+}
+
+@media (min-width: 960px) {
+  .ticket-dashboard__overview {
+    grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+@media (max-width: 640px) {
+  .ticket-dashboard__filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ticket-dashboard__filters .form-input,
+  .ticket-dashboard__filters .button {
+    width: 100%;
+  }
 }
 
 .table__select {
