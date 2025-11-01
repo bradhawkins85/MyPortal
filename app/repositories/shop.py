@@ -78,12 +78,47 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
     sql = " ".join(query_parts)
 
     rows = await db.fetch_all(sql, tuple(params) if params else None)
-    return [_normalise_product(row) for row in rows]
+    products = [_normalise_product(row) for row in rows]
+    return await _attach_features_to_products(products)
 
 
 async def list_all_products(include_archived: bool = False) -> list[dict[str, Any]]:
     filters = ProductFilters(include_archived=include_archived)
     return await list_products(filters)
+
+
+async def list_product_features(product_id: int) -> list[dict[str, Any]]:
+    features = await list_features_for_products([product_id])
+    return features.get(int(product_id), [])
+
+
+async def list_features_for_products(
+    product_ids: Iterable[int],
+) -> dict[int, list[dict[str, Any]]]:
+    identifiers = sorted({int(pid) for pid in product_ids if int(pid) > 0})
+    if not identifiers:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(identifiers))
+    sql = f"""
+        SELECT
+            id,
+            product_id,
+            feature_name,
+            feature_value,
+            position
+        FROM shop_product_features
+        WHERE product_id IN ({placeholders})
+        ORDER BY product_id ASC, position ASC, id ASC
+    """
+    rows = await db.fetch_all(sql, tuple(identifiers))
+
+    features_map: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        feature = _normalise_feature(row)
+        product_id = feature["product_id"]
+        features_map.setdefault(product_id, []).append(feature)
+    return features_map
 
 
 async def list_products_by_ids(
@@ -129,7 +164,8 @@ async def list_products_by_ids(
 
     params.extend(identifiers)
     rows = await db.fetch_all(" ".join(query_parts), tuple(params))
-    return [_normalise_product(row) for row in rows]
+    products = [_normalise_product(row) for row in rows]
+    return await _attach_features_to_products(products)
 
 
 async def list_packages(filters: PackageFilters) -> list[dict[str, Any]]:
@@ -536,7 +572,12 @@ async def get_product_by_id(
         query.append("AND e.product_id IS NULL")
     sql = " ".join(query)
     row = await db.fetch_one(sql, tuple(params))
-    return _normalise_product(row) if row else None
+    if not row:
+        return None
+    product = _normalise_product(row)
+    features = await list_product_features(product_id)
+    product["features"] = features
+    return product
 
 
 async def get_product_by_sku(
@@ -563,7 +604,15 @@ async def get_product_by_sku(
         sql.append("AND p.archived = 0")
     sql.append("LIMIT 1")
     row = await db.fetch_one(" ".join(sql), tuple(params))
-    return _normalise_product(row) if row else None
+    if not row:
+        return None
+    product = _normalise_product(row)
+    if product["id"]:
+        features = await list_product_features(product["id"])
+        product["features"] = features
+    else:
+        product["features"] = []
+    return product
 
 
 async def create_product(
@@ -607,6 +656,46 @@ async def create_product(
     if not product:
         raise RuntimeError("Failed to create product")
     return product
+
+
+async def replace_product_features(
+    product_id: int,
+    features: Sequence[dict[str, Any]],
+) -> None:
+    ordered: list[tuple[int, str, str, int]] = []
+    for index, feature in enumerate(features):
+        name_value = feature.get("name")
+        value_value = feature.get("value")
+        position_value = feature.get("position")
+        try:
+            position = int(position_value)
+        except (TypeError, ValueError):
+            position = index
+        name = "" if name_value is None else str(name_value)
+        value = "" if value_value is None else str(value_value)
+        ordered.append((product_id, name, value, position))
+
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await conn.begin()
+            try:
+                await cursor.execute(
+                    "DELETE FROM shop_product_features WHERE product_id = %s",
+                    (product_id,),
+                )
+                if ordered:
+                    await cursor.executemany(
+                        """
+                        INSERT INTO shop_product_features
+                            (product_id, feature_name, feature_value, position)
+                        VALUES (%s, %s, %s, %s)
+                        """,
+                        ordered,
+                    )
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
 
 
 async def delete_product(product_id: int) -> bool:
@@ -984,6 +1073,40 @@ async def upsert_product_from_feed(
             manufacturer,
         ),
     )
+
+
+async def _attach_features_to_products(
+    products: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    if not products:
+        return products
+
+    identifiers = sorted(
+        {int(product.get("id") or 0) for product in products if int(product.get("id") or 0) > 0}
+    )
+    features_map: dict[int, list[dict[str, Any]]] = {}
+    if identifiers:
+        features_map = await list_features_for_products(identifiers)
+
+    for product in products:
+        product_id = int(product.get("id") or 0)
+        if product_id > 0:
+            product["features"] = features_map.get(product_id, [])
+        else:
+            product["features"] = []
+    return products
+
+
+def _normalise_feature(row: dict[str, Any]) -> dict[str, Any]:
+    record = dict(row)
+    record["id"] = _coerce_int(row.get("id"))
+    record["product_id"] = _coerce_int(row.get("product_id"))
+    name_value = row.get("feature_name")
+    value_value = row.get("feature_value")
+    record["name"] = "" if name_value is None else str(name_value)
+    record["value"] = "" if value_value is None else str(value_value)
+    record["position"] = _coerce_int(row.get("position"), default=0)
+    return record
 
 
 def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
