@@ -1331,6 +1331,32 @@
     bindTaskActions();
     bindAutomationDeleteActions();
     setupAutomationForm();
+    bindAutomationSectionPagination();
+  }
+
+  function dispatchAutomationTableLayoutRefresh() {
+    const openSections = document.querySelectorAll('details[data-automation-section][open]');
+    openSections.forEach((section) => {
+      section.querySelectorAll('table[data-table]').forEach((table) => {
+        table.dispatchEvent(new CustomEvent('table:layout-change'));
+      });
+    });
+  }
+
+  function bindAutomationSectionPagination() {
+    const sections = document.querySelectorAll('details[data-automation-section]');
+    if (!sections.length) {
+      return;
+    }
+    const scheduleRefresh = () => {
+      window.requestAnimationFrame(() => {
+        dispatchAutomationTableLayoutRefresh();
+      });
+    };
+    sections.forEach((section) => {
+      section.addEventListener('toggle', scheduleRefresh);
+    });
+    scheduleRefresh();
   }
 
   if (document.readyState === 'loading') {
