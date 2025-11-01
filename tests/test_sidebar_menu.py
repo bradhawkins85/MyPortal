@@ -79,6 +79,7 @@ def company_admin_context(monkeypatch):
             "csrf_token": "csrf-token",
             "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": 0},
             "notification_unread_count": 0,
+            "can_access_tickets": True,
         }
         if extra:
             context.update(extra)
@@ -97,6 +98,7 @@ def test_company_admin_sees_authorised_menu_items(company_admin_context):
 
     assert response.status_code == 200
     html = response.text
+    assert 'href="/tickets"' in html
     assert 'href="/shop"' in html
     assert 'href="/cart"' not in html
     assert 'href="/forms"' in html

@@ -916,6 +916,7 @@ async def _build_base_context(
         "impersonator_user": impersonator_user,
         "impersonation_started_at": impersonation_started_at,
         "has_issue_tracker_access": has_issue_tracker_access,
+        "can_access_tickets": True,
     }
     context.update(permission_flags)
     if extra:
@@ -1385,6 +1386,15 @@ _ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
     {"key": "warranty_status", "label": "Warranty status", "sort": "string"},
     {"key": "warranty_end_date", "label": "Warranty end", "sort": "date"},
 ]
+
+
+_PORTAL_STATUS_BADGE_MAP: dict[str, str] = {
+    "open": "badge--warning",
+    "in_progress": "badge--warning",
+    "pending": "badge--warning",
+    "resolved": "badge--success",
+    "closed": "badge--muted",
+}
 
 
 def _normalise_api_key_order(order_by: str | None) -> str:
@@ -4773,6 +4783,210 @@ async def notifications_dashboard(request: Request):
     }
 
     return await _render_template("notifications/index.html", request, user, extra=extra)
+
+
+@app.get("/tickets", response_class=HTMLResponse)
+async def portal_tickets_page(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+
+    params = request.query_params
+    status_filter = (params.get("status") or "").strip() or None
+    search_term = (params.get("q") or "").strip() or None
+    success_message = params.get("success")
+    error_message = params.get("error")
+
+    return await _render_portal_tickets_page(
+        request,
+        user,
+        status_filter=status_filter,
+        search_term=search_term,
+        success_message=success_message,
+        error_message=error_message,
+    )
+
+
+@app.post("/tickets", response_class=HTMLResponse)
+async def portal_create_ticket(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+
+    params = request.query_params
+    status_filter = (params.get("status") or "").strip() or None
+    search_term = (params.get("q") or "").strip() or None
+
+    form = await request.form()
+    subject = str(form.get("subject") or "").strip()
+    description = str(form.get("description") or "").strip()
+    form_values = {"subject": subject, "description": description}
+
+    if not subject:
+        return await _render_portal_tickets_page(
+            request,
+            user,
+            status_filter=status_filter,
+            search_term=search_term,
+            error_message="Provide a subject for your ticket.",
+            form_values=form_values,
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    sanitized_description = sanitize_rich_text(description)
+    description_payload = sanitized_description.html
+
+    try:
+        requester_id = int(user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
+
+    company_raw = user.get("company_id")
+    try:
+        company_id = int(company_raw) if company_raw is not None else None
+    except (TypeError, ValueError):
+        company_id = None
+    if company_id is None:
+        return await _render_portal_tickets_page(
+            request,
+            user,
+            status_filter=status_filter,
+            search_term=search_term,
+            error_message="Select a company before creating a ticket.",
+            form_values=form_values,
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        status_value = await tickets_service.resolve_status_or_default("open")
+        ticket = await tickets_service.create_ticket(
+            subject=subject,
+            description=description_payload,
+            requester_id=requester_id,
+            company_id=company_id,
+            assigned_user_id=None,
+            priority="normal",
+            status=status_value,
+            category=None,
+            module_slug=None,
+            external_reference=None,
+            trigger_automations=True,
+        )
+        await tickets_repo.add_watcher(ticket["id"], requester_id)
+        try:
+            await tickets_service.refresh_ticket_ai_summary(ticket["id"])
+        except RuntimeError:
+            pass
+        await tickets_service.refresh_ticket_ai_tags(ticket["id"])
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to create portal ticket", error=str(exc))
+        return await _render_portal_tickets_page(
+            request,
+            user,
+            status_filter=status_filter,
+            search_term=search_term,
+            error_message="We couldn't create your ticket right now. Please try again.",
+            form_values=form_values,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    message = quote("Ticket created.")
+    destination = f"/tickets/{ticket['id']}?success={message}"
+    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/tickets/{ticket_id}", response_class=HTMLResponse)
+async def portal_ticket_detail(request: Request, ticket_id: int):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+
+    params = request.query_params
+    success_message = params.get("success")
+    error_message = params.get("error")
+
+    return await _render_portal_ticket_detail(
+        request,
+        user,
+        ticket_id=ticket_id,
+        success_message=success_message,
+        error_message=error_message,
+    )
+
+
+@app.post("/tickets/{ticket_id}/replies", response_class=HTMLResponse)
+async def portal_ticket_reply(request: Request, ticket_id: int):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+
+    try:
+        user_id = int(user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
+
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    has_helpdesk_access = await _is_helpdesk_technician(user, request)
+    is_super_admin = bool(user.get("is_super_admin"))
+    is_requester = ticket.get("requester_id") == user_id
+    if not (has_helpdesk_access or is_super_admin or is_requester):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    form = await request.form()
+    body = str(form.get("body") or "").strip()
+    sanitized_body = sanitize_rich_text(body)
+    if not sanitized_body.has_rich_content:
+        return await _render_portal_ticket_detail(
+            request,
+            user,
+            ticket_id=ticket_id,
+            reply_error="Reply message cannot be empty.",
+            reply_body=body,
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        await tickets_repo.create_reply(
+            ticket_id=ticket_id,
+            author_id=user_id,
+            body=sanitized_body.html,
+            is_internal=False,
+            minutes_spent=None,
+            is_billable=False,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to create portal ticket reply", ticket_id=ticket_id, error=str(exc))
+        return await _render_portal_ticket_detail(
+            request,
+            user,
+            ticket_id=ticket_id,
+            error_message="We couldn't post your reply. Please try again.",
+            reply_body=body,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    try:
+        await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    except RuntimeError:
+        pass
+    await tickets_service.refresh_ticket_ai_tags(ticket_id)
+    actor_type = "technician" if has_helpdesk_access or is_super_admin else "requester"
+    await tickets_service.emit_ticket_updated_event(
+        ticket_id,
+        actor_type=actor_type,
+        actor=user,
+    )
+    await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
+
+    message = quote("Reply posted.")
+    return RedirectResponse(
+        url=f"/tickets/{ticket_id}?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
 
 
 @app.get("/knowledge-base", response_class=HTMLResponse, tags=["Knowledge Base"])
@@ -8667,6 +8881,361 @@ async def admin_delete_shop_product(request: Request, product_id: int):
         deleted_by=current_user.get("id") if current_user else None,
     )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+
+async def _render_portal_tickets_page(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    status_filter: str | None = None,
+    search_term: str | None = None,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    form_values: dict[str, str] | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    try:
+        user_id = int(user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
+
+    available_companies = await company_access.list_accessible_companies(user)
+    active_company_id = getattr(request.state, "active_company_id", None)
+    company_lookup: dict[int, dict[str, Any]] = {}
+    available_company_ids: list[int] = []
+    for entry in available_companies:
+        company_id = entry.get("company_id")
+        try:
+            numeric_id = int(company_id)
+        except (TypeError, ValueError):
+            continue
+        available_company_ids.append(numeric_id)
+        company_lookup[numeric_id] = entry if isinstance(entry, dict) else dict(entry)
+
+    active_company_ids: list[int] = []
+    if active_company_id is not None:
+        try:
+            active_company_ids = [int(active_company_id)]
+        except (TypeError, ValueError):
+            active_company_ids = []
+    if not active_company_ids:
+        active_company_ids = available_company_ids
+
+    status_definitions = await tickets_service.list_status_definitions()
+    status_label_map = {
+        definition.tech_status: definition.public_status for definition in status_definitions
+    }
+    status_options: list[dict[str, str]] = [
+        {
+            "value": definition.tech_status,
+            "label": definition.public_status,
+        }
+        for definition in status_definitions
+    ]
+
+    status_slug = (status_filter or "").strip().lower() or None
+    if status_slug and status_slug not in status_label_map:
+        status_slug = None
+
+    search_value = (search_term or "").strip()
+    effective_search = search_value or None
+
+    try:
+        tickets = await tickets_repo.list_tickets_for_user(
+            user_id,
+            company_ids=active_company_ids or None,
+            status=status_slug,
+            search=effective_search,
+            limit=200,
+        )
+        total_count = await tickets_repo.count_tickets_for_user(
+            user_id,
+            company_ids=active_company_ids or None,
+            status=status_slug,
+            search=effective_search,
+        )
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        log_error("Failed to load portal tickets", error=str(exc))
+        tickets = []
+        total_count = 0
+        if not error_message:
+            error_message = "Unable to load tickets right now. Please try again."
+
+    status_counts: Counter[str] = Counter()
+    formatted_tickets: list[dict[str, Any]] = []
+    for record in tickets:
+        status_value = str(record.get("status") or "open").lower()
+        status_counts[status_value] += 1
+        status_label = status_label_map.get(status_value) or status_value.replace("_", " ").title()
+        priority_value = str(record.get("priority") or "normal")
+        priority_label = priority_value.replace("_", " ").title()
+        company_name = None
+        company_identifier = record.get("company_id")
+        try:
+            company_numeric = int(company_identifier) if company_identifier is not None else None
+        except (TypeError, ValueError):
+            company_numeric = None
+        if company_numeric is not None:
+            company_entry = company_lookup.get(company_numeric) or {}
+            company_name = (
+                str(company_entry.get("company_name") or company_entry.get("name") or "").strip()
+                or None
+            )
+        updated_at = record.get("updated_at")
+        created_at = record.get("created_at")
+        updated_iso = (
+            updated_at.astimezone(timezone.utc).isoformat()
+            if hasattr(updated_at, "astimezone")
+            else ""
+        )
+        created_iso = (
+            created_at.astimezone(timezone.utc).isoformat()
+            if hasattr(created_at, "astimezone")
+            else ""
+        )
+        formatted_tickets.append(
+            {
+                "id": record.get("id"),
+                "subject": record.get("subject"),
+                "status": status_value,
+                "status_label": status_label,
+                "status_badge": _PORTAL_STATUS_BADGE_MAP.get(status_value, "badge--muted"),
+                "priority_label": priority_label,
+                "company_name": company_name,
+                "company_id": record.get("company_id"),
+                "updated_iso": updated_iso,
+                "created_iso": created_iso,
+            }
+        )
+
+    summary_entries: list[dict[str, Any]] = []
+    for definition in status_definitions:
+        summary_entries.append(
+            {
+                "slug": definition.tech_status,
+                "label": definition.public_status,
+                "count": status_counts.get(definition.tech_status, 0),
+            }
+        )
+    defined_statuses = {definition.tech_status for definition in status_definitions}
+    for slug, count in status_counts.items():
+        if slug not in defined_statuses:
+            summary_entries.append(
+                {
+                    "slug": slug,
+                    "label": slug.replace("_", " ").title(),
+                    "count": count,
+                }
+            )
+            status_options.append({"value": slug, "label": slug.replace("_", " ").title()})
+
+    summary_entries = [entry for entry in summary_entries if entry["count"] > 0]
+    summary_entries.sort(key=lambda entry: entry["label"].lower())
+    unique_options: dict[str, dict[str, str]] = {}
+    for option in status_options:
+        key = option.get("value")
+        if key is None or key in unique_options:
+            continue
+        unique_options[str(key)] = option
+    status_options = list(unique_options.values())
+    status_options.sort(key=lambda option: option["label"].lower())
+
+    extra = {
+        "title": "Tickets",
+        "tickets": formatted_tickets,
+        "tickets_total": total_count,
+        "status_options": status_options,
+        "status_filter": status_slug,
+        "status_summary": summary_entries,
+        "search_term": search_value,
+        "filters_active": bool(status_slug or search_value),
+        "success_message": success_message,
+        "error_message": error_message,
+        "form_values": form_values or {},
+    }
+    response = await _render_template("tickets/index.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
+
+
+async def _render_portal_ticket_detail(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    ticket_id: int,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    reply_error: str | None = None,
+    reply_body: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    has_helpdesk_access = await _is_helpdesk_technician(user, request)
+    is_super_admin = bool(user.get("is_super_admin"))
+
+    user_id = user.get("id")
+    try:
+        user_id_int = int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        user_id_int = None
+
+    is_requester = user_id_int is not None and ticket.get("requester_id") == user_id_int
+    is_watcher = False
+    if user_id_int is not None and not is_requester:
+        try:
+            is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, user_id_int)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error("Failed to determine ticket watcher state", error=str(exc))
+            is_watcher = False
+
+    if not (has_helpdesk_access or is_super_admin or is_requester or is_watcher):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    sanitized_description = sanitize_rich_text(str(ticket.get("description") or ""))
+    status_label_map = await tickets_service.get_public_status_map()
+    status_value = str(ticket.get("status") or "open").lower()
+    status_label = status_label_map.get(status_value) or status_value.replace("_", " ").title()
+    priority_value = str(ticket.get("priority") or "normal")
+    priority_label = priority_value.replace("_", " ").title()
+
+    created_at = ticket.get("created_at")
+    updated_at = ticket.get("updated_at")
+    created_iso = (
+        created_at.astimezone(timezone.utc).isoformat()
+        if hasattr(created_at, "astimezone")
+        else ""
+    )
+    updated_iso = (
+        updated_at.astimezone(timezone.utc).isoformat()
+        if hasattr(updated_at, "astimezone")
+        else ""
+    )
+
+    company_record: Mapping[str, Any] | None = None
+    company_name = None
+    company_identifier = ticket.get("company_id")
+    try:
+        company_numeric = int(company_identifier) if company_identifier is not None else None
+    except (TypeError, ValueError):
+        company_numeric = None
+    if company_numeric is not None:
+        company_record = await company_repo.get_company_by_id(company_numeric)
+        if isinstance(company_record, Mapping):
+            company_name = (
+                str(company_record.get("name") or "").strip()
+                or None
+            )
+        else:
+            company_record = None
+
+    replies = await tickets_repo.list_replies(ticket_id, include_internal=has_helpdesk_access)
+    ordered_replies = list(reversed(replies))
+
+    related_user_ids: set[int] = set()
+    for key in ("assigned_user_id", "requester_id"):
+        value = ticket.get(key)
+        try:
+            if value is not None:
+                related_user_ids.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    for reply in ordered_replies:
+        author_id = reply.get("author_id")
+        try:
+            if author_id is not None:
+                related_user_ids.add(int(author_id))
+        except (TypeError, ValueError):
+            continue
+
+    user_lookup: dict[int, Mapping[str, Any]] = {}
+    if related_user_ids:
+        lookup_results = await asyncio.gather(
+            *(user_repo.get_user_by_id(identifier) for identifier in related_user_ids),
+            return_exceptions=True,
+        )
+        for record in lookup_results:
+            if isinstance(record, Mapping) and record.get("id") is not None:
+                try:
+                    identifier = int(record["id"])
+                except (TypeError, ValueError):
+                    continue
+                user_lookup[identifier] = record
+
+    def _format_user_label(user_record: Mapping[str, Any] | None) -> str:
+        if not isinstance(user_record, Mapping):
+            return "System"
+        first = str(user_record.get("first_name") or "").strip()
+        last = str(user_record.get("last_name") or "").strip()
+        name_parts = [part for part in (first, last) if part]
+        if name_parts:
+            return " ".join(name_parts)
+        email = str(user_record.get("email") or "").strip()
+        return email or "System"
+
+    requester_record = user_lookup.get(ticket.get("requester_id"))
+    assigned_record = user_lookup.get(ticket.get("assigned_user_id"))
+
+    timeline_entries: list[dict[str, Any]] = []
+    for reply in ordered_replies:
+        sanitized_reply = sanitize_rich_text(str(reply.get("body") or ""))
+        minutes_value = reply.get("minutes_spent")
+        minutes_spent = minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
+        billable_flag = bool(reply.get("is_billable"))
+        time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag)
+        created_at = reply.get("created_at")
+        created_iso = (
+            created_at.astimezone(timezone.utc).isoformat()
+            if hasattr(created_at, "astimezone")
+            else ""
+        )
+        author_record = user_lookup.get(reply.get("author_id"))
+        timeline_entries.append(
+            {
+                "id": reply.get("id"),
+                "author": author_record,
+                "author_label": _format_user_label(author_record),
+                "created_iso": created_iso,
+                "body_html": sanitized_reply.html,
+                "has_content": sanitized_reply.has_rich_content,
+                "time_summary": time_summary,
+                "is_internal": bool(reply.get("is_internal")),
+            }
+        )
+
+    extra = {
+        "title": f"Ticket {ticket_id}",
+        "ticket": {
+            **ticket,
+            "status_label": status_label,
+            "status_badge": _PORTAL_STATUS_BADGE_MAP.get(status_value, "badge--muted"),
+            "priority_label": priority_label,
+            "description_html": sanitized_description.html,
+            "description_has_content": sanitized_description.has_rich_content,
+            "company": company_record,
+            "company_name": company_name,
+            "requester": requester_record,
+            "requester_label": _format_user_label(requester_record) if requester_record else None,
+            "assigned_user": assigned_record,
+            "assigned_label": _format_user_label(assigned_record) if assigned_record else None,
+            "created_iso": created_iso,
+            "updated_iso": updated_iso,
+        },
+        "ticket_replies": timeline_entries,
+        "can_reply": bool(has_helpdesk_access or is_super_admin or is_requester),
+        "is_requester": is_requester,
+        "is_watcher": is_watcher,
+        "has_helpdesk_access": has_helpdesk_access,
+        "success_message": success_message,
+        "error_message": error_message,
+        "reply_error": reply_error,
+        "reply_body": reply_body or "",
+    }
+    response = await _render_template("tickets/detail.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
 
 
 async def _render_tickets_dashboard(
