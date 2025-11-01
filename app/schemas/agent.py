@@ -35,10 +35,19 @@ class AgentSourceProduct(BaseModel):
     recommendations: list[str] = Field(default_factory=list)
 
 
+class AgentSourcePackage(BaseModel):
+    id: Optional[int] = None
+    name: str
+    sku: Optional[str] = None
+    description: Optional[str] = None
+    product_count: Optional[int] = None
+
+
 class AgentSources(BaseModel):
     knowledge_base: list[AgentSourceArticle] = Field(default_factory=list)
     tickets: list[AgentSourceTicket] = Field(default_factory=list)
     products: list[AgentSourceProduct] = Field(default_factory=list)
+    packages: list[AgentSourcePackage] = Field(default_factory=list)
 
 
 class AgentContextCompany(BaseModel):
