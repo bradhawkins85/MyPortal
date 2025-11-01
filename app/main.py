@@ -8923,20 +8923,88 @@ async def _render_portal_tickets_page(
         active_company_ids = available_company_ids
 
     status_definitions = await tickets_service.list_status_definitions()
+
+    def _normalise_status_slug(value: str | None) -> str | None:
+        if value in (None, ""):
+            return None
+        slug = str(value).strip().lower()
+        if not slug:
+            return None
+        for character in slug:
+            if not (character.isalnum() or character in {"_", "-"}):
+                return None
+        return slug
+
+    def _encode_status_value(slugs: Sequence[str]) -> str:
+        unique = []
+        seen: set[str] = set()
+        for slug in slugs:
+            normalised = _normalise_status_slug(slug)
+            if not normalised or normalised in seen:
+                continue
+            seen.add(normalised)
+            unique.append(normalised)
+        if not unique:
+            return ""
+        if len(unique) == 1:
+            return unique[0]
+        unique.sort()
+        return ",".join(unique)
+
+    grouped_statuses: dict[str, dict[str, Any]] = {}
+    slug_to_group: dict[str, str] = {}
+    for definition in status_definitions:
+        label = definition.public_status
+        group_key = label.casefold()
+        entry = grouped_statuses.setdefault(
+            group_key,
+            {
+                "label": label,
+                "slugs": [],
+            },
+        )
+        normalised_slug = _normalise_status_slug(definition.tech_status)
+        if not normalised_slug:
+            continue
+        if normalised_slug not in entry["slugs"]:
+            entry["slugs"].append(normalised_slug)
+        slug_to_group[normalised_slug] = group_key
+
     status_label_map = {
         definition.tech_status: definition.public_status for definition in status_definitions
     }
-    status_options: list[dict[str, str]] = [
-        {
-            "value": definition.tech_status,
-            "label": definition.public_status,
-        }
-        for definition in status_definitions
-    ]
 
-    status_slug = (status_filter or "").strip().lower() or None
-    if status_slug and status_slug not in status_label_map:
-        status_slug = None
+    for entry in grouped_statuses.values():
+        entry["slugs"].sort()
+        entry["value"] = _encode_status_value(entry["slugs"])
+
+    value_to_group: dict[str, str] = {
+        entry["value"]: key
+        for key, entry in grouped_statuses.items()
+        if entry.get("value")
+    }
+
+    raw_status_filter = (status_filter or "").strip()
+    status_filter_value: str | None = None
+    selected_status_slugs: list[str] | None = None
+    if raw_status_filter:
+        candidate = _normalise_status_slug(raw_status_filter)
+        if candidate and candidate in value_to_group:
+            group_key = value_to_group[candidate]
+            entry = grouped_statuses.get(group_key) or {}
+            selected_status_slugs = list(entry.get("slugs") or [])
+            status_filter_value = entry.get("value")
+        else:
+            parts = [segment for segment in raw_status_filter.split(",") if segment.strip()]
+            slugs: list[str] = []
+            for part in parts:
+                slug = _normalise_status_slug(part)
+                if not slug or slug in slugs:
+                    continue
+                slugs.append(slug)
+            if slugs:
+                selected_status_slugs = slugs
+                status_filter_value = _encode_status_value(slugs)
 
     search_value = (search_term or "").strip()
     effective_search = search_value or None
@@ -8945,14 +9013,14 @@ async def _render_portal_tickets_page(
         tickets = await tickets_repo.list_tickets_for_user(
             user_id,
             company_ids=active_company_ids or None,
-            status=status_slug,
+            status=selected_status_slugs,
             search=effective_search,
             limit=200,
         )
         total_count = await tickets_repo.count_tickets_for_user(
             user_id,
             company_ids=active_company_ids or None,
-            status=status_slug,
+            status=selected_status_slugs,
             search=effective_search,
         )
     except Exception as exc:  # pragma: no cover - defensive fallback
@@ -9009,47 +9077,59 @@ async def _render_portal_tickets_page(
             }
         )
 
+    for slug, group_key in slug_to_group.items():
+        label = grouped_statuses[group_key]["label"]
+        status_label_map.setdefault(slug, label)
+
+    for slug, count in status_counts.items():
+        if slug in slug_to_group:
+            continue
+        label = slug.replace("_", " ").title()
+        group_key = f"dynamic::{slug}"
+        grouped_statuses[group_key] = {
+            "label": label,
+            "slugs": [slug],
+            "value": _encode_status_value([slug]),
+        }
+        slug_to_group[slug] = group_key
+        value_to_group[grouped_statuses[group_key]["value"]] = group_key
+        status_label_map.setdefault(slug, label)
+
     summary_entries: list[dict[str, Any]] = []
-    for definition in status_definitions:
+    for entry in sorted(grouped_statuses.values(), key=lambda item: item["label"].lower()):
+        count = sum(status_counts.get(slug, 0) for slug in entry["slugs"])
+        if count <= 0:
+            continue
         summary_entries.append(
             {
-                "slug": definition.tech_status,
-                "label": definition.public_status,
-                "count": status_counts.get(definition.tech_status, 0),
+                "slug": entry.get("value"),
+                "label": entry["label"],
+                "count": count,
             }
         )
-    defined_statuses = {definition.tech_status for definition in status_definitions}
-    for slug, count in status_counts.items():
-        if slug not in defined_statuses:
-            summary_entries.append(
-                {
-                    "slug": slug,
-                    "label": slug.replace("_", " ").title(),
-                    "count": count,
-                }
-            )
-            status_options.append({"value": slug, "label": slug.replace("_", " ").title()})
 
-    summary_entries = [entry for entry in summary_entries if entry["count"] > 0]
-    summary_entries.sort(key=lambda entry: entry["label"].lower())
-    unique_options: dict[str, dict[str, str]] = {}
-    for option in status_options:
-        key = option.get("value")
-        if key is None or key in unique_options:
-            continue
-        unique_options[str(key)] = option
-    status_options = list(unique_options.values())
-    status_options.sort(key=lambda option: option["label"].lower())
+    status_options = [
+        {"value": entry["value"], "label": entry["label"]}
+        for entry in sorted(grouped_statuses.values(), key=lambda item: item["label"].lower())
+        if entry.get("value")
+    ]
+
+    if status_filter_value is None and selected_status_slugs:
+        status_filter_value = _encode_status_value(selected_status_slugs)
+    if selected_status_slugs:
+        selected_status_slugs = list(dict.fromkeys(selected_status_slugs))
+    else:
+        selected_status_slugs = None
 
     extra = {
         "title": "Tickets",
         "tickets": formatted_tickets,
         "tickets_total": total_count,
         "status_options": status_options,
-        "status_filter": status_slug,
+        "status_filter": status_filter_value,
         "status_summary": summary_entries,
         "search_term": search_value,
-        "filters_active": bool(status_slug or search_value),
+        "filters_active": bool(status_filter_value or search_value),
         "success_message": success_message,
         "error_message": error_message,
         "form_values": form_values or {},

@@ -219,12 +219,32 @@ async def list_tickets(
     return [_normalise_ticket(row) for row in rows]
 
 
+def _prepare_status_filters(status: str | Sequence[str] | None) -> list[str]:
+    if status in (None, ""):
+        return []
+    if isinstance(status, str):
+        candidates = [status]
+    else:
+        candidates = list(status)
+    slugs: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        text = str(candidate or "").strip().lower()
+        if not text or text in seen:
+            continue
+        if any(not (char.isalnum() or char in {"_", "-"}) for char in text):
+            continue
+        seen.add(text)
+        slugs.append(text)
+    return slugs
+
+
 async def list_tickets_for_user(
     user_id: int,
     *,
     company_ids: Sequence[int] | None = None,
     search: str | None = None,
-    status: str | None = None,
+    status: str | Sequence[str] | None = None,
     limit: int = 25,
     offset: int = 0,
 ) -> list[TicketRecord]:
@@ -244,9 +264,15 @@ async def list_tickets_for_user(
     conditions = ["(t.requester_id = %s OR tw.user_id = %s)"]
     params.extend([user_id, user_id])
 
-    if status:
-        conditions.append("t.status = %s")
-        params.append(status)
+    status_filters = _prepare_status_filters(status)
+    if status_filters:
+        if len(status_filters) == 1:
+            conditions.append("t.status = %s")
+            params.append(status_filters[0])
+        else:
+            placeholders = ", ".join(["%s"] * len(status_filters))
+            conditions.append(f"t.status IN ({placeholders})")
+            params.extend(status_filters)
 
     if company_filters:
         placeholders = ", ".join(["%s"] * len(company_filters))
@@ -275,7 +301,7 @@ async def count_tickets_for_user(
     *,
     company_ids: Sequence[int] | None = None,
     search: str | None = None,
-    status: str | None = None,
+    status: str | Sequence[str] | None = None,
 ) -> int:
     """Return the number of tickets requested by or watched by the specified user."""
 
@@ -293,9 +319,15 @@ async def count_tickets_for_user(
     conditions = ["(t.requester_id = %s OR tw.user_id = %s)"]
     params.extend([user_id, user_id])
 
-    if status:
-        conditions.append("t.status = %s")
-        params.append(status)
+    status_filters = _prepare_status_filters(status)
+    if status_filters:
+        if len(status_filters) == 1:
+            conditions.append("t.status = %s")
+            params.append(status_filters[0])
+        else:
+            placeholders = ", ".join(["%s"] * len(status_filters))
+            conditions.append(f"t.status IN ({placeholders})")
+            params.extend(status_filters)
 
     if company_filters:
         placeholders = ", ".join(["%s"] * len(company_filters))
