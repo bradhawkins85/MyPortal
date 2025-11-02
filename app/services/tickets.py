@@ -907,6 +907,12 @@ async def create_ticket(
     status_slug = await resolve_status_or_default(status)
     truncated_description = _truncate_description(description)
 
+    original_description: str | None = None
+    if description is not None:
+        original_description = str(description)
+
+    truncated_description = _truncate_description(original_description)
+
     ticket = await tickets_repo.create_ticket(
         subject=subject,
         description=truncated_description,
@@ -931,8 +937,8 @@ async def create_ticket(
     if (
         isinstance(ticket_id, int)
         and ticket_id > 0
-        and isinstance(truncated_description, str)
-        and truncated_description
+        and isinstance(original_description, str)
+        and original_description
         and author_id is not None
         and author_id > 0
     ):
@@ -940,7 +946,7 @@ async def create_ticket(
             await tickets_repo.create_reply(
                 ticket_id=ticket_id,
                 author_id=author_id,
-                body=truncated_description,
+                body=original_description,
                 is_internal=False,
             )
         except Exception as exc:  # pragma: no cover - defensive logging
