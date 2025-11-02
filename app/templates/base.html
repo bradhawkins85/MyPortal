@@ -18,6 +18,7 @@
   <body
     class="theme-default"
     data-enable-auto-refresh="{{ 'true' if enable_auto_refresh else 'false' }}"
+    data-low-stock-threshold="{{ low_stock_threshold | default(5) }}"
   >
     <div class="layout" data-layout>
       <div class="layout__scrim" data-mobile-nav-scrim aria-hidden="true"></div>

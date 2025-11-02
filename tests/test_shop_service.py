@@ -19,7 +19,11 @@ def test_send_discord_stock_notification_enqueues_event(monkeypatch):
         "get_settings",
         _fake_settings_with_webhook,
     )
+    async def fake_emit_notification(**kwargs):
+        return None
+
     monkeypatch.setattr(shop_service.webhook_monitor, "enqueue_event", fake_enqueue_event)
+    monkeypatch.setattr(shop_service, "emit_notification", fake_emit_notification)
 
     product = {"id": 10, "name": "Widget+", "sku": "SKU-1"}
 
@@ -49,8 +53,12 @@ def test_maybe_send_discord_stock_notification_returns_event(monkeypatch):
         "get_settings",
         _fake_settings_with_webhook,
     )
+    async def fake_emit_notification(**kwargs):
+        return None
+
     monkeypatch.setattr(shop_service.webhook_monitor, "enqueue_event", fake_enqueue_event)
     monkeypatch.setattr(shop_service.shop_repo, "get_product_by_id", fake_get_product_by_id)
+    monkeypatch.setattr(shop_service, "emit_notification", fake_emit_notification)
 
     event = asyncio.run(
         shop_service.maybe_send_discord_stock_notification_by_id(

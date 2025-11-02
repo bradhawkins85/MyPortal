@@ -905,6 +905,7 @@ async def create_ticket(
     """Create a ticket and emit the corresponding automation event."""
 
     status_slug = await resolve_status_or_default(status)
+    truncated_description = _truncate_description(description)
 
     original_description: str | None = None
     if description is not None:
