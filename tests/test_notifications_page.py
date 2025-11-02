@@ -1,6 +1,6 @@
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-
-from datetime import datetime, timezone
+from typing import AsyncIterator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,10 +13,36 @@ from app.repositories import notification_preferences as preferences_repo
 
 @pytest.fixture(autouse=True)
 def mock_startup(monkeypatch):
+    class DummyCursor:
+        async def execute(self, *args, **kwargs):
+            return None
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def fetchone(self):
+            return None
+
+        async def fetchall(self):
+            return []
+
+    class DummyConnection:
+        def cursor(self, *args, **kwargs):
+            return DummyCursor()
+
+    @asynccontextmanager
+    async def fake_acquire() -> AsyncIterator[DummyConnection]:
+        yield DummyConnection()
+
     async def fake_connect():
+        db._pool = object()  # type: ignore[attr-defined]
         return None
 
     async def fake_disconnect():
+        db._pool = None  # type: ignore[attr-defined]
         return None
 
     async def fake_run_migrations():
@@ -30,6 +56,8 @@ def mock_startup(monkeypatch):
 
     monkeypatch.setattr(db, "connect", fake_connect)
     monkeypatch.setattr(db, "disconnect", fake_disconnect)
+    monkeypatch.setattr(db, "acquire", fake_acquire)
+    monkeypatch.setattr(db, "is_connected", lambda: True)
     monkeypatch.setattr(db, "run_migrations", fake_run_migrations)
     monkeypatch.setattr(scheduler_service, "start", fake_start)
     monkeypatch.setattr(scheduler_service, "stop", fake_stop)

@@ -4655,6 +4655,35 @@ button.header-title-menu__link {
   margin-bottom: 0.75rem;
 }
 
+.stock-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  min-width: 2.5rem;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.stock-status__icon {
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+.stock-status__label {
+  font-size: 0.875rem;
+}
+
+.cart-quantity {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.cart-quantity .stock-status {
+  flex-shrink: 0;
+}
+
 @media (max-width: 960px) {
   .notification-settings {
     grid-template-columns: 1fr;

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "partials/stock_status.html" as stock_helpers %}
 
 {% block header_actions %}
   <a class="button button--ghost" href="{{ request.url_for('shop_page') }}">Continue shopping</a>
@@ -81,17 +82,23 @@
                 <td data-label="SKU">{{ item.product_sku }}</td>
                 <td data-label="Unit price" data-value="{{ item.unit_price }}">${{ '%.2f'|format(item.unit_price) }}</td>
                 <td data-label="Quantity" data-value="{{ item.quantity }}">
-                  <input
-                    class="form-input form-input--sm"
-                    type="number"
-                    min="0"
-                    max="9999"
-                    step="1"
-                    name="quantity_{{ item.product_id }}"
-                    value="{{ item.quantity }}"
-                    aria-label="Quantity for {{ item.product_name }}"
-                    required
-                  />
+                  {% set available = item.available_stock | default(0) | int %}
+                  {% set max_allowed = available if available > item.quantity else item.quantity %}
+                  <div class="cart-quantity">
+                    {{ stock_helpers.stock_status_badge(available, low_stock_threshold) }}
+                    <input
+                      class="form-input form-input--sm"
+                      type="number"
+                      min="0"
+                      max="{{ max_allowed }}"
+                      step="1"
+                      name="quantity_{{ item.product_id }}"
+                      value="{{ item.quantity }}"
+                      aria-label="Quantity for {{ item.product_name }}"
+                      data-stock-limit="{{ available }}"
+                      required
+                    />
+                  </div>
                 </td>
                 <td data-label="Line total" data-value="{{ item.line_total }}">${{ '%.2f'|format(item.line_total) }}</td>
               </tr>
