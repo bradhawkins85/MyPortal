@@ -153,6 +153,7 @@ templates_config = get_templates_config()
 oauth_state_serializer = URLSafeSerializer(settings.secret_key, salt="m365-oauth")
 PWA_THEME_COLOR = "#0f172a"
 PWA_BACKGROUND_COLOR = "#0f172a"
+SHOP_LOW_STOCK_THRESHOLD = 5
 _PWA_SERVICE_WORKER_PATH = templates_config.static_path / "service-worker.js"
 _PWA_ICON_SOURCES = [
     {
@@ -3708,6 +3709,7 @@ async def shop_page(
         "show_out_of_stock": show_out_of_stock,
         "search_term": search_term,
         "cart_error": cart_error,
+        "low_stock_threshold": SHOP_LOW_STOCK_THRESHOLD,
     }
     return await _render_template("shop/index.html", request, user, extra=extra)
 
@@ -3748,6 +3750,7 @@ async def shop_packages_page(
         "packages": packages,
         "packages_json": packages_json,
         "cart_error": cart_error,
+        "low_stock_threshold": SHOP_LOW_STOCK_THRESHOLD,
     }
     return await _render_template("shop/packages.html", request, user, extra=extra)
 
@@ -4071,6 +4074,7 @@ async def view_cart(
         hydrated = dict(item)
         hydrated["unit_price"] = unit_price
         hydrated["line_total"] = line_total
+        hydrated["available_stock"] = 0
         cart_items.append(hydrated)
         product_identifier = hydrated.get("product_id")
         try:
@@ -4099,6 +4103,27 @@ async def view_cart(
             cart_product_ids,
             company_id=company_id,
         )
+        product_lookup: dict[int, dict[str, Any]] = {}
+        for product in base_products:
+            try:
+                product_lookup[int(product.get("id") or 0)] = product
+            except (TypeError, ValueError):
+                continue
+
+        for item in cart_items:
+            try:
+                product_id = int(item.get("product_id") or 0)
+            except (TypeError, ValueError):
+                product_id = 0
+            product = product_lookup.get(product_id)
+            available_stock = 0
+            if product:
+                try:
+                    available_stock = int(product.get("stock") or 0)
+                except (TypeError, ValueError):
+                    available_stock = 0
+            item["available_stock"] = available_stock
+
         cart_product_id_set = {pid for pid in cart_product_ids}
         cross_sell_targets: dict[int, set[str]] = {}
         upsell_targets: dict[int, dict[str, set[str] | set[int]]] = {}
@@ -4207,6 +4232,7 @@ async def view_cart(
         "cart_message": cart_message,
         "cart_items_payload": cart_items_payload,
         "cart_recommendations": recommendations,
+        "low_stock_threshold": SHOP_LOW_STOCK_THRESHOLD,
     }
     return await _render_template("shop/cart.html", request, user, extra=extra)
 
