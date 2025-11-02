@@ -1,4 +1,7 @@
 import asyncio
+from copy import deepcopy
+
+from app.core.notifications import DEFAULT_NOTIFICATION_EVENTS
 
 from app.services import notifications
 
@@ -23,6 +26,17 @@ def test_emit_notification_sends_email(monkeypatch):
     monkeypatch.setattr(notifications.notifications_repo, "create_notification", fake_create_notification)
     monkeypatch.setattr(notifications.user_repo, "get_user_by_id", fake_get_user_by_id)
     monkeypatch.setattr(notifications.email_service, "send_email", fake_send_email)
+    
+    async def fake_get_event_setting(event_type: str):
+        base = deepcopy(DEFAULT_NOTIFICATION_EVENTS.get(event_type, {}))
+        base["event_type"] = event_type
+        return base
+
+    monkeypatch.setattr(
+        notifications.notification_event_settings,
+        "get_event_setting",
+        fake_get_event_setting,
+    )
 
     asyncio.run(
         notifications.emit_notification(
@@ -60,6 +74,17 @@ def test_emit_notification_sends_sms(monkeypatch):
     monkeypatch.setattr(notifications.notifications_repo, "create_notification", fake_create_notification)
     monkeypatch.setattr(notifications.user_repo, "get_user_by_id", fake_get_user_by_id)
     monkeypatch.setattr(notifications.sms_service, "send_sms", fake_send_sms)
+
+    async def fake_get_event_setting(event_type: str):
+        base = deepcopy(DEFAULT_NOTIFICATION_EVENTS.get(event_type, {}))
+        base["event_type"] = event_type
+        return base
+
+    monkeypatch.setattr(
+        notifications.notification_event_settings,
+        "get_event_setting",
+        fake_get_event_setting,
+    )
 
     asyncio.run(
         notifications.emit_notification(
