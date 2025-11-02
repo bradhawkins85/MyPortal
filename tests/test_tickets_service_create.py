@@ -163,6 +163,122 @@ async def test_create_ticket_truncates_long_description(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_create_ticket_initial_reply_uses_full_description(monkeypatch):
+    captured_ticket: dict[str, object] = {}
+    recorded_reply: dict[str, object] = {}
+
+    async def fake_create_ticket(**kwargs):
+        captured_ticket.update(kwargs)
+        return {"id": 222, **kwargs}
+
+    async def fake_create_reply(**kwargs):
+        recorded_reply.update(kwargs)
+        return {"id": 333, **kwargs}
+
+    async def fake_handle_event(event_name, context):  # pragma: no cover - via test
+        return []
+
+    async def fake_get_company(company_id):
+        return None
+
+    async def fake_get_user(user_id):
+        return None
+
+    async def fake_resolve_status(value):
+        return value or "open"
+
+    monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
+    monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
+    monkeypatch.setattr(tickets_service, "resolve_status_or_default", fake_resolve_status)
+
+    long_description = "B" * (tickets_service._MAX_TICKET_DESCRIPTION_BYTES + 128)
+
+    ticket = await tickets_service.create_ticket(
+        subject="Large payload",
+        description=long_description,
+        requester_id=10,
+        company_id=None,
+        assigned_user_id=None,
+        priority="normal",
+        status="open",
+        category=None,
+        module_slug=None,
+        external_reference=None,
+        ticket_number=None,
+        initial_reply_author_id=10,
+    )
+
+    assert ticket["id"] == 222
+    stored_description = captured_ticket.get("description")
+    assert isinstance(stored_description, str)
+    assert stored_description != long_description
+    assert stored_description.endswith("Message truncated due to size]")
+    assert (
+        len(stored_description.encode("utf-8"))
+        <= tickets_service._MAX_TICKET_DESCRIPTION_BYTES
+    )
+    assert recorded_reply["ticket_id"] == 222
+    assert recorded_reply["author_id"] == 10
+    assert recorded_reply["body"] == long_description
+    assert recorded_reply["is_internal"] is False
+
+
+@pytest.mark.anyio
+async def test_create_ticket_records_initial_reply(monkeypatch):
+    recorded_reply: dict[str, object] = {}
+
+    async def fake_create_ticket(**kwargs):
+        return {"id": 135, **kwargs}
+
+    async def fake_create_reply(**kwargs):
+        recorded_reply.update(kwargs)
+        return {"id": 246, **kwargs}
+
+    async def fake_handle_event(event_name, context):  # pragma: no cover - via test
+        return []
+
+    async def fake_get_company(company_id):
+        return None
+
+    async def fake_get_user(user_id):
+        return None
+
+    async def fake_resolve_status(value):
+        return value or "open"
+
+    monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
+    monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
+    monkeypatch.setattr(tickets_service, "resolve_status_or_default", fake_resolve_status)
+
+    ticket = await tickets_service.create_ticket(
+        subject="VPN issue",
+        description="Cannot connect to VPN",
+        requester_id=12,
+        company_id=4,
+        assigned_user_id=None,
+        priority="normal",
+        status="open",
+        category=None,
+        module_slug=None,
+        external_reference=None,
+        ticket_number=None,
+        initial_reply_author_id=12,
+    )
+
+    assert ticket["id"] == 135
+    assert recorded_reply["ticket_id"] == 135
+    assert recorded_reply["author_id"] == 12
+    assert recorded_reply["body"] == "Cannot connect to VPN"
+    assert recorded_reply["is_internal"] is False
+
+
+@pytest.mark.anyio
 async def test_enrich_ticket_context_includes_relationship_details(monkeypatch):
     ticket = {
         "id": 99,
