@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "partials/stock_status.html" as stock_helpers %}
 
 {% set cart_allowed = (can_access_cart | default(false)) %}
 {% if not cart_allowed %}
@@ -95,9 +96,7 @@
               <td data-label="Items" data-value="{{ package.product_count }}">{{ package.product_count }}</td>
               <td data-label="Price" data-value="{{ package.price_total }}">${{ '%.2f'|format(package.price_total) }}</td>
               <td data-label="Stock" data-value="{{ package.stock_level }}">
-                <span class="badge {% if package.stock_level == 0 %}badge--danger{% elif package.stock_level < 5 %}badge--warning{% else %}badge--success{% endif %}">
-                  {{ package.stock_level }}
-                </span>
+                {{ stock_helpers.stock_status_badge(package.stock_level, low_stock_threshold) }}
               </td>
               <td class="table__actions">
                 <div class="table__action-buttons">
@@ -115,6 +114,7 @@
                           min="1"
                           max="{{ package.stock_level }}"
                           value="1"
+                          data-stock-limit="{{ package.stock_level }}"
                         />
                         <button type="submit" class="button">Add to cart</button>
                       </form>

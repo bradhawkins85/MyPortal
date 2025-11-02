@@ -12,6 +12,68 @@
     }
   }
 
+  function bindStockLimitInputs(container) {
+    container.querySelectorAll('[data-stock-limit]').forEach((input) => {
+      if (!(input instanceof HTMLInputElement)) {
+        return;
+      }
+
+      const limitAttr = Number(input.getAttribute('data-stock-limit'));
+      const currentValue = Number(input.value);
+      const fallbackLimit = Number.isFinite(currentValue) ? currentValue : 0;
+      const limit = Number.isFinite(limitAttr) ? limitAttr : fallbackLimit;
+      const effectiveLimit = limit > 0 ? limit : fallbackLimit;
+      const minAttr = Number(input.getAttribute('min'));
+      const min = Number.isFinite(minAttr) ? minAttr : 0;
+      let previous = input.value;
+
+      input.addEventListener('focus', () => {
+        previous = input.value;
+        input.setCustomValidity('');
+      });
+
+      input.addEventListener('input', () => {
+        const value = Number(input.value);
+        if (!Number.isFinite(value)) {
+          return;
+        }
+
+        if (value > effectiveLimit) {
+          input.value = previous || String(effectiveLimit || '');
+          input.setCustomValidity('Cannot exceed available stock.');
+          input.reportValidity();
+          return;
+        }
+
+        if (value < min) {
+          input.setCustomValidity(min > 0 ? 'Quantity must be at least 1.' : 'Quantity cannot be negative.');
+          input.reportValidity();
+          input.value = previous || String(Math.max(min, 0));
+          return;
+        }
+
+        previous = input.value;
+        input.setCustomValidity('');
+      });
+
+      input.addEventListener('blur', () => {
+        if (!input.value) {
+          input.value = previous || String(Math.max(min, 0));
+        }
+      });
+
+      input.addEventListener('invalid', (event) => {
+        event.preventDefault();
+        if (Number(input.value) > effectiveLimit) {
+          input.setCustomValidity('Cannot exceed available stock.');
+        } else {
+          input.setCustomValidity('Enter a valid quantity.');
+        }
+        input.reportValidity();
+      });
+    });
+  }
+
   function openModal(modal) {
     if (!modal) {
       return;
@@ -103,15 +165,18 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    const products = parseJson('cart-items-data');
-    if (!products.length) {
-      return;
-    }
+    const container = document.body;
+    bindStockLimitInputs(container);
 
     const modal = document.getElementById('cart-product-details-modal');
     const modalTitle = document.getElementById('cart-product-details-title');
     const modalBody = document.getElementById('cart-product-details-body');
     if (!modal || !modalBody) {
+      return;
+    }
+
+    const products = parseJson('cart-items-data');
+    if (!products.length) {
       return;
     }
 
@@ -121,6 +186,10 @@
         itemsById.set(Number(product.product_id), product);
       }
     });
+
+    if (!itemsById.size) {
+      return;
+    }
 
     bindModalDismissal(modal);
 

@@ -59,15 +59,87 @@
     return `$${number.toFixed(2)}`;
   }
 
+  function getLowStockThreshold() {
+    const root = document.body;
+    if (!root) {
+      return 5;
+    }
+    const value = Number(root.getAttribute('data-low-stock-threshold'));
+    return Number.isFinite(value) && value > 0 ? value : 5;
+  }
+
   function describeStock(stock) {
+    const threshold = getLowStockThreshold();
     const quantity = Number(stock);
     if (!Number.isFinite(quantity) || quantity <= 0) {
       return 'Out of stock';
     }
-    if (quantity < 5) {
-      return `Low stock (${quantity} available)`;
+    if (quantity < threshold) {
+      return 'Low stock';
     }
-    return `In stock (${quantity} available)`;
+    return 'In stock';
+  }
+
+  function bindStockLimitInputs(container) {
+    container.querySelectorAll('[data-stock-limit]').forEach((input) => {
+      if (!(input instanceof HTMLInputElement)) {
+        return;
+      }
+
+      const limitAttr = Number(input.getAttribute('data-stock-limit'));
+      const currentValue = Number(input.value);
+      const fallbackLimit = Number.isFinite(currentValue) ? currentValue : 0;
+      const limit = Number.isFinite(limitAttr) ? limitAttr : fallbackLimit;
+      const effectiveLimit = limit > 0 ? limit : fallbackLimit;
+      const minAttr = Number(input.getAttribute('min'));
+      const min = Number.isFinite(minAttr) ? minAttr : 0;
+      let previous = input.value;
+
+      input.addEventListener('focus', () => {
+        previous = input.value;
+        input.setCustomValidity('');
+      });
+
+      input.addEventListener('input', () => {
+        const value = Number(input.value);
+        if (!Number.isFinite(value)) {
+          return;
+        }
+
+        if (value > effectiveLimit) {
+          input.value = previous || String(effectiveLimit || '');
+          input.setCustomValidity('Cannot exceed available stock.');
+          input.reportValidity();
+          return;
+        }
+
+        if (value < min) {
+          input.setCustomValidity(min > 0 ? 'Quantity must be at least 1.' : 'Quantity cannot be negative.');
+          input.reportValidity();
+          input.value = previous || String(Math.max(min, 0));
+          return;
+        }
+
+        previous = input.value;
+        input.setCustomValidity('');
+      });
+
+      input.addEventListener('blur', () => {
+        if (!input.value) {
+          input.value = previous || String(Math.max(min, 0));
+        }
+      });
+
+      input.addEventListener('invalid', (event) => {
+        event.preventDefault();
+        if (Number(input.value) > effectiveLimit) {
+          input.setCustomValidity('Cannot exceed available stock.');
+        } else {
+          input.setCustomValidity('Enter a valid quantity.');
+        }
+        input.reportValidity();
+      });
+    });
   }
 
   function renderPackageProductDetails(item) {
@@ -162,6 +234,9 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
+    const container = document.body;
+    bindStockLimitInputs(container);
+
     const modal = document.getElementById('package-product-details-modal');
     bindModalDismissal(modal);
 
