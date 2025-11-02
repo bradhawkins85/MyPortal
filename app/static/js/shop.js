@@ -23,6 +23,89 @@
     });
   }
 
+  function getLowStockThreshold() {
+    const root = document.body;
+    if (!root) {
+      return 5;
+    }
+    const value = Number(root.getAttribute('data-low-stock-threshold'));
+    return Number.isFinite(value) && value > 0 ? value : 5;
+  }
+
+  function describeStockStatus(quantity) {
+    const threshold = getLowStockThreshold();
+    const value = Number(quantity);
+    if (!Number.isFinite(value) || value <= 0) {
+      return 'Out of stock';
+    }
+    if (value < threshold) {
+      return 'Low stock';
+    }
+    return 'In stock';
+  }
+
+  function bindStockLimitInputs(container) {
+    container.querySelectorAll('[data-stock-limit]').forEach((input) => {
+      if (!(input instanceof HTMLInputElement)) {
+        return;
+      }
+
+      const limitAttr = Number(input.getAttribute('data-stock-limit'));
+      const currentValue = Number(input.value);
+      const fallbackLimit = Number.isFinite(currentValue) ? currentValue : 0;
+      const limit = Number.isFinite(limitAttr) ? limitAttr : fallbackLimit;
+      const effectiveLimit = limit > 0 ? limit : fallbackLimit;
+      const minAttr = Number(input.getAttribute('min'));
+      const min = Number.isFinite(minAttr) ? minAttr : 0;
+      let previous = input.value;
+
+      input.addEventListener('focus', () => {
+        previous = input.value;
+        input.setCustomValidity('');
+      });
+
+      input.addEventListener('input', () => {
+        const value = Number(input.value);
+        if (!Number.isFinite(value)) {
+          return;
+        }
+
+        if (value > effectiveLimit) {
+          input.value = previous || String(effectiveLimit || '');
+          input.setCustomValidity('Cannot exceed available stock.');
+          input.reportValidity();
+          return;
+        }
+
+        if (value < min) {
+          input.setCustomValidity(min > 0 ? 'Quantity must be at least 1.' : 'Quantity cannot be negative.');
+          input.reportValidity();
+          input.value = previous || String(Math.max(min, 0));
+          return;
+        }
+
+        previous = input.value;
+        input.setCustomValidity('');
+      });
+
+      input.addEventListener('blur', () => {
+        if (!input.value) {
+          input.value = previous || String(Math.max(min, 0));
+        }
+      });
+
+      input.addEventListener('invalid', (event) => {
+        event.preventDefault();
+        if (Number(input.value) > effectiveLimit) {
+          input.setCustomValidity('Cannot exceed available stock.');
+        } else {
+          input.setCustomValidity('Enter a valid quantity.');
+        }
+        input.reportValidity();
+      });
+    });
+  }
+
   function openModal(modal) {
     if (!modal) {
       return;
@@ -85,15 +168,7 @@
     }
 
     container.appendChild(createDetailRow('Price', `$${Number(product.price || 0).toFixed(2)}`));
-
-    const stock = Number(product.stock || 0);
-    let stockText = 'Out of stock';
-    if (stock > 5) {
-      stockText = 'In stock';
-    } else if (stock > 0) {
-      stockText = 'Low stock';
-    }
-    container.appendChild(createDetailRow('Availability', stockText));
+    container.appendChild(createDetailRow('Availability', describeStockStatus(product.stock)));
 
     if (product.description) {
       const descriptionTitle = document.createElement('h3');
@@ -115,6 +190,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     const container = document.body;
     submitOnChange(container);
+    bindStockLimitInputs(container);
 
     const products = parseJson('shop-products-data');
     const productsById = new Map(products.map((product) => [product.id, product]));

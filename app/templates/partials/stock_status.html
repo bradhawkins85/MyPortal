@@ -1,0 +1,28 @@
+{% macro stock_status_badge(stock_value, low_threshold=5, show_label=False) -%}
+  {%- set quantity = (stock_value | default(0)) | int -%}
+  {%- set threshold = (low_threshold | default(5)) | int -%}
+  {%- if quantity <= 0 -%}
+    {%- set tone = 'danger' -%}
+    {%- set icon = '✖️' -%}
+    {%- set label = 'Out of stock' -%}
+  {%- elif quantity < threshold -%}
+    {%- set tone = 'warning' -%}
+    {%- set icon = '⚠️' -%}
+    {%- set label = 'Low stock' -%}
+  {%- else -%}
+    {%- set tone = 'success' -%}
+    {%- set icon = '✔️' -%}
+    {%- set label = 'In stock' -%}
+  {%- endif -%}
+  <span
+    class="badge badge--{{ tone }} stock-status"
+    data-stock-status="{{ label | lower | replace(' ', '-') }}"
+    title="{{ label }}"
+  >
+    <span aria-hidden="true" class="stock-status__icon">{{ icon }}</span>
+    <span class="visually-hidden">{{ label }}</span>
+    {%- if show_label -%}
+      <span class="stock-status__label">{{ label }}</span>
+    {%- endif -%}
+  </span>
+{%- endmacro %}
