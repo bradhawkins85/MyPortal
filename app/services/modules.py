@@ -5,6 +5,7 @@ import json
 import os
 import string
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import asyncio
 from typing import Any, Awaitable, Callable, Mapping
 from urllib.parse import urljoin
@@ -140,6 +141,33 @@ def _default_uptimekuma_settings() -> dict[str, Any]:
     }
 
 
+def _default_xero_settings() -> dict[str, Any]:
+    def _clean_env(key: str) -> str:
+        return str(os.getenv(key, "")).strip()
+
+    def _format_rate(value: str) -> str:
+        if not value:
+            return ""
+        try:
+            decimal_value = Decimal(value)
+        except (InvalidOperation, ValueError):
+            return ""
+        quantised = decimal_value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return f"{quantised:f}"
+
+    return {
+        "client_id": _clean_env("XERO_CLIENT_ID"),
+        "client_secret": _clean_env("XERO_CLIENT_SECRET"),
+        "refresh_token": _clean_env("XERO_REFRESH_TOKEN"),
+        "tenant_id": _clean_env("XERO_TENANT_ID"),
+        "default_hourly_rate": _format_rate(_clean_env("XERO_DEFAULT_HOURLY_RATE")),
+        "account_code": _clean_env("XERO_ACCOUNT_CODE") or "400",
+        "tax_type": _clean_env("XERO_TAX_TYPE"),
+        "line_amount_type": _clean_env("XERO_LINE_AMOUNT_TYPE") or "Exclusive",
+        "reference_prefix": _clean_env("XERO_REFERENCE_PREFIX") or "Support",
+    }
+
+
 DEFAULT_MODULES: list[dict[str, Any]] = [
     {
         "slug": "syncro",
@@ -218,6 +246,13 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "description": "Expose ticketing tools to ChatGPT via the Model Context Protocol.",
         "icon": "🤖",
         "settings": _default_chatgpt_settings(),
+    },
+    {
+        "slug": "xero",
+        "name": "Xero",
+        "description": "Synchronise invoice data with Xero.",
+        "icon": "💼",
+        "settings": _default_xero_settings(),
     },
 ]
 
@@ -368,6 +403,43 @@ def _coerce_settings(
                 merged["shared_secret_hash"] = _hash_secret(candidate_str)
         merged["shared_secret_hash"] = str(merged.get("shared_secret_hash", "")).strip()
         merged.pop("shared_secret", None)
+    elif slug == "xero":
+        overrides = payload or {}
+
+        def _preserve_secret(field: str) -> str:
+            override = overrides.get(field)
+            if override is None:
+                return str(merged.get(field, "") or "").strip()
+            candidate = str(override or "").strip()
+            if candidate and candidate != "********":
+                return candidate
+            if existing_settings and existing_settings.get(field):
+                return str(existing_settings.get(field) or "").strip()
+            return ""
+
+        def _normalise_rate(value: Any) -> str:
+            if value in (None, ""):
+                return ""
+            try:
+                decimal_value = Decimal(str(value))
+            except (InvalidOperation, ValueError):
+                return ""
+            quantised = decimal_value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            return f"{quantised:f}"
+
+        merged.update(
+            {
+                "client_id": str(merged.get("client_id", "")).strip(),
+                "client_secret": _preserve_secret("client_secret"),
+                "refresh_token": _preserve_secret("refresh_token"),
+                "tenant_id": str(merged.get("tenant_id", "")).strip(),
+                "default_hourly_rate": _normalise_rate(merged.get("default_hourly_rate")),
+                "account_code": str(merged.get("account_code", "")).strip(),
+                "tax_type": str(merged.get("tax_type", "")).strip(),
+                "line_amount_type": str(merged.get("line_amount_type", "")).strip() or "Exclusive",
+                "reference_prefix": str(merged.get("reference_prefix", "")).strip() or "Support",
+            }
+        )
     return merged
 
 
@@ -379,6 +451,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "uptimekuma": ("shared_secret_hash",),
         "tacticalrmm": ("api_key",),
         "ntfy": ("auth_token",),
+        "xero": ("client_secret", "refresh_token"),
     }
     targets = fields_to_redact.get(slug)
     if not targets:
