@@ -1,7 +1,0 @@
-{
-  "guid": "e64a320f-0981-4366-ad0c-e3a11d3864f0",
-  "occurred_at": "2025-11-03T11:51:00Z",
-  "change_type": "Fix",
-  "summary": "Hardened the Ticket tools dropdown so it remains functional behind Cloudflare by using details/summary markup with resilient scripting.",
-  "content_hash": "e08baf6a6c6129e1d24b5d53104e51338af237619a29763ab02609f9ae31cc33"
-}
