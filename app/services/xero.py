@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from typing import Any, Awaitable, Callable, Mapping, Sequence
+from typing import Any, Awaitable, Callable, Mapping, MutableMapping, Sequence
 
 from loguru import logger
 
@@ -13,6 +14,78 @@ RepliesFetcher = Callable[[int], Awaitable[Sequence[Mapping[str, Any]] | None]]
 CompanyFetcher = Callable[[int], Awaitable[Mapping[str, Any] | None]]
 OrderSummaryFetcher = Callable[[str, int], Awaitable[Mapping[str, Any] | None]]
 OrderItemsFetcher = Callable[[str, int], Awaitable[Sequence[Mapping[str, Any]] | None]]
+
+
+class _TemplateValues(dict[str, Any]):
+    def __missing__(self, key: str) -> str:
+        return ""
+
+
+def _normalise_status_filter(statuses: Sequence[Any] | None) -> set[str] | None:
+    if not statuses:
+        return None
+    filtered: set[str] = set()
+    for status in statuses:
+        text = str(status or "").strip().lower()
+        if text:
+            filtered.add(text)
+    return filtered or None
+
+
+def _collect_ticket_numbers(tickets: Sequence[Mapping[str, Any]]) -> list[str]:
+    numbers: list[str] = []
+    for ticket in tickets:
+        identifier = ticket.get("id")
+        if identifier is None:
+            continue
+        candidate = str(identifier)
+        if candidate not in numbers:
+            numbers.append(candidate)
+    return numbers
+
+
+def _build_reference(reference_prefix: str, ticket_numbers: Sequence[str]) -> str:
+    reference_parts: list[str] = []
+    prefix = reference_prefix.strip()
+    if prefix:
+        reference_parts.append(prefix)
+    tickets_text = ", ".join(number for number in ticket_numbers if number)
+    if tickets_text:
+        reference_parts.append(f"Tickets {tickets_text}")
+    return " — ".join(reference_parts)
+
+
+def _format_line_description(
+    template: str,
+    ticket: Mapping[str, Any],
+    labour: Mapping[str, Any] | None,
+    minutes: int,
+) -> str:
+    safe_template = template.strip() or "Ticket {ticket_id}: {ticket_subject}{labour_suffix}"
+    subject = str(ticket.get("subject") or "").strip()
+    labour_name = str((labour or {}).get("name") or "").strip()
+    labour_code = str((labour or {}).get("code") or "").strip()
+    labour_minutes = max(0, int(minutes))
+    labour_hours_decimal = _minutes_to_hours(labour_minutes) if labour_minutes else Decimal("0")
+    values = _TemplateValues(
+        ticket_id=ticket.get("id"),
+        ticket_subject=subject,
+        ticket_status=str(ticket.get("status") or "").strip(),
+        labour_name=labour_name,
+        labour_code=labour_code,
+        labour_minutes=labour_minutes,
+        labour_hours=float(_quantize(labour_hours_decimal)) if labour_minutes else 0.0,
+        labour_suffix=f" · {labour_name}" if labour_name else "",
+    )
+    try:
+        description = safe_template.format_map(values).strip()
+    except Exception:  # pragma: no cover - defensive guardrail
+        description = ""
+    if not description:
+        description = f"Ticket {ticket.get('id')}: {subject}".strip()
+        if labour_name:
+            description = f"{description} · {labour_name}" if description else labour_name
+    return description
 
 
 def _to_decimal(value: Any) -> Decimal | None:
@@ -54,11 +127,24 @@ async def build_ticket_invoices(
     tax_type: str | None,
     line_amount_type: str,
     reference_prefix: str,
+    allowed_statuses: Sequence[str] | None = None,
+    description_template: str | None = None,
+    invoice_date: date | None = None,
+    existing_invoice_map: MutableMapping[tuple[int, date], dict[str, Any]] | None = None,
     fetch_ticket: TicketFetcher,
     fetch_replies: RepliesFetcher,
     fetch_company: CompanyFetcher,
 ) -> list[dict[str, Any]]:
     """Construct invoice payloads for the provided ticket identifiers."""
+
+    status_filter = _normalise_status_filter(allowed_statuses)
+    line_item_template = (description_template or "").strip()
+    invoice_day = invoice_date or date.today()
+    invoice_lookup: MutableMapping[tuple[int, date], dict[str, Any]]
+    if existing_invoice_map is None:
+        invoice_lookup = {}
+    else:
+        invoice_lookup = existing_invoice_map
 
     unique_ticket_ids: list[int] = []
     for raw_identifier in ticket_ids:
@@ -82,6 +168,9 @@ async def build_ticket_invoices(
         try:
             company_id = int(raw_company_id)
         except (TypeError, ValueError):
+            continue
+        ticket_status = str(ticket.get("status") or "").strip().lower()
+        if status_filter is not None and ticket_status not in status_filter:
             continue
 
         replies = await fetch_replies(ticket_id) or []
@@ -114,6 +203,7 @@ async def build_ticket_invoices(
         tickets_by_company.setdefault(company_id, []).append(entry)
 
     invoices: list[dict[str, Any]] = []
+    appended_invoices: set[int] = set()
     if not tickets_by_company:
         return invoices
 
@@ -137,10 +227,12 @@ async def build_ticket_invoices(
                     if group_minutes <= 0:
                         continue
                     hours_decimal = _minutes_to_hours(group_minutes)
-                    description = f"Ticket {ticket.get('id')}: {ticket.get('subject', '').strip()}"
-                    labour_name = str(group.get("name") or "").strip()
-                    if labour_name:
-                        description = f"{description} · {labour_name}"
+                    description = _format_line_description(
+                        line_item_template,
+                        ticket,
+                        group,
+                        group_minutes,
+                    )
                     line_item: dict[str, Any] = {
                         "Description": description,
                         "Quantity": float(hours_decimal),
@@ -155,7 +247,12 @@ async def build_ticket_invoices(
                     line_items.append(line_item)
             else:
                 hours_decimal = _minutes_to_hours(ticket_minutes)
-                description = f"Ticket {ticket.get('id')}: {ticket.get('subject', '').strip()}"
+                description = _format_line_description(
+                    line_item_template,
+                    ticket,
+                    None,
+                    ticket_minutes,
+                )
                 line_item = {
                     "Description": description,
                     "Quantity": float(hours_decimal),
@@ -169,10 +266,14 @@ async def build_ticket_invoices(
                 {
                     "id": ticket.get("id"),
                     "subject": ticket.get("subject"),
+                    "status": ticket.get("status"),
                     "billable_minutes": ticket_minutes,
                     "labour_groups": labour_groups,
                 }
             )
+
+        if not line_items:
+            continue
 
         contact_payload: dict[str, Any] = {}
         xero_id = company_record.get("xero_id")
@@ -182,18 +283,39 @@ async def build_ticket_invoices(
         if not contact_payload:
             contact_payload["Name"] = name
 
-        ticket_numbers = ", ".join(str(ticket.get("id")) for ticket in context_tickets if ticket.get("id"))
-        reference_parts = [reference_prefix.strip()] if reference_prefix else []
-        if ticket_numbers:
-            reference_parts.append(f"Tickets {ticket_numbers}")
-        reference = " — ".join(part for part in reference_parts if part)
+        invoice_key = (company_id, invoice_day)
+        ticket_numbers = _collect_ticket_numbers(context_tickets)
+        existing_invoice = invoice_lookup.get(invoice_key)
+        if existing_invoice:
+            target_invoice = existing_invoice
+            target_invoice.setdefault("line_items", []).extend(line_items)
+            context = target_invoice.setdefault("context", {})
+            existing_tickets = context.setdefault("tickets", [])
+            existing_tickets.extend(context_tickets)
+            current_minutes = int(context.get("total_billable_minutes") or 0)
+            context["total_billable_minutes"] = current_minutes + total_minutes
+            context.setdefault(
+                "company",
+                {
+                    "id": company_record.get("id", company_id),
+                    "name": name,
+                    "xero_id": company_record.get("xero_id"),
+                },
+            )
+            context["invoice_date"] = invoice_day.isoformat()
+            merged_ticket_numbers = _collect_ticket_numbers(existing_tickets)
+            target_invoice["reference"] = _build_reference(reference_prefix, merged_ticket_numbers)
+            if id(target_invoice) not in appended_invoices:
+                invoices.append(target_invoice)
+                appended_invoices.add(id(target_invoice))
+            continue
 
         invoice = {
             "type": "ACCREC",
             "contact": contact_payload,
             "line_items": line_items,
             "line_amount_type": line_amount_type or "Exclusive",
-            "reference": reference,
+            "reference": _build_reference(reference_prefix, ticket_numbers),
             "context": {
                 "company": {
                     "id": company_record.get("id", company_id),
@@ -202,9 +324,12 @@ async def build_ticket_invoices(
                 },
                 "tickets": context_tickets,
                 "total_billable_minutes": total_minutes,
+                "invoice_date": invoice_day.isoformat(),
             },
         }
+        invoice_lookup[invoice_key] = invoice
         invoices.append(invoice)
+        appended_invoices.add(id(invoice))
 
     return invoices
 
@@ -326,6 +451,8 @@ async def sync_company(company_id: int) -> dict[str, Any]:
         "account_code": settings.get("account_code"),
         "line_amount_type": settings.get("line_amount_type"),
         "reference_prefix": settings.get("reference_prefix"),
+        "billable_statuses": settings.get("billable_statuses"),
+        "line_item_description_template": settings.get("line_item_description_template"),
         "company": {
             "id": company.get("id"),
             "name": company.get("name"),

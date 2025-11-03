@@ -165,6 +165,9 @@ def _default_xero_settings() -> dict[str, Any]:
         "tax_type": _clean_env("XERO_TAX_TYPE"),
         "line_amount_type": _clean_env("XERO_LINE_AMOUNT_TYPE") or "Exclusive",
         "reference_prefix": _clean_env("XERO_REFERENCE_PREFIX") or "Support",
+        "billable_statuses": _normalise_statuses(_clean_env("XERO_BILLABLE_STATUSES")),
+        "line_item_description_template": _clean_env("XERO_LINE_ITEM_TEMPLATE")
+        or "Ticket {ticket_id}: {ticket_subject}{labour_suffix}",
     }
 
 
@@ -438,6 +441,11 @@ def _coerce_settings(
                 "tax_type": str(merged.get("tax_type", "")).strip(),
                 "line_amount_type": str(merged.get("line_amount_type", "")).strip() or "Exclusive",
                 "reference_prefix": str(merged.get("reference_prefix", "")).strip() or "Support",
+                "billable_statuses": _normalise_statuses(merged.get("billable_statuses")),
+                "line_item_description_template": str(
+                    merged.get("line_item_description_template", "")
+                ).strip()
+                or "Ticket {ticket_id}: {ticket_subject}{labour_suffix}",
             }
         )
     return merged
