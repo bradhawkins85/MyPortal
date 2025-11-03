@@ -69,6 +69,7 @@ from app.api.routes import (
     users,
     system,
     uptimekuma,
+    xero,
 )
 from uuid import uuid4
 
@@ -496,6 +497,7 @@ app.include_router(imap_api.router)
 app.include_router(mcp_api.router)
 app.include_router(system.router)
 app.include_router(uptimekuma.router)
+app.include_router(xero.router)
 
 HELPDESK_PERMISSION_KEY = tickets_service.HELPDESK_PERMISSION_KEY
 ISSUE_TRACKER_PERMISSION_KEY = issues_service.ISSUE_TRACKER_PERMISSION_KEY
