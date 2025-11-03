@@ -211,6 +211,37 @@ html {
   border-radius: 0.75rem;
 }
 
+.sidebar__footer {
+  margin-top: auto;
+  padding-top: var(--space-gap-base);
+  display: flex;
+}
+
+.sidebar__footer-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 999px;
+  color: #e5e7eb;
+  background: rgba(148, 163, 184, 0.08);
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.sidebar__footer-link:hover,
+.sidebar__footer-link:focus-visible {
+  background: rgba(148, 163, 184, 0.25);
+  color: #f8fafc;
+  outline: none;
+}
+
+.sidebar__footer-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: currentColor;
+}
+
 .impersonation-exit {
   display: flex;
   flex-direction: column;
