@@ -1,0 +1,7 @@
+{
+  "guid": "677fc15f-8c3b-4fc0-ab73-8c518db6f694",
+  "occurred_at": "2025-10-08T11:49Z",
+  "change_type": "Fix",
+  "summary": "Restored the licenses admin HTML view by namespacing the API under /api to prevent JSON responses from hijacking the UI route",
+  "content_hash": "dd1692bc96c73aa47037890b586dde2e2437be0787d7d8ad1ff4e60f4350145c"
+}

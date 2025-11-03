@@ -1,0 +1,7 @@
+{
+  "guid": "768234b4-8694-426c-a4be-71aca3fa0858",
+  "occurred_at": "2025-12-13T16:30Z",
+  "change_type": "Fix",
+  "summary": "Routed Syncro ticket import fallback logging through the webhook repository so webhook monitor entries persist when manual monitor helpers fail",
+  "content_hash": "45d113781918c278aac177beb019ffd30b7c7c81c670263899780758da5168ab"
+}

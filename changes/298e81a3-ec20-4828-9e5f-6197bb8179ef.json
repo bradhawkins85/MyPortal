@@ -1,0 +1,7 @@
+{
+  "guid": "298e81a3-ec20-4828-9e5f-6197bb8179ef",
+  "occurred_at": "2025-10-16T09:45Z",
+  "change_type": "Fix",
+  "summary": "Hardened the restart automation to respect environment overrides and fail fast when system updates cannot restart the service",
+  "content_hash": "6c9add6ab0dc5d44b4c513b09c643ce99033b16388ffc2dec6fbf2cc07d212bb"
+}

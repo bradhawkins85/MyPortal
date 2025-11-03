@@ -1,0 +1,7 @@
+{
+  "guid": "ac09cb1e-5920-445c-9c5f-e3dc0c4d6f51",
+  "occurred_at": "2025-10-08T12:12Z",
+  "change_type": "Fix",
+  "summary": "Removed product description input from the shop admin creation form per request",
+  "content_hash": "50a43201adf295b8d22e06bb4e45bffa94bfdf2929266888410565af642c47b2"
+}

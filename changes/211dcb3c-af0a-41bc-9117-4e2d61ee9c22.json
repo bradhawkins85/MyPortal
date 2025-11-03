@@ -1,0 +1,7 @@
+{
+  "guid": "211dcb3c-af0a-41bc-9117-4e2d61ee9c22",
+  "occurred_at": "2025-10-30T09:00Z",
+  "change_type": "Feature",
+  "summary": "Added an Administration My Profile console with password rotation, TOTP management, and SMS contact updates",
+  "content_hash": "234eb4e785dc7c9d417b1ed974818bdaec8e71491ea376a0bd0e6e3467f540cb"
+}

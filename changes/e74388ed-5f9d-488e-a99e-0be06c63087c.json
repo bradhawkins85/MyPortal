@@ -1,0 +1,7 @@
+{
+  "guid": "e74388ed-5f9d-488e-a99e-0be06c63087c",
+  "occurred_at": "2025-10-22T23:59Z",
+  "change_type": "Fix",
+  "summary": "Guarded migration CREATE statements with IF NOT EXISTS to allow safe reimports when objects already exist",
+  "content_hash": "f4d49c912be57dbd35e411c3b563a1c1d26f7df07b51832399b45b69557bfd6e"
+}

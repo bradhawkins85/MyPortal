@@ -482,6 +482,18 @@
                 />
                 <p class="form-help">Log how many minutes this update required.</p>
               </div>
+              <div class="form-field">
+                <label class="form-label" for="ticket-reply-labour">Labour type</label>
+                <select id="ticket-reply-labour" name="labourTypeId" class="form-input">
+                  <option value="">No labour type</option>
+                  {% for labour_type in ticket_labour_types %}
+                    <option value="{{ labour_type.id }}">
+                      {{ labour_type.name }}{% if labour_type.code %} ({{ labour_type.code }}){% endif %}
+                    </option>
+                  {% endfor %}
+                </select>
+                <p class="form-help">Select the labour code to synchronise with Xero invoices.</p>
+              </div>
               <div class="form-grid form-grid--auto">
                 <div class="form-field form-field--checkbox">
                   <label class="checkbox">
@@ -513,10 +525,11 @@
                     <article
                       class="timeline__event"
                       data-ticket-reply
-                      data-reply-id="{{ reply.id }}"
-                      data-reply-minutes="{{ reply.minutes_spent if reply.minutes_spent is not none else '' }}"
-                      data-reply-billable="{{ 'true' if reply.is_billable else 'false' }}"
-                    >
+                  data-reply-id="{{ reply.id }}"
+                  data-reply-minutes="{{ reply.minutes_spent if reply.minutes_spent is not none else '' }}"
+                  data-reply-billable="{{ 'true' if reply.is_billable else 'false' }}"
+                  data-reply-labour="{{ reply.labour_type_id if reply.labour_type_id is not none else '' }}"
+                >
                       <header class="timeline__header">
                         <div class="timeline__header-main">
                           <span class="timeline__timestamp">
@@ -619,6 +632,17 @@
             <input type="checkbox" data-reply-time-billable />
             <span>Billable</span>
           </label>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="reply-time-labour">Labour type</label>
+          <select id="reply-time-labour" class="form-input" data-reply-time-labour>
+            <option value="">No labour type</option>
+            {% for labour_type in ticket_labour_types %}
+              <option value="{{ labour_type.id }}">
+                {{ labour_type.name }}{% if labour_type.code %} ({{ labour_type.code }}){% endif %}
+              </option>
+            {% endfor %}
+          </select>
         </div>
         <p class="form-help form-help--error" data-reply-time-error role="alert" hidden></p>
         <div class="form-actions">

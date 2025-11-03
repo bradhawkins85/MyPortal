@@ -266,7 +266,7 @@ async def test_render_portal_ticket_detail_includes_replies(monkeypatch):
     monkeypatch.setattr(
         main.tickets_service,
         "format_reply_time_summary",
-        lambda minutes, is_billable: f"{minutes} minutes" if minutes is not None else "",
+        lambda minutes, is_billable, labour=None: f"{minutes} minutes" if minutes is not None else "",
     )
     monkeypatch.setattr(main, "_is_helpdesk_technician", AsyncMock(return_value=False))
     monkeypatch.setattr(main.company_repo, "get_company_by_id", AsyncMock(return_value={"id": 22, "name": "Example"}))
@@ -306,6 +306,8 @@ async def test_render_portal_ticket_detail_includes_replies(monkeypatch):
             "has_content": True,
             "time_summary": "15 minutes",
             "is_internal": False,
+            "labour_type_name": None,
+            "labour_type_code": None,
         }
     ]
 

@@ -131,6 +131,7 @@ from app.services import shop_packages as shop_packages_service
 from app.services import staff_importer
 from app.services import staff_access as staff_access_service
 from app.services import company_importer
+from app.services import labour_types as labour_types_service
 from app.services import ticket_importer
 from app.services import tickets as tickets_service
 from app.services import template_variables
@@ -9293,7 +9294,12 @@ async def _render_portal_ticket_detail(
         minutes_value = reply.get("minutes_spent")
         minutes_spent = minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
         billable_flag = bool(reply.get("is_billable"))
-        time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag)
+        labour_type_name = str(reply.get("labour_type_name") or "").strip() or None
+        time_summary = tickets_service.format_reply_time_summary(
+            minutes_spent,
+            billable_flag,
+            labour_type_name,
+        )
         created_at = reply.get("created_at")
         created_iso = (
             created_at.astimezone(timezone.utc).isoformat()
@@ -9311,6 +9317,8 @@ async def _render_portal_ticket_detail(
                 "has_content": sanitized_reply.has_rich_content,
                 "time_summary": time_summary,
                 "is_internal": bool(reply.get("is_internal")),
+                "labour_type_name": labour_type_name,
+                "labour_type_code": reply.get("labour_type_code"),
             }
         )
 
@@ -9384,6 +9392,7 @@ async def _render_tickets_dashboard(
     public_status_map = {
         definition.tech_status: definition.public_status for definition in dashboard.status_definitions
     }
+    labour_types = await labour_types_service.list_labour_types()
     extra = {
         "title": "Ticketing workspace",
         "tickets": dashboard.tickets,
@@ -9399,6 +9408,7 @@ async def _render_tickets_dashboard(
         "ticket_user_options": dashboard.technicians,
         "ticket_company_lookup": dashboard.company_lookup,
         "ticket_user_lookup": dashboard.user_lookup,
+        "ticket_labour_types": labour_types,
         "can_bulk_delete_tickets": bool(user.get("is_super_admin")),
         "success_message": success_message,
         "error_message": error_message,
@@ -9523,7 +9533,12 @@ async def _render_ticket_detail(
                 total_billable_minutes += minutes_spent
             else:
                 total_non_billable_minutes += minutes_spent
-        time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag)
+        labour_type_name = str(reply.get("labour_type_name") or "").strip() or None
+        time_summary = tickets_service.format_reply_time_summary(
+            minutes_spent,
+            billable_flag,
+            labour_type_name,
+        )
         enriched_replies.append(
             {
                 **reply,
@@ -9533,6 +9548,7 @@ async def _render_ticket_detail(
                 "minutes_spent": minutes_spent,
                 "is_billable": billable_flag,
                 "time_summary": time_summary,
+                "labour_type_name": labour_type_name,
             }
         )
 
@@ -9540,6 +9556,8 @@ async def _render_ticket_detail(
     for watcher in watchers:
         watcher_user = user_lookup.get(watcher.get("user_id"))
         enriched_watchers.append({**watcher, "user": watcher_user})
+
+    labour_types = await labour_types_service.list_labour_types()
 
     status_definitions = await tickets_service.list_status_definitions()
     status_label_map = {definition.tech_status: definition.tech_label for definition in status_definitions}
@@ -9601,6 +9619,7 @@ async def _render_ticket_detail(
         "ticket_requester": user_lookup.get(ticket.get("requester_id")),
         "ticket_replies": enriched_replies,
         "ticket_watchers": enriched_watchers,
+        "ticket_labour_types": labour_types,
         "ticket_billable_minutes": total_billable_minutes,
         "ticket_non_billable_minutes": total_non_billable_minutes,
         "ticket_available_statuses": available_statuses,
@@ -10235,6 +10254,43 @@ async def admin_replace_ticket_statuses(request: Request):
     )
 
 
+@app.post("/admin/tickets/labour-types", response_class=HTMLResponse)
+async def admin_replace_labour_types(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    ids = form.getlist("labourId")
+    codes = form.getlist("labourCode")
+    names = form.getlist("labourName")
+
+    definitions: list[dict[str, Any]] = []
+    max_length = max(len(ids), len(codes), len(names))
+    for index in range(max_length):
+        identifier = ids[index] if index < len(ids) else None
+        code = codes[index] if index < len(codes) else ""
+        name = names[index] if index < len(names) else ""
+        if not code and not name:
+            continue
+        definitions.append({"id": identifier, "code": code, "name": name})
+
+    try:
+        await labour_types_service.replace_labour_types(definitions)
+    except ValueError as exc:
+        return await _render_tickets_dashboard(
+            request,
+            current_user,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return RedirectResponse(
+        url="/admin/tickets?success=" + quote("Labour types updated."),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @app.post("/admin/tickets/{ticket_id}/description", response_class=HTMLResponse)
 async def admin_update_ticket_description(ticket_id: int, request: Request):
     current_user, redirect = await _require_helpdesk_page(request)
@@ -10735,6 +10791,39 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             )
         minutes_spent = minutes_candidate
     is_billable = str(form.get("isBillable", "")).lower() in {"1", "true", "on", "yes"}
+    labour_type_raw = form.get("labourTypeId")
+    labour_type_id: int | None = None
+    if isinstance(labour_type_raw, str):
+        labour_type_text = labour_type_raw.strip()
+        if labour_type_text:
+            try:
+                labour_candidate = int(labour_type_text)
+            except (TypeError, ValueError):
+                return await _render_ticket_detail(
+                    request,
+                    current_user,
+                    ticket_id=ticket_id,
+                    error_message="Select a valid labour type.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            if labour_candidate <= 0:
+                return await _render_ticket_detail(
+                    request,
+                    current_user,
+                    ticket_id=ticket_id,
+                    error_message="Select a valid labour type.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            labour_record = await labour_types_service.get_labour_type(labour_candidate)
+            if not labour_record:
+                return await _render_ticket_detail(
+                    request,
+                    current_user,
+                    ticket_id=ticket_id,
+                    error_message="Selected labour type could not be found.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            labour_type_id = labour_candidate
     if not sanitized_body.has_rich_content:
         return await _render_ticket_detail(
             request,
@@ -10755,6 +10844,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             is_internal=is_internal,
             minutes_spent=minutes_spent,
             is_billable=is_billable,
+            labour_type_id=labour_type_id,
         )
         if isinstance(author_id, int):
             await tickets_repo.add_watcher(ticket_id, author_id)

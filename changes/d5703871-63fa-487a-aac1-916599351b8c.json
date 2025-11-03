@@ -1,0 +1,7 @@
+{
+  "guid": "d5703871-63fa-487a-aac1-916599351b8c",
+  "occurred_at": "2025-09-17T07:38Z",
+  "change_type": "Feature",
+  "summary": "Added automated product DBP threshold alerts with super admin email and popup notifications",
+  "content_hash": "44da8ce393c6d64ec4ff8ab2af6fca2aa296646adc103de1dbcda5d246c265fd"
+}

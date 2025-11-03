@@ -1,0 +1,7 @@
+{
+  "guid": "2d47c928-78b4-459c-a01b-fd30809ca4ff",
+  "occurred_at": "2025-10-09T13:15Z",
+  "change_type": "Feature",
+  "summary": "Added viewport-aware pagination controls to the webhook delivery queue for responsive monitoring",
+  "content_hash": "1b230e3c303ccb32c1eeb3541eb7f685007f20c9d3173a6a104591ee1e8d6413"
+}

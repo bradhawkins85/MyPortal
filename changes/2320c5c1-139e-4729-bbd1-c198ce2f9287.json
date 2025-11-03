@@ -1,0 +1,7 @@
+{
+  "guid": "2320c5c1-139e-4729-bbd1-c198ce2f9287",
+  "occurred_at": "2025-10-15T12:16Z",
+  "change_type": "Feature",
+  "summary": "Added forms admin assignment controls so OpnForm experiences can be scoped to specific companies and users",
+  "content_hash": "1dff62999175ef23e0fbcbd7bf561a0fd30c9db849b8c0078174d4cbb47642ca"
+}
