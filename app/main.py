@@ -4036,7 +4036,10 @@ async def add_package_to_cart(request: Request) -> RedirectResponse:
         added_by=user.get("id") if user else None,
     )
 
-    return RedirectResponse(url=request.url_for("shop_packages_page"), status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        url=f"{request.url_for('shop_page')}?category=packages",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.get("/cart", response_class=HTMLResponse, name="cart_page")
