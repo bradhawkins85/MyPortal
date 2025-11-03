@@ -375,6 +375,7 @@
                 type="button"
                 class="button button--ghost header__action"
                 data-force-refresh
+                data-force-refresh-broadcast="{{ 'true' if current_user and current_user.get('is_super_admin') else 'false' }}"
                 title="Force the browser to fetch the latest version of the application"
               >
                 <span class="button__icon" aria-hidden="true">

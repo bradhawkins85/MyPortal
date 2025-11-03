@@ -264,6 +264,7 @@
     const hasServiceWorker = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
     const hasCacheAPI = typeof window !== 'undefined' && 'caches' in window;
     const supportsEnhancedRefresh = hasServiceWorker || hasCacheAPI;
+    const shouldBroadcastRefresh = trigger.getAttribute('data-force-refresh-broadcast') === 'true';
 
     if (!supportsEnhancedRefresh) {
       trigger.title = 'Reloads the app to request the latest files';
@@ -271,6 +272,60 @@
 
     const toast = createToastController(document.querySelector('[data-global-toast]'));
     let busy = false;
+
+    async function broadcastRefreshNotice() {
+      if (!shouldBroadcastRefresh || typeof fetch !== 'function') {
+        return { attempted: false, success: false };
+      }
+
+      const controller = typeof AbortController === 'function' ? new AbortController() : null;
+      let timeoutId = null;
+
+      if (controller && typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+        timeoutId = window.setTimeout(() => {
+          try {
+            controller.abort();
+          } catch (error) {
+            // Ignore abort errors so the refresh flow can continue.
+          }
+        }, 6000);
+      }
+
+      try {
+        const options = {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+          },
+          credentials: 'same-origin',
+        };
+        if (controller) {
+          options.signal = controller.signal;
+        }
+
+        const response = await fetch('/api/system/refresh', options);
+        if (!response || !response.ok) {
+          return {
+            attempted: true,
+            success: false,
+            status: response ? response.status : null,
+          };
+        }
+
+        return { attempted: true, success: true };
+      } catch (error) {
+        console.error('Failed to broadcast refresh request', error);
+        return {
+          attempted: true,
+          success: false,
+          error,
+        };
+      } finally {
+        if (timeoutId !== null) {
+          window.clearTimeout(timeoutId);
+        }
+      }
+    }
 
     function waitForServiceWorkerMessage(expectedType, timeoutMs) {
       if (!hasServiceWorker || !navigator.serviceWorker || typeof navigator.serviceWorker.addEventListener !== 'function') {
@@ -408,14 +463,34 @@
       trigger.disabled = true;
       trigger.setAttribute('aria-busy', 'true');
 
-      toast.show(
-        supportsEnhancedRefresh
-          ? 'Refreshing the application and clearing cached assets…'
-          : 'Refreshing the application with a clean request…',
-        {
-          variant: 'info',
-        },
-      );
+      let broadcastResult = { attempted: false, success: false };
+
+      if (shouldBroadcastRefresh) {
+        toast.show('Notifying connected sessions to refresh…', { variant: 'info' });
+        broadcastResult = await broadcastRefreshNotice();
+        if (broadcastResult.success) {
+          toast.show(
+            supportsEnhancedRefresh
+              ? 'Refresh notice sent. Clearing cached assets…'
+              : 'Refresh notice sent. Reloading with a clean request…',
+            { variant: 'info' },
+          );
+        } else {
+          toast.show('Could not notify other sessions. Continuing with local refresh…', {
+            variant: 'warning',
+            autoHideMs: 6000,
+          });
+        }
+      } else {
+        toast.show(
+          supportsEnhancedRefresh
+            ? 'Refreshing the application and clearing cached assets…'
+            : 'Refreshing the application with a clean request…',
+          {
+            variant: 'info',
+          },
+        );
+      }
 
       let hadError = false;
       try {
@@ -437,7 +512,10 @@
           autoHideMs: 4000,
         });
       } else {
-        toast.show('Reloading the application to request the latest files…', {
+        const message = broadcastResult.success
+          ? 'Reloading the application with the latest files…'
+          : 'Reloading the application to request the latest files…';
+        toast.show(message, {
           variant: 'success',
           autoHideMs: 4000,
         });
