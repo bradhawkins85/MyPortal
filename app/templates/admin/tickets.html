@@ -9,15 +9,22 @@
   <div class="header-title-menu">
     <span class="header-title-menu__label">Ticketing workspace</span>
     {% if show_ticket_tools %}
-      <details class="header-title-menu__dropdown" data-header-menu>
-        <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+      <div class="header-title-menu__dropdown" data-header-menu>
+        <button
+          type="button"
+          class="header-title-menu__toggle"
+          data-header-menu-toggle
+          aria-haspopup="true"
+          aria-controls="ticket-tools-menu"
+          aria-expanded="false"
+        >
           Ticket tools
           <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
             <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
           </svg>
           <span class="visually-hidden">Toggle ticket tools menu</span>
-        </summary>
-        <ul class="header-title-menu__list" role="menu">
+        </button>
+        <ul class="header-title-menu__list" id="ticket-tools-menu" role="menu" data-header-menu-list>
           {% if show_ticket_automations %}
             <li class="header-title-menu__item" role="none">
               <a href="/admin/automations" class="header-title-menu__link" role="menuitem">Ticket automations</a>
@@ -57,7 +64,7 @@
             </li>
           {% endif %}
         </ul>
-      </details>
+      </div>
     {% endif %}
   </div>
 {% endblock %}
