@@ -148,6 +148,224 @@
     nonBillableElement.textContent = nonBillableTotal.toString();
   }
 
+  function parseJsonArray(value, fallback = []) {
+    if (typeof value !== 'string' || value.trim() === '') {
+      return Array.isArray(fallback) ? fallback : [];
+    }
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : Array.isArray(fallback) ? fallback : [];
+    } catch (error) {
+      console.warn('Failed to parse JSON dataset value', error);
+      return Array.isArray(fallback) ? fallback : [];
+    }
+  }
+
+  function normaliseIdList(values) {
+    if (!Array.isArray(values)) {
+      return [];
+    }
+    return values
+      .map((value) => {
+        if (typeof value === 'number') {
+          return value.toString();
+        }
+        if (typeof value === 'string') {
+          return value.trim();
+        }
+        if (value && typeof value === 'object' && 'id' in value) {
+          return String(value.id);
+        }
+        return '';
+      })
+      .filter((value) => value !== '');
+  }
+
+  function formatAssetLabel(record) {
+    if (!record || typeof record !== 'object') {
+      return '';
+    }
+    const idValue = 'id' in record ? String(record.id) : '';
+    let name = '';
+    if (typeof record.label === 'string' && record.label.trim() !== '') {
+      return record.label.trim();
+    }
+    if (typeof record.name === 'string' && record.name.trim() !== '') {
+      name = record.name.trim();
+    } else if (idValue) {
+      name = `Asset ${idValue}`;
+    }
+    const serial = typeof record.serial_number === 'string' ? record.serial_number.trim() : '';
+    const status = typeof record.status === 'string' ? record.status.trim() : '';
+    const parts = [name];
+    if (serial) {
+      parts.push(`SN ${serial}`);
+    }
+    if (status) {
+      const cleanedStatus = status
+        .split('_')
+        .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+        .join(' ');
+      parts.push(cleanedStatus);
+    }
+    return parts.join(' · ');
+  }
+
+  function initialiseAssetSelector() {
+    const select = document.querySelector('[data-ticket-asset-selector]');
+    if (!(select instanceof HTMLSelectElement)) {
+      return;
+    }
+
+    const companySelect = document.getElementById('ticket-company-detail');
+    if (!(companySelect instanceof HTMLSelectElement)) {
+      return;
+    }
+
+    const helpElement = document.querySelector('[data-ticket-asset-help]');
+    const endpointTemplate = select.dataset.assetsEndpointTemplate || '';
+    const initialOptions = parseJsonArray(select.dataset.initialOptions, []);
+    const initialSelection = normaliseIdList(parseJsonArray(select.dataset.selectedAssets, []));
+
+    function setHelpState(state, overrideMessage) {
+      if (!helpElement) {
+        return;
+      }
+      const enabledMessage = helpElement.dataset.helpEnabled || helpElement.textContent || '';
+      const disabledMessage = helpElement.dataset.helpDisabled || enabledMessage;
+      let message = enabledMessage;
+      let isError = false;
+
+      if (state === 'disabled') {
+        message = overrideMessage || disabledMessage;
+      } else if (state === 'loading') {
+        message = overrideMessage || 'Loading assets…';
+      } else if (state === 'error') {
+        message = overrideMessage || 'Unable to load assets. Please try again.';
+        isError = true;
+      } else if (state === 'empty') {
+        message = overrideMessage || 'No assets are available for the selected company.';
+      } else if (overrideMessage) {
+        message = overrideMessage;
+      }
+
+      helpElement.textContent = message;
+      helpElement.classList.toggle('form-help--error', isError);
+    }
+
+    function renderOptions(options, selectedValues) {
+      const selectedSet = new Set(normaliseIdList(selectedValues));
+      select.innerHTML = '';
+      options.forEach((option) => {
+        if (!option || typeof option !== 'object') {
+          return;
+        }
+        const optionId = 'id' in option ? option.id : undefined;
+        if (optionId === null || optionId === undefined) {
+          return;
+        }
+        const optionElement = document.createElement('option');
+        optionElement.value = String(optionId);
+        optionElement.textContent = formatAssetLabel(option);
+        if (selectedSet.has(String(optionId))) {
+          optionElement.selected = true;
+        }
+        select.appendChild(optionElement);
+      });
+    }
+
+    async function fetchAssets(companyId) {
+      if (!endpointTemplate || !companyId) {
+        return [];
+      }
+      const endpoint = endpointTemplate.replace('{companyId}', encodeURIComponent(companyId));
+      const response = await fetch(endpoint, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+      const payload = await response.json();
+      if (!Array.isArray(payload)) {
+        return [];
+      }
+      return payload
+        .map((record) => {
+          if (!record || typeof record !== 'object') {
+            return null;
+          }
+          const idValue = 'id' in record ? record.id : null;
+          if (idValue === null || idValue === undefined) {
+            return null;
+          }
+          return {
+            id: idValue,
+            label: formatAssetLabel(record),
+            serial_number: record.serial_number,
+            status: record.status,
+            name: record.name,
+          };
+        })
+        .filter((option) => option !== null);
+    }
+
+    async function reloadAssets(companyId) {
+      if (!companyId) {
+        renderOptions([], []);
+        select.value = '';
+        select.disabled = true;
+        select.setAttribute('aria-disabled', 'true');
+        setHelpState('disabled');
+        return;
+      }
+
+      select.disabled = true;
+      select.setAttribute('aria-disabled', 'true');
+      setHelpState('loading');
+
+      try {
+        const assets = await fetchAssets(companyId);
+        renderOptions(assets, []);
+        if (!assets.length) {
+          setHelpState('empty');
+        } else {
+          setHelpState('enabled');
+        }
+      } catch (error) {
+        console.error('Failed to load company assets', error);
+        renderOptions([], []);
+        setHelpState('error');
+      } finally {
+        select.disabled = false;
+        select.removeAttribute('aria-disabled');
+      }
+    }
+
+    renderOptions(initialOptions, initialSelection);
+    if (companySelect.value) {
+      select.disabled = false;
+      select.removeAttribute('aria-disabled');
+      setHelpState(initialOptions.length ? 'enabled' : 'empty');
+    } else {
+      select.disabled = true;
+      select.setAttribute('aria-disabled', 'true');
+      setHelpState('disabled');
+    }
+
+    companySelect.addEventListener('change', () => {
+      const companyId = companySelect.value;
+      if (!companyId) {
+        renderOptions([], []);
+        select.value = '';
+        select.disabled = true;
+        select.setAttribute('aria-disabled', 'true');
+        setHelpState('disabled');
+        return;
+      }
+      reloadAssets(companyId);
+    });
+  }
+
   function initialiseReplyTimeEditing() {
     const modal = document.getElementById('reply-time-modal');
     const timeline = document.querySelector('[data-ticket-timeline]');
@@ -456,6 +674,7 @@
     });
 
     initialiseReplyTimeEditing();
+    initialiseAssetSelector();
   }
 
   if (document.readyState === 'loading') {

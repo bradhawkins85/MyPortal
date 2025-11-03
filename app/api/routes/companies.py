@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.database import require_database
+from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
+from app.schemas.assets import AssetResponse
 from app.schemas.companies import CompanyCreate, CompanyResponse, CompanyUpdate
 
 router = APIRouter(prefix="/companies", tags=["Companies"])
@@ -67,3 +71,29 @@ async def delete_company(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     await company_repo.delete_company(company_id)
     return None
+
+
+@router.get("/{company_id}/assets", response_model=list[AssetResponse])
+async def list_company_assets(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    rows = await assets_repo.list_company_assets(company_id)
+    assets: list[dict[str, Any]] = []
+    for row in rows:
+        record = dict(row)
+        for numeric_key in ("ram_gb", "approx_age", "performance_score"):
+            value = record.get(numeric_key)
+            if value is None or value == "":
+                record[numeric_key] = None
+                continue
+            try:
+                record[numeric_key] = float(value)
+            except (TypeError, ValueError):
+                record[numeric_key] = None
+        assets.append(record)
+    return assets

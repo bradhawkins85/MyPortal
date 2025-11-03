@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ticket asset selector preview</title>
+    <link rel="stylesheet" href="../app/static/css/app.css" />
+    <style>
+      body {
+        background: #0f172a;
+        padding: 2rem;
+      }
+      .card {
+        max-width: 720px;
+        margin: 0 auto;
+      }
+    </style>
+  </head>
+  <body class="app-body">
+    <div class="card card--panel">
+      <header class="card__header">
+        <h1 class="card__title">Ticket assets preview</h1>
+        <p class="card__subtitle">Assets now appear below the external reference field with multi-select support.</p>
+      </header>
+      <div class="card__body card__body--stacked">
+        <div class="form-field">
+          <label class="form-label" for="ticket-reference-detail">External reference</label>
+          <input
+            id="ticket-reference-detail"
+            class="form-input"
+            maxlength="128"
+            value="SYNCRO-12345"
+            placeholder="Syncro ID or external case"
+          />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="ticket-assets">Assets</label>
+          <select
+            id="ticket-assets"
+            class="form-input"
+            multiple
+            size="6"
+          >
+            <option selected>Workstation-1 · SN XYZ123 · Active</option>
+            <option>Workstation-2 · SN XYZ456 · Active</option>
+            <option>Laptop-5 · SN ABC987 · In Repair</option>
+            <option>Firewall-Edge · SN FWF1234 · Online</option>
+            <option>Server-DB1 · SN DB1928 · Maintenance</option>
+            <option>Server-DB2 · SN DB2736 · Maintenance</option>
+          </select>
+          <p class="form-help">
+            Hold Ctrl (Windows) or ⌘ (macOS) to select multiple assets. Options refresh when the linked company changes.
+          </p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
