@@ -63,13 +63,17 @@
     });
   }
 
-  function formatTimeSummary(minutes, isBillable) {
+  function formatTimeSummary(minutes, isBillable, labourName) {
     if (typeof minutes !== 'number' || Number.isNaN(minutes) || minutes < 0) {
       return '';
     }
     const label = minutes === 1 ? 'minute' : 'minutes';
     const billing = isBillable ? 'Billable' : 'Non-billable';
-    return `${minutes} ${label} · ${billing}`;
+    let summary = `${minutes} ${label} · ${billing}`;
+    if (typeof labourName === 'string' && labourName.trim() !== '') {
+      summary = `${summary} · ${labourName.trim()}`;
+    }
+    return summary;
   }
 
   function getCookie(name) {
@@ -155,10 +159,19 @@
     const form = modal.querySelector('[data-reply-time-form]');
     const minutesInput = modal.querySelector('[data-reply-time-minutes]');
     const billableCheckbox = modal.querySelector('[data-reply-time-billable]');
+    const labourSelect = modal.querySelector('[data-reply-time-labour]');
     const errorMessage = modal.querySelector('[data-reply-time-error]');
     const submitButton = modal.querySelector('[data-reply-time-submit]');
     const triggers = document.querySelectorAll('[data-reply-edit]');
-    if (!form || !minutesInput || !billableCheckbox || !errorMessage || !submitButton || !triggers.length) {
+    if (
+      !form ||
+      !minutesInput ||
+      !billableCheckbox ||
+      !errorMessage ||
+      !submitButton ||
+      !labourSelect ||
+      !triggers.length
+    ) {
       return;
     }
 
@@ -251,15 +264,19 @@
       focusFirstElement();
     }
 
-    function updateReplyDisplay(replyArticle, minutes, billable, summary) {
+    function updateReplyDisplay(replyArticle, minutes, billable, summary, labourTypeId, labourTypeName) {
       if (!replyArticle) {
         return;
       }
       replyArticle.dataset.replyMinutes = typeof minutes === 'number' ? String(minutes) : '';
       replyArticle.dataset.replyBillable = billable ? 'true' : 'false';
+      replyArticle.dataset.replyLabour =
+        typeof labourTypeId === 'number' && !Number.isNaN(labourTypeId) && labourTypeId > 0
+          ? String(labourTypeId)
+          : '';
       const summaryElement = replyArticle.querySelector('[data-reply-time-summary]');
       if (summaryElement) {
-        const text = summary || formatTimeSummary(minutes, billable);
+        const text = summary || formatTimeSummary(minutes, billable, labourTypeName);
         if (text) {
           summaryElement.textContent = text;
           summaryElement.hidden = false;
@@ -282,8 +299,10 @@
         }
         const minutesValue = replyArticle.getAttribute('data-reply-minutes') || '';
         const billableValue = replyArticle.getAttribute('data-reply-billable') === 'true';
+        const labourValue = replyArticle.getAttribute('data-reply-labour') || '';
         minutesInput.value = minutesValue;
         billableCheckbox.checked = billableValue;
+        labourSelect.value = labourValue;
         setError('');
         openModal(button, replyArticle);
       });
@@ -315,6 +334,7 @@
       }
 
       const rawMinutes = minutesInput.value.trim();
+      const labourValue = labourSelect.value.trim();
       let minutes = null;
       if (rawMinutes !== '') {
         const parsed = Number.parseInt(rawMinutes, 10);
@@ -334,6 +354,15 @@
       }
 
       const isBillable = billableCheckbox.checked;
+      let labourTypeId = null;
+      if (labourValue !== '') {
+        const parsedLabour = Number.parseInt(labourValue, 10);
+        if (Number.isNaN(parsedLabour) || parsedLabour <= 0) {
+          setError('Select a valid labour type.');
+          return;
+        }
+        labourTypeId = parsedLabour;
+      }
       const csrfToken = getCsrfToken();
       const headers = {
         'Content-Type': 'application/json',
@@ -356,7 +385,11 @@
           method: 'PATCH',
           credentials: 'same-origin',
           headers,
-          body: JSON.stringify({ minutes_spent: minutes, is_billable: isBillable }),
+          body: JSON.stringify({
+            minutes_spent: minutes,
+            is_billable: isBillable,
+            labour_type_id: labourTypeId,
+          }),
         });
 
         if (!response.ok) {
@@ -383,8 +416,21 @@
           typeof replyData.minutes_spent === 'number' ? replyData.minutes_spent : null;
         const updatedBillable = Boolean(replyData.is_billable);
         const summaryText = typeof replyData.time_summary === 'string' ? replyData.time_summary : '';
+        const updatedLabourId =
+          typeof replyData.labour_type_id === 'number' && replyData.labour_type_id > 0
+            ? replyData.labour_type_id
+            : null;
+        const labourName =
+          typeof replyData.labour_type_name === 'string' ? replyData.labour_type_name : '';
 
-        updateReplyDisplay(activeReply, updatedMinutes, updatedBillable, summaryText);
+        updateReplyDisplay(
+          activeReply,
+          updatedMinutes,
+          updatedBillable,
+          summaryText,
+          updatedLabourId,
+          labourName,
+        );
         adjustTimeTotals(previousMinutes, previousBillable, updatedMinutes, updatedBillable);
         closeModal();
       } catch (error) {

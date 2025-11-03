@@ -201,7 +201,9 @@ async def test_create_reply_returns_inserted_record(monkeypatch):
     assert record["id"] == 42
     assert record["minutes_spent"] == 15
     assert record["is_billable"] is True
-    assert dummy_db.fetch_sql == "SELECT * FROM ticket_replies WHERE id = %s"
+    assert "SELECT tr.*, lt.name AS labour_type_name" in dummy_db.fetch_sql
+    assert "FROM ticket_replies tr" in dummy_db.fetch_sql
+    assert "LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id" in dummy_db.fetch_sql
     assert dummy_db.fetch_params == (42,)
 
 
@@ -243,7 +245,9 @@ async def test_get_reply_by_id_fetches_normalised_record(monkeypatch):
 
     record = await tickets.get_reply_by_id(15)
 
-    assert dummy_db.fetch_sql == "SELECT * FROM ticket_replies WHERE id = %s"
+    assert "SELECT tr.*, lt.name AS labour_type_name" in dummy_db.fetch_sql
+    assert "FROM ticket_replies tr" in dummy_db.fetch_sql
+    assert "LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id" in dummy_db.fetch_sql
     assert dummy_db.fetch_params == (15,)
     assert record["id"] == 15
     assert record["minutes_spent"] == 10
@@ -269,7 +273,13 @@ async def test_update_reply_updates_minutes_and_billable(monkeypatch):
 
     assert "UPDATE ticket_replies" in dummy_db.execute_sql
     assert dummy_db.execute_params == (15, 1, 7)
-    assert dummy_db.fetch_sql == "SELECT * FROM ticket_replies WHERE id = %s"
+    assert (
+        "SELECT tr.*, lt.name AS labour_type_name, lt.code AS labour_type_code"
+        in dummy_db.fetch_sql
+    )
+    assert "FROM ticket_replies tr" in dummy_db.fetch_sql
+    assert "LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id" in dummy_db.fetch_sql
+    assert "WHERE tr.id = %s" in dummy_db.fetch_sql
     assert record["minutes_spent"] == 15
     assert record["is_billable"] is True
 

@@ -1,0 +1,7 @@
+{
+  "guid": "88513e4b-82eb-4a62-8175-a83f1996b60d",
+  "occurred_at": "2025-10-08T12:08Z",
+  "change_type": "Fix",
+  "summary": "Sanitised automation scheduler task payloads before JSON encoding to restore the admin dashboard",
+  "content_hash": "80cba50b48864c3118cbbac28e28c8d1e80ef47d3bf7aa09247baa145ed9b481"
+}

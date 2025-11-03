@@ -9,12 +9,14 @@
 ```json
 {
   "minutes_spent": 30,
-  "is_billable": true
+  "is_billable": true,
+  "labour_type_id": 5
 }
 ```
 
 * `minutes_spent` – Optional integer between `0` and `1440`. Omit or send `null` to clear the stored duration.
 * `is_billable` – Optional boolean indicating whether the minutes should count towards billable totals.
+* `labour_type_id` – Optional integer referencing the labour code to apply to this reply. Omit or send `null` to remove the assigned labour type.
 
 ### Response
 
@@ -44,8 +46,10 @@ The endpoint returns the updated ticket and reply record. The reply payload incl
     "is_internal": false,
     "minutes_spent": 30,
     "is_billable": true,
+    "labour_type_id": 5,
+    "labour_type_name": "Onsite support",
     "created_at": "2025-01-05T10:05:00Z",
-    "time_summary": "30 minutes · Billable"
+    "time_summary": "30 minutes · Billable · Onsite support"
   }
 }
 ```
@@ -53,7 +57,7 @@ The endpoint returns the updated ticket and reply record. The reply payload incl
 ### Error responses
 
 * `404 Not Found` – Returned when the ticket or reply cannot be located, or the reply does not belong to the ticket.
-* `400 Bad Request` – Returned when neither `minutes_spent` nor `is_billable` is provided, or when `minutes_spent` falls outside the allowed range.
+* `400 Bad Request` – Returned when neither `minutes_spent`, `is_billable`, nor `labour_type_id` is provided, when `minutes_spent` falls outside the allowed range, or when the supplied `labour_type_id` does not exist.
 
 ### Notes
 
@@ -118,3 +122,50 @@ Provide an array of status objects. Each object must include a technician label 
 ### Response
 
 The endpoint returns the saved definitions using the technician and public labels provided. Slugs are derived automatically and always returned in lowercase snake case.
+
+## Manage labour types
+
+Labour types link ticket reply time entries to Xero product codes. Only super admins may create, update, or delete labour types. Technicians can retrieve the catalogue to populate UI selectors.
+
+### List labour types
+
+`GET /api/tickets/labour-types` returns the available labour codes.
+
+```json
+{
+  "labour_types": [
+    {
+      "id": 5,
+      "code": "ONSITE",
+      "name": "Onsite support",
+      "created_at": "2025-01-04T02:15:00Z",
+      "updated_at": "2025-01-04T02:15:00Z"
+    }
+  ]
+}
+```
+
+### Create a labour type
+
+`POST /api/tickets/labour-types` creates a new labour code. Provide the `code` that matches the Xero product SKU and a descriptive `name`.
+
+```json
+{
+  "code": "REMOTE",
+  "name": "Remote support"
+}
+```
+
+### Update a labour type
+
+`PUT /api/tickets/labour-types/{labour_type_id}` updates the stored code or name. Fields are optional; omit values you do not wish to change.
+
+```json
+{
+  "name": "Remote assistance"
+}
+```
+
+### Delete a labour type
+
+`DELETE /api/tickets/labour-types/{labour_type_id}` removes the labour type. Any ticket replies referencing the labour type are automatically reset to "No labour type".

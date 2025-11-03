@@ -1,9 +1,11 @@
+import asyncio
 import pytest
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 
 from app.api.dependencies import auth as auth_dependencies, database as database_dependencies
 from app.core.database import db
+from app.api.routes import tickets as tickets_api
 from app.main import (
     app,
     automations_service,
@@ -264,3 +266,38 @@ def test_update_reply_time_clears_minutes(monkeypatch, active_session):
     assert data["reply"].get("time_summary") in (None, "")
     assert update_calls["reply_id"] == reply["id"]
     assert update_calls["kwargs"] == {"minutes_spent": None, "is_billable": False}
+
+
+def test_list_labour_types_returns_records(monkeypatch, active_session):
+    async def fake_list_labour_types():
+        return [
+            {
+                "id": 3,
+                "code": "REMOTE",
+                "name": "Remote support",
+                "created_at": None,
+                "updated_at": None,
+            }
+        ]
+
+    monkeypatch.setattr(tickets_api.labour_types_service, "list_labour_types", fake_list_labour_types)
+
+    result = asyncio.run(
+        tickets_api.list_labour_types_endpoint(
+            current_user={
+                "id": active_session.user_id,
+                "email": "tech@example.com",
+                "is_super_admin": False,
+            }
+        )
+    )
+
+    assert result.labour_types == [
+        tickets_api.LabourTypeModel(
+            id=3,
+            code="REMOTE",
+            name="Remote support",
+            created_at=None,
+            updated_at=None,
+        )
+    ]

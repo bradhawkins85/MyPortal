@@ -85,18 +85,31 @@ async def build_ticket_invoices(
             continue
 
         replies = await fetch_replies(ticket_id) or []
+        labour_map: dict[tuple[str | None, str | None], dict[str, Any]] = {}
         billable_minutes = 0
         for reply in replies:
             minutes = _coerce_minutes(reply.get("minutes_spent"))
+            if minutes <= 0:
+                continue
             is_billable = reply.get("is_billable")
-            if is_billable:
-                billable_minutes += minutes
+            if not is_billable:
+                continue
+            billable_minutes += minutes
+            labour_code = str(reply.get("labour_type_code") or "").strip() or None
+            labour_name = str(reply.get("labour_type_name") or "").strip() or None
+            key = (labour_code, labour_name)
+            bucket = labour_map.get(key)
+            if not bucket:
+                bucket = {"minutes": 0, "code": labour_code, "name": labour_name}
+                labour_map[key] = bucket
+            bucket["minutes"] += minutes
         if billable_minutes <= 0:
             continue
 
         entry = {
             "ticket": ticket,
             "billable_minutes": billable_minutes,
+            "labour_groups": list(labour_map.values()) if labour_map else [],
         }
         tickets_by_company.setdefault(company_id, []).append(entry)
 
@@ -115,23 +128,49 @@ async def build_ticket_invoices(
         total_minutes = 0
         for item in entries:
             ticket = item.get("ticket") or {}
-            minutes = int(item.get("billable_minutes") or 0)
-            total_minutes += minutes
-            hours_decimal = _minutes_to_hours(minutes)
-            line_item: dict[str, Any] = {
-                "Description": f"Ticket {ticket.get('id')}: {ticket.get('subject', '').strip()}",
-                "Quantity": float(hours_decimal),
-                "UnitAmount": float(_quantize(rate_decimal)),
-                "AccountCode": str(account_code or "").strip(),
-            }
-            if tax_type:
-                line_item["TaxType"] = str(tax_type).strip()
-            line_items.append(line_item)
+            ticket_minutes = int(item.get("billable_minutes") or 0)
+            total_minutes += ticket_minutes
+            labour_groups = item.get("labour_groups") or []
+            if labour_groups:
+                for group in labour_groups:
+                    group_minutes = int(group.get("minutes") or 0)
+                    if group_minutes <= 0:
+                        continue
+                    hours_decimal = _minutes_to_hours(group_minutes)
+                    description = f"Ticket {ticket.get('id')}: {ticket.get('subject', '').strip()}"
+                    labour_name = str(group.get("name") or "").strip()
+                    if labour_name:
+                        description = f"{description} · {labour_name}"
+                    line_item: dict[str, Any] = {
+                        "Description": description,
+                        "Quantity": float(hours_decimal),
+                        "UnitAmount": float(_quantize(rate_decimal)),
+                        "AccountCode": str(account_code or "").strip(),
+                    }
+                    labour_code = str(group.get("code") or "").strip()
+                    if labour_code:
+                        line_item["ItemCode"] = labour_code
+                    if tax_type:
+                        line_item["TaxType"] = str(tax_type).strip()
+                    line_items.append(line_item)
+            else:
+                hours_decimal = _minutes_to_hours(ticket_minutes)
+                description = f"Ticket {ticket.get('id')}: {ticket.get('subject', '').strip()}"
+                line_item = {
+                    "Description": description,
+                    "Quantity": float(hours_decimal),
+                    "UnitAmount": float(_quantize(rate_decimal)),
+                    "AccountCode": str(account_code or "").strip(),
+                }
+                if tax_type:
+                    line_item["TaxType"] = str(tax_type).strip()
+                line_items.append(line_item)
             context_tickets.append(
                 {
                     "id": ticket.get("id"),
                     "subject": ticket.get("subject"),
-                    "billable_minutes": minutes,
+                    "billable_minutes": ticket_minutes,
+                    "labour_groups": labour_groups,
                 }
             )
 

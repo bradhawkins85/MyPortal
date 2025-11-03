@@ -48,8 +48,10 @@ async def emit_notification(
         }
 
     allow_in_app = bool(event_setting.get("allow_channel_in_app", True))
-    allow_email = bool(event_setting.get("allow_channel_email", False))
-    allow_sms = bool(event_setting.get("allow_channel_sms", False))
+    allow_email_value = event_setting.get("allow_channel_email")
+    allow_email = True if allow_email_value is None else bool(allow_email_value)
+    allow_sms_value = event_setting.get("allow_channel_sms")
+    allow_sms = True if allow_sms_value is None else bool(allow_sms_value)
     default_in_app = bool(event_setting.get("default_channel_in_app", True))
     default_email = bool(event_setting.get("default_channel_email", False))
     default_sms = bool(event_setting.get("default_channel_sms", False))

@@ -1,0 +1,7 @@
+{
+  "guid": "240ddc13-ae25-46a2-87a0-1a3698e19769",
+  "occurred_at": "2025-10-09T13:14Z",
+  "change_type": "Feature",
+  "summary": "Added viewport-aware pagination to the software licenses table so row counts follow the available space",
+  "content_hash": "a4a48eb358edb83f8167cc3bc92067cd1305a1d0be1e01bc57e1f7e9d288a99d"
+}

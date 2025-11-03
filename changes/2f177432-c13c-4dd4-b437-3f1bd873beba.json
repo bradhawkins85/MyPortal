@@ -1,0 +1,7 @@
+{
+  "guid": "2f177432-c13c-4dd4-b437-3f1bd873beba",
+  "occurred_at": "2025-10-18T10:45Z",
+  "change_type": "Feature",
+  "summary": "Added an orders dashboard with analytics, filtering, and navigation to restore customer order history in the new app",
+  "content_hash": "9d94fc8b379d9f8e7fef87eef0632c392edce4b09772caef7abb629bfdf3834a"
+}
