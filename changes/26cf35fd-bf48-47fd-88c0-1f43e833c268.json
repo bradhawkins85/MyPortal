@@ -1,0 +1,7 @@
+{
+  "guid": "26cf35fd-bf48-47fd-88c0-1f43e833c268",
+  "occurred_at": "2025-10-18T09:05Z",
+  "change_type": "Feature",
+  "summary": "Added customer cart support with persistent checkout, webhook retries, and Discord stock notifications for shop orders",
+  "content_hash": "93911068e2adc26eb31cb556859e0ee5c4896a38f918275b6df1b2e333fbcf8d"
+}

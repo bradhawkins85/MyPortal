@@ -15,6 +15,10 @@ from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
 from app.repositories import tickets as tickets_repo
 from app.schemas.tickets import (
+    LabourTypeCreateRequest,
+    LabourTypeListResponse,
+    LabourTypeModel,
+    LabourTypeUpdateRequest,
     SyncroTicketImportRequest,
     SyncroTicketImportSummary,
     TicketCreate,
@@ -36,6 +40,7 @@ from app.schemas.tickets import (
     TicketWatcherUpdate,
 )
 from app.security.session import SessionData
+from app.services import labour_types as labour_types_service
 from app.services import ticket_importer, tickets as tickets_service
 from app.services.sanitization import sanitize_rich_text
 
@@ -417,6 +422,12 @@ async def add_reply(
             detail="Reply body cannot be empty.",
         )
 
+    labour_type_id = payload.labour_type_id if has_helpdesk_access else None
+    if labour_type_id is not None:
+        labour_record = await labour_types_service.get_labour_type(labour_type_id)
+        if not labour_record:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Labour type not found")
+
     reply = await tickets_repo.create_reply(
         ticket_id=ticket_id,
         author_id=session.user_id,
@@ -424,6 +435,7 @@ async def add_reply(
         is_internal=payload.is_internal if has_helpdesk_access else False,
         minutes_spent=payload.minutes_spent if has_helpdesk_access else None,
         is_billable=payload.is_billable if has_helpdesk_access else False,
+        labour_type_id=labour_type_id,
     )
     try:
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
@@ -443,7 +455,8 @@ async def add_reply(
     minutes_value = reply_payload.get("minutes_spent")
     minutes_spent = minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
     billable_flag = bool(reply_payload.get("is_billable"))
-    time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag)
+    labour_type_name = reply_payload.get("labour_type_name")
+    time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag, labour_type_name)
     if time_summary:
         reply_payload["time_summary"] = time_summary
     await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
@@ -470,6 +483,14 @@ async def update_reply_time_entry(
         update_kwargs["minutes_spent"] = payload.minutes_spent
     if "is_billable" in fields_set and payload.is_billable is not None:
         update_kwargs["is_billable"] = payload.is_billable
+    if "labour_type_id" in fields_set:
+        if payload.labour_type_id is None:
+            update_kwargs["labour_type_id"] = None
+        else:
+            labour_record = await labour_types_service.get_labour_type(payload.labour_type_id)
+            if not labour_record:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Labour type not found")
+            update_kwargs["labour_type_id"] = payload.labour_type_id
     if not update_kwargs:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -483,7 +504,8 @@ async def update_reply_time_entry(
     minutes_value = updated.get("minutes_spent")
     minutes_spent = minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
     billable_flag = bool(updated.get("is_billable"))
-    time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag)
+    labour_type_name = updated.get("labour_type_name")
+    time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag, labour_type_name)
     reply_payload = {
         **updated,
         "minutes_spent": minutes_spent,
@@ -518,4 +540,65 @@ async def update_watchers(
         actor=current_user,
     )
     return await _build_ticket_detail(ticket_id, current_user)
+
+
+@router.get("/labour-types", response_model=LabourTypeListResponse)
+async def list_labour_types_endpoint(
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> LabourTypeListResponse:
+    labour_types = await labour_types_service.list_labour_types()
+    items = [
+        LabourTypeModel(
+            id=int(item.get("id")),
+            code=str(item.get("code") or ""),
+            name=str(item.get("name") or ""),
+            created_at=item.get("created_at"),
+            updated_at=item.get("updated_at"),
+        )
+        for item in labour_types
+        if item.get("id") is not None
+    ]
+    return LabourTypeListResponse(labour_types=items)
+
+
+@router.post("/labour-types", response_model=LabourTypeModel, status_code=status.HTTP_201_CREATED)
+async def create_labour_type_endpoint(
+    payload: LabourTypeCreateRequest,
+    current_user: dict = Depends(require_super_admin),
+) -> LabourTypeModel:
+    try:
+        record = await labour_types_service.create_labour_type(code=payload.code, name=payload.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return LabourTypeModel(**record)
+
+
+@router.put("/labour-types/{labour_type_id}", response_model=LabourTypeModel)
+async def update_labour_type_endpoint(
+    labour_type_id: int,
+    payload: LabourTypeUpdateRequest,
+    current_user: dict = Depends(require_super_admin),
+) -> LabourTypeModel:
+    try:
+        record = await labour_types_service.update_labour_type(
+            labour_type_id,
+            code=payload.code,
+            name=payload.name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Labour type not found")
+    return LabourTypeModel(**record)
+
+
+@router.delete("/labour-types/{labour_type_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_labour_type_endpoint(
+    labour_type_id: int,
+    current_user: dict = Depends(require_super_admin),
+) -> None:
+    existing = await labour_types_service.get_labour_type(labour_type_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Labour type not found")
+    await labour_types_service.delete_labour_type(labour_type_id)
 

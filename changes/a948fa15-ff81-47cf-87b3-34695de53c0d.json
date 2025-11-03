@@ -1,0 +1,7 @@
+{
+  "guid": "a948fa15-ff81-47cf-87b3-34695de53c0d",
+  "occurred_at": "2025-10-15T11:45Z",
+  "change_type": "Fix",
+  "summary": "Restored shop product deletion via FastAPI with secure file cleanup and redirect handling",
+  "content_hash": "6974f80a4bc9154feb155374b80e398c0af0a0b352dd6e11e3aaa868a5e1b832"
+}

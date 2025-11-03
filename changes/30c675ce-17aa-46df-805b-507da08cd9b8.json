@@ -1,0 +1,7 @@
+{
+  "guid": "30c675ce-17aa-46df-805b-507da08cd9b8",
+  "occurred_at": "2025-10-22T02:23Z",
+  "change_type": "Feature",
+  "summary": "Added quick add dropdowns for automation trigger filters and module-specific action templates",
+  "content_hash": "7a89965ebd7bef2981ef46285ca32d5e2f3442caa0516527e960cd80fb75774d"
+}

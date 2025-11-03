@@ -1,0 +1,7 @@
+{
+  "guid": "716fa2a2-986f-4ddd-8a5a-1cb2658900d3",
+  "occurred_at": "2025-10-15T09:20Z",
+  "change_type": "Fix",
+  "summary": "Removed an extra Jinja endif in base.html so the dashboard template renders without 500 errors",
+  "content_hash": "0e8489aac6e1855175dad1745073064491b9f66a1380e70e99503c4fa67cddbf"
+}

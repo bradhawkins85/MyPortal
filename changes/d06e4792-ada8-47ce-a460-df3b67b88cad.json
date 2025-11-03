@@ -1,0 +1,7 @@
+{
+  "guid": "d06e4792-ada8-47ce-a460-df3b67b88cad",
+  "occurred_at": "2025-10-11T09:30Z",
+  "change_type": "Fix",
+  "summary": "Added server-rendered CSRF tokens across portal forms so submissions succeed even without client-side scripts",
+  "content_hash": "e766beb166341c9abaab3da889780f81e3cbf19d6ad8f16026016611db8b6234"
+}

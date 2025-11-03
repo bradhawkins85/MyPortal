@@ -85,12 +85,18 @@ def _normalise_ticket(row: dict[str, Any]) -> TicketRecord:
 
 def _normalise_reply(row: dict[str, Any]) -> TicketRecord:
     record = dict(row)
-    for key in ("id", "ticket_id", "author_id", "minutes_spent"):
+    for key in ("id", "ticket_id", "author_id", "minutes_spent", "labour_type_id"):
         if key in record and record[key] is not None:
             record[key] = int(record[key])
     record["created_at"] = _make_aware(record.get("created_at"))
     if "is_billable" in record:
         record["is_billable"] = bool(record.get("is_billable"))
+    labour_name = record.get("labour_type_name")
+    if labour_name is not None:
+        record["labour_type_name"] = str(labour_name)
+    labour_code = record.get("labour_type_code")
+    if labour_code is not None:
+        record["labour_type_code"] = str(labour_code)
     return record
 
 
@@ -506,6 +512,7 @@ async def create_reply(
     is_billable: bool = False,
     external_reference: str | None = None,
     created_at: datetime | None = None,
+    labour_type_id: int | None = None,
 ) -> TicketRecord:
     columns = ["ticket_id", "author_id", "body", "is_internal", "is_billable"]
     params: list[Any] = [
@@ -518,6 +525,9 @@ async def create_reply(
     if minutes_spent is not None:
         columns.append("minutes_spent")
         params.append(minutes_spent)
+    if labour_type_id is not None:
+        columns.append("labour_type_id")
+        params.append(labour_type_id)
     if external_reference is not None:
         columns.append("external_reference")
         params.append(external_reference)
@@ -533,7 +543,15 @@ async def create_reply(
         tuple(params),
     )
     if reply_id:
-        row = await db.fetch_one("SELECT * FROM ticket_replies WHERE id = %s", (reply_id,))
+        row = await db.fetch_one(
+            """
+            SELECT tr.*, lt.name AS labour_type_name, lt.code AS labour_type_code
+            FROM ticket_replies tr
+            LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id
+            WHERE tr.id = %s
+            """,
+            (reply_id,),
+        )
         if row:
             return _normalise_reply(row)
     fallback_row: dict[str, Any] = {
@@ -546,6 +564,7 @@ async def create_reply(
         "is_billable": 1 if is_billable else 0,
         "external_reference": external_reference,
         "created_at": created_at,
+        "labour_type_id": labour_type_id,
     }
     return _normalise_reply(fallback_row)
 
@@ -557,10 +576,11 @@ async def list_replies(ticket_id: int, *, include_internal: bool = True) -> list
         where += " AND is_internal = 0"
     rows = await db.fetch_all(
         f"""
-        SELECT *
-        FROM ticket_replies
+        SELECT tr.*, lt.name AS labour_type_name, lt.code AS labour_type_code
+        FROM ticket_replies tr
+        LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id
         WHERE {where}
-        ORDER BY created_at ASC
+        ORDER BY tr.created_at ASC
         """,
         tuple(params),
     )
@@ -569,7 +589,12 @@ async def list_replies(ticket_id: int, *, include_internal: bool = True) -> list
 
 async def get_reply_by_id(reply_id: int) -> TicketRecord | None:
     row = await db.fetch_one(
-        "SELECT * FROM ticket_replies WHERE id = %s",
+        """
+        SELECT tr.*, lt.name AS labour_type_name, lt.code AS labour_type_code
+        FROM ticket_replies tr
+        LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id
+        WHERE tr.id = %s
+        """,
         (reply_id,),
     )
     if row:
@@ -582,6 +607,7 @@ async def update_reply(
     *,
     minutes_spent: int | None | object = _UNSET,
     is_billable: bool | object = _UNSET,
+    labour_type_id: int | None | object = _UNSET,
 ) -> TicketRecord | None:
     updates: list[str] = []
     params: list[Any] = []
@@ -594,6 +620,12 @@ async def update_reply(
     if is_billable is not _UNSET:
         updates.append("is_billable = %s")
         params.append(1 if bool(is_billable) else 0)
+    if labour_type_id is not _UNSET:
+        if labour_type_id is None:
+            updates.append("labour_type_id = NULL")
+        else:
+            updates.append("labour_type_id = %s")
+            params.append(int(labour_type_id))
     if updates:
         params.append(reply_id)
         await db.execute(

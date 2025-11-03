@@ -1,0 +1,7 @@
+{
+  "guid": "b59c8fb0-af9e-446c-b8ce-38ecdf9ac9c3",
+  "occurred_at": "2025-10-14T09:15Z",
+  "change_type": "Fix",
+  "summary": "Reinstated shop admin product import via stock feed with FastAPI endpoint and service coverage",
+  "content_hash": "503ba5147e0c477724ff9f04fb2578e1b1fc0f2233bc86ac7b97eeb71c819535"
+}

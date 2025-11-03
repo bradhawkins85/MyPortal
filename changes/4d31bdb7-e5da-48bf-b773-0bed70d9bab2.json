@@ -1,0 +1,7 @@
+{
+  "guid": "4d31bdb7-e5da-48bf-b773-0bed70d9bab2",
+  "occurred_at": "2025-12-21T09:30Z",
+  "change_type": "Feature",
+  "summary": "Added configurable auto-refresh websocket client with toast notifications before page reloads",
+  "content_hash": "4c2421b014000d1f18e0d65d834a4af457eb5edc8e29d42f80d1bc8bd661eb50"
+}

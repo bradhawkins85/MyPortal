@@ -1,0 +1,7 @@
+{
+  "guid": "b47fe640-1b40-42ba-8b3c-d3f0a016eb8c",
+  "occurred_at": "2025-09-18T02:45Z",
+  "change_type": "Fix",
+  "summary": "Always proxy OpnForm content and show an in-portal unavailable message when upstream embedding is blocked",
+  "content_hash": "8581ca67c3b1b63a574331b4d4c60aa24765253bff3a545d5cc82fe8fa16df9b"
+}

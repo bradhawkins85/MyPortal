@@ -1,0 +1,7 @@
+{
+  "guid": "ed4dde17-106c-4a93-a666-2eebfee165f5",
+  "occurred_at": "2025-10-21T13:20Z",
+  "change_type": "Feature",
+  "summary": "Added viewport-aware pagination to the asset inventory with dynamic counts and table refresh hooks",
+  "content_hash": "41e54763694207684a96ef53d1ca0facf4cd3528282c64b87f146b6f18d99020"
+}

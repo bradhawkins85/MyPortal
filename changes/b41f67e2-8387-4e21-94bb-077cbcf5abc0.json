@@ -1,0 +1,7 @@
+{
+  "guid": "b41f67e2-8387-4e21-94bb-077cbcf5abc0",
+  "occurred_at": "2025-10-10T03:15Z",
+  "change_type": "Fix",
+  "summary": "Prevented switch-company payload parsing from failing after CSRF middleware consumes the request body stream",
+  "content_hash": "26f6b8c96c540d68f8009b737a9656ff007d881ae105088913998163dbb2826d"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "d7d6edee-5d77-482e-8e19-a14e5f5cf797",
+  "occurred_at": "2025-10-08T13:23Z",
+  "change_type": "Feature",
+  "summary": "Restored company management console with invitations, permissions, and admin UI parity",
+  "content_hash": "86c6ef3dcfba8c4c40603176783fce1109032fd795c314f3ea26edefc45cd432"
+}

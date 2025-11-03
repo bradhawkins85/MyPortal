@@ -1,0 +1,7 @@
+{
+  "guid": "45047cf9-9e0c-46b9-ad25-92173b8b37fb",
+  "occurred_at": "2025-12-13T08:45Z",
+  "change_type": "Fix",
+  "summary": "Recorded Syncro API requests for ticket imports in the webhook monitor with manual success and failure logging",
+  "content_hash": "86c9fcc695af8a59c96596fbc5fdfde16550334253ac57db35b95952830499b4"
+}
