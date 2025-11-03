@@ -417,6 +417,90 @@ async def get_ticket_by_external_reference(external_reference: str) -> TicketRec
     return _normalise_ticket(row) if row else None
 
 
+async def list_ticket_assets(ticket_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT
+            ta.asset_id,
+            ta.created_at,
+            a.name,
+            a.serial_number,
+            a.status,
+            a.type,
+            a.os_name
+        FROM ticket_assets AS ta
+        INNER JOIN assets AS a ON a.id = ta.asset_id
+        WHERE ta.ticket_id = %s
+        ORDER BY a.name ASC, ta.asset_id ASC
+        """,
+        (ticket_id,),
+    )
+    assets: list[dict[str, Any]] = []
+    for row in rows or []:
+        asset_id = row.get("asset_id")
+        try:
+            asset_id_int = int(asset_id)
+        except (TypeError, ValueError):
+            continue
+        asset = {
+            "asset_id": asset_id_int,
+            "name": str(row.get("name") or "").strip() or f"Asset {asset_id_int}",
+            "serial_number": str(row.get("serial_number") or "").strip() or None,
+            "status": str(row.get("status") or "").strip() or None,
+            "type": str(row.get("type") or "").strip() or None,
+            "os_name": str(row.get("os_name") or "").strip() or None,
+            "linked_at": _make_aware(row.get("created_at")),
+        }
+        assets.append(asset)
+    return assets
+
+
+async def replace_ticket_assets(ticket_id: int, asset_ids: Iterable[int]) -> list[dict[str, Any]]:
+    normalised_ids: list[int] = []
+    seen: set[int] = set()
+    for raw_id in asset_ids:
+        try:
+            candidate = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if candidate <= 0 or candidate in seen:
+            continue
+        seen.add(candidate)
+        normalised_ids.append(candidate)
+
+    existing_rows = await db.fetch_all(
+        "SELECT asset_id FROM ticket_assets WHERE ticket_id = %s",
+        (ticket_id,),
+    )
+    existing_ids: set[int] = set()
+    for row in existing_rows or []:
+        asset_id = row.get("asset_id")
+        try:
+            existing_ids.add(int(asset_id))
+        except (TypeError, ValueError):
+            continue
+
+    new_ids = set(normalised_ids)
+    to_remove = existing_ids - new_ids
+    to_add = new_ids - existing_ids
+
+    if to_remove:
+        placeholders = ", ".join(["%s"] * len(to_remove))
+        params: list[Any] = [ticket_id, *sorted(to_remove)]
+        await db.execute(
+            f"DELETE FROM ticket_assets WHERE ticket_id = %s AND asset_id IN ({placeholders})",
+            tuple(params),
+        )
+
+    for asset_id in sorted(to_add):
+        await db.execute(
+            "INSERT INTO ticket_assets (ticket_id, asset_id) VALUES (%s, %s)",
+            (ticket_id, asset_id),
+        )
+
+    return await list_ticket_assets(ticket_id)
+
+
 async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     if not fields:
         return await get_ticket(ticket_id)

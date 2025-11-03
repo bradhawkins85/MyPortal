@@ -28,7 +28,8 @@ async def list_company_assets(company_id: int) -> list[dict[str, Any]]:
             performance_score,
             warranty_status,
             warranty_end_date,
-            syncro_asset_id
+            syncro_asset_id,
+            tactical_asset_id
         FROM assets
         WHERE company_id = %s
         ORDER BY name ASC, id ASC
@@ -146,8 +147,11 @@ async def upsert_asset(
     warranty_status: str | None = None,
     warranty_end_date: Any = None,
     syncro_asset_id: str | None = None,
+    tactical_asset_id: str | None = None,
+    match_name: bool = False,
 ) -> None:
     sync_id = str(syncro_asset_id) if syncro_asset_id else None
+    tactical_id = str(tactical_asset_id) if tactical_asset_id else None
     ram_value = _coerce_float(ram_gb)
     approx_value = _coerce_float(approx_age)
     performance_value = _coerce_float(performance_score)
@@ -160,10 +164,20 @@ async def upsert_asset(
             "SELECT id FROM assets WHERE company_id = %s AND syncro_asset_id = %s",
             (company_id, sync_id),
         )
+    if not row and tactical_id:
+        row = await db.fetch_one(
+            "SELECT id FROM assets WHERE company_id = %s AND tactical_asset_id = %s",
+            (company_id, tactical_id),
+        )
     if not row and serial_number:
         row = await db.fetch_one(
             "SELECT id FROM assets WHERE company_id = %s AND serial_number = %s",
             (company_id, serial_number),
+        )
+    if not row and match_name and name:
+        row = await db.fetch_one(
+            "SELECT id FROM assets WHERE company_id = %s AND LOWER(name) = LOWER(%s)",
+            (company_id, name),
         )
 
     params = (
@@ -183,8 +197,9 @@ async def upsert_asset(
         warranty_status,
         warranty_end_db,
         sync_id,
+        tactical_id,
         serial_number,
-        )
+    )
 
     if row:
         await db.execute(
@@ -206,6 +221,7 @@ async def upsert_asset(
                 warranty_status = %s,
                 warranty_end_date = %s,
                 syncro_asset_id = %s,
+                tactical_asset_id = %s,
                 serial_number = %s
             WHERE id = %s
             """,
@@ -232,8 +248,9 @@ async def upsert_asset(
                 performance_score,
                 warranty_status,
                 warranty_end_date,
-                syncro_asset_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                syncro_asset_id,
+                tactical_asset_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 company_id,
@@ -254,6 +271,7 @@ async def upsert_asset(
                 warranty_status,
                 warranty_end_db,
                 sync_id,
+                tactical_id,
             ),
         )
 

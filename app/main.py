@@ -80,6 +80,7 @@ from loguru import logger
 from app.repositories import audit_logs as audit_repo
 from app.repositories import api_keys as api_key_repo
 from app.repositories import auth as auth_repo
+from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import change_log as change_log_repo
@@ -2633,6 +2634,10 @@ async def _render_company_edit_page(
         "syncro_company_id": _string_value(
             "syncro_company_id", (company_record.get("syncro_company_id") or "").strip()
         ),
+        "tacticalrmm_client_id": _string_value(
+            "tacticalrmm_client_id",
+            (company_record.get("tacticalrmm_client_id") or "").strip(),
+        ),
         "xero_id": _string_value("xero_id", (company_record.get("xero_id") or "").strip()),
         "email_domains": _string_value("email_domains", default_email_domains),
         "is_vip": _bool_value("is_vip", bool(company_record.get("is_vip"))),
@@ -3075,6 +3080,7 @@ async def assets_page(request: Request):
             "last_user": _clean_text(row.get("last_user")),
             "warranty_status": _clean_text(row.get("warranty_status")),
             "syncro_asset_id": _clean_text(row.get("syncro_asset_id")),
+            "tactical_asset_id": _clean_text(row.get("tactical_asset_id")),
         }
 
         ram_display, ram_sort = _format_number(row.get("ram_gb"))
@@ -5918,6 +5924,7 @@ async def admin_create_company(request: Request):
     form = await request.form()
     name = str(form.get("name", "")).strip()
     syncro_company_id = (str(form.get("syncroCompanyId", "")).strip() or None)
+    tactical_client_id = (str(form.get("tacticalClientId", "")).strip() or None)
     xero_id = (str(form.get("xeroId", "")).strip() or None)
     is_vip = _parse_bool(form.get("isVip"))
     raw_email_domains = form.get("emailDomains")
@@ -5950,6 +5957,8 @@ async def admin_create_company(request: Request):
         payload["syncro_company_id"] = syncro_company_id
     if xero_id:
         payload["xero_id"] = xero_id
+    if tactical_client_id:
+        payload["tacticalrmm_client_id"] = tactical_client_id
     try:
         created = await company_repo.create_company(**payload)
     except Exception as exc:  # pragma: no cover - defensive logging
@@ -6254,6 +6263,7 @@ async def admin_update_company(company_id: int, request: Request):
     form = await request.form()
     name = str(form.get("name", "")).strip()
     syncro_company_raw = str(form.get("syncroCompanyId", "")).strip()
+    tactical_client_raw = str(form.get("tacticalClientId", "")).strip()
     xero_id_raw = str(form.get("xeroId", "")).strip()
     is_vip = _parse_bool(form.get("isVip"))
     raw_email_domains = form.get("emailDomains")
@@ -6261,6 +6271,7 @@ async def admin_update_company(company_id: int, request: Request):
     form_values = {
         "name": name,
         "syncro_company_id": syncro_company_raw,
+        "tacticalrmm_client_id": tactical_client_raw,
         "xero_id": xero_id_raw,
         "email_domains": email_domains_text,
         "is_vip": is_vip,
@@ -6289,11 +6300,13 @@ async def admin_update_company(company_id: int, request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     syncro_company_id = syncro_company_raw or None
+    tactical_client_id = tactical_client_raw or None
     xero_id = xero_id_raw or None
     updates: dict[str, Any] = {
         "name": name,
         "is_vip": 1 if is_vip else 0,
         "syncro_company_id": syncro_company_id,
+        "tacticalrmm_client_id": tactical_client_id,
         "xero_id": xero_id,
         "email_domains": email_domains,
     }
@@ -9615,6 +9628,47 @@ async def _render_ticket_detail(
         seen_priorities.add(normalised)
         priority_options.append(option_str)
 
+    ticket_assets = await tickets_repo.list_ticket_assets(ticket_id)
+    asset_selection: list[int] = []
+    for linked in ticket_assets:
+        asset_id = linked.get("asset_id")
+        try:
+            asset_selection.append(int(asset_id))
+        except (TypeError, ValueError):
+            continue
+
+    asset_options: list[dict[str, Any]] = []
+    if ticket_company_id is not None:
+        company_assets = await assets_repo.list_company_assets(ticket_company_id)
+
+        def _format_asset_label(asset_row: Mapping[str, Any]) -> str:
+            asset_name = str(asset_row.get("name") or "").strip() or "Asset"
+            serial_value = str(asset_row.get("serial_number") or "").strip()
+            status_value = str(asset_row.get("status") or "").strip()
+            parts = [asset_name]
+            if serial_value:
+                parts.append(f"SN {serial_value}")
+            if status_value:
+                parts.append(status_value.title())
+            return " · ".join(parts)
+
+        for asset_row in company_assets:
+            asset_id = asset_row.get("id")
+            if asset_id is None:
+                continue
+            try:
+                asset_id_int = int(asset_id)
+            except (TypeError, ValueError):
+                continue
+            asset_options.append(
+                {
+                    "id": asset_id_int,
+                    "label": _format_asset_label(asset_row),
+                }
+            )
+
+    asset_options.sort(key=lambda option: option["label"].lower())
+
     extra = {
         "title": f"Ticket #{ticket_id}",
         "ticket": ticket,
@@ -9643,6 +9697,9 @@ async def _render_ticket_detail(
         "ticket_requester_options": requester_options,
         "ticket_priority_options": priority_options,
         "ticket_return_url": request.url.path,
+        "ticket_assets": ticket_assets,
+        "ticket_asset_options": asset_options,
+        "ticket_asset_selection": asset_selection,
         "can_delete_ticket": bool(user.get("is_super_admin")),
         "success_message": success_message,
         "error_message": error_message,
@@ -10581,6 +10638,42 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
         "external_reference": external_reference,
     }
 
+    raw_asset_values = form.getlist("assetIds") if hasattr(form, "getlist") else []
+    selected_asset_ids: list[int] = []
+    for raw_value in raw_asset_values:
+        try:
+            asset_id_value = int(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if asset_id_value <= 0 or asset_id_value in selected_asset_ids:
+            continue
+        selected_asset_ids.append(asset_id_value)
+
+    if selected_asset_ids and final_company_id is None:
+        return await _render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Link the ticket to a company before assigning assets.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    validated_asset_ids: list[int] = []
+    if selected_asset_ids and final_company_id is not None:
+        for asset_id in selected_asset_ids:
+            asset = await assets_repo.get_asset_by_id(asset_id)
+            if not asset or asset.get("company_id") != final_company_id:
+                return await _render_ticket_detail(
+                    request,
+                    current_user,
+                    ticket_id=ticket_id,
+                    error_message="Assets must belong to the linked company.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+            validated_asset_ids.append(asset_id)
+    elif not selected_asset_ids:
+        validated_asset_ids = []
+
     await tickets_repo.update_ticket(ticket_id, **update_fields)
     await tickets_repo.set_ticket_status(ticket_id, status_value)
     if description_raw is not None:
@@ -10593,6 +10686,8 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
         actor_type="technician",
         actor=current_user,
     )
+
+    await tickets_repo.replace_ticket_assets(ticket_id, validated_asset_ids)
 
     message = quote("Ticket details updated.")
     destination = f"/admin/tickets/{ticket_id}?success={message}"
