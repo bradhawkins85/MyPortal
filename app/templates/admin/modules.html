@@ -210,6 +210,76 @@
                   <input id="chatgpt-system-user" name="settings.system_user_id" class="form-input" value="{{ settings.system_user_id or '' }}" placeholder="123" />
                   <p class="form-help">The ticket reply author when ChatGPT posts updates. Override per request by sending author_id.</p>
                 </div>
+              {% elif module.slug == 'xero' %}
+                <div class="form-field">
+                  <label class="form-label" for="xero-client-id">Client ID</label>
+                  <input id="xero-client-id" name="settings.client_id" class="form-input" value="{{ settings.client_id or '' }}" autocomplete="off" />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="xero-client-secret">Client secret</label>
+                  <input
+                    id="xero-client-secret"
+                    name="settings.client_secret"
+                    class="form-input"
+                    type="password"
+                    autocomplete="off"
+                    value="{{ settings.client_secret or '' }}"
+                    placeholder="Enter a new client secret"
+                  />
+                  <p class="form-help">Secrets are stored securely. Leave blank or enter ******** to keep the existing value.</p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="xero-refresh-token">Refresh token</label>
+                  <input
+                    id="xero-refresh-token"
+                    name="settings.refresh_token"
+                    class="form-input"
+                    type="password"
+                    autocomplete="off"
+                    value="{{ settings.refresh_token or '' }}"
+                    placeholder="Enter a new refresh token"
+                  />
+                  <p class="form-help">Tokens are encrypted before storage. Leave blank or enter ******** to keep the existing value.</p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="xero-tenant-id">Tenant ID</label>
+                  <input id="xero-tenant-id" name="settings.tenant_id" class="form-input" value="{{ settings.tenant_id or '' }}" autocomplete="off" />
+                </div>
+                <div class="form-field form-field--inline">
+                  <label class="form-label" for="xero-hourly-rate">Default hourly rate</label>
+                  <input
+                    id="xero-hourly-rate"
+                    name="settings.default_hourly_rate"
+                    class="form-input"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value="{{ settings.default_hourly_rate or '' }}"
+                    placeholder="150.00"
+                  />
+                </div>
+                <div class="form-field form-field--inline">
+                  <label class="form-label" for="xero-account-code">Account code</label>
+                  <input id="xero-account-code" name="settings.account_code" class="form-input" value="{{ settings.account_code or '' }}" placeholder="400" />
+                </div>
+                <div class="form-field form-field--inline">
+                  <label class="form-label" for="xero-tax-type">Tax type</label>
+                  <input id="xero-tax-type" name="settings.tax_type" class="form-input" value="{{ settings.tax_type or '' }}" placeholder="OUTPUT" />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="xero-line-amount-type">Line amount type</label>
+                  <select id="xero-line-amount-type" name="settings.line_amount_type" class="form-input">
+                    {% set amount_type = (settings.line_amount_type or 'Exclusive') %}
+                    {% for option in ['Exclusive', 'Inclusive', 'NoTax'] %}
+                      <option value="{{ option }}" {% if amount_type == option %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="xero-reference-prefix">Reference prefix</label>
+                  <input id="xero-reference-prefix" name="settings.reference_prefix" class="form-input" value="{{ settings.reference_prefix or '' }}" placeholder="Support" />
+                  <p class="form-help">Prefixes are prepended to generated invoice references.</p>
+                </div>
               {% else %}
                 {% for key, value in settings.items() %}
                   <div class="form-field">
@@ -219,7 +289,7 @@
                 {% endfor %}
               {% endif %}
               <div class="form-actions">
-                <button type="submit" class="button button--primary">Update module</button>
+                <button type="submit" class="button">Save settings</button>
               </div>
             </form>
             {% if module.slug == 'syncro' %}
