@@ -211,13 +211,17 @@ html {
   border-radius: 0.75rem;
 }
 
+
 .sidebar__footer {
   margin-top: auto;
   padding-top: var(--space-gap-base);
   display: flex;
+  align-items: center;
+  gap: var(--space-gap-tight);
 }
 
-.sidebar__footer-link {
+.sidebar__footer-link,
+.sidebar__footer-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -229,11 +233,23 @@ html {
   transition: background 0.2s ease, color 0.2s ease;
 }
 
+.sidebar__footer-button {
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
 .sidebar__footer-link:hover,
-.sidebar__footer-link:focus-visible {
+.sidebar__footer-link:focus-visible,
+.sidebar__footer-button:hover,
+.sidebar__footer-button:focus-visible {
   background: rgba(148, 163, 184, 0.25);
   color: #f8fafc;
   outline: none;
+}
+
+.sidebar__footer-button:focus-visible {
+  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.4);
 }
 
 .sidebar__footer-icon {
