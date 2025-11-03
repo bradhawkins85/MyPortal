@@ -5,6 +5,10 @@ file. The template at `.env.example` lists every supported key alongside
 recommended defaults. Copy the template to `.env` (or point your process manager
 at a dedicated path) and edit values as required for the deployment target.
 
+For integration-specific guidance refer to the dedicated documentation under
+`docs/`. For example, [docs/xero.md](xero.md) outlines the callback URL and
+credential requirements for the Xero module.
+
 ## UI Auto Refresh
 
 `ENABLE_AUTO_REFRESH` controls whether browser clients automatically poll the
