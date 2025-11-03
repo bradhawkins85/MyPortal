@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime, time, timezone
 from typing import Any
 
-from app.services import message_templates, system_variables
+from app.services import dynamic_variables, message_templates, system_variables
 
 _TOKEN_PATTERN = re.compile(r"\{\{\s*([^\s{}]+)\s*\}\}")
 _UPPER_TOKEN_SANITISER = re.compile(r"[^A-Z0-9]+")
@@ -24,6 +24,44 @@ def build_base_token_map(context: Mapping[str, Any] | None) -> dict[str, Any]:
     if context:
         tokens.update(system_variables.build_context_variables(context))
     return tokens
+
+
+def _collect_tokens(value: Any) -> set[str]:
+    tokens: set[str] = set()
+    if isinstance(value, str):
+        tokens.update(match.group(1) for match in _TOKEN_PATTERN.finditer(value))
+        return tokens
+    if isinstance(value, Mapping):
+        for item in value.values():
+            tokens.update(_collect_tokens(item))
+        return tokens
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        for item in value:
+            tokens.update(_collect_tokens(item))
+        return tokens
+    return tokens
+
+
+async def build_async_base_token_map(
+    context: Mapping[str, Any] | None,
+    *,
+    tokens: Iterable[str] | None = None,
+    include_templates: bool = True,
+) -> dict[str, Any]:
+    base_tokens = build_base_token_map(context)
+    required_tokens: set[str] = set(tokens or [])
+    if include_templates:
+        for template in message_templates.iter_templates():
+            required_tokens.update(_collect_tokens(str(template.get("content") or "")))
+    if required_tokens:
+        dynamic_values = await dynamic_variables.build_dynamic_token_map(
+            required_tokens,
+            context,
+            base_tokens=base_tokens,
+        )
+        if dynamic_values:
+            base_tokens.update(dynamic_values)
+    return base_tokens
 
 
 def _coerce_template_value(value: Any) -> Any:
@@ -145,6 +183,25 @@ def render_string(
     return _TOKEN_PATTERN.sub(_replace, value)
 
 
+async def render_string_async(
+    value: str,
+    context: Mapping[str, Any] | None,
+    *,
+    include_templates: bool = True,
+) -> Any:
+    base_tokens = await build_async_base_token_map(
+        context,
+        tokens=_collect_tokens(value),
+        include_templates=include_templates,
+    )
+    return render_string(
+        value,
+        context,
+        base_tokens=base_tokens,
+        include_templates=include_templates,
+    )
+
+
 def render_value(
     value: Any,
     context: Mapping[str, Any] | None,
@@ -172,6 +229,25 @@ def render_value(
             for item in value
         ]
     return value
+
+
+async def render_value_async(
+    value: Any,
+    context: Mapping[str, Any] | None,
+    *,
+    include_templates: bool = True,
+) -> Any:
+    base_tokens = await build_async_base_token_map(
+        context,
+        tokens=_collect_tokens(value),
+        include_templates=include_templates,
+    )
+    return render_value(
+        value,
+        context,
+        base_tokens=base_tokens,
+        include_templates=include_templates,
+    )
 
 
 def render_payload(value: Any, context: Mapping[str, Any] | None) -> Any:

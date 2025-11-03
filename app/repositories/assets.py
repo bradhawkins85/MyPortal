@@ -184,7 +184,7 @@ async def upsert_asset(
         warranty_end_db,
         sync_id,
         serial_number,
-    )
+        )
 
     if row:
         await db.execute(
@@ -256,3 +256,39 @@ async def upsert_asset(
                 sync_id,
             ),
         )
+
+
+async def count_active_assets(*, company_id: Any = None, since: Any = None) -> int:
+    """Return the number of assets that have synced since the provided date."""
+
+    filters: list[str] = ["1 = 1"]
+    params: list[Any] = []
+
+    def _coerce_company_id(value: Any) -> int | None:
+        try:
+            candidate = int(value)
+        except (TypeError, ValueError):
+            return None
+        if candidate < 0:
+            return None
+        return candidate
+
+    company_value = _coerce_company_id(company_id)
+    if company_value is not None:
+        filters.append("company_id = %s")
+        params.append(company_value)
+
+    since_dt = _ensure_datetime(since)
+    if since_dt:
+        filters.append("last_sync IS NOT NULL")
+        filters.append("last_sync >= %s")
+        params.append(since_dt.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"))
+
+    sql = f"SELECT COUNT(*) AS total FROM assets WHERE {' AND '.join(filters)}"
+    row = await db.fetch_one(sql, tuple(params) if params else None)
+    if not row:
+        return 0
+    try:
+        return int(row.get("total") or 0)
+    except (TypeError, ValueError):
+        return 0
