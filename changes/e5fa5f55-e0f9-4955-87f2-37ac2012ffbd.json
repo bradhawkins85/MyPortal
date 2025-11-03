@@ -1,0 +1,7 @@
+{
+  "guid": "e5fa5f55-e0f9-4955-87f2-37ac2012ffbd",
+  "occurred_at": "2025-10-16T09:55Z",
+  "change_type": "Fix",
+  "summary": "Restored Syncro asset scheduled sync with importer service and repository upsert handling",
+  "content_hash": "48931d3c256663c0d54c4eb5882d84c7f2df50b79c4ca21785fd5108eb7cb541"
+}

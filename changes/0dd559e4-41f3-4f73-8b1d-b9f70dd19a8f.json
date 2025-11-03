@@ -1,0 +1,7 @@
+{
+  "guid": "0dd559e4-41f3-4f73-8b1d-b9f70dd19a8f",
+  "occurred_at": "2025-12-09T16:30Z",
+  "change_type": "Fix",
+  "summary": "Replaced PWA PNG icons with SVG sources and updated manifest caching to remove binary assets",
+  "content_hash": "d957671509f981d9e80d9405708d81478e849d7d23314b7ec0f9753a4a10f404"
+}

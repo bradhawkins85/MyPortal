@@ -1,0 +1,7 @@
+{
+  "guid": "116d313b-2aa3-4b71-bc0d-a97d625ca46a",
+  "occurred_at": "2025-10-08T10:55Z",
+  "change_type": "Fix",
+  "summary": "Hardened active company session migration for legacy MySQL compatibility so company switching succeeds",
+  "content_hash": "ab5e980e022ac5b6eef139a91cbc8d2ac41d0c1f52ddfc0d6ebdbdc700335088"
+}

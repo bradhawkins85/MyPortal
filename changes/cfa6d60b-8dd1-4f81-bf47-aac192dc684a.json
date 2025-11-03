@@ -1,0 +1,7 @@
+{
+  "guid": "cfa6d60b-8dd1-4f81-bf47-aac192dc684a",
+  "occurred_at": "2025-10-08T13:01Z",
+  "change_type": "Feature",
+  "summary": "Redesigned shop catalogue layout with sidebar category navigation and removed vendor SKUs from the customer view",
+  "content_hash": "55014843331a20c2e41815283616d0318267513287077c858c702486eab2ed9f"
+}

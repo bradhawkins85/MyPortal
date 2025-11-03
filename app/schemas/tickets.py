@@ -40,6 +40,9 @@ class TicketReplyCreate(BaseModel):
     is_internal: bool = False
     minutes_spent: Optional[int] = Field(default=None, ge=0)
     is_billable: bool = False
+    labour_type_id: Optional[int] = Field(default=None, alias="labourTypeId", ge=1)
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class TicketReplyTimeUpdate(BaseModel):
@@ -52,6 +55,11 @@ class TicketReplyTimeUpdate(BaseModel):
     is_billable: Optional[bool] = Field(
         default=None,
         validation_alias=AliasChoices("is_billable", "isBillable"),
+    )
+    labour_type_id: Optional[int] = Field(
+        default=None,
+        ge=1,
+        validation_alias=AliasChoices("labour_type_id", "labourTypeId"),
     )
 
     model_config = ConfigDict(populate_by_name=True)
@@ -67,6 +75,9 @@ class TicketReply(BaseModel):
     is_billable: bool = False
     created_at: datetime
     time_summary: Optional[str] = None
+    labour_type_id: Optional[int] = None
+    labour_type_name: Optional[str] = None
+    labour_type_code: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -132,6 +143,31 @@ class TicketDashboardRow(BaseModel):
 class TicketReplyResponse(BaseModel):
     ticket: TicketResponse
     reply: TicketReply
+
+
+class LabourTypeModel(BaseModel):
+    id: int
+    code: str
+    name: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class LabourTypeListResponse(BaseModel):
+    labour_types: list[LabourTypeModel] = Field(default_factory=list)
+
+
+class LabourTypeUpdateRequest(BaseModel):
+    code: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+
+
+class LabourTypeCreateRequest(BaseModel):
+    code: str = Field(..., min_length=1, max_length=64)
+    name: str = Field(..., min_length=1, max_length=128)
 
 
 class TicketSearchFilters(BaseModel):

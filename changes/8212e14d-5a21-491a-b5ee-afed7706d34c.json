@@ -1,0 +1,7 @@
+{
+  "guid": "8212e14d-5a21-491a-b5ee-afed7706d34c",
+  "occurred_at": "2025-10-15T23:46Z",
+  "change_type": "Fix",
+  "summary": "Prevented dashboard summary cards from overlapping their meta text by expanding spacing and line heights",
+  "content_hash": "130633bc5ea2bdbe2749f9ea9117741200b2079356cb840c34fd0dc712eb656a"
+}

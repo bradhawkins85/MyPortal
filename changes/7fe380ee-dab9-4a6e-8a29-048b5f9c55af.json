@@ -1,0 +1,7 @@
+{
+  "guid": "7fe380ee-dab9-4a6e-8a29-048b5f9c55af",
+  "occurred_at": "2025-10-08T10:32Z",
+  "change_type": "Fix",
+  "summary": "Added resilient switch-company payload parsing fallback for raw form bodies and undocumented clients",
+  "content_hash": "7a696addb0aac6006ad1686f8fdd910dec3541b1b30c9bfcaf40650507174cb7"
+}

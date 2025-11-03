@@ -1,0 +1,7 @@
+{
+  "guid": "e37a9603-60aa-4a40-bb0f-7aff99a6305b",
+  "occurred_at": "2025-10-11T09:00Z",
+  "change_type": "Fix",
+  "summary": "Restored authenticated legacy uploads route in FastAPI to eliminate shop image 404 errors",
+  "content_hash": "7f3d026bf118c2dd46ddf656b696b24e8eb5b23f62606b5ed3afc343dc2206ad"
+}

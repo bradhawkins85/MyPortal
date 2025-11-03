@@ -1,0 +1,7 @@
+{
+  "guid": "6bb1011c-37a1-43ca-81c6-ef6e45f66977",
+  "occurred_at": "2025-12-07T09:15Z",
+  "change_type": "Fix",
+  "summary": "Restricted ticket requester selection to enabled staff for the linked company and blocked assignments without a company",
+  "content_hash": "941db09f5a7db4433156d4a711c354cfa4edaca371d9f28446f29068f83ee920"
+}

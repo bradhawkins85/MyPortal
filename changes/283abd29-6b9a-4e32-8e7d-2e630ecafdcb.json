@@ -1,0 +1,7 @@
+{
+  "guid": "283abd29-6b9a-4e32-8e7d-2e630ecafdcb",
+  "occurred_at": "2025-10-21T07:59Z",
+  "change_type": "Feature",
+  "summary": "Persisted webhook attempt request and response payloads with an admin monitor detail viewer for troubleshooting",
+  "content_hash": "7c9adef93f29c658edcc36c6cdad89aa2d4405fd058a7f0beaf8f7c0446ea043"
+}
