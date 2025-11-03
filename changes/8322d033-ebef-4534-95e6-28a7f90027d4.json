@@ -1,0 +1,7 @@
+{
+  "guid": "8322d033-ebef-4534-95e6-28a7f90027d4",
+  "occurred_at": "2025-10-23T12:00Z",
+  "change_type": "Fix",
+  "summary": "Removed legacy port notification defaults from preference options to keep event lists focused on active services",
+  "content_hash": "3383b623121e9b84729ce16e84d3c07d3a72857db4305c40bfdfaabb64ecaa5c"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "113c106d-737e-4c0c-96ef-f0bd7d461003",
+  "occurred_at": "2025-11-30T12:20Z",
+  "change_type": "Fix",
+  "summary": "Allowed scheduled system updates to restart myportal.service using sudo and user service fallbacks when direct restarts fail",
+  "content_hash": "b515b73434cc5c242ae007b24a339e17c7a796adf56b3d12b18a61a3a0efe897"
+}

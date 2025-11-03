@@ -2187,6 +2187,179 @@
     updateRemoveButtons();
   }
 
+  function bindLabourTypeManager() {
+    const modal = document.getElementById('edit-labour-types-modal');
+    if (!modal) {
+      return;
+    }
+
+    const form = modal.querySelector('[data-labour-types-form]');
+    const list = form ? form.querySelector('[data-labour-list]') : null;
+    const template = modal.querySelector('#labour-type-row-template');
+    const errorContainer = modal.querySelector('[data-labour-error]');
+
+    if (!form || !list || !template) {
+      return;
+    }
+
+    function clearError() {
+      if (errorContainer) {
+        errorContainer.hidden = true;
+        errorContainer.textContent = '';
+      }
+    }
+
+    function showError(message) {
+      if (errorContainer) {
+        errorContainer.textContent = message;
+        errorContainer.hidden = false;
+      }
+    }
+
+    function updateRowIdentifiers() {
+      const rows = Array.from(list.querySelectorAll('[data-labour-row]'));
+      rows.forEach((row, index) => {
+        const codeInput = row.querySelector('input[name="labourCode"]');
+        const nameInput = row.querySelector('input[name="labourName"]');
+        const labels = Array.from(row.querySelectorAll('label'));
+        if (codeInput) {
+          const codeId = `labour-code-${index}`;
+          codeInput.id = codeId;
+          if (labels[0]) {
+            labels[0].setAttribute('for', codeId);
+          }
+        }
+        if (nameInput) {
+          const nameId = `labour-name-${index}`;
+          nameInput.id = nameId;
+          if (labels[1]) {
+            labels[1].setAttribute('for', nameId);
+          }
+        }
+      });
+    }
+
+    function updateRemoveButtons() {
+      const rows = Array.from(list.querySelectorAll('[data-labour-row]'));
+      const disableRemoval = rows.length <= 1;
+      rows.forEach((row) => {
+        const removeButton = row.querySelector('[data-labour-remove]');
+        if (removeButton) {
+          removeButton.disabled = disableRemoval;
+        }
+      });
+    }
+
+    function createRow() {
+      if (template instanceof HTMLTemplateElement) {
+        const fragment = template.content.firstElementChild;
+        if (fragment) {
+          return fragment.cloneNode(true);
+        }
+      }
+      return template.firstElementChild.cloneNode(true);
+    }
+
+    function addRow() {
+      const row = createRow();
+      const codeInput = row.querySelector('input[name="labourCode"]');
+      const nameInput = row.querySelector('input[name="labourName"]');
+      const idInput = row.querySelector('input[name="labourId"]');
+      if (codeInput) {
+        codeInput.value = '';
+      }
+      if (nameInput) {
+        nameInput.value = '';
+      }
+      if (idInput) {
+        idInput.value = '';
+      }
+      list.appendChild(row);
+      updateRowIdentifiers();
+      updateRemoveButtons();
+      clearError();
+      if (codeInput) {
+        codeInput.focus();
+      }
+    }
+
+    function removeRow(button) {
+      const row = button.closest('[data-labour-row]');
+      if (!row) {
+        return;
+      }
+      const rows = list.querySelectorAll('[data-labour-row]');
+      if (rows.length <= 1) {
+        return;
+      }
+      row.remove();
+      updateRowIdentifiers();
+      updateRemoveButtons();
+      clearError();
+    }
+
+    form.addEventListener('click', (event) => {
+      const addTrigger = event.target.closest('[data-add-labour]');
+      if (addTrigger) {
+        event.preventDefault();
+        addRow();
+        return;
+      }
+      const removeTrigger = event.target.closest('[data-labour-remove]');
+      if (removeTrigger) {
+        event.preventDefault();
+        removeRow(removeTrigger);
+      }
+    });
+
+    form.addEventListener('input', () => {
+      clearError();
+    });
+
+    form.addEventListener('submit', (event) => {
+      clearError();
+      const rows = Array.from(list.querySelectorAll('[data-labour-row]'));
+      const seenCodes = new Set();
+      for (const row of rows) {
+        const codeInput = row.querySelector('input[name="labourCode"]');
+        const nameInput = row.querySelector('input[name="labourName"]');
+        if (codeInput) {
+          codeInput.value = codeInput.value.trim();
+        }
+        if (nameInput) {
+          nameInput.value = nameInput.value.trim();
+        }
+        if (!codeInput || !codeInput.value) {
+          showError('Enter a labour code for each row.');
+          if (codeInput) {
+            codeInput.focus();
+          }
+          event.preventDefault();
+          return;
+        }
+        if (!nameInput || !nameInput.value) {
+          showError('Enter a name for each labour type.');
+          if (nameInput) {
+            nameInput.focus();
+          }
+          event.preventDefault();
+          return;
+        }
+        const codeKey = codeInput.value.toLowerCase();
+        if (seenCodes.has(codeKey)) {
+          showError('Labour type codes must be unique.');
+          codeInput.focus();
+          event.preventDefault();
+          return;
+        }
+        seenCodes.add(codeKey);
+      }
+    });
+
+    updateRowIdentifiers();
+    updateRemoveButtons();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     bindSyncroTicketImportForms();
     bindSyncroCompanyImportForm();
@@ -2206,11 +2379,13 @@
     bindApiKeyCopyButtons();
     bindConfirmationButtons();
     bindTicketStatusManager();
+    bindLabourTypeManager();
     bindModal({ modalId: 'add-company-modal', triggerSelector: '[data-add-company-modal-open]' });
     bindModal({ modalId: 'create-ticket-modal', triggerSelector: '[data-create-ticket-modal-open]' });
     bindModal({ modalId: 'create-api-key-modal', triggerSelector: '[data-create-api-key-modal-open]' });
     bindModal({ modalId: 'create-issue-modal', triggerSelector: '[data-create-issue-modal-open]' });
     bindModal({ modalId: 'edit-ticket-statuses-modal', triggerSelector: '[data-edit-ticket-statuses-open]' });
+    bindModal({ modalId: 'edit-labour-types-modal', triggerSelector: '[data-edit-labour-types-open]' });
     bindModal({ modalId: 'import-product-modal', triggerSelector: '[data-import-product-modal-open]' });
   });
 })();

@@ -1,0 +1,7 @@
+{
+  "guid": "15acae9f-d0f1-4805-a807-0d43d337863c",
+  "occurred_at": "2025-10-09T12:53Z",
+  "change_type": "Fix",
+  "summary": "Hardened system update cleanup to skip inaccessible user site-packages paths and avoid permission failures",
+  "content_hash": "30a740c6d78a22b3cf787bd569e11b599821bcdabb029bc20d369a570818617c"
+}

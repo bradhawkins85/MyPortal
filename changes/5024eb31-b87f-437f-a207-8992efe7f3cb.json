@@ -1,0 +1,7 @@
+{
+  "guid": "5024eb31-b87f-437f-a207-8992efe7f3cb",
+  "occurred_at": "2025-12-13T17:15Z",
+  "change_type": "Fix",
+  "summary": "Added detailed Syncro ticket import logging for admin requests and webhook lifecycle events to troubleshoot missing monitor processing",
+  "content_hash": "7d19c69c02d7eabb5b82957c8e61d375c8bd8032fa452afba0360e864188df9c"
+}
