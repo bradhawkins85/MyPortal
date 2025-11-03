@@ -1,0 +1,7 @@
+{
+  "guid": "bf20db06-e9a4-4a1d-badd-5794b8eb13e4",
+  "occurred_at": "2025-10-29T10:45Z",
+  "change_type": "Fix",
+  "summary": "Redacted TacticalRMM and ntfy credentials in module management while keeping stored keys when left blank",
+  "content_hash": "cf4b4d26643f0942909883dcd9ff825a3804dc05ce94b44333402e5c4a72c1b4"
+}

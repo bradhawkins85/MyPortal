@@ -1,0 +1,7 @@
+{
+  "guid": "69ed0633-6a39-4e4a-b462-00ff5a259f70",
+  "occurred_at": "2025-12-24T14:20Z",
+  "change_type": "Fix",
+  "summary": "Restored uppercase automation variable interpolation for ntfy event alerts and added regression coverage",
+  "content_hash": "f71848cd1f809cbf2c8b508df53b1089b5a6cff7ffce65a27048b380d5797a8e"
+}

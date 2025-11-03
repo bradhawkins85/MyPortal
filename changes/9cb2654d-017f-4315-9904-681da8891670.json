@@ -1,0 +1,7 @@
+{
+  "guid": "9cb2654d-017f-4315-9904-681da8891670",
+  "occurred_at": "2025-12-15T09:30Z",
+  "change_type": "Feature",
+  "summary": "Added automated webhook cleanup after 24 hours with admin delete controls to cancel pending deliveries",
+  "content_hash": "ef5754064dfa8083d09e20bfe0287752ad24e6ffacde442ce37b49b818520c32"
+}

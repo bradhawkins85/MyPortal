@@ -4,7 +4,8 @@
   {% set show_ticket_automations = is_super_admin %}
   {% set show_syncro_import = syncro_module_enabled and (is_super_admin or (is_helpdesk_technician | default(false))) %}
   {% set show_ticket_status_editor = is_super_admin %}
-  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor %}
+  {% set show_labour_type_editor = is_super_admin %}
+  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor %}
   <div class="header-title-menu">
     <span class="header-title-menu__label">Ticketing workspace</span>
     {% if show_ticket_tools %}
@@ -38,6 +39,20 @@
                 aria-controls="edit-ticket-statuses-modal"
               >
                 Edit statuses
+              </button>
+            </li>
+          {% endif %}
+          {% if show_labour_type_editor %}
+            <li class="header-title-menu__item" role="none">
+              <button
+                type="button"
+                class="header-title-menu__link"
+                role="menuitem"
+                data-edit-labour-types-open
+                aria-haspopup="dialog"
+                aria-controls="edit-labour-types-modal"
+              >
+                Manage labour types
               </button>
             </li>
           {% endif %}
@@ -503,24 +518,130 @@
           <button type="submit" class="button button--primary">Save changes</button>
           <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
         </div>
-      </form>
-      <template id="ticket-status-row-template">
-        <tr data-status-row>
-          <td data-label="Tech status">
-            <label class="visually-hidden">Tech status</label>
-            <input name="techLabel" class="form-input" maxlength="128" required />
-            <input type="hidden" name="existingSlug" value="" />
-          </td>
-          <td data-label="Public status">
-            <label class="visually-hidden">Public status</label>
-            <input name="publicLabel" class="form-input" maxlength="128" required />
-          </td>
-          <td class="table__actions">
-            <button type="button" class="button button--ghost" data-status-remove>Remove</button>
-          </td>
-        </tr>
-      </template>
-    </div>
+  </form>
+  <template id="ticket-status-row-template">
+    <tr data-status-row>
+      <td data-label="Tech status">
+        <label class="visually-hidden">Tech status</label>
+        <input name="techLabel" class="form-input" maxlength="128" required />
+        <input type="hidden" name="existingSlug" value="" />
+      </td>
+      <td data-label="Public status">
+        <label class="visually-hidden">Public status</label>
+        <input name="publicLabel" class="form-input" maxlength="128" required />
+      </td>
+      <td class="table__actions">
+        <button type="button" class="button button--ghost" data-status-remove>Remove</button>
+      </td>
+    </tr>
+  </template>
+</div>
+
+<div
+  class="modal"
+  id="edit-labour-types-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="edit-labour-types-title"
+  aria-hidden="true"
+  hidden
+>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close labour types editor</span>
+      &times;
+    </button>
+    <h2 class="modal__title" id="edit-labour-types-title">Manage labour types</h2>
+    <p class="modal__subtitle">Link technician time entries to Xero products by defining reusable labour codes.</p>
+    <div class="alert alert--error" role="alert" data-labour-error hidden></div>
+    <form action="/admin/tickets/labour-types" method="post" class="form" data-labour-types-form>
+      {% include "partials/csrf.html" %}
+      <div class="table-wrapper">
+        <table class="table table--compact">
+          <thead>
+            <tr>
+              <th scope="col">Code</th>
+              <th scope="col">Name</th>
+              <th scope="col" class="table__actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody data-labour-list>
+            {% if ticket_labour_types %}
+              {% for labour_type in ticket_labour_types %}
+                <tr data-labour-row>
+                  <td data-label="Code">
+                    <label class="visually-hidden" for="labour-code-{{ loop.index0 }}">Code</label>
+                    <input
+                      id="labour-code-{{ loop.index0 }}"
+                      name="labourCode"
+                      class="form-input"
+                      maxlength="64"
+                      value="{{ labour_type.code }}"
+                      required
+                    />
+                    <input type="hidden" name="labourId" value="{{ labour_type.id }}" />
+                  </td>
+                  <td data-label="Name">
+                    <label class="visually-hidden" for="labour-name-{{ loop.index0 }}">Name</label>
+                    <input
+                      id="labour-name-{{ loop.index0 }}"
+                      name="labourName"
+                      class="form-input"
+                      maxlength="128"
+                      value="{{ labour_type.name }}"
+                      required
+                    />
+                  </td>
+                  <td class="table__actions">
+                    <button type="button" class="button button--ghost" data-labour-remove>Remove</button>
+                  </td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr data-labour-row>
+                <td data-label="Code">
+                  <label class="visually-hidden" for="labour-code-0">Code</label>
+                  <input id="labour-code-0" name="labourCode" class="form-input" maxlength="64" required />
+                  <input type="hidden" name="labourId" value="" />
+                </td>
+                <td data-label="Name">
+                  <label class="visually-hidden" for="labour-name-0">Name</label>
+                  <input id="labour-name-0" name="labourName" class="form-input" maxlength="128" required />
+                </td>
+                <td class="table__actions">
+                  <button type="button" class="button button--ghost" data-labour-remove disabled>Remove</button>
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+      <div class="form-actions form-actions--secondary">
+        <button type="button" class="button button--ghost" data-add-labour>Add labour type</button>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button button--primary">Save changes</button>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      </div>
+    </form>
+    <template id="labour-type-row-template">
+      <tr data-labour-row>
+        <td data-label="Code">
+          <label class="visually-hidden">Code</label>
+          <input name="labourCode" class="form-input" maxlength="64" required />
+          <input type="hidden" name="labourId" value="" />
+        </td>
+        <td data-label="Name">
+          <label class="visually-hidden">Name</label>
+          <input name="labourName" class="form-input" maxlength="128" required />
+        </td>
+        <td class="table__actions">
+          <button type="button" class="button button--ghost" data-labour-remove>Remove</button>
+        </td>
+      </tr>
+    </template>
+  </div>
+</div>
   </div>
 {% endblock %}
 

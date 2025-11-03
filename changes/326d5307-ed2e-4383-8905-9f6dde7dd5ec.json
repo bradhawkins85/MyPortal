@@ -1,0 +1,7 @@
+{
+  "guid": "326d5307-ed2e-4383-8905-9f6dde7dd5ec",
+  "occurred_at": "2025-12-26T12:30Z",
+  "change_type": "Fix",
+  "summary": "Corrected super admin knowledge base seed content concatenation so migrations import with matching column counts",
+  "content_hash": "dda5bff6054148093e67aa200f34e074137113a789294cb07e0a4c8f52894ead"
+}

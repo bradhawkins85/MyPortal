@@ -1,0 +1,7 @@
+{
+  "guid": "2fd9dfcc-7b05-4324-8b03-01a711f0e6c1",
+  "occurred_at": "2025-10-21T10:39Z",
+  "change_type": "Fix",
+  "summary": "Displayed ticket conversation history with newest replies first across admin views, APIs, and AI prompts",
+  "content_hash": "0c58a71f0d036d2593aef66789830ec52d03f1dbc64d877696bb4c54ed59ba8d"
+}

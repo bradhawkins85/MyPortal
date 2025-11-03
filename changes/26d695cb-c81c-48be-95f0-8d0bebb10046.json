@@ -1,0 +1,7 @@
+{
+  "guid": "26d695cb-c81c-48be-95f0-8d0bebb10046",
+  "occurred_at": "2025-10-08T12:10Z",
+  "change_type": "Fix",
+  "summary": "Stored imported shop images in the secure uploads directory and enforced validation to resolve 404s",
+  "content_hash": "4c321fbe1b13c2dc6db574dc84f6889a8f99829ec37e42bba074fc510d86321b"
+}
