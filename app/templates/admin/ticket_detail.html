@@ -157,6 +157,37 @@
                   placeholder="Syncro ID or external case"
                 />
               </div>
+              <div class="form-field">
+                <label class="form-label" for="ticket-assets">Assets</label>
+                <select
+                  id="ticket-assets"
+                  name="assetIds"
+                  class="form-input"
+                  multiple
+                  size="6"
+                  data-ticket-asset-selector
+                  data-assets-endpoint-template="/api/companies/{companyId}/assets"
+                  data-initial-options='{{ ticket_asset_options | tojson }}'
+                  data-selected-assets='{{ ticket_asset_selection | tojson }}'
+                  {% if not ticket.company_id %}disabled aria-disabled="true"{% endif %}
+                >
+                  {% for option in ticket_asset_options %}
+                    <option value="{{ option.id }}" {% if option.id in ticket_asset_selection %}selected{% endif %}>{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+                <p
+                  class="form-help"
+                  data-ticket-asset-help
+                  data-help-enabled="Hold Ctrl (Windows) or ⌘ (macOS) to select multiple assets. Options refresh when the linked company changes."
+                  data-help-disabled="Link the ticket to a company to select assets."
+                >
+                  {% if not ticket.company_id %}
+                    Link the ticket to a company to select assets.
+                  {% else %}
+                    Hold Ctrl (Windows) or ⌘ (macOS) to select multiple assets. Options refresh when the linked company changes.
+                  {% endif %}
+                </p>
+              </div>
               <div class="form-actions">
                 <button type="submit" class="button button--primary">Save changes</button>
               </div>
@@ -189,6 +220,22 @@
                   <dt>Module</dt>
                   <dd>{{ ticket_module.name if ticket_module else (ticket.module_slug or '—') }}</dd>
                 </div>
+                {% if ticket_assets %}
+                  <div class="definition-list__item">
+                    <dt>Assets</dt>
+                    <dd>
+                      <div class="tag-list">
+                        {% for asset in ticket_assets %}
+                          {% set asset_label = asset.name %}
+                          {% if asset.serial_number %}
+                            {% set asset_label = asset_label ~ ' · SN ' ~ asset.serial_number %}
+                          {% endif %}
+                          <span class="tag">{{ asset_label }}</span>
+                        {% endfor %}
+                      </div>
+                    </dd>
+                  </div>
+                {% endif %}
                 <div class="definition-list__item">
                   <dt>Created</dt>
                   <dd>{{ ticket.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.created_at else '—' }}</dd>
