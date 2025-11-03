@@ -225,7 +225,7 @@ async def _execute_automation(
                     if isinstance(payload_source, Mapping)
                     else {}
                 )
-                module_payload = value_templates.render_value(module_payload, context)
+                module_payload = await value_templates.render_value_async(module_payload, context)
                 if context:
                     module_payload.setdefault("context", context)
                 try:
@@ -289,7 +289,7 @@ async def _execute_automation(
                 payload = {}
             module_slug = automation.get("action_module")
             if module_slug:
-                module_payload = value_templates.render_value(dict(payload), context)
+                module_payload = await value_templates.render_value_async(dict(payload), context)
                 if context:
                     module_payload.setdefault("context", context)
                 result_payload = await modules_service.trigger_module(
