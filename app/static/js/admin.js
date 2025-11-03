@@ -2083,12 +2083,24 @@
 
     function createRow() {
       if (template instanceof HTMLTemplateElement) {
-        const fragment = template.content.firstElementChild;
-        if (fragment) {
-          return fragment.cloneNode(true);
+        const fragmentClone = template.content.cloneNode(true);
+        const element = fragmentClone.firstElementChild;
+        if (element) {
+          return element;
         }
       }
-      return template.firstElementChild.cloneNode(true);
+      const fallback = template.firstElementChild;
+      if (fallback) {
+        return fallback.cloneNode(true);
+      }
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = template.innerHTML.trim();
+      const derived = wrapper.firstElementChild;
+      if (derived) {
+        return derived.cloneNode(true);
+      }
+      console.error('Ticket status row template is empty.');
+      return document.createElement('tr');
     }
 
     function addStatusRow() {
@@ -2252,12 +2264,24 @@
 
     function createRow() {
       if (template instanceof HTMLTemplateElement) {
-        const fragment = template.content.firstElementChild;
-        if (fragment) {
-          return fragment.cloneNode(true);
+        const fragmentClone = template.content.cloneNode(true);
+        const element = fragmentClone.firstElementChild;
+        if (element) {
+          return element;
         }
       }
-      return template.firstElementChild.cloneNode(true);
+      const fallback = template.firstElementChild;
+      if (fallback) {
+        return fallback.cloneNode(true);
+      }
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = template.innerHTML.trim();
+      const derived = wrapper.firstElementChild;
+      if (derived) {
+        return derived.cloneNode(true);
+      }
+      console.error('Labour type row template is empty.');
+      return document.createElement('tr');
     }
 
     function addRow() {
