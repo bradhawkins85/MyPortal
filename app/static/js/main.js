@@ -540,7 +540,6 @@
     }
 
     const toggleLookup = new Map();
-    const listLookup = new Map();
 
     function getToggle(menu) {
       if (toggleLookup.has(menu)) {
@@ -553,57 +552,19 @@
       return toggle;
     }
 
-    function getList(menu) {
-      if (listLookup.has(menu)) {
-        return listLookup.get(menu);
-      }
-      const list = menu.querySelector('[data-header-menu-list]');
-      if (list) {
-        listLookup.set(menu, list);
-      }
-      return list;
-    }
-
-    function isMenuOpen(menu) {
-      return menu.classList.contains('is-open');
-    }
-
-    function focusFirstItem(menu) {
-      const list = getList(menu);
-      if (!list) {
-        return;
-      }
-      const focusable = Array.from(
-        list.querySelectorAll(
-          '[role="menuitem"], a[href]:not([aria-disabled="true"]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        ),
-      ).find((element) => !element.hasAttribute('disabled') && element.getAttribute('aria-disabled') !== 'true');
-      if (focusable) {
-        try {
-          focusable.focus({ preventScroll: true });
-        } catch (error) {
-          focusable.focus();
-        }
-      }
-    }
-
     function updateToggle(menu) {
       const toggle = getToggle(menu);
       if (toggle) {
-        toggle.setAttribute('aria-expanded', isMenuOpen(menu) ? 'true' : 'false');
+        toggle.setAttribute('aria-expanded', menu.open ? 'true' : 'false');
       }
     }
 
     function closeMenu(menu, options) {
       const settings = options || {};
-      if (!isMenuOpen(menu)) {
+      if (!menu.open) {
         return;
       }
-      menu.classList.remove('is-open');
-      const list = getList(menu);
-      if (list) {
-        list.hidden = true;
-      }
+      menu.removeAttribute('open');
       updateToggle(menu);
       if (settings.focusToggle) {
         const toggle = getToggle(menu);
@@ -617,64 +578,18 @@
       }
     }
 
-    function openMenu(menu, options) {
-      const settings = options || {};
-      if (isMenuOpen(menu)) {
-        return;
-      }
-      menus.forEach((other) => {
-        if (other !== menu) {
-          closeMenu(other);
-        }
-      });
-      menu.classList.add('is-open');
-      const list = getList(menu);
-      if (list) {
-        list.hidden = false;
-      }
-      updateToggle(menu);
-      if (settings.focusFirstItem) {
-        focusFirstItem(menu);
-      }
-    }
-
     menus.forEach((menu) => {
-      const list = getList(menu);
-      if (list) {
-        list.hidden = !isMenuOpen(menu);
-      }
       updateToggle(menu);
 
-      const toggle = getToggle(menu);
-      if (!toggle) {
-        return;
-      }
-
-      toggle.addEventListener('click', (event) => {
-        event.preventDefault();
-        if (isMenuOpen(menu)) {
-          closeMenu(menu, { focusToggle: false });
-        } else {
-          openMenu(menu);
+      menu.addEventListener('toggle', () => {
+        if (menu.open) {
+          menus.forEach((other) => {
+            if (other !== menu) {
+              closeMenu(other);
+            }
+          });
         }
-      });
-
-      toggle.addEventListener('keydown', (event) => {
-        if (event.key === 'ArrowDown') {
-          event.preventDefault();
-          if (!isMenuOpen(menu)) {
-            openMenu(menu, { focusFirstItem: true });
-          } else {
-            focusFirstItem(menu);
-          }
-        } else if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          if (isMenuOpen(menu)) {
-            closeMenu(menu, { focusToggle: false });
-          } else {
-            openMenu(menu, { focusFirstItem: true });
-          }
-        }
+        updateToggle(menu);
       });
     });
 
