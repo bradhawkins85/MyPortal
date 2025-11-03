@@ -542,6 +542,10 @@
     const toggleLookup = new Map();
     const listLookup = new Map();
 
+    function isDetailsMenu(menu) {
+      return typeof HTMLDetailsElement !== 'undefined' && menu instanceof HTMLDetailsElement;
+    }
+
     function getToggle(menu) {
       if (toggleLookup.has(menu)) {
         return toggleLookup.get(menu);
@@ -565,7 +569,7 @@
     }
 
     function isMenuOpen(menu) {
-      return menu.classList.contains('is-open');
+      return menu.classList.contains('is-open') || (isDetailsMenu(menu) && menu.open);
     }
 
     function focusFirstItem(menu) {
@@ -600,6 +604,9 @@
         return;
       }
       menu.classList.remove('is-open');
+      if (isDetailsMenu(menu)) {
+        menu.open = false;
+      }
       const list = getList(menu);
       if (list) {
         list.hidden = true;
@@ -628,6 +635,9 @@
         }
       });
       menu.classList.add('is-open');
+      if (isDetailsMenu(menu)) {
+        menu.open = true;
+      }
       const list = getList(menu);
       if (list) {
         list.hidden = false;
@@ -651,7 +661,9 @@
       }
 
       toggle.addEventListener('click', (event) => {
-        event.preventDefault();
+        if (toggle.tagName !== 'SUMMARY') {
+          event.preventDefault();
+        }
         if (isMenuOpen(menu)) {
           closeMenu(menu, { focusToggle: false });
         } else {
@@ -676,6 +688,29 @@
           }
         }
       });
+      if (isDetailsMenu(menu)) {
+        menu.addEventListener('toggle', () => {
+          if (menu.open) {
+            menus.forEach((other) => {
+              if (other !== menu) {
+                closeMenu(other);
+              }
+            });
+            menu.classList.add('is-open');
+            const list = getList(menu);
+            if (list) {
+              list.hidden = false;
+            }
+          } else {
+            menu.classList.remove('is-open');
+            const list = getList(menu);
+            if (list) {
+              list.hidden = true;
+            }
+          }
+          updateToggle(menu);
+        });
+      }
     });
 
     document.addEventListener('click', (event) => {
