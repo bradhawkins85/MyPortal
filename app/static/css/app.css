@@ -962,8 +962,7 @@ html {
   transition: transform 0.2s ease;
 }
 
-[data-header-menu][open] .header-title-menu__icon,
-[data-header-menu].is-open .header-title-menu__icon {
+[data-header-menu][open] .header-title-menu__icon {
   transform: rotate(180deg);
 }
 
