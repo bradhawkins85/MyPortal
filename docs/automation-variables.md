@@ -65,6 +65,9 @@ emails or webhook requests). Newly added tokens include:
 | `{{ TICKET_LATEST_REPLY_BODY }}` | Body of the most recent reply. |
 | `{{ TICKET_LATEST_REPLY_AUTHOR_EMAIL }}` | Email for the author of the latest reply. |
 | `{{ TICKET_LATEST_REPLY_AUTHOR_DISPLAY_NAME }}` | Display name for the latest reply author. |
+| `{{ ACTIVE_ASSETS }}` / `{{ ACTIVE_ASSETS:7 }}` | Count of assets that synced in the current month, or within the last `N` days when the `:N` suffix is provided. |
+
+`{{ ACTIVE_ASSETS }}` tokens scope to the company in the current automation context when available (for example a ticket's company). When no company is present the counts cover the entire tenant. The default form returns assets with a Syncro sync timestamp in the current month; append `:N` to evaluate the past `N` days such as `{{ ACTIVE_ASSETS:1 }}` for the past day.
 
 ## Message templates
 

@@ -98,7 +98,7 @@ async def emit_notification(
     template = str(event_setting.get("message_template") or "{{ message }}")
     rendered_message: str | None = None
     try:
-        rendered = value_templates.render_string(template, context)
+        rendered = await value_templates.render_string_async(template, context)
     except Exception as exc:  # pragma: no cover - template guard
         logger.error(
             "Failed to render notification message template",
@@ -108,7 +108,7 @@ async def emit_notification(
         rendered = None
 
     if isinstance(rendered, (dict, list)):
-        rendered_message = value_templates.render_value(rendered, context)
+        rendered_message = await value_templates.render_value_async(rendered, context)
         rendered_message = str(rendered_message)
     elif rendered is not None:
         rendered_message = str(rendered)
@@ -236,7 +236,7 @@ async def emit_notification(
             else:
                 payload_source = payload or {}
             try:
-                rendered_payload = value_templates.render_value(payload_source, context)
+                rendered_payload = await value_templates.render_value_async(payload_source, context)
                 if isinstance(rendered_payload, Mapping):
                     payload_data = dict(rendered_payload)
                 else:
