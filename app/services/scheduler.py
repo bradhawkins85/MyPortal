@@ -21,6 +21,7 @@ from app.services import staff_importer
 from app.services import m365 as m365_service
 from app.services import products as products_service
 from app.services import webhook_monitor
+from app.services import xero as xero_service
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_UPDATE_LOCK = asyncio.Lock()
@@ -156,6 +157,14 @@ class SchedulerService:
                 company_id = task.get("company_id")
                 if company_id:
                     await m365_service.sync_company_licenses(int(company_id))
+            elif command == "sync_to_xero":
+                company_id = task.get("company_id")
+                if company_id:
+                    result = await xero_service.sync_company(int(company_id))
+                    details = json.dumps(result, default=str) if result else None
+                else:
+                    status = "skipped"
+                    details = "Company context required"
             elif command == "update_products":
                 await products_service.update_products_from_feed()
             elif command == "update_stock_feed":

@@ -2722,6 +2722,7 @@ async def _render_company_edit_page(
         automation_command_options = [
             {"value": "sync_staff", "label": "Sync staff directory"},
             {"value": "sync_o365", "label": "Sync Microsoft 365 licenses"},
+            {"value": "sync_to_xero", "label": "Sync to Xero"},
         ]
         default_command_values = {option["value"] for option in automation_command_options}
 
@@ -7374,6 +7375,7 @@ async def admin_automation(request: Request):
     command_options = [
         {"value": "sync_staff", "label": "Sync staff directory"},
         {"value": "sync_o365", "label": "Sync Microsoft 365 licenses"},
+        {"value": "sync_to_xero", "label": "Sync to Xero"},
     ]
     existing_commands = {task.get("command") for task in tasks if task.get("command")}
     for command in sorted(existing_commands):

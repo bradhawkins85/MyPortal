@@ -1,0 +1,7 @@
+{
+  "guid": "7436d357-06df-4a90-bc35-42b3f62e49ec",
+  "occurred_at": "2025-11-02T23:54:03Z",
+  "change_type": "Feature",
+  "summary": "Added Xero integration module UI and per-company sync automation command.",
+  "content_hash": "c5fc7c4b8fda83d85e1170c4efc27b3db66dd1174a72ffa149a457dfbc3aebf7"
+}
