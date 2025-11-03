@@ -169,3 +169,25 @@ Labour types link ticket reply time entries to Xero product codes. Only super ad
 ### Delete a labour type
 
 `DELETE /api/tickets/labour-types/{labour_type_id}` removes the labour type. Any ticket replies referencing the labour type are automatically reset to "No labour type".
+
+## Manage ticket assets
+
+Technicians can link one or more hardware assets to a helpdesk ticket to provide context for the issue being worked on. The asset selector appears directly below the **External reference** field on the ticket detail page. Linked assets are displayed in the ticket sidebar so other users can quickly review warranty status, serial numbers, and device metadata.
+
+### Update ticket assets from the admin UI
+
+`POST /admin/tickets/{ticket_id}` accepts an `assetIds` form field containing a list of asset identifiers that belong to the same company as the ticket. The field may be submitted multiple times (for example `assetIds=5&assetIds=8`) to attach several devices. If a ticket is not associated with a company the asset selector remains disabled to prevent mismatched links.
+
+When processing the update the server verifies that every asset belongs to the ticket's company. Invalid identifiers return a `400 Bad Request` response with a descriptive validation error and no links are changed. Submitting an empty `assetIds` list clears all existing asset links for the ticket.
+
+### Refresh available assets via the API
+
+The admin UI uses `GET /api/companies/{company_id}/assets` to populate the multi-select when the ticket's company changes. The endpoint responds with an array of asset records sorted by name and includes Tactical RMM and Syncro identifiers where present. Each record contains:
+
+* `id` – Asset primary key.
+* `name` – Display name from the asset catalogue.
+* `serial_number` – Optional serial number used for hardware tracking.
+* `status` – Lifecycle status such as `active` or `retired`.
+* `tactical_asset_id` / `syncro_asset_id` – Identifiers from upstream RMM systems.
+
+Assets are only returned for companies that the authenticated user is authorised to manage. Requests from non-super admin accounts receive `403 Forbidden`.

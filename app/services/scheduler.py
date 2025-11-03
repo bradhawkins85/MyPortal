@@ -153,6 +153,17 @@ class SchedulerService:
                 company_id = task.get("company_id")
                 if company_id:
                     await asset_importer.import_assets_for_company(int(company_id))
+            elif command == "sync_tactical_assets":
+                company_id = task.get("company_id")
+                if company_id:
+                    processed = await asset_importer.import_tactical_assets_for_company(int(company_id))
+                    details = json.dumps(
+                        {"company_id": int(company_id), "processed": processed},
+                        default=str,
+                    )
+                else:
+                    summary = await asset_importer.import_all_tactical_assets()
+                    details = json.dumps(summary, default=str)
             elif command == "sync_o365":
                 company_id = task.get("company_id")
                 if company_id:

@@ -12,6 +12,7 @@ class CompanyBase(BaseModel):
     address: Optional[str] = None
     is_vip: Optional[int] = None
     syncro_company_id: Optional[str] = None
+    tacticalrmm_client_id: Optional[str] = None
     xero_id: Optional[str] = None
     email_domains: list[str] = Field(default_factory=list)
 
@@ -33,6 +34,7 @@ class CompanyUpdate(BaseModel):
     address: Optional[str] = None
     is_vip: Optional[int] = None
     syncro_company_id: Optional[str] = None
+    tacticalrmm_client_id: Optional[str] = None
     xero_id: Optional[str] = None
     email_domains: Optional[list[str]] = None
 

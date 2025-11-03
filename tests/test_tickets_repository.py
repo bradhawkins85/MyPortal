@@ -84,6 +84,36 @@ class _ListTicketsDB:
         return []
 
 
+class _ListTicketAssetsDB:
+    def __init__(self, rows):
+        self.fetch_sql = None
+        self.fetch_params = None
+        self._rows = rows
+
+    async def fetch_all(self, sql, params):
+        self.fetch_sql = sql.strip()
+        self.fetch_params = params
+        return self._rows
+
+
+class _ReplaceTicketAssetsDB:
+    def __init__(self, existing_rows, final_rows):
+        self.fetch_calls: list[tuple[str, tuple]] = []
+        self.execute_calls: list[tuple[str, tuple]] = []
+        self._existing_rows = existing_rows
+        self._final_rows = final_rows
+
+    async def fetch_all(self, sql, params):
+        sql_clean = sql.strip()
+        self.fetch_calls.append((sql_clean, params))
+        if "INNER JOIN assets" in sql_clean:
+            return self._final_rows
+        return self._existing_rows
+
+    async def execute(self, sql, params):
+        self.execute_calls.append((sql.strip(), params))
+
+
 class _CountTicketsDB:
     def __init__(self, count):
         self.fetch_sql = None
@@ -174,6 +204,70 @@ async def test_create_ticket_falls_back_when_fetch_missing(monkeypatch):
     assert record["priority"] == "urgent"
     assert record["ai_summary"] is None
     assert record["ai_tags"] == []
+
+
+@pytest.mark.anyio
+async def test_list_ticket_assets_formats_records(monkeypatch):
+    rows = [
+        {
+            "asset_id": 5,
+            "created_at": datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc),
+            "name": "Device",
+            "serial_number": "SER123",
+            "status": "online",
+            "type": "laptop",
+            "os_name": "Windows",
+        }
+    ]
+    dummy_db = _ListTicketAssetsDB(rows)
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    assets = await tickets.list_ticket_assets(12)
+
+    assert dummy_db.fetch_sql.startswith("SELECT")
+    assert dummy_db.fetch_params == (12,)
+    assert assets[0]["asset_id"] == 5
+    assert assets[0]["name"] == "Device"
+    assert assets[0]["serial_number"] == "SER123"
+    assert assets[0]["linked_at"].tzinfo is not None
+
+
+@pytest.mark.anyio
+async def test_replace_ticket_assets_updates_links(monkeypatch):
+    existing = [{"asset_id": 1}, {"asset_id": 2}]
+    final_rows = [
+        {
+            "asset_id": 2,
+            "created_at": None,
+            "name": "Device B",
+            "serial_number": "B",
+            "status": "online",
+            "type": "laptop",
+            "os_name": "Windows",
+        },
+        {
+            "asset_id": 3,
+            "created_at": None,
+            "name": "Device C",
+            "serial_number": "C",
+            "status": "offline",
+            "type": "server",
+            "os_name": "Linux",
+        },
+    ]
+    dummy_db = _ReplaceTicketAssetsDB(existing, final_rows)
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    assets = await tickets.replace_ticket_assets(77, [2, 3])
+
+    delete_calls = [call for call in dummy_db.execute_calls if call[0].startswith("DELETE FROM ticket_assets")]
+    insert_calls = [call for call in dummy_db.execute_calls if call[0].startswith("INSERT INTO ticket_assets")]
+
+    assert delete_calls
+    assert insert_calls
+    assert delete_calls[0][1][0] == 77
+    assert insert_calls[0][1] == (77, 3)
+    assert len(assets) == 2
 
 
 @pytest.mark.anyio
