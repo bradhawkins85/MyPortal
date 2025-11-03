@@ -212,6 +212,11 @@
                 </div>
               {% elif module.slug == 'xero' %}
                 <div class="form-field">
+                  <label class="form-label" for="xero-callback-url">Callback URL</label>
+                  <input id="xero-callback-url" class="form-input" value="{{ request.url_for('xero_receive_callback') }}" readonly />
+                  <p class="form-help">Provide this URL as the redirect/callback endpoint inside your Xero app configuration.</p>
+                </div>
+                <div class="form-field">
                   <label class="form-label" for="xero-client-id">Client ID</label>
                   <input id="xero-client-id" name="settings.client_id" class="form-input" value="{{ settings.client_id or '' }}" autocomplete="off" />
                 </div>

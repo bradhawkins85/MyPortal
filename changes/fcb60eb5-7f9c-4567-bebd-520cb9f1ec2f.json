@@ -1,0 +1,7 @@
+{
+  "guid": "fcb60eb5-7f9c-4567-bebd-520cb9f1ec2f",
+  "occurred_at": "2025-02-14T00:00:00Z",
+  "change_type": "Feature",
+  "summary": "Documented and exposed the Xero integration callback endpoint.",
+  "content_hash": "ee33a740fd35a670d447a85697fde057201439e1566339f921833048fce1f910"
+}

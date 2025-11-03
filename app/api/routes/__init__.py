@@ -26,6 +26,7 @@ from . import (
     users,
     system,
     uptimekuma,
+    xero,
 )
 
 __all__ = [
@@ -56,4 +57,5 @@ __all__ = [
     "users",
     "system",
     "uptimekuma",
+    "xero",
 ]
