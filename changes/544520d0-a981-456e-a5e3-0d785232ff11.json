@@ -1,0 +1,7 @@
+{
+  "guid": "544520d0-a981-456e-a5e3-0d785232ff11",
+  "occurred_at": "2024-05-26T10:30Z",
+  "change_type": "Fix",
+  "summary": "Stabilised sidebar footer icons so GitHub link and refresh arrow retain size behind CDN optimisations.",
+  "content_hash": "926ed18cc4ec85cbfa13d4b9721e4b4dd00b55c9af317f95dcde204d32067618"
+}
