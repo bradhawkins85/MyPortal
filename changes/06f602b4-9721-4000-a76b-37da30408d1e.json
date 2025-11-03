@@ -1,0 +1,7 @@
+{
+  "guid": "06f602b4-9721-4000-a76b-37da30408d1e",
+  "occurred_at": "2025-11-03T07:03Z",
+  "change_type": "Fix",
+  "summary": "Moved the refresh control to the sidebar footer beside the GitHub shortcut.",
+  "content_hash": "111b48c35cb2fa4f82535cff5dbcaf5a4a71870da2e935c5ea3d153281e25aed"
+}
