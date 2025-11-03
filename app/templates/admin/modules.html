@@ -285,6 +285,34 @@
                   <input id="xero-reference-prefix" name="settings.reference_prefix" class="form-input" value="{{ settings.reference_prefix or '' }}" placeholder="Support" />
                   <p class="form-help">Prefixes are prepended to generated invoice references.</p>
                 </div>
+                <div class="form-field">
+                  <label class="form-label" for="xero-billable-statuses">Billable ticket statuses</label>
+                  <input
+                    id="xero-billable-statuses"
+                    name="settings.billable_statuses"
+                    class="form-input"
+                    value="{{ settings.billable_statuses|join(', ') if settings.billable_statuses else '' }}"
+                    placeholder="resolved, closed"
+                  />
+                  <p class="form-help">
+                    Tickets must match one of these technical status values to be synchronised. Separate multiple statuses with
+                    commas.
+                  </p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="xero-description-template">Line item description template</label>
+                  <input
+                    id="xero-description-template"
+                    name="settings.line_item_description_template"
+                    class="form-input"
+                    value="{{ settings.line_item_description_template or '' }}"
+                    placeholder="Ticket #{ticket_id} - {ticket_subject} - {labour_name}"
+                  />
+                  <p class="form-help">
+                    Available placeholders include {ticket_id}, {ticket_subject}, {ticket_status}, {labour_name}, {labour_code},
+                    {labour_minutes}, {labour_hours}, and {labour_suffix}.
+                  </p>
+                </div>
               {% else %}
                 {% for key, value in settings.items() %}
                   <div class="form-field">
