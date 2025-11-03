@@ -1,0 +1,7 @@
+{
+  "guid": "79dd602d-11fd-41a1-804c-b49f63804550",
+  "occurred_at": "2025-11-03T07:25:00Z",
+  "change_type": "Fix",
+  "summary": "Fix ticket tools menu not rendering when proxied by CDN",
+  "content_hash": "fa7c7a2ad6401be0a95016f69f69eeb51b4016fd8254298eb65ef10dc9607b57"
+}
