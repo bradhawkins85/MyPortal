@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import string
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import asyncio
 from pathlib import Path
@@ -26,6 +26,7 @@ from app.core.database import db
 from app.repositories import companies as company_repo
 from app.repositories import integration_modules as module_repo
 from app.repositories import webhook_events as webhook_repo
+from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import email as email_service, webhook_monitor
 from app.services.realtime import RefreshNotifier, refresh_notifier
 
@@ -46,6 +47,197 @@ DEFAULT_CHATGPT_TOOLS = [
 
 def _hash_secret(secret: str) -> str:
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+
+async def update_xero_tokens(
+    *,
+    refresh_token: str | None = None,
+    access_token: str | None = None,
+    token_expires_at: datetime | None = None,
+) -> None:
+    """Update Xero OAuth tokens in the module settings.
+    
+    Args:
+        refresh_token: The refresh token to store (will be encrypted)
+        access_token: The access token to store (will be encrypted)
+        token_expires_at: When the access token expires
+    """
+    module = await module_repo.get_module(XERO_MODULE_SLUG)
+    if not module:
+        logger.error("Xero module not found when attempting to update tokens")
+        return
+    
+    settings = dict(module.get("settings") or {})
+    
+    # Encrypt and store tokens
+    if refresh_token is not None:
+        settings["refresh_token"] = encrypt_secret(refresh_token) if refresh_token else ""
+    if access_token is not None:
+        settings["access_token"] = encrypt_secret(access_token) if access_token else ""
+    if token_expires_at is not None:
+        # Store as ISO format string
+        settings["token_expires_at"] = token_expires_at.isoformat() if token_expires_at else None
+    
+    await module_repo.update_module(XERO_MODULE_SLUG, settings=settings)
+    logger.info("Updated Xero OAuth tokens")
+
+
+async def get_xero_credentials() -> dict[str, Any] | None:
+    """Get Xero credentials with decrypted tokens.
+    
+    Returns:
+        Dictionary with decrypted credentials or None if module not found
+    """
+    module = await module_repo.get_module(XERO_MODULE_SLUG)
+    if not module:
+        return None
+    
+    settings = dict(module.get("settings") or {})
+    credentials = {
+        "client_id": settings.get("client_id", ""),
+        "client_secret": settings.get("client_secret", ""),
+        "tenant_id": settings.get("tenant_id", ""),
+        "company_name": settings.get("company_name", ""),
+    }
+    
+    # Decrypt tokens if present
+    encrypted_refresh = settings.get("refresh_token", "")
+    encrypted_access = settings.get("access_token", "")
+    
+    if encrypted_refresh:
+        try:
+            credentials["refresh_token"] = decrypt_secret(encrypted_refresh)
+        except Exception as exc:
+            logger.error("Failed to decrypt Xero refresh token", error=str(exc))
+            credentials["refresh_token"] = ""
+    else:
+        credentials["refresh_token"] = ""
+    
+    if encrypted_access:
+        try:
+            credentials["access_token"] = decrypt_secret(encrypted_access)
+        except Exception as exc:
+            logger.error("Failed to decrypt Xero access token", error=str(exc))
+            credentials["access_token"] = ""
+    else:
+        credentials["access_token"] = ""
+    
+    # Parse token expiry
+    token_expires_at_str = settings.get("token_expires_at")
+    if token_expires_at_str:
+        try:
+            credentials["token_expires_at"] = datetime.fromisoformat(token_expires_at_str)
+        except (ValueError, TypeError):
+            credentials["token_expires_at"] = None
+    else:
+        credentials["token_expires_at"] = None
+    
+    return credentials
+
+
+async def refresh_xero_access_token() -> str:
+    """Refresh the Xero access token using the stored refresh token.
+    
+    Returns:
+        The new access token
+        
+    Raises:
+        RuntimeError: If credentials are missing or token refresh fails
+    """
+    credentials = await get_xero_credentials()
+    if not credentials:
+        raise RuntimeError("Xero credentials not configured")
+    
+    client_id = credentials.get("client_id", "").strip()
+    client_secret = credentials.get("client_secret", "").strip()
+    refresh_token = credentials.get("refresh_token", "").strip()
+    
+    if not (client_id and client_secret and refresh_token):
+        raise RuntimeError("Xero OAuth credentials incomplete")
+    
+    # Exchange refresh token for new access token
+    token_url = "https://identity.xero.com/connect/token"
+    token_data = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            response = await client.post(
+                token_url,
+                data=token_data,
+                auth=(client_id, client_secret),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            response.raise_for_status()
+            token_response = response.json()
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "Failed to refresh Xero access token",
+            status_code=exc.response.status_code if exc.response else None,
+            error=exc.response.text if exc.response else str(exc),
+        )
+        raise RuntimeError("Failed to refresh Xero access token") from exc
+    except Exception as exc:
+        logger.error("Error refreshing Xero access token", error=str(exc))
+        raise RuntimeError("Failed to refresh Xero access token") from exc
+    
+    access_token = token_response.get("access_token")
+    new_refresh_token = token_response.get("refresh_token")
+    expires_in = token_response.get("expires_in")
+    
+    if not access_token:
+        raise RuntimeError("No access token in Xero response")
+    
+    # Calculate expiry time
+    expires_at = None
+    if isinstance(expires_in, (int, float)):
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in))
+    
+    # Store the new tokens
+    await update_xero_tokens(
+        access_token=access_token,
+        refresh_token=new_refresh_token if new_refresh_token else refresh_token,
+        token_expires_at=expires_at,
+    )
+    
+    logger.info("Successfully refreshed Xero access token")
+    return access_token
+
+
+async def acquire_xero_access_token() -> str:
+    """Get a valid Xero access token, refreshing if necessary.
+    
+    Returns:
+        A valid access token
+        
+    Raises:
+        RuntimeError: If unable to acquire a valid token
+    """
+    credentials = await get_xero_credentials()
+    if not credentials:
+        raise RuntimeError("Xero credentials not configured")
+    
+    access_token = credentials.get("access_token", "").strip()
+    token_expires_at = credentials.get("token_expires_at")
+    
+    # Check if we have a valid token
+    if access_token and token_expires_at:
+        # Add 5 minute buffer before expiry
+        now = datetime.now(timezone.utc)
+        buffer_time = timedelta(minutes=5)
+        
+        # Ensure token_expires_at is timezone-aware
+        if token_expires_at.tzinfo is None:
+            token_expires_at = token_expires_at.replace(tzinfo=timezone.utc)
+        
+        if now + buffer_time < token_expires_at:
+            # Token is still valid
+            return access_token
+    
+    # Token is missing or expired, refresh it
+    return await refresh_xero_access_token()
 
 
 def _merge_settings(defaults: Mapping[str, Any], overrides: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -443,11 +635,22 @@ def _coerce_settings(
             quantised = decimal_value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             return f"{quantised:f}"
 
+        # Preserve encrypted tokens if not overriding
+        access_token = _preserve_secret("access_token")
+        refresh_token = _preserve_secret("refresh_token")
+        token_expires_at = merged.get("token_expires_at")
+        
+        # Preserve existing token expiry if not provided in overrides
+        if token_expires_at is None and existing_settings:
+            token_expires_at = existing_settings.get("token_expires_at")
+
         merged.update(
             {
                 "client_id": str(merged.get("client_id", "")).strip(),
                 "client_secret": _preserve_secret("client_secret"),
-                "refresh_token": _preserve_secret("refresh_token"),
+                "refresh_token": refresh_token,
+                "access_token": access_token,
+                "token_expires_at": token_expires_at,
                 "tenant_id": str(merged.get("tenant_id", "")).strip(),
                 "company_name": str(merged.get("company_name", "")).strip(),
                 "default_hourly_rate": _normalise_rate(merged.get("default_hourly_rate")),
@@ -473,7 +676,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "uptimekuma": ("shared_secret_hash",),
         "tacticalrmm": ("api_key",),
         "ntfy": ("auth_token",),
-        "xero": ("client_secret", "refresh_token"),
+        "xero": ("client_secret", "refresh_token", "access_token"),
     }
     targets = fields_to_redact.get(slug)
     if not targets:
@@ -1439,22 +1642,41 @@ async def _validate_xero(
     This handler is used when trigger_module is called with the xero module.
     
     If company_name is provided but tenant_id is missing, attempts to discover
-    the tenant_id from the Xero API.
+    the tenant_id from the Xero API using OAuth tokens.
     """
-    client_id = str(settings.get("client_id") or "").strip()
-    client_secret = str(settings.get("client_secret") or "").strip()
-    refresh_token = str(settings.get("refresh_token") or "").strip()
-    tenant_id = str(settings.get("tenant_id") or "").strip()
-    company_name = str(settings.get("company_name") or "").strip()
+    # Get decrypted credentials
+    credentials = await get_xero_credentials()
+    if not credentials:
+        return {
+            "status": "error",
+            "message": "Xero credentials not configured",
+        }
+    
+    client_id = credentials.get("client_id", "").strip()
+    client_secret = credentials.get("client_secret", "").strip()
+    refresh_token = credentials.get("refresh_token", "").strip()
+    tenant_id = credentials.get("tenant_id", "").strip()
+    company_name = credentials.get("company_name", "").strip()
+    access_token = credentials.get("access_token", "").strip()
+    token_expires_at = credentials.get("token_expires_at")
     
     result: dict[str, Any] = {
         "status": "ok",
         "has_client_id": bool(client_id),
         "has_client_secret": bool(client_secret),
         "has_refresh_token": bool(refresh_token),
+        "has_access_token": bool(access_token),
         "has_tenant_id": bool(tenant_id),
         "has_company_name": bool(company_name),
     }
+    
+    # Add token expiry info
+    if token_expires_at:
+        result["token_expires_at"] = token_expires_at.isoformat()
+        now = datetime.now(timezone.utc)
+        if token_expires_at.tzinfo is None:
+            token_expires_at = token_expires_at.replace(tzinfo=timezone.utc)
+        result["token_expired"] = now >= token_expires_at
     
     # Attempt to discover tenant_id if company_name is provided but tenant_id is missing
     if company_name and not tenant_id and client_id and client_secret and refresh_token:

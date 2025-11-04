@@ -1,0 +1,8 @@
+{
+  "guid": "4129e0ee-0612-4130-af40-d9147ff80dd9",
+  "occurred_at": "2025-11-04T11:00:20.367402+00:00",
+  "change_type": "Feature",
+  "summary": "Xero OAuth2 Integration",
+  "content": "Implemented OAuth2 authentication flow for Xero integration. Refresh tokens are now obtained automatically through the /xero/connect endpoint instead of being manually entered. Tokens are stored encrypted in the database and automatically refreshed when expired. This enhances security by ensuring tokens are never exposed in configuration files and provides a seamless authorization experience.",
+  "content_hash": "69ecb7dab38c65a1c5e3c3e37aaba465674717151d583525918f27a0e8794c9b"
+}
