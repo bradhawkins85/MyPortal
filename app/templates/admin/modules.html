@@ -247,8 +247,15 @@
                   <p class="form-help">Tokens are encrypted before storage. Leave blank or enter ******** to keep the existing value.</p>
                 </div>
                 <div class="form-field">
-                  <label class="form-label" for="xero-tenant-id">Tenant ID</label>
-                  <input id="xero-tenant-id" name="settings.tenant_id" class="form-input" value="{{ settings.tenant_id or '' }}" autocomplete="off" />
+                  <label class="form-label" for="xero-company-name">Company name</label>
+                  <input
+                    id="xero-company-name"
+                    name="settings.company_name"
+                    class="form-input"
+                    value="{{ settings.company_name or '' }}"
+                    readonly
+                  />
+                  <p class="form-help">Update the <code>XERO_COMPANY_NAME</code> value in your environment file to change the linked tenant.</p>
                 </div>
                 <div class="form-field form-field--inline">
                   <label class="form-label" for="xero-hourly-rate">Default hourly rate</label>
