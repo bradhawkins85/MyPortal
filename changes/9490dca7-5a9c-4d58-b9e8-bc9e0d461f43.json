@@ -1,0 +1,7 @@
+{
+  "guid": "9490dca7-5a9c-4d58-b9e8-bc9e0d461f43",
+  "occurred_at": "2025-10-21T10:39Z",
+  "change_type": "Feature",
+  "summary": "Auto-created missing companies from Syncro ticket imports using returned customer details to keep tickets linked",
+  "content_hash": "9a138ce57448f917315ba8f0ed4bd820648c468f0ae002cc3ff0b75d9dc57114"
+}

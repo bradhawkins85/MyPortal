@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-08T10:30Z",
   "change_type": "Fix",
   "summary": "Hardened SQL migration runner to respect quoted semicolons so HTML seed data applies without syntax errors",
-  "content_hash": "3487cad24d5af1593a057b8309b0aee6ba5c950198960a59856e451bdaf89176"
+  "content_hash": "5f237d7481ecc81b4f0270bb8fb7b3ce9184f35f44b2f283df281c59a4c5e3f7"
 }

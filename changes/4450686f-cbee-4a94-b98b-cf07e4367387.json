@@ -1,6 +1,6 @@
 {
   "guid": "4450686f-cbee-4a94-b98b-cf07e4367387",
-  "occurred_at": "2025-11-20T09:30:00Z",
+  "occurred_at": "2025-11-20T09:30Z",
   "change_type": "Feature",
   "summary": "Added realtime ticket dashboard refresh with websocket updates and new API.",
   "content_hash": "0ae749d99f9048739443a4f07ad315047e17fd6601e0dc8130e962f7cf564537"

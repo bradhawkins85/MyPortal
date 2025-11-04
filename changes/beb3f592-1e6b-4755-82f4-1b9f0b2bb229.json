@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-13T13:45Z",
   "change_type": "Fix",
   "summary": "Logged Syncro ticket import jobs in the webhook monitor with success and failure outcomes so the delivery queue lists them",
-  "content_hash": "5882e515eb2be38ae08173a6c4ee0431b3167d41e887334dff4690c9fec44de7"
+  "content_hash": "9348cf35048cdbfb7e63dc79fd45c258f483376a0261afc3e4c6b0fad4094154"
 }

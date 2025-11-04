@@ -1,7 +1,7 @@
 {
   "guid": "e9802d1c-d95c-4099-8a80-7cbb90ab4bfb",
-  "occurred_at": "2025-10-29T05:31:10Z",
+  "occurred_at": "2025-10-29T05:31Z",
   "change_type": "Feature",
   "summary": "Split scheduled automation tasks into global and company-specific tables.",
-  "content_hash": "49909a2b5d445a55ed5c7629f0ee564d918e48a349369298cf41bf6e52c926c6"
+  "content_hash": "a001e31c1a0468642da391c688ec508d4660a09c4672d3551f008cbcf853d5bd"
 }

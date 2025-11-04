@@ -1,0 +1,7 @@
+{
+  "guid": "0eca4778-328b-42c5-929d-2d33c80af1de",
+  "occurred_at": "2025-10-16T08:13Z",
+  "change_type": "Fix",
+  "summary": "Restored add-to-cart controls by exposing cart permissions in shared context so authorised users can shop",
+  "content_hash": "cc79a9e138b5c21b21d7aee6d5192c3989370d733e5df2793f021377d97f6b56"
+}

@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-13T14:30Z",
   "change_type": "Fix",
   "summary": "Hardened Syncro ticket import webhook fallback with repository error handling tests and logging coverage",
-  "content_hash": "ffb783e9e985c81740c9cb28c4206a12abc4a9b2bc956841faba579cf7719452"
+  "content_hash": "5d6f0157f1e6e2867249faa91140e59f6d8c5822237d2f6b33b0a34086ea1ee6"
 }

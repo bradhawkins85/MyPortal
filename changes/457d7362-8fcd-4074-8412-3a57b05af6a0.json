@@ -1,0 +1,7 @@
+{
+  "guid": "457d7362-8fcd-4074-8412-3a57b05af6a0",
+  "occurred_at": "2025-12-27T10:15Z",
+  "change_type": "Fix",
+  "summary": "Corrected the agent API route to /api/agent/query so dashboard requests reach the service without 404 errors",
+  "content_hash": "ce809d8cc6fb3f3d92c1927de707c56c62e4383f898169638a6c89cc46803740"
+}
