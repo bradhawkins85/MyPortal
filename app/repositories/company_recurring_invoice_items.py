@@ -5,6 +5,11 @@ from typing import Any, Optional, Sequence
 from app.core.database import db
 
 
+def _bool_to_tinyint(value: bool) -> int:
+    """Convert boolean to MySQL TINYINT(1) format."""
+    return 1 if value else 0
+
+
 async def list_company_recurring_invoice_items(company_id: int) -> Sequence[dict[str, Any]]:
     """List all recurring invoice items for a company."""
     rows = await db.fetch_all(
@@ -49,7 +54,7 @@ async def create_recurring_invoice_item(
         (company_id, product_code, description_template, qty_expression, price_override, active)
         VALUES (%s, %s, %s, %s, %s, %s)
         """,
-        (company_id, product_code, description_template, qty_expression, price_override, 1 if active else 0),
+        (company_id, product_code, description_template, qty_expression, price_override, _bool_to_tinyint(active)),
     )
     row = await db.fetch_one(
         """
@@ -94,7 +99,7 @@ async def update_recurring_invoice_item(
     
     if active is not None:
         updates.append("active = %s")
-        params.append(1 if active else 0)
+        params.append(_bool_to_tinyint(active))
     
     if not updates:
         return await get_recurring_invoice_item(item_id)

@@ -220,7 +220,7 @@
               <tbody>
                 {% if recurring_invoice_items %}
                   {% for item in recurring_invoice_items %}
-                    <tr data-recurring-item='{{ item | tojson }}'>
+                    <tr data-recurring-item='{{ item | tojson | e }}'>
                       <td data-label="Product Code">{{ item.product_code }}</td>
                       <td data-label="Description" class="text-truncate" style="max-width: 300px;">
                         {{ item.description_template }}

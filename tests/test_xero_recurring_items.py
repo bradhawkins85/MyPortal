@@ -34,7 +34,7 @@ def test_build_recurring_invoice_items(monkeypatch):
                 "description_template": "Managed services for {company_name}",
                 "qty_expression": "1",
                 "price_override": 100.00,
-                "active": 1,
+                "active": True,
             },
             {
                 "id": 2,
@@ -43,7 +43,7 @@ def test_build_recurring_invoice_items(monkeypatch):
                 "description_template": "Ad-hoc support",
                 "qty_expression": "{active_agents}",
                 "price_override": None,
-                "active": 1,
+                "active": True,
             },
             {
                 "id": 3,
@@ -52,7 +52,7 @@ def test_build_recurring_invoice_items(monkeypatch):
                 "description_template": "Should not appear",
                 "qty_expression": "1",
                 "price_override": None,
-                "active": 0,
+                "active": False,
             },
         ]
 
