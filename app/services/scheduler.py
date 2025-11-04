@@ -12,6 +12,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.core.config import get_settings
+from app.core.database import db
 from app.core.logging import log_error, log_info
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.services import asset_importer
@@ -94,7 +95,7 @@ class SchedulerService:
             return
         if not self._scheduler.get_job("webhook-monitor"):
             self._scheduler.add_job(
-                webhook_monitor.process_pending_events,
+                self._run_webhook_monitor,
                 "interval",
                 seconds=60,
                 id="webhook-monitor",
@@ -104,7 +105,7 @@ class SchedulerService:
             )
         if not self._scheduler.get_job("webhook-cleanup"):
             self._scheduler.add_job(
-                webhook_monitor.purge_completed_events,
+                self._run_webhook_cleanup,
                 "interval",
                 hours=1,
                 id="webhook-cleanup",
@@ -114,7 +115,7 @@ class SchedulerService:
             )
         if not self._scheduler.get_job("automation-runner"):
             self._scheduler.add_job(
-                automations_service.process_due_automations,
+                self._run_automation_runner,
                 "interval",
                 seconds=60,
                 id="automation-runner",
@@ -122,6 +123,30 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+
+    async def _run_webhook_monitor(self) -> None:
+        """Run webhook monitoring with distributed lock to prevent duplicate execution."""
+        async with db.acquire_lock("webhook_monitor", timeout=1) as lock_acquired:
+            if not lock_acquired:
+                log_info("Webhook monitor already running on another worker, skipping")
+                return
+            await webhook_monitor.process_pending_events()
+
+    async def _run_webhook_cleanup(self) -> None:
+        """Run webhook cleanup with distributed lock to prevent duplicate execution."""
+        async with db.acquire_lock("webhook_cleanup", timeout=1) as lock_acquired:
+            if not lock_acquired:
+                log_info("Webhook cleanup already running on another worker, skipping")
+                return
+            await webhook_monitor.purge_completed_events()
+
+    async def _run_automation_runner(self) -> None:
+        """Run automation processing with distributed lock to prevent duplicate execution."""
+        async with db.acquire_lock("automation_runner", timeout=1) as lock_acquired:
+            if not lock_acquired:
+                log_info("Automation runner already running on another worker, skipping")
+                return
+            await automations_service.process_due_automations()
 
     def _build_trigger(self, task: dict[str, Any]) -> CronTrigger | None:
         try:
@@ -138,99 +163,115 @@ class SchedulerService:
     async def _run_task(self, task: dict[str, Any], *, force_restart: bool = False) -> None:
         task_id = task.get("id")
         command = task.get("command")
-        log_info("Running scheduled task", task_id=task_id, command=command)
-        started_at = datetime.now(timezone.utc)
-        status = "succeeded"
-        details: str | None = None
+        
         if task_id is None:
             log_error("Scheduled task missing identifier", command=command)
             return
-        try:
-            if command == "sync_staff":
-                company_id = task.get("company_id")
-                if company_id:
-                    await staff_importer.import_contacts_for_company(int(company_id))
-            elif command == "sync_assets":
-                company_id = task.get("company_id")
-                if company_id:
-                    await asset_importer.import_assets_for_company(int(company_id))
-            elif command == "sync_tactical_assets":
-                company_id = task.get("company_id")
-                if company_id:
-                    processed = await asset_importer.import_tactical_assets_for_company(int(company_id))
-                    details = json.dumps(
-                        {"company_id": int(company_id), "processed": processed},
-                        default=str,
-                    )
-                else:
-                    summary = await asset_importer.import_all_tactical_assets()
-                    details = json.dumps(summary, default=str)
-            elif command == "sync_o365":
-                company_id = task.get("company_id")
-                if company_id:
-                    await m365_service.sync_company_licenses(int(company_id))
-            elif command == "sync_to_xero":
-                company_id = task.get("company_id")
-                if company_id:
-                    result = await xero_service.sync_company(int(company_id))
-                    details = json.dumps(result, default=str) if result else None
+
+        # Use a distributed lock to ensure only one worker executes this task
+        lock_name = f"scheduled_task_{task_id}"
+        
+        async with db.acquire_lock(lock_name, timeout=1) as lock_acquired:
+            if not lock_acquired:
+                # Another worker is already executing this task, skip silently
+                log_info(
+                    "Scheduled task already running on another worker, skipping",
+                    task_id=task_id,
+                    command=command,
+                )
+                return
+
+            log_info("Running scheduled task", task_id=task_id, command=command)
+            started_at = datetime.now(timezone.utc)
+            status = "succeeded"
+            details: str | None = None
+            
+            try:
+                if command == "sync_staff":
+                    company_id = task.get("company_id")
+                    if company_id:
+                        await staff_importer.import_contacts_for_company(int(company_id))
+                elif command == "sync_assets":
+                    company_id = task.get("company_id")
+                    if company_id:
+                        await asset_importer.import_assets_for_company(int(company_id))
+                elif command == "sync_tactical_assets":
+                    company_id = task.get("company_id")
+                    if company_id:
+                        processed = await asset_importer.import_tactical_assets_for_company(int(company_id))
+                        details = json.dumps(
+                            {"company_id": int(company_id), "processed": processed},
+                            default=str,
+                        )
+                    else:
+                        summary = await asset_importer.import_all_tactical_assets()
+                        details = json.dumps(summary, default=str)
+                elif command == "sync_o365":
+                    company_id = task.get("company_id")
+                    if company_id:
+                        await m365_service.sync_company_licenses(int(company_id))
+                elif command == "sync_to_xero":
+                    company_id = task.get("company_id")
+                    if company_id:
+                        result = await xero_service.sync_company(int(company_id))
+                        details = json.dumps(result, default=str) if result else None
+                    else:
+                        status = "skipped"
+                        details = "Company context required"
+                elif command == "refresh_company_ids":
+                    company_id = task.get("company_id")
+                    if company_id:
+                        result = await company_id_lookup.lookup_missing_company_ids(int(company_id))
+                        details = json.dumps(result, default=str) if result else None
+                    else:
+                        result = await company_id_lookup.refresh_all_missing_company_ids()
+                        details = json.dumps(result, default=str) if result else None
+                elif command == "update_products":
+                    await products_service.update_products_from_feed()
+                elif command == "update_stock_feed":
+                    await products_service.update_stock_feed()
+                elif command == "system_update":
+                    output = await self._run_system_update(force_restart=force_restart)
+                    if output:
+                        details = output
+                elif isinstance(command, str) and command.startswith("imap_sync:"):
+                    try:
+                        account_id = int(command.split(":", 1)[1])
+                    except (IndexError, ValueError):
+                        status = "skipped"
+                        details = "Invalid IMAP account reference"
+                        log_error(
+                            "Invalid IMAP sync command",
+                            task_id=task_id,
+                            command=command,
+                        )
+                    else:
+                        result = await imap_service.sync_account(account_id)
+                        details = json.dumps(result, default=str) if result else None
                 else:
                     status = "skipped"
-                    details = "Company context required"
-            elif command == "refresh_company_ids":
-                company_id = task.get("company_id")
-                if company_id:
-                    result = await company_id_lookup.lookup_missing_company_ids(int(company_id))
-                    details = json.dumps(result, default=str) if result else None
-                else:
-                    result = await company_id_lookup.refresh_all_missing_company_ids()
-                    details = json.dumps(result, default=str) if result else None
-            elif command == "update_products":
-                await products_service.update_products_from_feed()
-            elif command == "update_stock_feed":
-                await products_service.update_stock_feed()
-            elif command == "system_update":
-                output = await self._run_system_update(force_restart=force_restart)
-                if output:
-                    details = output
-            elif isinstance(command, str) and command.startswith("imap_sync:"):
-                try:
-                    account_id = int(command.split(":", 1)[1])
-                except (IndexError, ValueError):
-                    status = "skipped"
-                    details = "Invalid IMAP account reference"
-                    log_error(
-                        "Invalid IMAP sync command",
-                        task_id=task_id,
-                        command=command,
-                    )
-                else:
-                    result = await imap_service.sync_account(account_id)
-                    details = json.dumps(result, default=str) if result else None
-            else:
-                status = "skipped"
-                details = "No handler registered for command"
-                log_info("Scheduled task has no handler", task_id=task_id, command=command)
-        except Exception as exc:  # pragma: no cover - defensive logging
-            status = "failed"
-            details = str(exc)
-            log_error(
-                "Scheduled task failed",
-                task_id=task_id,
-                command=command,
-                error=str(exc),
-            )
-        finally:
-            finished_at = datetime.now(timezone.utc)
-            duration_ms = int((finished_at - started_at).total_seconds() * 1000)
-            await scheduled_tasks_repo.record_task_run(
-                int(task_id),
-                status=status,
-                started_at=started_at,
-                finished_at=finished_at,
-                duration_ms=duration_ms,
-                details=details,
-            )
+                    details = "No handler registered for command"
+                    log_info("Scheduled task has no handler", task_id=task_id, command=command)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                status = "failed"
+                details = str(exc)
+                log_error(
+                    "Scheduled task failed",
+                    task_id=task_id,
+                    command=command,
+                    error=str(exc),
+                )
+            finally:
+                finished_at = datetime.now(timezone.utc)
+                duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+                await scheduled_tasks_repo.record_task_run(
+                    int(task_id),
+                    status=status,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    duration_ms=duration_ms,
+                    details=details,
+                )
 
     async def run_now(self, task_id: int) -> None:
         task = await scheduled_tasks_repo.get_task(task_id)

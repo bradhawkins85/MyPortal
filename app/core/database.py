@@ -308,5 +308,45 @@ class Database:
                     async with conn.cursor() as cursor:
                         await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
 
+    @asynccontextmanager
+    async def acquire_lock(
+        self,
+        lock_name: str,
+        timeout: int = 10,
+    ) -> AsyncIterator[bool]:
+        """Acquire a named MySQL lock for distributed coordination.
+
+        Args:
+            lock_name: The name of the lock to acquire
+            timeout: Maximum seconds to wait for the lock (default: 10)
+
+        Yields:
+            bool: True if lock was acquired, False otherwise
+
+        This uses MySQL's GET_LOCK() function to provide distributed locking
+        across multiple workers/processes. Only one connection can hold a
+        named lock at a time.
+        """
+        if not self._pool:
+            raise RuntimeError("Database pool not initialised")
+
+        conn = await self._pool.acquire()
+        lock_acquired = False
+        try:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT GET_LOCK(%s, %s)", (lock_name, timeout))
+                result = await cursor.fetchone()
+                lock_acquired = bool(result and result[0] == 1)
+
+            yield lock_acquired
+        finally:
+            if lock_acquired:
+                try:
+                    async with conn.cursor() as cursor:
+                        await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                except Exception:  # pragma: no cover - defensive cleanup
+                    pass
+            self._pool.release(conn)
+
 
 db = Database()
