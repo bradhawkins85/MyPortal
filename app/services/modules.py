@@ -17,7 +17,8 @@ from loguru import logger
 
 # Load .env file before accessing environment variables
 # This ensures XERO_ and other env vars are available when DEFAULT_MODULES is initialized
-_env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_env_path = _PROJECT_ROOT / ".env"
 if _env_path.exists():
     load_dotenv(_env_path)
 
@@ -31,6 +32,9 @@ from app.services.realtime import RefreshNotifier, refresh_notifier
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
 _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
+# Module slug constants
+XERO_MODULE_SLUG = "xero"
 
 DEFAULT_CHATGPT_TOOLS = [
     "listTickets",
@@ -1338,7 +1342,8 @@ async def _discover_xero_tenant_id(
     Returns:
         The tenant_id if found, None otherwise
     """
-    if not all([client_id, client_secret, refresh_token, company_name]):
+    # Check all required parameters are provided
+    if not (client_id and client_secret and refresh_token and company_name):
         logger.warning(
             "Cannot discover tenant_id: missing required credentials or company name",
             has_client_id=bool(client_id),
@@ -1385,10 +1390,14 @@ async def _discover_xero_tenant_id(
             
             # Step 3: Find matching tenant by company name (case-insensitive)
             company_name_lower = company_name.strip().lower()
-            for connection in connections:
-                tenant_name = str(connection.get("tenantName", "")).strip().lower()
-                if tenant_name == company_name_lower:
-                    tenant_id = connection.get("tenantId")
+            # Pre-process all connections for efficient matching
+            normalized_connections = [
+                (str(conn.get("tenantName", "")).strip().lower(), conn.get("tenantId"))
+                for conn in connections
+            ]
+            
+            for tenant_name_lower, tenant_id in normalized_connections:
+                if tenant_name_lower == company_name_lower:
                     logger.info(
                         "Discovered Xero tenant_id",
                         company_name=company_name,
@@ -1465,7 +1474,7 @@ async def _validate_xero(
             # Update the module settings with the discovered tenant_id
             try:
                 await module_repo.update_module(
-                    "xero",
+                    XERO_MODULE_SLUG,
                     settings={**settings, "tenant_id": discovered_tenant_id},
                 )
                 result["tenant_id_updated"] = True
