@@ -61,6 +61,22 @@ prepare_git_environment() {
   echo "Redirected Git configuration to ${fallback_home} because the default HOME directory is not writable." >&2
 }
 
+# Clean up local modifications to __pycache__ files before pulling from remote.
+# These files are incorrectly tracked in the repository and can cause merge conflicts
+# when they are modified locally during normal Python execution.
+# This function resets all tracked __pycache__ files to their HEAD version.
+clean_pycache_files() {
+  echo "Cleaning __pycache__ files to prevent merge conflicts..."
+  
+  # Reset any local changes to __pycache__ files to prevent merge conflicts
+  # git checkout works for both existing and deleted files
+  git ls-files '*__pycache__*' 2>/dev/null | while IFS= read -r file; do
+    git checkout HEAD -- "$file" 2>/dev/null || true
+  done
+  
+  echo "__pycache__ cleanup complete."
+}
+
 AUTO_FALLBACK=0
 
 while [[ $# -gt 0 ]]; do
@@ -329,6 +345,9 @@ fi
 
 REMOTE_URL=$(git config --get remote.origin.url || true)
 PRE_PULL_HEAD=$(git rev-parse HEAD)
+
+# Clean up __pycache__ files before pulling to prevent merge conflicts
+clean_pycache_files
 
 if [[ -n "${GITHUB_USERNAME:-}" && -n "${GITHUB_PASSWORD:-}" && "$REMOTE_URL" == https://* ]]; then
   AUTH_REMOTE_URL="https://${GITHUB_USERNAME}:${GITHUB_PASSWORD}@${REMOTE_URL#https://}"
