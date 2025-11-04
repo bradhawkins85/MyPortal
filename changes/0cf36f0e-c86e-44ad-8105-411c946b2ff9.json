@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-06T10:00Z",
   "change_type": "Feature",
   "summary": "Added Ollama-powered ticket AI summaries with resolution insights and admin workspace display",
-  "content_hash": "be170cdb0b54a7e6a95ead441eef5442c27af5417d0ff651dbf3c542726a9763"
+  "content_hash": "1fbc4d9e19785c4bd08c3ec400df41d799a9a536c9bf1188bde3ce532b7565ef"
 }

@@ -1,0 +1,7 @@
+{
+  "guid": "bdd7e785-373a-4593-a55c-a9f1d65a13db",
+  "occurred_at": "2025-10-21T11:44Z",
+  "change_type": "Fix",
+  "summary": "Removed succeeded/skipped AI tag status labels from the admin ticket detail view to declutter the tags section",
+  "content_hash": "a8e9893175e4733023c616f21e20a5584325ddba1634bd65b538c9d221d1a207"
+}

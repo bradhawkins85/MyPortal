@@ -1,0 +1,7 @@
+{
+  "guid": "870d6806-5770-4b43-8161-b48a62e28ac7",
+  "occurred_at": "2025-10-10T13:45Z",
+  "change_type": "Fix",
+  "summary": "Corrected scheduler monitoring migration defaults to remain MariaDB-compatible while storing UTC timestamps",
+  "content_hash": "6896ca106688b6a4b2dad0c68d9bd48e7b43c910a4d62130da7f35239dc6ea94"
+}

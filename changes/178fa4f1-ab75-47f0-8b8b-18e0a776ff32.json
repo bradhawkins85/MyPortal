@@ -1,0 +1,7 @@
+{
+  "guid": "178fa4f1-ab75-47f0-8b8b-18e0a776ff32",
+  "occurred_at": "2025-10-20T06:59Z",
+  "change_type": "Fix",
+  "summary": "Aligned ticketing migration key types with existing INT identifiers so startup migrations succeed on MySQL",
+  "content_hash": "635a8cacede517caadda8e8166b99acab73149e9faf209ab2224aa0c30b1a044"
+}

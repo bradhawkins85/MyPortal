@@ -1,0 +1,7 @@
+{
+  "guid": "df0c81c0-e0bd-41e9-9684-85d9692bf910",
+  "occurred_at": "2025-10-15T12:18Z",
+  "change_type": "Feature",
+  "summary": "Added Fail2ban-aware authentication logging with sample filter/jail configs and documentation",
+  "content_hash": "4dd2340856de76eaaa39d868bd37c3e0ec153ed87cbb4651bd742791b4e3ec4c"
+}

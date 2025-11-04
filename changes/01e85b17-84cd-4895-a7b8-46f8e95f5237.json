@@ -1,0 +1,7 @@
+{
+  "guid": "01e85b17-84cd-4895-a7b8-46f8e95f5237",
+  "occurred_at": "2025-10-08T12:22Z",
+  "change_type": "Fix",
+  "summary": "Removed the product description textarea from the shop admin add product form and refreshed helper copy",
+  "content_hash": "edbb03c4d1d1259839a44ce8333750c41ff53146952660e16212230bbaf0428e"
+}

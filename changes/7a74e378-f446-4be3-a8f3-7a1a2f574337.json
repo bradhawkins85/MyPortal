@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-26T14:50Z",
   "change_type": "Fix",
   "summary": "Rebuilt system variables knowledge base section seeds with CONCAT_WS strings to restore valid SQL syntax during article re-imports",
-  "content_hash": "c2fe0b86fa50d557f9fd70e1fccc63e09209af8cb2dbcca02d0cb9317327eda2"
+  "content_hash": "1ac94d18565de3427a4f914a302767cfa9da082fc17475d6ef7140861ca1c562"
 }

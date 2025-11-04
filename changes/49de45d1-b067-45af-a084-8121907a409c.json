@@ -3,5 +3,5 @@
   "occurred_at": "2025-11-01T11:05Z",
   "change_type": "Feature",
   "summary": "Added dashboard agent powered by Ollama with API endpoint and documentation.",
-  "content_hash": "de5e63ecb74531ccecd35e7c3179eb6e7b16707bcd42749c8a8a0a8dc34870d0"
+  "content_hash": "887a4ff710afb2a3d5b429bd431e7fa4f5ad22018b263ba91f80c1dfae09ef6e"
 }

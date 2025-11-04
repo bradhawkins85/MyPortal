@@ -1,0 +1,7 @@
+{
+  "guid": "791d7bdc-18d3-4133-a1ef-8e8182a2f183",
+  "occurred_at": "2025-10-23T03:05Z",
+  "change_type": "Fix",
+  "summary": "Stopped event automation forms from seeding default trigger filters and action payload templates on load.",
+  "content_hash": "1dc0af0eaf35b1cc36cd1bbec70aeebaf9a1eeef817cbf924189efbb3509920a"
+}

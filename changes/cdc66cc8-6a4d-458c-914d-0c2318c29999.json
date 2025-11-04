@@ -1,0 +1,7 @@
+{
+  "guid": "cdc66cc8-6a4d-458c-914d-0c2318c29999",
+  "occurred_at": "2025-12-13T11:00Z",
+  "change_type": "Fix",
+  "summary": "Marked manual webhook events as in progress when logging Syncro and module API calls so the monitor now records their delivery outcomes",
+  "content_hash": "321cfca6e7c4817adf78d90a38422ce4bcfa0e1892ba641650ce9f7fb74d77db"
+}

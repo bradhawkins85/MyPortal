@@ -1,7 +1,7 @@
 {
   "guid": "7988de5e-d2f1-4218-960e-341948e47835",
-  "occurred_at": "2025-11-01T05:52:36Z",
+  "occurred_at": "2025-11-01T05:52Z",
   "change_type": "Fix",
   "summary": "Upsell upgrades now replace original cart items and redirect users back to the cart page.",
-  "content_hash": "37ac167afab494b06e16c1229b1a3a7727e9f323dec1be52dd6837e89eaa4767"
+  "content_hash": "e91afde2fc1fa9c11a7387908d1ee20ee344596cfaebcc02d3a137baa17dfdd9"
 }

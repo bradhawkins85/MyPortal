@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-08T22:05Z",
   "change_type": "Feature",
   "summary": "Enabled installable Progressive Web App support with manifest, service worker caching, and offline fallback",
-  "content_hash": "80145ebc5e1b536af37aaeeedd498309a94162d32602ba2d7c403ea84373fac0"
+  "content_hash": "799364753343637ef7e45595b3b501b1ea432479f967c9fc9c4493195617bfee"
 }

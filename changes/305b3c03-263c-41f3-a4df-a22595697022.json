@@ -1,0 +1,7 @@
+{
+  "guid": "305b3c03-263c-41f3-a4df-a22595697022",
+  "occurred_at": "2025-10-09T19:30Z",
+  "change_type": "Fix",
+  "summary": "Restored company switching with session-backed active company tracking and sidebar selector",
+  "content_hash": "8a8c44e12234509432cfc03b34d0d09a59e919bf1b72fb88280f7e655557b8b0"
+}

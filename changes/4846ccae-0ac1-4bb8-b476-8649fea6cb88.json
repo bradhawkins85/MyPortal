@@ -1,0 +1,7 @@
+{
+  "guid": "4846ccae-0ac1-4bb8-b476-8649fea6cb88",
+  "occurred_at": "2025-10-21T11:50Z",
+  "change_type": "Fix",
+  "summary": "Removed automation workspace sidebar so the orchestration view spans the full width per request",
+  "content_hash": "9fa5b62ae9ebd04c9d4b2838a6a4bfac41f71c003e93c9dd0f7f05fffa0b3e40"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "59f47deb-c723-4715-8254-29556aa12430",
+  "occurred_at": "2025-10-08T13:42Z",
+  "change_type": "Fix",
+  "summary": "Restored /admin/companies administration dashboard with user provisioning and permission controls",
+  "content_hash": "2679c683da8f00bcc7b2cc3759168abdb4aa9b0a98166ca8c3a96eb9f029be0a"
+}
