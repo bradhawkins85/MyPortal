@@ -155,6 +155,7 @@ configure_logging()
 settings = get_settings()
 templates_config = get_templates_config()
 oauth_state_serializer = URLSafeSerializer(settings.secret_key, salt="m365-oauth")
+xero_oauth_state_serializer = URLSafeSerializer(settings.secret_key, salt="xero-oauth")
 PWA_THEME_COLOR = "#0f172a"
 PWA_BACKGROUND_COLOR = "#0f172a"
 SHOP_LOW_STOCK_THRESHOLD = 5
@@ -3608,9 +3609,9 @@ async def xero_connect(request: Request):
         return RedirectResponse(url="/admin/modules?error=missing+client+id", status_code=status.HTTP_303_SEE_OTHER)
     
     # Generate state token to prevent CSRF
-    state = oauth_state_serializer.dumps({
+    state = xero_oauth_state_serializer.dumps({
         "user_id": session_data.user_id,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     })
     
     # Build authorization URL
@@ -3649,7 +3650,7 @@ async def xero_callback(
     
     # Verify state token
     try:
-        state_data = oauth_state_serializer.loads(state)
+        state_data = xero_oauth_state_serializer.loads(state)
     except BadSignature:
         return RedirectResponse(
             url="/admin/modules?error=invalid+state",
@@ -3722,7 +3723,7 @@ async def xero_callback(
     # Calculate token expiry
     expires_at = None
     if isinstance(expires_in, (int, float)):
-        expires_at = datetime.utcnow() + timedelta(seconds=float(expires_in))
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in))
     
     # Store tokens (they will be encrypted by update_xero_tokens)
     await modules_service.update_xero_tokens(
