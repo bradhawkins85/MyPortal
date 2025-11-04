@@ -34,8 +34,8 @@ XERO_CLIENT_ID=your_xero_client_id
 XERO_CLIENT_SECRET=your_xero_client_secret
 
 # Optional configuration
-XERO_TENANT_ID=  # Auto-discovered during OAuth flow
-XERO_COMPANY_NAME=  # For auto-discovery of tenant_id
+XERO_TENANT_ID=  # Auto-discovered during OAuth flow or when running "Run test"
+XERO_COMPANY_NAME=My Company Ltd  # Required for auto-discovery of tenant_id
 XERO_DEFAULT_HOURLY_RATE=150.00
 XERO_ACCOUNT_CODE=400
 XERO_TAX_TYPE=OUTPUT
@@ -74,8 +74,22 @@ The system will automatically:
 After authorization, you can verify the connection by:
 
 1. Going to **Admin → Integration Modules → Xero**
-2. Clicking **"Test Module"** to validate credentials
+2. Clicking **"Run test"** to validate credentials and auto-discover tenant_id
 3. Checking that the module shows "Connected" status
+
+#### Automatic Tenant ID Discovery
+
+When you click "Run test" on the Xero module, MyPortal automatically discovers your Xero tenant ID if:
+- You have configured `XERO_COMPANY_NAME` in your `.env` file
+- The tenant ID is not already set
+- Valid OAuth credentials (client_id, client_secret, refresh_token) are configured
+
+The system will:
+1. Call the Xero `/connections` API endpoint
+2. Match the tenant by comparing the `tenantName` from Xero with your configured `XERO_COMPANY_NAME` (case-insensitive)
+3. Automatically store the discovered `tenant_id` in the module settings
+
+This eliminates the need to manually look up and enter your Xero tenant ID.
 
 ## How It Works
 
