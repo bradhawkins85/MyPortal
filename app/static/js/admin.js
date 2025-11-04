@@ -2480,12 +2480,21 @@
       event.preventDefault();
       
       const itemId = document.getElementById('recurring-item-id').value;
+      const priceValue = document.getElementById('recurring-item-price').value.trim();
+      let priceOverride = null;
+      
+      if (priceValue) {
+        const parsed = parseFloat(priceValue);
+        if (!isNaN(parsed) && parsed >= 0) {
+          priceOverride = parsed;
+        }
+      }
+      
       const formData = {
         product_code: document.getElementById('recurring-item-product-code').value.trim(),
         description_template: document.getElementById('recurring-item-description').value.trim(),
         qty_expression: document.getElementById('recurring-item-qty').value.trim(),
-        price_override: document.getElementById('recurring-item-price').value ? 
-          parseFloat(document.getElementById('recurring-item-price').value) : null,
+        price_override: priceOverride,
         active: document.getElementById('recurring-item-active').checked,
       };
 

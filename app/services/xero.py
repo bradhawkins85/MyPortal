@@ -483,7 +483,7 @@ async def build_recurring_invoice_items(
         
         # Evaluate quantity expression
         qty_expression = str(item.get("qty_expression") or "1")
-        quantity = _evaluate_qty_expression(qty_expression, dict(template_context))
+        quantity = _evaluate_qty_expression(qty_expression, template_context)
         
         # Build the line item
         line_item: dict[str, Any] = {
