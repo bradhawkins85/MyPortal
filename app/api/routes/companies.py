@@ -16,6 +16,7 @@ from app.schemas.company_recurring_invoice_items import (
     RecurringInvoiceItemResponse,
     RecurringInvoiceItemUpdate,
 )
+from app.services import company_id_lookup
 
 router = APIRouter(prefix="/companies", tags=["Companies"])
 
@@ -36,6 +37,20 @@ async def create_company(
     __: dict = Depends(require_super_admin),
 ):
     created = await company_repo.create_company(**payload.model_dump())
+    company_id = created.get("id")
+    
+    # Lookup missing external IDs after creating the company
+    if company_id:
+        try:
+            await company_id_lookup.lookup_missing_company_ids(company_id)
+            # Fetch the updated company to return with any newly found IDs
+            updated = await company_repo.get_company_by_id(company_id)
+            if updated:
+                return updated
+        except Exception:
+            # If lookup fails, still return the created company
+            pass
+    
     return created
 
 
@@ -63,6 +78,25 @@ async def update_company(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     data = payload.model_dump(exclude_unset=True)
     updated = await company_repo.update_company(company_id, **data)
+    
+    # Check if any external IDs are missing and lookup if needed
+    has_missing_ids = (
+        not updated.get("syncro_company_id") or
+        not updated.get("tacticalrmm_client_id") or
+        not updated.get("xero_id")
+    )
+    
+    if has_missing_ids:
+        try:
+            await company_id_lookup.lookup_missing_company_ids(company_id)
+            # Fetch the updated company to return with any newly found IDs
+            refreshed = await company_repo.get_company_by_id(company_id)
+            if refreshed:
+                return refreshed
+        except Exception:
+            # If lookup fails, still return the updated company
+            pass
+    
     return updated
 
 

@@ -1,0 +1,7 @@
+{
+  "guid": "1cfa46a3-57fc-4d3d-8488-13001960cdf4",
+  "occurred_at": "2025-11-04T06:04:56.062845+00:00",
+  "change_type": "Feature",
+  "summary": "Automatic lookup of external company IDs from Syncro, Tactical RMM, and Xero",
+  "content_hash": "2b0694336e8718e798df28e2a4a65eff4e92596dc4c5f594eda01deb9ddf9d19"
+}
