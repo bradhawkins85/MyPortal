@@ -16,10 +16,11 @@ from app.core.logging import log_error, log_info
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.services import asset_importer
 from app.services import automations as automations_service
+from app.services import company_id_lookup
 from app.services import imap as imap_service
-from app.services import staff_importer
 from app.services import m365 as m365_service
 from app.services import products as products_service
+from app.services import staff_importer
 from app.services import webhook_monitor
 from app.services import xero as xero_service
 
@@ -176,6 +177,14 @@ class SchedulerService:
                 else:
                     status = "skipped"
                     details = "Company context required"
+            elif command == "refresh_company_ids":
+                company_id = task.get("company_id")
+                if company_id:
+                    result = await company_id_lookup.lookup_missing_company_ids(int(company_id))
+                    details = json.dumps(result, default=str) if result else None
+                else:
+                    result = await company_id_lookup.refresh_all_missing_company_ids()
+                    details = json.dumps(result, default=str) if result else None
             elif command == "update_products":
                 await products_service.update_products_from_feed()
             elif command == "update_stock_feed":
