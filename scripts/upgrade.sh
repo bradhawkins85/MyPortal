@@ -61,19 +61,17 @@ prepare_git_environment() {
   echo "Redirected Git configuration to ${fallback_home} because the default HOME directory is not writable." >&2
 }
 
+# Clean up local modifications to __pycache__ files before pulling from remote.
+# These files are incorrectly tracked in the repository and can cause merge conflicts
+# when they are modified locally during normal Python execution.
+# This function resets all tracked __pycache__ files to their HEAD version.
 clean_pycache_files() {
   echo "Cleaning __pycache__ files to prevent merge conflicts..."
   
   # Reset any local changes to __pycache__ files to prevent merge conflicts
-  # This discards local modifications to these files so git pull can proceed
+  # git checkout works for both existing and deleted files
   git ls-files '*__pycache__*' 2>/dev/null | while IFS= read -r file; do
-    if [[ -f "$file" ]]; then
-      # File exists - reset it to HEAD version
-      git checkout HEAD -- "$file" 2>/dev/null || true
-    else
-      # File was deleted locally - restore it from HEAD
-      git checkout HEAD -- "$file" 2>/dev/null || true
-    fi
+    git checkout HEAD -- "$file" 2>/dev/null || true
   done
   
   echo "__pycache__ cleanup complete."
