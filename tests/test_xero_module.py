@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -214,3 +215,166 @@ async def test_build_order_invoice_returns_payload_with_context():
     assert invoice["line_items"][0]["Quantity"] == 2
     assert invoice["context"]["order"]["order_number"] == "SO-100"
     assert invoice["context"]["company"]["xero_id"] == "xyz-789"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_discover_xero_tenant_id_from_connections_api():
+    """Test that _discover_xero_tenant_id makes correct API calls and matches tenant by name."""
+    
+    # Mock httpx.AsyncClient
+    with patch("app.services.modules.httpx.AsyncClient") as mock_client_class:
+        # Create a mock client instance
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+        
+        # Mock the token response - use MagicMock for sync methods
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {
+            "access_token": "test_access_token",
+            "token_type": "Bearer",
+            "expires_in": 1800,
+        }
+        mock_token_response.raise_for_status.return_value = None
+        
+        # Mock the connections response
+        mock_connections_response = MagicMock()
+        mock_connections_response.json.return_value = [
+            {
+                "id": "connection-1",
+                "tenantId": "wrong-tenant-id",
+                "tenantName": "Other Company",
+                "tenantType": "ORGANISATION",
+            },
+            {
+                "id": "connection-2",
+                "tenantId": "correct-tenant-id",
+                "tenantName": "Test Company Name",
+                "tenantType": "ORGANISATION",
+            },
+            {
+                "id": "connection-3",
+                "tenantId": "another-tenant-id",
+                "tenantName": "Another Company",
+                "tenantType": "ORGANISATION",
+            },
+        ]
+        mock_connections_response.raise_for_status.return_value = None
+        
+        # Set up the mock client to return the appropriate responses
+        mock_client.post.return_value = mock_token_response
+        mock_client.get.return_value = mock_connections_response
+        
+        # Call the function
+        tenant_id = await modules_service._discover_xero_tenant_id(
+            client_id="test_client_id",
+            client_secret="test_client_secret",
+            refresh_token="test_refresh_token",
+            company_name="Test Company Name",
+        )
+        
+        # Verify the result
+        assert tenant_id == "correct-tenant-id"
+        
+        # Verify the token request was made correctly
+        mock_client.post.assert_called_once()
+        post_call = mock_client.post.call_args
+        assert post_call[0][0] == "https://identity.xero.com/connect/token"
+        assert post_call[1]["data"]["grant_type"] == "refresh_token"
+        assert post_call[1]["data"]["refresh_token"] == "test_refresh_token"
+        assert post_call[1]["auth"] == ("test_client_id", "test_client_secret")
+        
+        # Verify the connections request was made correctly
+        mock_client.get.assert_called_once()
+        get_call = mock_client.get.call_args
+        assert get_call[0][0] == "https://api.xero.com/connections"
+        assert get_call[1]["headers"]["Authorization"] == "Bearer test_access_token"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_discover_xero_tenant_id_case_insensitive_matching():
+    """Test that tenant name matching is case-insensitive."""
+    
+    with patch("app.services.modules.httpx.AsyncClient") as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+        
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {"access_token": "test_token"}
+        mock_token_response.raise_for_status.return_value = None
+        
+        mock_connections_response = MagicMock()
+        mock_connections_response.json.return_value = [
+            {
+                "tenantId": "matching-tenant",
+                "tenantName": "MY COMPANY NAME",
+            },
+        ]
+        mock_connections_response.raise_for_status.return_value = None
+        
+        mock_client.post.return_value = mock_token_response
+        mock_client.get.return_value = mock_connections_response
+        
+        # Test with lowercase company name
+        tenant_id = await modules_service._discover_xero_tenant_id(
+            client_id="test_id",
+            client_secret="test_secret",
+            refresh_token="test_token",
+            company_name="my company name",
+        )
+        
+        assert tenant_id == "matching-tenant"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_discover_xero_tenant_id_no_match():
+    """Test that None is returned when no matching tenant is found."""
+    
+    with patch("app.services.modules.httpx.AsyncClient") as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+        
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {"access_token": "test_token"}
+        mock_token_response.raise_for_status.return_value = None
+        
+        mock_connections_response = MagicMock()
+        mock_connections_response.json.return_value = [
+            {"tenantId": "tenant-1", "tenantName": "Different Company"},
+            {"tenantId": "tenant-2", "tenantName": "Another Company"},
+        ]
+        mock_connections_response.raise_for_status.return_value = None
+        
+        mock_client.post.return_value = mock_token_response
+        mock_client.get.return_value = mock_connections_response
+        
+        tenant_id = await modules_service._discover_xero_tenant_id(
+            client_id="test_id",
+            client_secret="test_secret",
+            refresh_token="test_token",
+            company_name="Nonexistent Company",
+        )
+        
+        assert tenant_id is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_discover_xero_tenant_id_missing_credentials():
+    """Test that None is returned when required credentials are missing."""
+    
+    # Missing company_name
+    tenant_id = await modules_service._discover_xero_tenant_id(
+        client_id="test_id",
+        client_secret="test_secret",
+        refresh_token="test_token",
+        company_name="",
+    )
+    assert tenant_id is None
+    
+    # Missing refresh_token
+    tenant_id = await modules_service._discover_xero_tenant_id(
+        client_id="test_id",
+        client_secret="test_secret",
+        refresh_token="",
+        company_name="Test Company",
+    )
+    assert tenant_id is None
