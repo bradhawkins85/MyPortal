@@ -3756,7 +3756,7 @@ async def xero_callback(
         access_token=access_token,
         refresh_token=refresh_token,
         token_expires_at=expires_at,
-        tenant_id=str(tenant_id) if tenant_id else None,
+        tenant_id=tenant_id,
     )
     
     log_info("Xero OAuth callback processed successfully", user_id=state_data.get("user_id"))
