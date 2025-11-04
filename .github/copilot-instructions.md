@@ -54,4 +54,4 @@ For tables always keep row dividers  heights consistent across the width of the 
 
 Do not generate binary files.
 
-Do not include __pycache__ files and folder in pull requests
+Python bytecode cache files should not be committed to the repository.
