@@ -1318,7 +1318,7 @@ async def _validate_xero(
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
     """Validate Xero module configuration.
-    
+
     Returns a status object indicating which credentials are configured.
     This handler is used when trigger_module is called with the xero module.
     """
