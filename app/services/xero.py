@@ -636,12 +636,16 @@ async def sync_company(company_id: int) -> dict[str, Any]:
     reference_prefix = settings.get("reference_prefix", "")
     reference = f"{reference_prefix} - Recurring Services" if reference_prefix else "Recurring Services"
     
+    # Use today's date for the invoice
+    invoice_date = date.today()
+    
     invoice_data = {
         "type": "ACCREC",
         "contact": contact_payload,
         "line_items": line_items,
         "line_amount_type": settings.get("line_amount_type", "Exclusive"),
         "reference": reference,
+        "date": invoice_date.isoformat(),
     }
     
     # Send the invoice to Xero with webhook monitoring
@@ -704,16 +708,22 @@ async def send_invoice_to_xero(
     
     # Prepare the invoice payload for Xero API
     # Xero expects Invoices array even for single invoice
+    invoice_payload: dict[str, Any] = {
+        "Type": invoice_data.get("type", "ACCREC"),
+        "Contact": invoice_data.get("contact", {}),
+        "LineItems": invoice_data.get("line_items", []),
+        "LineAmountTypes": invoice_data.get("line_amount_type", "Exclusive"),
+        "Reference": invoice_data.get("reference", ""),
+    }
+    
+    # Add optional fields if provided
+    if "date" in invoice_data:
+        invoice_payload["Date"] = invoice_data["date"]
+    if "due_date" in invoice_data:
+        invoice_payload["DueDate"] = invoice_data["due_date"]
+    
     xero_payload = {
-        "Invoices": [
-            {
-                "Type": invoice_data.get("type", "ACCREC"),
-                "Contact": invoice_data.get("contact", {}),
-                "LineItems": invoice_data.get("line_items", []),
-                "LineAmountTypes": invoice_data.get("line_amount_type", "Exclusive"),
-                "Reference": invoice_data.get("reference", ""),
-            }
-        ]
+        "Invoices": [invoice_payload]
     }
     
     # Create webhook event for monitoring
