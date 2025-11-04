@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Awaitable, Callable, Mapping, MutableMapping, Sequence
 
 from loguru import logger
 
+from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.services import modules as modules_service
@@ -441,6 +442,58 @@ def _evaluate_qty_expression(expression: str, context: dict[str, Any]) -> float:
             context_keys=list(context.keys()),
         )
         return 1.0
+
+
+async def build_invoice_context(company_id: int) -> dict[str, Any]:
+    """Build context variables for invoice template substitution.
+    
+    Args:
+        company_id: The company ID to build context for
+    
+    Returns:
+        Dictionary of available variables including device counts
+    """
+    # Calculate date for "last month" - assets synced in the last 30 days
+    since_date = datetime.now(timezone.utc) - timedelta(days=30)
+    
+    # Count total active assets
+    total_assets = await assets_repo.count_active_assets(
+        company_id=company_id,
+        since=since_date,
+    )
+    
+    # Count assets by device type
+    workstation_count = await assets_repo.count_active_assets_by_type(
+        company_id=company_id,
+        since=since_date,
+        device_type="Workstation",
+    )
+    
+    server_count = await assets_repo.count_active_assets_by_type(
+        company_id=company_id,
+        since=since_date,
+        device_type="Server",
+    )
+    
+    user_count = await assets_repo.count_active_assets_by_type(
+        company_id=company_id,
+        since=since_date,
+        device_type="User",
+    )
+    
+    # Get company details
+    company = await company_repo.get_company_by_id(company_id)
+    company_name = company.get("name") if company else f"Company {company_id}"
+    
+    return {
+        "company_id": company_id,
+        "company_name": company_name,
+        "active_agents": total_assets,
+        "active_workstations": workstation_count,
+        "active_servers": server_count,
+        "active_users": user_count,
+        "total_assets": total_assets,
+    }
 
 
 async def build_recurring_invoice_items(

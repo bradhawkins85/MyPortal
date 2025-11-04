@@ -268,9 +268,18 @@
           <div class="card__help">
             <h3 class="card__help-title">Variable Substitution</h3>
             <p class="card__help-text">
-              Use variables in the description and quantity fields to dynamically populate invoice data. 
-              For example, use <code>{active_agents}</code> in the qty expression to bill based on the number of active agents.
+              Use variables in the description and quantity fields to dynamically populate invoice data.
             </p>
+            <p class="card__help-text">
+              <strong>Available variables:</strong>
+            </p>
+            <ul class="card__help-list">
+              <li><code>{active_agents}</code> - Total count of all active devices (synced in last 30 days)</li>
+              <li><code>{active_workstations}</code> - Count of active Workstation devices</li>
+              <li><code>{active_servers}</code> - Count of active Server devices</li>
+              <li><code>{active_users}</code> - Count of active User devices</li>
+              <li><code>{company_name}</code> - Name of the company</li>
+            </ul>
             <p class="card__help-text">
               If no price override is specified, the price will be retrieved from Xero using the product code.
             </p>
