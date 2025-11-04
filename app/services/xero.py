@@ -744,7 +744,7 @@ async def sync_company(company_id: int) -> dict[str, Any]:
                         response_status=response_status,
                         response_body=response_body,
                         request_headers=request_headers,
-                        request_body=webhook_payload,
+                        request_body=invoice_payload,
                         response_headers=response_headers,
                     )
                 except Exception as record_exc:
@@ -763,7 +763,7 @@ async def sync_company(company_id: int) -> dict[str, Any]:
                         response_status=response_status,
                         response_body=response_body,
                         request_headers=request_headers,
-                        request_body=webhook_payload,
+                        request_body=invoice_payload,
                         response_headers=response_headers,
                     )
                 except Exception as record_exc:
@@ -816,7 +816,7 @@ async def sync_company(company_id: int) -> dict[str, Any]:
                     response_status=response_status,
                     response_body=response_body,
                     request_headers=request_headers,
-                    request_body=webhook_payload,
+                    request_body=invoice_payload,
                     response_headers=response_headers,
                 )
             except Exception as record_exc:
@@ -843,7 +843,7 @@ async def sync_company(company_id: int) -> dict[str, Any]:
                     response_status=None,
                     response_body=None,
                     request_headers=request_headers,
-                    request_body=webhook_payload,
+                    request_body=invoice_payload,
                     response_headers=None,
                 )
             except Exception as record_exc:
