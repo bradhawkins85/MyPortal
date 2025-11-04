@@ -568,6 +568,7 @@ async def trigger_module(
         "ntfy": _invoke_ntfy,
         "uptimekuma": _validate_uptimekuma,
         "chatgpt-mcp": _invoke_chatgpt_mcp,
+        "xero": _validate_xero,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -1307,6 +1308,30 @@ async def _validate_uptimekuma(
     return {
         "status": "ok",
         "has_shared_secret": bool(shared_secret_hash),
+    }
+
+
+async def _validate_xero(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Validate Xero module configuration.
+
+    Returns a status object indicating which credentials are configured.
+    This handler is used when trigger_module is called with the xero module.
+    """
+    client_id = str(settings.get("client_id") or "").strip()
+    client_secret = str(settings.get("client_secret") or "").strip()
+    refresh_token = str(settings.get("refresh_token") or "").strip()
+    tenant_id = str(settings.get("tenant_id") or "").strip()
+    return {
+        "status": "ok",
+        "has_client_id": bool(client_id),
+        "has_client_secret": bool(client_secret),
+        "has_refresh_token": bool(refresh_token),
+        "has_tenant_id": bool(tenant_id),
     }
 
 
