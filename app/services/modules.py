@@ -104,7 +104,11 @@ async def get_xero_credentials() -> dict[str, Any] | None:
         "tenant_id": settings.get("tenant_id", ""),
         "company_name": settings.get("company_name", ""),
     }
-    
+
+    company_name_env = str(os.getenv("XERO_COMPANY_NAME", "")).strip()
+    if company_name_env and not credentials["company_name"]:
+        credentials["company_name"] = company_name_env
+
     # Decrypt tokens if present
     encrypted_refresh = settings.get("refresh_token", "")
     encrypted_access = settings.get("access_token", "")
@@ -368,7 +372,6 @@ def _default_xero_settings() -> dict[str, Any]:
         "client_id": _clean_env("XERO_CLIENT_ID"),
         "client_secret": _clean_env("XERO_CLIENT_SECRET"),
         "refresh_token": _clean_env("XERO_REFRESH_TOKEN"),
-        "tenant_id": _clean_env("XERO_TENANT_ID"),
         "company_name": _clean_env("XERO_COMPANY_NAME"),
         "default_hourly_rate": _format_rate(_clean_env("XERO_DEFAULT_HOURLY_RATE")),
         "account_code": _clean_env("XERO_ACCOUNT_CODE") or "400",
@@ -1646,8 +1649,10 @@ async def _validate_xero(
     Returns a status object indicating which credentials are configured.
     This handler is used when trigger_module is called with the xero module.
     
-    If company_name is provided but tenant_id is missing, attempts to discover
-    the tenant_id from the Xero API using OAuth tokens.
+    The Xero company name is sourced from the XERO_COMPANY_NAME environment
+    variable when available. During validation the /connections endpoint is
+    queried to discover the tenant_id for the configured company and the
+    resulting identifier is stored for future API calls.
     """
     # Get decrypted credentials
     credentials = await get_xero_credentials()
@@ -1662,6 +1667,13 @@ async def _validate_xero(
     refresh_token = credentials.get("refresh_token", "").strip()
     tenant_id = credentials.get("tenant_id", "").strip()
     company_name = credentials.get("company_name", "").strip()
+    company_name_env = str(os.getenv("XERO_COMPANY_NAME", "")).strip()
+    if company_name_env:
+        if company_name_env != company_name:
+            company_name = company_name_env
+        result_company_name = company_name_env
+    else:
+        result_company_name = company_name
     access_token = credentials.get("access_token", "").strip()
     token_expires_at = credentials.get("token_expires_at")
     
@@ -1672,9 +1684,12 @@ async def _validate_xero(
         "has_refresh_token": bool(refresh_token),
         "has_access_token": bool(access_token),
         "has_tenant_id": bool(tenant_id),
-        "has_company_name": bool(company_name),
+        "has_company_name": bool(result_company_name),
     }
-    
+
+    if result_company_name:
+        result["company_name"] = result_company_name
+
     # Add token expiry info
     if token_expires_at:
         result["token_expires_at"] = token_expires_at.isoformat()
@@ -1682,9 +1697,28 @@ async def _validate_xero(
         if token_expires_at.tzinfo is None:
             token_expires_at = token_expires_at.replace(tzinfo=timezone.utc)
         result["token_expired"] = now >= token_expires_at
-    
-    # Attempt to discover tenant_id if company_name is provided but tenant_id is missing
-    if company_name and not tenant_id and client_id and client_secret and refresh_token:
+
+    should_discover = bool(company_name and client_id and client_secret and refresh_token)
+
+    if company_name_env and settings.get("company_name") != company_name_env:
+        try:
+            await module_repo.update_module(
+                XERO_MODULE_SLUG,
+                settings={**settings, "company_name": company_name_env},
+            )
+            result["company_name_updated"] = True
+            logger.info(
+                "Synchronised Xero company name from environment",
+                company_name=company_name_env,
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to synchronise Xero company name from environment",
+                error=str(exc),
+            )
+            result["company_name_updated"] = False
+
+    if should_discover:
         logger.info(
             "Attempting to discover Xero tenant_id from company name",
             company_name=company_name,
@@ -1698,26 +1732,30 @@ async def _validate_xero(
         if discovered_tenant_id:
             result["discovered_tenant_id"] = discovered_tenant_id
             result["tenant_id_discovery"] = "success"
-            # Update the module settings with the discovered tenant_id
-            try:
-                await module_repo.update_module(
-                    XERO_MODULE_SLUG,
-                    settings={**settings, "tenant_id": discovered_tenant_id},
-                )
-                result["tenant_id_updated"] = True
-                logger.info(
-                    "Successfully updated Xero module with discovered tenant_id",
-                    tenant_id=discovered_tenant_id,
-                )
-            except Exception as exc:
-                logger.error(
-                    "Failed to update Xero module with discovered tenant_id",
-                    error=str(exc),
-                )
+            if discovered_tenant_id != tenant_id:
+                try:
+                    await module_repo.update_module(
+                        XERO_MODULE_SLUG,
+                        settings={**settings, "tenant_id": discovered_tenant_id},
+                    )
+                    result["tenant_id_updated"] = True
+                    logger.info(
+                        "Successfully updated Xero module with discovered tenant_id",
+                        tenant_id=discovered_tenant_id,
+                    )
+                    tenant_id = discovered_tenant_id
+                    result["has_tenant_id"] = True
+                except Exception as exc:
+                    logger.error(
+                        "Failed to update Xero module with discovered tenant_id",
+                        error=str(exc),
+                    )
+                    result["tenant_id_updated"] = False
+            else:
                 result["tenant_id_updated"] = False
         else:
             result["tenant_id_discovery"] = "failed"
-    
+
     return result
 
 
