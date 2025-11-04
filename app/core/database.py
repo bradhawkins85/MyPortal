@@ -327,12 +327,19 @@ class Database:
         across multiple workers/processes. Only one connection can hold a
         named lock at a time.
         
-        If the database pool is not initialized (e.g., in tests), yields True
-        to allow the operation to proceed.
+        When the database pool is not initialized (e.g., during tests or
+        early application startup), this context manager yields True to
+        allow operations to proceed. In production with multiple workers,
+        the database pool will be initialized during app startup before
+        any scheduled tasks run, ensuring proper locking behavior.
+        
+        Note: The no-database-pool behavior is a convenience for testing
+        and does not provide actual locking. Production deployments must
+        ensure the database is connected before starting scheduled tasks.
         """
         if not self._pool:
             # Database not initialized - likely in tests or early startup
-            # Allow the operation to proceed
+            # Allow the operation to proceed without actual locking
             yield True
             return
 
@@ -350,8 +357,14 @@ class Database:
                 try:
                     async with conn.cursor() as cursor:
                         await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
-                except Exception:  # pragma: no cover - defensive cleanup
-                    pass
+                except Exception as exc:
+                    # Log but don't raise - lock will be auto-released on connection close
+                    # Defensive cleanup that shouldn't fail in normal operation
+                    logger.warning(
+                        "Failed to explicitly release lock {lock}: {error}",
+                        lock=lock_name,
+                        error=str(exc),
+                    )
             self._pool.release(conn)
 
 
