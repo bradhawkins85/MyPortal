@@ -33,11 +33,14 @@ def test_list_company_recurring_invoice_items_builds_expected_query(monkeypatch)
 def test_create_recurring_invoice_item_builds_expected_query(monkeypatch):
     captured: dict[str, object] = {}
 
-    async def fake_execute(sql, params=None):
+    async def fake_execute_returning_lastrowid(sql, params=None):
         captured["sql"] = sql
         captured["params"] = params
+        return 1  # Return the mock ID
 
     async def fake_fetch_one(sql, params=None):
+        captured["fetch_sql"] = sql
+        captured["fetch_params"] = params
         return {
             "id": 1,
             "company_id": 5,
@@ -48,7 +51,7 @@ def test_create_recurring_invoice_item_builds_expected_query(monkeypatch):
             "active": 1,
         }
 
-    monkeypatch.setattr(recurring_items_repo.db, "execute", fake_execute)
+    monkeypatch.setattr(recurring_items_repo.db, "execute_returning_lastrowid", fake_execute_returning_lastrowid)
     monkeypatch.setattr(recurring_items_repo.db, "fetch_one", fake_fetch_one)
 
     result = asyncio.run(
@@ -66,6 +69,9 @@ def test_create_recurring_invoice_item_builds_expected_query(monkeypatch):
     assert result["company_id"] == 5
     assert "INSERT INTO company_recurring_invoice_items" in captured["sql"]
     assert captured["params"] == (5, "LABOR-MANAGED", "Monthly managed services", "1", None, 1)
+    # Verify fetch_one uses the returned ID instead of LAST_INSERT_ID()
+    assert "WHERE id = %s" in captured["fetch_sql"]
+    assert captured["fetch_params"] == (1,)
 
 
 def test_update_recurring_invoice_item_builds_expected_query(monkeypatch):

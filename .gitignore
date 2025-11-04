@@ -5,7 +5,7 @@ dist
 /private_uploads
 stock_feed.xml
 var/
-__pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
