@@ -2384,6 +2384,209 @@
     updateRemoveButtons();
   }
 
+  function bindRecurringInvoiceItems() {
+    const modal = document.getElementById('recurring-item-editor-modal');
+    const form = document.getElementById('recurring-item-form');
+    const companyIdElement = document.querySelector('[data-company-id]');
+    
+    if (!modal || !form) {
+      return;
+    }
+
+    const companyId = companyIdElement ? companyIdElement.dataset.companyId : null;
+    if (!companyId) {
+      return;
+    }
+
+    const createButtons = document.querySelectorAll('[data-recurring-item-create]');
+    const editButtons = document.querySelectorAll('[data-recurring-item-edit]');
+    const deleteButtons = document.querySelectorAll('[data-recurring-item-delete]');
+    const deleteModalButton = document.querySelector('[data-recurring-item-delete-modal]');
+    const resetButton = document.querySelector('[data-recurring-item-reset]');
+
+    function openModal() {
+      modal.removeAttribute('hidden');
+      const initialFocus = form.querySelector('[data-initial-focus]');
+      if (initialFocus) {
+        initialFocus.focus();
+      }
+    }
+
+    function closeModal() {
+      modal.setAttribute('hidden', '');
+      resetForm();
+    }
+
+    function resetForm() {
+      form.reset();
+      document.getElementById('recurring-item-id').value = '';
+      if (deleteModalButton) {
+        deleteModalButton.setAttribute('hidden', '');
+        deleteModalButton.setAttribute('aria-hidden', 'true');
+      }
+    }
+
+    function populateForm(item) {
+      document.getElementById('recurring-item-id').value = item.id || '';
+      document.getElementById('recurring-item-product-code').value = item.product_code || '';
+      document.getElementById('recurring-item-description').value = item.description_template || '';
+      document.getElementById('recurring-item-qty').value = item.qty_expression || '';
+      document.getElementById('recurring-item-price').value = item.price_override || '';
+      document.getElementById('recurring-item-active').checked = !!item.active;
+      
+      if (item.id && deleteModalButton) {
+        deleteModalButton.removeAttribute('hidden');
+        deleteModalButton.setAttribute('aria-hidden', 'false');
+      }
+    }
+
+    createButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        resetForm();
+        openModal();
+      });
+    });
+
+    editButtons.forEach((button) => {
+      button.addEventListener('click', (event) => {
+        const row = event.target.closest('tr');
+        if (!row) {
+          return;
+        }
+        const itemJson = row.dataset.recurringItem;
+        if (!itemJson) {
+          return;
+        }
+        try {
+          const item = JSON.parse(itemJson);
+          populateForm(item);
+          openModal();
+        } catch (error) {
+          console.error('Failed to parse item data:', error);
+        }
+      });
+    });
+
+    const closeButtons = modal.querySelectorAll('[data-modal-close]');
+    closeButtons.forEach((button) => {
+      button.addEventListener('click', closeModal);
+    });
+
+    if (resetButton) {
+      resetButton.addEventListener('click', resetForm);
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      
+      const itemId = document.getElementById('recurring-item-id').value;
+      const priceValue = document.getElementById('recurring-item-price').value.trim();
+      let priceOverride = null;
+      
+      if (priceValue) {
+        const parsed = parseFloat(priceValue);
+        if (!isNaN(parsed) && parsed >= 0) {
+          priceOverride = parsed;
+        }
+      }
+      
+      const formData = {
+        product_code: document.getElementById('recurring-item-product-code').value.trim(),
+        description_template: document.getElementById('recurring-item-description').value.trim(),
+        qty_expression: document.getElementById('recurring-item-qty').value.trim(),
+        price_override: priceOverride,
+        active: document.getElementById('recurring-item-active').checked,
+      };
+
+      try {
+        let response;
+        if (itemId) {
+          response = await requestJson(`/api/companies/${companyId}/recurring-invoice-items/${itemId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(formData),
+          });
+        } else {
+          response = await requestJson(`/api/companies/${companyId}/recurring-invoice-items`, {
+            method: 'POST',
+            body: JSON.stringify(formData),
+          });
+        }
+
+        if (response.ok) {
+          window.location.reload();
+        } else {
+          const errorData = await response.json();
+          alert(`Failed to save item: ${errorData.detail || 'Unknown error'}`);
+        }
+      } catch (error) {
+        console.error('Failed to save recurring invoice item:', error);
+        alert('Failed to save item. Please try again.');
+      }
+    });
+
+    deleteButtons.forEach((button) => {
+      button.addEventListener('click', async (event) => {
+        const row = event.target.closest('tr');
+        if (!row) {
+          return;
+        }
+        const itemJson = row.dataset.recurringItem;
+        if (!itemJson) {
+          return;
+        }
+        
+        try {
+          const item = JSON.parse(itemJson);
+          if (!confirm(`Delete recurring invoice item "${item.product_code}"?`)) {
+            return;
+          }
+
+          const response = await requestJson(`/api/companies/${companyId}/recurring-invoice-items/${item.id}`, {
+            method: 'DELETE',
+          });
+
+          if (response.ok) {
+            window.location.reload();
+          } else {
+            alert('Failed to delete item. Please try again.');
+          }
+        } catch (error) {
+          console.error('Failed to delete recurring invoice item:', error);
+          alert('Failed to delete item. Please try again.');
+        }
+      });
+    });
+
+    if (deleteModalButton) {
+      deleteModalButton.addEventListener('click', async () => {
+        const itemId = document.getElementById('recurring-item-id').value;
+        if (!itemId) {
+          return;
+        }
+
+        const productCode = document.getElementById('recurring-item-product-code').value;
+        if (!confirm(`Delete recurring invoice item "${productCode}"?`)) {
+          return;
+        }
+
+        try {
+          const response = await requestJson(`/api/companies/${companyId}/recurring-invoice-items/${itemId}`, {
+            method: 'DELETE',
+          });
+
+          if (response.ok) {
+            window.location.reload();
+          } else {
+            alert('Failed to delete item. Please try again.');
+          }
+        } catch (error) {
+          console.error('Failed to delete recurring invoice item:', error);
+          alert('Failed to delete item. Please try again.');
+        }
+      });
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     bindSyncroTicketImportForms();
     bindSyncroCompanyImportForm();
@@ -2399,6 +2602,7 @@
     bindRoleForm();
     bindCompanyAssignForm();
     bindCompanyAssignmentControls();
+    bindRecurringInvoiceItems();
     bindApiKeyEditModal();
     bindApiKeyCopyButtons();
     bindConfirmationButtons();

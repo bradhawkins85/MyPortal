@@ -310,3 +310,56 @@ async def count_active_assets(*, company_id: Any = None, since: Any = None) -> i
         return int(row.get("total") or 0)
     except (TypeError, ValueError):
         return 0
+
+
+async def count_active_assets_by_type(
+    *,
+    company_id: Any = None,
+    since: Any = None,
+    device_type: str | None = None,
+) -> int:
+    """Return the number of assets of a specific type that have synced since the provided date.
+    
+    Args:
+        company_id: Company ID to filter by
+        since: Only count assets that synced since this datetime
+        device_type: Device type to filter by (e.g., 'Workstation', 'Server', 'User')
+    
+    Returns:
+        Count of matching assets
+    """
+    filters: list[str] = ["1 = 1"]
+    params: list[Any] = []
+
+    def _coerce_company_id(value: Any) -> int | None:
+        try:
+            candidate = int(value)
+        except (TypeError, ValueError):
+            return None
+        if candidate < 0:
+            return None
+        return candidate
+
+    company_value = _coerce_company_id(company_id)
+    if company_value is not None:
+        filters.append("company_id = %s")
+        params.append(company_value)
+
+    since_dt = _ensure_datetime(since)
+    if since_dt:
+        filters.append("last_sync IS NOT NULL")
+        filters.append("last_sync >= %s")
+        params.append(since_dt.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"))
+
+    if device_type:
+        filters.append("LOWER(type) = LOWER(%s)")
+        params.append(device_type)
+
+    sql = f"SELECT COUNT(*) AS total FROM assets WHERE {' AND '.join(filters)}"
+    row = await db.fetch_one(sql, tuple(params) if params else None)
+    if not row:
+        return 0
+    try:
+        return int(row.get("total") or 0)
+    except (TypeError, ValueError):
+        return 0

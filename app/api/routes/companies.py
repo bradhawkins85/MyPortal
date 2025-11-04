@@ -8,8 +8,14 @@ from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.database import require_database
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
+from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.schemas.assets import AssetResponse
 from app.schemas.companies import CompanyCreate, CompanyResponse, CompanyUpdate
+from app.schemas.company_recurring_invoice_items import (
+    RecurringInvoiceItemCreate,
+    RecurringInvoiceItemResponse,
+    RecurringInvoiceItemUpdate,
+)
 
 router = APIRouter(prefix="/companies", tags=["Companies"])
 
@@ -97,3 +103,80 @@ async def list_company_assets(
                 record[numeric_key] = None
         assets.append(record)
     return assets
+
+
+@router.get("/{company_id}/recurring-invoice-items", response_model=list[RecurringInvoiceItemResponse])
+async def list_company_recurring_invoice_items(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    items = await recurring_items_repo.list_company_recurring_invoice_items(company_id)
+    return items
+
+
+@router.post(
+    "/{company_id}/recurring-invoice-items",
+    response_model=RecurringInvoiceItemResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_recurring_invoice_item(
+    company_id: int,
+    payload: RecurringInvoiceItemCreate,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    item = await recurring_items_repo.create_recurring_invoice_item(
+        company_id=company_id,
+        **payload.model_dump(),
+    )
+    return item
+
+
+@router.patch(
+    "/{company_id}/recurring-invoice-items/{item_id}",
+    response_model=RecurringInvoiceItemResponse,
+)
+async def update_recurring_invoice_item(
+    company_id: int,
+    item_id: int,
+    payload: RecurringInvoiceItemUpdate,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    item = await recurring_items_repo.get_recurring_invoice_item(item_id)
+    if not item or item.get("company_id") != company_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recurring invoice item not found")
+    updated = await recurring_items_repo.update_recurring_invoice_item(
+        item_id,
+        **payload.model_dump(exclude_unset=True),
+    )
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recurring invoice item not found")
+    return updated
+
+
+@router.delete("/{company_id}/recurring-invoice-items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_recurring_invoice_item(
+    company_id: int,
+    item_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    item = await recurring_items_repo.get_recurring_invoice_item(item_id)
+    if not item or item.get("company_id") != company_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recurring invoice item not found")
+    await recurring_items_repo.delete_recurring_invoice_item(item_id)
+    return None
