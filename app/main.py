@@ -83,6 +83,7 @@ from app.repositories import auth as auth_repo
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
+from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import change_log as change_log_repo
 from app.repositories import assets as asset_repo
 from app.repositories import invoices as invoice_repo
@@ -2770,7 +2771,14 @@ async def _render_company_edit_page(
             }
         ]
 
-        company_automation_tasks.sort(key=lambda item: (item.get("name") or "").lower())
+        automation_company_tasks.sort(key=lambda item: (item.get("name") or "").lower())
+
+    # Fetch recurring invoice items for the company
+    recurring_invoice_items = []
+    if is_super_admin:
+        items = await recurring_items_repo.list_company_recurring_invoice_items(company_id)
+        for item in items:
+            recurring_invoice_items.append(_serialise_mapping(item))
 
     assign_form = {
         "company_id": assign_company_id,
@@ -2801,6 +2809,7 @@ async def _render_company_edit_page(
         "company_automation_tasks": company_automation_tasks,
         "automation_command_options": automation_command_options,
         "automation_company_options": automation_company_options,
+        "recurring_invoice_items": recurring_invoice_items,
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
