@@ -377,3 +377,187 @@ async def test_discover_xero_tenant_id_missing_credentials():
         company_name="Test Company",
     )
     assert tenant_id is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_company_creates_webhook_monitor_event():
+    """Test that sync_company creates a webhook monitor event and records request/response."""
+    
+    with patch("app.services.xero.modules_service.get_module") as mock_get_module, \
+         patch("app.services.xero.company_repo.get_company_by_id") as mock_get_company, \
+         patch("app.services.xero.recurring_items_repo.list_company_recurring_invoice_items") as mock_get_items, \
+         patch("app.services.xero.build_invoice_context") as mock_build_context, \
+         patch("app.services.xero.build_recurring_invoice_items") as mock_build_line_items, \
+         patch("app.services.xero.modules_service.acquire_xero_access_token") as mock_get_token, \
+         patch("app.services.xero.webhook_monitor.create_manual_event") as mock_create_event, \
+         patch("app.services.xero.webhook_monitor.record_manual_success") as mock_record_success, \
+         patch("app.services.xero.httpx.AsyncClient") as mock_client_class:
+        
+        # Setup mocks
+        mock_get_module.return_value = {
+            "enabled": True,
+            "settings": {
+                "client_id": "test-client-id",
+                "client_secret": "test-secret",
+                "refresh_token": "test-refresh",
+                "tenant_id": "test-tenant-id",
+                "tax_type": "OUTPUT",
+                "line_amount_type": "Exclusive",
+                "reference_prefix": "TEST",
+            }
+        }
+        
+        mock_get_company.return_value = {
+            "id": 123,
+            "name": "Test Company",
+            "xero_id": "xero-contact-123",
+        }
+        
+        mock_get_items.return_value = [
+            {
+                "active": True,
+                "product_code": "MONTHLY-FEE",
+                "description_template": "Monthly service fee",
+                "qty_expression": "1",
+                "price_override": None,
+            }
+        ]
+        
+        mock_build_context.return_value = {
+            "company_id": 123,
+            "company_name": "Test Company",
+        }
+        
+        mock_build_line_items.return_value = [
+            {
+                "Description": "Monthly service fee",
+                "Quantity": 1.0,
+                "ItemCode": "MONTHLY-FEE",
+                "TaxType": "OUTPUT",
+            }
+        ]
+        
+        mock_get_token.return_value = "test-access-token"
+        
+        mock_create_event.return_value = {
+            "id": 456,
+            "status": "in_progress",
+        }
+        
+        # Setup HTTP client mock
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = '{"Invoices": [{"InvoiceID": "invoice-123"}]}'
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_client.post.return_value = mock_response
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+        
+        # Call sync_company
+        result = await xero_service.sync_company(123)
+        
+        # Verify result
+        assert result["status"] == "succeeded"
+        assert result["company_id"] == 123
+        assert result["event_id"] == 456
+        assert result["response_status"] == 200
+        
+        # Verify webhook event was created
+        mock_create_event.assert_called_once()
+        create_call = mock_create_event.call_args
+        assert create_call[1]["name"] == "xero.sync.company"
+        assert create_call[1]["target_url"] == "https://api.xero.com/api.xro/2.0/Invoices"
+        assert create_call[1]["max_attempts"] == 1
+        
+        # Verify HTTP request was made
+        mock_client.post.assert_called_once()
+        post_call = mock_client.post.call_args
+        assert post_call[0][0] == "https://api.xero.com/api.xro/2.0/Invoices"
+        assert post_call[1]["headers"]["Authorization"] == "Bearer test-access-token"
+        assert post_call[1]["headers"]["xero-tenant-id"] == "test-tenant-id"
+        
+        # Verify success was recorded
+        mock_record_success.assert_called_once()
+        record_call = mock_record_success.call_args
+        assert record_call[0][0] == 456  # event_id
+        assert record_call[1]["attempt_number"] == 1
+        assert record_call[1]["response_status"] == 200
+        assert record_call[1]["response_body"] == '{"Invoices": [{"InvoiceID": "invoice-123"}]}'
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_company_records_webhook_failure():
+    """Test that sync_company records webhook failure for non-2xx responses."""
+    
+    with patch("app.services.xero.modules_service.get_module") as mock_get_module, \
+         patch("app.services.xero.company_repo.get_company_by_id") as mock_get_company, \
+         patch("app.services.xero.recurring_items_repo.list_company_recurring_invoice_items") as mock_get_items, \
+         patch("app.services.xero.build_invoice_context") as mock_build_context, \
+         patch("app.services.xero.build_recurring_invoice_items") as mock_build_line_items, \
+         patch("app.services.xero.modules_service.acquire_xero_access_token") as mock_get_token, \
+         patch("app.services.xero.webhook_monitor.create_manual_event") as mock_create_event, \
+         patch("app.services.xero.webhook_monitor.record_manual_failure") as mock_record_failure, \
+         patch("app.services.xero.httpx.AsyncClient") as mock_client_class:
+        
+        # Setup mocks
+        mock_get_module.return_value = {
+            "enabled": True,
+            "settings": {
+                "client_id": "test-client-id",
+                "client_secret": "test-secret",
+                "refresh_token": "test-refresh",
+                "tenant_id": "test-tenant-id",
+                "tax_type": "OUTPUT",
+                "line_amount_type": "Exclusive",
+                "reference_prefix": "TEST",
+            }
+        }
+        
+        mock_get_company.return_value = {
+            "id": 123,
+            "name": "Test Company",
+            "xero_id": "xero-contact-123",
+        }
+        
+        mock_get_items.return_value = [
+            {
+                "active": True,
+                "product_code": "MONTHLY-FEE",
+                "description_template": "Monthly service fee",
+                "qty_expression": "1",
+                "price_override": None,
+            }
+        ]
+        
+        mock_build_context.return_value = {"company_id": 123}
+        mock_build_line_items.return_value = [
+            {"Description": "Test item", "Quantity": 1.0, "ItemCode": "MONTHLY-FEE"}
+        ]
+        mock_get_token.return_value = "test-access-token"
+        mock_create_event.return_value = {"id": 789, "status": "in_progress"}
+        
+        # Setup HTTP client mock to return 400 error
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.text = '{"Error": "Invalid request"}'
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_client.post.return_value = mock_response
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+        
+        # Call sync_company
+        result = await xero_service.sync_company(123)
+        
+        # Verify result indicates failure
+        assert result["status"] == "failed"
+        assert result["response_status"] == 400
+        assert result["event_id"] == 789
+        
+        # Verify failure was recorded
+        mock_record_failure.assert_called_once()
+        record_call = mock_record_failure.call_args
+        assert record_call[0][0] == 789  # event_id
+        assert record_call[1]["attempt_number"] == 1
+        assert record_call[1]["status"] == "failed"
+        assert record_call[1]["response_status"] == 400
+        assert record_call[1]["error_message"] == "HTTP 400"
