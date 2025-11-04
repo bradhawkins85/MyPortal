@@ -3638,8 +3638,11 @@ async def xero_callback(
 ):
     """Handle Xero OAuth2 callback and exchange code for tokens."""
     if error:
+        # Sanitize error message to prevent URL redirection attacks
         message = request.query_params.get("error_description", error)
-        encoded = urlencode({"error": message})
+        # Only use alphanumeric, spaces, and basic punctuation
+        safe_message = "".join(c if c.isalnum() or c in " .-_" else "" for c in str(message)[:200])
+        encoded = urlencode({"error": safe_message or "authorization_error"})
         return RedirectResponse(url=f"/admin/modules?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     
     if not code or not state:
