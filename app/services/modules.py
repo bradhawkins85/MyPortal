@@ -54,6 +54,7 @@ async def update_xero_tokens(
     refresh_token: str | None = None,
     access_token: str | None = None,
     token_expires_at: datetime | None = None,
+    tenant_id: str | None = None,
 ) -> None:
     """Update Xero OAuth tokens in the module settings.
     
@@ -61,6 +62,7 @@ async def update_xero_tokens(
         refresh_token: The refresh token to store (will be encrypted)
         access_token: The access token to store (will be encrypted)
         token_expires_at: When the access token expires
+        tenant_id: The Xero tenant ID (string)
     """
     module = await module_repo.get_module(XERO_MODULE_SLUG)
     if not module:
@@ -77,6 +79,9 @@ async def update_xero_tokens(
     if token_expires_at is not None:
         # Store as ISO format string
         settings["token_expires_at"] = token_expires_at.isoformat() if token_expires_at else None
+    if tenant_id is not None:
+        # Store tenant_id as a string (empty string allowed)
+        settings["tenant_id"] = str(tenant_id)
     
     await module_repo.update_module(XERO_MODULE_SLUG, settings=settings)
     logger.info("Updated Xero OAuth tokens")
