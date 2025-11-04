@@ -55,6 +55,43 @@ Super administrators can populate and refresh the company directory directly fro
 
 Progress is surfaced via the JSON response from `POST /admin/syncro/import-companies`, reporting how many companies were fetched, created, updated, or skipped. When using the module card action from the admin UI, success messages are shown inline on the module page. The importer requires the Syncro integration module to be enabled with both a base URL and API key.
 
+## Company ID Lookup
+
+MyPortal can automatically lookup missing external IDs from integrated services when working with companies. This feature helps maintain synchronisation between MyPortal and external systems like Syncro, Tactical RMM, and Xero.
+
+### Automatic Lookup on Create/Update
+
+When creating or updating a company through the API, MyPortal automatically attempts to lookup any missing external IDs:
+
+- **Syncro Company ID** – Searches Syncro customers by company name to find matching customer records
+- **Tactical RMM Client ID** – Searches Tactical RMM agents to find matching client records  
+- **Xero Contact ID** – Placeholder for future Xero contact lookup implementation
+
+The lookup happens asynchronously after the company is created or updated, ensuring the API remains responsive. Only missing IDs are looked up—if an ID is already set, it is not overwritten.
+
+### Scheduled Task for Bulk Refresh
+
+A scheduled task command `refresh_company_ids` is available to refresh missing IDs across all companies:
+
+- When configured with a `company_id`, it refreshes only that specific company
+- When run without a company context, it processes all companies in the system
+
+Companies that already have all external IDs configured are automatically skipped to minimize unnecessary API calls. The task returns detailed metrics about how many companies were processed, updated, skipped, or encountered errors.
+
+To set up the scheduled task:
+
+1. Navigate to **Admin → Scheduled Tasks**
+2. Create a new task with command `refresh_company_ids`
+3. Optionally specify a `company_id` to limit the scope
+4. Configure the cron schedule (e.g., `0 2 * * *` for daily at 2 AM)
+
+### API Integration Notes
+
+- The Syncro lookup searches up to the first 10 pages of customers to avoid excessive API usage
+- The Tactical RMM lookup fetches all agents and extracts unique client mappings
+- All lookups use case-insensitive name matching for robust identification
+- Configuration errors (e.g., missing API credentials) are handled gracefully without blocking other operations
+
 ## Syncro Ticket Importer
 
 Super administrators can synchronise Syncro tickets into MyPortal directly from **Admin → Syncro ticket import** once the Syncro integration module is enabled. The import console offers
