@@ -1,6 +1,6 @@
 {
   "guid": "a93b4a7e-aa7d-4c48-a7a0-bf38fa5b6547",
-  "occurred_at": "2025-10-30T14:19:00Z",
+  "occurred_at": "2025-10-30T14:19Z",
   "change_type": "Fix",
   "summary": "Moved scheduled task creation button into the admin header for easier access.",
   "content_hash": "156f1fc274b79c17fe347b81f65b6005191a795970fd8623ad0e8216a697dacd"

@@ -1,0 +1,7 @@
+{
+  "guid": "715761b9-3849-478f-9a73-7fadba2c46ad",
+  "occurred_at": "2025-10-30T00:55Z",
+  "change_type": "Fix",
+  "summary": "Normalised shop package payloads before JSON serialisation so the packages category renders without server errors",
+  "content_hash": "0d0bbede967a30ca91e63c13bf66ac27d71dd16c52e6eb777452a6bd77fcb111"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "58021542-041e-41b0-b8d5-be7a3fb50157",
+  "occurred_at": "2025-12-03T10:15Z",
+  "change_type": "Fix",
+  "summary": "Reconnected automation repository queries before writes so creating automations no longer fails when the database pool is cold",
+  "content_hash": "58a46b69c9cd7f74672cef7fcf758d2b54c52390b34bb2b6b8ee94052e01df70"
+}

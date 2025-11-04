@@ -1,0 +1,7 @@
+{
+  "guid": "8a856a43-ef87-4a70-851d-c4b5e8d25499",
+  "occurred_at": "2025-10-09T21:15Z",
+  "change_type": "Feature",
+  "summary": "Restored license management UI, Microsoft 365 sync services, OAuth callbacks, and admin credential workflows for parity with the legacy portal",
+  "content_hash": "c6e6248b98c619e46138c369a78b955d2735d929529a65275b8dd7963dcae4e6"
+}

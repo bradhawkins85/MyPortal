@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-06T12:30Z",
   "change_type": "Feature",
   "summary": "Added Ollama-driven ticket tagging with UI badges, API fields, and resilient fallbacks for 5-10 issue labels",
-  "content_hash": "cc1f2a23469afc11e6947baf296573b5fe672dec732bb74a997858353bca4c50"
+  "content_hash": "90737f5bc56467315881769e7a79b083dbaa05e45460ee37cd8e88e0ea9b2270"
 }

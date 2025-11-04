@@ -1,7 +1,7 @@
 {
   "guid": "961639d3-9f7f-46f1-9cca-951b32eb1605",
-  "occurred_at": "2025-02-15T00:00:00Z",
+  "occurred_at": "2025-02-15T00:00Z",
   "change_type": "Feature",
   "summary": "Added editable feature table to the admin product editor",
-  "content_hash": "a8ba4bc29aa56705b2d2ebf610d2e916ddf5561a0a6f80bbfb2e259ae4bd7e93"
+  "content_hash": "c7067d755c70f211adb966d8d34298fe95913de58f1f43f58e1d3109e1f5fb57"
 }
