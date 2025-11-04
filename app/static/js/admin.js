@@ -2394,7 +2394,8 @@
     }
 
     const companyId = companyIdElement ? companyIdElement.dataset.companyId : null;
-    if (!companyId) {
+    if (!companyId || companyId.trim() === '') {
+      console.error('Company ID not found for recurring invoice items');
       return;
     }
 
@@ -2499,28 +2500,22 @@
       };
 
       try {
-        let response;
         if (itemId) {
-          response = await requestJson(`/api/companies/${companyId}/recurring-invoice-items/${itemId}`, {
+          await requestJson(`/api/companies/${companyId}/recurring-invoice-items/${itemId}`, {
             method: 'PATCH',
             body: JSON.stringify(formData),
           });
         } else {
-          response = await requestJson(`/api/companies/${companyId}/recurring-invoice-items`, {
+          await requestJson(`/api/companies/${companyId}/recurring-invoice-items`, {
             method: 'POST',
             body: JSON.stringify(formData),
           });
         }
-
-        if (response.ok) {
-          window.location.reload();
-        } else {
-          const errorData = await response.json();
-          alert(`Failed to save item: ${errorData.detail || 'Unknown error'}`);
-        }
+        window.location.reload();
       } catch (error) {
         console.error('Failed to save recurring invoice item:', error);
-        alert('Failed to save item. Please try again.');
+        const message = error instanceof Error ? error.message : 'Failed to save item. Please try again.';
+        alert(message);
       }
     });
 
@@ -2541,18 +2536,14 @@
             return;
           }
 
-          const response = await requestJson(`/api/companies/${companyId}/recurring-invoice-items/${item.id}`, {
+          await requestJson(`/api/companies/${companyId}/recurring-invoice-items/${item.id}`, {
             method: 'DELETE',
           });
-
-          if (response.ok) {
-            window.location.reload();
-          } else {
-            alert('Failed to delete item. Please try again.');
-          }
+          window.location.reload();
         } catch (error) {
           console.error('Failed to delete recurring invoice item:', error);
-          alert('Failed to delete item. Please try again.');
+          const message = error instanceof Error ? error.message : 'Failed to delete item. Please try again.';
+          alert(message);
         }
       });
     });
@@ -2570,18 +2561,14 @@
         }
 
         try {
-          const response = await requestJson(`/api/companies/${companyId}/recurring-invoice-items/${itemId}`, {
+          await requestJson(`/api/companies/${companyId}/recurring-invoice-items/${itemId}`, {
             method: 'DELETE',
           });
-
-          if (response.ok) {
-            window.location.reload();
-          } else {
-            alert('Failed to delete item. Please try again.');
-          }
+          window.location.reload();
         } catch (error) {
           console.error('Failed to delete recurring invoice item:', error);
-          alert('Failed to delete item. Please try again.');
+          const message = error instanceof Error ? error.message : 'Failed to delete item. Please try again.';
+          alert(message);
         }
       });
     }
