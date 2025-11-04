@@ -1,0 +1,7 @@
+{
+  "guid": "8143df37-4505-49cf-9e7d-87a036f7d0ca",
+  "occurred_at": "2025-10-20T14:15Z",
+  "change_type": "Feature",
+  "summary": "Added viewport-aware pagination to the scheduled tasks table so automation rows scale with the available space",
+  "content_hash": "ad1dc06e673436be519eebeb83e56ab03b52b3cc17ecb358fe184e8e9a800a88"
+}

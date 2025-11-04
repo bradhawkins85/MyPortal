@@ -1,7 +1,7 @@
 {
   "guid": "0042537b-6435-45fb-8d34-c8ccaa9ce797",
-  "occurred_at": "2025-10-29T01:47:00Z",
+  "occurred_at": "2025-10-29T01:47Z",
   "change_type": "Feature",
   "summary": "Introduced IMAP ticket ingestion module with scheduled mailbox sync and admin workspace.",
-  "content_hash": "e7bcbb58f696484e0d67c04d3f09298745c3377488dbc32a92ec13a280720d8c"
+  "content_hash": "e1e318000bed52789e42d782676eb592955b1cbdbb82930c27d3e6558b51388c"
 }

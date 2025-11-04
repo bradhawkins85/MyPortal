@@ -1,0 +1,7 @@
+{
+  "guid": "294ef672-6115-4a99-b5aa-00572a3b86ee",
+  "occurred_at": "2025-10-07T12:00Z",
+  "change_type": "Fix",
+  "summary": "Allowed extra environment variables in Python settings loader to restore API startup",
+  "content_hash": "869f8d92c04f46ba70c9bc874817c0798607a305a3910d3a6d84ccd58184f8c7"
+}

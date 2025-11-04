@@ -1,0 +1,7 @@
+{
+  "guid": "2a6791a4-08dd-4a28-b0ae-dde05290d273",
+  "occurred_at": "2025-12-22T09:15Z",
+  "change_type": "Feature",
+  "summary": "Seeded ENABLE_AUTO_REFRESH across installers and deployment scripts with documentation and regression coverage",
+  "content_hash": "ad5ccb3797afda9eb709741894161b9149d211bd7e5aa11ea55c76dbbfc9610b"
+}

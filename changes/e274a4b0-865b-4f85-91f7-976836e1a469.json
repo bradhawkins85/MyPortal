@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-13T15:45Z",
   "change_type": "Fix",
   "summary": "Normalised webhook event timestamp updates to stay database-agnostic so Syncro ticket import API calls appear in the monitor log",
-  "content_hash": "e41df07f47dd8c47002ae388823eb5434f7c4d69057ef5e645a46fd662616c5d"
+  "content_hash": "407c1cc270a0eec4a61e46cef79d36ce74c32fcff45cec138080bc4c499d9dc6"
 }

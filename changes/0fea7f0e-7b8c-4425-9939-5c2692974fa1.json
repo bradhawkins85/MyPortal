@@ -1,6 +1,6 @@
 {
   "guid": "0fea7f0e-7b8c-4425-9939-5c2692974fa1",
-  "occurred_at": "2025-10-30T13:13:18Z",
+  "occurred_at": "2025-10-30T13:13Z",
   "change_type": "Fix",
   "summary": "Align Create issue header action to the right edge for consistent layout.",
   "content_hash": "fe06040b44978fc7e247f283c7ac6742f3aab2200d4a3031fca68c8adf6ebe6e"

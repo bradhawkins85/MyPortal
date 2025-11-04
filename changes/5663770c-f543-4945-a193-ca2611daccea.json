@@ -1,7 +1,7 @@
 {
   "guid": "5663770c-f543-4945-a193-ca2611daccea",
-  "occurred_at": "2025-10-31T23:31:31Z",
+  "occurred_at": "2025-10-31T23:31Z",
   "change_type": "Feature",
   "summary": "Added shop product cross-sell and up-sell recommendations in cart",
-  "content_hash": "02d59e347fef89a48f3cf2adf94b315e3d7ee3f5a9c875cc440d25541e92da6e"
+  "content_hash": "f6d6143c1cdb8c2b91681082206e78027362461044067f6ad1400dcf6e955e0f"
 }

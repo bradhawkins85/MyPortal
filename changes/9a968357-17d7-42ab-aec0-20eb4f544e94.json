@@ -1,0 +1,7 @@
+{
+  "guid": "9a968357-17d7-42ab-aec0-20eb4f544e94",
+  "occurred_at": "2025-10-09T05:40Z",
+  "change_type": "Fix",
+  "summary": "Restored admin API key dashboard by aligning API key usage queries with ONLY_FULL_GROUP_BY SQL mode to prevent runtime errors",
+  "content_hash": "f5ae63a80ab39a86f7d682e94404c5b5e353f5e54278ff3f70a9d573e8a28dfe"
+}

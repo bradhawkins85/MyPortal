@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-16T00:00Z",
   "change_type": "Feature",
   "summary": "Added bulk deletion controls for failed and successful webhook deliveries with admin UI prompts and API support.",
-  "content_hash": "c1c07d94868214b3048d28c5c40e6c949c866122f710d23cc771a8077af44cb9"
+  "content_hash": "d3226546cd7da6312a8907a64bb7d9de6d4e638f83a2eeaff5dd93aeabaedb5e"
 }

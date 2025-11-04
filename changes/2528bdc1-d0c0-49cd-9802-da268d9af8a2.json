@@ -1,7 +1,7 @@
 {
   "guid": "2528bdc1-d0c0-49cd-9802-da268d9af8a2",
-  "occurred_at": "2025-10-29T03:10:53.179059Z",
+  "occurred_at": "2025-10-29T03:10Z",
   "change_type": "Fix",
   "summary": "Ensure IMAP ticket imports associate requesters with existing user accounts instead of staff records.",
-  "content_hash": "4f8d53642910183e16782fc4864e82feb20f9f0ec9e6a19e926ed7e71efc489f"
+  "content_hash": "fd24dbce0dff80636c46e5d746a28289003f37fa18897e816c1a209ae333dc16"
 }

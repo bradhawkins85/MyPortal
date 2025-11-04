@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-24T10:00Z",
   "change_type": "Fix",
   "summary": "Removed the Super admin sidebar heading to keep navigation compact for privileged users",
-  "content_hash": "a423bd3956f770497a14c05b6f2de2b4f2fe96ac693399438dba30d07cd45124"
+  "content_hash": "c1ae6bad98a49c7f22f1be43faa55944e9d2dbeb6491da6e3a8fc3900f403db6"
 }

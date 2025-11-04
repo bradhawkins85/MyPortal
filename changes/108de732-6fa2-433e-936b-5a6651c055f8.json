@@ -1,0 +1,7 @@
+{
+  "guid": "108de732-6fa2-433e-936b-5a6651c055f8",
+  "occurred_at": "2025-10-10T12:00Z",
+  "change_type": "Feature",
+  "summary": "Added persistent scheduler management APIs, webhook retry monitoring UI, and admin automation controls with database migrations",
+  "content_hash": "0bc71b56aa924b43eeb87fbca0c4f9c8f38f5f3a4af76b88e682bdeb2cc40fb0"
+}
