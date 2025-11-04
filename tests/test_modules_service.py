@@ -779,3 +779,37 @@ def test_invoke_ntfy_payload_overrides_defaults(monkeypatch):
     assert result["title"] == "Ticket created"
     assert captured_event.get("max_attempts") == 1
     assert "attempt_immediately" not in captured_event
+
+
+def test_validate_xero_reports_credentials_presence():
+    settings_with_all = {
+        "client_id": "test-client-id",
+        "client_secret": "test-secret",
+        "refresh_token": "test-token",
+        "tenant_id": "test-tenant",
+    }
+    
+    result = asyncio.run(modules._validate_xero(settings_with_all, {}))
+    
+    assert result["status"] == "ok"
+    assert result["has_client_id"] is True
+    assert result["has_client_secret"] is True
+    assert result["has_refresh_token"] is True
+    assert result["has_tenant_id"] is True
+
+
+def test_validate_xero_reports_missing_credentials():
+    settings_partial = {
+        "client_id": "test-client-id",
+        "client_secret": "",
+        "refresh_token": "test-token",
+        "tenant_id": "",
+    }
+    
+    result = asyncio.run(modules._validate_xero(settings_partial, {}))
+    
+    assert result["status"] == "ok"
+    assert result["has_client_id"] is True
+    assert result["has_client_secret"] is False
+    assert result["has_refresh_token"] is True
+    assert result["has_tenant_id"] is False
