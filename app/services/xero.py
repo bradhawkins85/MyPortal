@@ -4,12 +4,14 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Awaitable, Callable, Mapping, MutableMapping, Sequence
 
+import httpx
 from loguru import logger
 
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.services import modules as modules_service
+from app.services import webhook_monitor
 
 TicketFetcher = Callable[[int], Awaitable[Mapping[str, Any] | None]]
 RepliesFetcher = Callable[[int], Awaitable[Sequence[Mapping[str, Any]] | None]]
@@ -566,9 +568,8 @@ async def build_recurring_invoice_items(
 async def sync_company(company_id: int) -> dict[str, Any]:
     """Trigger a Xero synchronisation for the given company.
 
-    The implementation focuses on returning structured metadata so that the
-    scheduler run history captures useful diagnostics without leaking
-    credentials.
+    This implementation makes HTTP calls to Xero API and records them
+    in the webhook monitor for tracking and debugging.
     """
 
     module = await modules_service.get_module("xero", redact=False)
@@ -598,6 +599,15 @@ async def sync_company(company_id: int) -> dict[str, Any]:
             "company_id": company_id,
         }
 
+    # Get tenant_id for API calls
+    tenant_id = str(settings.get("tenant_id", "")).strip()
+    if not tenant_id:
+        return {
+            "status": "skipped",
+            "reason": "Tenant ID not configured",
+            "company_id": company_id,
+        }
+
     # Fetch recurring invoice items for this company
     recurring_items = await recurring_items_repo.list_company_recurring_invoice_items(company_id)
     recurring_items_info = []
@@ -610,28 +620,242 @@ async def sync_company(company_id: int) -> dict[str, Any]:
                 "price_override": item.get("price_override"),
             })
 
-    payload = {
-        "status": "queued",
-        "company_id": company_id,
-        "module": "xero",
-        "tenant_id": settings.get("tenant_id"),
-        "account_code": settings.get("account_code"),
-        "line_amount_type": settings.get("line_amount_type"),
-        "reference_prefix": settings.get("reference_prefix"),
-        "billable_statuses": settings.get("billable_statuses"),
-        "line_item_description_template": settings.get("line_item_description_template"),
-        "recurring_invoice_items": recurring_items_info,
-        "company": {
-            "id": company.get("id"),
-            "name": company.get("name"),
-            "xero_id": company.get("xero_id"),
-        },
-    }
-    logger.info(
-        "Queued company for Xero synchronisation",
-        company_id=company_id,
-        tenant_id=settings.get("tenant_id"),
-        recurring_items_count=len(recurring_items_info),
+    # Build context for invoice line item template substitution
+    context = await build_invoice_context(company_id)
+    
+    # Build line items from recurring invoice items
+    tax_type = str(settings.get("tax_type", "")).strip() or None
+    line_items = await build_recurring_invoice_items(
+        company_id,
+        tax_type=tax_type,
+        context=context,
     )
-    return payload
+
+    # If no line items, skip the sync
+    if not line_items:
+        logger.info(
+            "No active recurring invoice items for company",
+            company_id=company_id,
+        )
+        return {
+            "status": "skipped",
+            "reason": "No active recurring invoice items",
+            "company_id": company_id,
+            "recurring_items_count": len(recurring_items_info),
+        }
+
+    # Build invoice payload for Xero API
+    xero_id = company.get("xero_id")
+    contact_payload: dict[str, Any] = {}
+    if xero_id:
+        contact_payload["ContactID"] = str(xero_id)
+    else:
+        company_name = company.get("name") or f"Company #{company_id}"
+        contact_payload["Name"] = str(company_name).strip()
+
+    line_amount_type = str(settings.get("line_amount_type", "")).strip() or "Exclusive"
+    reference_prefix = str(settings.get("reference_prefix", "")).strip() or "Support"
+    
+    invoice_payload = {
+        "Type": "ACCREC",
+        "Contact": contact_payload,
+        "LineItems": line_items,
+        "LineAmountTypes": line_amount_type,
+        "Reference": reference_prefix,
+        "Date": date.today().isoformat(),
+        "Status": "DRAFT",
+    }
+
+    # Prepare for API call
+    api_url = f"https://api.xero.com/api.xro/2.0/Invoices"
+    
+    # Get or refresh access token
+    try:
+        access_token = await modules_service.acquire_xero_access_token()
+    except Exception as exc:
+        logger.error("Failed to acquire Xero access token", error=str(exc))
+        return {
+            "status": "error",
+            "reason": "Failed to acquire access token",
+            "error": str(exc),
+            "company_id": company_id,
+        }
+
+    request_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "xero-tenant-id": tenant_id,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    # Create webhook monitor event
+    webhook_payload = {
+        "company_id": company_id,
+        "company_name": company.get("name"),
+        "invoice": invoice_payload,
+        "recurring_items": recurring_items_info,
+    }
+
+    try:
+        event = await webhook_monitor.create_manual_event(
+            name="xero.sync.company",
+            target_url=api_url,
+            payload=webhook_payload,
+            headers=request_headers,
+            max_attempts=1,
+            backoff_seconds=0,
+        )
+    except Exception as exc:
+        logger.error("Failed to create webhook monitor event", error=str(exc))
+        event = None
+
+    event_id: int | None = None
+    if event and event.get("id") is not None:
+        try:
+            event_id = int(event["id"])
+        except (TypeError, ValueError):
+            event_id = None
+
+    # Make the HTTP request to Xero
+    response_status: int | None = None
+    response_body: str | None = None
+    response_headers: dict[str, Any] | None = None
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                api_url,
+                json=invoice_payload,
+                headers=request_headers,
+            )
+            response_status = response.status_code
+            response_body = response.text
+            response_headers = dict(response.headers)
+        
+        # Check if request was successful
+        success = 200 <= response_status < 300
+        
+        if event_id is not None:
+            if success:
+                try:
+                    await webhook_monitor.record_manual_success(
+                        event_id,
+                        attempt_number=1,
+                        response_status=response_status,
+                        response_body=response_body,
+                        request_headers=request_headers,
+                        request_body=webhook_payload,
+                        response_headers=response_headers,
+                    )
+                except Exception as record_exc:
+                    logger.error(
+                        "Failed to record webhook success",
+                        event_id=event_id,
+                        error=str(record_exc),
+                    )
+            else:
+                try:
+                    await webhook_monitor.record_manual_failure(
+                        event_id,
+                        attempt_number=1,
+                        status="failed",
+                        error_message=f"HTTP {response_status}",
+                        response_status=response_status,
+                        response_body=response_body,
+                        request_headers=request_headers,
+                        request_body=webhook_payload,
+                        response_headers=response_headers,
+                    )
+                except Exception as record_exc:
+                    logger.error(
+                        "Failed to record webhook failure",
+                        event_id=event_id,
+                        error=str(record_exc),
+                    )
+        
+        if success:
+            logger.info(
+                "Successfully synced company to Xero",
+                company_id=company_id,
+                tenant_id=tenant_id,
+                response_status=response_status,
+                event_id=event_id,
+            )
+            return {
+                "status": "succeeded",
+                "company_id": company_id,
+                "tenant_id": tenant_id,
+                "response_status": response_status,
+                "event_id": event_id,
+                "recurring_items_count": len(recurring_items_info),
+            }
+        else:
+            logger.error(
+                "Xero API returned error status",
+                company_id=company_id,
+                response_status=response_status,
+                response_body=response_body,
+            )
+            return {
+                "status": "failed",
+                "company_id": company_id,
+                "response_status": response_status,
+                "error": f"HTTP {response_status}",
+                "event_id": event_id,
+            }
+    
+    except httpx.HTTPError as exc:
+        logger.error("Xero API request failed", company_id=company_id, error=str(exc))
+        if event_id is not None:
+            try:
+                await webhook_monitor.record_manual_failure(
+                    event_id,
+                    attempt_number=1,
+                    status="error",
+                    error_message=str(exc),
+                    response_status=response_status,
+                    response_body=response_body,
+                    request_headers=request_headers,
+                    request_body=webhook_payload,
+                    response_headers=response_headers,
+                )
+            except Exception as record_exc:
+                logger.error(
+                    "Failed to record webhook error",
+                    event_id=event_id,
+                    error=str(record_exc),
+                )
+        return {
+            "status": "error",
+            "company_id": company_id,
+            "error": str(exc),
+            "event_id": event_id,
+        }
+    except Exception as exc:
+        logger.error("Unexpected error during Xero sync", company_id=company_id, error=str(exc))
+        if event_id is not None:
+            try:
+                await webhook_monitor.record_manual_failure(
+                    event_id,
+                    attempt_number=1,
+                    status="error",
+                    error_message=str(exc),
+                    response_status=None,
+                    response_body=None,
+                    request_headers=request_headers,
+                    request_body=webhook_payload,
+                    response_headers=None,
+                )
+            except Exception as record_exc:
+                logger.error(
+                    "Failed to record webhook error",
+                    event_id=event_id,
+                    error=str(record_exc),
+                )
+        return {
+            "status": "error",
+            "company_id": company_id,
+            "error": str(exc),
+            "event_id": event_id,
+        }
 
