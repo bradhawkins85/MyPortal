@@ -308,5 +308,64 @@ class Database:
                     async with conn.cursor() as cursor:
                         await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
 
+    @asynccontextmanager
+    async def acquire_lock(
+        self,
+        lock_name: str,
+        timeout: int = 10,
+    ) -> AsyncIterator[bool]:
+        """Acquire a named MySQL lock for distributed coordination.
+
+        Args:
+            lock_name: The name of the lock to acquire
+            timeout: Maximum seconds to wait for the lock (default: 10)
+
+        Yields:
+            bool: True if lock was acquired, False otherwise
+
+        This uses MySQL's GET_LOCK() function to provide distributed locking
+        across multiple workers/processes. Only one connection can hold a
+        named lock at a time.
+        
+        When the database pool is not initialized (e.g., during tests or
+        early application startup), this context manager yields True to
+        allow operations to proceed. In production with multiple workers,
+        the database pool will be initialized during app startup before
+        any scheduled tasks run, ensuring proper locking behavior.
+        
+        Note: The no-database-pool behavior is a convenience for testing
+        and does not provide actual locking. Production deployments must
+        ensure the database is connected before starting scheduled tasks.
+        """
+        if not self._pool:
+            # Database not initialized - likely in tests or early startup
+            # Allow the operation to proceed without actual locking
+            yield True
+            return
+
+        conn = await self._pool.acquire()
+        lock_acquired = False
+        try:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT GET_LOCK(%s, %s)", (lock_name, timeout))
+                result = await cursor.fetchone()
+                lock_acquired = bool(result and result[0] == 1)
+
+            yield lock_acquired
+        finally:
+            if lock_acquired:
+                try:
+                    async with conn.cursor() as cursor:
+                        await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                except Exception as exc:
+                    # Log but don't raise - lock will be auto-released on connection close
+                    # Defensive cleanup that shouldn't fail in normal operation
+                    logger.warning(
+                        "Failed to explicitly release lock {lock}: {error}",
+                        lock=lock_name,
+                        error=str(exc),
+                    )
+            self._pool.release(conn)
+
 
 db = Database()
