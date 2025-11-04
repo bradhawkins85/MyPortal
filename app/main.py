@@ -3728,14 +3728,8 @@ async def xero_callback(
     if isinstance(expires_in, (int, float)):
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in))
     
-    # Store tokens (they will be encrypted by update_xero_tokens)
-    await modules_service.update_xero_tokens(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_expires_at=expires_at,
-    )
-    
     # Fetch tenant connections to get tenant_id
+    tenant_id = None
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             connections_response = await client.get(
@@ -3748,20 +3742,22 @@ async def xero_callback(
         connections_response.raise_for_status()
         connections = connections_response.json()
         
-        # Store the first tenant_id if we have connections
+        # Get the first tenant_id if we have connections
         if connections and len(connections) > 0:
             tenant_id = connections[0].get("tenantId")
             if tenant_id:
-                # Update module settings with tenant_id
-                module = await modules_service.get_module("xero", redact=False)
-                if module:
-                    settings = dict(module.get("settings") or {})
-                    settings["tenant_id"] = str(tenant_id)
-                    await integration_modules_repo.update_module("xero", settings=settings)
-                    log_info("Stored Xero tenant_id", tenant_id=tenant_id)
+                log_info("Discovered Xero tenant_id", tenant_id=tenant_id)
     except Exception as exc:
         # Don't fail the entire flow if we can't fetch connections
         log_error("Failed to fetch Xero connections", error=str(exc))
+    
+    # Store tokens and tenant_id (tokens will be encrypted by update_xero_tokens)
+    await modules_service.update_xero_tokens(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_expires_at=expires_at,
+        tenant_id=str(tenant_id) if tenant_id else None,
+    )
     
     log_info("Xero OAuth callback processed successfully", user_id=state_data.get("user_id"))
     return RedirectResponse(url="/admin/modules?success=xero+authorized", status_code=status.HTTP_303_SEE_OTHER)
