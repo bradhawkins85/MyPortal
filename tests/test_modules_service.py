@@ -782,9 +782,6 @@ def test_invoke_ntfy_payload_overrides_defaults(monkeypatch):
 
 
 def test_validate_xero_reports_credentials_presence():
-    import asyncio
-    from app.services import modules as modules_service
-    
     settings_with_all = {
         "client_id": "test-client-id",
         "client_secret": "test-secret",
@@ -792,7 +789,7 @@ def test_validate_xero_reports_credentials_presence():
         "tenant_id": "test-tenant",
     }
     
-    result = asyncio.run(modules_service._validate_xero(settings_with_all, {}))
+    result = asyncio.run(modules._validate_xero(settings_with_all, {}))
     
     assert result["status"] == "ok"
     assert result["has_client_id"] is True
@@ -802,9 +799,6 @@ def test_validate_xero_reports_credentials_presence():
 
 
 def test_validate_xero_reports_missing_credentials():
-    import asyncio
-    from app.services import modules as modules_service
-    
     settings_partial = {
         "client_id": "test-client-id",
         "client_secret": "",
@@ -812,7 +806,7 @@ def test_validate_xero_reports_missing_credentials():
         "tenant_id": "",
     }
     
-    result = asyncio.run(modules_service._validate_xero(settings_partial, {}))
+    result = asyncio.run(modules._validate_xero(settings_partial, {}))
     
     assert result["status"] == "ok"
     assert result["has_client_id"] is True
