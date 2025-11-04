@@ -18,7 +18,7 @@ from app.schemas.company_recurring_invoice_items import (
 )
 from app.services import company_id_lookup
 
-router = APIRouter(prefix="/companies", tags=["Companies"])
+router = APIRouter(prefix="/api/companies", tags=["Companies"])
 
 
 @router.get("", response_model=list[CompanyResponse])
