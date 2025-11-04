@@ -53,11 +53,10 @@ def test_coerce_settings_xero_includes_company_name():
     }
     payload = {
         "company_name": "New Company Name",
-        "tenant_id": "new-tenant",
     }
     result = modules_service._coerce_settings("xero", payload, existing)
     assert result["company_name"] == "New Company Name"
-    assert result["tenant_id"] == "new-tenant"
+    assert result["tenant_id"] == "existing-tenant"
     # Verify secrets are preserved
     assert result["client_secret"] == "super-secret"
     assert result["refresh_token"] == "refresh-token"
