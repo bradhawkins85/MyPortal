@@ -349,11 +349,29 @@ PRE_PULL_HEAD=$(git rev-parse HEAD)
 # Clean up __pycache__ files before pulling to prevent merge conflicts
 clean_pycache_files
 
+perform_git_update() {
+  local remote_ref="$1"
+  local branch="$2"
+
+  if git pull --ff-only "$remote_ref" "$branch"; then
+    return 0
+  fi
+
+  echo "Fast-forward pull failed; attempting rebase to integrate remote changes..." >&2
+  if git pull --rebase "$remote_ref" "$branch"; then
+    return 0
+  fi
+
+  echo "Error: Unable to update repository automatically from ${remote_ref} ${branch}." >&2
+  echo "Please resolve the divergence manually and re-run the upgrade." >&2
+  exit 1
+}
+
 if [[ -n "${GITHUB_USERNAME:-}" && -n "${GITHUB_PASSWORD:-}" && "$REMOTE_URL" == https://* ]]; then
   AUTH_REMOTE_URL="https://${GITHUB_USERNAME}:${GITHUB_PASSWORD}@${REMOTE_URL#https://}"
-  git pull "$AUTH_REMOTE_URL" main
+  perform_git_update "$AUTH_REMOTE_URL" main
 else
-  git pull origin main
+  perform_git_update origin main
 fi
 
 POST_PULL_HEAD=$(git rev-parse HEAD)
