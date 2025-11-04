@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Awaitable, Callable, Mapping, MutableMapping, Sequence
 
 from loguru import logger
 
+from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
+from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.services import modules as modules_service
 
 TicketFetcher = Callable[[int], Awaitable[Mapping[str, Any] | None]]
@@ -408,6 +410,159 @@ async def build_order_invoice(
     return invoice
 
 
+def _evaluate_qty_expression(expression: str, context: dict[str, Any]) -> float:
+    """Evaluate a quantity expression, supporting both static numbers and variables.
+    
+    Args:
+        expression: The quantity expression (e.g., "5", "{active_agents}", "10")
+        context: Dictionary of available variables for substitution
+    
+    Returns:
+        The evaluated quantity as a float
+    """
+    if not expression:
+        return 1.0
+    
+    # Try to evaluate as a direct number first
+    try:
+        return float(expression)
+    except ValueError:
+        pass
+    
+    # Try to substitute variables and then evaluate
+    try:
+        # Simple variable substitution using format_map
+        evaluated = expression.format_map(_TemplateValues(context))
+        return float(evaluated)
+    except (ValueError, KeyError):
+        # If evaluation fails, default to 1
+        logger.warning(
+            "Failed to evaluate quantity expression, defaulting to 1",
+            expression=expression,
+            context_keys=list(context.keys()),
+        )
+        return 1.0
+
+
+async def build_invoice_context(company_id: int) -> dict[str, Any]:
+    """Build context variables for invoice template substitution.
+    
+    Args:
+        company_id: The company ID to build context for
+    
+    Returns:
+        Dictionary of available variables including device counts
+    """
+    # Calculate date for "last month" - assets synced in the last 30 days
+    since_date = datetime.now(timezone.utc) - timedelta(days=30)
+    
+    # Count total active assets
+    total_assets = await assets_repo.count_active_assets(
+        company_id=company_id,
+        since=since_date,
+    )
+    
+    # Count assets by device type
+    workstation_count = await assets_repo.count_active_assets_by_type(
+        company_id=company_id,
+        since=since_date,
+        device_type="Workstation",
+    )
+    
+    server_count = await assets_repo.count_active_assets_by_type(
+        company_id=company_id,
+        since=since_date,
+        device_type="Server",
+    )
+    
+    user_count = await assets_repo.count_active_assets_by_type(
+        company_id=company_id,
+        since=since_date,
+        device_type="User",
+    )
+    
+    # Get company details
+    company = await company_repo.get_company_by_id(company_id)
+    company_name = company.get("name") if company else f"Company {company_id}"
+    
+    return {
+        "company_id": company_id,
+        "company_name": company_name,
+        "active_agents": total_assets,
+        "active_workstations": workstation_count,
+        "active_servers": server_count,
+        "active_users": user_count,
+        "total_assets": total_assets,
+    }
+
+
+async def build_recurring_invoice_items(
+    company_id: int,
+    *,
+    tax_type: str | None,
+    context: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Build line items for recurring invoice items configured for a company.
+    
+    Args:
+        company_id: The company ID to fetch recurring items for
+        tax_type: Tax type to apply to line items
+        context: Dictionary of variables available for template substitution
+    
+    Returns:
+        List of Xero line item dictionaries
+    """
+    recurring_items = await recurring_items_repo.list_company_recurring_invoice_items(company_id)
+    if not recurring_items:
+        return []
+    
+    template_context = _TemplateValues(context or {})
+    line_items: list[dict[str, Any]] = []
+    
+    for item in recurring_items:
+        # Skip inactive items
+        if not item.get("active"):
+            continue
+        
+        # Format description using template
+        description_template = str(item.get("description_template") or "")
+        try:
+            description = description_template.format_map(template_context).strip()
+        except Exception:
+            description = description_template.strip()
+        
+        if not description:
+            description = str(item.get("product_code") or "Item")
+        
+        # Evaluate quantity expression
+        qty_expression = str(item.get("qty_expression") or "1")
+        quantity = _evaluate_qty_expression(qty_expression, template_context)
+        
+        # Build the line item
+        line_item: dict[str, Any] = {
+            "Description": description,
+            "Quantity": quantity,
+            "ItemCode": str(item.get("product_code") or ""),
+        }
+        
+        # Add price override if specified
+        price_override = item.get("price_override")
+        if price_override is not None:
+            try:
+                unit_amount = float(price_override)
+                line_item["UnitAmount"] = unit_amount
+            except (TypeError, ValueError):
+                pass
+        
+        # Add tax type if specified
+        if tax_type:
+            line_item["TaxType"] = str(tax_type).strip()
+        
+        line_items.append(line_item)
+    
+    return line_items
+
+
 async def sync_company(company_id: int) -> dict[str, Any]:
     """Trigger a Xero synchronisation for the given company.
 
@@ -443,6 +598,18 @@ async def sync_company(company_id: int) -> dict[str, Any]:
             "company_id": company_id,
         }
 
+    # Fetch recurring invoice items for this company
+    recurring_items = await recurring_items_repo.list_company_recurring_invoice_items(company_id)
+    recurring_items_info = []
+    for item in recurring_items:
+        if item.get("active"):
+            recurring_items_info.append({
+                "product_code": item.get("product_code"),
+                "description_template": item.get("description_template"),
+                "qty_expression": item.get("qty_expression"),
+                "price_override": item.get("price_override"),
+            })
+
     payload = {
         "status": "queued",
         "company_id": company_id,
@@ -453,6 +620,7 @@ async def sync_company(company_id: int) -> dict[str, Any]:
         "reference_prefix": settings.get("reference_prefix"),
         "billable_statuses": settings.get("billable_statuses"),
         "line_item_description_template": settings.get("line_item_description_template"),
+        "recurring_invoice_items": recurring_items_info,
         "company": {
             "id": company.get("id"),
             "name": company.get("name"),
@@ -463,6 +631,7 @@ async def sync_company(company_id: int) -> dict[str, Any]:
         "Queued company for Xero synchronisation",
         company_id=company_id,
         tenant_id=settings.get("tenant_id"),
+        recurring_items_count=len(recurring_items_info),
     )
     return payload
 
