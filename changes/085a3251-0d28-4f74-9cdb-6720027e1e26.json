@@ -1,0 +1,7 @@
+{
+  "guid": "085a3251-0d28-4f74-9cdb-6720027e1e26",
+  "occurred_at": "2025-10-15T13:21Z",
+  "change_type": "Fix",
+  "summary": "Restored shop admin category, product update, archive, and visibility endpoints with validation and logging",
+  "content_hash": "0e67bcfca9914a06f7b5568176ea5cc884ecc5ffcea544cf5e178eb64411aec1"
+}

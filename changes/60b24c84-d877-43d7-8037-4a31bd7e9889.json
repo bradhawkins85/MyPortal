@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-01T09:05Z",
   "change_type": "Fix",
   "summary": "Ensured automation inserts reuse their connection so creation succeeds without 500 errors",
-  "content_hash": "a9e2dc69c1f013e5034069a25ac375d7332f8911a477f647e3c648884b046b94"
+  "content_hash": "0deb875416f15371ca6d3e51e06b437ed9a2c7b4eb913660c72acef93f573634"
 }

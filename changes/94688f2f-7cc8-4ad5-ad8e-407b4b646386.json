@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-24T15:45Z",
   "change_type": "Feature",
   "summary": "Added ticket-aware system variable expansion for templates and automations including flattened ticket tokens",
-  "content_hash": "bed1261f048f8841fbb3eae9b788d443394d30522520dc1029ba94aaca12f974"
+  "content_hash": "2b1821efe96690863262128a8aa24fbc2c81f6a474a2c8a85e3feb97b707fcf2"
 }

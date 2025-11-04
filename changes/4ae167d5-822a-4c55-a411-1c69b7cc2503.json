@@ -1,7 +1,7 @@
 {
   "guid": "4ae167d5-822a-4c55-a411-1c69b7cc2503",
-  "occurred_at": "2025-10-29T14:57:35Z",
+  "occurred_at": "2025-10-29T14:57Z",
   "change_type": "Fix",
   "summary": "Fix shop product shuffle indentation to prevent startup failure",
-  "content_hash": "3ee7f58d8c011dd3b5d6808ee4eb718ac7fd54dfbcfa86cf28184374c7fab7ec"
+  "content_hash": "2fc207a84b9196efb16cf0e6079ddfd5ff2a3674a924c7fea3d4a44aac4c9785"
 }

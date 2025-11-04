@@ -48,7 +48,7 @@ async def create_recurring_invoice_item(
     active: bool = True,
 ) -> dict[str, Any]:
     """Create a new recurring invoice item."""
-    await db.execute(
+    item_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO company_recurring_invoice_items
         (company_id, product_code, description_template, qty_expression, price_override, active)
@@ -61,8 +61,9 @@ async def create_recurring_invoice_item(
         SELECT id, company_id, product_code, description_template, qty_expression,
                price_override, active, created_at, updated_at
         FROM company_recurring_invoice_items
-        WHERE id = LAST_INSERT_ID()
-        """
+        WHERE id = %s
+        """,
+        (item_id,),
     )
     if not row:
         raise RuntimeError("Failed to create recurring invoice item")

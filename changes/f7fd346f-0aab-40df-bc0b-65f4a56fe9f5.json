@@ -1,0 +1,7 @@
+{
+  "guid": "f7fd346f-0aab-40df-bc0b-65f4a56fe9f5",
+  "occurred_at": "2025-10-09T23:32Z",
+  "change_type": "Fix",
+  "summary": "Resized all modal popups to occupy 75% of the viewport for consistent layout compliance",
+  "content_hash": "3473bf74f0285ad961d57a780bb7fa22de42efc34398251a5dcf8abddb33b862"
+}

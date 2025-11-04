@@ -1,0 +1,7 @@
+{
+  "guid": "87b304f2-9b3d-47fd-a47e-b47b13ac9226",
+  "occurred_at": "2025-10-31T09:15Z",
+  "change_type": "Feature",
+  "summary": "Added super-admin controls to grant or block company admin access to shop, cart, order, and form sections",
+  "content_hash": "86f8ac6fb2f857b069c9a01d8191c55f19850f09cf597fa88e1f0140f934f391"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "ed44c49c-f4f2-4bac-9e82-bf31a11d59b3",
+  "occurred_at": "2025-12-08T16:45Z",
+  "change_type": "Fix",
+  "summary": "Redirected knowledge base deletion flow back to the admin catalogue to prevent Article not found errors",
+  "content_hash": "da23b98be04d21d0dab15fbfee554c4473651e24796c31273899562d67861a48"
+}

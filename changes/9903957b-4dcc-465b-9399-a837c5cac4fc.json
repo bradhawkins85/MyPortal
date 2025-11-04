@@ -3,5 +3,5 @@
   "occurred_at": "2025-10-03T10:15Z",
   "change_type": "Fix",
   "summary": "Reconnected automation repository queries before writes so creating automations no longer fails when the database pool is cold",
-  "content_hash": "58a46b69c9cd7f74672cef7fcf758d2b54c52390b34bb2b6b8ee94052e01df70"
+  "content_hash": "c281e3efa0ac22bd3815c502ada59c31fb9c10f3f112fe1b83ddb4f5402412cd"
 }

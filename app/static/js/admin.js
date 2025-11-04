@@ -2511,6 +2511,7 @@
             body: JSON.stringify(formData),
           });
         }
+        closeModal();
         window.location.reload();
       } catch (error) {
         console.error('Failed to save recurring invoice item:', error);
