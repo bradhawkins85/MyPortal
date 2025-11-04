@@ -162,7 +162,7 @@ async def _lookup_syncro_company_id(company_name: str) -> str | None:
         return None
     except Exception as exc:
         log_error("Error searching Syncro customers", company_name=company_name, error=str(exc))
-        raise
+        return None
     
     return None
 
@@ -209,7 +209,7 @@ async def _lookup_tactical_client_id(company_name: str) -> str | None:
         return None
     except Exception as exc:
         log_error("Error searching Tactical RMM clients", company_name=company_name, error=str(exc))
-        raise
+        return None
     
     return None
 
@@ -273,8 +273,12 @@ async def refresh_all_missing_company_ids() -> dict[str, Any]:
             
             if result.get("status") == "updated":
                 summary["updated"] += 1
-            elif result.get("status") in ("error", "skipped"):
-                summary["errors"] += 1
+            elif result.get("status") == "skipped":
+                summary["skipped"] += 1
+            elif result.get("status") in ("error", "no_updates"):
+                # "no_updates" means we tried but found nothing, not an error
+                if result.get("status") == "error":
+                    summary["errors"] += 1
             
             summary["results"].append({
                 "company_id": company_id,
