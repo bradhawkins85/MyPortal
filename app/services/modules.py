@@ -7,11 +7,19 @@ import string
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import asyncio
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
 from urllib.parse import urljoin
 
 import httpx
+from dotenv import load_dotenv
 from loguru import logger
+
+# Load .env file before accessing environment variables
+# This ensures XERO_ and other env vars are available when DEFAULT_MODULES is initialized
+_env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path)
 
 from app.core.database import db
 from app.repositories import companies as company_repo
@@ -160,6 +168,7 @@ def _default_xero_settings() -> dict[str, Any]:
         "client_secret": _clean_env("XERO_CLIENT_SECRET"),
         "refresh_token": _clean_env("XERO_REFRESH_TOKEN"),
         "tenant_id": _clean_env("XERO_TENANT_ID"),
+        "company_name": _clean_env("XERO_COMPANY_NAME"),
         "default_hourly_rate": _format_rate(_clean_env("XERO_DEFAULT_HOURLY_RATE")),
         "account_code": _clean_env("XERO_ACCOUNT_CODE") or "400",
         "tax_type": _clean_env("XERO_TAX_TYPE"),
@@ -436,6 +445,7 @@ def _coerce_settings(
                 "client_secret": _preserve_secret("client_secret"),
                 "refresh_token": _preserve_secret("refresh_token"),
                 "tenant_id": str(merged.get("tenant_id", "")).strip(),
+                "company_name": str(merged.get("company_name", "")).strip(),
                 "default_hourly_rate": _normalise_rate(merged.get("default_hourly_rate")),
                 "account_code": str(merged.get("account_code", "")).strip(),
                 "tax_type": str(merged.get("tax_type", "")).strip(),
@@ -1311,6 +1321,103 @@ async def _validate_uptimekuma(
     }
 
 
+async def _discover_xero_tenant_id(
+    client_id: str,
+    client_secret: str,
+    refresh_token: str,
+    company_name: str,
+) -> str | None:
+    """Discover Xero tenant_id by querying the Xero API based on company name.
+    
+    Args:
+        client_id: Xero OAuth client ID
+        client_secret: Xero OAuth client secret
+        refresh_token: Xero OAuth refresh token
+        company_name: Company name to match against Xero organisations
+    
+    Returns:
+        The tenant_id if found, None otherwise
+    """
+    if not all([client_id, client_secret, refresh_token, company_name]):
+        logger.warning(
+            "Cannot discover tenant_id: missing required credentials or company name",
+            has_client_id=bool(client_id),
+            has_client_secret=bool(client_secret),
+            has_refresh_token=bool(refresh_token),
+            has_company_name=bool(company_name),
+        )
+        return None
+    
+    try:
+        # Step 1: Get access token using refresh token
+        token_url = "https://identity.xero.com/connect/token"
+        token_data = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }
+        
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            token_response = await client.post(
+                token_url,
+                data=token_data,
+                auth=(client_id, client_secret),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            token_response.raise_for_status()
+            token_data_response = token_response.json()
+            access_token = token_data_response.get("access_token")
+            
+            if not access_token:
+                logger.error("Failed to get access token from Xero")
+                return None
+            
+            # Step 2: Get connections (tenants)
+            connections_url = "https://api.xero.com/connections"
+            connections_response = await client.get(
+                connections_url,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+            )
+            connections_response.raise_for_status()
+            connections = connections_response.json()
+            
+            # Step 3: Find matching tenant by company name (case-insensitive)
+            company_name_lower = company_name.strip().lower()
+            for connection in connections:
+                tenant_name = str(connection.get("tenantName", "")).strip().lower()
+                if tenant_name == company_name_lower:
+                    tenant_id = connection.get("tenantId")
+                    logger.info(
+                        "Discovered Xero tenant_id",
+                        company_name=company_name,
+                        tenant_id=tenant_id,
+                    )
+                    return str(tenant_id) if tenant_id else None
+            
+            logger.warning(
+                "No matching Xero tenant found for company name",
+                company_name=company_name,
+                available_tenants=[c.get("tenantName") for c in connections],
+            )
+            return None
+            
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "HTTP error while discovering Xero tenant_id",
+            status_code=exc.response.status_code if exc.response else None,
+            error=str(exc),
+        )
+        return None
+    except Exception as exc:
+        logger.error(
+            "Error discovering Xero tenant_id",
+            error=str(exc),
+        )
+        return None
+
+
 async def _validate_xero(
     settings: Mapping[str, Any],
     payload: Mapping[str, Any],
@@ -1321,18 +1428,61 @@ async def _validate_xero(
 
     Returns a status object indicating which credentials are configured.
     This handler is used when trigger_module is called with the xero module.
+    
+    If company_name is provided but tenant_id is missing, attempts to discover
+    the tenant_id from the Xero API.
     """
     client_id = str(settings.get("client_id") or "").strip()
     client_secret = str(settings.get("client_secret") or "").strip()
     refresh_token = str(settings.get("refresh_token") or "").strip()
     tenant_id = str(settings.get("tenant_id") or "").strip()
-    return {
+    company_name = str(settings.get("company_name") or "").strip()
+    
+    result: dict[str, Any] = {
         "status": "ok",
         "has_client_id": bool(client_id),
         "has_client_secret": bool(client_secret),
         "has_refresh_token": bool(refresh_token),
         "has_tenant_id": bool(tenant_id),
+        "has_company_name": bool(company_name),
     }
+    
+    # Attempt to discover tenant_id if company_name is provided but tenant_id is missing
+    if company_name and not tenant_id and client_id and client_secret and refresh_token:
+        logger.info(
+            "Attempting to discover Xero tenant_id from company name",
+            company_name=company_name,
+        )
+        discovered_tenant_id = await _discover_xero_tenant_id(
+            client_id,
+            client_secret,
+            refresh_token,
+            company_name,
+        )
+        if discovered_tenant_id:
+            result["discovered_tenant_id"] = discovered_tenant_id
+            result["tenant_id_discovery"] = "success"
+            # Update the module settings with the discovered tenant_id
+            try:
+                await module_repo.update_module(
+                    "xero",
+                    settings={**settings, "tenant_id": discovered_tenant_id},
+                )
+                result["tenant_id_updated"] = True
+                logger.info(
+                    "Successfully updated Xero module with discovered tenant_id",
+                    tenant_id=discovered_tenant_id,
+                )
+            except Exception as exc:
+                logger.error(
+                    "Failed to update Xero module with discovered tenant_id",
+                    error=str(exc),
+                )
+                result["tenant_id_updated"] = False
+        else:
+            result["tenant_id_discovery"] = "failed"
+    
+    return result
 
 
 async def test_module(slug: str) -> dict[str, Any]:
