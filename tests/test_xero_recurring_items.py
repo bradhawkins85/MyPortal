@@ -96,3 +96,35 @@ def test_build_recurring_invoice_items_with_empty_list(monkeypatch):
     )
 
     assert len(result) == 0
+
+
+def test_build_invoice_context(monkeypatch):
+    from datetime import datetime, timezone
+
+    async def fake_count_active_assets(*, company_id=None, since=None):
+        return 25
+
+    async def fake_count_by_type(*, company_id=None, since=None, device_type=None):
+        counts = {
+            "Workstation": 15,
+            "Server": 5,
+            "User": 5,
+        }
+        return counts.get(device_type, 0)
+
+    async def fake_get_company(company_id):
+        return {"id": company_id, "name": "Test Company"}
+
+    monkeypatch.setattr(xero.assets_repo, "count_active_assets", fake_count_active_assets)
+    monkeypatch.setattr(xero.assets_repo, "count_active_assets_by_type", fake_count_by_type)
+    monkeypatch.setattr(xero.company_repo, "get_company_by_id", fake_get_company)
+
+    result = asyncio.run(xero.build_invoice_context(company_id=1))
+
+    assert result["company_id"] == 1
+    assert result["company_name"] == "Test Company"
+    assert result["active_agents"] == 25
+    assert result["active_workstations"] == 15
+    assert result["active_servers"] == 5
+    assert result["active_users"] == 5
+    assert result["total_assets"] == 25
