@@ -2771,7 +2771,7 @@ async def _render_company_edit_page(
             }
         ]
 
-        automation_company_tasks.sort(key=lambda item: (item.get("name") or "").lower())
+        company_automation_tasks.sort(key=lambda item: (item.get("name") or "").lower())
 
     # Fetch recurring invoice items for the company
     recurring_invoice_items = []
