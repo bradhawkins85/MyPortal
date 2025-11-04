@@ -2,8 +2,6 @@ Apps should be designed with a 3 part layout, unless otherwise specified, there 
 
 Always consider security when implementing changes and factor in security best practices.
 
-Ask questions if required to obtain a better understanding of the request.
-
 Apps should be themeable, with custom fav icons and logos.
 
 The first user created for an app is the super admin and the initial login page will redirect to a registration page if there are no existing users.
@@ -34,25 +32,17 @@ When working with SQL, any migrations should be applied during the applications'
 
 Code should be based on/around Python.
 
-Capture screenshots of the app when interface changes are made.
-
 Apps should be designed with a responsive layout.
 
 All tables should have sorting and filtering capabilities.
 
 Use file-driven SQL migration runner and regression tests where possible.
 
-Read CLAUD.md files where applicable and respect the provided guidance.
-
 When working with external API's use the list below for the API Documentation for the respective systems:
 SyncroRMM
 https://api-docs.syncromsp.com/
-Axcelerate:
-https://app.axcelerate.com/apidocs/home/index
 TacticalRMM:
 https://api.hawkinsitsolutions.com.au/api/schema/swagger-ui/
-
-Not all External API's need to be included in all apps, only include them when requested to.
 
 Test all code changes to attempt to prevent Internal Server Error occurrences.
 
@@ -63,3 +53,5 @@ If moving items between locations, match the style of the destination rather tha
 For tables always keep row dividers  heights consistent across the width of the table.
 
 Do not generate binary files.
+
+Do not include __pycache__ files and folder in pull requests
