@@ -39,6 +39,29 @@ def test_coerce_settings_xero_preserves_secrets():
     assert result["line_item_description_template"] == "Ticket #{ticket_id} - {ticket_subject}"
 
 
+def test_coerce_settings_xero_includes_company_name():
+    """Test that company_name field is properly handled in Xero settings."""
+    existing = {
+        "settings": {
+            "client_id": "existing-id",
+            "client_secret": "super-secret",
+            "refresh_token": "refresh-token",
+            "tenant_id": "existing-tenant",
+            "company_name": "Old Company Name",
+        }
+    }
+    payload = {
+        "company_name": "New Company Name",
+        "tenant_id": "new-tenant",
+    }
+    result = modules_service._coerce_settings("xero", payload, existing)
+    assert result["company_name"] == "New Company Name"
+    assert result["tenant_id"] == "new-tenant"
+    # Verify secrets are preserved
+    assert result["client_secret"] == "super-secret"
+    assert result["refresh_token"] == "refresh-token"
+
+
 @pytest.mark.anyio("asyncio")
 async def test_build_ticket_invoices_groups_billable_minutes():
     async def fake_fetch_ticket(ticket_id: int):
