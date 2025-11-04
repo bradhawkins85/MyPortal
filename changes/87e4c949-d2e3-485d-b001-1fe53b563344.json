@@ -1,7 +1,7 @@
 {
   "guid": "87e4c949-d2e3-485d-b001-1fe53b563344",
-  "occurred_at": "2025-10-29T14:01:03Z",
+  "occurred_at": "2025-10-29T14:01Z",
   "change_type": "Feature",
   "summary": "Moved API credential creation into a header button with modal capture for description and expiry.",
-  "content_hash": "22995ac45e63e36dfb8da1184623fe31ffc0f7efa1591d35f506a27134d27198"
+  "content_hash": "6f28894ab0763cbcd35fac7eec36b1d7d197a71a3d1a62f907952802c4963eba"
 }

@@ -1,0 +1,7 @@
+{
+  "guid": "87e9b186-3edd-455b-9d98-d0c5d009d378",
+  "occurred_at": "2025-10-08T12:51Z",
+  "change_type": "Fix",
+  "summary": "Restored shop product creation with validated uploads and database persistence to resolve Not Found errors",
+  "content_hash": "6c1000a82df7b4fb50a72ecedf2a3e3187ec37cd9c4febf1cb9fe6d0a57e20aa"
+}

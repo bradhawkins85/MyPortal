@@ -1,0 +1,7 @@
+{
+  "guid": "f2628c19-5e28-478d-8a66-2d904ea5ad23",
+  "occurred_at": "2025-10-20T21:35Z",
+  "change_type": "Fix",
+  "summary": "Suppressed MySQL duplicate database and migrations table warnings during startup by temporarily disabling sql_notes around idempotent CREATE statements",
+  "content_hash": "a074f340f1156e7c0bd508438ecaa53512f09ad10782c3067d96ccb843eb5a76"
+}

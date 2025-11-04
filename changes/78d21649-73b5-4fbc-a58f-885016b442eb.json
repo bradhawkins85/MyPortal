@@ -1,0 +1,7 @@
+{
+  "guid": "78d21649-73b5-4fbc-a58f-885016b442eb",
+  "occurred_at": "2025-10-20T12:04Z",
+  "change_type": "Feature",
+  "summary": "Added automatic Ollama-generated AI tags to knowledge base articles with admin previews and public badges",
+  "content_hash": "a46014aa610774228a90cd6d39ca32f6e8a41726449100e7d6b5bacad1788819"
+}

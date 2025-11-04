@@ -1,0 +1,7 @@
+{
+  "guid": "ccd86155-4b2e-4037-83f4-6b9b0e9bce2c",
+  "occurred_at": "2025-10-09T12:18Z",
+  "change_type": "Fix",
+  "summary": "Accepted camelCase membership payload fields so API updates persist when saving company membership roles",
+  "content_hash": "3744adbae5ae811988e3a454df23cc535e7fe01acb9c1437474ad34339a2e911"
+}

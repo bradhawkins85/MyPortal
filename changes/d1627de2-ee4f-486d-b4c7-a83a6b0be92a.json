@@ -1,0 +1,7 @@
+{
+  "guid": "d1627de2-ee4f-486d-b4c7-a83a6b0be92a",
+  "occurred_at": "2025-10-20T09:05Z",
+  "change_type": "Fix",
+  "summary": "Treated integration module enable submissions as truthy when checkboxes send numeric values so toggles persist",
+  "content_hash": "e2b0fcc92ecb957f3b81923917178c0d32aa4de42f4ce195af4e3e6a113599d5"
+}

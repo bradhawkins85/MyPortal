@@ -1,7 +1,7 @@
 {
   "guid": "bc362f3f-ec09-4f62-9af7-275a049c26a2",
-  "occurred_at": "2025-10-30T13:45:01Z",
+  "occurred_at": "2025-10-30T13:45Z",
   "change_type": "Fix",
   "summary": "Normalised API key usage counts to avoid Decimal serialization errors in admin modal.",
-  "content_hash": "230b36044979d2f1a6d80ef2d5d193cac139775cbe0e525787ed0255f7441c44"
+  "content_hash": "31ce6c5c254496734808e2a4f468b96c2583f9a14321ca866d88105595124bf0"
 }

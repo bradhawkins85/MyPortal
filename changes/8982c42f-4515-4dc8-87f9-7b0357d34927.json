@@ -1,0 +1,7 @@
+{
+  "guid": "8982c42f-4515-4dc8-87f9-7b0357d34927",
+  "occurred_at": "2025-10-10T12:45Z",
+  "change_type": "Fix",
+  "summary": "Corrected scheduler monitoring migration defaults and enforced UTC MySQL sessions to restore startup",
+  "content_hash": "947691279d4affdc85c1b6d52480189cb549f59667ff5c2a3384fe54c5f598f6"
+}

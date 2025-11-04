@@ -1,0 +1,7 @@
+{
+  "guid": "a941e2b1-1474-4761-adbf-3b9fdb0eb0b6",
+  "occurred_at": "2025-12-13T09:30Z",
+  "change_type": "Fix",
+  "summary": "Ensured webhook events capture their identifiers during Syncro API logging so monitor entries persist with delivery outcomes",
+  "content_hash": "281a4686604ebe3fe988770a84ad2e6de0a2f104b599a1183ef5af0ae0124e52"
+}

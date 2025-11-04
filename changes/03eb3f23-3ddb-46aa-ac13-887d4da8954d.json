@@ -1,0 +1,7 @@
+{
+  "guid": "03eb3f23-3ddb-46aa-ac13-887d4da8954d",
+  "occurred_at": "2025-10-08T13:22Z",
+  "change_type": "Fix",
+  "summary": "Restricted Swagger UI and OpenAPI schema to authenticated sessions to keep API documentation private",
+  "content_hash": "7dab40f194db8bac8cacfc75bd4621addfca90c4942f00294f7a772a79c929ba"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "7ae8c8a7-b095-4cea-a5ea-e87993135f7c",
+  "occurred_at": "2025-10-11T11:45Z",
+  "change_type": "Fix",
+  "summary": "Synced stock feed images into the portal and replaced zero pricing with RRP during product updates",
+  "content_hash": "e6eb98fac0525842667835fdc0d1dcfe71c9f51eacbc052eff1832ca08502bc3"
+}

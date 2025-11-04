@@ -1,7 +1,7 @@
 {
   "guid": "f673081a-7ab0-4e7f-93a7-31de47443e9c",
-  "occurred_at": "2025-10-29T08:42:38Z",
+  "occurred_at": "2025-10-29T08:42Z",
   "change_type": "Feature",
   "summary": "Add configurable JSON filters to IMAP mailboxes and document example queries.",
-  "content_hash": "009e207ee043df60e8c5ee44f54e30841f188f6f4ca17c77617ee58468c12bce"
+  "content_hash": "a553fece9cbc0cfd77292efec511ee2a4c29aefdcbe4f1d24957f7fff4ec22e8"
 }

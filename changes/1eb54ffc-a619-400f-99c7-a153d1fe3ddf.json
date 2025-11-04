@@ -1,0 +1,7 @@
+{
+  "guid": "1eb54ffc-a619-400f-99c7-a153d1fe3ddf",
+  "occurred_at": "2025-10-22T09:55Z",
+  "change_type": "Fix",
+  "summary": "Forced web UI system updates to run the restart helper even when the repository is already up to date",
+  "content_hash": "3702b108909b6be5958607101c2c290e48ad79afc5af29ad53a17159edc0e294"
+}

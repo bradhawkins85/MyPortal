@@ -1,6 +1,6 @@
 {
   "guid": "d5bfeab0-1ada-47da-98bb-85dfae40a05a",
-  "occurred_at": "2025-11-01T06:54:00Z",
+  "occurred_at": "2025-11-01T06:54Z",
   "change_type": "Fix",
   "summary": "Added Issue Tracker permission toggles to company membership and staff assignment tools.",
   "content_hash": "4c719bd4aa474b7677c14f807063778acff401acf6683a75b1fdfc73ab572183"

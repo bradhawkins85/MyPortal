@@ -1,7 +1,7 @@
 {
   "guid": "d0f89eaf-d5b5-4003-bd2d-a0e71f742153",
-  "occurred_at": "2025-11-04T12:53:00Z",
+  "occurred_at": "2025-11-04T12:53Z",
   "change_type": "Feature",
   "summary": "Add webhook monitoring to Xero sync operations",
-  "content_hash": ""
+  "content_hash": "fbb15a94ee06eb79cc80a006fda026f3e6da08e804eb0b21092056b7c1aec964"
 }

@@ -1,0 +1,7 @@
+{
+  "guid": "4d86d8cb-5fcb-4869-87f8-77c926e93f33",
+  "occurred_at": "2025-09-17T07:54Z",
+  "change_type": "Feature",
+  "summary": "Added OpnForm deployment guidance, nginx proxy config, and super admin builder link",
+  "content_hash": "ce7ae366c0fde96318b4e63f987abab885ca4ba65e205943e5b04845817c07a2"
+}
