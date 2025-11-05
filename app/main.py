@@ -3588,7 +3588,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
 @app.get("/xero/connect")
 async def xero_connect(request: Request):
     """Initiate Xero OAuth2 authorization flow."""
-    session_data = await session_manager.get_session(request)
+    session_data = await session_manager.load_session(request)
     if not session_data:
         return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
     
