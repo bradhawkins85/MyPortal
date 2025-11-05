@@ -2637,6 +2637,60 @@
     if (companySelect.value) {
       updateRequesterOptions(companySelect.value);
     }
+  function bindCompanyDeleteButtons() {
+    document.querySelectorAll('[data-company-delete]').forEach((button) => {
+      button.addEventListener('click', async (event) => {
+        const companyId = button.dataset.companyId;
+        const companyName = button.dataset.companyName || 'this company';
+        
+        if (!companyId) {
+          return;
+        }
+
+        if (!confirm(`Delete ${companyName}? This action cannot be undone.`)) {
+          return;
+        }
+
+        try {
+          await requestJson(`/api/companies/${companyId}`, {
+            method: 'DELETE',
+          });
+          window.location.href = `/admin/companies?success=${encodeURIComponent('Company deleted.')}`;
+        } catch (error) {
+          console.error('Failed to delete company:', error);
+          const message = error instanceof Error ? error.message : 'Failed to delete company. Please try again.';
+          alert(message);
+        }
+      });
+    });
+  }
+
+  function bindOrderDeleteButtons() {
+    document.querySelectorAll('[data-order-delete]').forEach((button) => {
+      button.addEventListener('click', async (event) => {
+        const orderNumber = button.dataset.orderNumber;
+        const companyId = button.dataset.companyId;
+        
+        if (!orderNumber || !companyId) {
+          return;
+        }
+
+        if (!confirm(`Delete order ${orderNumber}? This action cannot be undone.`)) {
+          return;
+        }
+
+        try {
+          await requestJson(`/api/orders/${orderNumber}?companyId=${companyId}`, {
+            method: 'DELETE',
+          });
+          window.location.reload();
+        } catch (error) {
+          console.error('Failed to delete order:', error);
+          const message = error instanceof Error ? error.message : 'Failed to delete order. Please try again.';
+          alert(message);
+        }
+      });
+    });
   }
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -2661,6 +2715,8 @@
     bindTicketStatusManager();
     bindLabourTypeManager();
     bindTicketRequesterField();
+    bindCompanyDeleteButtons();
+    bindOrderDeleteButtons();
     bindModal({ modalId: 'add-company-modal', triggerSelector: '[data-add-company-modal-open]' });
     bindModal({ modalId: 'create-ticket-modal', triggerSelector: '[data-create-ticket-modal-open]' });
     bindModal({ modalId: 'create-api-key-modal', triggerSelector: '[data-create-api-key-modal-open]' });
