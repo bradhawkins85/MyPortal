@@ -17,7 +17,7 @@
       <header class="management__header">
         <div>
           <h1 class="management__title">Integration modules</h1>
-          <p class="management__subtitle">Synchronise credentials and delivery endpoints for Syncro, Ollama, SMTP, TacticalRMM, ntfy, Uptime Kuma, and ChatGPT.</p>
+          <p class="management__subtitle">Synchronise credentials and delivery endpoints for Syncro, Ollama, SMTP, TacticalRMM, ntfy, Uptime Kuma, ChatGPT, and SMS Gateway.</p>
         </div>
       </header>
 
@@ -319,6 +319,24 @@
                     Available placeholders include {ticket_id}, {ticket_subject}, {ticket_status}, {labour_name}, {labour_code},
                     {labour_minutes}, {labour_hours}, and {labour_suffix}.
                   </p>
+                </div>
+              {% elif module.slug == 'sms-gateway' %}
+                <div class="form-field">
+                  <label class="form-label" for="sms-gateway-url">Gateway URL</label>
+                  <input id="sms-gateway-url" name="settings.gateway_url" class="form-input" value="{{ settings.gateway_url or '' }}" placeholder="https://sms.example.com/api/send" />
+                  <p class="form-help">Enter the HTTP POST endpoint for your SMS gateway.</p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="sms-gateway-auth">Authorization header</label>
+                  <input
+                    id="sms-gateway-auth"
+                    name="settings.authorization"
+                    class="form-input"
+                    type="password"
+                    autocomplete="off"
+                    placeholder="Enter authorization header value"
+                  />
+                  <p class="form-help">Authorization header value (e.g., "Bearer token123"). Leave blank to keep the existing value.</p>
                 </div>
               {% else %}
                 {% for key, value in settings.items() %}
