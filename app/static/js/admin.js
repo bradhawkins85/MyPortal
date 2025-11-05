@@ -2591,11 +2591,13 @@
     const tacticalInput = document.getElementById('edit-company-tactical');
     const xeroInput = document.getElementById('edit-company-xero');
 
+    const spinnerHtml = '<span class="button__icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false" class="spin-animation"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></span>';
+
     if (tacticalButton && tacticalInput) {
       tacticalButton.addEventListener('click', async () => {
         const originalText = tacticalButton.innerHTML;
         tacticalButton.disabled = true;
-        tacticalButton.innerHTML = '<span class="button__icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false" class="spin-animation"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></span>';
+        tacticalButton.innerHTML = spinnerHtml;
         
         try {
           const result = await requestJson(`/api/companies/${companyId}/lookup-tactical-id`, {
@@ -2624,7 +2626,7 @@
       xeroButton.addEventListener('click', async () => {
         const originalText = xeroButton.innerHTML;
         xeroButton.disabled = true;
-        xeroButton.innerHTML = '<span class="button__icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false" class="spin-animation"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></span>';
+        xeroButton.innerHTML = spinnerHtml;
         
         try {
           const result = await requestJson(`/api/companies/${companyId}/lookup-xero-id`, {
@@ -2636,7 +2638,7 @@
             xeroInput.classList.add('form-input--success');
             setTimeout(() => xeroInput.classList.remove('form-input--success'), 2000);
           } else {
-            alert('Xero contact ID not found. Xero contact lookup is not yet implemented.');
+            alert('Xero contact ID lookup is not yet implemented. Please enter the ID manually.');
           }
         } catch (error) {
           console.error('Failed to lookup Xero contact ID:', error);
