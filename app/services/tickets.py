@@ -373,6 +373,10 @@ def _build_user_snapshot(user: Mapping[str, Any] | None) -> Mapping[str, Any] | 
 async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
     enriched: TicketRecord = dict(ticket)
 
+    # Add 'number' alias for 'ticket_number' to support {{ticket.number}} template variable
+    if "ticket_number" in enriched and "number" not in enriched:
+        enriched["number"] = enriched["ticket_number"]
+
     company_value = enriched.get("company") if isinstance(enriched.get("company"), Mapping) else None
     company_id = enriched.get("company_id")
     if not isinstance(company_value, Mapping) and isinstance(company_id, int):
