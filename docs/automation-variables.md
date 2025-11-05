@@ -10,6 +10,7 @@ lookups.
 Use dotted paths in automation filters to reference specific ticket fields. Key
 paths now available include:
 
+- `ticket.number` / `ticket.ticket_number` - Ticket number (e.g., "TKT-123")
 - `ticket.requester.email` / `ticket.requester.display_name`
 - `ticket.assigned_user.email` / `ticket.assigned_user.display_name`
 - `ticket.company.name`
@@ -50,6 +51,7 @@ emails or webhook requests). Newly added tokens include:
 
 | Token | Description |
 | --- | --- |
+| `{{ TICKET_NUMBER }}` | Ticket number (e.g., "TKT-123"). Also available as `{{ TICKET_TICKET_NUMBER }}`. |
 | `{{ TICKET_REQUESTER_EMAIL }}` | Requester email address. |
 | `{{ TICKET_REQUESTER_DISPLAY_NAME }}` | Requester display name derived from their profile. |
 | `{{ TICKET_ASSIGNED_USER_EMAIL }}` | Assigned technician email address. |
