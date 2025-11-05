@@ -1523,24 +1523,26 @@ async def _invoke_sms_gateway(
     gateway_url = str(settings.get("gateway_url") or "").strip()
     if not gateway_url:
         raise ValueError("SMS Gateway URL is not configured")
-    
+
     authorization = str(settings.get("authorization") or "").strip()
     if not authorization:
         raise ValueError("SMS Gateway authorization is not configured")
-    
+
     # Extract message and phone numbers from payload
+    # Accepts both "phoneNumbers" (camelCase) and "phone_numbers" (snake_case)
+    # for flexibility, but always outputs "phoneNumbers" in the request body
     message = str(payload.get("message") or "")
     phone_numbers = payload.get("phoneNumbers") or payload.get("phone_numbers") or []
-    
+
     if not isinstance(phone_numbers, list):
         phone_numbers = [str(phone_numbers)]
-    
+
     # Build the request body
     request_body = {
         "message": message,
         "phoneNumbers": phone_numbers,
     }
-    
+
     # Set up headers
     headers = {
         "Content-Type": "application/json",
