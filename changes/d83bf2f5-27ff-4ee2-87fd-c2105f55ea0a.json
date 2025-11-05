@@ -1,0 +1,7 @@
+{
+  "guid": "d83bf2f5-27ff-4ee2-87fd-c2105f55ea0a",
+  "occurred_at": "2025-10-21T20:45Z",
+  "change_type": "Fix",
+  "summary": "Converted automation module context data to JSON-safe timestamps so the ticket automation admin page renders without template errors",
+  "content_hash": "7b6162e9b4446239f7cc811d389f082b44668e8420679301d17c32f1c0ab11e6"
+}

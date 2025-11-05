@@ -1,0 +1,7 @@
+{
+  "guid": "f74a7d56-cadc-4b77-ad6c-9ff4aba1b2cd",
+  "occurred_at": "2025-10-09T11:21Z",
+  "change_type": "Fix",
+  "summary": "Restored scheduled task modals by eagerly binding UI handlers and reading CSRF tokens from meta fallback",
+  "content_hash": "aa4b09eb38c6ea2f1fd2bbc77f20c594e48091e520fa63259235acafa750dee5"
+}

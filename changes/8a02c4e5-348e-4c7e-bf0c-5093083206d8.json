@@ -1,0 +1,7 @@
+{
+  "guid": "8a02c4e5-348e-4c7e-bf0c-5093083206d8",
+  "occurred_at": "2025-10-20T21:30Z",
+  "change_type": "Fix",
+  "summary": "Guarded startup migrations with MySQL advisory locks so concurrent workers stop raising duplicate index errors",
+  "content_hash": "2a758da6959db20018c335ae3f195c085c1cfccf0f92601e20cd7382248e3a81"
+}

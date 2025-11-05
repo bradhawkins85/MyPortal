@@ -1,0 +1,7 @@
+{
+  "guid": "f1b78878-c6b8-4b6f-b904-0aec750c3e97",
+  "occurred_at": "2025-10-23T01:20Z",
+  "change_type": "Feature",
+  "summary": "Added super admin deletion controls for scheduled and event automations with confirmation prompts and audit logging",
+  "content_hash": "9e633cce50b2e1514d7b77427c7dcce7d4d72644796eec252ff819ae59cca454"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "c56fa1e5-3e40-494a-8cfa-7f66e84a9526",
+  "occurred_at": "2025-10-20T07:53Z",
+  "change_type": "Feature",
+  "summary": "Replaced the integration module enable checkbox with a themed toggle switch for clearer status control",
+  "content_hash": "41bee200283fd9be8d973152405b52086f76ee832b42db0bbda363bd0de37908"
+}

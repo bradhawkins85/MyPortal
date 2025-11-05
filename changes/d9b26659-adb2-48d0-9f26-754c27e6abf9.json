@@ -1,0 +1,7 @@
+{
+  "guid": "d9b26659-adb2-48d0-9f26-754c27e6abf9",
+  "occurred_at": "2025-10-21T12:17Z",
+  "change_type": "Fix",
+  "summary": "Triggered ticket-created automations with event filter support and event repository helpers so workflows fire on new tickets",
+  "content_hash": "8db58068c7e685e8eb087dee51ef702027bc32980a71f3789205d1c2ccc66385"
+}
