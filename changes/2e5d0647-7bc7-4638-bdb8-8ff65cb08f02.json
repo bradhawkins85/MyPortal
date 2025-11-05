@@ -1,0 +1,7 @@
+{
+  "guid": "2e5d0647-7bc7-4638-bdb8-8ff65cb08f02",
+  "occurred_at": "2025-12-20T10:30Z",
+  "change_type": "Feature",
+  "summary": "Added super-admin ticket deletion control on the admin ticket detail page with secure backend handling and confirmation prompts",
+  "content_hash": "45d17f354f4c807600b5518d1bcfd94cb9ef88cf05d3fb77115196eb2bb3b4d6"
+}

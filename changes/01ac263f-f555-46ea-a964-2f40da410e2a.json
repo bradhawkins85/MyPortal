@@ -1,0 +1,7 @@
+{
+  "guid": "01ac263f-f555-46ea-a964-2f40da410e2a",
+  "occurred_at": "2025-10-10T04:45Z",
+  "change_type": "Fix",
+  "summary": "Routed staff API under /api to restore the staff management UI rendering on the Python portal",
+  "content_hash": "4f00c52704a702523899ae4a85acd7d6e42de3411999a65d32aeb1d75ab086f7"
+}

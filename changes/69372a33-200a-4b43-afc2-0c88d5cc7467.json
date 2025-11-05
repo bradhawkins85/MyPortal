@@ -1,0 +1,7 @@
+{
+  "guid": "69372a33-200a-4b43-afc2-0c88d5cc7467",
+  "occurred_at": "2025-10-08T13:06Z",
+  "change_type": "Fix",
+  "summary": "Added stock feed product update handler so scheduled Update Products runs refresh inventory data",
+  "content_hash": "9c335f9115a293e3d80470ca8e8ba1c8829e9e9036d02b6af61ee43e88b0cc3c"
+}

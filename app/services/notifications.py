@@ -94,6 +94,11 @@ async def emit_notification(
     }
     if user_id is not None:
         context["user_id"] = user_id
+    
+    # Expose ticket data directly in context if present in metadata
+    # This allows {{ticket.number}} to work in notification templates
+    if isinstance(metadata_payload, Mapping) and "ticket" in metadata_payload:
+        context["ticket"] = metadata_payload["ticket"]
 
     template = str(event_setting.get("message_template") or "{{ message }}")
     rendered_message: str | None = None

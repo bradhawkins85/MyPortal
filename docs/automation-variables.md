@@ -1,9 +1,17 @@
-# Ticket automation variables
+# Ticket automation and notification variables
 
-Ticket-based automations receive a `ticket` object inside the event context as
-well as pre-rendered template tokens. The context now includes relationship
-metadata so filters and actions can target the correct recipients without manual
-lookups.
+Ticket-based automations and notifications can access a `ticket` object inside 
+the event context as well as pre-rendered template tokens. The context includes 
+relationship metadata so filters and actions can target the correct recipients 
+without manual lookups.
+
+## Usage in automations vs notifications
+
+- **Automations**: Receive the full ticket context directly in the `tickets.created`, 
+  `tickets.updated`, and other ticket events
+- **Notifications**: When `emit_notification` is called with ticket data in the 
+  `metadata` parameter, the ticket is automatically exposed at the top level of 
+  the context for template rendering and module actions
 
 ## Filterable context fields
 

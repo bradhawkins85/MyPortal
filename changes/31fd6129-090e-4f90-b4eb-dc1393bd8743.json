@@ -1,0 +1,7 @@
+{
+  "guid": "31fd6129-090e-4f90-b4eb-dc1393bd8743",
+  "occurred_at": "2025-11-28T09:30Z",
+  "change_type": "Feature",
+  "summary": "Added helpdesk.technician role permission with constrained ticket workspace access for non-super-admin technicians",
+  "content_hash": "72dd2e247c98e5e302e9ebfa64806d22906f7fcf237b45b3426217f8e3343e80"
+}
