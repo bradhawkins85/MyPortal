@@ -1,0 +1,7 @@
+{
+  "guid": "bd090331-e844-499d-9d97-acf11666b588",
+  "occurred_at": "2025-10-08T12:41Z",
+  "change_type": "Fix",
+  "summary": "Updated API documentation links to open in a new tab with secure attributes for consistent navigation",
+  "content_hash": "c47776c15220258c20952b17e3ee41fb640c11d800a04e6c2205c92751967e39"
+}

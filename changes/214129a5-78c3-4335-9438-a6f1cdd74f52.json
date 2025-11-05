@@ -1,0 +1,7 @@
+{
+  "guid": "214129a5-78c3-4335-9438-a6f1cdd74f52",
+  "occurred_at": "2025-10-08T02:12Z",
+  "change_type": "Fix",
+  "summary": "Ensured login authenticator prompts expose and submit TOTP codes reliably while focusing invalid entries for quick retries",
+  "content_hash": "2e83957934c8a82e9030dbfd09418a7936b5303d0efc0204e0a2bf7869482e1f"
+}
