@@ -13,15 +13,19 @@ router = APIRouter(prefix="/api/staff", tags=["Staff"])
 
 @router.get("", response_model=list[StaffResponse])
 async def list_staff(
+    company_id: int | None = Query(default=None, alias="companyId"),
     account_action: str | None = Query(default=None, alias="accountAction"),
     email: str | None = None,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    __: dict = Depends(get_current_user),
 ):
-    records = await staff_repo.list_all_staff(
-        account_action=account_action,
-        email=email,
-    )
+    if company_id is not None:
+        records = await staff_repo.list_staff(company_id, enabled=True)
+    else:
+        records = await staff_repo.list_all_staff(
+            account_action=account_action,
+            email=email,
+        )
     return [StaffResponse.model_validate(record) for record in records]
 
 
