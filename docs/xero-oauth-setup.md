@@ -22,7 +22,7 @@ The Xero integration uses OAuth2 authorization code flow for secure authenticati
 
 1. Go to https://developer.xero.com/
 2. Sign in with your Xero account
-3. Navigate to "My Apps" and click "New App"
+3. Navigate to "My Apps" and click "Create an app"
 4. Fill in the application details:
    - **App name**: MyPortal (or your preferred name)
    - **Integration type**: Web app
@@ -99,6 +99,8 @@ The integration requests the following OAuth2 scopes:
 - `accounting.transactions` - For invoice management
 - `accounting.contacts` - For company/contact synchronization
 
+Note: These are the exact scope names used in the code. Xero may show these with different formatting in their UI.
+
 ## Security
 
 - All tokens (access and refresh) are encrypted before storage
@@ -123,8 +125,12 @@ The integration requests the following OAuth2 scopes:
 - Ensure `SESSION_SECRET` is properly configured in your `.env`
 
 ### "No matching tenant found" error
-- Set `XERO_COMPANY_NAME` to match your organization name in Xero exactly
-- Or manually set `XERO_TENANT_ID` after checking your Xero connections
+- Set `XERO_COMPANY_NAME` to match your organization name in Xero exactly (case-insensitive)
+- Alternatively, find your tenant ID manually:
+  1. After completing OAuth authorization, the tenant ID is logged
+  2. Or visit the Xero Developer Portal → My Apps → Your App → OAuth 2.0 Credentials
+  3. Set `XERO_TENANT_ID` directly in your `.env` file
+- You can also check available tenants by viewing the MyPortal logs after authorization
 
 ## API Reference
 
