@@ -1,0 +1,7 @@
+{
+  "guid": "5b3f798f-5d66-49a0-8a9d-e70d01f32b3b",
+  "occurred_at": "2025-10-09T05:52Z",
+  "change_type": "Fix",
+  "summary": "Normalised string timestamp values from the database to UTC datetimes so the admin API key dashboard loads",
+  "content_hash": "741995a5faa7456fa41c7b60609c67179412922dedfefde6381a69e2a5b54d72"
+}

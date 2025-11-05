@@ -1,0 +1,7 @@
+{
+  "guid": "3335fe7f-9a2d-42e2-bc9c-abed78e5bc32",
+  "occurred_at": "2025-10-09T11:56Z",
+  "change_type": "Fix",
+  "summary": "Routed Update Stock Feed scheduler command to product feed synchronisation handler to resolve missing handler errors",
+  "content_hash": "fe04644ca6a5c59518c89447992b13e5c6c582153417e95bb4646bdd729ee5f2"
+}

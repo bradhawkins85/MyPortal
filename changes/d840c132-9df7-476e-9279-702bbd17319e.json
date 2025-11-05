@@ -1,0 +1,7 @@
+{
+  "guid": "d840c132-9df7-476e-9279-702bbd17319e",
+  "occurred_at": "2025-12-08T09:45Z",
+  "change_type": "Feature",
+  "summary": "Added Syncro ticket importer with admin UI, rate-limited Syncro API client, and documentation",
+  "content_hash": "29a93c79f7315676dc0a2862604026852043333e00b231d2ef1575fe36e6f4af"
+}

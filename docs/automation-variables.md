@@ -1,15 +1,24 @@
-# Ticket automation variables
+# Ticket automation and notification variables
 
-Ticket-based automations receive a `ticket` object inside the event context as
-well as pre-rendered template tokens. The context now includes relationship
-metadata so filters and actions can target the correct recipients without manual
-lookups.
+Ticket-based automations and notifications can access a `ticket` object inside 
+the event context as well as pre-rendered template tokens. The context includes 
+relationship metadata so filters and actions can target the correct recipients 
+without manual lookups.
+
+## Usage in automations vs notifications
+
+- **Automations**: Receive the full ticket context directly in the `tickets.created`, 
+  `tickets.updated`, and other ticket events
+- **Notifications**: When `emit_notification` is called with ticket data in the 
+  `metadata` parameter, the ticket is automatically exposed at the top level of 
+  the context for template rendering and module actions
 
 ## Filterable context fields
 
 Use dotted paths in automation filters to reference specific ticket fields. Key
 paths now available include:
 
+- `ticket.number` / `ticket.ticket_number` - Ticket number (e.g., "TKT-123")
 - `ticket.requester.email` / `ticket.requester.display_name`
 - `ticket.assigned_user.email` / `ticket.assigned_user.display_name`
 - `ticket.company.name`
@@ -50,6 +59,7 @@ emails or webhook requests). Newly added tokens include:
 
 | Token | Description |
 | --- | --- |
+| `{{ TICKET_NUMBER }}` | Ticket number (e.g., "TKT-123"). Also available as `{{ TICKET_TICKET_NUMBER }}`. |
 | `{{ TICKET_REQUESTER_EMAIL }}` | Requester email address. |
 | `{{ TICKET_REQUESTER_DISPLAY_NAME }}` | Requester display name derived from their profile. |
 | `{{ TICKET_ASSIGNED_USER_EMAIL }}` | Assigned technician email address. |

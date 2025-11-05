@@ -1,0 +1,7 @@
+{
+  "guid": "acdc08d4-b94c-48ff-9a08-c3e55cfb3f2c",
+  "occurred_at": "2025-10-09T13:09Z",
+  "change_type": "Fix",
+  "summary": "Namespaced the notifications API under /api so the dashboard renders HTML instead of returning JSON arrays",
+  "content_hash": "666ccac47fcdd13bf02eca51f6d68f582776e3fe3b387041c33c077ca77040b8"
+}

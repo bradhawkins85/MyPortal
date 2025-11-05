@@ -1,0 +1,7 @@
+{
+  "guid": "1368fff1-d8a8-4a90-87e3-d884c1d85220",
+  "occurred_at": "2025-10-22T04:08Z",
+  "change_type": "Feature",
+  "summary": "Expanded safe system variable exposure for automations and templates with runtime and environment tokens",
+  "content_hash": "5553319449b6fda1cdf27a051a51f338fa75632ac9721680a991b89cdbd6d0d0"
+}

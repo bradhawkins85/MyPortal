@@ -1,0 +1,7 @@
+{
+  "guid": "05215273-66d3-4599-b1a0-8f6cf2ce17d7",
+  "occurred_at": "2025-10-08T06:49Z",
+  "change_type": "Fix",
+  "summary": "Restored shop admin and catalogue views to load categories and products from the database with VIP pricing and company restrictions",
+  "content_hash": "ea5a4c61c57e1662dcd7eb077fb7c5e60888f6643e80ae77c01c48af0728cc26"
+}

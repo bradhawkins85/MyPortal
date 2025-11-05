@@ -1,0 +1,7 @@
+{
+  "guid": "48342409-faa9-4e14-8a1e-0f0890ef01c8",
+  "occurred_at": "2025-10-10T02:50Z",
+  "change_type": "Fix",
+  "summary": "Removed remaining Node.js references from documentation and configuration comments to reflect the Python-only stack",
+  "content_hash": "334b1b651eba067da13fdf180dde68ce5d65166b7c63bae0191089fc8c432604"
+}
