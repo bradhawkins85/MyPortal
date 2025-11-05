@@ -847,6 +847,13 @@ async def update_order(
     return await get_order_summary(order_number, company_id)
 
 
+async def delete_order(order_number: str, company_id: int) -> None:
+    await db.execute(
+        "DELETE FROM shop_orders WHERE order_number = %s AND company_id = %s",
+        (order_number, company_id),
+    )
+
+
 async def list_order_items(order_number: str, company_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """

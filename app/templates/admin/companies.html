@@ -96,6 +96,15 @@
                         <a class="button button--ghost" href="/admin/companies/{{ company.id }}/edit">
                           Edit
                         </a>
+                        <button 
+                          type="button" 
+                          class="button button--ghost button--danger" 
+                          data-company-delete
+                          data-company-id="{{ company.id }}"
+                          data-company-name="{{ company.name }}"
+                        >
+                          Delete
+                        </button>
                       </div>
                     </td>
                   </tr>
