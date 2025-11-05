@@ -1708,6 +1708,10 @@ async def _invoke_create_ticket(
     attempt_number = 1
     try:
         # Create the ticket using the tickets service
+        # Note: trigger_automations=False prevents recursive automation execution.
+        # Without this, if a "tickets.created" event automation is configured, it
+        # could trigger when this automation creates a ticket, potentially causing
+        # an infinite loop if that automation also creates tickets.
         ticket = await tickets_service.create_ticket(
             subject=subject,
             description=description,
@@ -1719,14 +1723,41 @@ async def _invoke_create_ticket(
             category=category,
             module_slug=module_slug,
             external_reference=external_reference,
-            trigger_automations=False,  # Avoid recursion
+            trigger_automations=False,
         )
-    except Exception as exc:  # pragma: no cover - defensive
+    except (ValueError, TypeError) as exc:
+        # Handle validation errors from ticket creation
+        logger.error(
+            "Ticket creation validation failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            subject=subject,
+        )
         updated_event = await _record_failure(
             event_id,
             attempt_number=attempt_number,
             status="error",
-            error_message=str(exc),
+            error_message=f"{type(exc).__name__}: {str(exc)}",
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"subject": subject},
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard for unexpected errors
+        # Catch any other unexpected errors (e.g., database, network issues)
+        logger.error(
+            "Unexpected error during ticket creation",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            subject=subject,
+        )
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=f"{type(exc).__name__}: {str(exc)}",
             response_status=None,
             response_body=None,
         )
