@@ -2604,7 +2604,7 @@
           // Add a disabled option to show why it's empty
           const emptyOption = document.createElement('option');
           emptyOption.value = '';
-          emptyOption.textContent = 'No staff found for this company';
+          emptyOption.textContent = 'No staff members found for this company';
           emptyOption.disabled = true;
           requesterSelect.appendChild(emptyOption);
           return;
