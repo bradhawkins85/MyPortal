@@ -371,7 +371,8 @@ def _default_xero_settings() -> dict[str, Any]:
     return {
         "client_id": _clean_env("XERO_CLIENT_ID"),
         "client_secret": _clean_env("XERO_CLIENT_SECRET"),
-        "refresh_token": _clean_env("XERO_REFRESH_TOKEN"),
+        # Note: refresh_token is obtained via OAuth2 code flow only (/xero/connect)
+        # and should not be set manually via environment variables
         "company_name": _clean_env("XERO_COMPANY_NAME"),
         "default_hourly_rate": _format_rate(_clean_env("XERO_DEFAULT_HOURLY_RATE")),
         "account_code": _clean_env("XERO_ACCOUNT_CODE") or "400",
