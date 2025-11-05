@@ -10371,6 +10371,7 @@ async def admin_create_ticket(request: Request):
     status_raw = str(form.get("status", "")).strip()
     company_raw = form.get("companyId")
     assigned_raw = form.get("assignedUserId")
+    requester_raw = form.get("requesterId")
     try:
         company_id = int(company_raw) if company_raw else None
     except (TypeError, ValueError):
@@ -10379,6 +10380,10 @@ async def admin_create_ticket(request: Request):
         assigned_user_id = int(assigned_raw) if assigned_raw else None
     except (TypeError, ValueError):
         assigned_user_id = None
+    try:
+        requester_id = int(requester_raw) if requester_raw else current_user.get("id")
+    except (TypeError, ValueError):
+        requester_id = current_user.get("id")
     if not subject:
         return await _render_tickets_dashboard(
             request,
@@ -10394,7 +10399,7 @@ async def admin_create_ticket(request: Request):
         created = await tickets_service.create_ticket(
             subject=subject,
             description=description,
-            requester_id=current_user.get("id"),
+            requester_id=requester_id,
             company_id=company_id,
             assigned_user_id=assigned_user_id,
             priority=priority,
