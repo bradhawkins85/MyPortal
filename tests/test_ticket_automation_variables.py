@@ -135,7 +135,6 @@ async def test_automation_context_includes_ticket_number():
         return []
     
     # Monkeypatch the repository calls
-    import sys
     original_get_company = getattr(company_repo, "get_company_by_id", None)
     original_get_user = getattr(user_repo, "get_user_by_id", None)
     original_list_watchers = getattr(tickets_repo, "list_watchers", None)
