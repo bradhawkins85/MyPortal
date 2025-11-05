@@ -214,7 +214,19 @@ class SchedulerService:
                     company_id = task.get("company_id")
                     if company_id:
                         result = await xero_service.sync_company(int(company_id))
-                        details = json.dumps(result, default=str) if result else None
+                        if result:
+                            details = json.dumps(result, default=str)
+                            result_status = str(
+                                result.get("status")
+                                or result.get("event_status")
+                                or ""
+                            ).strip().lower()
+                            if result_status in {"failed", "error"}:
+                                status = "failed"
+                            elif result_status == "skipped":
+                                status = "skipped"
+                        else:
+                            details = None
                     else:
                         status = "skipped"
                         details = "Company context required"
