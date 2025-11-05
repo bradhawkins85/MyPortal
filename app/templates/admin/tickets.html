@@ -381,11 +381,17 @@
         </div>
         <div class="form-field">
           <label class="form-label" for="modal-ticket-company">Company</label>
-          <select id="modal-ticket-company" name="companyId" class="form-input">
+          <select id="modal-ticket-company" name="companyId" class="form-input" data-ticket-company-select>
             <option value="">Not linked</option>
             {% for company in ticket_company_options %}
               <option value="{{ company.id }}">{{ company.name }}</option>
             {% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="modal-ticket-requester">Requester</label>
+          <select id="modal-ticket-requester" name="requesterId" class="form-input" data-ticket-requester-select>
+            <option value="">Not specified</option>
           </select>
         </div>
         <div class="form-field">
