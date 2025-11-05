@@ -4779,3 +4779,40 @@ button.header-title-menu__link {
     grid-template-columns: 1fr;
   }
 }
+
+/* Form field group for input + button layout */
+.form-field__group {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.form-field__group .form-input {
+  flex: 1;
+}
+
+.form-field__group .button {
+  flex-shrink: 0;
+  padding: var(--space-gap-tight) var(--space-gap-base);
+}
+
+/* Success state for form inputs */
+.form-input--success {
+  border-color: rgba(34, 197, 94, 0.8) !important;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25) !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Spin animation for loading state */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin-animation {
+  animation: spin 1s linear infinite;
+}

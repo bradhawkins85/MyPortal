@@ -214,3 +214,68 @@ async def delete_recurring_invoice_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recurring invoice item not found")
     await recurring_items_repo.delete_recurring_invoice_item(item_id)
     return None
+
+
+@router.post("/{company_id}/lookup-tactical-id")
+async def lookup_tactical_rmm_client_id(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Lookup Tactical RMM client ID for a company by searching the API."""
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    
+    company_name = company.get("name", "")
+    if not company_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company name is required")
+    
+    try:
+        tactical_id = await company_id_lookup._lookup_tactical_client_id(company_name)
+        if tactical_id:
+            # Update the company with the found ID
+            await company_repo.update_company(company_id, tacticalrmm_client_id=tactical_id)
+            return {"status": "found", "id": tactical_id}
+        else:
+            return {"status": "not_found", "id": None}
+    except company_id_lookup.tacticalrmm.TacticalRMMConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Tactical RMM not configured: {str(exc)}"
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error looking up Tactical RMM client ID: {str(exc)}"
+        )
+
+
+@router.post("/{company_id}/lookup-xero-id")
+async def lookup_xero_contact_id(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Lookup Xero contact ID for a company by searching the API."""
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    
+    company_name = company.get("name", "")
+    if not company_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company name is required")
+    
+    try:
+        xero_id = await company_id_lookup._lookup_xero_contact_id(company_name)
+        if xero_id:
+            # Update the company with the found ID
+            await company_repo.update_company(company_id, xero_id=xero_id)
+            return {"status": "found", "id": xero_id}
+        else:
+            return {"status": "not_found", "id": None}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error looking up Xero contact ID: {str(exc)}"
+        )
