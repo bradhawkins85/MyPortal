@@ -32,6 +32,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - Automation builder covering scheduled and event-driven workflows with Ollama, SMTP, TacticalRMM, and ntfy integrations
 - Ticket automation variables cover requester, assignment, company, watcher, and latest reply data for filters and templates; see [docs/automation-variables.md](docs/automation-variables.md)
 - Integration module catalogue to manage external credentials, run diagnostics, and ensure webhook retries remain observable
+- Xero integration using OAuth2 authorization code flow for secure invoice synchronization; see [docs/xero-oauth-setup.md](docs/xero-oauth-setup.md)
 - Uptime Kuma integration module to receive monitoring alerts over secure HTTP POST webhooks with shared-secret validation
 - ChatGPT MCP module providing secure ticket triage tools and automations to OpenAI ChatGPT via the Model Context Protocol
 - Syncro ticket importer with super admin UI controls, rate limiting, and REST API access for bulk migrations
