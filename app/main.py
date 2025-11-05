@@ -10384,6 +10384,26 @@ async def admin_create_ticket(request: Request):
         requester_id = int(requester_raw) if requester_raw else current_user.get("id")
     except (TypeError, ValueError):
         requester_id = current_user.get("id")
+    
+    # Validate that the requester belongs to the selected company if both are provided
+    if requester_id and company_id and requester_id != current_user.get("id"):
+        try:
+            staff_member = await staff_repo.get_staff_by_id(requester_id)
+            if not staff_member or staff_member.get("company_id") != company_id:
+                return await _render_tickets_dashboard(
+                    request,
+                    current_user,
+                    error_message="The selected requester does not belong to the selected company.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+        except Exception:
+            return await _render_tickets_dashboard(
+                request,
+                current_user,
+                error_message="Invalid requester selection.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+    
     if not subject:
         return await _render_tickets_dashboard(
             request,

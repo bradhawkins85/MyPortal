@@ -2601,6 +2601,12 @@
         
         if (!Array.isArray(staff) || staff.length === 0) {
           requesterSelect.disabled = true;
+          // Add a disabled option to show why it's empty
+          const emptyOption = document.createElement('option');
+          emptyOption.value = '';
+          emptyOption.textContent = 'No staff found for this company';
+          emptyOption.disabled = true;
+          requesterSelect.appendChild(emptyOption);
           return;
         }
 
@@ -2613,6 +2619,12 @@
       } catch (error) {
         console.error('Failed to load staff for company:', error);
         requesterSelect.disabled = true;
+        // Add a disabled option to show the error
+        const errorOption = document.createElement('option');
+        errorOption.value = '';
+        errorOption.textContent = 'Unable to load staff members';
+        errorOption.disabled = true;
+        requesterSelect.appendChild(errorOption);
       }
     }
 
