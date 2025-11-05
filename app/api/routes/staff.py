@@ -17,11 +17,38 @@ async def list_staff(
     account_action: str | None = Query(default=None, alias="accountAction"),
     email: str | None = None,
     _: None = Depends(require_database),
-    __: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
+    # If company_id is provided, only helpdesk technicians and super admins can access
     if company_id is not None:
+        is_super_admin = current_user.get("is_super_admin", False)
+        if not is_super_admin:
+            # Check if user has helpdesk permission
+            from app.repositories import company_memberships as membership_repo
+            user_id = current_user.get("id")
+            try:
+                user_id_int = int(user_id)
+                has_helpdesk = await membership_repo.user_has_permission(
+                    user_id_int, "helpdesk.technician"
+                )
+                if not has_helpdesk:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Insufficient permissions to list staff"
+                    )
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Insufficient permissions to list staff"
+                )
         records = await staff_repo.list_staff(company_id, enabled=True)
     else:
+        # Listing all staff requires super admin
+        if not current_user.get("is_super_admin", False):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions to list all staff"
+            )
         records = await staff_repo.list_all_staff(
             account_action=account_action,
             email=email,
