@@ -253,3 +253,94 @@ def test_update_order_applies_changes(monkeypatch, active_session):
     data = response.json()
     assert data["status"] == "processing"
     assert data["shippingStatus"] == "shipped"
+
+
+def test_delete_order_requires_super_admin(monkeypatch, active_session):
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+        "is_super_admin": False,
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.delete(
+                "/api/orders/ORD123456789012",
+                params={"companyId": 7},
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    # This should fail because require_super_admin dependency is not satisfied
+    # The endpoint uses require_super_admin, so a non-super-admin user should get 403
+    assert response.status_code in [403, 401]
+
+
+def test_delete_order_removes_order(monkeypatch, active_session):
+    async def fake_get_company(company_id):
+        return {"id": company_id}
+
+    async def fake_get_summary(order_number, company_id):
+        return _make_summary(order_number=order_number, company_id=company_id)
+
+    deleted_order = None
+
+    async def fake_delete_order(order_number, company_id):
+        nonlocal deleted_order
+        deleted_order = (order_number, company_id)
+
+    monkeypatch.setattr(company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(shop_repo, "get_order_summary", fake_get_summary)
+    monkeypatch.setattr(shop_repo, "delete_order", fake_delete_order)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.require_super_admin] = lambda: {
+        "id": active_session.user_id,
+        "email": "admin@example.com",
+        "is_super_admin": True,
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.delete(
+                "/api/orders/ORD123456789012",
+                params={"companyId": 7},
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 204
+    assert deleted_order == ("ORD123456789012", 7)
+
+
+def test_delete_order_returns_404_when_not_found(monkeypatch, active_session):
+    async def fake_get_company(company_id):
+        return {"id": company_id}
+
+    async def fake_get_summary(order_number, company_id):
+        return None
+
+    monkeypatch.setattr(company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(shop_repo, "get_order_summary", fake_get_summary)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.require_super_admin] = lambda: {
+        "id": active_session.user_id,
+        "email": "admin@example.com",
+        "is_super_admin": True,
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.delete(
+                "/api/orders/ORD999999999999",
+                params={"companyId": 7},
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
