@@ -121,6 +121,9 @@ When working with external APIs, use the documentation for these systems:
 
 - **SyncroRMM**: https://api-docs.syncromsp.com/
 - **TacticalRMM**: https://api.hawkinsitsolutions.com.au/api/schema/swagger-ui/
+- **Xero**: https://developer.xero.com/documentation/api/
+- **UptimeKuma**: https://github.com/louislam/uptime-kuma/wiki/API-Documentation
+- **Ntfy**: https://docs.ntfy.sh/subscribe/api/
 
 ### Webhook Management
 
