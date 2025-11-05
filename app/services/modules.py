@@ -1756,6 +1756,9 @@ async def _validate_xero(
         else:
             result["tenant_id_discovery"] = "failed"
 
+    if tenant_id:
+        result["tenant_id"] = str(tenant_id)
+
     return result
 
 
