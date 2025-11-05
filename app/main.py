@@ -12180,8 +12180,15 @@ async def admin_test_module(slug: str, request: Request):
             url=f"/admin/modules?error=" + quote(result.get("error") or "Module test failed."),
             status_code=status.HTTP_303_SEE_OTHER,
         )
+    success_message = "Module test succeeded."
+    if slug == "xero":
+        details = result.get("details")
+        if isinstance(details, Mapping):
+            tenant_id = details.get("discovered_tenant_id") or details.get("tenant_id")
+            if tenant_id:
+                success_message += f" Tenant ID: {tenant_id}"
     return RedirectResponse(
-        url=f"/admin/modules?success=" + quote("Module test succeeded."),
+        url=f"/admin/modules?success=" + quote(success_message),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
