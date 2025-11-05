@@ -2650,6 +2650,8 @@
         }
       });
     }
+  }
+
   function bindTicketRequesterField() {
     const companySelect = document.querySelector('[data-ticket-company-select]');
     const requesterSelect = document.querySelector('[data-ticket-requester-select]');
@@ -2712,6 +2714,8 @@
     if (companySelect.value) {
       updateRequesterOptions(companySelect.value);
     }
+  }
+
   function bindCompanyDeleteButtons() {
     document.querySelectorAll('[data-company-delete]').forEach((button) => {
       button.addEventListener('click', async (event) => {
