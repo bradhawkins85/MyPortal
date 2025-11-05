@@ -192,6 +192,21 @@ def _opnform_base_url() -> str | None:
     return "/myforms/"
 
 
+def _build_xero_redirect_uri() -> str:
+    """Build Xero OAuth redirect URI using PORTAL_URL setting.
+    
+    This ensures the redirect_uri matches what's configured in the Xero OAuth app,
+    preventing 'Invalid redirect_uri' errors when the app is behind a proxy or
+    using a different hostname than the incoming request.
+    """
+    if settings.portal_url:
+        base = str(settings.portal_url).rstrip("/")
+        return f"{base}/xero/callback"
+    # Fallback to relative path if PORTAL_URL not set
+    # This maintains backward compatibility but may cause issues
+    return "/xero/callback"
+
+
 def _serialise_for_json(value: Any) -> Any:
     """Convert mappings and sequences to JSON-safe primitives for templates."""
 
@@ -3614,8 +3629,8 @@ async def xero_connect(request: Request):
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
     
-    # Build authorization URL
-    redirect_uri = str(request.url_for("xero_callback"))
+    # Build authorization URL using PORTAL_URL to ensure it matches Xero app settings
+    redirect_uri = _build_xero_redirect_uri()
     params = {
         "response_type": "code",
         "client_id": client_id,
@@ -3625,7 +3640,7 @@ async def xero_connect(request: Request):
     }
     authorize_url = f"https://login.xero.com/identity/connect/authorize?{urlencode(params)}"
     
-    log_info("Initiating Xero OAuth flow", user_id=session_data.user_id)
+    log_info("Initiating Xero OAuth flow", user_id=session_data.user_id, redirect_uri=redirect_uri)
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -3678,7 +3693,7 @@ async def xero_callback(
     
     # Exchange authorization code for tokens
     token_url = "https://identity.xero.com/connect/token"
-    redirect_uri = str(request.url_for("xero_callback"))
+    redirect_uri = _build_xero_redirect_uri()
     data = {
         "grant_type": "authorization_code",
         "code": code,
