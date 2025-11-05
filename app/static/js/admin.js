@@ -2575,6 +2575,81 @@
     }
   }
 
+  function bindCompanyIdLookupButtons() {
+    const companyEditPage = document.querySelector('[data-company-id]');
+    if (!companyEditPage) {
+      return;
+    }
+
+    const companyId = companyEditPage.dataset.companyId;
+    if (!companyId) {
+      return;
+    }
+
+    const tacticalButton = document.querySelector('[data-lookup-tactical-id]');
+    const xeroButton = document.querySelector('[data-lookup-xero-id]');
+    const tacticalInput = document.getElementById('edit-company-tactical');
+    const xeroInput = document.getElementById('edit-company-xero');
+
+    const spinnerHtml = '<span class="button__icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false" class="spin-animation"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></span>';
+
+    if (tacticalButton && tacticalInput) {
+      tacticalButton.addEventListener('click', async () => {
+        const originalText = tacticalButton.innerHTML;
+        tacticalButton.disabled = true;
+        tacticalButton.innerHTML = spinnerHtml;
+        
+        try {
+          const result = await requestJson(`/api/companies/${companyId}/lookup-tactical-id`, {
+            method: 'POST',
+          });
+          
+          if (result.status === 'found' && result.id) {
+            tacticalInput.value = result.id;
+            tacticalInput.classList.add('form-input--success');
+            setTimeout(() => tacticalInput.classList.remove('form-input--success'), 2000);
+          } else {
+            alert('Tactical RMM client ID not found. Please ensure the company name matches exactly in Tactical RMM.');
+          }
+        } catch (error) {
+          console.error('Failed to lookup Tactical RMM client ID:', error);
+          const message = error instanceof Error ? error.message : 'Failed to lookup ID. Please try again.';
+          alert(message);
+        } finally {
+          tacticalButton.disabled = false;
+          tacticalButton.innerHTML = originalText;
+        }
+      });
+    }
+
+    if (xeroButton && xeroInput) {
+      xeroButton.addEventListener('click', async () => {
+        const originalText = xeroButton.innerHTML;
+        xeroButton.disabled = true;
+        xeroButton.innerHTML = spinnerHtml;
+        
+        try {
+          const result = await requestJson(`/api/companies/${companyId}/lookup-xero-id`, {
+            method: 'POST',
+          });
+          
+          if (result.status === 'found' && result.id) {
+            xeroInput.value = result.id;
+            xeroInput.classList.add('form-input--success');
+            setTimeout(() => xeroInput.classList.remove('form-input--success'), 2000);
+          } else {
+            alert('Xero contact ID lookup is not yet implemented. Please enter the ID manually.');
+          }
+        } catch (error) {
+          console.error('Failed to lookup Xero contact ID:', error);
+          const message = error instanceof Error ? error.message : 'Failed to lookup ID. Please try again.';
+          alert(message);
+        } finally {
+          xeroButton.disabled = false;
+          xeroButton.innerHTML = originalText;
+        }
+      });
+    }
   function bindTicketRequesterField() {
     const companySelect = document.querySelector('[data-ticket-company-select]');
     const requesterSelect = document.querySelector('[data-ticket-requester-select]');
@@ -2709,6 +2784,7 @@
     bindCompanyAssignForm();
     bindCompanyAssignmentControls();
     bindRecurringInvoiceItems();
+    bindCompanyIdLookupButtons();
     bindApiKeyEditModal();
     bindApiKeyCopyButtons();
     bindConfirmationButtons();
