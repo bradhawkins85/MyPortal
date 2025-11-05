@@ -1,12 +1,19 @@
 """Test for /xero/connect endpoint to verify session loading."""
+from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qs, urlparse
+
 import pytest
 from fastapi.testclient import TestClient
-from urllib.parse import parse_qs, urlparse
+from pydantic import AnyHttpUrl
 
 import app.main as main_module
 from app.core.database import db
 from app.main import app, scheduler_service
 from app.security.session import SessionData
+
+# Test constants
+TEST_PORTAL_URL = "https://myportal.example.com"
+TEST_CLIENT_ID = "test-client-id"
 
 
 @pytest.fixture(autouse=True)
@@ -67,11 +74,8 @@ def test_xero_connect_calls_load_session(monkeypatch):
 
 def test_xero_connect_uses_portal_url_for_redirect_uri(monkeypatch):
     """Test that xero_connect uses PORTAL_URL for redirect_uri instead of request URL."""
-    from pydantic import AnyHttpUrl
-    from datetime import datetime, timezone, timedelta
-    
     # Mock PORTAL_URL setting
-    monkeypatch.setattr(main_module.settings, "portal_url", AnyHttpUrl("https://myportal.example.com"))
+    monkeypatch.setattr(main_module.settings, "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
     
     # Mock session with super admin user
     async def fake_load_session(request, *, allow_inactive: bool = False):
@@ -93,7 +97,7 @@ def test_xero_connect_uses_portal_url_for_redirect_uri(monkeypatch):
     
     # Mock modules service
     async def fake_get_xero_credentials():
-        return {"client_id": "test-client-id", "client_secret": "test-secret"}
+        return {"client_id": TEST_CLIENT_ID, "client_secret": "test-secret"}
     
     monkeypatch.setattr(main_module.session_manager, "load_session", fake_load_session)
     monkeypatch.setattr(main_module.user_repo, "get_user_by_id", fake_get_user_by_id)
@@ -112,7 +116,7 @@ def test_xero_connect_uses_portal_url_for_redirect_uri(monkeypatch):
     # Verify the redirect_uri uses PORTAL_URL
     assert "redirect_uri" in query_params
     redirect_uri = query_params["redirect_uri"][0]
-    assert redirect_uri == "https://myportal.example.com/xero/callback"
+    assert redirect_uri == f"{TEST_PORTAL_URL}/xero/callback"
     assert "client_id" in query_params
-    assert query_params["client_id"][0] == "test-client-id"
+    assert query_params["client_id"][0] == TEST_CLIENT_ID
 
