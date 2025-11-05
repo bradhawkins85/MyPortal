@@ -108,3 +108,20 @@ async def update_order(
     items = await shop_repo.list_order_items(order_number, resolved_company_id)
     summary["items"] = items
     return OrderDetailResponse.model_validate(summary)
+
+
+@router.delete("/{order_number}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_order(
+    order_number: str,
+    company_id: int | None = Query(default=None, alias="companyId"),
+    company_id_alt: int | None = Query(default=None, alias="company_id"),
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    resolved_company_id = await _resolve_company_id(company_id, company_id_alt)
+    await _ensure_company(resolved_company_id)
+    summary = await shop_repo.get_order_summary(order_number, resolved_company_id)
+    if not summary:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    await shop_repo.delete_order(order_number, resolved_company_id)
+    return None
