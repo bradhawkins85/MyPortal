@@ -113,6 +113,7 @@
             <th scope="col" data-sort="string" data-mobile-priority="supporting">Notes</th>
             {% if current_user and current_user.is_super_admin %}
               <th scope="col" data-sort="string" data-mobile-priority="supporting">Consignment</th>
+              <th scope="col" class="table__actions">Actions</th>
             {% endif %}
           </tr>
         </thead>
@@ -144,11 +145,22 @@
               <td data-label="Notes">{{ order.notes or '—' }}</td>
               {% if current_user and current_user.is_super_admin %}
                 <td data-label="Consignment">{{ order.consignment_id or '—' }}</td>
+                <td class="table__actions">
+                  <button 
+                    type="button" 
+                    class="button button--ghost button--danger" 
+                    data-order-delete
+                    data-order-number="{{ order.order_number }}"
+                    data-company-id="{{ order.company_id }}"
+                  >
+                    Delete
+                  </button>
+                </td>
               {% endif %}
             </tr>
           {% else %}
             <tr>
-              <td colspan="{% if current_user and current_user.is_super_admin %}8{% else %}7{% endif %}" class="table__empty">No orders available.</td>
+              <td colspan="{% if current_user and current_user.is_super_admin %}9{% else %}7{% endif %}" class="table__empty">No orders available.</td>
             </tr>
           {% endfor %}
         </tbody>
