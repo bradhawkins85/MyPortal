@@ -2575,6 +2575,68 @@
     }
   }
 
+  function bindTicketRequesterField() {
+    const companySelect = document.querySelector('[data-ticket-company-select]');
+    const requesterSelect = document.querySelector('[data-ticket-requester-select]');
+    
+    if (!companySelect || !requesterSelect) {
+      return;
+    }
+
+    async function updateRequesterOptions(companyId) {
+      // Clear existing options except the first "Not specified" option
+      while (requesterSelect.options.length > 1) {
+        requesterSelect.remove(1);
+      }
+
+      if (!companyId) {
+        requesterSelect.disabled = true;
+        return;
+      }
+
+      requesterSelect.disabled = false;
+
+      try {
+        const staff = await requestJson(`/api/staff?companyId=${encodeURIComponent(companyId)}`);
+        
+        if (!Array.isArray(staff) || staff.length === 0) {
+          requesterSelect.disabled = true;
+          // Add a disabled option to show why it's empty
+          const emptyOption = document.createElement('option');
+          emptyOption.value = '';
+          emptyOption.textContent = 'No staff members found for this company';
+          emptyOption.disabled = true;
+          requesterSelect.appendChild(emptyOption);
+          return;
+        }
+
+        staff.forEach((member) => {
+          const option = document.createElement('option');
+          option.value = member.id;
+          option.textContent = `${member.first_name} ${member.last_name} (${member.email})`;
+          requesterSelect.appendChild(option);
+        });
+      } catch (error) {
+        console.error('Failed to load staff for company:', error);
+        requesterSelect.disabled = true;
+        // Add a disabled option to show the error
+        const errorOption = document.createElement('option');
+        errorOption.value = '';
+        errorOption.textContent = 'Unable to load staff members';
+        errorOption.disabled = true;
+        requesterSelect.appendChild(errorOption);
+      }
+    }
+
+    companySelect.addEventListener('change', () => {
+      const companyId = companySelect.value;
+      updateRequesterOptions(companyId);
+    });
+
+    // Initialize on load if company is already selected
+    if (companySelect.value) {
+      updateRequesterOptions(companySelect.value);
+    }
   function bindCompanyDeleteButtons() {
     document.querySelectorAll('[data-company-delete]').forEach((button) => {
       button.addEventListener('click', async (event) => {
@@ -2652,6 +2714,7 @@
     bindConfirmationButtons();
     bindTicketStatusManager();
     bindLabourTypeManager();
+    bindTicketRequesterField();
     bindCompanyDeleteButtons();
     bindOrderDeleteButtons();
     bindModal({ modalId: 'add-company-modal', triggerSelector: '[data-add-company-modal-open]' });
