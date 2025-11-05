@@ -50,23 +50,59 @@
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-company-tactical">Tactical RMM client ID</label>
-            <input
-              id="edit-company-tactical"
-              name="tacticalClientId"
-              class="form-input"
-              value="{{ form_data.tacticalrmm_client_id }}"
-              maxlength="255"
-            />
+            <div class="form-field__group">
+              <input
+                id="edit-company-tactical"
+                name="tacticalClientId"
+                class="form-input"
+                value="{{ form_data.tacticalrmm_client_id }}"
+                maxlength="255"
+              />
+              <button
+                type="button"
+                class="button button--ghost"
+                data-lookup-tactical-id
+                title="Lookup Tactical RMM client ID"
+                aria-label="Lookup Tactical RMM client ID from API"
+              >
+                <span class="button__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
+                    <path d="M20 12h2a10 10 0 0 0-10-10v2a8 8 0 0 1 8 8z"/>
+                    <path d="M12 20v2a10 10 0 0 0 10-10h-2a8 8 0 0 1-8 8z"/>
+                    <path d="M4 12H2a10 10 0 0 0 10 10v-2a8 8 0 0 1-8-8z"/>
+                  </svg>
+                </span>
+              </button>
+            </div>
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-company-xero">Xero ID</label>
-            <input
-              id="edit-company-xero"
-              name="xeroId"
-              class="form-input"
-              value="{{ form_data.xero_id }}"
-              maxlength="255"
-            />
+            <div class="form-field__group">
+              <input
+                id="edit-company-xero"
+                name="xeroId"
+                class="form-input"
+                value="{{ form_data.xero_id }}"
+                maxlength="255"
+              />
+              <button
+                type="button"
+                class="button button--ghost"
+                data-lookup-xero-id
+                title="Lookup Xero contact ID"
+                aria-label="Lookup Xero contact ID from API"
+              >
+                <span class="button__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
+                    <path d="M20 12h2a10 10 0 0 0-10-10v2a8 8 0 0 1 8 8z"/>
+                    <path d="M12 20v2a10 10 0 0 0 10-10h-2a8 8 0 0 1-8 8z"/>
+                    <path d="M4 12H2a10 10 0 0 0 10 10v-2a8 8 0 0 1-8-8z"/>
+                  </svg>
+                </span>
+              </button>
+            </div>
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-company-email-domains">Email domains</label>
