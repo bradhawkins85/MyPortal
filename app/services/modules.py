@@ -471,6 +471,16 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "icon": "💼",
         "settings": _default_xero_settings(),
     },
+    {
+        "slug": "sms-gateway",
+        "name": "SMS Gateway",
+        "description": "Send SMS messages via HTTP POST to a custom gateway endpoint.",
+        "icon": "📱",
+        "settings": {
+            "gateway_url": "",
+            "authorization": "",
+        },
+    },
 ]
 
 
@@ -674,6 +684,23 @@ def _coerce_settings(
                 or "Ticket {ticket_id}: {ticket_subject}{labour_suffix}",
             }
         )
+    elif slug == "sms-gateway":
+        overrides = payload or {}
+        authorization_override = overrides.get("authorization")
+        if authorization_override is None:
+            authorization = str(merged.get("authorization") or "").strip()
+        else:
+            candidate = str(authorization_override or "").strip()
+            if not candidate and existing_settings and existing_settings.get("authorization"):
+                authorization = str(existing_settings.get("authorization") or "").strip()
+            else:
+                authorization = candidate
+        merged.update(
+            {
+                "gateway_url": str(merged.get("gateway_url", "")).strip(),
+                "authorization": authorization,
+            }
+        )
     return merged
 
 
@@ -686,6 +713,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "tacticalrmm": ("api_key",),
         "ntfy": ("auth_token",),
         "xero": ("client_secret", "refresh_token", "access_token"),
+        "sms-gateway": ("authorization",),
     }
     targets = fields_to_redact.get(slug)
     if not targets:
@@ -795,6 +823,7 @@ async def trigger_module(
         "uptimekuma": _validate_uptimekuma,
         "chatgpt-mcp": _invoke_chatgpt_mcp,
         "xero": _validate_xero,
+        "sms-gateway": _invoke_sms_gateway,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -1482,6 +1511,104 @@ async def _invoke_ntfy(
     return _build_event_result(
         updated_event,
         extra={"topic": topic, "priority": priority, "title": title, "url": url},
+    )
+
+
+async def _invoke_sms_gateway(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    gateway_url = str(settings.get("gateway_url") or "").strip()
+    if not gateway_url:
+        raise ValueError("SMS Gateway URL is not configured")
+    
+    authorization = str(settings.get("authorization") or "").strip()
+    if not authorization:
+        raise ValueError("SMS Gateway authorization is not configured")
+    
+    # Extract message and phone numbers from payload
+    message = str(payload.get("message") or "")
+    phone_numbers = payload.get("phoneNumbers") or payload.get("phone_numbers") or []
+    
+    if not isinstance(phone_numbers, list):
+        phone_numbers = [str(phone_numbers)]
+    
+    # Build the request body
+    request_body = {
+        "message": message,
+        "phoneNumbers": phone_numbers,
+    }
+    
+    # Set up headers
+    headers = {
+        "Content-Type": "application/json",
+        "authorization": authorization,
+    }
+    
+    # Create webhook event for monitoring
+    event = await webhook_monitor.create_manual_event(
+        name="module.sms-gateway.send",
+        target_url=gateway_url,
+        payload=request_body,
+        headers=headers,
+        max_attempts=1,
+        backoff_seconds=60,
+    )
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for SMS Gateway request")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
+    
+    attempt_number = 1
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            response = await client.post(
+                gateway_url,
+                json=request_body,
+                headers=headers,
+            )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        response_body = exc.response.text if exc.response is not None else None
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="failed",
+            error_message=f"HTTP {exc.response.status_code}" if exc.response else str(exc),
+            response_status=exc.response.status_code if exc.response else None,
+            response_body=response_body,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"gateway_url": gateway_url, "phone_count": len(phone_numbers)},
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=str(exc),
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"gateway_url": gateway_url, "phone_count": len(phone_numbers)},
+        )
+    
+    response_body = response.text
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=response.status_code,
+        response_body=response_body,
+    )
+    return _build_event_result(
+        updated_event,
+        extra={"gateway_url": gateway_url, "phone_count": len(phone_numbers)},
     )
 
 
