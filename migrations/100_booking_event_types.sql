@@ -1,0 +1,26 @@
+-- Create event types table for booking system
+CREATE TABLE IF NOT EXISTS booking_event_types (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    slug VARCHAR(255) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    duration_minutes INT NOT NULL DEFAULT 30,
+    buffer_before_minutes INT NOT NULL DEFAULT 0,
+    buffer_after_minutes INT NOT NULL DEFAULT 0,
+    minimum_notice_hours INT NOT NULL DEFAULT 0,
+    max_days_in_future INT NOT NULL DEFAULT 60,
+    location_type VARCHAR(50),
+    location_value TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    requires_confirmation BOOLEAN NOT NULL DEFAULT FALSE,
+    allow_guests BOOLEAN NOT NULL DEFAULT TRUE,
+    max_guests INT NOT NULL DEFAULT 0,
+    metadata JSON,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_user_slug (user_id, slug),
+    INDEX idx_active (is_active),
+    INDEX idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
