@@ -1839,47 +1839,102 @@ async def _invoke_create_task(
     *,
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
-    """Create a new task for a ticket from automation payload.
+    """Create one or more tasks for a ticket from automation payload.
 
-    Accepts a JSON payload with task details. Required fields: ticket_id, task_name.
-    Optional fields: sort_order.
+    Accepts either a single task definition (ticket_id, task_name, optional
+    sort_order) or a ``tasks`` list describing multiple tasks. When a list is
+    provided each entry can override ``ticket_id`` and ``sort_order`` while the
+    top-level values act as defaults. ``context.ticket_id`` is also respected as
+    a fallback for convenience when triggering from ticket automations.
     """
     from app.repositories import ticket_tasks as ticket_tasks_repo
-    
-    # Extract task details from payload
-    ticket_id = payload.get("ticket_id")
-    if ticket_id is None:
-        # Try to get from context
-        context = payload.get("context") or {}
-        ticket_id = context.get("ticket_id")
-    
-    if ticket_id is None:
-        raise ValueError("ticket_id is required")
-    
-    try:
-        ticket_id = int(ticket_id)
-    except (TypeError, ValueError):
-        raise ValueError("ticket_id must be a valid integer")
-    
-    task_name = str(payload.get("task_name", "")).strip()
-    if not task_name:
-        raise ValueError("task_name is required")
-    
-    sort_order = payload.get("sort_order", 0)
-    try:
-        sort_order = int(sort_order)
-    except (TypeError, ValueError):
-        sort_order = 0
-    
+
+    raw_context = payload.get("context")
+    context = raw_context if isinstance(raw_context, Mapping) else {}
+
+    def _require_ticket_id(value: Any) -> int:
+        if value is None:
+            raise ValueError("ticket_id is required")
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            raise ValueError("ticket_id must be a valid integer")
+
+    def _coerce_sort_order(value: Any, fallback: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    default_ticket_id = payload.get("ticket_id")
+    if default_ticket_id is None:
+        default_ticket_id = context.get("ticket_id")
+
+    default_sort_raw = payload.get("sort_order", 0)
+    default_sort_order = _coerce_sort_order(default_sort_raw, 0)
+
+    raw_tasks = payload.get("tasks")
+    tasks_payload = raw_tasks if isinstance(raw_tasks, list) else None
+    tasks_to_create: list[dict[str, Any]] = []
+
+    if tasks_payload:
+        for index, task_entry in enumerate(tasks_payload, start=1):
+            if not isinstance(task_entry, Mapping):
+                raise ValueError(f"tasks[{index}] must be an object")
+            entry_ticket_id = task_entry.get("ticket_id", default_ticket_id)
+            ticket_id_value = _require_ticket_id(entry_ticket_id)
+            task_name_value = str(task_entry.get("task_name", "")).strip()
+            if not task_name_value:
+                raise ValueError(f"task_name is required for task {index}")
+            sort_fallback = default_sort_order + (index - 1) * 10
+            sort_value = task_entry.get("sort_order", sort_fallback)
+            sort_order_value = _coerce_sort_order(sort_value, sort_fallback)
+            tasks_to_create.append(
+                {
+                    "ticket_id": ticket_id_value,
+                    "task_name": task_name_value,
+                    "sort_order": sort_order_value,
+                }
+            )
+    else:
+        ticket_id_value = _require_ticket_id(default_ticket_id)
+        task_name_value = str(payload.get("task_name", "")).strip()
+        if not task_name_value:
+            raise ValueError("task_name is required")
+        sort_order_value = _coerce_sort_order(payload.get("sort_order", 0), 0)
+        tasks_to_create.append(
+            {
+                "ticket_id": ticket_id_value,
+                "task_name": task_name_value,
+                "sort_order": sort_order_value,
+            }
+        )
+
+    ticket_ids = {task["ticket_id"] for task in tasks_to_create}
+    primary_ticket_id = next(iter(ticket_ids))
+    target_url = (
+        f"internal://tickets/{primary_ticket_id}/tasks"
+        if len(ticket_ids) == 1
+        else "internal://tickets/tasks"
+    )
+    payload_summary = {
+        "tasks": [
+            {
+                "ticket_id": task["ticket_id"],
+                "task_name": task["task_name"],
+                "sort_order": task["sort_order"],
+            }
+            for task in tasks_to_create
+        ]
+    }
+    if len(tasks_to_create) == 1:
+        payload_summary.update(tasks_to_create[0])
+
     # Create webhook event for tracking
     event = await webhook_monitor.create_manual_event(
         name="module.create-task.create",
-        target_url=f"internal://tickets/{ticket_id}/tasks",
-        payload={
-            "ticket_id": ticket_id,
-            "task_name": task_name,
-            "sort_order": sort_order,
-        },
+        target_url=target_url,
+        payload=payload_summary,
         headers={"X-Module": "create-task"},
         max_attempts=1,
         backoff_seconds=60,
@@ -1889,23 +1944,26 @@ async def _invoke_create_task(
         raise RuntimeError("Failed to create webhook event for task creation")
     if event_future and not event_future.done():
         event_future.set_result(event_id)
-    
+
     attempt_number = 1
+    created_tasks: list[dict[str, Any]] = []
     try:
-        # Create the task using the tasks repository
-        task = await ticket_tasks_repo.create_task(
-            ticket_id=ticket_id,
-            task_name=task_name,
-            sort_order=sort_order,
-        )
+        for entry in tasks_to_create:
+            task_id_value = entry["ticket_id"]
+            task_name_value = entry["task_name"]
+            task = await ticket_tasks_repo.create_task(
+                ticket_id=task_id_value,
+                task_name=task_name_value,
+                sort_order=entry["sort_order"],
+            )
+            created_tasks.append(task)
     except (ValueError, TypeError) as exc:
-        # Handle validation errors
         logger.error(
             "Task creation validation failed",
             error=str(exc),
             error_type=type(exc).__name__,
-            ticket_id=ticket_id,
-            task_name=task_name,
+            ticket_id=entry.get("ticket_id") if "entry" in locals() else None,
+            task_name=entry.get("task_name") if "entry" in locals() else None,
         )
         updated_event = await _record_failure(
             event_id,
@@ -1915,17 +1973,18 @@ async def _invoke_create_task(
             response_status=None,
             response_body=None,
         )
-        return _build_event_result(
-            updated_event,
-            extra={"ticket_id": ticket_id, "task_name": task_name},
-        )
+        extra = {
+            "ticket_id": entry.get("ticket_id") if "entry" in locals() else None,
+            "task_name": entry.get("task_name") if "entry" in locals() else None,
+        }
+        return _build_event_result(updated_event, extra=extra)
     except Exception as exc:  # pragma: no cover - defensive guard
         logger.error(
             "Unexpected error during task creation",
             error=str(exc),
             error_type=type(exc).__name__,
-            ticket_id=ticket_id,
-            task_name=task_name,
+            ticket_id=entry.get("ticket_id") if "entry" in locals() else None,
+            task_name=entry.get("task_name") if "entry" in locals() else None,
         )
         updated_event = await _record_failure(
             event_id,
@@ -1935,30 +1994,53 @@ async def _invoke_create_task(
             response_status=None,
             response_body=None,
         )
-        return _build_event_result(
-            updated_event,
-            extra={"ticket_id": ticket_id, "task_name": task_name},
-        )
-    
+        extra = {
+            "ticket_id": entry.get("ticket_id") if "entry" in locals() else None,
+            "task_name": entry.get("task_name") if "entry" in locals() else None,
+        }
+        return _build_event_result(updated_event, extra=extra)
+
     # Build success response
-    response_body = json.dumps({
-        "task_id": task.get("id"),
-        "ticket_id": task.get("ticket_id"),
-        "task_name": task.get("task_name"),
-    })
+    if len(created_tasks) == 1:
+        task = created_tasks[0]
+        response_body = json.dumps(
+            {
+                "task_id": task.get("id"),
+                "ticket_id": task.get("ticket_id"),
+                "task_name": task.get("task_name"),
+            }
+        )
+        extra: dict[str, Any] = {
+            "task_id": task.get("id"),
+            "ticket_id": task.get("ticket_id"),
+        }
+    else:
+        response_body = json.dumps(
+            {
+                "tasks": [
+                    {
+                        "task_id": task.get("id"),
+                        "ticket_id": task.get("ticket_id"),
+                        "task_name": task.get("task_name"),
+                        "sort_order": task.get("sort_order"),
+                    }
+                    for task in created_tasks
+                ],
+                "count": len(created_tasks),
+            }
+        )
+        extra = {
+            "task_ids": [task.get("id") for task in created_tasks if task.get("id") is not None],
+            "ticket_ids": sorted({task.get("ticket_id") for task in created_tasks if task.get("ticket_id") is not None}),
+        }
+
     updated_event = await _record_success(
         event_id,
         attempt_number=attempt_number,
         response_status=200,
         response_body=response_body,
     )
-    return _build_event_result(
-        updated_event,
-        extra={
-            "task_id": task.get("id"),
-            "ticket_id": task.get("ticket_id"),
-        },
-    )
+    return _build_event_result(updated_event, extra=extra)
 
 
 async def _invoke_chatgpt_mcp(

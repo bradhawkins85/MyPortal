@@ -229,6 +229,61 @@
         }),
       },
     ],
+    'create-ticket': [
+      {
+        label: 'Create escalation ticket for current requester',
+        value: toJsonTemplate({
+          subject: 'Escalation for ticket {{ ticket.ticket_number }}',
+          description:
+            'Follow up on {{ ticket.ticket_number }}. Include investigation details and notify the duty engineer.',
+          priority: 'high',
+          status: 'open',
+          requester_id: '{{ ticket.requester_id }}',
+          company_id: '{{ ticket.company_id }}',
+        }),
+      },
+      {
+        label: 'Create proactive maintenance ticket',
+        value: toJsonTemplate({
+          subject: 'Proactive maintenance follow-up',
+          description: 'Log a preventative maintenance visit from this automation trigger.',
+          priority: 'normal',
+          status: 'open',
+          assigned_user_id: '{{ staff.id }}',
+          module_slug: 'automations',
+        }),
+      },
+    ],
+    'create-task': [
+      {
+        label: 'Add follow-up task to current ticket',
+        value: toJsonTemplate({
+          context: {
+            ticket_id: '{{ ticket.id }}',
+          },
+          task_name: 'Call customer to confirm resolution',
+          sort_order: 10,
+        }),
+      },
+      {
+        label: 'Add multiple checklist tasks',
+        value: toJsonTemplate({
+          context: {
+            ticket_id: '{{ ticket.id }}',
+          },
+          tasks: [
+            {
+              task_name: 'Review diagnostic logs',
+              sort_order: 10,
+            },
+            {
+              task_name: 'Document remediation steps',
+              sort_order: 20,
+            },
+          ],
+        }),
+      },
+    ],
   };
 
   function getCookie(name) {
