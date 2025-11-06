@@ -46,8 +46,6 @@ def test_extract_agent_details_handles_beta_agent_payload():
 
 def test_fetch_clients_handles_list_response(monkeypatch):
     """Test that fetch_clients correctly parses a list response from /beta/v1/client."""
-    import pytest
-    
     # Mock the _call_endpoint function to return a list of clients
     async def fake_call_endpoint(endpoint: str):
         return [
@@ -90,8 +88,6 @@ def test_fetch_clients_handles_list_response(monkeypatch):
 
 def test_fetch_clients_handles_paginated_response(monkeypatch):
     """Test that fetch_clients correctly parses a paginated response with 'results' key."""
-    import pytest
-    
     # Mock the _call_endpoint function to return a paginated response
     async def fake_call_endpoint(endpoint: str):
         return {
@@ -135,8 +131,6 @@ def test_fetch_clients_handles_paginated_response(monkeypatch):
 
 def test_fetch_clients_handles_single_client_response(monkeypatch):
     """Test that fetch_clients correctly parses a single client object response."""
-    import pytest
-    
     # Mock the _call_endpoint function to return a single client
     async def fake_call_endpoint(endpoint: str):
         return {
@@ -168,8 +162,6 @@ def test_fetch_clients_handles_single_client_response(monkeypatch):
 
 def test_fetch_clients_handles_api_error(monkeypatch):
     """Test that fetch_clients returns empty list on API error."""
-    import pytest
-    
     # Mock the _call_endpoint function to raise an error
     async def fake_call_endpoint(endpoint: str):
         raise tacticalrmm.TacticalRMMAPIError("API request failed")

@@ -320,8 +320,7 @@ async def fetch_clients() -> list[Mapping[str, Any]]:
     Returns:
         List of client dictionaries with 'id' and 'name' fields
     """
-    settings = await _load_settings()
-    base_url = settings["base_url"]
+    await _load_settings()
     endpoint = "beta/v1/client"
     
     collected: list[Mapping[str, Any]] = []
