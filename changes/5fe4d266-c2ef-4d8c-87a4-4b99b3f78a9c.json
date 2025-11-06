@@ -1,0 +1,7 @@
+{
+  "guid": "5fe4d266-c2ef-4d8c-87a4-4b99b3f78a9c",
+  "occurred_at": "2025-10-08T06:07Z",
+  "change_type": "Feature",
+  "summary": "Rebuilt shop, forms, staff, and commerce admin dashboards with Jinja templates, responsive layout components, and supporting scripts",
+  "content_hash": "0e18d55d9ca321bc8c4a0e125a9a0bc7687f4dcfff3c31d7eded146576cd2861"
+}

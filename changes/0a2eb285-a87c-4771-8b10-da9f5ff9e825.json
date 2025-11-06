@@ -1,0 +1,7 @@
+{
+  "guid": "0a2eb285-a87c-4771-8b10-da9f5ff9e825",
+  "occurred_at": "2025-10-21T11:06Z",
+  "change_type": "Fix",
+  "summary": "Moved ticket AI tags into the Ticket details metadata panel above the module label for clearer context",
+  "content_hash": "31b4234db7d31e7ea4e856206019e42c574ee30c4cd77626a4bffdb0e1ddc1bd"
+}

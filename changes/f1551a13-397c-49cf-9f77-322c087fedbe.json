@@ -1,0 +1,7 @@
+{
+  "guid": "f1551a13-397c-49cf-9f77-322c087fedbe",
+  "occurred_at": "2025-12-08T10:30Z",
+  "change_type": "Fix",
+  "summary": "Hardened SQL migration runner to respect quoted semicolons so HTML seed data applies without syntax errors",
+  "content_hash": "3487cad24d5af1593a057b8309b0aee6ba5c950198960a59856e451bdaf89176"
+}

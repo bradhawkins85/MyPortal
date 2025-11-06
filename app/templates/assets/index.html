@@ -2,6 +2,20 @@
 
 {% block title %}Assets{% endblock %}
 
+{% block header_title %}
+  <div style="display: flex; align-items: center; width: 100%; justify-content: space-between;">
+    <span>Assets</span>
+    {% if is_super_admin %}
+    <a href="/assets/settings" class="button button--ghost button--small" style="margin-left: auto;">
+      <svg viewBox="0 0 24 24" width="16" height="16" style="margin-right: 4px;" aria-hidden="true">
+        <path fill="currentColor" d="M12 1a3 3 0 0 1 3 3v.18a3 3 0 0 1 2.12 2.12H17a3 3 0 0 1 3 3v.18a3 3 0 0 1 0 5.03V15a3 3 0 0 1-3 3h-.18a3 3 0 0 1-2.12 2.12V21a3 3 0 0 1-6 0v-.88A3 3 0 0 1 6.58 18H6a3 3 0 0 1-3-3v-.67a3 3 0 0 1 0-4.66V9a3 3 0 0 1 3-3h.18A3 3 0 0 1 8.3 3.18V3a3 3 0 0 1 3-3z"/>
+      </svg>
+      Settings
+    </a>
+    {% endif %}
+  </div>
+{% endblock %}
+
 {% block header_actions %}
   <div class="header-actions">
     <label class="visually-hidden" for="asset-search">Search assets</label>
@@ -148,6 +162,9 @@
               {% endfor %}
               {% if is_super_admin %}
                 <td class="table__actions" data-mobile-priority="essential">
+                  <button type="button" class="button button--ghost button--small" data-edit-asset="{{ asset.id }}">
+                    Edit
+                  </button>
                   <button type="button" class="button button--danger button--small asset-delete-button" data-asset-id="{{ asset.id }}">
                     Delete
                   </button>
@@ -188,6 +205,39 @@
     {% endif %}
   </section>
 </div>
+
+<!-- Edit Asset Custom Fields Modal -->
+<div class="modal" id="asset-fields-modal" style="display: none;">
+  <div class="modal__overlay" data-asset-modal-close></div>
+  <div class="modal__content">
+    <header class="modal__header">
+      <h2 class="modal__title">Edit Custom Fields</h2>
+      <button type="button" class="modal__close" data-asset-modal-close aria-label="Close">
+        <svg viewBox="0 0 24 24" width="24" height="24">
+          <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+        </svg>
+      </button>
+    </header>
+    <form id="asset-fields-form" data-asset-fields-form>
+      <div class="modal__body">
+        <p class="modal__subtitle" data-asset-name></p>
+        <div id="custom-fields-container" data-custom-fields-container>
+          <!-- Custom fields will be inserted here -->
+        </div>
+        <div id="no-fields-message" style="display: none; padding: 20px; text-align: center; color: #666;">
+          No custom fields have been configured yet. Go to <a href="/assets/settings">Settings</a> to create custom fields.
+        </div>
+      </div>
+      
+      <footer class="modal__footer">
+        <button type="button" class="button button--ghost" data-asset-modal-close>Cancel</button>
+        <button type="submit" class="button button--primary">Save Changes</button>
+      </footer>
+    </form>
+  </div>
+</div>
+
+{% include "partials/csrf.html" %}
 {% endblock %}
 
 {% block scripts %}

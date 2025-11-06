@@ -1,0 +1,7 @@
+{
+  "guid": "2c607d0b-f77d-4007-a905-afa675e3230e",
+  "occurred_at": "2025-10-20T21:10Z",
+  "change_type": "Fix",
+  "summary": "Serialised knowledge base admin context timestamps before embedding JSON so the admin console loads without datetime errors",
+  "content_hash": "bacb3068e7569d64fb1a8333fe5c5c19aec71309f3cda45aaa3c6ca00f9a61c4"
+}

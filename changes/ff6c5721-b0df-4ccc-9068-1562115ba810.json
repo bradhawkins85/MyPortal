@@ -1,0 +1,7 @@
+{
+  "guid": "ff6c5721-b0df-4ccc-9068-1562115ba810",
+  "occurred_at": "2025-10-08T06:41Z",
+  "change_type": "Fix",
+  "summary": "Restored shop catalogue display for products whose names match their SKUs so existing items appear",
+  "content_hash": "600aa42b93c177ec5ec4a46c8a5d8556cc8c5d08e28bd699dc676144b5148cda"
+}

@@ -170,12 +170,190 @@
     });
   }
 
+  function initialiseCustomFieldsEditing() {
+    const modal = document.getElementById('asset-fields-modal');
+    const form = document.querySelector('[data-asset-fields-form]');
+    const assetNameElement = document.querySelector('[data-asset-name]');
+    const fieldsContainer = document.querySelector('[data-custom-fields-container]');
+    const noFieldsMessage = document.getElementById('no-fields-message');
+    let currentAssetId = null;
+    let currentAssetName = '';
+    let fieldDefinitions = [];
+
+    async function loadFieldDefinitions() {
+      try {
+        const response = await fetch('/asset-custom-fields/definitions');
+        if (!response.ok) throw new Error('Failed to load field definitions');
+        fieldDefinitions = await response.json();
+        return fieldDefinitions;
+      } catch (error) {
+        console.error('Error loading field definitions:', error);
+        return [];
+      }
+    }
+
+    async function loadAssetFieldValues(assetId) {
+      try {
+        const response = await fetch(`/assets/${assetId}/custom-fields`);
+        if (!response.ok) throw new Error('Failed to load asset field values');
+        return await response.json();
+      } catch (error) {
+        console.error('Error loading asset field values:', error);
+        return [];
+      }
+    }
+
+    function renderFieldInputs(definitions, values) {
+      if (!definitions || definitions.length === 0) {
+        fieldsContainer.innerHTML = '';
+        fieldsContainer.style.display = 'none';
+        noFieldsMessage.style.display = 'block';
+        return;
+      }
+
+      fieldsContainer.style.display = 'block';
+      noFieldsMessage.style.display = 'none';
+
+      const valueMap = {};
+      values.forEach(v => {
+        valueMap[v.field_definition_id] = v.value;
+      });
+
+      fieldsContainer.innerHTML = definitions.map(def => {
+        const value = valueMap[def.id] || '';
+        const inputId = `field-${def.id}`;
+
+        let inputHtml = '';
+        switch (def.field_type) {
+          case 'text':
+          case 'url':
+            inputHtml = `<input type="${def.field_type === 'url' ? 'url' : 'text'}" id="${inputId}" name="field_${def.id}" class="input" value="${escapeHtml(value)}">`;
+            break;
+          case 'image':
+            inputHtml = `<input type="url" id="${inputId}" name="field_${def.id}" class="input" placeholder="Image URL" value="${escapeHtml(value)}">`;
+            break;
+          case 'checkbox':
+            const checked = value === true || value === 'true' || value === '1' ? 'checked' : '';
+            inputHtml = `<input type="checkbox" id="${inputId}" name="field_${def.id}" ${checked}>`;
+            break;
+          case 'date':
+            inputHtml = `<input type="date" id="${inputId}" name="field_${def.id}" class="input" value="${value || ''}">`;
+            break;
+        }
+
+        return `
+          <div class="form-group">
+            <label for="${inputId}" class="form-label">${escapeHtml(def.name)}</label>
+            ${inputHtml}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    async function openModal(assetId, assetName) {
+      currentAssetId = assetId;
+      currentAssetName = assetName;
+      
+      assetNameElement.textContent = `Asset: ${assetName}`;
+      
+      const [definitions, values] = await Promise.all([
+        loadFieldDefinitions(),
+        loadAssetFieldValues(assetId)
+      ]);
+
+      renderFieldInputs(definitions, values);
+      modal.style.display = 'flex';
+    }
+
+    function closeModal() {
+      modal.style.display = 'none';
+      currentAssetId = null;
+      currentAssetName = '';
+    }
+
+    // Event listeners for edit buttons
+    document.addEventListener('click', (e) => {
+      const editBtn = e.target.closest('[data-edit-asset]');
+      if (editBtn) {
+        const assetId = editBtn.dataset.editAsset;
+        const row = editBtn.closest('tr');
+        const assetName = row ? row.querySelector('[data-column="name"]')?.textContent?.trim() : 'Unknown';
+        openModal(assetId, assetName);
+      }
+    });
+
+    // Close modal buttons
+    document.querySelectorAll('[data-asset-modal-close]').forEach(btn => {
+      btn.addEventListener('click', closeModal);
+    });
+
+    // Close on escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal.style.display === 'flex') {
+        closeModal();
+      }
+    });
+
+    // Form submission
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      if (!currentAssetId) return;
+
+      const formData = new FormData(form);
+      const fields = fieldDefinitions.map(def => {
+        let value = null;
+        const fieldName = `field_${def.id}`;
+        
+        if (def.field_type === 'checkbox') {
+          value = formData.has(fieldName);
+        } else {
+          value = formData.get(fieldName) || null;
+        }
+
+        return {
+          field_definition_id: def.id,
+          value: value
+        };
+      });
+
+      try {
+        const response = await fetch(`/assets/${currentAssetId}/custom-fields`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fields)
+        });
+
+        if (!response.ok) throw new Error('Failed to save custom fields');
+
+        // Show success message
+        const toast = document.createElement('div');
+        toast.style.cssText = 'position: fixed; bottom: 20px; right: 20px; padding: 16px 24px; background: #10b981; color: white; border-radius: 4px; z-index: 10000;';
+        toast.textContent = 'Custom fields saved successfully';
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+
+        closeModal();
+      } catch (error) {
+        console.error('Error saving custom fields:', error);
+        alert('Failed to save custom fields. Please try again.');
+      }
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const table = document.getElementById('assets-table');
     const searchInput = document.getElementById('asset-search');
 
     initialiseColumnControls(table);
     initialiseDeletion(table);
+    initialiseCustomFieldsEditing();
     updateVisibleCount(table);
 
     if (table) {

@@ -1,0 +1,7 @@
+{
+  "guid": "520c101b-64ea-4966-8adf-4f55b5b5212e",
+  "occurred_at": "2025-10-30T10:15Z",
+  "change_type": "Feature",
+  "summary": "Added configurable SMS notification delivery with secure gateway integration and tests",
+  "content_hash": "2ceb0c85906138912493a05986df35154704db0cb97009f783cda9a12508fa4d"
+}

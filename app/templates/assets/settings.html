@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}Asset Custom Fields Settings{% endblock %}
+
+{% block header_actions %}
+  <a href="/assets" class="button button--ghost">Back to Assets</a>
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Custom Fields Configuration</h2>
+        <p class="card__subtitle">
+          Manage custom fields that will be available for all assets. Fields can be Text, Images, Checkbox, URL, or Date.
+        </p>
+      </div>
+      <div class="card__controls">
+        <button type="button" class="button button--primary" data-add-field>
+          Add Custom Field
+        </button>
+      </div>
+    </header>
+    
+    <div class="custom-fields-list" data-fields-container>
+      <div class="empty-state" data-empty-state>
+        <h3 class="empty-state__title">No custom fields yet</h3>
+        <p class="empty-state__subtitle">
+          Click "Add Custom Field" to create your first custom field.
+        </p>
+      </div>
+      
+      <div class="table-wrapper" data-fields-table style="display: none;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Type</th>
+              <th scope="col">Display Order</th>
+              <th scope="col" class="table__actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody data-fields-tbody>
+            <!-- Fields will be inserted here -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- Add/Edit Field Modal -->
+<div class="modal" id="field-modal" style="display: none;">
+  <div class="modal__overlay" data-modal-close></div>
+  <div class="modal__content">
+    <header class="modal__header">
+      <h2 class="modal__title" data-modal-title>Add Custom Field</h2>
+      <button type="button" class="modal__close" data-modal-close aria-label="Close">
+        <svg viewBox="0 0 24 24" width="24" height="24">
+          <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+        </svg>
+      </button>
+    </header>
+    <form id="field-form" data-field-form>
+      <div class="modal__body">
+        <div class="form-group">
+          <label for="field-name" class="form-label">Field Name</label>
+          <input
+            type="text"
+            id="field-name"
+            name="name"
+            class="input"
+            required
+            maxlength="255"
+          />
+        </div>
+        
+        <div class="form-group">
+          <label for="field-type" class="form-label">Field Type</label>
+          <select id="field-type" name="field_type" class="input" required>
+            <option value="">Select a type</option>
+            <option value="text">Text</option>
+            <option value="image">Image (URL)</option>
+            <option value="checkbox">Checkbox</option>
+            <option value="url">URL</option>
+            <option value="date">Date</option>
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label for="field-order" class="form-label">Display Order</label>
+          <input
+            type="number"
+            id="field-order"
+            name="display_order"
+            class="input"
+            min="0"
+            value="0"
+          />
+        </div>
+      </div>
+      
+      <footer class="modal__footer">
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        <button type="submit" class="button button--primary">Save Field</button>
+      </footer>
+    </form>
+  </div>
+</div>
+
+{% include "partials/csrf.html" %}
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/asset-custom-fields-settings.js" defer></script>
+{% endblock %}
