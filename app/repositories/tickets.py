@@ -427,7 +427,8 @@ async def list_ticket_assets(ticket_id: int) -> list[dict[str, Any]]:
             a.serial_number,
             a.status,
             a.type,
-            a.os_name
+            a.os_name,
+            a.tactical_asset_id
         FROM ticket_assets AS ta
         INNER JOIN assets AS a ON a.id = ta.asset_id
         WHERE ta.ticket_id = %s
@@ -449,6 +450,7 @@ async def list_ticket_assets(ticket_id: int) -> list[dict[str, Any]]:
             "status": str(row.get("status") or "").strip() or None,
             "type": str(row.get("type") or "").strip() or None,
             "os_name": str(row.get("os_name") or "").strip() or None,
+            "tactical_asset_id": str(row.get("tactical_asset_id") or "").strip() or None,
             "linked_at": _make_aware(row.get("created_at")),
         }
         assets.append(asset)

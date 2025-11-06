@@ -222,10 +222,27 @@
       return;
     }
 
+    const linkedContainer = document.querySelector('[data-ticket-linked-assets]');
+    if (!linkedContainer) {
+      return;
+    }
+
+    const linkedList = linkedContainer.querySelector('[data-linked-assets-list]');
+    const emptyState = linkedContainer.querySelector('[data-linked-assets-empty]');
     const helpElement = document.querySelector('[data-ticket-asset-help]');
     const endpointTemplate = select.dataset.assetsEndpointTemplate || '';
     const initialOptions = parseJsonArray(select.dataset.initialOptions, []);
     const initialSelection = normaliseIdList(parseJsonArray(select.dataset.selectedAssets, []));
+    const initialLinkedRecords = parseJsonArray(linkedContainer.dataset.initialLinked, []);
+    const emptyMessage = linkedContainer.dataset.emptyMessage || 'No assets are linked to this ticket yet.';
+    const tacticalBaseUrlRaw = linkedContainer.dataset.tacticalBaseUrl || '';
+    const initialCompanyId = select.dataset.initialCompanyId || '';
+
+    const tacticalBaseUrl = tacticalBaseUrlRaw.replace(/\/+$/, '');
+    const optionLookup = new Map();
+    const linkedMap = new Map();
+    let allOptions = [];
+    let currentCompanyId = initialCompanyId || companySelect.value || '';
 
     function setHelpState(state, overrideMessage) {
       if (!helpElement) {
@@ -233,6 +250,8 @@
       }
       const enabledMessage = helpElement.dataset.helpEnabled || helpElement.textContent || '';
       const disabledMessage = helpElement.dataset.helpDisabled || enabledMessage;
+      const emptyLabel = helpElement.dataset.helpEmpty || 'No assets are available for the linked company.';
+      const exhaustedLabel = helpElement.dataset.helpExhausted || emptyLabel;
       let message = enabledMessage;
       let isError = false;
 
@@ -244,7 +263,9 @@
         message = overrideMessage || 'Unable to load assets. Please try again.';
         isError = true;
       } else if (state === 'empty') {
-        message = overrideMessage || 'No assets are available for the selected company.';
+        message = overrideMessage || emptyLabel;
+      } else if (state === 'exhausted') {
+        message = overrideMessage || exhaustedLabel;
       } else if (overrideMessage) {
         message = overrideMessage;
       }
@@ -253,25 +274,255 @@
       helpElement.classList.toggle('form-help--error', isError);
     }
 
-    function renderOptions(options, selectedValues) {
-      const selectedSet = new Set(normaliseIdList(selectedValues));
-      select.innerHTML = '';
+    function normaliseOption(option) {
+      if (!option || typeof option !== 'object') {
+        return null;
+      }
+      const rawId = option.id ?? option.asset_id;
+      if (rawId === null || rawId === undefined) {
+        return null;
+      }
+      const idText = String(rawId).trim();
+      if (!idText) {
+        return null;
+      }
+      const serialNumber = typeof option.serial_number === 'string' ? option.serial_number.trim() : '';
+      const statusValue = typeof option.status === 'string' ? option.status.trim() : '';
+      const tacticalId = typeof option.tactical_asset_id === 'string' ? option.tactical_asset_id.trim() : '';
+      let name = '';
+      if (typeof option.name === 'string' && option.name.trim() !== '') {
+        name = option.name.trim();
+      }
+      let label = '';
+      if (typeof option.label === 'string' && option.label.trim() !== '') {
+        label = option.label.trim();
+      }
+      if (!label) {
+        label = formatAssetLabel({
+          id: idText,
+          name,
+          serial_number: serialNumber,
+          status: statusValue,
+        });
+      }
+      if (!name) {
+        name = label;
+      }
+      return {
+        id: idText,
+        label,
+        name,
+        serial_number: serialNumber || null,
+        status: statusValue || null,
+        tactical_asset_id: tacticalId || null,
+      };
+    }
+
+    function normaliseLinkedRecord(record) {
+      if (!record || typeof record !== 'object') {
+        return null;
+      }
+      const base = normaliseOption(record);
+      if (!base) {
+        return null;
+      }
+      const assetId = record.asset_id ?? record.id ?? base.id;
+      const assetIdInt = Number.parseInt(String(assetId), 10);
+      return {
+        ...base,
+        asset_id: Number.isNaN(assetIdInt) ? base.id : assetIdInt,
+      };
+    }
+
+    function setAvailableOptions(options) {
+      optionLookup.clear();
+      allOptions = [];
       options.forEach((option) => {
-        if (!option || typeof option !== 'object') {
+        const normalised = normaliseOption(option);
+        if (!normalised) {
           return;
         }
-        const optionId = 'id' in option ? option.id : undefined;
-        if (optionId === null || optionId === undefined) {
+        optionLookup.set(normalised.id, normalised);
+        allOptions.push(normalised);
+      });
+    }
+
+    function buildTacticalUrl(tacticalId) {
+      if (!tacticalBaseUrl || typeof tacticalId !== 'string') {
+        return null;
+      }
+      const trimmed = tacticalId.trim();
+      if (!trimmed) {
+        return null;
+      }
+      return `${tacticalBaseUrl}/web/agents/${encodeURIComponent(trimmed)}`;
+    }
+
+    function renderLinkedAssets() {
+      if (!linkedList) {
+        return;
+      }
+      linkedList.innerHTML = '';
+
+      const entries = Array.from(linkedMap.values());
+      entries.sort((a, b) => {
+        const labelA = formatAssetLabel(a).toLowerCase();
+        const labelB = formatAssetLabel(b).toLowerCase();
+        if (labelA < labelB) {
+          return -1;
+        }
+        if (labelA > labelB) {
+          return 1;
+        }
+        return 0;
+      });
+
+      entries.forEach((record) => {
+        const item = document.createElement('li');
+        item.className = 'ticket-assets-linked__item';
+        item.setAttribute('data-linked-asset', '');
+        const assetIdValue = String(record.asset_id ?? record.id);
+        item.setAttribute('data-asset-id', assetIdValue);
+        if (record.tactical_asset_id) {
+          item.setAttribute('data-tactical-id', record.tactical_asset_id);
+        }
+
+        const hiddenInput = document.createElement('input');
+        hiddenInput.type = 'hidden';
+        hiddenInput.name = 'assetIds';
+        hiddenInput.value = assetIdValue;
+        item.appendChild(hiddenInput);
+
+        const label = formatAssetLabel(record);
+        const displayName = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : label;
+        const tacticalUrl = buildTacticalUrl(record.tactical_asset_id);
+        const nameElement = tacticalUrl ? document.createElement('a') : document.createElement('span');
+        nameElement.className = 'ticket-assets-linked__name';
+        nameElement.textContent = displayName;
+        nameElement.setAttribute('data-linked-asset-name', '');
+        if (label && label !== displayName) {
+          nameElement.title = label;
+        }
+        if (tacticalUrl && nameElement instanceof HTMLAnchorElement) {
+          nameElement.href = tacticalUrl;
+          nameElement.target = '_blank';
+          nameElement.rel = 'noreferrer noopener';
+        }
+        item.appendChild(nameElement);
+
+        const metaParts = [];
+        if (record.serial_number) {
+          metaParts.push(`SN ${record.serial_number}`);
+        }
+        if (record.status) {
+          const cleanedStatus = record.status
+            .split('_')
+            .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+            .join(' ');
+          metaParts.push(cleanedStatus);
+        }
+        if (metaParts.length) {
+          const metaElement = document.createElement('p');
+          metaElement.className = 'ticket-assets-linked__meta';
+          metaElement.textContent = metaParts.join(' · ');
+          item.appendChild(metaElement);
+        }
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'button button--ghost button--icon ticket-assets-linked__remove';
+        removeButton.setAttribute('data-linked-asset-remove', '');
+        removeButton.innerHTML = '<span class="visually-hidden">Remove asset</span>×';
+        item.appendChild(removeButton);
+
+        linkedList.appendChild(item);
+      });
+
+      if (emptyState) {
+        emptyState.hidden = entries.length > 0;
+        if (!entries.length) {
+          emptyState.textContent = emptyMessage;
+        }
+      }
+    }
+
+    function renderOptions() {
+      const placeholder = select.dataset.placeholder || 'Select an asset to link';
+      select.innerHTML = '';
+      const placeholderOption = document.createElement('option');
+      placeholderOption.value = '';
+      placeholderOption.textContent = placeholder;
+      select.appendChild(placeholderOption);
+
+      let availableCount = 0;
+      allOptions.forEach((option) => {
+        if (linkedMap.has(option.id)) {
           return;
         }
         const optionElement = document.createElement('option');
-        optionElement.value = String(optionId);
-        optionElement.textContent = formatAssetLabel(option);
-        if (selectedSet.has(String(optionId))) {
-          optionElement.selected = true;
-        }
+        optionElement.value = option.id;
+        optionElement.textContent = option.label;
         select.appendChild(optionElement);
+        availableCount += 1;
       });
+
+      if (availableCount === 0) {
+        select.disabled = true;
+        select.setAttribute('aria-disabled', 'true');
+      } else {
+        select.disabled = false;
+        select.removeAttribute('aria-disabled');
+      }
+
+      if (!companySelect.value) {
+        setHelpState('disabled');
+      } else if (!allOptions.length) {
+        setHelpState('empty');
+      } else if (availableCount === 0) {
+        setHelpState('exhausted');
+      } else {
+        setHelpState('enabled');
+      }
+    }
+
+    function addLinkedAssetById(assetId) {
+      const id = String(assetId || '').trim();
+      if (!id || linkedMap.has(id)) {
+        return;
+      }
+      const option = optionLookup.get(id);
+      if (!option) {
+        return;
+      }
+      const numericId = Number.parseInt(id, 10);
+      linkedMap.set(id, {
+        ...option,
+        asset_id: Number.isNaN(numericId) ? id : numericId,
+      });
+      renderLinkedAssets();
+      renderOptions();
+    }
+
+    function removeLinkedAssetById(assetId) {
+      const id = String(assetId || '').trim();
+      if (!id) {
+        return;
+      }
+      if (!linkedMap.has(id)) {
+        return;
+      }
+      linkedMap.delete(id);
+      renderLinkedAssets();
+      renderOptions();
+    }
+
+    function clearLinkedAssets() {
+      if (!linkedMap.size) {
+        return;
+      }
+      linkedMap.clear();
+      renderLinkedAssets();
+      renderOptions();
     }
 
     async function fetchAssets(companyId) {
@@ -294,16 +545,13 @@
           if (!record || typeof record !== 'object') {
             return null;
           }
-          const idValue = 'id' in record ? record.id : null;
-          if (idValue === null || idValue === undefined) {
-            return null;
-          }
           return {
-            id: idValue,
+            id: record.id,
             label: formatAssetLabel(record),
+            name: record.name,
             serial_number: record.serial_number,
             status: record.status,
-            name: record.name,
+            tactical_asset_id: record.tactical_asset_id,
           };
         })
         .filter((option) => option !== null);
@@ -311,11 +559,9 @@
 
     async function reloadAssets(companyId) {
       if (!companyId) {
-        renderOptions([], []);
+        setAvailableOptions([]);
         select.value = '';
-        select.disabled = true;
-        select.setAttribute('aria-disabled', 'true');
-        setHelpState('disabled');
+        renderOptions();
         return;
       }
 
@@ -325,42 +571,89 @@
 
       try {
         const assets = await fetchAssets(companyId);
-        renderOptions(assets, []);
-        if (!assets.length) {
-          setHelpState('empty');
-        } else {
-          setHelpState('enabled');
-        }
+        setAvailableOptions(assets);
+        renderOptions();
       } catch (error) {
         console.error('Failed to load company assets', error);
-        renderOptions([], []);
+        setAvailableOptions([]);
+        renderOptions();
         setHelpState('error');
       } finally {
-        select.disabled = false;
-        select.removeAttribute('aria-disabled');
+        if (companySelect.value && allOptions.length) {
+          select.disabled = false;
+          select.removeAttribute('aria-disabled');
+        }
       }
     }
 
-    renderOptions(initialOptions, initialSelection);
-    if (companySelect.value) {
-      select.disabled = false;
-      select.removeAttribute('aria-disabled');
-      setHelpState(initialOptions.length ? 'enabled' : 'empty');
-    } else {
+    setAvailableOptions(initialOptions);
+    initialLinkedRecords.forEach((record) => {
+      const normalised = normaliseLinkedRecord(record);
+      if (!normalised) {
+        return;
+      }
+      linkedMap.set(String(normalised.id), normalised);
+    });
+    initialSelection.forEach((assetId) => {
+      const id = String(assetId || '').trim();
+      if (!id || linkedMap.has(id)) {
+        return;
+      }
+      const option = optionLookup.get(id);
+      if (option) {
+        const numericId = Number.parseInt(id, 10);
+        linkedMap.set(id, {
+          ...option,
+          asset_id: Number.isNaN(numericId) ? id : numericId,
+        });
+      }
+    });
+
+    renderLinkedAssets();
+    renderOptions();
+
+    if (!companySelect.value) {
       select.disabled = true;
       select.setAttribute('aria-disabled', 'true');
       setHelpState('disabled');
     }
 
+    select.addEventListener('change', () => {
+      const selectedId = select.value;
+      if (!selectedId) {
+        return;
+      }
+      addLinkedAssetById(selectedId);
+      select.value = '';
+    });
+
+    linkedContainer.addEventListener('click', (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const removeButton = target ? target.closest('[data-linked-asset-remove]') : null;
+      if (!removeButton) {
+        return;
+      }
+      const parent = removeButton.closest('[data-linked-asset]');
+      if (!parent) {
+        return;
+      }
+      const assetId = parent.getAttribute('data-asset-id');
+      removeLinkedAssetById(assetId);
+    });
+
     companySelect.addEventListener('change', () => {
       const companyId = companySelect.value;
       if (!companyId) {
-        renderOptions([], []);
+        currentCompanyId = '';
+        clearLinkedAssets();
         select.value = '';
-        select.disabled = true;
-        select.setAttribute('aria-disabled', 'true');
-        setHelpState('disabled');
+        setAvailableOptions([]);
+        renderOptions();
         return;
+      }
+      if (companyId !== currentCompanyId) {
+        currentCompanyId = companyId;
+        clearLinkedAssets();
       }
       reloadAssets(companyId);
     });
