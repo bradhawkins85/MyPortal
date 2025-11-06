@@ -19,6 +19,7 @@
     class="theme-default"
     data-enable-auto-refresh="{{ 'true' if enable_auto_refresh else 'false' }}"
     data-low-stock-threshold="{{ low_stock_threshold | default(5) }}"
+    data-super-admin="{{ 'true' if current_user and current_user.is_super_admin else 'false' }}"
   >
     <div class="layout" data-layout>
       <div class="layout__scrim" data-mobile-nav-scrim aria-hidden="true"></div>
