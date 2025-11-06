@@ -946,13 +946,14 @@ async def create_ticket(
             author_id = int(initial_reply_author_id)
         except (TypeError, ValueError):  # pragma: no cover - defensive
             author_id = None
+        else:
+            if author_id <= 0:
+                author_id = None
     if (
         isinstance(ticket_id, int)
         and ticket_id > 0
         and isinstance(original_description, str)
         and original_description
-        and author_id is not None
-        and author_id > 0
     ):
         try:
             await tickets_repo.create_reply(
