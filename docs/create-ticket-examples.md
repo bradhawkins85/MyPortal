@@ -191,6 +191,57 @@
 
 ---
 
+### Subject Wildcard Matching for Ticket Events
+
+**Scenario:** Trigger an automation when ticket subjects match familiar patterns.
+
+Use SQL-style wildcards (`%` for any length, `_` for a single character) inside the `trigger_filters` block. Escape literal percent or underscore characters with a backslash (`\%`, `\_`).
+
+```json
+{
+  "name": "Subject Pattern Routing",
+  "description": "Route known subject patterns to the correct queue",
+  "kind": "event",
+  "trigger_event": "tickets.created",
+  "trigger_filters": {
+    "any": [
+      {
+        "match": {
+          "ticket.subject": "My computer%"
+        }
+      },
+      {
+        "match": {
+          "ticket.subject": "% wont turn on"
+        }
+      },
+      {
+        "match": {
+          "ticket.subject": "New User % Onboarding"
+        }
+      }
+    ]
+  },
+  "status": "active",
+  "action_payload": {
+    "actions": [
+      {
+        "module": "create-ticket",
+        "payload": {
+          "subject": "Escalated ticket: {{ticket.subject}}",
+          "description": "Wildcard routing matched {{ticket.subject}} at {{timestamp}}.",
+          "queue": "Escalations"
+        }
+      }
+    ]
+  }
+}
+```
+
+**Result:** Tickets with subjects like “My computer is frozen”, “Server wont turn on”, or “New User HR Onboarding” automatically route into the escalations queue.
+
+---
+
 ### 6. Multi-Company Onboarding
 
 **Scenario:** Create an onboarding ticket for new companies.
