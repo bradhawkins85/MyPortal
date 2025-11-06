@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block header_title %}
+  <div class="header-title-menu">
+    <span class="header-title-menu__label">AI Tag Exclusions</span>
+  </div>
+{% endblock %}
+
+{% block content %}
+  {% if success_message or error_message %}
+    <div class="alert-stack">
+      {% if success_message %}
+        <div class="alert" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="admin-grid">
+    <section class="card card--panel">
+      <header class="card__header">
+        <div>
+          <h2 class="card__title">Tag Exclusions</h2>
+          <p class="card__subtitle">Manage tags that should be excluded from AI-generated tags for tickets and knowledge base articles.</p>
+        </div>
+        <input
+          type="search"
+          class="form-input"
+          placeholder="Filter exclusions"
+          aria-label="Filter tag exclusions"
+          data-table-filter="exclusions-table"
+        />
+      </header>
+      <div class="table-wrapper">
+        <table class="table" id="exclusions-table" data-table>
+          <thead>
+            <tr>
+              <th scope="col" data-sort="string">Tag Slug</th>
+              <th scope="col" data-sort="date">Created At</th>
+              <th scope="col" class="table__actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="exclusions-tbody">
+            <!-- Populated by JavaScript -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card card--panel">
+      <header class="card__header">
+        <div>
+          <h2 class="card__title">Add Tag Exclusion</h2>
+          <p class="card__subtitle">Add a new tag to the exclusion list. Tags will be normalized to kebab-case.</p>
+        </div>
+      </header>
+      <form id="exclusion-form" class="form" autocomplete="off">
+        <div class="form-group">
+          <label for="tag-slug" class="form-label">Tag Slug</label>
+          <input
+            type="text"
+            id="tag-slug"
+            name="tag_slug"
+            class="form-input"
+            placeholder="e.g., unhelpful-tag"
+            required
+            maxlength="48"
+          />
+          <small class="form-help">Enter the tag slug to exclude. It will be normalized to lowercase kebab-case.</small>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">Add Exclusion</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <script>
+    (function() {
+      const exclusionsTable = document.getElementById('exclusions-tbody');
+      const exclusionForm = document.getElementById('exclusion-form');
+      const tagSlugInput = document.getElementById('tag-slug');
+
+      async function loadExclusions() {
+        try {
+          const response = await fetch('/api/tag-exclusions');
+          if (!response.ok) {
+            throw new Error('Failed to load exclusions');
+          }
+          const data = await response.json();
+          renderExclusions(data.exclusions || []);
+        } catch (error) {
+          console.error('Error loading exclusions:', error);
+          exclusionsTable.innerHTML = '<tr><td colspan="3" class="table__empty">Failed to load exclusions</td></tr>';
+        }
+      }
+
+      function renderExclusions(exclusions) {
+        if (!exclusions.length) {
+          exclusionsTable.innerHTML = '<tr><td colspan="3" class="table__empty">No tag exclusions defined yet.</td></tr>';
+          return;
+        }
+
+        exclusionsTable.innerHTML = exclusions.map(exc => `
+          <tr data-tag-slug="${exc.tag_slug}">
+            <td data-label="Tag Slug">${exc.tag_slug}</td>
+            <td data-label="Created At">${exc.created_at ? new Date(exc.created_at).toLocaleString() : '—'}</td>
+            <td class="table__actions">
+              <div class="table__action-buttons">
+                <button type="button" class="button button--danger" onclick="deleteExclusion('${exc.tag_slug}')">Delete</button>
+              </div>
+            </td>
+          </tr>
+        `).join('');
+      }
+
+      window.deleteExclusion = async function(tagSlug) {
+        if (!confirm(`Are you sure you want to remove "${tagSlug}" from the exclusion list?`)) {
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/tag-exclusions/${encodeURIComponent(tagSlug)}`, {
+            method: 'DELETE',
+          });
+
+          if (!response.ok) {
+            throw new Error('Failed to delete exclusion');
+          }
+
+          await loadExclusions();
+        } catch (error) {
+          console.error('Error deleting exclusion:', error);
+          alert('Failed to delete tag exclusion. Please try again.');
+        }
+      };
+
+      exclusionForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const tagSlug = tagSlugInput.value.trim();
+        if (!tagSlug) {
+          return;
+        }
+
+        try {
+          const response = await fetch('/api/tag-exclusions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ tag_slug: tagSlug }),
+          });
+
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to create exclusion');
+          }
+
+          tagSlugInput.value = '';
+          await loadExclusions();
+        } catch (error) {
+          console.error('Error creating exclusion:', error);
+          alert(error.message || 'Failed to create tag exclusion. Please try again.');
+        }
+      });
+
+      loadExclusions();
+    })();
+  </script>
+{% endblock %}
