@@ -13,6 +13,7 @@ from app.api.dependencies.auth import (
 from app.core.logging import log_error
 from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
+from app.repositories import ticket_tasks as ticket_tasks_repo
 from app.repositories import tickets as tickets_repo
 from app.schemas.tickets import (
     LabourTypeCreateRequest,
@@ -35,6 +36,10 @@ from app.schemas.tickets import (
     TicketStatusDefinitionModel,
     TicketStatusListResponse,
     TicketStatusUpdateRequest,
+    TicketTask,
+    TicketTaskCreate,
+    TicketTaskListResponse,
+    TicketTaskUpdate,
     TicketUpdate,
     TicketWatcher,
     TicketWatcherUpdate,
@@ -601,4 +606,149 @@ async def delete_labour_type_endpoint(
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Labour type not found")
     await labour_types_service.delete_labour_type(labour_type_id)
+
+
+@router.get("/{ticket_id}/tasks", response_model=TicketTaskListResponse)
+async def list_ticket_tasks(
+    ticket_id: int,
+    current_user: dict = Depends(get_current_user),
+) -> TicketTaskListResponse:
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    has_helpdesk_access = await _has_helpdesk_permission(current_user)
+    requester_id = ticket.get("requester_id")
+    current_user_id = current_user.get("id")
+    try:
+        current_user_id_int = int(current_user_id)
+    except (TypeError, ValueError):
+        current_user_id_int = None
+    
+    if not has_helpdesk_access:
+        if requester_id != current_user_id_int:
+            is_watcher = False
+            if current_user_id_int is not None:
+                is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int)
+            if not is_watcher:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    tasks = await ticket_tasks_repo.list_tasks(ticket_id)
+    return TicketTaskListResponse(items=[TicketTask(**task) for task in tasks])
+
+
+@router.post("/{ticket_id}/tasks", response_model=TicketTask, status_code=status.HTTP_201_CREATED)
+async def create_ticket_task(
+    ticket_id: int,
+    payload: TicketTaskCreate,
+    current_user: dict = Depends(get_current_user),
+) -> TicketTask:
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    has_helpdesk_access = await _has_helpdesk_permission(current_user)
+    requester_id = ticket.get("requester_id")
+    current_user_id = current_user.get("id")
+    try:
+        current_user_id_int = int(current_user_id)
+    except (TypeError, ValueError):
+        current_user_id_int = None
+    
+    if not has_helpdesk_access:
+        if requester_id != current_user_id_int:
+            is_watcher = False
+            if current_user_id_int is not None:
+                is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int)
+            if not is_watcher:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    task = await ticket_tasks_repo.create_task(
+        ticket_id=ticket_id,
+        task_name=payload.task_name,
+        sort_order=payload.sort_order,
+    )
+    return TicketTask(**task)
+
+
+@router.put("/{ticket_id}/tasks/{task_id}", response_model=TicketTask)
+async def update_ticket_task(
+    ticket_id: int,
+    task_id: int,
+    payload: TicketTaskUpdate,
+    session: SessionData = Depends(get_current_session),
+    current_user: dict = Depends(get_current_user),
+) -> TicketTask:
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    task = await ticket_tasks_repo.get_task(task_id)
+    if not task or task.get("ticket_id") != ticket_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    
+    has_helpdesk_access = await _has_helpdesk_permission(current_user)
+    requester_id = ticket.get("requester_id")
+    current_user_id = current_user.get("id")
+    try:
+        current_user_id_int = int(current_user_id)
+    except (TypeError, ValueError):
+        current_user_id_int = None
+    
+    if not has_helpdesk_access:
+        if requester_id != current_user_id_int:
+            is_watcher = False
+            if current_user_id_int is not None:
+                is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int)
+            if not is_watcher:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    update_kwargs = {}
+    if payload.task_name is not None:
+        update_kwargs["task_name"] = payload.task_name
+    if payload.is_completed is not None:
+        update_kwargs["is_completed"] = payload.is_completed
+        if payload.is_completed:
+            update_kwargs["completed_by"] = session.user_id
+    if payload.sort_order is not None:
+        update_kwargs["sort_order"] = payload.sort_order
+    
+    updated_task = await ticket_tasks_repo.update_task(task_id, **update_kwargs)
+    if not updated_task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    
+    return TicketTask(**updated_task)
+
+
+@router.delete("/{ticket_id}/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_ticket_task(
+    ticket_id: int,
+    task_id: int,
+    current_user: dict = Depends(get_current_user),
+) -> None:
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    task = await ticket_tasks_repo.get_task(task_id)
+    if not task or task.get("ticket_id") != ticket_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    
+    has_helpdesk_access = await _has_helpdesk_permission(current_user)
+    requester_id = ticket.get("requester_id")
+    current_user_id = current_user.get("id")
+    try:
+        current_user_id_int = int(current_user_id)
+    except (TypeError, ValueError):
+        current_user_id_int = None
+    
+    if not has_helpdesk_access:
+        if requester_id != current_user_id_int:
+            is_watcher = False
+            if current_user_id_int is not None:
+                is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int)
+            if not is_watcher:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    await ticket_tasks_repo.delete_task(task_id)
 
