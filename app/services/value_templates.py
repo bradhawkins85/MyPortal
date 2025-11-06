@@ -45,7 +45,6 @@ def _collect_tokens(value: Any) -> set[str]:
                     # Skip quoted strings
                     if part and not (part.startswith('"') or part.startswith("'")):
                         # Split on comparison operators to get left and right sides
-                        import re
                         comparison_parts = re.split(r'\s*(>=|<=|>|<|==|!=)\s*', part)
                         for token_candidate in comparison_parts:
                             token_candidate = token_candidate.strip()
