@@ -505,6 +505,23 @@
     });
   }
 
+  function toggleJsonPayloadField() {
+    const commandField = query('task-command');
+    const jsonPayloadField = query('task-json-payload-field');
+    const descriptionField = query('task-description-field');
+    
+    if (commandField && jsonPayloadField && descriptionField) {
+      const command = commandField.value;
+      if (command === 'create_scheduled_ticket') {
+        jsonPayloadField.style.display = 'block';
+        descriptionField.style.display = 'none';
+      } else {
+        jsonPayloadField.style.display = 'none';
+        descriptionField.style.display = 'block';
+      }
+    }
+  }
+
   function populateTaskForm(task) {
     const idField = query('task-id');
     const commandField = query('task-command');
@@ -637,6 +654,9 @@
         deleteButton.disabled = true;
       }
     }
+    
+    // Toggle field visibility after populating the form
+    toggleJsonPayloadField();
   }
 
   function clearTaskForm() {
@@ -888,22 +908,6 @@
 
     const commandField = query('task-command');
     const companyField = query('task-company');
-    const jsonPayloadField = query('task-json-payload-field');
-    const jsonPayloadTextarea = query('task-json-payload');
-    const descriptionField = query('task-description-field');
-    
-    const toggleJsonPayloadField = () => {
-      if (commandField && jsonPayloadField && descriptionField) {
-        const command = commandField.value;
-        if (command === 'create_scheduled_ticket') {
-          jsonPayloadField.style.display = 'block';
-          descriptionField.style.display = 'none';
-        } else {
-          jsonPayloadField.style.display = 'none';
-          descriptionField.style.display = 'block';
-        }
-      }
-    };
     
     const refreshTaskName = () => {
       const nameFields = getTaskNameFields();
