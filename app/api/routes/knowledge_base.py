@@ -86,6 +86,7 @@ async def get_article(
         permission_scope=article["permission_scope"],
         is_published=article["is_published"],
         ai_tags=article.get("ai_tags", []),
+        excluded_ai_tags=article.get("excluded_ai_tags", []),
         allowed_user_ids=article.get("allowed_user_ids", []),
         allowed_company_ids=article.get("allowed_company_ids", []),
         company_admin_ids=article.get("company_admin_ids", []),
@@ -129,6 +130,7 @@ async def create_article(
         permission_scope=article["permission_scope"],
         is_published=article["is_published"],
         ai_tags=article.get("ai_tags", []),
+        excluded_ai_tags=article.get("excluded_ai_tags", []),
         allowed_user_ids=article.get("allowed_user_ids", []),
         allowed_company_ids=article.get("allowed_company_ids", []),
         company_admin_ids=article.get("company_admin_ids", []),
@@ -168,6 +170,7 @@ async def update_article(
         permission_scope=article["permission_scope"],
         is_published=article["is_published"],
         ai_tags=article.get("ai_tags", []),
+        excluded_ai_tags=article.get("excluded_ai_tags", []),
         allowed_user_ids=article.get("allowed_user_ids", []),
         allowed_company_ids=article.get("allowed_company_ids", []),
         company_admin_ids=article.get("company_admin_ids", []),
@@ -184,6 +187,16 @@ async def delete_article(
     current_user: dict = Depends(require_super_admin),
 ) -> None:
     await kb_service.delete_article(article_id)
+
+
+@router.post("/articles/{article_id}/refresh-ai-tags", status_code=status.HTTP_200_OK)
+async def refresh_article_ai_tags(
+    article_id: int,
+    current_user: dict = Depends(require_super_admin),
+) -> dict[str, str]:
+    """Refresh the AI-generated tags for an article."""
+    await kb_service.refresh_article_ai_tags(article_id)
+    return {"status": "queued", "message": "AI tag refresh has been queued"}
 
 
 @router.post("/search", response_model=KnowledgeBaseSearchResponse)

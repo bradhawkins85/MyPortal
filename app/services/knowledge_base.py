@@ -251,6 +251,14 @@ async def _schedule_article_ai_tags(
         if not tags:
             log_error("Knowledge base AI tag parsing yielded no tags")
             return
+        
+        # Fetch the current article to get excluded tags
+        article = await kb_repo.get_article_by_id(article_id)
+        if article:
+            excluded_tags = article.get("excluded_ai_tags", [])
+            # Filter out any tags that have been manually excluded
+            tags = [tag for tag in tags if tag not in excluded_tags]
+        
         await kb_repo.update_article(article_id, ai_tags=tags)
         resolved_notifier = notifier or refresh_notifier
         await resolved_notifier.broadcast_refresh(
@@ -373,6 +381,7 @@ def _serialise_article(
         "title": str(article.get("title")),
         "summary": article.get("summary"),
         "ai_tags": list(article.get("ai_tags") or []),
+        "excluded_ai_tags": list(article.get("excluded_ai_tags") or []),
         "permission_scope": str(article.get("permission_scope")),
         "is_published": bool(article.get("is_published")),
         "updated_at": article.get("updated_at_utc"),
@@ -580,6 +589,28 @@ async def delete_article(article_id: int, *, notifier: RefreshNotifier | None = 
     await kb_repo.delete_article(article_id)
     resolved_notifier = notifier or refresh_notifier
     await resolved_notifier.broadcast_refresh(reason="knowledge_base:article_deleted")
+
+
+async def refresh_article_ai_tags(article_id: int, *, notifier: RefreshNotifier | None = None) -> None:
+    """Refresh the AI-generated tags for a knowledge base article."""
+    article = await kb_repo.get_article_by_id(article_id)
+    if not article:
+        return
+    
+    title = str(article.get("title", ""))
+    summary = article.get("summary")
+    sections = article.get("sections", [])
+    content = article.get("content", "")
+    
+    await _schedule_article_ai_tags(
+        article_id,
+        title,
+        summary,
+        sections,
+        content,
+        notifier=notifier,
+    )
+
 
 
 async def _sync_relations(article_id: int, permission_scope: str, payload: Mapping[str, Any]) -> None:

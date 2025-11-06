@@ -144,7 +144,7 @@ async def remove_kb_article_tag(
     request: RemoveTagRequest,
     current_user: dict = Depends(require_super_admin),
 ) -> dict[str, Any]:
-    """Remove a specific tag from a knowledge base article's AI tags."""
+    """Remove a specific tag from a knowledge base article's AI tags and prevent it from being re-added."""
     article = await kb_repo.get_article_by_id(article_id)
     if not article:
         raise HTTPException(
@@ -156,10 +156,17 @@ async def remove_kb_article_tag(
     if not isinstance(ai_tags, list):
         ai_tags = []
     
+    excluded_ai_tags = article.get("excluded_ai_tags", [])
+    if not isinstance(excluded_ai_tags, list):
+        excluded_ai_tags = []
+    
     normalized_slug = slugify_tag(request.tag_slug)
     if normalized_slug and normalized_slug in ai_tags:
         updated_tags = [tag for tag in ai_tags if tag != normalized_slug]
-        await kb_repo.update_article(article_id, ai_tags=updated_tags)
+        # Add to excluded list to prevent re-adding on refresh
+        if normalized_slug not in excluded_ai_tags:
+            excluded_ai_tags.append(normalized_slug)
+        await kb_repo.update_article(article_id, ai_tags=updated_tags, excluded_ai_tags=excluded_ai_tags)
         return {"success": True, "removed": normalized_slug, "remaining_tags": updated_tags}
     
     raise HTTPException(
