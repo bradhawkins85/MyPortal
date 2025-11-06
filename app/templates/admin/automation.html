@@ -184,6 +184,12 @@
         <div class="form-field">
           <label class="form-label" for="task-description">Description</label>
           <textarea class="form-input form-input--textarea" id="task-description" name="description" rows="3"></textarea>
+          <p class="form-help" id="task-description-help">Optional description or notes about this task.</p>
+        </div>
+        <div class="form-field" id="task-json-payload-field" style="display: none;">
+          <label class="form-label" for="task-json-payload">JSON Payload</label>
+          <textarea class="form-input form-input--textarea" id="task-json-payload" name="jsonPayload" rows="8" placeholder='{"subject": "Example ticket", "description": "Ticket details", "priority": "normal", "status": "open"}'></textarea>
+          <p class="form-help">JSON configuration for ticket creation. Required fields: subject. Optional: description, priority, status, category, requester_id, assigned_user_id.</p>
         </div>
         <div class="form-field form-field--inline">
           <label class="form-label" for="task-max-retries">Max retries</label>

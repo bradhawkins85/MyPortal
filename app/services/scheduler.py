@@ -22,6 +22,7 @@ from app.services import imap as imap_service
 from app.services import m365 as m365_service
 from app.services import products as products_service
 from app.services import staff_importer
+from app.services import tickets as tickets_service
 from app.services import webhook_monitor
 from app.services import xero as xero_service
 
@@ -246,6 +247,62 @@ class SchedulerService:
                     output = await self._run_system_update(force_restart=force_restart)
                     if output:
                         details = output
+                elif command == "create_scheduled_ticket":
+                    # Parse JSON payload from task description
+                    task_description = task.get("description") or ""
+                    try:
+                        payload = json.loads(task_description) if task_description else {}
+                    except json.JSONDecodeError as exc:
+                        status = "failed"
+                        details = f"Invalid JSON payload: {str(exc)}"
+                        log_error(
+                            "Invalid JSON in scheduled ticket creation",
+                            task_id=task_id,
+                            error=str(exc),
+                        )
+                    else:
+                        # Extract ticket fields from payload
+                        subject = payload.get("subject", "")
+                        if not subject:
+                            status = "failed"
+                            details = "Missing required field: subject"
+                        else:
+                            try:
+                                company_id = task.get("company_id")
+                                ticket = await tickets_service.create_ticket(
+                                    subject=str(subject),
+                                    description=payload.get("description"),
+                                    company_id=int(company_id) if company_id else None,
+                                    requester_id=int(payload.get("requester_id")) if payload.get("requester_id") else None,
+                                    assigned_user_id=int(payload.get("assigned_user_id")) if payload.get("assigned_user_id") else None,
+                                    priority=str(payload.get("priority", "normal")),
+                                    status=str(payload.get("status", "open")),
+                                    category=str(payload.get("category")) if payload.get("category") else None,
+                                    module_slug=str(payload.get("module_slug")) if payload.get("module_slug") else None,
+                                    external_reference=str(payload.get("external_reference")) if payload.get("external_reference") else None,
+                                    trigger_automations=False,  # Prevent automation loops
+                                )
+                                ticket_id = ticket.get("id") if ticket else None
+                                ticket_number = ticket.get("number") if ticket else None
+                                details = json.dumps({
+                                    "ticket_id": ticket_id,
+                                    "ticket_number": ticket_number,
+                                    "subject": subject,
+                                }, default=str)
+                                log_info(
+                                    "Scheduled ticket created",
+                                    task_id=task_id,
+                                    ticket_id=ticket_id,
+                                    ticket_number=ticket_number,
+                                )
+                            except Exception as ticket_exc:
+                                status = "failed"
+                                details = f"Ticket creation failed: {str(ticket_exc)}"
+                                log_error(
+                                    "Failed to create scheduled ticket",
+                                    task_id=task_id,
+                                    error=str(ticket_exc),
+                                )
                 elif isinstance(command, str) and command.startswith("imap_sync:"):
                     try:
                         account_id = int(command.split(":", 1)[1])
