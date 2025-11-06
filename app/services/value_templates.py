@@ -199,6 +199,17 @@ def render_string(
     # First, process conditional expressions
     processed_value = conditional_expressions.process_conditionals(value, token_map)
     
+    # Check if the entire processed result is a single token (for type coercion)
+    # This must be done BEFORE token replacement to preserve types
+    stripped = processed_value.strip()
+    single_match = _TOKEN_PATTERN.fullmatch(stripped)
+    if single_match:
+        token_name = single_match.group(1)
+        resolved = _resolve_context_value(context, token_name)
+        if resolved is None:
+            resolved = token_map.get(token_name)
+        return _coerce_template_value(resolved)
+    
     # Then process any token references that may have been returned by conditionals
     # This handles cases where conditionals return token names like "list:asset:bitdefender"
     def _replace(match: re.Match[str]) -> str:
@@ -210,16 +221,6 @@ def render_string(
     
     # Apply token replacement to the processed value
     final_value = _TOKEN_PATTERN.sub(_replace, processed_value)
-    
-    # Check if the entire result is a single token (for type coercion)
-    stripped = final_value.strip()
-    single_match = _TOKEN_PATTERN.fullmatch(stripped)
-    if single_match:
-        token_name = single_match.group(1)
-        resolved = _resolve_context_value(context, token_name)
-        if resolved is None:
-            resolved = token_map.get(token_name)
-        return _coerce_template_value(resolved)
     
     return final_value
 
