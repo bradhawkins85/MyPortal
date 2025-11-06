@@ -163,9 +163,7 @@
       if (!this.table || !this.mobileConfig) {
         return;
       }
-      const portraitActive = this.mobileQuery
-        ? this.mobileQuery.matches
-        : (typeof window !== 'undefined' ? window.innerWidth <= 720 : false);
+      const portraitActive = this.isMobileView();
       const rows = [];
       if (this.table.tHead) {
         rows.push(...this.table.tHead.rows);
@@ -280,17 +278,27 @@
       return this.rows.filter((row) => row.dataset.filterHidden !== 'true');
     }
 
+    isMobileView() {
+      return this.mobileQuery
+        ? this.mobileQuery.matches
+        : (typeof window !== 'undefined' ? window.innerWidth <= 720 : false);
+    }
+
     render() {
       if (!this.tbody) {
         return;
       }
       const filteredRows = this.getFilteredRows();
       const totalFiltered = filteredRows.length;
+      const inMobileView = this.isMobileView();
 
-      if (!this.paginationElement) {
+      // Skip pagination if no pagination element or if in mobile view
+      if (!this.paginationElement || inMobileView) {
         this.rows.forEach((row) => {
           const hidden = row.dataset.filterHidden === 'true';
           row.style.display = hidden ? 'none' : '';
+          // Clear any pagination-related hiding when not paginating
+          delete row.dataset.pageHidden;
         });
         const visibleCount = this.rows.reduce((count, row) => (
           row.dataset.filterHidden === 'true' ? count : count + 1
@@ -304,10 +312,16 @@
           startDisplay: totalFiltered > 0 ? 1 : 0,
           endDisplay: totalFiltered,
         });
+        // Hide pagination controls when in mobile view
+        // Note: When switching back to desktop, updatePaginationControls will restore visibility
+        if (this.paginationElement && inMobileView) {
+          this.paginationElement.hidden = true;
+        }
         this.applyMobileLayout();
         return;
       }
 
+      // Normal pagination flow for desktop view
       if (!this.pageSize) {
         this.recalculatePageSize();
       }

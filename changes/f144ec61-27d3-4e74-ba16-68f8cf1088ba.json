@@ -1,0 +1,7 @@
+{
+  "guid": "f144ec61-27d3-4e74-ba16-68f8cf1088ba",
+  "occurred_at": "2025-10-20T22:17Z",
+  "change_type": "Fix",
+  "summary": "Corrected HTTP POST module knowledge base seed to keep migration column counts aligned",
+  "content_hash": "9b6c094f03be779f90005aa201da6adbd9ff2821b772823af688e77c0785405c"
+}

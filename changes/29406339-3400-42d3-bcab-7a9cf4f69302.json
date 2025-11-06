@@ -1,0 +1,7 @@
+{
+  "guid": "29406339-3400-42d3-bcab-7a9cf4f69302",
+  "occurred_at": "2025-10-14T11:55Z",
+  "change_type": "Fix",
+  "summary": "Filtered zero-priced products from the shop catalogue so customers only see priced items",
+  "content_hash": "5a76efaa7fff938ca4e9a9f6d8fc6c5680cc7836718b19230e845c66e7b90325"
+}

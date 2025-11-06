@@ -1,0 +1,7 @@
+{
+  "guid": "3fbe5af5-619f-4b36-af64-ad57629d7d25",
+  "occurred_at": "2025-10-09T06:01Z",
+  "change_type": "Fix",
+  "summary": "Seeded the MyPortal System Update scheduled task so the automation runs on its daily cron",
+  "content_hash": "55a0d9ede71063f4c34a77e392cf2de95a0cccc200b6feb08d407fe879506069"
+}

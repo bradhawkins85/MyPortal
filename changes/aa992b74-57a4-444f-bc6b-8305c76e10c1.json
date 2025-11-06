@@ -1,0 +1,7 @@
+{
+  "guid": "aa992b74-57a4-444f-bc6b-8305c76e10c1",
+  "occurred_at": "2025-12-19T15:30Z",
+  "change_type": "Fix",
+  "summary": "Removed AI tag status badge, model label, and timestamp from the admin ticket detail metadata view",
+  "content_hash": "1fa1e0dca085a4d97d48aa9f095df2b4ae2fba7e9c74413f6e1daef033bbe761"
+}

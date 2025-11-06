@@ -1,0 +1,7 @@
+{
+  "guid": "320b5b5c-11cd-4340-90e1-6b47fd7010bd",
+  "occurred_at": "2025-12-09T14:00Z",
+  "change_type": "Fix",
+  "summary": "Allowed controlled service worker activation by removing forced skipWaiting and exposing Service-Worker-Allowed header",
+  "content_hash": "2c1449292177ff3f4d21c1daa3dd628f37623e8fb303d302c2aba3053ce53589"
+}
