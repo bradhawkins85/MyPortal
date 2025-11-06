@@ -112,7 +112,7 @@ async def delete_tag_exclusion(
 async def remove_ticket_tag(
     ticket_id: int,
     request: RemoveTagRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_super_admin),
 ) -> dict[str, Any]:
     """Remove a specific tag from a ticket's AI tags."""
     ticket = await tickets_repo.get_ticket(ticket_id)
