@@ -1465,4 +1465,9 @@ def _normalise_order_item(row: dict[str, Any]) -> dict[str, Any]:
     normalised["order_number"] = str(row.get("order_number") or "").strip()
     normalised["order_date"] = _normalise_datetime(row.get("order_date"))
     normalised["eta"] = _normalise_datetime(row.get("eta"))
+    normalised["stock"] = _coerce_optional_int(row.get("stock"))
+    normalised["stock_nsw"] = _coerce_optional_int(row.get("stock_nsw"))
+    normalised["stock_qld"] = _coerce_optional_int(row.get("stock_qld"))
+    normalised["stock_vic"] = _coerce_optional_int(row.get("stock_vic"))
+    normalised["stock_sa"] = _coerce_optional_int(row.get("stock_sa"))
     return normalised

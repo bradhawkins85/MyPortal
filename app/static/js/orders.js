@@ -1,7 +1,8 @@
 (function () {
   'use strict';
 
-  const isSuperAdmin = document.querySelector('[data-order-view]')?.closest('body')?.dataset?.superAdmin === 'true';
+  const COLUMN_COUNT_REGULAR = 4;
+  const COLUMN_COUNT_ADMIN = 9;
 
   function openModal(modal) {
     if (!modal) {
@@ -23,16 +24,24 @@
     if (!modal) {
       return;
     }
+    
+    // Close modal on background click
     modal.addEventListener('click', (event) => {
       if (event.target === modal || event.target.hasAttribute('data-modal-close')) {
         closeModal(modal);
       }
     });
-    document.addEventListener('keydown', (event) => {
+    
+    // Close modal on Escape key (using capture to handle once globally)
+    const handleEscape = (event) => {
       if (event.key === 'Escape' && !modal.hidden) {
         closeModal(modal);
       }
-    });
+    };
+    
+    // Store handler reference for cleanup if needed in future
+    modal._escapeHandler = handleEscape;
+    document.addEventListener('keydown', handleEscape);
   }
 
   async function requestJson(url, options = {}) {
@@ -80,6 +89,9 @@
       return;
     }
 
+    // Check if user is super admin
+    const isSuperAdmin = document.body.dataset.superAdmin === 'true';
+
     // Reset modal state
     modalTitle.textContent = `Order ${orderNumber}`;
     loadingDiv.style.display = 'block';
@@ -105,7 +117,6 @@
           `;
 
           // Add stock columns for super admins
-          const isSuperAdmin = document.body.dataset.superAdmin === 'true';
           if (isSuperAdmin) {
             rowHtml += `
               <td data-label="Stock (Total)">${formatStock(item.stock)}</td>
@@ -121,7 +132,7 @@
         });
       } else {
         const emptyRow = document.createElement('tr');
-        const colspan = isSuperAdmin ? 9 : 4;
+        const colspan = isSuperAdmin ? COLUMN_COUNT_ADMIN : COLUMN_COUNT_REGULAR;
         emptyRow.innerHTML = `<td colspan="${colspan}" class="table__empty">No items found in this order.</td>`;
         itemsContainer.appendChild(emptyRow);
       }
