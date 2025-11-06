@@ -1,0 +1,7 @@
+{
+  "guid": "fd916de4-3159-41d1-aaa9-230ec0781ed4",
+  "occurred_at": "2025-10-07T12:30Z",
+  "change_type": "Fix",
+  "summary": "Guarded MySQL bootstrap connection shutdown to support aiomysql versions without wait_closed",
+  "content_hash": "ae122500b511f2b9a66f9ebe964d243c5b93ad5930b865028d677572a5018f04"
+}

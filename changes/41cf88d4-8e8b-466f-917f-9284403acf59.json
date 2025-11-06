@@ -1,0 +1,7 @@
+{
+  "guid": "41cf88d4-8e8b-466f-917f-9284403acf59",
+  "occurred_at": "2025-10-08T11:08Z",
+  "change_type": "Fix",
+  "summary": "Allowed switch-company requests with incorrect JSON headers to fall back to form parsing so company switching succeeds",
+  "content_hash": "b5b621b6e52cd1816dfa886135050dd36a175f7cab3e8b3972faf39ed664123c"
+}

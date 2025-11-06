@@ -1,0 +1,7 @@
+{
+  "guid": "c1d831d8-a2d8-4bb8-87f4-f453b078f708",
+  "occurred_at": "2025-10-10T16:05Z",
+  "change_type": "Fix",
+  "summary": "Namespaced the forms API under /api/forms so the customer UI renders instead of JSON responses",
+  "content_hash": "5cb4280247109a9741061f28ac7bf545657ce09f1d4c8d24f2b87fec1ed1ec05"
+}

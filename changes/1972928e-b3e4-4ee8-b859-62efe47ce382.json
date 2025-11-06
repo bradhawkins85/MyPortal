@@ -1,0 +1,7 @@
+{
+  "guid": "1972928e-b3e4-4ee8-b859-62efe47ce382",
+  "occurred_at": "2025-10-15T12:53Z",
+  "change_type": "Fix",
+  "summary": "Restored the full super admin sidebar with shop, cart, orders, forms, assets, licenses, invoices, and staff links",
+  "content_hash": "fbda522c359a1e43544a3c8f20fbd39a8a4248368f1ce68e61f2a54c2327c193"
+}

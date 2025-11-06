@@ -1,0 +1,7 @@
+{
+  "guid": "06ca4ae8-4c37-4456-b3ad-285a49948768",
+  "occurred_at": "2025-10-09T13:18Z",
+  "change_type": "Fix",
+  "summary": "Allowed Run Now scheduled tasks to execute in the background without redirecting to the update progress message",
+  "content_hash": "d399f43c9e0c7417135e59202d97405605c36a5512a868ed82489a1f625d63e4"
+}
