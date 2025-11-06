@@ -23,6 +23,7 @@ from app.services import m365 as m365_service
 from app.services import products as products_service
 from app.services import staff_importer
 from app.services import tickets as tickets_service
+from app.services import value_templates
 from app.services import webhook_monitor
 from app.services import xero as xero_service
 
@@ -261,6 +262,9 @@ class SchedulerService:
                             error=str(exc),
                         )
                     else:
+                        # Render template variables in the payload
+                        payload = await value_templates.render_value_async(payload, context=None)
+                        
                         # Extract ticket fields from payload
                         subject = payload.get("subject", "")
                         if not subject:
