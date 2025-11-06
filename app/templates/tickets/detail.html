@@ -102,6 +102,31 @@
             </div>
           </article>
 
+          <article class="card card--panel" data-ticket-tasks-card>
+            <header class="card__header">
+              <h2 class="card__title">Tasks</h2>
+              {% if can_reply %}
+                <div class="button-group">
+                  <button
+                    type="button"
+                    class="button button--ghost button--small"
+                    data-add-task-button
+                    data-ticket-id="{{ ticket.id }}"
+                    aria-label="Add a new task"
+                  >
+                    Add task
+                  </button>
+                </div>
+              {% endif %}
+            </header>
+            <div class="card__body">
+              <ul class="task-list" data-task-list data-ticket-id="{{ ticket.id }}">
+                <!-- Tasks will be loaded dynamically -->
+              </ul>
+              <p class="card__empty" data-tasks-empty hidden>No tasks have been added yet.</p>
+            </div>
+          </article>
+
           <article class="card card--panel">
             <header class="card__header">
               <h2 class="card__title">Reply</h2>

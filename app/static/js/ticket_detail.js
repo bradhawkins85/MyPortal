@@ -661,6 +661,226 @@
     });
   }
 
+  function initialiseTaskManagement() {
+    const taskLists = document.querySelectorAll('[data-task-list]');
+    if (!taskLists.length) {
+      return;
+    }
+
+    taskLists.forEach((taskList) => {
+      const ticketId = taskList.dataset.ticketId;
+      if (!ticketId) {
+        return;
+      }
+
+      const card = taskList.closest('[data-ticket-tasks-card]');
+      const emptyMessage = card ? card.querySelector('[data-tasks-empty]') : null;
+      const addButton = card ? card.querySelector('[data-add-task-button]') : null;
+
+      async function loadTasks() {
+        try {
+          const response = await fetch(`/api/tickets/${ticketId}/tasks`, {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+          });
+          if (!response.ok) {
+            throw new Error('Failed to load tasks');
+          }
+          const data = await response.json();
+          renderTasks(data.items || []);
+        } catch (error) {
+          console.error('Failed to load tasks', error);
+        }
+      }
+
+      function renderTasks(tasks) {
+        taskList.innerHTML = '';
+        if (!tasks || !tasks.length) {
+          if (emptyMessage) {
+            emptyMessage.hidden = false;
+          }
+          return;
+        }
+        if (emptyMessage) {
+          emptyMessage.hidden = true;
+        }
+        tasks.forEach((task) => {
+          const li = createTaskElement(task);
+          taskList.appendChild(li);
+        });
+      }
+
+      function createTaskElement(task) {
+        const li = document.createElement('li');
+        li.className = 'task-list__item';
+        li.dataset.taskId = task.id;
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'task-list__checkbox';
+        checkbox.checked = task.is_completed || false;
+        checkbox.addEventListener('change', () => handleTaskToggle(task.id, checkbox.checked));
+
+        const label = document.createElement('span');
+        label.className = 'task-list__label';
+        label.textContent = task.task_name || '';
+        if (task.is_completed) {
+          label.classList.add('task-list__label--completed');
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'task-list__actions';
+
+        const editButton = document.createElement('button');
+        editButton.type = 'button';
+        editButton.className = 'button button--ghost button--icon button--small';
+        editButton.setAttribute('aria-label', 'Edit task');
+        editButton.innerHTML = '✎';
+        editButton.addEventListener('click', () => handleEditTask(task));
+
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'button button--ghost button--icon button--small';
+        deleteButton.setAttribute('aria-label', 'Delete task');
+        deleteButton.innerHTML = '×';
+        deleteButton.addEventListener('click', () => handleDeleteTask(task.id));
+
+        actions.appendChild(editButton);
+        actions.appendChild(deleteButton);
+
+        li.appendChild(checkbox);
+        li.appendChild(label);
+        li.appendChild(actions);
+
+        return li;
+      }
+
+      async function handleTaskToggle(taskId, isCompleted) {
+        const csrfToken = getCsrfToken();
+        const headers = {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        };
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken;
+        }
+
+        try {
+          const response = await fetch(`/api/tickets/${ticketId}/tasks/${taskId}`, {
+            method: 'PUT',
+            credentials: 'same-origin',
+            headers,
+            body: JSON.stringify({ isCompleted }),
+          });
+          if (!response.ok) {
+            throw new Error('Failed to update task');
+          }
+          await loadTasks();
+        } catch (error) {
+          console.error('Failed to update task', error);
+          await loadTasks();
+        }
+      }
+
+      async function handleEditTask(task) {
+        const newName = prompt('Edit task name:', task.task_name);
+        if (!newName || newName.trim() === '' || newName === task.task_name) {
+          return;
+        }
+
+        const csrfToken = getCsrfToken();
+        const headers = {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        };
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken;
+        }
+
+        try {
+          const response = await fetch(`/api/tickets/${ticketId}/tasks/${task.id}`, {
+            method: 'PUT',
+            credentials: 'same-origin',
+            headers,
+            body: JSON.stringify({ taskName: newName.trim() }),
+          });
+          if (!response.ok) {
+            throw new Error('Failed to update task');
+          }
+          await loadTasks();
+        } catch (error) {
+          console.error('Failed to update task', error);
+          alert('Failed to update task. Please try again.');
+        }
+      }
+
+      async function handleDeleteTask(taskId) {
+        if (!confirm('Delete this task? This cannot be undone.')) {
+          return;
+        }
+
+        const csrfToken = getCsrfToken();
+        const headers = { Accept: 'application/json' };
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken;
+        }
+
+        try {
+          const response = await fetch(`/api/tickets/${ticketId}/tasks/${taskId}`, {
+            method: 'DELETE',
+            credentials: 'same-origin',
+            headers,
+          });
+          if (!response.ok) {
+            throw new Error('Failed to delete task');
+          }
+          await loadTasks();
+        } catch (error) {
+          console.error('Failed to delete task', error);
+          alert('Failed to delete task. Please try again.');
+        }
+      }
+
+      async function handleAddTask() {
+        const taskName = prompt('Enter task name:');
+        if (!taskName || taskName.trim() === '') {
+          return;
+        }
+
+        const csrfToken = getCsrfToken();
+        const headers = {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        };
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken;
+        }
+
+        try {
+          const response = await fetch(`/api/tickets/${ticketId}/tasks`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers,
+            body: JSON.stringify({ taskName: taskName.trim(), sortOrder: 0 }),
+          });
+          if (!response.ok) {
+            throw new Error('Failed to create task');
+          }
+          await loadTasks();
+        } catch (error) {
+          console.error('Failed to create task', error);
+          alert('Failed to create task. Please try again.');
+        }
+      }
+
+      if (addButton) {
+        addButton.addEventListener('click', handleAddTask);
+      }
+
+      loadTasks();
+    });
+  }
+
   function ready() {
     const messageWrappers = document.querySelectorAll('[data-timeline-message]');
 
@@ -675,6 +895,7 @@
 
     initialiseReplyTimeEditing();
     initialiseAssetSelector();
+    initialiseTaskManagement();
   }
 
   if (document.readyState === 'loading') {
