@@ -11,6 +11,9 @@ from app.repositories import companies as company_repo
 from app.services import modules as modules_service
 from app.services import syncro, tacticalrmm
 
+# Xero API returns 100 contacts per page by default
+XERO_CONTACTS_PER_PAGE = 100
+
 
 async def lookup_missing_company_ids(company_id: int) -> dict[str, Any]:
     """
@@ -234,7 +237,7 @@ async def _lookup_xero_contact_id(company_name: str) -> str | None:
             log_info("Xero integration not enabled, skipping lookup")
             return None
         
-        settings = dict(module.get("settings") or {})
+        settings = module.get("settings") or {}
         tenant_id = str(settings.get("tenant_id", "")).strip()
         if not tenant_id:
             log_info("Xero tenant ID not configured, skipping lookup")
@@ -293,8 +296,7 @@ async def _lookup_xero_contact_id(company_name: str) -> str | None:
                             return str(contact_id)
                 
                 # Check if we should continue paginating
-                # Xero returns 100 contacts per page by default
-                if len(contacts) < 100:
+                if len(contacts) < XERO_CONTACTS_PER_PAGE:
                     # This was the last page
                     break
                 
