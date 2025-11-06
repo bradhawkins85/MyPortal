@@ -34,22 +34,29 @@
         </div>
         <div class="form-field">
           <label class="form-label" for="ticket-assets">Assets</label>
-          <select
-            id="ticket-assets"
-            class="form-input"
-            multiple
-            size="6"
-          >
-            <option selected>Workstation-1 · SN XYZ123 · Active</option>
-            <option>Workstation-2 · SN XYZ456 · Active</option>
+          <select id="ticket-assets" class="form-input">
+            <option>Select an asset to link</option>
+            <option>Workstation-3 · SN XYZ456 · Active</option>
             <option>Laptop-5 · SN ABC987 · In Repair</option>
             <option>Firewall-Edge · SN FWF1234 · Online</option>
             <option>Server-DB1 · SN DB1928 · Maintenance</option>
-            <option>Server-DB2 · SN DB2736 · Maintenance</option>
           </select>
-          <p class="form-help">
-            Hold Ctrl (Windows) or ⌘ (macOS) to select multiple assets. Options refresh when the linked company changes.
-          </p>
+          <p class="form-help">Choose an asset to link. Linked devices appear below.</p>
+          <div class="ticket-assets-linked">
+            <ul class="ticket-assets-linked__list">
+              <li class="ticket-assets-linked__item">
+                <a class="ticket-assets-linked__name" href="#" title="Workstation-1 · SN XYZ123 · Active">Workstation-1</a>
+                <p class="ticket-assets-linked__meta">SN XYZ123 · Active</p>
+                <button type="button" class="button button--ghost button--icon ticket-assets-linked__remove">×</button>
+              </li>
+              <li class="ticket-assets-linked__item">
+                <a class="ticket-assets-linked__name" href="#" title="Server-DB2 · SN DB2736 · Maintenance">Server-DB2</a>
+                <p class="ticket-assets-linked__meta">SN DB2736 · Maintenance</p>
+                <button type="button" class="button button--ghost button--icon ticket-assets-linked__remove">×</button>
+              </li>
+            </ul>
+            <p class="ticket-assets-linked__empty">No assets are linked to this ticket yet.</p>
+          </div>
         </div>
       </div>
     </div>
