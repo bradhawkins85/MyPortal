@@ -802,12 +802,16 @@ async def list_trigger_action_modules() -> list[dict[str, Any]]:
     This filters out modules that are only ingesters (e.g., IMAP) or interfaces
     (e.g., Ollama, ChatGPT MCP) that cannot output actions, as well as modules
     that have been explicitly excluded (Xero, UptimeKuma, Syncro).
+    
+    Additionally, disabled modules are filtered out to prevent them from appearing
+    in the trigger actions menu.
     """
     modules = await module_repo.list_modules()
     actionable_modules = [
         _redact_module_settings(module)
         for module in modules
         if module.get("slug") not in _NON_TRIGGERABLE_MODULE_SLUGS
+        and module.get("enabled", False)
     ]
     return actionable_modules
 
