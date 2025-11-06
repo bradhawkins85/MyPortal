@@ -35,6 +35,7 @@ def _article_factory(**overrides):
         "permission_scope": "anonymous",
         "is_published": True,
         "ai_tags": ["public"],
+        "excluded_ai_tags": [],
         "created_by": 1,
         "created_at": now,
         "updated_at": now,
@@ -242,7 +243,7 @@ async def test_update_article_refreshes_ai_tags(monkeypatch):
     monkeypatch.setattr(
         knowledge_base_service.kb_repo,
         "get_article_by_id",
-        AsyncMock(side_effect=[current_article, updated_article]),
+        AsyncMock(side_effect=[current_article, updated_article, current_article, updated_article]),
     )
     update_mock = AsyncMock(return_value=dict(current_article, title="Security fundamentals"))
     monkeypatch.setattr(knowledge_base_service.kb_repo, "update_article", update_mock)
