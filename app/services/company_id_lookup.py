@@ -178,32 +178,24 @@ async def _lookup_tactical_client_id(company_name: str) -> str | None:
         The Tactical RMM client ID if found, None otherwise
     """
     try:
-        # Fetch all agents and extract unique clients
-        agents = await tacticalrmm.fetch_agents()
+        # Fetch all clients from the /beta/v1/client endpoint
+        clients = await tacticalrmm.fetch_clients()
         
-        # Build a set of clients with their IDs and names
-        clients_seen = {}
-        for agent in agents:
-            if not isinstance(agent, dict):
-                continue
-                
-            client_info = agent.get("client")
-            if not isinstance(client_info, dict):
-                continue
-            
-            client_id = client_info.get("id") or client_info.get("pk")
-            client_name = client_info.get("name") or client_info.get("client")
-            
-            if client_id and client_name:
-                # Store by lowercase name for case-insensitive matching
-                key = str(client_name).strip().lower()
-                if key not in clients_seen:
-                    clients_seen[key] = str(client_id)
-        
-        # Look for a matching client name
+        # Search for a matching client name
         search_key = company_name.strip().lower()
-        if search_key in clients_seen:
-            return clients_seen[search_key]
+        for client in clients:
+            if not isinstance(client, dict):
+                continue
+            
+            client_name = client.get("name")
+            if not client_name:
+                continue
+            
+            # Case-insensitive name comparison
+            if str(client_name).strip().lower() == search_key:
+                client_id = client.get("id")
+                if client_id:
+                    return str(client_id)
     except tacticalrmm.TacticalRMMConfigurationError:
         log_info("Tactical RMM integration not configured, skipping lookup")
         return None

@@ -83,23 +83,15 @@ async def test_lookup_missing_company_ids_finds_tactical_id(monkeypatch):
                 return dict(company)
         raise ValueError("Company not found")
     
-    async def fake_fetch_agents(client_id: str | None = None):
+    async def fake_fetch_clients():
         return [
-            {
-                "id": "agent-1",
-                "hostname": "server1",
-                "client": {"id": "client-100", "name": "Beta Industries"},
-            },
-            {
-                "id": "agent-2",
-                "hostname": "server2",
-                "client": {"id": "client-200", "name": "Other Client"},
-            },
+            {"id": "client-100", "name": "Beta Industries"},
+            {"id": "client-200", "name": "Other Client"},
         ]
     
     monkeypatch.setattr(company_id_lookup.company_repo, "get_company_by_id", fake_get_company_by_id)
     monkeypatch.setattr(company_id_lookup.company_repo, "update_company", fake_update_company)
-    monkeypatch.setattr(company_id_lookup.tacticalrmm, "fetch_agents", fake_fetch_agents)
+    monkeypatch.setattr(company_id_lookup.tacticalrmm, "fetch_clients", fake_fetch_clients)
     
     result = await company_id_lookup.lookup_missing_company_ids(1)
     
@@ -160,18 +152,14 @@ async def test_lookup_missing_company_ids_not_found(monkeypatch):
     async def fake_list_customers(*, page: int, per_page: int):
         return ([{"id": "syncro-100", "name": "Other Company"}], {"total_pages": 1})
     
-    async def fake_fetch_agents(client_id: str | None = None):
+    async def fake_fetch_clients():
         return [
-            {
-                "id": "agent-1",
-                "hostname": "server1",
-                "client": {"id": "client-100", "name": "Other Client"},
-            }
+            {"id": "client-100", "name": "Other Client"},
         ]
     
     monkeypatch.setattr(company_id_lookup.company_repo, "get_company_by_id", fake_get_company_by_id)
     monkeypatch.setattr(company_id_lookup.syncro, "list_customers", fake_list_customers)
-    monkeypatch.setattr(company_id_lookup.tacticalrmm, "fetch_agents", fake_fetch_agents)
+    monkeypatch.setattr(company_id_lookup.tacticalrmm, "fetch_clients", fake_fetch_clients)
     
     result = await company_id_lookup.lookup_missing_company_ids(1)
     
@@ -203,16 +191,12 @@ async def test_lookup_syncro_company_id_case_insensitive(monkeypatch):
 @pytest.mark.anyio
 async def test_lookup_tactical_client_id_case_insensitive(monkeypatch):
     """Test that Tactical RMM client lookup is case insensitive."""
-    async def fake_fetch_agents(client_id: str | None = None):
+    async def fake_fetch_clients():
         return [
-            {
-                "id": "agent-1",
-                "hostname": "server1",
-                "client": {"id": "client-100", "name": "BETA INDUSTRIES"},
-            }
+            {"id": "client-100", "name": "BETA INDUSTRIES"},
         ]
     
-    monkeypatch.setattr(company_id_lookup.tacticalrmm, "fetch_agents", fake_fetch_agents)
+    monkeypatch.setattr(company_id_lookup.tacticalrmm, "fetch_clients", fake_fetch_clients)
     
     result = await company_id_lookup._lookup_tactical_client_id("beta industries")
     
@@ -271,16 +255,16 @@ async def test_refresh_all_missing_company_ids(monkeypatch):
             {"total_pages": 1},
         )
     
-    async def fake_fetch_agents(client_id: str | None = None):
+    async def fake_fetch_clients():
         return [
-            {"id": "agent-1", "hostname": "server1", "client": {"id": "client-100", "name": "Company A"}},
+            {"id": "client-100", "name": "Company A"},
         ]
     
     monkeypatch.setattr(company_id_lookup.company_repo, "list_companies", fake_list_companies)
     monkeypatch.setattr(company_id_lookup.company_repo, "get_company_by_id", fake_get_company_by_id)
     monkeypatch.setattr(company_id_lookup.company_repo, "update_company", fake_update_company)
     monkeypatch.setattr(company_id_lookup.syncro, "list_customers", fake_list_customers)
-    monkeypatch.setattr(company_id_lookup.tacticalrmm, "fetch_agents", fake_fetch_agents)
+    monkeypatch.setattr(company_id_lookup.tacticalrmm, "fetch_clients", fake_fetch_clients)
     
     result = await company_id_lookup.refresh_all_missing_company_ids()
     
@@ -312,12 +296,12 @@ async def test_lookup_handles_syncro_configuration_error(monkeypatch):
     async def fake_list_customers(*, page: int, per_page: int):
         raise company_id_lookup.syncro.SyncroConfigurationError("Not configured")
     
-    async def fake_fetch_agents(client_id: str | None = None):
+    async def fake_fetch_clients():
         raise company_id_lookup.tacticalrmm.TacticalRMMConfigurationError("Not configured")
     
     monkeypatch.setattr(company_id_lookup.company_repo, "get_company_by_id", fake_get_company_by_id)
     monkeypatch.setattr(company_id_lookup.syncro, "list_customers", fake_list_customers)
-    monkeypatch.setattr(company_id_lookup.tacticalrmm, "fetch_agents", fake_fetch_agents)
+    monkeypatch.setattr(company_id_lookup.tacticalrmm, "fetch_clients", fake_fetch_clients)
     
     result = await company_id_lookup.lookup_missing_company_ids(1)
     
