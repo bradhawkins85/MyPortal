@@ -296,3 +296,75 @@ def test_asset_field_value_from_db_row_date():
     assert value.value == test_date
     assert value.field_name == "Purchase Date"
     assert value.field_type.value == "date"
+
+
+@pytest.mark.asyncio
+async def test_count_assets_by_custom_field_checkbox_true():
+    """Test counting assets with a checkbox custom field set to true."""
+    from app.repositories import asset_custom_fields
+    
+    mock_row = {"total": 15}
+    
+    with patch.object(asset_custom_fields.db, 'fetch_one', new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = mock_row
+        
+        result = await asset_custom_fields.count_assets_by_custom_field(
+            company_id=42,
+            field_name="bitdefender",
+            field_value=True,
+        )
+        
+        assert result == 15
+        mock_fetch.assert_called_once()
+        # Verify the SQL query includes the right filters
+        call_args = mock_fetch.call_args
+        sql = call_args[0][0]
+        params = call_args[0][1]
+        assert "d.name = %s" in sql
+        assert "d.field_type = 'checkbox'" in sql
+        assert "v.value_boolean = %s" in sql
+        assert "a.company_id = %s" in sql
+        assert params == ("bitdefender", True, 42)
+
+
+@pytest.mark.asyncio
+async def test_count_assets_by_custom_field_no_company():
+    """Test counting assets across all companies."""
+    from app.repositories import asset_custom_fields
+    
+    mock_row = {"total": 50}
+    
+    with patch.object(asset_custom_fields.db, 'fetch_one', new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = mock_row
+        
+        result = await asset_custom_fields.count_assets_by_custom_field(
+            company_id=None,
+            field_name="threatlocker-installed",
+            field_value=True,
+        )
+        
+        assert result == 50
+        mock_fetch.assert_called_once()
+        call_args = mock_fetch.call_args
+        sql = call_args[0][0]
+        params = call_args[0][1]
+        # Should not include company filter when company_id is None
+        assert "a.company_id" not in sql
+        assert params == ("threatlocker-installed", True)
+
+
+@pytest.mark.asyncio
+async def test_count_assets_by_custom_field_returns_zero_on_none():
+    """Test that count returns 0 when database returns None."""
+    from app.repositories import asset_custom_fields
+    
+    with patch.object(asset_custom_fields.db, 'fetch_one', new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = None
+        
+        result = await asset_custom_fields.count_assets_by_custom_field(
+            company_id=42,
+            field_name="nonexistent",
+            field_value=True,
+        )
+        
+        assert result == 0

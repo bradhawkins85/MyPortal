@@ -76,8 +76,34 @@ emails or webhook requests). Newly added tokens include:
 | `{{ TICKET_LATEST_REPLY_AUTHOR_EMAIL }}` | Email for the author of the latest reply. |
 | `{{ TICKET_LATEST_REPLY_AUTHOR_DISPLAY_NAME }}` | Display name for the latest reply author. |
 | `{{ ACTIVE_ASSETS }}` / `{{ ACTIVE_ASSETS:7 }}` | Count of assets that synced in the current month, or within the last `N` days when the `:N` suffix is provided. |
+| `{{ count:asset:field-name }}` | Count of assets with a specific custom field checkbox set to true (e.g., `{{ count:asset:bitdefender }}` or `{{ count:asset:threatlocker-installed }}`). |
 
 `{{ ACTIVE_ASSETS }}` tokens scope to the company in the current automation context when available (for example a ticket's company). When no company is present the counts cover the entire tenant. The default form returns assets with a Syncro sync timestamp in the current month; append `:N` to evaluate the past `N` days such as `{{ ACTIVE_ASSETS:1 }}` for the past day.
+
+### Asset custom field count variables
+
+The `{{ count:asset:field-name }}` variables allow you to count assets that have a specific checkbox custom field set to true. These variables are particularly useful for tracking security software installations, compliance status, or any other asset characteristic tracked via checkbox custom fields.
+
+**Usage examples:**
+
+- `{{ count:asset:bitdefender }}` - Count assets with the "bitdefender" checkbox enabled
+- `{{ count:asset:threatlocker-installed }}` - Count assets with the "threatlocker-installed" checkbox enabled
+- `{{ count:asset:warranty-active }}` - Count assets with the "warranty-active" checkbox enabled
+
+**Context scoping:**
+
+Like `ACTIVE_ASSETS`, these counters automatically scope to the company associated with the current ticket when used in ticket automations. When no company context is available, they count across all companies in the tenant.
+
+**Field name matching:**
+
+The field name in the variable (after `count:asset:`) must match the exact name of a checkbox custom field defined in **Admin → Asset Custom Fields**. The comparison is case-sensitive and the field must be of type "checkbox".
+
+**Example automation use case:**
+
+```
+Subject: Security Software Status for {{ COMPANY_NAME }}
+Body: You have {{ count:asset:bitdefender }} assets with Bitdefender and {{ count:asset:threatlocker-installed }} assets with ThreatLocker installed.
+```
 
 ## Message templates
 
