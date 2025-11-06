@@ -401,3 +401,219 @@ async def test_create_ticket_module_error_handling(monkeypatch):
     
     assert result["status"] == "failed" or result.get("last_error") == "Database connection failed"
     assert "subject" in result
+
+
+@pytest.mark.anyio
+async def test_create_ticket_module_creates_initial_reply_when_requester_and_description_provided(monkeypatch):
+    """Test that initial conversation history is created when requester and description are provided."""
+    created_tickets = []
+    
+    async def fake_create_ticket(**kwargs):
+        created_tickets.append(kwargs)
+        return {
+            "id": 1001,
+            "ticket_number": "TKT-1001",
+            "subject": kwargs["subject"],
+            "description": kwargs.get("description"),
+            "requester_id": kwargs.get("requester_id"),
+        }
+    
+    async def fake_create_manual_event(**kwargs):
+        return {"id": 7}
+    
+    async def fake_record_attempt(*args, **kwargs):
+        pass
+    
+    async def fake_mark_event_completed(*args, **kwargs):
+        pass
+    
+    async def fake_get_event(event_id):
+        return {
+            "id": event_id,
+            "status": "succeeded",
+            "response_status": 200,
+        }
+    
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(
+        modules_service.webhook_monitor,
+        "create_manual_event",
+        fake_create_manual_event,
+    )
+    monkeypatch.setattr(
+        modules_service.webhook_repo,
+        "record_attempt",
+        fake_record_attempt,
+    )
+    monkeypatch.setattr(
+        modules_service.webhook_repo,
+        "mark_event_completed",
+        fake_mark_event_completed,
+    )
+    monkeypatch.setattr(
+        modules_service.webhook_repo,
+        "get_event",
+        fake_get_event,
+    )
+    
+    # Test with requester and description - should pass initial_reply_author_id
+    result = await modules_service._invoke_create_ticket(
+        settings={},
+        payload={
+            "subject": "Scheduled maintenance",
+            "description": "Performing scheduled server maintenance",
+            "requester_id": 15,
+        },
+        event_future=None,
+    )
+    
+    assert result["status"] == "succeeded"
+    assert result.get("ticket_id") == 1001
+    assert len(created_tickets) == 1
+    ticket = created_tickets[0]
+    assert ticket["subject"] == "Scheduled maintenance"
+    assert ticket["description"] == "Performing scheduled server maintenance"
+    assert ticket["requester_id"] == 15
+    assert ticket["initial_reply_author_id"] == 15
+
+
+@pytest.mark.anyio
+async def test_create_ticket_module_no_initial_reply_when_no_requester(monkeypatch):
+    """Test that no initial conversation history is created when requester is missing."""
+    created_tickets = []
+    
+    async def fake_create_ticket(**kwargs):
+        created_tickets.append(kwargs)
+        return {
+            "id": 1002,
+            "ticket_number": "TKT-1002",
+            "subject": kwargs["subject"],
+            "description": kwargs.get("description"),
+        }
+    
+    async def fake_create_manual_event(**kwargs):
+        return {"id": 8}
+    
+    async def fake_record_attempt(*args, **kwargs):
+        pass
+    
+    async def fake_mark_event_completed(*args, **kwargs):
+        pass
+    
+    async def fake_get_event(event_id):
+        return {
+            "id": event_id,
+            "status": "succeeded",
+            "response_status": 200,
+        }
+    
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(
+        modules_service.webhook_monitor,
+        "create_manual_event",
+        fake_create_manual_event,
+    )
+    monkeypatch.setattr(
+        modules_service.webhook_repo,
+        "record_attempt",
+        fake_record_attempt,
+    )
+    monkeypatch.setattr(
+        modules_service.webhook_repo,
+        "mark_event_completed",
+        fake_mark_event_completed,
+    )
+    monkeypatch.setattr(
+        modules_service.webhook_repo,
+        "get_event",
+        fake_get_event,
+    )
+    
+    # Test without requester - should not pass initial_reply_author_id
+    result = await modules_service._invoke_create_ticket(
+        settings={},
+        payload={
+            "subject": "System alert",
+            "description": "Automated system notification",
+        },
+        event_future=None,
+    )
+    
+    assert result["status"] == "succeeded"
+    assert len(created_tickets) == 1
+    ticket = created_tickets[0]
+    assert ticket["subject"] == "System alert"
+    assert ticket["description"] == "Automated system notification"
+    assert ticket["requester_id"] is None
+    assert ticket["initial_reply_author_id"] is None
+
+
+@pytest.mark.anyio
+async def test_create_ticket_module_no_initial_reply_when_no_description(monkeypatch):
+    """Test that no initial conversation history is created when description is missing."""
+    created_tickets = []
+    
+    async def fake_create_ticket(**kwargs):
+        created_tickets.append(kwargs)
+        return {
+            "id": 1003,
+            "ticket_number": "TKT-1003",
+            "subject": kwargs["subject"],
+            "requester_id": kwargs.get("requester_id"),
+        }
+    
+    async def fake_create_manual_event(**kwargs):
+        return {"id": 9}
+    
+    async def fake_record_attempt(*args, **kwargs):
+        pass
+    
+    async def fake_mark_event_completed(*args, **kwargs):
+        pass
+    
+    async def fake_get_event(event_id):
+        return {
+            "id": event_id,
+            "status": "succeeded",
+            "response_status": 200,
+        }
+    
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(
+        modules_service.webhook_monitor,
+        "create_manual_event",
+        fake_create_manual_event,
+    )
+    monkeypatch.setattr(
+        modules_service.webhook_repo,
+        "record_attempt",
+        fake_record_attempt,
+    )
+    monkeypatch.setattr(
+        modules_service.webhook_repo,
+        "mark_event_completed",
+        fake_mark_event_completed,
+    )
+    monkeypatch.setattr(
+        modules_service.webhook_repo,
+        "get_event",
+        fake_get_event,
+    )
+    
+    # Test without description - should not pass initial_reply_author_id
+    result = await modules_service._invoke_create_ticket(
+        settings={},
+        payload={
+            "subject": "Empty ticket",
+            "requester_id": 20,
+        },
+        event_future=None,
+    )
+    
+    assert result["status"] == "succeeded"
+    assert len(created_tickets) == 1
+    ticket = created_tickets[0]
+    assert ticket["subject"] == "Empty ticket"
+    assert ticket["description"] is None
+    assert ticket["requester_id"] == 20
+    assert ticket["initial_reply_author_id"] is None
