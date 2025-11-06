@@ -11,3 +11,4 @@ var/
 *.pyd
 .pytest_cache/
 venv/
+test_venv/
