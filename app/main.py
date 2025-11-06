@@ -5847,36 +5847,36 @@ async def verify_staff_member(staff_id: int, request: Request):
         admin_name=admin_name or None,
     )
 
-    settings = get_settings()
     staff_company = await company_repo.get_company_by_id(staff.get("company_id"))
-    event_record: dict[str, Any] | None = None
-    if settings.verify_webhook_url:
-        headers = {"Content-Type": "application/json"}
-        if settings.verify_api_key:
-            headers["Authorization"] = f"Bearer {settings.verify_api_key}"
-        payload = {
-            "mobilePhone": staff.get("mobile_phone"),
-            "code": code,
-            "adminName": admin_name,
-            "companyName": staff_company.get("name") if staff_company else "",
-        }
-        try:
-            event_record = await webhook_monitor.enqueue_event(
-                name="staff-verification",
-                target_url=str(settings.verify_webhook_url),
-                payload=payload,
-                headers=headers,
-                max_attempts=5,
-                backoff_seconds=180,
-                attempt_immediately=True,
-            )
-        except Exception as exc:
-            log_error("Verify webhook failed", staff_id=staff_id, error=str(exc))
+    company_name = staff_company.get("name") if staff_company else ""
+    
+    # Construct SMS message
+    message_parts = [f"Your verification code is: {code}"]
+    if admin_name:
+        message_parts.append(f"Requested by: {admin_name}")
+    if company_name:
+        message_parts.append(f"Company: {company_name}")
+    message = " | ".join(message_parts)
+    
+    # Send SMS via SMS Gateway module
+    result: dict[str, Any] = {}
+    try:
+        result = await modules_service.trigger_module(
+            "sms-gateway",
+            {
+                "message": message,
+                "phoneNumbers": [staff.get("mobile_phone")],
+            },
+            background=False,
+        )
+    except Exception as exc:
+        log_error("SMS Gateway module failed", staff_id=staff_id, error=str(exc))
+        result = {"status": "error", "error": str(exc)}
 
-    status_code = int(event_record.get("response_status")) if event_record and event_record.get("response_status") is not None else None
-    success = True
-    if event_record:
-        success = event_record.get("status") == "succeeded"
+    status_code = int(result.get("response_status")) if result.get("response_status") is not None else None
+    # Accept both "succeeded" and "queued" as success states
+    # (background=False should always return "succeeded", but we check "queued" defensively)
+    success = result.get("status") in {"succeeded", "queued"}
 
     return JSONResponse({
         "success": success,
