@@ -1,5 +1,4 @@
 """Test asset custom field count variables in dynamic_variables service."""
-import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
