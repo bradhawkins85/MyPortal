@@ -890,28 +890,17 @@
     const companyField = query('task-company');
     const jsonPayloadField = query('task-json-payload-field');
     const jsonPayloadTextarea = query('task-json-payload');
-    const descriptionField = query('task-description');
-    const descriptionHelp = query('task-description-help');
+    const descriptionField = query('task-description-field');
     
     const toggleJsonPayloadField = () => {
-      if (commandField && jsonPayloadField) {
+      if (commandField && jsonPayloadField && descriptionField) {
         const command = commandField.value;
         if (command === 'create_scheduled_ticket') {
           jsonPayloadField.style.display = 'block';
-          if (descriptionField) {
-            descriptionField.style.display = 'none';
-          }
-          if (descriptionHelp) {
-            descriptionHelp.style.display = 'none';
-          }
+          descriptionField.style.display = 'none';
         } else {
           jsonPayloadField.style.display = 'none';
-          if (descriptionField) {
-            descriptionField.style.display = 'block';
-          }
-          if (descriptionHelp) {
-            descriptionHelp.style.display = 'block';
-          }
+          descriptionField.style.display = 'block';
         }
       }
     };
