@@ -1642,6 +1642,11 @@ async def _invoke_create_ticket(
     Accepts a JSON payload with ticket details, supporting variable interpolation
     for all fields. Required fields: subject. Optional fields: description, 
     company_id, assigned_user_id, requester_id, priority, status, category.
+    
+    When both requester_id and description are provided, the description is 
+    automatically added as the initial conversation history entry, attributed 
+    to the requester. This ensures the conversation history is properly populated 
+    from the start for tickets created by scheduled automations.
     """
     # Extract ticket details from payload with defaults
     subject = str(payload.get("subject", "")).strip()
