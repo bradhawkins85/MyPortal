@@ -410,12 +410,16 @@ async def find_relevant_articles_for_ticket(
             relevant_articles.append((article, match_count))
     
     # Sort by match count (descending), then by updated_at (most recent first)
-    relevant_articles.sort(
-        key=lambda x: (
-            -x[1],  # Higher match count first
-            -(x[0].get("updated_at_utc") or datetime.min.replace(tzinfo=timezone.utc)).timestamp() if x[0].get("updated_at_utc") else 0
-        )
-    )
+    def _sort_key(item: tuple[dict[str, Any], int]) -> tuple[int, float]:
+        article, match_count = item
+        updated_at = article.get("updated_at_utc")
+        if updated_at and hasattr(updated_at, "timestamp"):
+            timestamp = updated_at.timestamp()
+        else:
+            timestamp = datetime.min.replace(tzinfo=timezone.utc).timestamp()
+        return (-match_count, -timestamp)
+    
+    relevant_articles.sort(key=_sort_key)
     
     # Return just the articles with their match counts embedded
     result = []
