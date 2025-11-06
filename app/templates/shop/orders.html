@@ -120,7 +120,11 @@
         <tbody>
           {% for order in orders %}
             <tr data-status="{{ order.status_value }}" data-shipping="{{ order.shipping_status_value }}">
-              <td data-label="Order">{{ order.order_number }}</td>
+              <td data-label="Order">
+                <button type="button" class="button-link" data-order-view data-order-number="{{ order.order_number }}" data-company-id="{{ order.company_id }}">
+                  {{ order.order_number }}
+                </button>
+              </td>
               <td data-label="PO Number">{{ order.po_number or '—' }}</td>
               <td data-label="Status">
                 <span class="badge {{ order.status_badge }}">{{ order.status_label }}</span>
@@ -167,9 +171,52 @@
       </table>
     </div>
   </section>
+
+  <!-- Order Details Modal -->
+  <div class="modal" id="order-details-modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-modal-close>
+        <span aria-hidden="true">&times;</span>
+      </button>
+      <h2 class="modal__title" id="modal-order-title">Order Details</h2>
+      <div class="modal__body">
+        <div id="modal-order-loading" class="text-center">
+          <p>Loading order details...</p>
+        </div>
+        <div id="modal-order-content" style="display: none;">
+          <div class="table-wrapper">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Product</th>
+                  <th scope="col">SKU</th>
+                  <th scope="col">Quantity</th>
+                  <th scope="col">Price</th>
+                  {% if current_user and current_user.is_super_admin %}
+                    <th scope="col">Stock (Total)</th>
+                    <th scope="col">Stock NSW</th>
+                    <th scope="col">Stock QLD</th>
+                    <th scope="col">Stock VIC</th>
+                    <th scope="col">Stock SA</th>
+                  {% endif %}
+                </tr>
+              </thead>
+              <tbody id="modal-order-items">
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div id="modal-order-error" style="display: none;" class="alert alert--danger" role="alert">
+          Failed to load order details. Please try again.
+        </div>
+      </div>
+    </div>
+  </div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/admin.js" defer></script>
+  <script src="/static/js/orders.js" defer></script>
 {% endblock %}

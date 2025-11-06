@@ -863,6 +863,11 @@ async def list_order_items(order_number: str, company_id: int) -> list[dict[str,
             p.sku,
             p.description,
             p.image_url,
+            p.stock,
+            p.stock_nsw,
+            p.stock_qld,
+            p.stock_vic,
+            p.stock_sa,
             IF(c.is_vip = 1 AND p.vip_price IS NOT NULL, p.vip_price, p.price) AS price
         FROM shop_orders AS o
         INNER JOIN shop_products AS p ON p.id = o.product_id

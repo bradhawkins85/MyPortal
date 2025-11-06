@@ -39,6 +39,11 @@ class OrderItemResponse(BaseModel):
     order_number: str = Field(alias="orderNumber")
     order_date: datetime | None = Field(default=None, alias="orderDate")
     eta: datetime | None = None
+    stock: int | None = None
+    stock_nsw: int | None = Field(default=None, alias="stockNsw")
+    stock_qld: int | None = Field(default=None, alias="stockQld")
+    stock_vic: int | None = Field(default=None, alias="stockVic")
+    stock_sa: int | None = Field(default=None, alias="stockSa")
 
     model_config = {
         "populate_by_name": True,
