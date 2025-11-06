@@ -116,8 +116,8 @@ async def test_count_assets_by_issue_slug_returns_count(monkeypatch):
     monkeypatch.setattr(issues_repo, "db", dummy_db)
 
     count = await issues_repo.count_assets_by_issue_slug(
-        company_id=5,
         issue_slug="network-outage",
+        company_id=5,
     )
 
     assert count == 15
@@ -137,8 +137,8 @@ async def test_count_assets_by_issue_slug_without_company_filter(monkeypatch):
     monkeypatch.setattr(issues_repo, "db", dummy_db)
 
     count = await issues_repo.count_assets_by_issue_slug(
-        company_id=None,
         issue_slug="network-outage",
+        company_id=None,
     )
 
     assert count == 42
@@ -156,8 +156,8 @@ async def test_count_assets_by_issue_slug_returns_zero_when_no_result(monkeypatc
     monkeypatch.setattr(issues_repo, "db", dummy_db)
 
     count = await issues_repo.count_assets_by_issue_slug(
-        company_id=5,
         issue_slug="network-outage",
+        company_id=5,
     )
 
     assert count == 0
@@ -175,8 +175,8 @@ async def test_list_assets_by_issue_slug_returns_asset_names(monkeypatch):
     monkeypatch.setattr(issues_repo, "db", dummy_db)
 
     assets = await issues_repo.list_assets_by_issue_slug(
-        company_id=5,
         issue_slug="network-outage",
+        company_id=5,
     )
 
     assert assets == ["Server01", "Router01", "Switch01"]
@@ -200,8 +200,8 @@ async def test_list_assets_by_issue_slug_without_company_filter(monkeypatch):
     monkeypatch.setattr(issues_repo, "db", dummy_db)
 
     assets = await issues_repo.list_assets_by_issue_slug(
-        company_id=None,
         issue_slug="network-outage",
+        company_id=None,
     )
 
     assert assets == ["Server01", "Server02"]
@@ -219,8 +219,8 @@ async def test_list_assets_by_issue_slug_returns_empty_list_when_no_results(monk
     monkeypatch.setattr(issues_repo, "db", dummy_db)
 
     assets = await issues_repo.list_assets_by_issue_slug(
-        company_id=5,
         issue_slug="network-outage",
+        company_id=5,
     )
 
     assert assets == []
@@ -238,8 +238,8 @@ async def test_list_assets_by_issue_slug_filters_none_names(monkeypatch):
     monkeypatch.setattr(issues_repo, "db", dummy_db)
 
     assets = await issues_repo.list_assets_by_issue_slug(
-        company_id=5,
         issue_slug="network-outage",
+        company_id=5,
     )
 
     # Should only include non-None names
