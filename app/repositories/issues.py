@@ -41,6 +41,9 @@ def _normalise_issue(row: Mapping[str, Any] | None) -> IssueRecord | None:
     name = record.get("name")
     if isinstance(name, bytes):
         record["name"] = name.decode("utf-8", errors="ignore")
+    slug = record.get("slug")
+    if isinstance(slug, bytes):
+        record["slug"] = slug.decode("utf-8", errors="ignore")
     description = record.get("description")
     if isinstance(description, bytes):
         record["description"] = description.decode("utf-8", errors="ignore")
@@ -100,6 +103,7 @@ async def list_issues_with_assignments(
         SELECT
             i.id AS issue_id,
             i.name,
+            i.slug,
             i.description,
             i.created_by,
             i.updated_by,
@@ -153,7 +157,7 @@ async def list_issues_with_assignments(
         # When no assignments exist at all ensure standalone issues are returned
         standalone_rows = await db.fetch_all(
             """
-            SELECT id AS issue_id, name, description, created_by, updated_by, created_at_utc, updated_at_utc
+            SELECT id AS issue_id, name, slug, description, created_by, updated_by, created_at_utc, updated_at_utc
             FROM issue_definitions
             ORDER BY name ASC
             """
@@ -177,7 +181,7 @@ async def list_issues_with_assignments(
 
 async def get_issue_by_id(issue_id: int) -> IssueRecord | None:
     row = await db.fetch_one(
-        "SELECT id AS issue_id, name, description, created_by, updated_by, created_at_utc, updated_at_utc FROM issue_definitions WHERE id = %s",
+        "SELECT id AS issue_id, name, slug, description, created_by, updated_by, created_at_utc, updated_at_utc FROM issue_definitions WHERE id = %s",
         (issue_id,),
     )
     issue = _normalise_issue(row)
@@ -207,7 +211,7 @@ async def get_issue_by_id(issue_id: int) -> IssueRecord | None:
 async def get_issue_by_name(name: str) -> IssueRecord | None:
     row = await db.fetch_one(
         """
-        SELECT id AS issue_id, name, description, created_by, updated_by, created_at_utc, updated_at_utc
+        SELECT id AS issue_id, name, slug, description, created_by, updated_by, created_at_utc, updated_at_utc
         FROM issue_definitions
         WHERE LOWER(name) = LOWER(%s)
         LIMIT 1
@@ -242,13 +246,52 @@ async def get_issue_by_name(name: str) -> IssueRecord | None:
     return issue
 
 
-async def create_issue(*, name: str, description: str | None, created_by: int | None) -> IssueRecord:
+async def get_issue_by_slug(slug: str) -> IssueRecord | None:
+    """Get an issue by its slug."""
+    row = await db.fetch_one(
+        """
+        SELECT id AS issue_id, name, slug, description, created_by, updated_by, created_at_utc, updated_at_utc
+        FROM issue_definitions
+        WHERE LOWER(slug) = LOWER(%s)
+        LIMIT 1
+        """,
+        (slug,),
+    )
+    if not row:
+        return None
+    issue = _normalise_issue(row)
+    if not issue or issue.get("issue_id") is None:
+        return issue
+    assignments = await db.fetch_all(
+        """
+        SELECT
+            ics.id AS assignment_id,
+            ics.issue_id,
+            ics.company_id,
+            ics.status,
+            ics.notes,
+            ics.updated_by,
+            ics.created_at_utc,
+            ics.updated_at_utc,
+            c.name AS company_name
+        FROM issue_company_statuses AS ics
+        INNER JOIN companies AS c ON c.id = ics.company_id
+        WHERE ics.issue_id = %s
+        ORDER BY c.name ASC
+        """,
+        (issue["issue_id"],),
+    )
+    issue["assignments"] = [assignment for assignment in (_normalise_assignment(row) for row in assignments) if assignment]
+    return issue
+
+
+async def create_issue(*, name: str, description: str | None, created_by: int | None, slug: str | None = None) -> IssueRecord:
     issue_id = await db.execute_returning_lastrowid(
         """
-        INSERT INTO issue_definitions (name, description, created_by, updated_by)
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO issue_definitions (name, slug, description, created_by, updated_by)
+        VALUES (%s, %s, %s, %s, %s)
         """,
-        (name, description, created_by, created_by),
+        (name, slug, description, created_by, created_by),
     )
     issue = await get_issue_by_id(issue_id)
     if issue:
@@ -256,6 +299,7 @@ async def create_issue(*, name: str, description: str | None, created_by: int | 
     fallback: IssueRecord = {
         "issue_id": issue_id,
         "name": name,
+        "slug": slug,
         "description": description,
         "created_by": created_by,
         "updated_by": created_by,
@@ -270,6 +314,7 @@ async def update_issue(
     issue_id: int,
     *,
     name: str | None = None,
+    slug: str | None = None,
     description: str | None = None,
     updated_by: int | None = None,
 ) -> IssueRecord:
@@ -278,6 +323,9 @@ async def update_issue(
     if name is not None:
         updates.append("name = %s")
         params.append(name)
+    if slug is not None:
+        updates.append("slug = %s")
+        params.append(slug)
     if description is not None:
         updates.append("description = %s")
         params.append(description)
@@ -389,3 +437,65 @@ async def list_assignments_for_issue(issue_id: int) -> list[AssignmentRecord]:
         (issue_id,),
     )
     return [assignment for assignment in (_normalise_assignment(row) for row in rows) if assignment]
+
+
+async def count_assets_by_issue_slug(*, issue_slug: str, company_id: int | None = None) -> int:
+    """Count assets that have the specified issue assigned to their company.
+    
+    Args:
+        issue_slug: The slug of the issue to count assets for
+        company_id: Optional company ID to filter by
+        
+    Returns:
+        Count of assets with the issue
+    """
+    query = """
+        SELECT COUNT(DISTINCT a.id) as count
+        FROM assets a
+        JOIN issue_company_statuses ics ON ics.company_id = a.company_id
+        JOIN issue_definitions i ON i.id = ics.issue_id
+        WHERE LOWER(i.slug) = LOWER(%s)
+    """
+    params = [issue_slug]
+    
+    if company_id is not None:
+        query += " AND a.company_id = %s"
+        params.append(company_id)
+    
+    row = await db.fetch_one(query, tuple(params))
+    if not row:
+        return 0
+    
+    return int(row.get("count", 0))
+
+
+async def list_assets_by_issue_slug(*, issue_slug: str, company_id: int | None = None) -> list[str]:
+    """List asset names that have the specified issue assigned to their company.
+    
+    Args:
+        issue_slug: The slug of the issue to list assets for
+        company_id: Optional company ID to filter by
+        
+    Returns:
+        List of asset names with the issue
+    """
+    query = """
+        SELECT DISTINCT a.name
+        FROM assets a
+        JOIN issue_company_statuses ics ON ics.company_id = a.company_id
+        JOIN issue_definitions i ON i.id = ics.issue_id
+        WHERE LOWER(i.slug) = LOWER(%s)
+    """
+    params = [issue_slug]
+    
+    if company_id is not None:
+        query += " AND a.company_id = %s"
+        params.append(company_id)
+    
+    query += " ORDER BY a.name ASC"
+    
+    rows = await db.fetch_all(query, tuple(params))
+    if not rows:
+        return []
+    
+    return [row.get("name") for row in rows if row.get("name")]

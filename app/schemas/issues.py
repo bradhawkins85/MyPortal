@@ -45,6 +45,7 @@ class IssueAssignmentResponse(BaseModel):
 
 class IssueBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
+    slug: Optional[str] = Field(default=None, max_length=255)
     description: Optional[str] = Field(default=None, max_length=2000)
 
     @validator("name")
@@ -53,6 +54,13 @@ class IssueBase(BaseModel):
         if not cleaned:
             raise ValueError("Issue name is required")
         return cleaned
+
+    @validator("slug")
+    def validate_slug(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
     @validator("description")
     def validate_description(cls, value: Optional[str]) -> Optional[str]:
@@ -69,6 +77,7 @@ class IssueCreate(IssueBase):
 class IssueUpdate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=2000)
     new_name: Optional[str] = Field(default=None, max_length=255)
+    new_slug: Optional[str] = Field(default=None, max_length=255)
     add_companies: List[IssueAssignmentCreate] = Field(default_factory=list)
 
     @validator("description")
@@ -87,9 +96,17 @@ class IssueUpdate(BaseModel):
             raise ValueError("New issue name cannot be empty")
         return cleaned
 
+    @validator("new_slug")
+    def validate_new_slug(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
 
 class IssueResponse(BaseModel):
     name: str
+    slug: Optional[str]
     description: Optional[str]
     created_at: Optional[datetime]
     created_at_iso: Optional[str]
