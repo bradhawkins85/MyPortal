@@ -66,6 +66,7 @@ from app.api.routes import (
     scheduler as scheduler_api,
     roles,
     staff as staff_api,
+    tag_exclusions,
     tickets as tickets_api,
     users,
     system,
@@ -519,6 +520,7 @@ app.include_router(system.router)
 app.include_router(uptimekuma.router)
 app.include_router(xero.router)
 app.include_router(asset_custom_fields.router)
+app.include_router(tag_exclusions.router)
 
 HELPDESK_PERMISSION_KEY = tickets_service.HELPDESK_PERMISSION_KEY
 ISSUE_TRACKER_PERMISSION_KEY = issues_service.ISSUE_TRACKER_PERMISSION_KEY
@@ -7851,6 +7853,28 @@ async def admin_forms_page(request: Request):
         "form_assignment_summary": form_assignment_summary,
     }
     return await _render_template("admin/forms.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/tag-exclusions", response_class=HTMLResponse)
+async def admin_tag_exclusions_page(
+    request: Request,
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    
+    return templates.TemplateResponse(
+        "admin/tag_exclusions.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "is_super_admin": current_user.get("is_super_admin", False),
+            "success_message": _sanitize_message(success),
+            "error_message": _sanitize_message(error),
+        },
+    )
 
 
 @app.get("/admin/knowledge-base", response_class=HTMLResponse)
