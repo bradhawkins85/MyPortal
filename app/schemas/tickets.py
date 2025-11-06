@@ -266,3 +266,37 @@ class SyncroTicketImportSummary(BaseModel):
     created: int = Field(default=0, ge=0)
     updated: int = Field(default=0, ge=0)
     skipped: int = Field(default=0, ge=0)
+
+
+class TicketTaskCreate(BaseModel):
+    task_name: str = Field(..., min_length=1, max_length=255, alias="taskName")
+    sort_order: int = Field(default=0, alias="sortOrder")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TicketTaskUpdate(BaseModel):
+    task_name: Optional[str] = Field(default=None, min_length=1, max_length=255, alias="taskName")
+    is_completed: Optional[bool] = Field(default=None, alias="isCompleted")
+    sort_order: Optional[int] = Field(default=None, alias="sortOrder")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TicketTask(BaseModel):
+    id: int
+    ticket_id: int
+    task_name: str
+    is_completed: bool
+    completed_at: Optional[datetime] = None
+    completed_by: Optional[int] = None
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TicketTaskListResponse(BaseModel):
+    items: list[TicketTask] = Field(default_factory=list)
