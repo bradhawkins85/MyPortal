@@ -413,10 +413,8 @@ async def find_relevant_articles_for_ticket(
     def _sort_key(item: tuple[dict[str, Any], int]) -> tuple[int, float]:
         article, match_count = item
         updated_at = article.get("updated_at_utc")
-        if updated_at and hasattr(updated_at, "timestamp"):
-            timestamp = updated_at.timestamp()
-        else:
-            timestamp = datetime.min.replace(tzinfo=timezone.utc).timestamp()
+        # Use timestamp if available, otherwise use 0 (will sort to the end)
+        timestamp = updated_at.timestamp() if updated_at else 0.0
         return (-match_count, -timestamp)
     
     relevant_articles.sort(key=_sort_key)
