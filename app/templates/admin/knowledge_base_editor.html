@@ -93,6 +93,26 @@
             </div>
           </div>
         </fieldset>
+        <fieldset class="kb-admin__fieldset" data-kb-ai-tags-section hidden>
+          <legend class="kb-admin__fieldset-title">AI Tags</legend>
+          <div class="kb-admin__fieldset-body">
+            <div class="form-field">
+              <div class="kb-admin__ai-tags-header">
+                <label class="form-label">Generated tags</label>
+                <button type="button" class="button button--ghost button--sm" data-kb-refresh-tags>
+                  <span class="button__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M12 4V2l-3 3 3 3V6a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg>
+                  </span>
+                  <span class="button__label">Refresh tags</span>
+                </button>
+              </div>
+              <div class="tag-list" id="kb-ai-tags-container" data-kb-ai-tags>
+                <span class="card__empty">No AI tags yet. Tags will be generated when you save the article.</span>
+              </div>
+              <p class="form-help">AI-generated tags are automatically created when you save. Click a tag to remove it.</p>
+            </div>
+          </div>
+        </fieldset>
         <section class="kb-admin__sections-card" aria-labelledby="kb-article-sections-heading">
           <header class="kb-admin__sections-header">
             <div class="kb-admin__sections-title-group">
