@@ -1,0 +1,7 @@
+{
+  "guid": "0e5f8e66-68cd-456e-a4ff-388786cdb28f",
+  "occurred_at": "2025-11-06T11:22:51.604045+00:00",
+  "change_type": "feature",
+  "summary": "Link knowledge base articles to tickets based on AI tag matching",
+  "content_hash": ""
+}
