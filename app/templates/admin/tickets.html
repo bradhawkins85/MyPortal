@@ -5,7 +5,8 @@
   {% set show_syncro_import = syncro_module_enabled and (is_super_admin or (is_helpdesk_technician | default(false))) %}
   {% set show_ticket_status_editor = is_super_admin %}
   {% set show_labour_type_editor = is_super_admin %}
-  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor %}
+  {% set show_tag_exclusions = is_super_admin %}
+  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor or show_tag_exclusions %}
   <div class="header-title-menu">
     <span class="header-title-menu__label">Ticketing workspace</span>
     {% if show_ticket_tools %}
@@ -54,6 +55,11 @@
               >
                 Manage labour types
               </button>
+            </li>
+          {% endif %}
+          {% if show_tag_exclusions %}
+            <li class="header-title-menu__item" role="none">
+              <a href="/admin/tag-exclusions" class="header-title-menu__link" role="menuitem">AI tag exclusions</a>
             </li>
           {% endif %}
         </ul>

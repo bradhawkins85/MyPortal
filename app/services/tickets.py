@@ -19,7 +19,7 @@ from app.repositories.tickets import TicketRecord
 from app.services import automations as automations_service
 from app.repositories import users as user_repo
 from app.services import modules as modules_service
-from app.services.tagging import filter_helpful_slugs, is_helpful_slug, slugify_tag
+from app.services.tagging import filter_helpful_slugs, get_all_excluded_tags, is_helpful_slug, slugify_tag
 from app.services.sanitization import sanitize_rich_text
 from app.services.realtime import RefreshNotifier, refresh_notifier
 
@@ -844,7 +844,7 @@ async def refresh_ticket_ai_tags(ticket_id: int) -> None:
         payload = result.get("response")
         tags: list[str] | None = None
         if status_value == "succeeded":
-            tags = _extract_tags(payload, ticket)
+            tags = await _extract_tags(payload, ticket)
         updated_at = datetime.now(timezone.utc)
         await _safely_call(
             tickets_repo.update_ticket,
@@ -1223,34 +1223,35 @@ def _normalise_resolution_state(label: str | None) -> str | None:
     return None
 
 
-def _extract_tags(payload: Any, ticket: Mapping[str, Any]) -> list[str]:
-    tags = _normalise_tag_list(payload)
+async def _extract_tags(payload: Any, ticket: Mapping[str, Any]) -> list[str]:
+    excluded_tags = await get_all_excluded_tags()
+    tags = _normalise_tag_list(payload, excluded_tags)
     if tags:
-        return _finalise_tags(tags, ticket)
+        return _finalise_tags(tags, ticket, excluded_tags)
     if isinstance(payload, Mapping):
         nested = payload.get("response") or payload.get("message")
-        tags = _normalise_tag_list(nested)
+        tags = _normalise_tag_list(nested, excluded_tags)
         if tags:
-            return _finalise_tags(tags, ticket)
+            return _finalise_tags(tags, ticket, excluded_tags)
     text = str(payload).strip() if payload is not None else ""
     if not text:
-        return _finalise_tags([], ticket)
+        return _finalise_tags([], ticket, excluded_tags)
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
-        tags = _normalise_tag_list(text)
+        tags = _normalise_tag_list(text, excluded_tags)
     else:
-        tags = _normalise_tag_list(parsed)
-    return _finalise_tags(tags, ticket)
+        tags = _normalise_tag_list(parsed, excluded_tags)
+    return _finalise_tags(tags, ticket, excluded_tags)
 
 
-def _normalise_tag_list(source: Any) -> list[str]:
+def _normalise_tag_list(source: Any, excluded_tags: set[str] | None = None) -> list[str]:
     if source is None:
         return []
     if isinstance(source, Mapping):
         for key in ("tags", "keywords", "labels", "topics"):
             if key in source:
-                return _normalise_tag_list(source[key])
+                return _normalise_tag_list(source[key], excluded_tags)
         return []
     if isinstance(source, str):
         segments = [segment.strip() for segment in re.split(r"[,\n;]+", source) if segment.strip()]
@@ -1264,7 +1265,7 @@ def _normalise_tag_list(source: Any) -> list[str]:
     for item in iterable:
         text = str(item).strip()
         slug = slugify_tag(text)
-        if slug is None or not is_helpful_slug(slug):
+        if slug is None or not is_helpful_slug(slug, excluded_tags):
             continue
         if slug in seen:
             continue
@@ -1273,10 +1274,10 @@ def _normalise_tag_list(source: Any) -> list[str]:
     return tags
 
 
-def _finalise_tags(tags: list[str], ticket: Mapping[str, Any]) -> list[str]:
+def _finalise_tags(tags: list[str], ticket: Mapping[str, Any], excluded_tags: set[str] | None = None) -> list[str]:
     unique: list[str] = []
     seen: set[str] = set()
-    for tag in filter_helpful_slugs(tags):
+    for tag in filter_helpful_slugs(tags, excluded_tags):
         if tag in seen:
             continue
         unique.append(tag)
@@ -1284,10 +1285,10 @@ def _finalise_tags(tags: list[str], ticket: Mapping[str, Any]) -> list[str]:
         if len(unique) >= 10:
             return unique[:10]
 
-    for candidate in _generate_candidate_tags(ticket):
+    for candidate in _generate_candidate_tags(ticket, excluded_tags):
         if len(unique) >= 10:
             break
-        if candidate in seen or not is_helpful_slug(candidate):
+        if candidate in seen or not is_helpful_slug(candidate, excluded_tags):
             continue
         unique.append(candidate)
         seen.add(candidate)
@@ -1295,7 +1296,7 @@ def _finalise_tags(tags: list[str], ticket: Mapping[str, Any]) -> list[str]:
     for fallback in _DEFAULT_TAG_FILL:
         if len(unique) >= 5:
             break
-        if fallback in seen or not is_helpful_slug(fallback):
+        if fallback in seen or not is_helpful_slug(fallback, excluded_tags):
             continue
         unique.append(fallback)
         seen.add(fallback)
@@ -1304,7 +1305,7 @@ def _finalise_tags(tags: list[str], ticket: Mapping[str, Any]) -> list[str]:
         for fallback in _DEFAULT_TAG_FILL:
             if len(unique) >= 5:
                 break
-            if fallback in seen or not is_helpful_slug(fallback):
+            if fallback in seen or not is_helpful_slug(fallback, excluded_tags):
                 continue
             unique.append(fallback)
             seen.add(fallback)
@@ -1312,13 +1313,13 @@ def _finalise_tags(tags: list[str], ticket: Mapping[str, Any]) -> list[str]:
     return unique[:10]
 
 
-def _generate_candidate_tags(ticket: Mapping[str, Any]) -> list[str]:
+def _generate_candidate_tags(ticket: Mapping[str, Any], excluded_tags: set[str] | None = None) -> list[str]:
     candidates: list[str] = []
     for key in ("category", "module_slug", "priority", "status"):
         value = ticket.get(key)
         if isinstance(value, str):
             slug = slugify_tag(value)
-            if slug and is_helpful_slug(slug):
+            if slug and is_helpful_slug(slug, excluded_tags):
                 candidates.append(slug)
     subject = str(ticket.get("subject") or "")
     description = _prepare_prompt_text(ticket.get("description"))
@@ -1326,13 +1327,13 @@ def _generate_candidate_tags(ticket: Mapping[str, Any]) -> list[str]:
         if len(word) < 3:
             continue
         slug = slugify_tag(word)
-        if slug and is_helpful_slug(slug):
+        if slug and is_helpful_slug(slug, excluded_tags):
             candidates.append(slug)
     for word in re.findall(r"[A-Za-z0-9]+", description):
         if len(word) < 5:
             continue
         slug = slugify_tag(word)
-        if slug and is_helpful_slug(slug):
+        if slug and is_helpful_slug(slug, excluded_tags):
             candidates.append(slug)
         if len(candidates) >= 25:
             break
