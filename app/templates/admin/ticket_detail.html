@@ -357,6 +357,33 @@
               </dl>
             </div>
           </article>
+
+          {% if relevant_kb_articles %}
+            <article class="card card--panel">
+              <header class="card__header">
+                <h2 class="card__title">Related Knowledge Base Articles</h2>
+              </header>
+              <div class="card__body">
+                <ul class="list">
+                  {% for article in relevant_kb_articles %}
+                    <li class="list__item">
+                      <a href="/knowledge-base?slug={{ article.slug }}" target="_blank" rel="noopener noreferrer">
+                        <strong>{{ article.title }}</strong>
+                      </a>
+                      {% if article.summary %}
+                        <div class="list__meta">{{ article.summary }}</div>
+                      {% endif %}
+                      {% if article.matching_tags_count %}
+                        <div class="list__meta">
+                          <span class="badge badge--muted">{{ article.matching_tags_count }} matching tag{{ 's' if article.matching_tags_count > 1 else '' }}</span>
+                        </div>
+                      {% endif %}
+                    </li>
+                  {% endfor %}
+                </ul>
+              </div>
+            </article>
+          {% endif %}
         </div>
 
         <div class="management__column management__column--content">

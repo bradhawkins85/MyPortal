@@ -91,6 +91,7 @@ from app.repositories import assets as asset_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import licenses as license_repo
 from app.repositories import forms as forms_repo
+from app.repositories import knowledge_base as knowledge_base_repo
 from app.repositories import m365 as m365_repo
 from app.core.notifications import DEFAULT_NOTIFICATION_EVENT_TYPES, merge_event_types
 from app.repositories import notifications as notifications_repo
@@ -9588,6 +9589,16 @@ async def _render_portal_ticket_detail(
             }
         )
 
+    # Find relevant knowledge base articles based on AI tag matching
+    relevant_articles: list[dict[str, Any]] = []
+    ticket_ai_tags = ticket.get("ai_tags") or []
+    if ticket_ai_tags:
+        min_matching_tags = settings.ai_tag_threshold
+        relevant_articles = await knowledge_base_repo.find_relevant_articles_for_ticket(
+            ticket_ai_tags=ticket_ai_tags,
+            min_matching_tags=min_matching_tags,
+        )
+
     extra = {
         "title": f"Ticket {ticket_id}",
         "ticket": {
@@ -9611,6 +9622,7 @@ async def _render_portal_ticket_detail(
         "is_requester": is_requester,
         "is_watcher": is_watcher,
         "has_helpdesk_access": has_helpdesk_access,
+        "relevant_kb_articles": relevant_articles,
         "success_message": success_message,
         "error_message": error_message,
         "reply_error": reply_error,
@@ -9947,6 +9959,16 @@ async def _render_ticket_detail(
 
     asset_options.sort(key=lambda option: option["label"].lower())
 
+    # Find relevant knowledge base articles based on AI tag matching
+    relevant_articles: list[dict[str, Any]] = []
+    ticket_ai_tags = ticket.get("ai_tags") or []
+    if ticket_ai_tags:
+        min_matching_tags = settings.ai_tag_threshold
+        relevant_articles = await knowledge_base_repo.find_relevant_articles_for_ticket(
+            ticket_ai_tags=ticket_ai_tags,
+            min_matching_tags=min_matching_tags,
+        )
+
     extra = {
         "title": f"Ticket #{ticket_id}",
         "ticket": ticket,
@@ -9981,6 +10003,7 @@ async def _render_ticket_detail(
         "ticket_asset_linked_data": serialisable_ticket_assets,
         "tacticalrmm_base_url": tactical_base_url,
         "can_delete_ticket": bool(user.get("is_super_admin")),
+        "relevant_kb_articles": relevant_articles,
         "success_message": success_message,
         "error_message": error_message,
     }

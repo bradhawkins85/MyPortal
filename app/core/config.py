@@ -89,6 +89,11 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="FAIL2BAN_LOG_PATH",
     )
+    ai_tag_threshold: int = Field(
+        default=1,
+        validation_alias="AI_TAG_THRESHOLD",
+        ge=1,
+    )
 
     @field_validator(
         "syncro_webhook_url",

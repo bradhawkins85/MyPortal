@@ -361,3 +361,68 @@ async def replace_article_sections(
             (article_id, position_int, heading, content),
         )
 
+
+async def find_relevant_articles_for_ticket(
+    ticket_ai_tags: Sequence[str],
+    min_matching_tags: int = 1,
+) -> list[dict[str, Any]]:
+    """Find published knowledge base articles relevant to a ticket based on matching AI tags.
+    
+    Args:
+        ticket_ai_tags: List of AI tags from the ticket
+        min_matching_tags: Minimum number of matching tags required (default: 1)
+    
+    Returns:
+        List of article dictionaries with matching tag counts, sorted by relevance
+    """
+    if not ticket_ai_tags or min_matching_tags < 1:
+        return []
+    
+    # Normalize ticket tags to lowercase for case-insensitive comparison
+    normalized_ticket_tags = {tag.lower() for tag in ticket_ai_tags if tag}
+    
+    if not normalized_ticket_tags:
+        return []
+    
+    # Fetch all published articles
+    all_articles = await list_articles(include_unpublished=False)
+    
+    relevant_articles: list[tuple[dict[str, Any], int]] = []
+    
+    for article in all_articles:
+        article_tags = article.get("ai_tags") or []
+        excluded_tags = article.get("excluded_ai_tags") or []
+        
+        # Normalize article tags
+        normalized_article_tags = {tag.lower() for tag in article_tags if tag}
+        normalized_excluded_tags = {tag.lower() for tag in excluded_tags if tag}
+        
+        # Check if any ticket tags are in the excluded list
+        if normalized_ticket_tags & normalized_excluded_tags:
+            continue
+        
+        # Count matching tags
+        matching_tags = normalized_ticket_tags & normalized_article_tags
+        match_count = len(matching_tags)
+        
+        # Only include if we meet the minimum threshold
+        if match_count >= min_matching_tags:
+            relevant_articles.append((article, match_count))
+    
+    # Sort by match count (descending), then by updated_at (most recent first)
+    relevant_articles.sort(
+        key=lambda x: (
+            -x[1],  # Higher match count first
+            -(x[0].get("updated_at_utc") or datetime.min).timestamp() if x[0].get("updated_at_utc") else 0
+        )
+    )
+    
+    # Return just the articles with their match counts embedded
+    result = []
+    for article, match_count in relevant_articles:
+        article_copy = dict(article)
+        article_copy["matching_tags_count"] = match_count
+        result.append(article_copy)
+    
+    return result
+
