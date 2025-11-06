@@ -1802,7 +1802,7 @@ async def _invoke_create_task(
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
     """Create a new task for a ticket from automation payload.
-    
+
     Accepts a JSON payload with task details. Required fields: ticket_id, task_name.
     Optional fields: sort_order.
     """
