@@ -49,6 +49,41 @@ async def test_list_trigger_action_modules_excludes_non_triggerable(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_list_trigger_action_modules_excludes_disabled(monkeypatch):
+    """Test that list_trigger_action_modules excludes disabled modules."""
+    from app.repositories import integration_modules as module_repo
+    
+    # Mock the module repository to return both enabled and disabled modules
+    async def fake_list_modules():
+        return [
+            {"slug": "smtp", "name": "Send Email", "enabled": True, "settings": {}},
+            {"slug": "ntfy", "name": "ntfy", "enabled": False, "settings": {}},
+            {"slug": "create-ticket", "name": "Create Ticket", "enabled": False, "settings": {}},
+            {"slug": "create-task", "name": "Create Task", "enabled": True, "settings": {}},
+            {"slug": "tacticalrmm", "name": "Tactical RMM", "enabled": False, "settings": {}},
+        ]
+    
+    monkeypatch.setattr(module_repo, "list_modules", fake_list_modules)
+    
+    # Call the function
+    result = await modules.list_trigger_action_modules()
+    
+    # Get slugs from result
+    result_slugs = {module["slug"] for module in result}
+    
+    # Check that only enabled modules are in the result
+    assert result_slugs == {"smtp", "create-task"}, f"Expected only enabled modules, got {result_slugs}"
+    
+    # Verify disabled modules are not in the result
+    disabled_slugs = {"ntfy", "create-ticket", "tacticalrmm"}
+    for slug in disabled_slugs:
+        assert slug not in result_slugs, f"Disabled module {slug} should not be in trigger action modules"
+    
+    # Verify the count
+    assert len(result) == 2, f"Expected 2 enabled modules, got {len(result)}"
+
+
+@pytest.mark.asyncio
 async def test_list_trigger_action_modules_redacts_settings(monkeypatch):
     """Test that list_trigger_action_modules redacts sensitive settings."""
     from app.repositories import integration_modules as module_repo
