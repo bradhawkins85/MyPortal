@@ -47,6 +47,9 @@
   const resetButton = form.querySelector('[data-kb-reset]');
   const sectionsContainer = document.querySelector('[data-kb-sections]');
   const addSectionButton = document.querySelector('[data-kb-add-section]');
+  const aiTagsSection = form.querySelector('[data-kb-ai-tags-section]');
+  const aiTagsContainer = document.getElementById('kb-ai-tags-container');
+  const refreshTagsButton = form.querySelector('[data-kb-refresh-tags]');
 
   const editorObservers = new WeakMap();
   const imageResize = {
@@ -89,6 +92,103 @@
     const div = document.createElement('div');
     div.textContent = value;
     return div.innerHTML;
+  }
+
+  function renderAiTags(tags) {
+    if (!aiTagsContainer) {
+      return;
+    }
+    if (!Array.isArray(tags) || tags.length === 0) {
+      aiTagsContainer.innerHTML = '<span class="card__empty">No AI tags yet. Tags will be generated when you save the article.</span>';
+      return;
+    }
+    const html = tags
+      .map((tag) => {
+        return `<button type="button" class="tag tag--removable" data-tag-value="${escapeHtml(tag)}" title="Click to remove this tag">
+          ${escapeHtml(tag)}
+          <span class="tag__remove" aria-hidden="true">×</span>
+        </button>`;
+      })
+      .join('');
+    aiTagsContainer.innerHTML = html;
+
+    // Add click listeners to remove tags
+    aiTagsContainer.querySelectorAll('[data-tag-value]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const tagValue = button.dataset.tagValue;
+        if (!tagValue || !state.activeId) {
+          return;
+        }
+        if (!confirm(`Remove tag "${tagValue}"? This tag will not be automatically re-added.`)) {
+          return;
+        }
+        await removeTag(tagValue);
+      });
+    });
+  }
+
+  async function removeTag(tagSlug) {
+    if (!state.activeId) {
+      return;
+    }
+    try {
+      const response = await fetch(`/api/tag-exclusions/knowledge-base/${state.activeId}/remove-tag`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ tag_slug: tagSlug }),
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error((detail && detail.detail) || `Failed to remove tag: ${response.status}`);
+      }
+      const result = await response.json();
+      renderAiTags(result.remaining_tags || []);
+      setStatus('Tag removed successfully.', 'success');
+      setTimeout(() => setStatus(''), 3000);
+    } catch (error) {
+      alert(error.message || 'Failed to remove tag. Please try again.');
+    }
+  }
+
+  async function refreshAiTags() {
+    if (!state.activeId) {
+      setStatus('Please save the article before refreshing tags.', 'error');
+      return;
+    }
+    if (refreshTagsButton) {
+      refreshTagsButton.disabled = true;
+    }
+    setStatus('Refreshing AI tags…');
+    try {
+      const response = await fetch(`/api/knowledge-base/articles/${state.activeId}/refresh-ai-tags`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error((detail && detail.detail) || `Failed to refresh tags: ${response.status}`);
+      }
+      setStatus('AI tags refresh queued. Tags will update shortly.', 'success');
+      setTimeout(() => setStatus(''), 5000);
+      // Reload article after a delay to get updated tags
+      setTimeout(async () => {
+        if (state.activeSlug) {
+          await loadArticle(state.activeSlug);
+        }
+      }, 3000);
+    } catch (error) {
+      setStatus(error.message || 'Failed to refresh AI tags. Please try again.', 'error');
+    } finally {
+      if (refreshTagsButton) {
+        refreshTagsButton.disabled = false;
+      }
+    }
   }
 
   function composeSectionsHtml(sections) {
@@ -601,6 +701,12 @@
     addSection({ heading: '', content: '<p><br></p>' });
     updateScopeFields('anonymous');
     setStatus('');
+    
+    // Hide AI tags section for new articles
+    if (aiTagsSection) {
+      aiTagsSection.hidden = true;
+    }
+    
     if (deleteButton) {
       deleteButton.hidden = true;
     }
@@ -664,6 +770,13 @@
     renderUserOptions(selectedUsers);
     renderCompanyOptions(selectedCompanies);
     updateScopeFields(article.permission_scope);
+    
+    // Show and populate AI tags
+    if (aiTagsSection && article.id) {
+      aiTagsSection.hidden = false;
+      renderAiTags(article.ai_tags || []);
+    }
+    
     if (deleteButton) {
       deleteButton.hidden = false;
     }
@@ -874,6 +987,12 @@
   if (addSectionButton) {
     addSectionButton.addEventListener('click', () => {
       addSection({ heading: '', content: '<p><br></p>' });
+    });
+  }
+
+  if (refreshTagsButton) {
+    refreshTagsButton.addEventListener('click', () => {
+      refreshAiTags();
     });
   }
 
