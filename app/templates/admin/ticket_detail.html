@@ -276,9 +276,20 @@
                     <dt>AI Tags</dt>
                     <dd>
                       {% if tag_status_lower == 'succeeded' and ticket.ai_tags %}
-                        <div class="tag-list">
+                        <div class="tag-list" id="ai-tags-container">
                           {% for tag in ticket.ai_tags %}
-                            <span class="tag">{{ tag.replace('-', ' ') }}</span>
+                            <span class="tag" data-tag-slug="{{ tag }}">
+                              {{ tag.replace('-', ' ') }}
+                              {% if is_super_admin %}
+                                <button 
+                                  type="button" 
+                                  class="tag__remove" 
+                                  onclick="removeTag('{{ tag }}')"
+                                  aria-label="Remove tag {{ tag }}"
+                                  title="Remove this tag"
+                                >×</button>
+                              {% endif %}
+                            </span>
                           {% endfor %}
                         </div>
                       {% elif tag_status_lower == 'succeeded' %}
@@ -815,4 +826,41 @@
   <script src="/static/js/admin.js" defer></script>
   <script src="/static/js/rich_text_editor.js" defer></script>
   <script src="/static/js/ticket_detail.js" defer></script>
+  <script>
+    async function removeTag(tagSlug) {
+      if (!confirm(`Remove tag "${tagSlug.replace('-', ' ')}" from this ticket?`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/tag-exclusions/tickets/{{ ticket.id }}/remove-tag`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ tag_slug: tagSlug }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || 'Failed to remove tag');
+        }
+
+        // Remove the tag from the UI
+        const tagElement = document.querySelector(`[data-tag-slug="${tagSlug}"]`);
+        if (tagElement) {
+          tagElement.remove();
+        }
+
+        // Check if there are any tags left
+        const container = document.getElementById('ai-tags-container');
+        if (container && container.children.length === 0) {
+          container.innerHTML = '<span class="card__empty">No AI tags remaining.</span>';
+        }
+      } catch (error) {
+        console.error('Error removing tag:', error);
+        alert(error.message || 'Failed to remove tag. Please try again.');
+      }
+    }
+  </script>
 {% endblock %}
