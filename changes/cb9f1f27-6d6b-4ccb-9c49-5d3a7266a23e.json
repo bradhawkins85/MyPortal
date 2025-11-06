@@ -1,0 +1,7 @@
+{
+  "guid": "cb9f1f27-6d6b-4ccb-9c49-5d3a7266a23e",
+  "occurred_at": "2025-10-09T12:10Z",
+  "change_type": "Fix",
+  "summary": "Restored stock feed download to fetch the configured XML source and persist items for scheduled product updates",
+  "content_hash": "9ad247389ce55e4f01d819541e28fa9b80c6fb6f4931e03ae0e264975da4846c"
+}

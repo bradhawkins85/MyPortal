@@ -1,7 +1,7 @@
 {
   "guid": "42e1f16c-77d9-4c58-bff4-7886621e96c5",
-  "occurred_at": "2025-11-06T01:40:13.298277+00:00",
-  "change_type": "feature",
+  "occurred_at": "2025-11-06T01:40Z",
+  "change_type": "Feature",
   "summary": "Add asset custom fields functionality with settings page",
-  "content_hash": "22aa0c36ecc63eb068a323900bb042bf0d8cdb094bc76256c027fa8e8eba6dce"
+  "content_hash": "ed71f68426b242d2998d379bdff8157eeae37d1f3654fdc3bfcd4e5e4098796c"
 }

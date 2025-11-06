@@ -1,0 +1,7 @@
+{
+  "guid": "1d1981d1-d71e-4b7d-a2ee-a31c6e8c43e2",
+  "occurred_at": "2025-10-18T09:00Z",
+  "change_type": "Fix",
+  "summary": "Removed Syncro import controls from the Staff page and expanded the Add Staff form to full width for better usability",
+  "content_hash": "4784d4944e139235ca330feb62292398468283768cd9cbbc43146f30e0d704d6"
+}
