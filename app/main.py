@@ -48,7 +48,6 @@ from app.api.routes import (
     audit_logs,
     auth,
     automations as automations_api,
-    bookings as bookings_api,
     companies,
     forms as forms_api,
     invoices as invoices_api,
@@ -236,18 +235,6 @@ tags_metadata = [
     {
         "name": "Automations",
         "description": "Workflow automations combining scheduling, event triggers, and module actions.",
-    },
-    {
-        "name": "Bookings",
-        "description": "Cal.com-style booking system for scheduling meetings and managing calendars.",
-    },
-    {
-        "name": "Event Types",
-        "description": "Define event types with durations, buffers, and availability rules for bookings.",
-    },
-    {
-        "name": "Booking Webhooks",
-        "description": "Webhook subscriptions for booking lifecycle events (created, rescheduled, cancelled).",
     },
     {
         "name": "ChatGPT MCP",
@@ -532,9 +519,6 @@ app.include_router(system.router)
 app.include_router(uptimekuma.router)
 app.include_router(xero.router)
 app.include_router(asset_custom_fields.router)
-app.include_router(bookings_api.router)
-app.include_router(bookings_api.event_types_router)
-app.include_router(bookings_api.webhooks_router)
 
 HELPDESK_PERMISSION_KEY = tickets_service.HELPDESK_PERMISSION_KEY
 ISSUE_TRACKER_PERMISSION_KEY = issues_service.ISSUE_TRACKER_PERMISSION_KEY
@@ -12316,48 +12300,6 @@ async def register_page(request: Request):
         "is_first_user": is_first_user,
     }
     return templates.TemplateResponse("auth/register.html", context)
-
-
-@app.get("/admin/bookings", response_class=HTMLResponse)
-async def admin_bookings_page(
-    request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
-):
-    """Admin page for managing bookings system."""
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-
-    from app.repositories import booking_event_types as event_types_repo
-    from app.repositories import bookings as bookings_repo
-
-    # Get event types for current user
-    event_types = await event_types_repo.list_event_types(
-        user_id=current_user["id"],
-        limit=50
-    )
-
-    # Get recent bookings
-    bookings = await bookings_repo.list_bookings(
-        host_user_id=current_user["id"],
-        limit=50
-    )
-
-    # Attach attendees to bookings
-    for booking in bookings:
-        attendees = await bookings_repo.list_attendees(booking["id"])
-        booking["attendees"] = attendees
-
-    extra = {
-        "title": "Booking System",
-        "event_types": event_types,
-        "bookings": bookings,
-        "success_message": success,
-        "error_message": error,
-    }
-
-    return await _render_template("admin/bookings.html", request, current_user, extra=extra)
 
 
 @app.get("/health")
