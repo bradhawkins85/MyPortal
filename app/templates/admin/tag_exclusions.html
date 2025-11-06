@@ -103,21 +103,34 @@
           return;
         }
 
-        exclusionsTable.innerHTML = exclusions.map(exc => `
-          <tr data-tag-slug="${exc.tag_slug}">
-            <td data-label="Tag Slug">${exc.tag_slug}</td>
-            <td data-label="Created At">${exc.created_at ? new Date(exc.created_at).toLocaleString() : '—'}</td>
+        exclusionsTable.innerHTML = exclusions.map(exc => {
+          const escapedSlug = exc.tag_slug.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+          const createdAt = exc.created_at ? new Date(exc.created_at).toLocaleString() : '—';
+          return `
+          <tr data-tag-slug="${escapedSlug}">
+            <td data-label="Tag Slug">${escapedSlug}</td>
+            <td data-label="Created At">${createdAt}</td>
             <td class="table__actions">
               <div class="table__action-buttons">
-                <button type="button" class="button button--danger" onclick="deleteExclusion('${exc.tag_slug}')">Delete</button>
+                <button type="button" class="button button--danger" data-delete-slug="${escapedSlug}">Delete</button>
               </div>
             </td>
           </tr>
-        `).join('');
+        `;
+        }).join('');
+
+        // Attach event listeners
+        document.querySelectorAll('[data-delete-slug]').forEach(button => {
+          button.addEventListener('click', function() {
+            const slug = this.getAttribute('data-delete-slug');
+            deleteExclusion(slug);
+          });
+        });
       }
 
-      window.deleteExclusion = async function(tagSlug) {
-        if (!confirm(`Are you sure you want to remove "${tagSlug}" from the exclusion list?`)) {
+      async function deleteExclusion(tagSlug) {
+        const escapedSlugForDisplay = tagSlug.replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"').replace(/&#039;/g, "'");
+        if (!confirm(`Are you sure you want to remove "${escapedSlugForDisplay}" from the exclusion list?`)) {
           return;
         }
 
@@ -135,7 +148,7 @@
           console.error('Error deleting exclusion:', error);
           alert('Failed to delete tag exclusion. Please try again.');
         }
-      };
+      }
 
       exclusionForm.addEventListener('submit', async (e) => {
         e.preventDefault();
