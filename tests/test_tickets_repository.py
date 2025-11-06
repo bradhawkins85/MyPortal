@@ -217,6 +217,7 @@ async def test_list_ticket_assets_formats_records(monkeypatch):
             "status": "online",
             "type": "laptop",
             "os_name": "Windows",
+            "tactical_asset_id": "agent-5",
         }
     ]
     dummy_db = _ListTicketAssetsDB(rows)
@@ -230,6 +231,7 @@ async def test_list_ticket_assets_formats_records(monkeypatch):
     assert assets[0]["name"] == "Device"
     assert assets[0]["serial_number"] == "SER123"
     assert assets[0]["linked_at"].tzinfo is not None
+    assert assets[0]["tactical_asset_id"] == "agent-5"
 
 
 @pytest.mark.anyio

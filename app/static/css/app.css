@@ -2002,6 +2002,64 @@ button.header-title-menu__link {
   color: rgba(148, 163, 184, 0.85);
 }
 
+.ticket-assets-linked {
+  margin-top: var(--space-gap-base);
+  padding: var(--space-gap-base);
+  border-radius: 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.ticket-assets-linked__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+}
+
+.ticket-assets-linked__item {
+  position: relative;
+  padding: var(--space-gap-base) calc(var(--space-gap-roomy) * 1.75) var(--space-gap-base) var(--space-gap-base);
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.55);
+  box-shadow: 0 16px 32px -22px rgba(14, 165, 233, 0.45);
+}
+
+.ticket-assets-linked__name {
+  color: #e2e8f0;
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-gap-tight);
+}
+
+.ticket-assets-linked__name:hover,
+.ticket-assets-linked__name:focus {
+  text-decoration: underline;
+}
+
+.ticket-assets-linked__meta {
+  margin: 0;
+  color: rgba(148, 163, 184, 0.8);
+  font-size: 0.9rem;
+}
+
+.ticket-assets-linked__remove {
+  position: absolute;
+  top: var(--space-gap-tight);
+  right: var(--space-gap-tight);
+}
+
+.ticket-assets-linked__empty {
+  margin: var(--space-gap-base) 0 0;
+  color: rgba(148, 163, 184, 0.75);
+  font-size: 0.95rem;
+}
+
 .button--ghost {
   background: transparent;
   border: 1px solid rgba(148, 163, 184, 0.4);
