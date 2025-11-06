@@ -178,7 +178,7 @@ async def _lookup_tactical_client_id(company_name: str) -> str | None:
         The Tactical RMM client ID if found, None otherwise
     """
     try:
-        # Fetch all clients from the /beta/v1/client endpoint
+        # Fetch all clients from the /beta/v1/client/ endpoint
         clients = await tacticalrmm.fetch_clients()
         
         # Search for a matching client name
