@@ -1720,6 +1720,11 @@ async def _invoke_create_ticket(
         # Without this, if a "tickets.created" event automation is configured, it
         # could trigger when this automation creates a ticket, potentially causing
         # an infinite loop if that automation also creates tickets.
+        #
+        # When a requester is specified and a description is provided, we set
+        # initial_reply_author_id to the requester to populate the description
+        # as the initial conversation history entry.
+        initial_reply_author_id = requester_id if (requester_id and description) else None
         ticket = await tickets_service.create_ticket(
             subject=subject,
             description=description,
@@ -1732,6 +1737,7 @@ async def _invoke_create_ticket(
             module_slug=module_slug,
             external_reference=external_reference,
             trigger_automations=False,
+            initial_reply_author_id=initial_reply_author_id,
         )
     except (ValueError, TypeError) as exc:
         # Handle validation errors from ticket creation
