@@ -104,6 +104,29 @@ def _extract_asset_custom_field_count_requests(tokens: Iterable[str]) -> dict[st
     return requests
 
 
+def _extract_asset_custom_field_list_requests(tokens: Iterable[str]) -> dict[str, str]:
+    """Extract list:asset:field-name tokens.
+    
+    Returns a dict mapping the full token to the field name.
+    For example: {"list:asset:bitdefender": "bitdefender"}
+    """
+    requests: dict[str, str] = {}
+    for token in tokens:
+        if not token:
+            continue
+        # Support both lowercase and uppercase variants
+        lower = token.lower()
+        if not lower.startswith("list:asset:"):
+            continue
+        parts = token.split(":", 2)
+        if len(parts) != 3:
+            continue
+        field_name = parts[2].strip()
+        if field_name:
+            requests[token] = field_name
+    return requests
+
+
 async def build_dynamic_token_map(
     tokens: Iterable[str],
     context: Mapping[str, Any] | None,
@@ -112,8 +135,9 @@ async def build_dynamic_token_map(
 ) -> dict[str, str]:
     active_asset_requests = _extract_active_asset_requests(tokens)
     custom_field_requests = _extract_asset_custom_field_count_requests(tokens)
+    custom_field_list_requests = _extract_asset_custom_field_list_requests(tokens)
     
-    if not active_asset_requests and not custom_field_requests:
+    if not active_asset_requests and not custom_field_requests and not custom_field_list_requests:
         return {}
 
     company_id = _extract_company_id(context, base_tokens)
@@ -147,5 +171,15 @@ async def build_dynamic_token_map(
                 field_value=True,
             )
             result[token] = str(count)
+    
+    # Handle custom field asset lists
+    if custom_field_list_requests:
+        for token, field_name in custom_field_list_requests.items():
+            assets = await asset_custom_fields_repo.list_assets_by_custom_field(
+                company_id=company_id,
+                field_name=field_name,
+                field_value=True,
+            )
+            result[token] = ", ".join(assets)
     
     return result
