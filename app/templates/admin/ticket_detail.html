@@ -319,8 +319,8 @@
           </details>
 
           {% if ticket.ai_summary or ticket.ai_summary_status %}
-            <article class="card card--panel" data-ticket-ai-card>
-              <header class="card__header">
+            <details class="card card--panel card-collapsible" data-ticket-ai-card open>
+              <summary class="card__header card__header--collapsible">
                 <div>
                   <h2 class="card__title">AI Summary</h2>
                   <p class="card__subtitle">
@@ -333,6 +333,7 @@
                     {% endif %}
                   </p>
                 </div>
+                <div class="card__collapsible-meta">
                   <div class="button-group">
                     <button
                       type="button"
@@ -363,67 +364,76 @@
                       </span>
                     </button>
                   </div>
-              </header>
-              <p
-                class="form-help"
-                role="status"
-                aria-live="polite"
-                data-ticket-ai-status
-                hidden
-              ></p>
-              <div class="card__body">
-                {% if ai_status_lower == 'succeeded' and ticket.ai_summary %}
-                  {% set resolution_label = resolution_label_map.get(ticket.ai_resolution_state) %}
-                  {% if resolution_label %}
-                    <p>
-                      <span class="badge {{ resolution_badge_map.get(ticket.ai_resolution_state, 'badge--muted') }}">
-                        {{ resolution_label }}
-                      </span>
-                    </p>
-                  {% endif %}
-                  {% set paragraphs = ticket.ai_summary.split('\n\n') %}
-                  {% for paragraph in paragraphs %}
-                    {% set safe_paragraph = (paragraph | e).replace('\n', '<br />') %}
-                    {% if safe_paragraph %}
-                      <p>{{ safe_paragraph | safe }}</p>
+                  <span class="card__toggle-icon" aria-hidden="true"></span>
+                </div>
+              </summary>
+              <div class="card-collapsible__content">
+                <p
+                  class="form-help"
+                  role="status"
+                  aria-live="polite"
+                  data-ticket-ai-status
+                  hidden
+                ></p>
+                <div class="card__body">
+                  {% if ai_status_lower == 'succeeded' and ticket.ai_summary %}
+                    {% set resolution_label = resolution_label_map.get(ticket.ai_resolution_state) %}
+                    {% if resolution_label %}
+                      <p>
+                        <span class="badge {{ resolution_badge_map.get(ticket.ai_resolution_state, 'badge--muted') }}">
+                          {{ resolution_label }}
+                        </span>
+                      </p>
                     {% endif %}
-                  {% endfor %}
-                {% elif ai_status_lower == 'succeeded' %}
-                  <p class="card__empty">Ollama did not return a summary for this ticket.</p>
-                {% elif ai_status_lower == 'skipped' %}
-                  <p class="card__empty">Enable the Ollama integration module to generate summaries.</p>
-                {% elif ai_status_lower == 'error' %}
-                  <p class="card__empty">AI summary generation failed. Check the Ollama module logs.</p>
-                {% else %}
-                  <p class="card__empty">AI summary is not currently available.</p>
-                {% endif %}
+                    {% set paragraphs = ticket.ai_summary.split('\n\n') %}
+                    {% for paragraph in paragraphs %}
+                      {% set safe_paragraph = (paragraph | e).replace('\n', '<br />') %}
+                      {% if safe_paragraph %}
+                        <p>{{ safe_paragraph | safe }}</p>
+                      {% endif %}
+                    {% endfor %}
+                  {% elif ai_status_lower == 'succeeded' %}
+                    <p class="card__empty">Ollama did not return a summary for this ticket.</p>
+                  {% elif ai_status_lower == 'skipped' %}
+                    <p class="card__empty">Enable the Ollama integration module to generate summaries.</p>
+                  {% elif ai_status_lower == 'error' %}
+                    <p class="card__empty">AI summary generation failed. Check the Ollama module logs.</p>
+                  {% else %}
+                    <p class="card__empty">AI summary is not currently available.</p>
+                  {% endif %}
 
+                </div>
               </div>
-            </article>
+            </details>
           {% endif %}
 
-          <article class="card card--panel" data-ticket-tasks-card>
-            <header class="card__header">
-              <h2 class="card__title">Tasks</h2>
-              <div class="button-group">
-                <button
-                  type="button"
-                  class="button button--ghost button--small"
-                  data-add-task-button
-                  data-ticket-id="{{ ticket.id }}"
-                  aria-label="Add a new task"
-                >
-                  Add task
-                </button>
+          <details class="card card--panel card-collapsible" data-ticket-tasks-card>
+            <summary class="card__header card__header--collapsible">
+              <h2 class="card__title">Tasks <span data-tasks-count-badge hidden></span></h2>
+              <div class="card__collapsible-meta">
+                <div class="button-group">
+                  <button
+                    type="button"
+                    class="button button--ghost button--small"
+                    data-add-task-button
+                    data-ticket-id="{{ ticket.id }}"
+                    aria-label="Add a new task"
+                  >
+                    Add task
+                  </button>
+                </div>
+                <span class="card__toggle-icon" aria-hidden="true"></span>
               </div>
-            </header>
-            <div class="card__body">
-              <ul class="task-list" data-task-list data-ticket-id="{{ ticket.id }}">
-                <!-- Tasks will be loaded dynamically -->
-              </ul>
-              <p class="card__empty" data-tasks-empty hidden>No tasks have been added yet.</p>
+            </summary>
+            <div class="card-collapsible__content">
+              <div class="card__body">
+                <ul class="task-list" data-task-list data-ticket-id="{{ ticket.id }}">
+                  <!-- Tasks will be loaded dynamically -->
+                </ul>
+                <p class="card__empty" data-tasks-empty hidden>No tasks have been added yet.</p>
+              </div>
             </div>
-          </article>
+          </details>
 
           <article class="card card--panel">
             <header class="card__header">

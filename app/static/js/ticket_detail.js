@@ -676,6 +676,7 @@
       const card = taskList.closest('[data-ticket-tasks-card]');
       const emptyMessage = card ? card.querySelector('[data-tasks-empty]') : null;
       const addButton = card ? card.querySelector('[data-add-task-button]') : null;
+      const countBadge = card ? card.querySelector('[data-tasks-count-badge]') : null;
 
       async function loadTasks() {
         try {
@@ -699,6 +700,7 @@
           if (emptyMessage) {
             emptyMessage.hidden = false;
           }
+          updateTaskCount(0, 0);
           return;
         }
         if (emptyMessage) {
@@ -708,6 +710,26 @@
           const li = createTaskElement(task);
           taskList.appendChild(li);
         });
+        
+        // Update task count badge
+        const incompleteCount = tasks.filter(task => !task.is_completed).length;
+        updateTaskCount(incompleteCount, tasks.length);
+      }
+
+      function updateTaskCount(incompleteCount, totalCount) {
+        if (!countBadge) {
+          return;
+        }
+        if (totalCount === 0) {
+          countBadge.hidden = true;
+          countBadge.textContent = '';
+        } else if (incompleteCount > 0) {
+          countBadge.hidden = false;
+          countBadge.textContent = `(${incompleteCount})`;
+        } else {
+          countBadge.hidden = true;
+          countBadge.textContent = '';
+        }
       }
 
       function createTaskElement(task) {
