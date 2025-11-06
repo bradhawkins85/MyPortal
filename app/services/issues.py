@@ -54,6 +54,7 @@ class IssueAssignment:
 class IssueOverview:
     issue_id: int
     name: str
+    slug: str | None
     description: str | None
     created_at: datetime | None
     created_at_iso: str | None
@@ -116,6 +117,9 @@ def _build_overview(record: dict[str, Any]) -> IssueOverview | None:
         assignments.append(_build_assignment(issue_id, assignment))
     created_iso = created_at.isoformat() if created_at else None
     updated_iso = updated_at.isoformat() if updated_at else None
+    slug = record.get("slug")
+    if isinstance(slug, str):
+        slug = slug.strip() or None
     description = record.get("description")
     if isinstance(description, str):
         description = description.strip() or None
@@ -124,6 +128,7 @@ def _build_overview(record: dict[str, Any]) -> IssueOverview | None:
     return IssueOverview(
         issue_id=issue_id,
         name=name,
+        slug=slug,
         description=description,
         created_at=created_at,
         created_at_iso=created_iso,

@@ -96,6 +96,7 @@ def _make_overview(**overrides):
     base = {
         "issue_id": 1,
         "name": "Printer",
+        "slug": None,
         "description": "Paper jams",
         "created_at": None,
         "created_at_iso": None,

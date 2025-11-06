@@ -39,6 +39,7 @@ def _build_issue_response(overview: issues_service.IssueOverview) -> IssueRespon
     ]
     return IssueResponse(
         name=overview.name,
+        slug=overview.slug,
         description=overview.description,
         created_at=overview.created_at,
         created_at_iso=overview.created_at_iso,
@@ -139,6 +140,7 @@ async def create_issue(
     try:
         issue = await issues_repo.create_issue(
             name=payload.name,
+            slug=payload.slug,
             description=payload.description,
             created_by=user_id,
         )
@@ -247,6 +249,8 @@ async def update_issue(
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         updates["name"] = payload.new_name
+    if payload.new_slug is not None:
+        updates["slug"] = payload.new_slug
 
     if updates:
         updates["updated_by"] = user_id
