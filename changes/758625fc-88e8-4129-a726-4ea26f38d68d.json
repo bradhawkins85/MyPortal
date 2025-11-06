@@ -1,0 +1,7 @@
+{
+  "guid": "758625fc-88e8-4129-a726-4ea26f38d68d",
+  "occurred_at": "2025-10-08T06:33Z",
+  "change_type": "Fix",
+  "summary": "Added global sidebar navigation for admin pages so new management views are accessible from the portal",
+  "content_hash": "bf44f26bba0c8bb1034129607829d0ab45736319a5352d22a5eb015383012b51"
+}

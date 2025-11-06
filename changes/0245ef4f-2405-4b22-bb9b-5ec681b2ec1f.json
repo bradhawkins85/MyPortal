@@ -1,0 +1,7 @@
+{
+  "guid": "0245ef4f-2405-4b22-bb9b-5ec681b2ec1f",
+  "occurred_at": "2025-10-08T13:09Z",
+  "change_type": "Feature",
+  "summary": "Added admin UI for inline API key rotation with cross-service audit correlation dashboards and secure copy workflows",
+  "content_hash": "aaf3b6ed60d7d1fc2abc9a26139b04452ba9cb4ec0bc9d771db55a8fbd478aab"
+}

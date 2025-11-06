@@ -1,0 +1,7 @@
+{
+  "guid": "00ba6024-c8d7-4ec7-9039-96004c75ea0f",
+  "occurred_at": "2025-12-13T13:45Z",
+  "change_type": "Fix",
+  "summary": "Logged Syncro ticket import jobs in the webhook monitor with success and failure outcomes so the delivery queue lists them",
+  "content_hash": "5882e515eb2be38ae08173a6c4ee0431b3167d41e887334dff4690c9fec44de7"
+}

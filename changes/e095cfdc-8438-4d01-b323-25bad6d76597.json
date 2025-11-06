@@ -1,0 +1,7 @@
+{
+  "guid": "e095cfdc-8438-4d01-b323-25bad6d76597",
+  "occurred_at": "2025-10-08T10:40Z",
+  "change_type": "Fix",
+  "summary": "Treated blank optional webhook URLs as unset so configuration validation no longer blocks startup",
+  "content_hash": "a58fbf59d19903e92c72abca930617445fabc48381ffa98e21ab18a6d105d499"
+}

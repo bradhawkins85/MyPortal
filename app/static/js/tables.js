@@ -163,9 +163,7 @@
       if (!this.table || !this.mobileConfig) {
         return;
       }
-      const portraitActive = this.mobileQuery
-        ? this.mobileQuery.matches
-        : (typeof window !== 'undefined' ? window.innerWidth <= 720 : false);
+      const portraitActive = this.isMobileView();
       const rows = [];
       if (this.table.tHead) {
         rows.push(...this.table.tHead.rows);
@@ -315,6 +313,7 @@
           endDisplay: totalFiltered,
         });
         // Hide pagination controls when in mobile view
+        // Note: When switching back to desktop, updatePaginationControls will restore visibility
         if (this.paginationElement && inMobileView) {
           this.paginationElement.hidden = true;
         }
@@ -322,6 +321,7 @@
         return;
       }
 
+      // Normal pagination flow for desktop view
       if (!this.pageSize) {
         this.recalculatePageSize();
       }

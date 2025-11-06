@@ -1,0 +1,7 @@
+{
+  "guid": "2818760a-0b0e-4ac4-9eb4-b041f7021a32",
+  "occurred_at": "2025-10-10T00:10Z",
+  "change_type": "Fix",
+  "summary": "Excluded high-capacity licenses (>=10000) from dashboard metrics so totals reflect countable seats",
+  "content_hash": "7d4f9b39ffd79e5dc8eaa2e6afcea9542c9c2d77118f9e886277e2bd8d37abc2"
+}

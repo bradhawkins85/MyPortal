@@ -1,0 +1,7 @@
+{
+  "guid": "dd2c2b84-f7db-4261-9bc8-a945d70f06b4",
+  "occurred_at": "2025-10-08T12:44Z",
+  "change_type": "Fix",
+  "summary": "Ensured company switch submissions always post the selected companyId by injecting a hidden field before form submission",
+  "content_hash": "c66d79bb4dcaa001ff0a155c14afc8d23ae79501023439f2eb8448f52587d66e"
+}

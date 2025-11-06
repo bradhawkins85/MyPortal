@@ -1,0 +1,7 @@
+{
+  "guid": "9daf5321-7bfc-47f4-9ca4-63ea720b9128",
+  "occurred_at": "2025-10-09T13:30Z",
+  "change_type": "Feature",
+  "summary": "Documented systemd service setup for running MyPortal as a managed Linux service",
+  "content_hash": "96a6a9f9b28dcdacffdf05fcb544d58a5d64496649a2d728047d7c23d77cf98f"
+}

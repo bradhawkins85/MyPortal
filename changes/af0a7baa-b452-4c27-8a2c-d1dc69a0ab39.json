@@ -1,0 +1,7 @@
+{
+  "guid": "af0a7baa-b452-4c27-8a2c-d1dc69a0ab39",
+  "occurred_at": "2025-10-22T06:49Z",
+  "change_type": "Feature",
+  "summary": "Added database migration reprocessing helper to re-run individual or all SQL files safely",
+  "content_hash": "d900848fa34db5ac39781bb85690bec434777aa0e6fa7d088fb599676f03ad6f"
+}
