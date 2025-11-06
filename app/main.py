@@ -7865,15 +7865,17 @@ async def admin_tag_exclusions_page(
     if redirect:
         return redirect
     
-    return templates.TemplateResponse(
-        "admin/tag_exclusions.html",
-        {
-            "request": request,
-            "current_user": current_user,
-            "is_super_admin": current_user.get("is_super_admin", False),
+    context = await _build_base_context(
+        request,
+        current_user,
+        extra={
             "success_message": _sanitize_message(success),
             "error_message": _sanitize_message(error),
         },
+    )
+    return templates.TemplateResponse(
+        "admin/tag_exclusions.html",
+        context,
     )
 
 
