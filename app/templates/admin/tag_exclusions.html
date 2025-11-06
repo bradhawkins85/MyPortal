@@ -79,6 +79,7 @@
 
   <script>
     (function() {
+      const csrfToken = {{ csrf_token | tojson }};
       const exclusionsTable = document.getElementById('exclusions-tbody');
       const exclusionForm = document.getElementById('exclusion-form');
       const tagSlugInput = document.getElementById('tag-slug');
@@ -137,6 +138,9 @@
         try {
           const response = await fetch(`/api/tag-exclusions/${encodeURIComponent(tagSlug)}`, {
             method: 'DELETE',
+            headers: {
+              'X-CSRF-Token': csrfToken || '',
+            },
           });
 
           if (!response.ok) {
@@ -163,6 +167,7 @@
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              'X-CSRF-Token': csrfToken || '',
             },
             body: JSON.stringify({ tag_slug: tagSlug }),
           });
