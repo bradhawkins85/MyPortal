@@ -413,7 +413,7 @@ async def find_relevant_articles_for_ticket(
     relevant_articles.sort(
         key=lambda x: (
             -x[1],  # Higher match count first
-            -(x[0].get("updated_at_utc") or datetime.min).timestamp() if x[0].get("updated_at_utc") else 0
+            -(x[0].get("updated_at_utc") or datetime.min.replace(tzinfo=timezone.utc)).timestamp() if x[0].get("updated_at_utc") else 0
         )
     )
     
