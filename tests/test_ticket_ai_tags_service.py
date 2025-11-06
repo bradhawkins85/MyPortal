@@ -3,6 +3,7 @@ from typing import Any
 import pytest
 
 from app.services import tickets as tickets_service
+from app.services import tagging as tagging_service
 
 
 @pytest.fixture
@@ -64,11 +65,15 @@ async def test_refresh_ticket_ai_tags_updates_tags(monkeypatch):
     async def fake_update(ticket_id, **fields):
         updates.append(fields)
 
+    async def fake_get_excluded_tags():
+        return set()
+
     monkeypatch.setattr(tickets_service.tickets_repo, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(tickets_service.tickets_repo, "list_replies", fake_list_replies)
     monkeypatch.setattr(tickets_service.tickets_repo, "update_ticket", fake_update)
     monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
     monkeypatch.setattr(tickets_service.modules_service, "trigger_module", fake_trigger)
+    monkeypatch.setattr("app.services.tickets.get_all_excluded_tags", fake_get_excluded_tags)
 
     await tickets_service.refresh_ticket_ai_tags(5)
 
