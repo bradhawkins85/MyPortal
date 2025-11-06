@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime, time, timezone
 from typing import Any
 
-from app.services import dynamic_variables, message_templates, system_variables
+from app.services import dynamic_variables, message_templates, system_variables, conditional_expressions
 
 _TOKEN_PATTERN = re.compile(r"\{\{\s*([^\s{}]+)\s*\}\}")
 _UPPER_TOKEN_SANITISER = re.compile(r"[^A-Z0-9]+")
@@ -29,6 +29,37 @@ def build_base_token_map(context: Mapping[str, Any] | None) -> dict[str, Any]:
 def _collect_tokens(value: Any) -> set[str]:
     tokens: set[str] = set()
     if isinstance(value, str):
+        # Collect tokens from conditional expressions
+        conditionals = conditional_expressions.find_conditionals(value)
+        for _, condition, then_value, else_value in conditionals:
+            # Extract token references from condition, then, and else clauses
+            # These can be bare token names (not wrapped in {{}})
+            for part in [condition, then_value, else_value]:
+                if part:
+                    # Look for wrapped tokens first
+                    tokens.update(match.group(1) for match in _TOKEN_PATTERN.finditer(part))
+                    
+                    # Also look for bare token-like strings (e.g., count:asset:bitdefender)
+                    # These are identifiers that contain colons and don't start with quotes
+                    part = part.strip()
+                    # Skip quoted strings
+                    if part and not (part.startswith('"') or part.startswith("'")):
+                        # Split on comparison operators to get left and right sides
+                        import re
+                        comparison_parts = re.split(r'\s*(>=|<=|>|<|==|!=)\s*', part)
+                        for token_candidate in comparison_parts:
+                            token_candidate = token_candidate.strip()
+                            # Add if it looks like a token (contains colon or is a known pattern)
+                            if ':' in token_candidate or token_candidate.replace('_', '').replace('-', '').replace('.', '').isalnum():
+                                # Exclude numeric literals
+                                try:
+                                    float(token_candidate)
+                                except (ValueError, TypeError):
+                                    # Not a number, might be a token
+                                    if token_candidate and token_candidate not in ['>', '<', '>=', '<=', '==', '!=']:
+                                        tokens.add(token_candidate)
+        
+        # Collect regular tokens (wrapped in {{}})
         tokens.update(match.group(1) for match in _TOKEN_PATTERN.finditer(value))
         return tokens
     if isinstance(value, Mapping):
@@ -164,7 +195,24 @@ def render_string(
     token_map = dict(base_tokens)
     if include_templates:
         token_map.update(build_template_token_map(context, base_tokens=base_tokens))
-    stripped = value.strip()
+    
+    # First, process conditional expressions
+    processed_value = conditional_expressions.process_conditionals(value, token_map)
+    
+    # Then process any token references that may have been returned by conditionals
+    # This handles cases where conditionals return token names like "list:asset:bitdefender"
+    def _replace(match: re.Match[str]) -> str:
+        token_name = match.group(1)
+        resolved = _resolve_context_value(context, token_name)
+        if resolved is None:
+            resolved = token_map.get(token_name, "")
+        return _stringify_template_value(resolved)
+    
+    # Apply token replacement to the processed value
+    final_value = _TOKEN_PATTERN.sub(_replace, processed_value)
+    
+    # Check if the entire result is a single token (for type coercion)
+    stripped = final_value.strip()
     single_match = _TOKEN_PATTERN.fullmatch(stripped)
     if single_match:
         token_name = single_match.group(1)
@@ -172,15 +220,8 @@ def render_string(
         if resolved is None:
             resolved = token_map.get(token_name)
         return _coerce_template_value(resolved)
-
-    def _replace(match: re.Match[str]) -> str:
-        token_name = match.group(1)
-        resolved = _resolve_context_value(context, token_name)
-        if resolved is None:
-            resolved = token_map.get(token_name, "")
-        return _stringify_template_value(resolved)
-
-    return _TOKEN_PATTERN.sub(_replace, value)
+    
+    return final_value
 
 
 async def render_string_async(
