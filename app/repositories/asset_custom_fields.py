@@ -145,3 +145,42 @@ async def delete_asset_field_value(asset_id: int, field_definition_id: int) -> N
         "DELETE FROM asset_custom_field_values WHERE asset_id = %s AND field_definition_id = %s",
         (asset_id, field_definition_id),
     )
+
+
+async def count_assets_by_custom_field(
+    company_id: int | None,
+    field_name: str,
+    field_value: bool = True,
+) -> int:
+    """Count assets for a company where a specific checkbox custom field is set to a value.
+    
+    Args:
+        company_id: Company ID to filter by (None for all companies)
+        field_name: Name of the custom field to filter by
+        field_value: Value to match (True for checked, False for unchecked)
+    
+    Returns:
+        Count of matching assets
+    """
+    query = """
+        SELECT COUNT(DISTINCT v.asset_id) AS total
+        FROM asset_custom_field_values v
+        JOIN asset_custom_field_definitions d ON v.field_definition_id = d.id
+        JOIN assets a ON v.asset_id = a.id
+        WHERE d.name = %s
+          AND d.field_type = 'checkbox'
+          AND v.value_boolean = %s
+    """
+    params = [field_name, field_value]
+    
+    if company_id is not None:
+        query += " AND a.company_id = %s"
+        params.append(company_id)
+    
+    row = await db.fetch_one(query, tuple(params))
+    if not row:
+        return 0
+    try:
+        return int(row.get("total") or 0)
+    except (TypeError, ValueError):
+        return 0

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.repositories import assets as assets_repo
+from app.repositories import asset_custom_fields as asset_custom_fields_repo
 
 
 def _utcnow() -> datetime:
@@ -80,31 +81,71 @@ def _extract_active_asset_requests(tokens: Iterable[str]) -> dict[str, int | Non
     return requests
 
 
+def _extract_asset_custom_field_count_requests(tokens: Iterable[str]) -> dict[str, str]:
+    """Extract count:asset:field-name tokens.
+    
+    Returns a dict mapping the full token to the field name.
+    For example: {"count:asset:bitdefender": "bitdefender"}
+    """
+    requests: dict[str, str] = {}
+    for token in tokens:
+        if not token:
+            continue
+        # Support both lowercase and uppercase variants
+        lower = token.lower()
+        if not lower.startswith("count:asset:"):
+            continue
+        parts = token.split(":", 2)
+        if len(parts) != 3:
+            continue
+        field_name = parts[2].strip()
+        if field_name:
+            requests[token] = field_name
+    return requests
+
+
 async def build_dynamic_token_map(
     tokens: Iterable[str],
     context: Mapping[str, Any] | None,
     *,
     base_tokens: Mapping[str, Any] | None = None,
 ) -> dict[str, str]:
-    requests = _extract_active_asset_requests(tokens)
-    if not requests:
+    active_asset_requests = _extract_active_asset_requests(tokens)
+    custom_field_requests = _extract_asset_custom_field_count_requests(tokens)
+    
+    if not active_asset_requests and not custom_field_requests:
         return {}
 
     company_id = _extract_company_id(context, base_tokens)
-    now = _utcnow()
+    result: dict[str, str] = {}
+    
+    # Handle active asset counts
+    if active_asset_requests:
+        now = _utcnow()
+        unique_durations: list[int | None] = []
+        for duration in active_asset_requests.values():
+            if duration not in unique_durations:
+                unique_durations.append(duration)
 
-    unique_durations: list[int | None] = []
-    for duration in requests.values():
-        if duration not in unique_durations:
-            unique_durations.append(duration)
+        counts: dict[int | None, str] = {}
+        for duration in unique_durations:
+            if duration is None:
+                since = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            else:
+                since = now - timedelta(days=duration)
+            count = await assets_repo.count_active_assets(company_id=company_id, since=since)
+            counts[duration] = str(count)
 
-    counts: dict[int | None, str] = {}
-    for duration in unique_durations:
-        if duration is None:
-            since = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        else:
-            since = now - timedelta(days=duration)
-        count = await assets_repo.count_active_assets(company_id=company_id, since=since)
-        counts[duration] = str(count)
-
-    return {token: counts[duration] for token, duration in requests.items()}
+        result.update({token: counts[duration] for token, duration in active_asset_requests.items()})
+    
+    # Handle custom field asset counts
+    if custom_field_requests:
+        for token, field_name in custom_field_requests.items():
+            count = await asset_custom_fields_repo.count_assets_by_custom_field(
+                company_id=company_id,
+                field_name=field_name,
+                field_value=True,
+            )
+            result[token] = str(count)
+    
+    return result
