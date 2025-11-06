@@ -9800,9 +9800,9 @@ async def _render_ticket_detail(
     tactical_module = next((module for module in modules if module.get("slug") == "tacticalrmm"), None)
     tactical_base_url = ""
     if tactical_module:
-        settings = tactical_module.get("settings") or {}
-        if isinstance(settings, Mapping):
-            base_url = str(settings.get("base_url") or "").strip()
+        tactical_settings = tactical_module.get("settings") or {}
+        if isinstance(tactical_settings, Mapping):
+            base_url = str(tactical_settings.get("base_url") or "").strip()
             if base_url:
                 tactical_base_url = base_url.rstrip("/")
 
