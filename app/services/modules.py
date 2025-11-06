@@ -29,6 +29,7 @@ from app.repositories import webhook_events as webhook_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import email as email_service, webhook_monitor
 from app.services.realtime import RefreshNotifier, refresh_notifier
+from app.services import tickets as tickets_service
 
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
@@ -481,6 +482,13 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "authorization": "",
         },
     },
+    {
+        "slug": "create-ticket",
+        "name": "Create Ticket",
+        "description": "Create a new support ticket with customizable details.",
+        "icon": "🎫",
+        "settings": {},
+    },
 ]
 
 
@@ -824,6 +832,7 @@ async def trigger_module(
         "chatgpt-mcp": _invoke_chatgpt_mcp,
         "xero": _validate_xero,
         "sms-gateway": _invoke_sms_gateway,
+        "create-ticket": _invoke_create_ticket,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -1611,6 +1620,170 @@ async def _invoke_sms_gateway(
     return _build_event_result(
         updated_event,
         extra={"gateway_url": gateway_url, "phone_count": len(phone_numbers)},
+    )
+
+
+async def _invoke_create_ticket(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Create a new ticket from automation payload.
+    
+    Accepts a JSON payload with ticket details, supporting variable interpolation
+    for all fields. Required fields: subject. Optional fields: description, 
+    company_id, assigned_user_id, requester_id, priority, status, category.
+    """
+    # Extract ticket details from payload with defaults
+    subject = str(payload.get("subject", "")).strip()
+    if not subject:
+        raise ValueError("Ticket subject is required")
+    
+    description = payload.get("description")
+    if description is not None:
+        description = str(description).strip() or None
+    
+    # Get optional fields with appropriate defaults
+    company_id = payload.get("company_id")
+    if company_id is not None:
+        try:
+            company_id = int(company_id)
+        except (TypeError, ValueError):
+            company_id = None
+    
+    assigned_user_id = payload.get("assigned_user_id")
+    if assigned_user_id is not None:
+        try:
+            assigned_user_id = int(assigned_user_id)
+        except (TypeError, ValueError):
+            assigned_user_id = None
+    
+    requester_id = payload.get("requester_id")
+    if requester_id is not None:
+        try:
+            requester_id = int(requester_id)
+        except (TypeError, ValueError):
+            requester_id = None
+    
+    priority = str(payload.get("priority", "normal")).strip().lower()
+    status = str(payload.get("status", "open")).strip().lower()
+    
+    category = payload.get("category")
+    if category is not None:
+        category = str(category).strip() or None
+    
+    module_slug = payload.get("module_slug")
+    if module_slug is not None:
+        module_slug = str(module_slug).strip() or None
+    
+    external_reference = payload.get("external_reference")
+    if external_reference is not None:
+        external_reference = str(external_reference).strip() or None
+    
+    # Create webhook event for tracking
+    event = await webhook_monitor.create_manual_event(
+        name="module.create-ticket.create",
+        target_url="internal://tickets",
+        payload={
+            "subject": subject,
+            "description": description,
+            "company_id": company_id,
+            "requester_id": requester_id,
+            "assigned_user_id": assigned_user_id,
+            "priority": priority,
+            "status": status,
+            "category": category,
+        },
+        headers={"X-Module": "create-ticket"},
+        max_attempts=1,
+        backoff_seconds=60,
+    )
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for ticket creation")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
+    
+    attempt_number = 1
+    try:
+        # Create the ticket using the tickets service
+        # Note: trigger_automations=False prevents recursive automation execution.
+        # Without this, if a "tickets.created" event automation is configured, it
+        # could trigger when this automation creates a ticket, potentially causing
+        # an infinite loop if that automation also creates tickets.
+        ticket = await tickets_service.create_ticket(
+            subject=subject,
+            description=description,
+            requester_id=requester_id,
+            company_id=company_id,
+            assigned_user_id=assigned_user_id,
+            priority=priority,
+            status=status,
+            category=category,
+            module_slug=module_slug,
+            external_reference=external_reference,
+            trigger_automations=False,
+        )
+    except (ValueError, TypeError) as exc:
+        # Handle validation errors from ticket creation
+        logger.error(
+            "Ticket creation validation failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            subject=subject,
+        )
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=f"{type(exc).__name__}: {str(exc)}",
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"subject": subject},
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard for unexpected errors
+        # Catch any other unexpected errors (e.g., database, network issues)
+        logger.error(
+            "Unexpected error during ticket creation",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            subject=subject,
+        )
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=f"{type(exc).__name__}: {str(exc)}",
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"subject": subject},
+        )
+    
+    # Build success response
+    response_body = json.dumps({
+        "ticket_id": ticket.get("id"),
+        "ticket_number": ticket.get("ticket_number"),
+        "subject": ticket.get("subject"),
+    })
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=200,
+        response_body=response_body,
+    )
+    return _build_event_result(
+        updated_event,
+        extra={
+            "ticket_id": ticket.get("id"),
+            "ticket_number": ticket.get("ticket_number"),
+        },
     )
 
 
