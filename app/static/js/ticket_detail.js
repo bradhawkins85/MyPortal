@@ -896,7 +896,11 @@
       }
 
       if (addButton) {
-        addButton.addEventListener('click', handleAddTask);
+        addButton.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          handleAddTask();
+        });
       }
 
       loadTasks();
