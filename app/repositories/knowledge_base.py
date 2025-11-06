@@ -368,12 +368,16 @@ async def find_relevant_articles_for_ticket(
 ) -> list[dict[str, Any]]:
     """Find published knowledge base articles relevant to a ticket based on matching AI tags.
     
+    This function performs case-insensitive tag matching and respects article exclusions.
+    Articles are automatically excluded if any of their excluded_ai_tags match any ticket tag.
+    
     Args:
         ticket_ai_tags: List of AI tags from the ticket
         min_matching_tags: Minimum number of matching tags required (default: 1)
     
     Returns:
         List of article dictionaries with matching tag counts, sorted by relevance
+        (highest match count first, then most recently updated)
     """
     if not ticket_ai_tags or min_matching_tags < 1:
         return []
