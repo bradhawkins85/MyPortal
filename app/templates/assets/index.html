@@ -2,6 +2,20 @@
 
 {% block title %}Assets{% endblock %}
 
+{% block header_title %}
+  <div style="display: flex; align-items: center; width: 100%; justify-content: space-between;">
+    <span>Assets</span>
+    {% if is_super_admin %}
+    <a href="/assets/settings" class="button button--ghost button--small" style="margin-left: auto;">
+      <svg viewBox="0 0 24 24" width="16" height="16" style="margin-right: 4px;" aria-hidden="true">
+        <path fill="currentColor" d="M12 1a3 3 0 0 1 3 3v.18a3 3 0 0 1 2.12 2.12H17a3 3 0 0 1 3 3v.18a3 3 0 0 1 0 5.03V15a3 3 0 0 1-3 3h-.18a3 3 0 0 1-2.12 2.12V21a3 3 0 0 1-6 0v-.88A3 3 0 0 1 6.58 18H6a3 3 0 0 1-3-3v-.67a3 3 0 0 1 0-4.66V9a3 3 0 0 1 3-3h.18A3 3 0 0 1 8.3 3.18V3a3 3 0 0 1 3-3z"/>
+      </svg>
+      Settings
+    </a>
+    {% endif %}
+  </div>
+{% endblock %}
+
 {% block header_actions %}
   <div class="header-actions">
     <label class="visually-hidden" for="asset-search">Search assets</label>

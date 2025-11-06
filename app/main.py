@@ -44,6 +44,7 @@ from starlette.datastructures import FormData, URL
 from app.api.routes import (
     agent,
     api_keys,
+    asset_custom_fields,
     audit_logs,
     auth,
     automations as automations_api,
@@ -517,6 +518,7 @@ app.include_router(mcp_api.router)
 app.include_router(system.router)
 app.include_router(uptimekuma.router)
 app.include_router(xero.router)
+app.include_router(asset_custom_fields.router)
 
 HELPDESK_PERMISSION_KEY = tickets_service.HELPDESK_PERMISSION_KEY
 ISSUE_TRACKER_PERMISSION_KEY = issues_service.ISSUE_TRACKER_PERMISSION_KEY
@@ -3180,6 +3182,23 @@ async def assets_page(request: Request):
         "is_super_admin": bool(user.get("is_super_admin")),
     }
     return await _render_template("assets/index.html", request, user, extra=extra)
+
+
+@app.get("/assets/settings", response_class=HTMLResponse, tags=["Assets"])
+async def assets_settings_page(request: Request):
+    user, _membership, _, _, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    
+    # Only super admins can access settings
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    
+    extra = {
+        "title": "Asset Custom Fields Settings",
+        "is_super_admin": True,
+    }
+    return await _render_template("assets/settings.html", request, user, extra=extra)
 
 
 @app.delete("/assets/{asset_id}", response_class=JSONResponse, tags=["Assets"])
