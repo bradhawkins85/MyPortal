@@ -1,0 +1,7 @@
+{
+  "guid": "73e7055f-e9cc-4c88-9661-10a647585384",
+  "occurred_at": "2025-11-06T06:03Z",
+  "change_type": "Fix",
+  "summary": "Stop displaying asset serial numbers for linked ticket assets in the admin view",
+  "content_hash": "7668f4b0bc4d0cc884ae85ce4474d5f5a02fab0b11815cd84b938d2727569cb8"
+}

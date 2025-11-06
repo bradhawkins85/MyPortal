@@ -164,8 +164,8 @@
                   class="form-input"
                   data-ticket-asset-selector
                   data-assets-endpoint-template="/api/companies/{companyId}/assets"
-                  data-initial-options='{{ ticket_asset_options | tojson }}'
-                  data-selected-assets='{{ ticket_asset_selection | tojson }}'
+                  data-initial-options="{{ ticket_asset_options | tojson | forceescape }}"
+                  data-selected-assets="{{ ticket_asset_selection | tojson | forceescape }}"
                   data-placeholder="Select an asset to link"
                   data-initial-company-id="{{ ticket.company_id or '' }}"
                   {% if not ticket.company_id %}disabled aria-disabled="true"{% endif %}
@@ -194,7 +194,7 @@
                 <div
                   class="ticket-assets-linked"
                   data-ticket-linked-assets
-                  data-initial-linked='{{ ticket_asset_linked_data | tojson }}'
+                  data-initial-linked="{{ ticket_asset_linked_data | tojson | forceescape }}"
                   data-tactical-base-url="{{ tacticalrmm_base_url or '' }}"
                   data-empty-message="No assets are linked to this ticket yet."
                 >
@@ -204,9 +204,6 @@
                       {% set status_value = asset.status %}
                       {% set status_label = status_value.replace('_', ' ').title() if status_value %}
                       {% set meta_parts = [] %}
-                      {% if serial_value %}
-                        {% set _ = meta_parts.append('SN ' ~ serial_value) %}
-                      {% endif %}
                       {% if status_label %}
                         {% set _ = meta_parts.append(status_label) %}
                       {% endif %}
@@ -303,10 +300,7 @@
                     <dd>
                       <div class="tag-list">
                         {% for asset in ticket_assets %}
-                          {% set asset_label = asset.name %}
-                          {% if asset.serial_number %}
-                            {% set asset_label = asset_label ~ ' · SN ' ~ asset.serial_number %}
-                          {% endif %}
+                      {% set asset_label = asset.name %}
                           <span class="tag">{{ asset_label }}</span>
                         {% endfor %}
                       </div>
