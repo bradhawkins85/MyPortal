@@ -315,7 +315,7 @@ async def fetch_agents(client_id: str | None = None) -> list[Mapping[str, Any]]:
 
 async def fetch_clients() -> list[Mapping[str, Any]]:
     """
-    Fetch all Tactical RMM clients from the /beta/v1/client endpoint.
+    Fetch all Tactical RMM clients from the /beta/v1/client/ endpoint.
     
     Returns:
         List of client dictionaries with 'id' and 'name' fields
