@@ -1,5 +1,6 @@
 """Test scheduled ticket creation command."""
 import json
+from datetime import datetime, timezone
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -115,3 +116,68 @@ async def test_create_scheduled_ticket_missing_subject():
             call_args = mock_record.call_args
             assert call_args.kwargs['status'] == 'failed'
             assert 'Missing required field: subject' in call_args.kwargs['details']
+
+
+@pytest.mark.asyncio
+async def test_create_scheduled_ticket_interpolates_variables():
+    """Test that template variables like {{ NOW_UTC }} are interpolated correctly."""
+    
+    task = {
+        "id": 4,
+        "command": "create_scheduled_ticket",
+        "company_id": 20,
+        "description": json.dumps({
+            "subject": "Scheduled Task {{ NOW_UTC }}",
+            "description": "Created at {{ SYSTEM_TIME_UTC }} on {{ APP_NAME }}",
+            "priority": "normal",
+            "status": "open"
+        })
+    }
+    
+    # Mock the tickets_service.create_ticket function
+    mock_ticket = {
+        "id": 200,
+        "number": "T-5678",
+        "subject": "Scheduled Task with timestamp"
+    }
+    
+    with patch('app.services.scheduler.tickets_service.create_ticket', new_callable=AsyncMock) as mock_create:
+        mock_create.return_value = mock_ticket
+        
+        # Import the scheduler service (after patching)
+        from app.services.scheduler import SchedulerService
+        
+        scheduler = SchedulerService()
+        
+        # Mock the database operations
+        with patch('app.services.scheduler.scheduled_tasks_repo.record_task_run', new_callable=AsyncMock):
+            with patch('app.services.scheduler.db.acquire_lock') as mock_lock:
+                # Configure the lock to return True (acquired)
+                mock_lock.return_value.__aenter__.return_value = True
+                
+                # Run the task
+                await scheduler._run_task(task)
+                
+                # Verify create_ticket was called
+                mock_create.assert_called_once()
+                call_kwargs = mock_create.call_args.kwargs
+                
+                # Verify that template variables were replaced
+                subject = call_kwargs['subject']
+                description = call_kwargs['description']
+                
+                # The subject should NOT contain the literal "{{ NOW_UTC }}"
+                assert "{{ NOW_UTC }}" not in subject
+                assert "{{ SYSTEM_TIME_UTC }}" not in description
+                assert "{{ APP_NAME }}" not in description
+                
+                # The subject should contain a valid timestamp
+                # It should match the pattern of ISO 8601 datetime
+                assert "Scheduled Task" in subject
+                # Check if subject contains an ISO timestamp (basic check)
+                assert any(char.isdigit() for char in subject), "Subject should contain interpolated timestamp"
+                
+                # The description should contain interpolated values
+                assert "Created at" in description
+                # Verify it contains some interpolated content
+                assert len(description) > len("Created at  on "), "Description should have interpolated values"
