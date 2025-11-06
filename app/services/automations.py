@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
+import re
+from functools import lru_cache
 from typing import Any
 
 from croniter import croniter
@@ -70,9 +72,43 @@ def _resolve_context_value(context: Mapping[str, Any] | None, path: str) -> Any:
     return current
 
 
+@lru_cache(maxsize=256)
+def _compile_like_pattern(pattern: str) -> re.Pattern[str]:
+    pieces: list[str] = ["^"]
+    escaped = False
+    for char in pattern:
+        if escaped:
+            pieces.append(re.escape(char))
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == "%":
+            pieces.append(".*")
+            continue
+        if char == "_":
+            pieces.append(".")
+            continue
+        pieces.append(re.escape(char))
+    if escaped:
+        pieces.append(re.escape("\\"))
+    pieces.append("$")
+    return re.compile("".join(pieces))
+
+
+def _string_value_matches(actual: Any, expected: str) -> bool:
+    if not isinstance(actual, str):
+        return False
+    pattern = _compile_like_pattern(expected)
+    return bool(pattern.fullmatch(actual))
+
+
 def _value_matches(actual: Any, expected: Any) -> bool:
     if isinstance(expected, Sequence) and not isinstance(expected, (str, bytes, bytearray)):
         return any(_value_matches(actual, candidate) for candidate in expected)
+    if isinstance(expected, str):
+        return _string_value_matches(actual, expected)
     return actual == expected
 
 
