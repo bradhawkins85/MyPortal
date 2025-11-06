@@ -489,6 +489,13 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "icon": "🎫",
         "settings": {},
     },
+    {
+        "slug": "create-task",
+        "name": "Create Task",
+        "description": "Create a new task for a ticket.",
+        "icon": "✓",
+        "settings": {},
+    },
 ]
 
 
@@ -833,6 +840,7 @@ async def trigger_module(
         "xero": _validate_xero,
         "sms-gateway": _invoke_sms_gateway,
         "create-ticket": _invoke_create_ticket,
+        "create-task": _invoke_create_task,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -1783,6 +1791,134 @@ async def _invoke_create_ticket(
         extra={
             "ticket_id": ticket.get("id"),
             "ticket_number": ticket.get("ticket_number"),
+        },
+    )
+
+
+async def _invoke_create_task(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Create a new task for a ticket from automation payload.
+    
+    Accepts a JSON payload with task details. Required fields: ticket_id, task_name.
+    Optional fields: sort_order.
+    """
+    from app.repositories import ticket_tasks as ticket_tasks_repo
+    
+    # Extract task details from payload
+    ticket_id = payload.get("ticket_id")
+    if ticket_id is None:
+        # Try to get from context
+        context = payload.get("context") or {}
+        ticket_id = context.get("ticket_id")
+    
+    if ticket_id is None:
+        raise ValueError("ticket_id is required")
+    
+    try:
+        ticket_id = int(ticket_id)
+    except (TypeError, ValueError):
+        raise ValueError("ticket_id must be a valid integer")
+    
+    task_name = str(payload.get("task_name", "")).strip()
+    if not task_name:
+        raise ValueError("task_name is required")
+    
+    sort_order = payload.get("sort_order", 0)
+    try:
+        sort_order = int(sort_order)
+    except (TypeError, ValueError):
+        sort_order = 0
+    
+    # Create webhook event for tracking
+    event = await webhook_monitor.create_manual_event(
+        name="module.create-task.create",
+        target_url=f"internal://tickets/{ticket_id}/tasks",
+        payload={
+            "ticket_id": ticket_id,
+            "task_name": task_name,
+            "sort_order": sort_order,
+        },
+        headers={"X-Module": "create-task"},
+        max_attempts=1,
+        backoff_seconds=60,
+    )
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for task creation")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
+    
+    attempt_number = 1
+    try:
+        # Create the task using the tasks repository
+        task = await ticket_tasks_repo.create_task(
+            ticket_id=ticket_id,
+            task_name=task_name,
+            sort_order=sort_order,
+        )
+    except (ValueError, TypeError) as exc:
+        # Handle validation errors
+        logger.error(
+            "Task creation validation failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            ticket_id=ticket_id,
+            task_name=task_name,
+        )
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=f"{type(exc).__name__}: {str(exc)}",
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"ticket_id": ticket_id, "task_name": task_name},
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.error(
+            "Unexpected error during task creation",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            ticket_id=ticket_id,
+            task_name=task_name,
+        )
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=f"{type(exc).__name__}: {str(exc)}",
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"ticket_id": ticket_id, "task_name": task_name},
+        )
+    
+    # Build success response
+    response_body = json.dumps({
+        "task_id": task.get("id"),
+        "ticket_id": task.get("ticket_id"),
+        "task_name": task.get("task_name"),
+    })
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=200,
+        response_body=response_body,
+    )
+    return _build_event_result(
+        updated_event,
+        extra={
+            "task_id": task.get("id"),
+            "ticket_id": task.get("ticket_id"),
         },
     )
 
