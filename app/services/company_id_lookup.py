@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
+from app.services import modules as modules_service
 from app.services import syncro, tacticalrmm
 
 
@@ -218,20 +221,94 @@ async def _lookup_xero_contact_id(company_name: str) -> str | None:
     """
     Search for a Xero contact by name and return their ID.
     
-    Note: Xero contact lookup is not currently implemented as the xero service
-    focuses on invoice operations. This is a placeholder for future implementation.
-    
     Args:
         company_name: The company name to search for
         
     Returns:
         The Xero contact ID if found, None otherwise
     """
-    # Xero contact lookup not implemented yet
-    # The xero service currently focuses on invoice operations
-    # This would require calling the Xero contacts API
-    log_info("Xero contact lookup not yet implemented, skipping")
-    return None
+    try:
+        # Get Xero module configuration
+        module = await modules_service.get_module("xero", redact=False)
+        if not module or not module.get("enabled"):
+            log_info("Xero integration not enabled, skipping lookup")
+            return None
+        
+        settings = dict(module.get("settings") or {})
+        tenant_id = str(settings.get("tenant_id", "")).strip()
+        if not tenant_id:
+            log_info("Xero tenant ID not configured, skipping lookup")
+            return None
+        
+        # Get a valid access token
+        try:
+            access_token = await modules_service.acquire_xero_access_token()
+        except Exception as token_exc:
+            log_error("Failed to acquire Xero access token", error=str(token_exc))
+            return None
+        
+        # Search for contacts matching the company name
+        # Use the Xero Contacts API with a where filter
+        api_url = "https://api.xero.com/api.xro/2.0/Contacts"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "xero-tenant-id": tenant_id,
+            "Accept": "application/json",
+        }
+        
+        # Fetch contacts and search for exact name match
+        # We'll paginate through results to find a match
+        page = 1
+        max_pages = 10  # Limit search to avoid excessive API calls
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            while page <= max_pages:
+                params = {
+                    "page": page,
+                    "order": "Name ASC",
+                }
+                
+                response = await client.get(api_url, headers=headers, params=params)
+                response.raise_for_status()
+                
+                data = response.json()
+                contacts = data.get("Contacts", [])
+                
+                if not contacts:
+                    # No more contacts to check
+                    break
+                
+                # Search for an exact match (case-insensitive)
+                search_name = company_name.strip().lower()
+                for contact in contacts:
+                    contact_name = str(contact.get("Name", "")).strip().lower()
+                    if contact_name == search_name:
+                        contact_id = contact.get("ContactID")
+                        if contact_id:
+                            log_info(
+                                "Found matching Xero contact",
+                                company_name=company_name,
+                                contact_id=contact_id,
+                            )
+                            return str(contact_id)
+                
+                # Check if we should continue paginating
+                # Xero returns 100 contacts per page by default
+                if len(contacts) < 100:
+                    # This was the last page
+                    break
+                
+                page += 1
+        
+        log_info("No matching Xero contact found", company_name=company_name)
+        return None
+        
+    except httpx.HTTPError as exc:
+        log_error("HTTP error searching Xero contacts", company_name=company_name, error=str(exc))
+        return None
+    except Exception as exc:
+        log_error("Error searching Xero contacts", company_name=company_name, error=str(exc))
+        return None
 
 
 async def refresh_all_missing_company_ids() -> dict[str, Any]:
