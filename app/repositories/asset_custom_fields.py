@@ -184,3 +184,42 @@ async def count_assets_by_custom_field(
         return int(row.get("total") or 0)
     except (TypeError, ValueError):
         return 0
+
+
+async def list_assets_by_custom_field(
+    company_id: int | None,
+    field_name: str,
+    field_value: bool = True,
+) -> list[str]:
+    """List asset names for a company where a specific checkbox custom field is set to a value.
+    
+    Args:
+        company_id: Company ID to filter by (None for all companies)
+        field_name: Name of the custom field to filter by
+        field_value: Value to match (True for checked, False for unchecked)
+    
+    Returns:
+        List of asset names matching the criteria
+    """
+    query = """
+        SELECT DISTINCT a.name
+        FROM asset_custom_field_values v
+        JOIN asset_custom_field_definitions d ON v.field_definition_id = d.id
+        JOIN assets a ON v.asset_id = a.id
+        WHERE d.name = %s
+          AND d.field_type = 'checkbox'
+          AND v.value_boolean = %s
+    """
+    params = [field_name, field_value]
+    
+    if company_id is not None:
+        query += " AND a.company_id = %s"
+        params.append(company_id)
+    
+    query += " ORDER BY a.name ASC"
+    
+    rows = await db.fetch_all(query, tuple(params))
+    if not rows:
+        return []
+    
+    return [row.get("name") for row in rows if row.get("name")]
