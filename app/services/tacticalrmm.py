@@ -321,7 +321,7 @@ async def fetch_clients() -> list[Mapping[str, Any]]:
         List of client dictionaries with 'id' and 'name' fields
     """
     await _load_settings()
-    endpoint = "beta/v1/client"
+    endpoint = "beta/v1/client/"
     
     collected: list[Mapping[str, Any]] = []
     log_info("Fetching Tactical RMM clients")
