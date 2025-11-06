@@ -583,7 +583,22 @@
     const cronValue = taskData.cron || (isEditing ? '' : randomDailyCron());
     cronField.value = cronValue;
 
-    descriptionField.value = taskData.description || '';
+    const command = commandValue || '';
+    const description = taskData.description || '';
+    
+    // If command is create_scheduled_ticket, populate JSON payload field
+    const jsonPayloadTextarea = query('task-json-payload');
+    if (command === 'create_scheduled_ticket' && description) {
+      if (jsonPayloadTextarea) {
+        jsonPayloadTextarea.value = description;
+      }
+      descriptionField.value = '';
+    } else {
+      descriptionField.value = description;
+      if (jsonPayloadTextarea) {
+        jsonPayloadTextarea.value = '';
+      }
+    }
 
     let maxRetriesValue = Number(taskData.max_retries ?? taskData.maxRetries ?? 12);
     if (!Number.isFinite(maxRetriesValue) || maxRetriesValue < 0) {
@@ -759,11 +774,32 @@
       event.preventDefault();
       const formData = new FormData(form);
       const taskId = formData.get('task_id') || formData.get('taskId') || '';
+      const command = (formData.get('command') || '').toString().trim();
+      let description = (formData.get('description') || '').toString().trim() || null;
+      
+      // For create_scheduled_ticket command, use JSON payload as description
+      if (command === 'create_scheduled_ticket') {
+        const jsonPayload = (formData.get('jsonPayload') || '').toString().trim();
+        if (jsonPayload) {
+          // Validate JSON
+          try {
+            JSON.parse(jsonPayload);
+            description = jsonPayload;
+          } catch (error) {
+            alert('Invalid JSON payload. Please check your JSON syntax.');
+            return;
+          }
+        } else {
+          alert('JSON payload is required for scheduled ticket creation.');
+          return;
+        }
+      }
+      
       const payload = {
         name: (formData.get('name') || '').toString().trim(),
-        command: (formData.get('command') || '').toString().trim(),
+        command: command,
         cron: (formData.get('cron') || '').toString().trim(),
-        description: (formData.get('description') || '').toString().trim() || null,
+        description: description,
         active: formData.get('active') !== null,
         maxRetries: Number(formData.get('maxRetries') || formData.get('max_retries') || 12),
         retryBackoffSeconds: Number(
@@ -852,6 +888,34 @@
 
     const commandField = query('task-command');
     const companyField = query('task-company');
+    const jsonPayloadField = query('task-json-payload-field');
+    const jsonPayloadTextarea = query('task-json-payload');
+    const descriptionField = query('task-description');
+    const descriptionHelp = query('task-description-help');
+    
+    const toggleJsonPayloadField = () => {
+      if (commandField && jsonPayloadField) {
+        const command = commandField.value;
+        if (command === 'create_scheduled_ticket') {
+          jsonPayloadField.style.display = 'block';
+          if (descriptionField) {
+            descriptionField.style.display = 'none';
+          }
+          if (descriptionHelp) {
+            descriptionHelp.style.display = 'none';
+          }
+        } else {
+          jsonPayloadField.style.display = 'none';
+          if (descriptionField) {
+            descriptionField.style.display = 'block';
+          }
+          if (descriptionHelp) {
+            descriptionHelp.style.display = 'block';
+          }
+        }
+      }
+    };
+    
     const refreshTaskName = () => {
       const nameFields = getTaskNameFields();
       if (nameFields.hidden) {
@@ -860,8 +924,16 @@
       setTaskName(generateTaskName());
     };
     if (commandField) {
-      commandField.addEventListener('change', refreshTaskName);
-      commandField.addEventListener('input', refreshTaskName);
+      commandField.addEventListener('change', () => {
+        toggleJsonPayloadField();
+        refreshTaskName();
+      });
+      commandField.addEventListener('input', () => {
+        toggleJsonPayloadField();
+        refreshTaskName();
+      });
+      // Initialize on page load
+      toggleJsonPayloadField();
     }
     if (companyField) {
       companyField.addEventListener('change', refreshTaskName);
