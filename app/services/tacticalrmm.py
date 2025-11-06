@@ -311,3 +311,41 @@ async def fetch_agents(client_id: str | None = None) -> list[Mapping[str, Any]]:
         if collected:
             break
     return collected
+
+
+async def fetch_clients() -> list[Mapping[str, Any]]:
+    """
+    Fetch all Tactical RMM clients from the /beta/v1/client endpoint.
+    
+    Returns:
+        List of client dictionaries with 'id' and 'name' fields
+    """
+    await _load_settings()
+    endpoint = "beta/v1/client"
+    
+    collected: list[Mapping[str, Any]] = []
+    log_info("Fetching Tactical RMM clients")
+    
+    try:
+        response = await _call_endpoint(endpoint)
+    except TacticalRMMAPIError as exc:
+        log_error("Failed to fetch Tactical RMM clients", endpoint=endpoint, error=str(exc))
+        return collected
+    
+    # The endpoint returns a list of client objects
+    if isinstance(response, list):
+        for item in response:
+            if isinstance(item, Mapping):
+                collected.append(item)
+    elif isinstance(response, Mapping):
+        # Handle paginated response with 'results' key
+        results = response.get("results")
+        if isinstance(results, list):
+            for item in results:
+                if isinstance(item, Mapping):
+                    collected.append(item)
+        # Handle case where response is a single client
+        elif "id" in response and "name" in response:
+            collected.append(response)
+    
+    return collected
