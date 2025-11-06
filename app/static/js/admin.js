@@ -2638,7 +2638,7 @@
             xeroInput.classList.add('form-input--success');
             setTimeout(() => xeroInput.classList.remove('form-input--success'), 2000);
           } else {
-            alert('Xero contact ID lookup is not yet implemented. Please enter the ID manually.');
+            alert('Xero contact ID not found. Please ensure the company name matches exactly in Xero.');
           }
         } catch (error) {
           console.error('Failed to lookup Xero contact ID:', error);

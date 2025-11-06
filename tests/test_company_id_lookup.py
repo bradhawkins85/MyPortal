@@ -309,3 +309,220 @@ async def test_lookup_handles_syncro_configuration_error(monkeypatch):
     assert result["status"] == "no_updates"
     assert result["syncro_lookup"] == "not_found"
     assert result["tactical_lookup"] == "not_found"
+
+
+@pytest.mark.anyio
+async def test_lookup_missing_company_ids_finds_xero_id(monkeypatch):
+    """Test that lookup finds a missing Xero contact ID."""
+    companies = [
+        {
+            "id": 1,
+            "name": "Gamma Tech",
+            "syncro_company_id": "syncro-123",
+            "tacticalrmm_client_id": "tactical-456",
+            "xero_id": None,
+        }
+    ]
+    
+    async def fake_get_company_by_id(company_id: int):
+        for company in companies:
+            if company["id"] == company_id:
+                return dict(company)
+        return None
+    
+    async def fake_update_company(company_id: int, **updates):
+        for company in companies:
+            if company["id"] == company_id:
+                company.update(updates)
+                return dict(company)
+        raise ValueError("Company not found")
+    
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        if slug == "xero":
+            return {
+                "enabled": True,
+                "settings": {"tenant_id": "tenant-123"},
+            }
+        return None
+    
+    async def fake_acquire_xero_access_token():
+        return "fake-access-token"
+    
+    class FakeResponse:
+        def __init__(self, json_data):
+            self._json_data = json_data
+            self.status_code = 200
+        
+        def json(self):
+            return self._json_data
+        
+        def raise_for_status(self):
+            pass
+    
+    class FakeClient:
+        def __init__(self, timeout):
+            pass
+        
+        async def __aenter__(self):
+            return self
+        
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+        
+        async def get(self, url, headers=None, params=None):
+            if params and params.get("page") == 1:
+                return FakeResponse({
+                    "Contacts": [
+                        {"ContactID": "xero-789", "Name": "Gamma Tech"},
+                        {"ContactID": "xero-999", "Name": "Other Company"},
+                    ]
+                })
+            return FakeResponse({"Contacts": []})
+    
+    monkeypatch.setattr(company_id_lookup.company_repo, "get_company_by_id", fake_get_company_by_id)
+    monkeypatch.setattr(company_id_lookup.company_repo, "update_company", fake_update_company)
+    monkeypatch.setattr(company_id_lookup.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(company_id_lookup.modules_service, "acquire_xero_access_token", fake_acquire_xero_access_token)
+    monkeypatch.setattr(company_id_lookup.httpx, "AsyncClient", FakeClient)
+    
+    result = await company_id_lookup.lookup_missing_company_ids(1)
+    
+    assert result["status"] == "updated"
+    assert result["xero_lookup"] == "found"
+    assert result["updates"]["xero_id"] == "xero-789"
+    assert companies[0]["xero_id"] == "xero-789"
+
+
+@pytest.mark.anyio
+async def test_lookup_xero_contact_id_case_insensitive(monkeypatch):
+    """Test that Xero contact lookup is case insensitive."""
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        if slug == "xero":
+            return {
+                "enabled": True,
+                "settings": {"tenant_id": "tenant-123"},
+            }
+        return None
+    
+    async def fake_acquire_xero_access_token():
+        return "fake-access-token"
+    
+    class FakeResponse:
+        def __init__(self, json_data):
+            self._json_data = json_data
+            self.status_code = 200
+        
+        def json(self):
+            return self._json_data
+        
+        def raise_for_status(self):
+            pass
+    
+    class FakeClient:
+        def __init__(self, timeout):
+            pass
+        
+        async def __aenter__(self):
+            return self
+        
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+        
+        async def get(self, url, headers=None, params=None):
+            return FakeResponse({
+                "Contacts": [
+                    {"ContactID": "xero-123", "Name": "DELTA SYSTEMS"},
+                ]
+            })
+    
+    monkeypatch.setattr(company_id_lookup.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(company_id_lookup.modules_service, "acquire_xero_access_token", fake_acquire_xero_access_token)
+    monkeypatch.setattr(company_id_lookup.httpx, "AsyncClient", FakeClient)
+    
+    result = await company_id_lookup._lookup_xero_contact_id("delta systems")
+    
+    assert result == "xero-123"
+
+
+@pytest.mark.anyio
+async def test_lookup_xero_contact_id_not_found(monkeypatch):
+    """Test that Xero contact lookup handles not found cases."""
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        if slug == "xero":
+            return {
+                "enabled": True,
+                "settings": {"tenant_id": "tenant-123"},
+            }
+        return None
+    
+    async def fake_acquire_xero_access_token():
+        return "fake-access-token"
+    
+    class FakeResponse:
+        def __init__(self, json_data):
+            self._json_data = json_data
+            self.status_code = 200
+        
+        def json(self):
+            return self._json_data
+        
+        def raise_for_status(self):
+            pass
+    
+    class FakeClient:
+        def __init__(self, timeout):
+            pass
+        
+        async def __aenter__(self):
+            return self
+        
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+        
+        async def get(self, url, headers=None, params=None):
+            return FakeResponse({
+                "Contacts": [
+                    {"ContactID": "xero-999", "Name": "Other Company"},
+                ]
+            })
+    
+    monkeypatch.setattr(company_id_lookup.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(company_id_lookup.modules_service, "acquire_xero_access_token", fake_acquire_xero_access_token)
+    monkeypatch.setattr(company_id_lookup.httpx, "AsyncClient", FakeClient)
+    
+    result = await company_id_lookup._lookup_xero_contact_id("Missing Company")
+    
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_lookup_xero_contact_id_module_disabled(monkeypatch):
+    """Test that Xero contact lookup handles disabled module."""
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        if slug == "xero":
+            return {"enabled": False}
+        return None
+    
+    monkeypatch.setattr(company_id_lookup.modules_service, "get_module", fake_get_module)
+    
+    result = await company_id_lookup._lookup_xero_contact_id("Test Company")
+    
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_lookup_xero_contact_id_missing_tenant(monkeypatch):
+    """Test that Xero contact lookup handles missing tenant ID."""
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        if slug == "xero":
+            return {
+                "enabled": True,
+                "settings": {},
+            }
+        return None
+    
+    monkeypatch.setattr(company_id_lookup.modules_service, "get_module", fake_get_module)
+    
+    result = await company_id_lookup._lookup_xero_contact_id("Test Company")
+    
+    assert result is None
