@@ -411,7 +411,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
     },
     {
         "slug": "smtp",
-        "name": "SMTP Relay",
+        "name": "Send Email",
         "description": "Trigger outbound email notifications using the platform SMTP server.",
         "icon": "✉️",
         "settings": {
@@ -474,7 +474,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
     },
     {
         "slug": "sms-gateway",
-        "name": "SMS Gateway",
+        "name": "Send SMS",
         "description": "Send SMS messages via HTTP POST to a custom gateway endpoint.",
         "icon": "📱",
         "settings": {
@@ -783,6 +783,33 @@ async def ensure_default_modules() -> None:
 async def list_modules() -> list[dict[str, Any]]:
     modules = await module_repo.list_modules()
     return [_redact_module_settings(module) for module in modules]
+
+
+# Modules that are only ingesters or interfaces and cannot trigger actions
+_NON_TRIGGERABLE_MODULE_SLUGS = {
+    "imap",           # IMAP Mailboxes - only ingests emails
+    "ollama",         # Ollama - AI interface, doesn't output actions
+    "xero",           # Xero - removed from trigger actions
+    "uptimekuma",     # Uptime Kuma - removed from trigger actions  
+    "syncro",         # Syncro - removed from trigger actions
+    "chatgpt-mcp",    # ChatGPT MCP - removed from trigger actions
+}
+
+
+async def list_trigger_action_modules() -> list[dict[str, Any]]:
+    """Return modules that can be used as trigger actions in automations.
+    
+    This filters out modules that are only ingesters (e.g., IMAP) or interfaces
+    (e.g., Ollama, ChatGPT MCP) that cannot output actions, as well as modules
+    that have been explicitly excluded (Xero, UptimeKuma, Syncro).
+    """
+    modules = await module_repo.list_modules()
+    actionable_modules = [
+        _redact_module_settings(module)
+        for module in modules
+        if module.get("slug") not in _NON_TRIGGERABLE_MODULE_SLUGS
+    ]
+    return actionable_modules
 
 
 async def get_module(slug: str, *, redact: bool = True) -> dict[str, Any] | None:

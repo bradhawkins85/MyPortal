@@ -11280,7 +11280,7 @@ async def _render_automation_form(
     automation_id: int | None = None,
 ) -> HTMLResponse:
     kind_normalised = "event" if str(kind).lower() == "event" else "scheduled"
-    modules = await modules_service.list_modules()
+    modules = await modules_service.list_trigger_action_modules()
     modules_payload = _serialise_for_json(modules)
     trigger_options = automations_service.list_trigger_events()
     mode_normalised = "edit" if str(mode).lower() == "edit" else "create"
