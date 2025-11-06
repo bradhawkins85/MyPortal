@@ -53,6 +53,7 @@ class KnowledgeBaseArticleResponse(BaseModel):
     permission_scope: PermissionScope
     is_published: bool
     ai_tags: list[str]
+    excluded_ai_tags: list[str] = Field(default_factory=list)
     allowed_user_ids: list[int]
     allowed_company_ids: list[int]
     company_admin_ids: list[int]
