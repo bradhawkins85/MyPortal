@@ -1,0 +1,7 @@
+{
+  "guid": "7d11c1f8-e65f-4e9c-9cc6-d315f3012393",
+  "occurred_at": "2025-09-17T15:30Z",
+  "change_type": "Fix",
+  "summary": "Relaxed embedded form sandbox and CSP to support FIDO2 postMessage flows while keeping CSP restrictions",
+  "content_hash": "cb9c31430e78b0c3617d9f826a8e89728e99c6524619914457616c5b6e513660"
+}

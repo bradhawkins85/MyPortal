@@ -1,0 +1,7 @@
+{
+  "guid": "c801a37a-b133-4012-aa20-36f283407e1b",
+  "occurred_at": "2025-10-21T12:33Z",
+  "change_type": "Fix",
+  "summary": "Reordered company assignment route registration to stop FastAPI parsing the static path as a company ID",
+  "content_hash": "20161694c366a26f1c231145c19986d3012ad6ab956df77eaaf26ff9d56628fb"
+}
