@@ -1,0 +1,7 @@
+{
+  "guid": "a87d900e-956a-4087-98b1-8ef8481501c7",
+  "occurred_at": "2025-10-09T11:46Z",
+  "change_type": "Feature",
+  "summary": "Consolidated the portal shell with a compact three-panel layout and reduced padding across views",
+  "content_hash": "0c4ee619de3c4f62f9adaf6ba72b30607349a126d5eabd47106659ea2215feaf"
+}

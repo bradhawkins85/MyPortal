@@ -1,0 +1,7 @@
+{
+  "guid": "abf19354-716b-435d-95c4-fbd2e1af5606",
+  "occurred_at": "2025-12-01T09:00Z",
+  "change_type": "Feature",
+  "summary": "Added knowledge base module with scoped permissions, Ollama-backed search, and portal UI integration",
+  "content_hash": "c4594e19e97ddaff3c100529ffb6a7b73f99d953d12ce45844ab4126e51430e8"
+}

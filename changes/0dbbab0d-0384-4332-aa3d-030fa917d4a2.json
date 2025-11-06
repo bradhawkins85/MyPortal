@@ -1,0 +1,7 @@
+{
+  "guid": "0dbbab0d-0384-4332-aa3d-030fa917d4a2",
+  "occurred_at": "2025-10-20T08:20Z",
+  "change_type": "Fix",
+  "summary": "Ensured ticket creation reuses insert connections so watcher setup no longer triggers 500 errors",
+  "content_hash": "ddecc68cafffc431d13e67d8641d50284b79504e860b433b679a537a631b7c6f"
+}
