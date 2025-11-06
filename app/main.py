@@ -9749,14 +9749,24 @@ async def _render_ticket_detail(
         else:
             company = await company_repo.get_company_by_id(ticket_company_id)
 
+    modules = await modules_service.list_modules()
+
     module_info: dict[str, Any] | None = None
     module_slug = ticket.get("module_slug")
     if module_slug:
-        modules = await modules_service.list_modules()
         for module in modules:
             if module.get("slug") == module_slug:
                 module_info = module
                 break
+
+    tactical_module = next((module for module in modules if module.get("slug") == "tacticalrmm"), None)
+    tactical_base_url = ""
+    if tactical_module:
+        settings = tactical_module.get("settings") or {}
+        if isinstance(settings, Mapping):
+            base_url = str(settings.get("base_url") or "").strip()
+            if base_url:
+                tactical_base_url = base_url.rstrip("/")
 
     ordered_replies = list(reversed(replies))
 
@@ -9861,6 +9871,22 @@ async def _render_ticket_detail(
         except (TypeError, ValueError):
             continue
 
+    serialisable_ticket_assets: list[dict[str, Any]] = []
+    for asset in ticket_assets:
+        if not isinstance(asset, Mapping):
+            continue
+        asset_identifier = asset.get("asset_id")
+        serialisable_ticket_assets.append(
+            {
+                "id": asset_identifier,
+                "asset_id": asset_identifier,
+                "name": str(asset.get("name") or "").strip() or (f"Asset {asset_identifier}" if asset_identifier else "Asset"),
+                "serial_number": (str(asset.get("serial_number") or "").strip() or None),
+                "status": (str(asset.get("status") or "").strip() or None),
+                "tactical_asset_id": (str(asset.get("tactical_asset_id") or "").strip() or None),
+            }
+        )
+
     asset_options: list[dict[str, Any]] = []
     if ticket_company_id is not None:
         company_assets = await assets_repo.list_company_assets(ticket_company_id)
@@ -9888,6 +9914,10 @@ async def _render_ticket_detail(
                 {
                     "id": asset_id_int,
                     "label": _format_asset_label(asset_row),
+                    "name": str(asset_row.get("name") or "").strip() or f"Asset {asset_id_int}",
+                    "serial_number": str(asset_row.get("serial_number") or "").strip() or None,
+                    "status": str(asset_row.get("status") or "").strip() or None,
+                    "tactical_asset_id": str(asset_row.get("tactical_asset_id") or "").strip() or None,
                 }
             )
 
@@ -9924,6 +9954,8 @@ async def _render_ticket_detail(
         "ticket_assets": ticket_assets,
         "ticket_asset_options": asset_options,
         "ticket_asset_selection": asset_selection,
+        "ticket_asset_linked_data": serialisable_ticket_assets,
+        "tacticalrmm_base_url": tactical_base_url,
         "can_delete_ticket": bool(user.get("is_super_admin")),
         "success_message": success_message,
         "error_message": error_message,
