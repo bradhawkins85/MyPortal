@@ -273,13 +273,13 @@ class SchedulerService:
                                     subject=str(subject),
                                     description=payload.get("description"),
                                     company_id=int(company_id) if company_id else None,
-                                    requester_id=int(payload["requester_id"]) if payload.get("requester_id") else None,
-                                    assigned_user_id=int(payload["assigned_user_id"]) if payload.get("assigned_user_id") else None,
+                                    requester_id=int(payload.get("requester_id")) if payload.get("requester_id") else None,
+                                    assigned_user_id=int(payload.get("assigned_user_id")) if payload.get("assigned_user_id") else None,
                                     priority=str(payload.get("priority", "normal")),
                                     status=str(payload.get("status", "open")),
-                                    category=payload.get("category"),
-                                    module_slug=payload.get("module_slug"),
-                                    external_reference=payload.get("external_reference"),
+                                    category=str(payload.get("category")) if payload.get("category") else None,
+                                    module_slug=str(payload.get("module_slug")) if payload.get("module_slug") else None,
+                                    external_reference=str(payload.get("external_reference")) if payload.get("external_reference") else None,
                                     trigger_automations=False,  # Prevent automation loops
                                 )
                                 ticket_id = ticket.get("id") if ticket else None
