@@ -77,6 +77,9 @@ emails or webhook requests). Newly added tokens include:
 | `{{ TICKET_LATEST_REPLY_AUTHOR_DISPLAY_NAME }}` | Display name for the latest reply author. |
 | `{{ ACTIVE_ASSETS }}` / `{{ ACTIVE_ASSETS:7 }}` | Count of assets that synced in the current month, or within the last `N` days when the `:N` suffix is provided. |
 | `{{ count:asset:field-name }}` | Count of assets with a specific custom field checkbox set to true (e.g., `{{ count:asset:bitdefender }}` or `{{ count:asset:threatlocker-installed }}`). |
+| `{{ list:asset:field-name }}` | Comma-separated list of asset names with a specific custom field checkbox set to true (e.g., `{{ list:asset:bitdefender }}`). |
+| `{{ count:issue:slug }}` | Count of assets linked to a specific issue type (e.g., `{{ count:issue:network-outage }}`). |
+| `{{ list:issue:slug }}` | Comma-separated list of asset names linked to a specific issue type (e.g., `{{ list:issue:network-outage }}`). |
 
 `{{ ACTIVE_ASSETS }}` tokens scope to the company in the current automation context when available (for example a ticket's company). When no company is present the counts cover the entire tenant. The default form returns assets with a Syncro sync timestamp in the current month; append `:N` to evaluate the past `N` days such as `{{ ACTIVE_ASSETS:1 }}` for the past day.
 
@@ -104,6 +107,73 @@ The field name in the variable (after `count:asset:`) must match the exact name 
 Subject: Security Software Status for {{ COMPANY_NAME }}
 Body: You have {{ count:asset:bitdefender }} assets with Bitdefender and {{ count:asset:threatlocker-installed }} assets with ThreatLocker installed.
 ```
+
+### Asset custom field list variables
+
+The `{{ list:asset:field-name }}` variables return a comma-separated list of asset names that have a specific checkbox custom field set to true. These work similarly to the count variables but provide the actual asset names instead of just a count.
+
+**Usage examples:**
+
+- `{{ list:asset:bitdefender }}` - List assets with the "bitdefender" checkbox enabled
+- `{{ list:asset:threatlocker-installed }}` - List assets with the "threatlocker-installed" checkbox enabled
+
+**Context scoping and field matching:**
+
+List variables follow the same scoping and field name matching rules as count variables. The assets are returned as a comma-separated list (e.g., "Server-01, Server-02, Workstation-03"). When no assets match, an empty string is returned.
+
+### Conditional logic
+
+Template variables support conditional expressions to dynamically return different values based on conditions. This is particularly useful for showing asset lists only when they exist, providing different messages based on counts, or any other conditional logic.
+
+**Syntax:**
+
+```
+{{ if condition then value_if_true else value_if_false }}
+```
+
+The `else` clause is optional. If omitted and the condition is false, an empty string is returned.
+
+**Comparison operators:**
+
+Conditional expressions support the following comparison operators:
+- `>` - Greater than
+- `<` - Less than
+- `>=` - Greater than or equal to
+- `<=` - Less than or equal to
+- `==` - Equal to
+- `!=` - Not equal to
+
+**Example use cases:**
+
+Show asset list only when assets exist:
+```
+Bitdefender assets: {{ if count:asset:bitdefender > 0 then list:asset:bitdefender else "None installed" }}
+```
+
+Display different messages based on count:
+```
+{{ if count:asset:bitdefender >= 10 then "Many assets protected" else "Few assets protected" }}
+```
+
+Conditional subject line:
+```
+Subject: {{ if count:asset:bitdefender > 0 then "Action Required: Bitdefender Updates" else "No action needed" }}
+```
+
+Multiple conditionals in the same template:
+```
+Security Status:
+- Bitdefender: {{ if count:asset:bitdefender > 0 then list:asset:bitdefender else "Not installed" }}
+- ThreatLocker: {{ if count:asset:threatlocker-installed > 0 then list:asset:threatlocker-installed else "Not installed" }}
+```
+
+**Notes:**
+
+- The `if`, `then`, and `else` keywords are case-insensitive
+- Variable names in conditionals (like `count:asset:bitdefender`) are automatically detected and resolved
+- Numeric comparisons are performed when both sides can be converted to numbers
+- String comparisons are used as a fallback when numeric conversion fails
+- Empty strings and zero values are considered "false" in boolean contexts
 
 ## Message templates
 
