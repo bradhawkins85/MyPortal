@@ -101,7 +101,7 @@ def test_extract_issue_list_requests_ignores_invalid():
 async def test_build_dynamic_token_map_with_issue_counts(monkeypatch):
     """Test that issue counts are included in the token map."""
     # Mock the repository function
-    async def fake_count_assets_by_issue_slug(company_id=None, issue_slug=None):
+    async def fake_count_assets_by_issue_slug(issue_slug=None, company_id=None):
         # Return different counts for different slugs
         counts = {
             "network-outage": 12,
@@ -128,7 +128,7 @@ async def test_build_dynamic_token_map_with_issue_counts(monkeypatch):
 async def test_build_dynamic_token_map_with_issue_lists(monkeypatch):
     """Test that issue asset lists are included in the token map."""
     # Mock the repository function
-    async def fake_list_assets_by_issue_slug(company_id=None, issue_slug=None):
+    async def fake_list_assets_by_issue_slug(issue_slug=None, company_id=None):
         # Return different lists for different slugs
         lists = {
             "network-outage": ["Server01", "Router01", "Switch01"],
@@ -159,7 +159,7 @@ async def test_build_dynamic_token_map_with_mixed_patterns(monkeypatch):
         return 10
     
     # Mock issue count
-    async def fake_count_assets_by_issue_slug(company_id=None, issue_slug=None):
+    async def fake_count_assets_by_issue_slug(issue_slug=None, company_id=None):
         return 15
     
     monkeypatch.setattr(
@@ -186,7 +186,7 @@ async def test_build_dynamic_token_map_with_mixed_patterns(monkeypatch):
 async def test_render_string_async_with_issue_count(monkeypatch):
     """Test that issue counts work in template rendering."""
     # Mock the repository function
-    async def fake_count_assets_by_issue_slug(company_id=None, issue_slug=None):
+    async def fake_count_assets_by_issue_slug(issue_slug=None, company_id=None):
         return 8
     
     monkeypatch.setattr(
@@ -207,7 +207,7 @@ async def test_render_string_async_with_issue_count(monkeypatch):
 async def test_render_string_async_with_issue_list(monkeypatch):
     """Test that issue asset lists work in template rendering."""
     # Mock the repository function
-    async def fake_list_assets_by_issue_slug(company_id=None, issue_slug=None):
+    async def fake_list_assets_by_issue_slug(issue_slug=None, company_id=None):
         return ["Server01", "Router01", "Switch01"]
     
     monkeypatch.setattr(
@@ -228,7 +228,7 @@ async def test_render_string_async_with_issue_list(monkeypatch):
 async def test_render_value_async_with_issue_counts(monkeypatch):
     """Test that issue counts work in complex payload rendering."""
     # Mock the repository function
-    async def fake_count_assets_by_issue_slug(company_id=None, issue_slug=None):
+    async def fake_count_assets_by_issue_slug(issue_slug=None, company_id=None):
         counts = {
             "network-outage": 12,
             "printer-issue": 5,
@@ -264,7 +264,7 @@ async def test_render_value_async_with_issue_counts(monkeypatch):
 async def test_issue_count_with_no_company_context(monkeypatch):
     """Test that issue counts work without a specific company."""
     # Mock the repository function
-    async def fake_count_assets_by_issue_slug(company_id=None, issue_slug=None):
+    async def fake_count_assets_by_issue_slug(issue_slug=None, company_id=None):
         # When company_id is None, should count across all companies
         assert company_id is None
         return 25
@@ -288,7 +288,7 @@ async def test_issue_count_extracts_company_from_ticket(monkeypatch):
     """Test that company_id is extracted from ticket context."""
     call_args = []
     
-    async def fake_count_assets_by_issue_slug(company_id=None, issue_slug=None):
+    async def fake_count_assets_by_issue_slug(issue_slug=None, company_id=None):
         call_args.append({"company_id": company_id, "issue_slug": issue_slug})
         return 7
     

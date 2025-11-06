@@ -186,7 +186,14 @@ async def build_dynamic_token_map(
     issue_count_requests = _extract_issue_count_requests(tokens)
     issue_list_requests = _extract_issue_list_requests(tokens)
     
-    if not active_asset_requests and not custom_field_requests and not custom_field_list_requests and not issue_count_requests and not issue_list_requests:
+    all_requests = [
+        active_asset_requests,
+        custom_field_requests,
+        custom_field_list_requests,
+        issue_count_requests,
+        issue_list_requests,
+    ]
+    if not any(all_requests):
         return {}
 
     company_id = _extract_company_id(context, base_tokens)
@@ -235,8 +242,8 @@ async def build_dynamic_token_map(
     if issue_count_requests:
         for token, issue_slug in issue_count_requests.items():
             count = await issues_repo.count_assets_by_issue_slug(
-                company_id=company_id,
                 issue_slug=issue_slug,
+                company_id=company_id,
             )
             result[token] = str(count)
     
@@ -244,8 +251,8 @@ async def build_dynamic_token_map(
     if issue_list_requests:
         for token, issue_slug in issue_list_requests.items():
             assets = await issues_repo.list_assets_by_issue_slug(
-                company_id=company_id,
                 issue_slug=issue_slug,
+                company_id=company_id,
             )
             result[token] = ", ".join(assets)
     

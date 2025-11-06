@@ -439,12 +439,12 @@ async def list_assignments_for_issue(issue_id: int) -> list[AssignmentRecord]:
     return [assignment for assignment in (_normalise_assignment(row) for row in rows) if assignment]
 
 
-async def count_assets_by_issue_slug(*, company_id: int | None = None, issue_slug: str) -> int:
+async def count_assets_by_issue_slug(*, issue_slug: str, company_id: int | None = None) -> int:
     """Count assets that have the specified issue assigned to their company.
     
     Args:
-        company_id: Optional company ID to filter by
         issue_slug: The slug of the issue to count assets for
+        company_id: Optional company ID to filter by
         
     Returns:
         Count of assets with the issue
@@ -469,12 +469,12 @@ async def count_assets_by_issue_slug(*, company_id: int | None = None, issue_slu
     return int(row.get("count", 0))
 
 
-async def list_assets_by_issue_slug(*, company_id: int | None = None, issue_slug: str) -> list[str]:
+async def list_assets_by_issue_slug(*, issue_slug: str, company_id: int | None = None) -> list[str]:
     """List asset names that have the specified issue assigned to their company.
     
     Args:
-        company_id: Optional company ID to filter by
         issue_slug: The slug of the issue to list assets for
+        company_id: Optional company ID to filter by
         
     Returns:
         List of asset names with the issue
