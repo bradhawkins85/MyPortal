@@ -5874,6 +5874,8 @@ async def verify_staff_member(staff_id: int, request: Request):
         result = {"status": "error", "error": str(exc)}
 
     status_code = int(result.get("response_status")) if result.get("response_status") is not None else None
+    # Accept both "succeeded" and "queued" as success states
+    # (background=False should always return "succeeded", but we check "queued" defensively)
     success = result.get("status") in {"succeeded", "queued"}
 
     return JSONResponse({
