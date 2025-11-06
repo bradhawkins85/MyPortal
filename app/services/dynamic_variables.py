@@ -6,6 +6,7 @@ from typing import Any
 
 from app.repositories import assets as assets_repo
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
+from app.repositories import issues as issues_repo
 
 
 def _utcnow() -> datetime:
@@ -127,6 +128,52 @@ def _extract_asset_custom_field_list_requests(tokens: Iterable[str]) -> dict[str
     return requests
 
 
+def _extract_issue_count_requests(tokens: Iterable[str]) -> dict[str, str]:
+    """Extract count:issue:slug tokens.
+    
+    Returns a dict mapping the full token to the issue slug.
+    For example: {"count:issue:network-outage": "network-outage"}
+    """
+    requests: dict[str, str] = {}
+    for token in tokens:
+        if not token:
+            continue
+        # Support both lowercase and uppercase variants
+        lower = token.lower()
+        if not lower.startswith("count:issue:"):
+            continue
+        parts = token.split(":", 2)
+        if len(parts) != 3:
+            continue
+        issue_slug = parts[2].strip()
+        if issue_slug:
+            requests[token] = issue_slug
+    return requests
+
+
+def _extract_issue_list_requests(tokens: Iterable[str]) -> dict[str, str]:
+    """Extract list:issue:slug tokens.
+    
+    Returns a dict mapping the full token to the issue slug.
+    For example: {"list:issue:network-outage": "network-outage"}
+    """
+    requests: dict[str, str] = {}
+    for token in tokens:
+        if not token:
+            continue
+        # Support both lowercase and uppercase variants
+        lower = token.lower()
+        if not lower.startswith("list:issue:"):
+            continue
+        parts = token.split(":", 2)
+        if len(parts) != 3:
+            continue
+        issue_slug = parts[2].strip()
+        if issue_slug:
+            requests[token] = issue_slug
+    return requests
+
+
 async def build_dynamic_token_map(
     tokens: Iterable[str],
     context: Mapping[str, Any] | None,
@@ -136,8 +183,10 @@ async def build_dynamic_token_map(
     active_asset_requests = _extract_active_asset_requests(tokens)
     custom_field_requests = _extract_asset_custom_field_count_requests(tokens)
     custom_field_list_requests = _extract_asset_custom_field_list_requests(tokens)
+    issue_count_requests = _extract_issue_count_requests(tokens)
+    issue_list_requests = _extract_issue_list_requests(tokens)
     
-    if not active_asset_requests and not custom_field_requests and not custom_field_list_requests:
+    if not active_asset_requests and not custom_field_requests and not custom_field_list_requests and not issue_count_requests and not issue_list_requests:
         return {}
 
     company_id = _extract_company_id(context, base_tokens)
@@ -179,6 +228,24 @@ async def build_dynamic_token_map(
                 company_id=company_id,
                 field_name=field_name,
                 field_value=True,
+            )
+            result[token] = ", ".join(assets)
+    
+    # Handle issue asset counts
+    if issue_count_requests:
+        for token, issue_slug in issue_count_requests.items():
+            count = await issues_repo.count_assets_by_issue_slug(
+                company_id=company_id,
+                issue_slug=issue_slug,
+            )
+            result[token] = str(count)
+    
+    # Handle issue asset lists
+    if issue_list_requests:
+        for token, issue_slug in issue_list_requests.items():
+            assets = await issues_repo.list_assets_by_issue_slug(
+                company_id=company_id,
+                issue_slug=issue_slug,
             )
             result[token] = ", ".join(assets)
     
