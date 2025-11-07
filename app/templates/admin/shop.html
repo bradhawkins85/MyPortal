@@ -285,6 +285,36 @@
         <input class="form-input" id="edit-product-price-annual-annual" name="price_annual_annual_payment" type="number" step="0.01" />
         <p class="form-helper">Price for annual commitment with annual payment (full year).</p>
       </div>
+      <details class="form-field form-field--wide form-collapsible">
+        <summary class="form-collapsible__summary">
+          <span class="form-collapsible__title">Schedule price change</span>
+          <span class="form-collapsible__icon" aria-hidden="true"></span>
+        </summary>
+        <div class="form-collapsible__content">
+          <div class="form-grid">
+            <div class="form-field">
+              <label class="form-label" for="edit-product-scheduled-price">New price</label>
+              <input class="form-input" id="edit-product-scheduled-price" name="scheduled_price" type="number" step="0.01" />
+              <p class="form-helper">The new standard price to apply on the change date.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="edit-product-scheduled-vip-price">New VIP price</label>
+              <input class="form-input" id="edit-product-scheduled-vip-price" name="scheduled_vip_price" type="number" step="0.01" />
+              <p class="form-helper">The new VIP price to apply on the change date (optional).</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="edit-product-scheduled-buy-price">New buy price</label>
+              <input class="form-input" id="edit-product-scheduled-buy-price" name="scheduled_buy_price" type="number" step="0.01" />
+              <p class="form-helper">The new buy price to apply on the change date.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="edit-product-price-change-date">Effective date</label>
+              <input class="form-input" id="edit-product-price-change-date" name="price_change_date" type="date" />
+              <p class="form-helper">Date when the price change will take effect. Customers will be notified beforehand.</p>
+            </div>
+          </div>
+        </div>
+      </details>
       <div class="form-field form-field--wide">
         <label class="form-label" for="edit-product-features-filter">Features</label>
         <div class="form-actions form-actions--inline">
