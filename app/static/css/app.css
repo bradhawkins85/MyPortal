@@ -4123,6 +4123,12 @@ button.header-title-menu__link {
   gap: 1rem;
 }
 
+@media (max-width: 720px) {
+  .management__stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 .stat-card {
   background: var(--surface-default);
   border-radius: 0.75rem;
