@@ -3588,13 +3588,77 @@ async def request_subscription_change(request: Request, subscription_id: str):
         user_id=user.get("id"),
     )
     
-    # For now, we just log the request. In a production system, you might:
-    # - Create a ticket
-    # - Send a notification to admins
-    # - Store the request in a pending changes table
-    # - Trigger a webhook
+    # Create a ticket for the subscription change request
+    product_name = subscription.get("product_name") or "Unknown Product"
+    current_quantity = subscription.get("quantity", 0)
     
-    return JSONResponse({"success": True, "message": "Change request submitted"})
+    # Build ticket subject
+    subject = f"Subscription Change Request - {product_name}"
+    
+    # Build detailed description
+    description_parts = [
+        f"A subscription change has been requested.",
+        "",
+        "**Subscription Details:**",
+        f"- Product: {product_name}",
+        f"- Subscription ID: {subscription_id}",
+        f"- Current Quantity: {current_quantity}",
+        f"- Requested Quantity: {new_quantity}",
+    ]
+    
+    if reason:
+        description_parts.extend([
+            "",
+            "**Reason for Change:**",
+            reason,
+        ])
+    
+    description = "\n".join(description_parts)
+    
+    # Create the ticket against the requester
+    user_id = user.get("id")
+    try:
+        ticket = await tickets_service.create_ticket(
+            subject=subject,
+            description=description,
+            requester_id=user_id,
+            company_id=company_id,
+            assigned_user_id=None,
+            priority="normal",
+            status="open",
+            category="subscription",
+            module_slug=None,
+            external_reference=f"subscription:{subscription_id}",
+            trigger_automations=True,
+        )
+        
+        ticket_id = ticket.get("id")
+        ticket_number = ticket.get("ticket_number")
+        
+        log_info(
+            "Ticket created for subscription change request",
+            ticket_id=ticket_id,
+            ticket_number=ticket_number,
+            subscription_id=subscription_id,
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Change request submitted and ticket created",
+            "ticket_id": ticket_id,
+            "ticket_number": ticket_number,
+        })
+    except Exception as exc:
+        log_error(
+            "Failed to create ticket for subscription change request",
+            subscription_id=subscription_id,
+            error=str(exc),
+        )
+        # Still return success to the user, but log the error
+        return JSONResponse({
+            "success": True,
+            "message": "Change request submitted",
+        })
 
 
 @app.post("/switch-company", response_class=RedirectResponse)
