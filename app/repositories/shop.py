@@ -30,10 +30,7 @@ async def list_categories() -> list[dict[str, Any]]:
         """
         SELECT id, name, parent_id, display_order 
         FROM shop_categories 
-        ORDER BY 
-            COALESCE(parent_id, id), 
-            display_order, 
-            name
+        ORDER BY name
         """
     )
     categories = [
@@ -52,28 +49,34 @@ async def list_categories() -> list[dict[str, Any]]:
         parent_id = category.get("parent_id")
         parent_map.setdefault(parent_id, []).append(category)
     
+    # Sort all children alphabetically by name
+    for children_list in parent_map.values():
+        children_list.sort(key=lambda c: c["name"].lower())
+    
     # Attach children to parents
     for category in categories:
         category_id = category["id"]
         category["children"] = parent_map.get(category_id, [])
     
-    # Return only top-level categories (those without parents)
+    # Return only top-level categories (those without parents), already sorted alphabetically
     return parent_map.get(None, [])
 
 
 async def list_all_categories_flat() -> list[dict[str, Any]]:
-    """List all categories in a flat structure for admin purposes."""
+    """List all categories in a flat structure for admin purposes.
+    
+    Returns categories ordered alphabetically with children grouped under their parents.
+    Parent categories are sorted alphabetically, and each parent's children are also
+    sorted alphabetically and appear immediately after their parent.
+    """
     rows = await db.fetch_all(
         """
         SELECT id, name, parent_id, display_order 
         FROM shop_categories 
-        ORDER BY 
-            COALESCE(parent_id, id), 
-            display_order, 
-            name
+        ORDER BY name
         """
     )
-    return [
+    categories = [
         {
             "id": int(row["id"]), 
             "name": row["name"],
@@ -82,6 +85,27 @@ async def list_all_categories_flat() -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+    
+    # Build parent-child map
+    parent_map: dict[int | None, list[dict[str, Any]]] = {}
+    for category in categories:
+        parent_id = category.get("parent_id")
+        parent_map.setdefault(parent_id, []).append(category)
+    
+    # Sort all groups alphabetically by name
+    for children_list in parent_map.values():
+        children_list.sort(key=lambda c: c["name"].lower())
+    
+    # Build flat list: parent followed by its children
+    result: list[dict[str, Any]] = []
+    for parent in parent_map.get(None, []):
+        result.append(parent)
+        # Add all children of this parent
+        parent_id = parent["id"]
+        for child in parent_map.get(parent_id, []):
+            result.append(child)
+    
+    return result
 
 async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
     query_parts: list[str] = [
