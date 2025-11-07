@@ -1,4 +1,4 @@
-"""Tests for subscription category and term days fields in product management."""
+"""Tests for subscription commitment and payment fields in product management."""
 from __future__ import annotations
 
 from typing import Any
@@ -32,7 +32,7 @@ def _make_request(path: str = "/shop/admin/product") -> Request:
 
 @pytest.mark.anyio("asyncio")
 async def test_admin_create_shop_product_with_subscription_fields(monkeypatch):
-    """Test creating a product with subscription category and term days."""
+    """Test creating a product with subscription commitment and payment fields."""
     request = _make_request()
 
     current_user = {"id": 42}
@@ -67,7 +67,11 @@ async def test_admin_create_shop_product_with_subscription_fields(monkeypatch):
         cross_sell_product_ids=None,
         upsell_product_ids=None,
         subscription_category_id="5",
-        term_days="365",
+        commitment_type="annual",
+        payment_frequency="monthly",
+        price_monthly_commitment=None,
+        price_annual_monthly_payment="19.95",
+        price_annual_annual_payment=None,
     )
 
     assert response.status_code == status.HTTP_303_SEE_OTHER
@@ -76,12 +80,13 @@ async def test_admin_create_shop_product_with_subscription_fields(monkeypatch):
     create_mock.assert_awaited_once()
     call_kwargs = create_mock.await_args.kwargs
     assert call_kwargs["subscription_category_id"] == 5
-    assert call_kwargs["term_days"] == 365
+    assert call_kwargs["commitment_type"] == "annual"
+    assert call_kwargs["payment_frequency"] == "monthly"
 
 
 @pytest.mark.anyio("asyncio")
 async def test_admin_update_shop_product_with_subscription_fields(monkeypatch):
-    """Test updating a product with subscription category and term days."""
+    """Test updating a product with subscription commitment and payment fields."""
     request = _make_request("/shop/admin/product/1")
 
     current_user = {"id": 42}
@@ -129,7 +134,11 @@ async def test_admin_update_shop_product_with_subscription_fields(monkeypatch):
         cross_sell_sku=None,
         upsell_sku=None,
         subscription_category_id="3",
-        term_days="365",
+        commitment_type="monthly",
+        payment_frequency="monthly",
+        price_monthly_commitment="29.99",
+        price_annual_monthly_payment=None,
+        price_annual_annual_payment=None,
     )
 
     assert response.status_code == status.HTTP_303_SEE_OTHER
@@ -140,12 +149,13 @@ async def test_admin_update_shop_product_with_subscription_fields(monkeypatch):
     # First positional arg is product_id
     assert call_args.args[0] == 1
     assert call_args.kwargs["subscription_category_id"] == 3
-    assert call_args.kwargs["term_days"] == 365
+    assert call_args.kwargs["commitment_type"] == "monthly"
+    assert call_args.kwargs["payment_frequency"] == "monthly"
 
 
 @pytest.mark.anyio("asyncio")
-async def test_admin_create_shop_product_defaults_term_days(monkeypatch):
-    """Test that term_days defaults to 365 when not provided."""
+async def test_admin_create_shop_product_defaults_no_subscription(monkeypatch):
+    """Test that non-subscription products don't require commitment/payment fields."""
     request = _make_request()
 
     current_user = {"id": 42}
@@ -172,7 +182,11 @@ async def test_admin_create_shop_product_defaults_term_days(monkeypatch):
         cross_sell_product_ids=None,
         upsell_product_ids=None,
         subscription_category_id="",
-        term_days="365",  # Default value
+        commitment_type=None,
+        payment_frequency=None,
+        price_monthly_commitment=None,
+        price_annual_monthly_payment=None,
+        price_annual_annual_payment=None,
     )
 
     assert response.status_code == status.HTTP_303_SEE_OTHER
@@ -180,4 +194,5 @@ async def test_admin_create_shop_product_defaults_term_days(monkeypatch):
     create_mock.assert_awaited_once()
     call_kwargs = create_mock.await_args.kwargs
     assert call_kwargs["subscription_category_id"] is None
-    assert call_kwargs["term_days"] == 365
+    assert call_kwargs["commitment_type"] is None
+    assert call_kwargs["payment_frequency"] is None

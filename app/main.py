@@ -814,6 +814,44 @@ def _parse_int_in_range(value: Any, *, default: int, minimum: int, maximum: int)
     return parsed
 
 
+def _validate_subscription_commitment_and_payment(
+    subscription_category_id: int | None,
+    commitment_type: str | None,
+    payment_frequency: str | None,
+) -> tuple[str | None, str | None]:
+    """Validate subscription commitment type and payment frequency.
+    
+    Returns:
+        Tuple of (commitment_value, payment_frequency_value)
+        
+    Raises:
+        HTTPException: If validation fails
+    """
+    if not subscription_category_id:
+        return None, None
+        
+    if not commitment_type or commitment_type not in ("monthly", "annual"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Commitment type must be 'monthly' or 'annual' for subscription products"
+        )
+    
+    if not payment_frequency or payment_frequency not in ("monthly", "annual"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment frequency must be 'monthly' or 'annual' for subscription products"
+        )
+    
+    # Validate business rule: Monthly commitment can only have monthly payment
+    if commitment_type == "monthly" and payment_frequency != "monthly":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Monthly commitment can only have monthly payment"
+        )
+    
+    return commitment_type, payment_frequency
+
+
 def _parse_staff_selection(value: Any) -> int | None:
     if value is None:
         return None
@@ -9113,7 +9151,11 @@ async def admin_create_shop_product(
     cross_sell_product_ids: list[int] | None = Form(default=None),
     upsell_product_ids: list[int] | None = Form(default=None),
     subscription_category_id: str | None = Form(default=None),
-    term_days: str = Form(default="365"),
+    commitment_type: str | None = Form(default=None),
+    payment_frequency: str | None = Form(default=None),
+    price_monthly_commitment: str | None = Form(default=None),
+    price_annual_monthly_payment: str | None = Form(default=None),
+    price_annual_annual_payment: str | None = Form(default=None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -9176,12 +9218,40 @@ async def admin_create_shop_product(
         if not sub_category:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected subscription category does not exist")
 
-    try:
-        term_days_int = int(term_days)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Term days must be a whole number")
-    if term_days_int < 1:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Term days must be at least 1")
+    # Validate commitment type and payment frequency for subscriptions
+    commitment_value, payment_freq_value = _validate_subscription_commitment_and_payment(
+        subscription_category_value,
+        commitment_type,
+        payment_frequency,
+    )
+
+    # Parse pricing fields
+    price_monthly_comm: Decimal | None = None
+    if price_monthly_commitment not in (None, ""):
+        try:
+            price_monthly_comm = Decimal(price_monthly_commitment).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if price_monthly_comm < 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Monthly commitment price must be at least zero")
+        except (TypeError, InvalidOperation):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Monthly commitment price must be a valid number")
+
+    price_annual_monthly: Decimal | None = None
+    if price_annual_monthly_payment not in (None, ""):
+        try:
+            price_annual_monthly = Decimal(price_annual_monthly_payment).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if price_annual_monthly < 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Annual commitment with monthly payment price must be at least zero")
+        except (TypeError, InvalidOperation):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Annual commitment with monthly payment price must be a valid number")
+
+    price_annual_annual: Decimal | None = None
+    if price_annual_annual_payment not in (None, ""):
+        try:
+            price_annual_annual = Decimal(price_annual_annual_payment).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if price_annual_annual < 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Annual commitment with annual payment price must be at least zero")
+        except (TypeError, InvalidOperation):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Annual commitment with annual payment price must be a valid number")
 
     cross_sell_ids = await _validate_recommendation_product_ids(
         cross_sell_product_ids,
@@ -9220,7 +9290,11 @@ async def admin_create_shop_product(
             cross_sell_product_ids=cross_sell_ids,
             upsell_product_ids=upsell_ids,
             subscription_category_id=subscription_category_value,
-            term_days=term_days_int,
+            commitment_type=commitment_value,
+            payment_frequency=payment_freq_value,
+            price_monthly_commitment=price_monthly_comm,
+            price_annual_monthly_payment=price_annual_monthly,
+            price_annual_annual_payment=price_annual_annual,
         )
     except aiomysql.IntegrityError as exc:
         if stored_path:
@@ -9269,7 +9343,11 @@ async def admin_update_shop_product(
     cross_sell_sku: str | None = Form(default=None),
     upsell_sku: str | None = Form(default=None),
     subscription_category_id: str | None = Form(default=None),
-    term_days: str = Form(default="365"),
+    commitment_type: str | None = Form(default=None),
+    payment_frequency: str | None = Form(default=None),
+    price_monthly_commitment: str | None = Form(default=None),
+    price_annual_monthly_payment: str | None = Form(default=None),
+    price_annual_annual_payment: str | None = Form(default=None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -9369,12 +9447,40 @@ async def admin_update_shop_product(
         if not sub_category:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected subscription category does not exist")
 
-    try:
-        term_days_int = int(term_days)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Term days must be a whole number")
-    if term_days_int < 1:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Term days must be at least 1")
+    # Validate commitment type and payment frequency for subscriptions
+    commitment_value, payment_freq_value = _validate_subscription_commitment_and_payment(
+        subscription_category_value,
+        commitment_type,
+        payment_frequency,
+    )
+
+    # Parse pricing fields
+    price_monthly_comm: Decimal | None = None
+    if price_monthly_commitment not in (None, ""):
+        try:
+            price_monthly_comm = Decimal(price_monthly_commitment).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if price_monthly_comm < 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Monthly commitment price must be at least zero")
+        except (TypeError, InvalidOperation):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Monthly commitment price must be a valid number")
+
+    price_annual_monthly: Decimal | None = None
+    if price_annual_monthly_payment not in (None, ""):
+        try:
+            price_annual_monthly = Decimal(price_annual_monthly_payment).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if price_annual_monthly < 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Annual commitment with monthly payment price must be at least zero")
+        except (TypeError, InvalidOperation):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Annual commitment with monthly payment price must be a valid number")
+
+    price_annual_annual: Decimal | None = None
+    if price_annual_annual_payment not in (None, ""):
+        try:
+            price_annual_annual = Decimal(price_annual_annual_payment).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if price_annual_annual < 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Annual commitment with annual payment price must be at least zero")
+        except (TypeError, InvalidOperation):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Annual commitment with annual payment price must be a valid number")
 
     previous_image_url = product.get("image_url")
     image_url = previous_image_url
@@ -9427,7 +9533,11 @@ async def admin_update_shop_product(
             cross_sell_product_ids=cross_sell_ids,
             upsell_product_ids=upsell_ids,
             subscription_category_id=subscription_category_value,
-            term_days=term_days_int,
+            commitment_type=commitment_value,
+            payment_frequency=payment_freq_value,
+            price_monthly_commitment=price_monthly_comm,
+            price_annual_monthly_payment=price_annual_monthly,
+            price_annual_annual_payment=price_annual_annual,
         )
     except aiomysql.IntegrityError as exc:
         if stored_path:

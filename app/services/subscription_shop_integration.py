@@ -72,7 +72,16 @@ async def create_subscriptions_from_order(
         
         quantity = int(item.get("quantity", 1))
         unit_price = Decimal(str(item.get("price", 0)))
-        term_days = int(product.get("term_days", 365))
+        
+        # Determine term length based on commitment type
+        commitment_type = product.get("commitment_type")
+        if commitment_type == "monthly":
+            term_days = 30  # Monthly commitment = 30 days
+        elif commitment_type == "annual":
+            term_days = 365  # Annual commitment = 365 days
+        else:
+            # Fallback for legacy products without commitment_type
+            term_days = 365
         
         # Calculate subscription dates
         start_date = today

@@ -10,6 +10,7 @@ from loguru import logger
 
 from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import scheduled_invoices as invoices_repo
+from app.repositories import shop as shop_repo
 
 
 async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
@@ -116,9 +117,20 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
             # Calculate next term dates
             next_term_start = sub["end_date"] + timedelta(days=1)
             
-            # Use product's term_days if available, otherwise default to 365
-            # For v1, we'll use unit_price as the renewal price (full term)
-            term_days = 365  # Could be fetched from product if needed
+            # Fetch product to determine commitment type and term length
+            product = await shop_repo.get_product_by_id(sub["product_id"])
+            
+            # Determine term length based on commitment type
+            if product and product.get("commitment_type"):
+                commitment_type = product.get("commitment_type")
+                if commitment_type == "monthly":
+                    term_days = 30  # Monthly commitment = 30 days
+                else:  # annual
+                    term_days = 365  # Annual commitment = 365 days
+            else:
+                # Fallback for legacy subscriptions
+                term_days = 365
+                
             next_term_end = next_term_start + timedelta(days=term_days - 1)
             
             await invoices_repo.add_invoice_line(
