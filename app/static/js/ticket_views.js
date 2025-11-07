@@ -76,6 +76,39 @@
         saveViewBtn.addEventListener('click', () => this.showSaveViewModal());
       }
 
+      // Save view form
+      const saveViewForm = document.querySelector('[data-save-view-form]');
+      if (saveViewForm) {
+        saveViewForm.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const formData = new FormData(saveViewForm);
+          const name = formData.get('name');
+          const description = formData.get('description');
+          const isDefault = formData.get('is_default') === 'on';
+          
+          const saved = await this.saveView(name, description, isDefault);
+          if (saved) {
+            saveViewForm.reset();
+            const modal = document.getElementById('save-view-modal');
+            if (modal) {
+              modal.setAttribute('hidden', '');
+              modal.setAttribute('aria-hidden', 'true');
+            }
+          }
+        });
+      }
+
+      // Modal close buttons
+      document.querySelectorAll('[data-modal-close]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const modal = e.target.closest('.modal');
+          if (modal) {
+            modal.setAttribute('hidden', '');
+            modal.setAttribute('aria-hidden', 'true');
+          }
+        });
+      });
+
       // Delete view button
       const deleteViewBtn = this.container.querySelector('[data-delete-view]');
       if (deleteViewBtn) {
