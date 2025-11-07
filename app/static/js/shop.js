@@ -219,5 +219,44 @@
         openModal(detailsModal);
       });
     });
+
+    // Category collapse/expand functionality
+    container.querySelectorAll('[data-category-toggle]').forEach((button) => {
+      const categoryId = button.getAttribute('data-category-toggle');
+      const childrenContainer = container.querySelector(`[data-category-children="${categoryId}"]`);
+      const icon = button.querySelector('.shop-categories__icon--expand');
+      
+      if (!childrenContainer) {
+        return;
+      }
+
+      button.addEventListener('click', () => {
+        const isExpanded = button.getAttribute('aria-expanded') === 'true';
+        
+        if (isExpanded) {
+          childrenContainer.hidden = true;
+          button.setAttribute('aria-expanded', 'false');
+          if (icon) {
+            icon.textContent = '▶';
+          }
+        } else {
+          childrenContainer.hidden = false;
+          button.setAttribute('aria-expanded', 'true');
+          if (icon) {
+            icon.textContent = '▼';
+          }
+        }
+      });
+
+      // Auto-expand if a child category is active
+      const activeChild = childrenContainer.querySelector('.is-active');
+      if (activeChild) {
+        childrenContainer.hidden = false;
+        button.setAttribute('aria-expanded', 'true');
+        if (icon) {
+          icon.textContent = '▼';
+        }
+      }
+    });
   });
 })();
