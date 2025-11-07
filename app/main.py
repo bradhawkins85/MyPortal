@@ -8710,18 +8710,34 @@ async def admin_update_shop_category(
     if parsed_parent_id is not None:
         all_categories = await shop_repo.list_all_categories_flat()
         
-        # Build a parent-child map
-        def is_descendant(parent_id: int, potential_descendant_id: int) -> bool:
-            """Check if potential_descendant_id is in the tree under parent_id."""
-            for cat in all_categories:
-                if cat["id"] == potential_descendant_id:
-                    if cat["parent_id"] == parent_id:
-                        return True
-                    elif cat["parent_id"] is not None:
-                        return is_descendant(parent_id, cat["parent_id"])
-            return False
+        # Build a map of category children
+        children_map: dict[int, list[int]] = {}
+        for cat in all_categories:
+            parent = cat.get("parent_id")
+            if parent is not None:
+                children_map.setdefault(parent, []).append(cat["id"])
         
-        if is_descendant(category_id, parsed_parent_id):
+        def get_all_descendants(cat_id: int, visited: set[int] | None = None) -> set[int]:
+            """Get all descendants of a category."""
+            if visited is None:
+                visited = set()
+            
+            # Prevent infinite loops
+            if cat_id in visited:
+                return set()
+            
+            visited.add(cat_id)
+            descendants = set()
+            
+            for child_id in children_map.get(cat_id, []):
+                descendants.add(child_id)
+                descendants.update(get_all_descendants(child_id, visited))
+            
+            return descendants
+        
+        # Check if the new parent is in the descendants of the current category
+        descendants = get_all_descendants(category_id)
+        if parsed_parent_id in descendants:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot move a category into one of its own descendants"
