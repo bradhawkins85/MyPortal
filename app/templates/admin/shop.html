@@ -1,33 +1,44 @@
 {% extends "base.html" %}
 
 {% block header_title %}
-  <div class="header__title-content">
-    <span class="header__title-text">Shop admin</span>
-    <div class="header__title-actions">
-      <a class="button button--ghost button--small header__title-button" href="/admin/shop/categories">
-        Product categories
-      </a>
-      <a class="button button--ghost button--small header__title-button" href="/admin/shop/subscription-categories">
-        Subscription categories
-      </a>
-      <a class="button button--primary button--small header__title-button" href="/admin/shop/products/new">
-        Add product
-      </a>
-      <button
-        type="button"
-        class="button button--ghost button--small header__title-button"
-        data-import-product-modal-open
-        aria-haspopup="dialog"
-        aria-controls="import-product-modal"
-      >
-        Import product
-      </button>
-    </div>
+  <div class="header-title-menu">
+    <span class="header-title-menu__label">Shop admin</span>
+    <details class="header-title-menu__dropdown" data-header-menu>
+      <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+        Shop tools
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+          <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
+        </svg>
+        <span class="visually-hidden">Toggle shop tools menu</span>
+      </summary>
+      <ul class="header-title-menu__list" role="menu">
+        <li class="header-title-menu__item" role="none">
+          <a href="/admin/shop/categories" class="header-title-menu__link" role="menuitem">Product categories</a>
+        </li>
+        <li class="header-title-menu__item" role="none">
+          <a href="/admin/shop/subscription-categories" class="header-title-menu__link" role="menuitem">Subscription categories</a>
+        </li>
+        <li class="header-title-menu__item" role="none">
+          <a href="/admin/shop/packages" class="header-title-menu__link" role="menuitem">Package admin</a>
+        </li>
+        <li class="header-title-menu__item" role="none">
+          <a href="/admin/shop/products/new" class="header-title-menu__link" role="menuitem">Add product</a>
+        </li>
+        <li class="header-title-menu__item" role="none">
+          <button
+            type="button"
+            class="header-title-menu__link"
+            role="menuitem"
+            data-import-product-modal-open
+            aria-haspopup="dialog"
+            aria-controls="import-product-modal"
+          >
+            Import product
+          </button>
+        </li>
+      </ul>
+    </details>
   </div>
-{% endblock %}
-
-{% block header_actions %}
-  <a class="button button--ghost" href="/admin/shop/packages">Package admin</a>
 {% endblock %}
 
 {% block content %}
