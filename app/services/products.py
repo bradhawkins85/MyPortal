@@ -378,44 +378,45 @@ async def _get_or_create_category_hierarchy(category_path: str) -> int | None:
     if not parts:
         return None
     
+    # Fetch all categories once to avoid N+1 queries
+    all_categories = await shop_repo.list_all_categories_flat()
+    
     parent_id: int | None = None
     
     for category_name in parts:
-        # Try to find existing category with this name and parent
-        # Note: get_category_by_name doesn't check parent, so we need to check manually
-        existing = await shop_repo.get_category_by_name(category_name)
+        # Find existing category with this name and parent
+        matching_category = None
+        for cat in all_categories:
+            if cat["name"] == category_name and cat.get("parent_id") == parent_id:
+                matching_category = cat
+                break
         
-        if existing and existing.get("parent_id") == parent_id:
+        if matching_category:
             # Found exact match (same name and parent)
-            category_id = int(existing["id"])
+            category_id = int(matching_category["id"])
         else:
-            # Need to create new category or existing doesn't match parent
-            # First check if there's already a category with this name and parent_id
-            all_categories = await shop_repo.list_all_categories_flat()
-            matching_category = None
-            for cat in all_categories:
-                if cat["name"] == category_name and cat.get("parent_id") == parent_id:
-                    matching_category = cat
-                    break
-            
-            if matching_category:
-                category_id = int(matching_category["id"])
-            else:
-                # Create new category with appropriate parent
-                try:
-                    category_id = await shop_repo.create_category(
-                        name=category_name,
-                        parent_id=parent_id,
-                        display_order=0
-                    )
-                except Exception as exc:  # pragma: no cover - defensive guard
-                    log_error(
-                        "Failed to create category in hierarchy",
-                        category=category_name,
-                        parent_id=parent_id,
-                        error=str(exc),
-                    )
-                    return None
+            # Create new category with appropriate parent
+            try:
+                category_id = await shop_repo.create_category(
+                    name=category_name,
+                    parent_id=parent_id,
+                    display_order=0
+                )
+                # Add newly created category to our local list to avoid refetching
+                all_categories.append({
+                    "id": category_id,
+                    "name": category_name,
+                    "parent_id": parent_id,
+                    "display_order": 0,
+                })
+            except Exception as exc:  # pragma: no cover - defensive guard
+                log_error(
+                    "Failed to create category in hierarchy",
+                    category=category_name,
+                    parent_id=parent_id,
+                    error=str(exc),
+                )
+                return None
         
         # This category becomes the parent for the next level
         parent_id = category_id

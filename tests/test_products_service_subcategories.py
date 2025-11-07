@@ -13,15 +13,9 @@ def anyio_backend():
 @pytest.mark.anyio("asyncio")
 async def test_get_or_create_category_hierarchy_simple(monkeypatch):
     """Test creating a simple single-level category."""
-    mock_get_by_name = AsyncMock(return_value=None)
     mock_list_flat = AsyncMock(return_value=[])
     mock_create = AsyncMock(return_value=42)
     
-    monkeypatch.setattr(
-        products_service.shop_repo,
-        "get_category_by_name",
-        mock_get_by_name,
-    )
     monkeypatch.setattr(
         products_service.shop_repo,
         "list_all_categories_flat",
@@ -36,18 +30,15 @@ async def test_get_or_create_category_hierarchy_simple(monkeypatch):
     category_id = await products_service._get_or_create_category_hierarchy("Electronics")
     
     assert category_id == 42
-    mock_get_by_name.assert_awaited_once_with("Electronics")
+    mock_list_flat.assert_awaited_once()
     mock_create.assert_awaited_once_with(name="Electronics", parent_id=None, display_order=0)
+
 
 
 @pytest.mark.anyio("asyncio")
 async def test_get_or_create_category_hierarchy_two_levels(monkeypatch):
     """Test creating a two-level category hierarchy."""
     create_calls = []
-    
-    async def mock_get_by_name(name):
-        # First call for "Electronics", second for "Computers"
-        return None
     
     async def mock_list_flat():
         # Return empty list - no existing categories
@@ -63,11 +54,6 @@ async def test_get_or_create_category_hierarchy_two_levels(monkeypatch):
         })
         return category_id
     
-    monkeypatch.setattr(
-        products_service.shop_repo,
-        "get_category_by_name",
-        mock_get_by_name,
-    )
     monkeypatch.setattr(
         products_service.shop_repo,
         "list_all_categories_flat",
@@ -96,9 +82,6 @@ async def test_get_or_create_category_hierarchy_three_levels(monkeypatch):
     """Test creating a three-level category hierarchy."""
     create_calls = []
     
-    async def mock_get_by_name(name):
-        return None
-    
     async def mock_list_flat():
         return []
     
@@ -112,11 +95,6 @@ async def test_get_or_create_category_hierarchy_three_levels(monkeypatch):
         })
         return category_id
     
-    monkeypatch.setattr(
-        products_service.shop_repo,
-        "get_category_by_name",
-        mock_get_by_name,
-    )
     monkeypatch.setattr(
         products_service.shop_repo,
         "list_all_categories_flat",
@@ -152,13 +130,8 @@ async def test_get_or_create_category_hierarchy_reuses_existing(monkeypatch):
         {"id": 10, "name": "Electronics", "parent_id": None, "display_order": 0}
     ]
     
-    async def mock_get_by_name(name):
-        if name == "Electronics":
-            return {"id": 10, "name": "Electronics", "parent_id": None, "display_order": 0}
-        return None
-    
     async def mock_list_flat():
-        return existing_categories
+        return existing_categories.copy()
     
     async def mock_create(name, parent_id=None, display_order=0):
         category_id = 20 + len(create_calls)
@@ -177,11 +150,6 @@ async def test_get_or_create_category_hierarchy_reuses_existing(monkeypatch):
         })
         return category_id
     
-    monkeypatch.setattr(
-        products_service.shop_repo,
-        "get_category_by_name",
-        mock_get_by_name,
-    )
     monkeypatch.setattr(
         products_service.shop_repo,
         "list_all_categories_flat",
@@ -223,9 +191,6 @@ async def test_get_or_create_category_hierarchy_strips_whitespace(monkeypatch):
     """Test that category names are stripped of whitespace."""
     create_calls = []
     
-    async def mock_get_by_name(name):
-        return None
-    
     async def mock_list_flat():
         return []
     
@@ -239,11 +204,6 @@ async def test_get_or_create_category_hierarchy_strips_whitespace(monkeypatch):
         })
         return category_id
     
-    monkeypatch.setattr(
-        products_service.shop_repo,
-        "get_category_by_name",
-        mock_get_by_name,
-    )
     monkeypatch.setattr(
         products_service.shop_repo,
         "list_all_categories_flat",
@@ -265,6 +225,7 @@ async def test_get_or_create_category_hierarchy_strips_whitespace(monkeypatch):
     assert create_calls[2]["name"] == "Laptops"
 
 
+
 @pytest.mark.anyio("asyncio")
 async def test_get_or_create_category_hierarchy_handles_duplicate_names_different_parents(monkeypatch):
     """Test handling categories with the same name but different parents."""
@@ -279,13 +240,6 @@ async def test_get_or_create_category_hierarchy_handles_duplicate_names_differen
         {"id": 2, "name": "Electronics", "parent_id": None, "display_order": 0},
         {"id": 3, "name": "Accessories", "parent_id": 2, "display_order": 0},
     ]
-    
-    async def mock_get_by_name(name):
-        # Returns first match by name only (doesn't check parent)
-        for cat in existing_categories:
-            if cat["name"] == name:
-                return cat
-        return None
     
     async def mock_list_flat():
         return existing_categories.copy()
@@ -306,11 +260,6 @@ async def test_get_or_create_category_hierarchy_handles_duplicate_names_differen
         })
         return category_id
     
-    monkeypatch.setattr(
-        products_service.shop_repo,
-        "get_category_by_name",
-        mock_get_by_name,
-    )
     monkeypatch.setattr(
         products_service.shop_repo,
         "list_all_categories_flat",
@@ -349,9 +298,6 @@ async def test_import_product_with_subcategory(monkeypatch):
     # Track the category hierarchy creation
     create_calls = []
     
-    async def mock_get_by_name(name):
-        return None
-    
     async def mock_list_flat():
         return []
     
@@ -376,11 +322,6 @@ async def test_import_product_with_subcategory(monkeypatch):
         products_service.shop_repo,
         "get_product_by_sku",
         mock_get_product,
-    )
-    monkeypatch.setattr(
-        products_service.shop_repo,
-        "get_category_by_name",
-        mock_get_by_name,
     )
     monkeypatch.setattr(
         products_service.shop_repo,
