@@ -102,6 +102,7 @@ from app.repositories import shop as shop_repo
 from app.repositories import cart as cart_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import subscription_categories as subscription_categories_repo
+from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import staff as staff_repo
 from app.repositories import pending_staff_access as pending_staff_access_repo
 from app.repositories import tickets as tickets_repo
@@ -3467,7 +3468,6 @@ async def subscriptions_page(request: Request):
         return redirect
     
     # Fetch subscriptions for this company
-    from app.repositories import subscriptions as subscriptions_repo
     subscriptions = await subscriptions_repo.list_subscriptions(
         customer_id=company_id,
         limit=500,
@@ -3516,7 +3516,6 @@ async def request_subscription_change(request: Request, subscription_id: str):
         return redirect
     
     # Verify subscription exists and belongs to this company
-    from app.repositories import subscriptions as subscriptions_repo
     subscription = await subscriptions_repo.get_subscription(subscription_id)
     if not subscription or int(subscription.get("customer_id", 0)) != company_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
@@ -3526,11 +3525,19 @@ async def request_subscription_change(request: Request, subscription_id: str):
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload") from exc
     
-    new_quantity = int(payload.get("quantity", 0) or 0)
-    reason = payload.get("reason")
+    new_quantity = payload.get("quantity")
+    if new_quantity is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity is required")
+    
+    try:
+        new_quantity = int(new_quantity)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be a valid integer")
     
     if new_quantity < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity cannot be negative")
+    
+    reason = payload.get("reason")
     
     # Log the change request for audit purposes
     log_info(
