@@ -756,14 +756,17 @@ async def create_product(
     image_url: str | None = None,
     cross_sell_product_ids: Iterable[int] | None = None,
     upsell_product_ids: Iterable[int] | None = None,
+    subscription_category_id: int | None = None,
+    term_days: int = 365,
 ) -> dict[str, Any]:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
             await cursor.execute(
                 """
                 INSERT INTO shop_products
-                    (name, sku, vendor_sku, description, image_url, price, vip_price, stock, category_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (name, sku, vendor_sku, description, image_url, price, vip_price, stock,
+                     category_id, subscription_category_id, term_days)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     name,
@@ -775,6 +778,8 @@ async def create_product(
                     vip_price,
                     stock,
                     category_id,
+                    subscription_category_id,
+                    term_days,
                 ),
             )
             product_id = int(cursor.lastrowid)
@@ -1079,6 +1084,8 @@ async def update_product(
     image_url: str | None,
     cross_sell_product_ids: Iterable[int] | None,
     upsell_product_ids: Iterable[int] | None,
+    subscription_category_id: int | None = None,
+    term_days: int = 365,
 ) -> dict[str, Any] | None:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -1094,7 +1101,9 @@ async def update_product(
                     price = %s,
                     vip_price = %s,
                     stock = %s,
-                    category_id = %s
+                    category_id = %s,
+                    subscription_category_id = %s,
+                    term_days = %s
                 WHERE id = %s
                 """,
                 (
@@ -1107,6 +1116,8 @@ async def update_product(
                     vip_price,
                     stock,
                     category_id,
+                    subscription_category_id,
+                    term_days,
                     product_id,
                 ),
             )
@@ -1384,6 +1395,8 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     normalised = dict(row)
     normalised["id"] = _coerce_int(row.get("id"))
     normalised["category_id"] = _coerce_optional_int(row.get("category_id"))
+    normalised["subscription_category_id"] = _coerce_optional_int(row.get("subscription_category_id"))
+    normalised["term_days"] = _coerce_int(row.get("term_days"), default=365)
     normalised["price"] = _coerce_decimal(row.get("price"), default=0.0)
     normalised["vip_price"] = _coerce_optional_decimal(row.get("vip_price"))
     normalised["buy_price"] = _coerce_optional_decimal(row.get("buy_price"))
