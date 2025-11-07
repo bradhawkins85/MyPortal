@@ -16,6 +16,7 @@ class ProductFilters:
     include_archived: bool = False
     company_id: int | None = None
     category_id: int | None = None
+    category_ids: list[int] | None = None
     search_term: str | None = None
 
 
@@ -114,6 +115,41 @@ async def list_all_categories_flat() -> list[dict[str, Any]]:
     
     return result
 
+
+async def get_category_descendants(category_id: int) -> list[int]:
+    """Get all descendant category IDs for a given category.
+    
+    Returns a list of category IDs including the category itself and all its descendants
+    (children, grandchildren, etc.).
+    """
+    rows = await db.fetch_all(
+        """
+        SELECT id, parent_id 
+        FROM shop_categories
+        """
+    )
+    
+    # Build parent-child map
+    parent_map: dict[int, list[int]] = {}
+    for row in rows:
+        parent_id = _coerce_optional_int(row.get("parent_id"))
+        child_id = int(row["id"])
+        if parent_id is not None:
+            parent_map.setdefault(parent_id, []).append(child_id)
+    
+    # Recursively collect all descendants
+    def collect_descendants(cat_id: int, result: set[int]) -> None:
+        """Recursively add all descendants to the result set."""
+        for child_id in parent_map.get(cat_id, []):
+            result.add(child_id)
+            collect_descendants(child_id, result)
+    
+    descendants: set[int] = {category_id}
+    collect_descendants(category_id, descendants)
+    
+    return list(descendants)
+
+
 async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
     query_parts: list[str] = [
         "SELECT",
@@ -139,6 +175,10 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
     if filters.category_id is not None:
         conditions.append("p.category_id = %s")
         params.append(filters.category_id)
+    elif filters.category_ids is not None and filters.category_ids:
+        placeholders = ", ".join(["%s"] * len(filters.category_ids))
+        conditions.append(f"p.category_id IN ({placeholders})")
+        params.extend(filters.category_ids)
     if filters.search_term:
         like = f"%{filters.search_term}%"
         conditions.append(

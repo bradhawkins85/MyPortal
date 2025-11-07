@@ -3904,10 +3904,15 @@ async def shop_page(
 
         products.sort(key=lambda entry: str(entry.get("name") or "").lower())
     else:
+        # Get category IDs to filter by (including descendants)
+        category_ids = None
+        if category_id is not None:
+            category_ids = await shop_repo.get_category_descendants(category_id)
+        
         filters = shop_repo.ProductFilters(
             include_archived=False,
             company_id=company_id,
-            category_id=category_id,
+            category_ids=category_ids,
             search_term=effective_search,
         )
 
