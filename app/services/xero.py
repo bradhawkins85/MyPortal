@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Awaitable, Callable, Mapping, MutableMapping, Sequence
@@ -670,7 +671,6 @@ async def sync_billable_tickets(
         tax_type=tax_type,
         line_amount_type=line_amount_type,
         reference_prefix=reference_prefix,
-        allowed_statuses=list(status_filter),
         description_template=description_template,
         invoice_date=date.today(),
         fetch_ticket=fetch_ticket,
@@ -785,7 +785,6 @@ async def sync_billable_tickets(
         # Parse invoice number from response
         if success and response_body:
             try:
-                import json
                 response_data = json.loads(response_body)
                 invoices_list = response_data.get("Invoices", [])
                 if invoices_list:
@@ -851,6 +850,11 @@ async def sync_billable_tickets(
                 for reply in replies:
                     reply_id = reply.get("id")
                     if reply_id not in unbilled_ids:
+                        continue
+                    
+                    # Ensure entry is billable
+                    is_billable = reply.get("is_billable")
+                    if not is_billable:
                         continue
                     
                     minutes = reply.get("minutes_spent")
