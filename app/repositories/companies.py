@@ -13,6 +13,8 @@ def _normalise_company(row: dict[str, Any]) -> dict[str, Any]:
         normalised["is_vip"] = int(normalised["is_vip"])
     if "id" in normalised and normalised["id"] is not None:
         normalised["id"] = int(normalised["id"])
+    if "archived" in normalised and normalised["archived"] is not None:
+        normalised["archived"] = int(normalised["archived"])
     return normalised
 
 
@@ -119,8 +121,11 @@ async def _bulk_email_domains(company_ids: Sequence[int]) -> dict[int, list[str]
     return grouped
 
 
-async def list_companies() -> List[dict[str, Any]]:
-    rows = await db.fetch_all("SELECT * FROM companies ORDER BY name")
+async def list_companies(include_archived: bool = False) -> List[dict[str, Any]]:
+    if include_archived:
+        rows = await db.fetch_all("SELECT * FROM companies ORDER BY name")
+    else:
+        rows = await db.fetch_all("SELECT * FROM companies WHERE archived = 0 OR archived IS NULL ORDER BY name")
     companies = [_normalise_company(row) for row in rows]
     company_ids = [company["id"] for company in companies if company.get("id") is not None]
     domain_lookup = await _bulk_email_domains(company_ids)
@@ -183,6 +188,24 @@ async def update_company(company_id: int, **updates: Any) -> dict[str, Any]:
 
 async def delete_company(company_id: int) -> None:
     await db.execute("DELETE FROM companies WHERE id = %s", (company_id,))
+
+
+async def archive_company(company_id: int) -> dict[str, Any]:
+    """Archive a company by setting archived = 1."""
+    await db.execute("UPDATE companies SET archived = 1 WHERE id = %s", (company_id,))
+    updated = await get_company_by_id(company_id)
+    if not updated:
+        raise ValueError("Company not found after archiving")
+    return updated
+
+
+async def unarchive_company(company_id: int) -> dict[str, Any]:
+    """Unarchive a company by setting archived = 0."""
+    await db.execute("UPDATE companies SET archived = 0 WHERE id = %s", (company_id,))
+    updated = await get_company_by_id(company_id)
+    if not updated:
+        raise ValueError("Company not found after unarchiving")
+    return updated
 
 
 async def replace_company_email_domains(company_id: int, domains: Iterable[str]) -> None:

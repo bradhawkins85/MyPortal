@@ -23,10 +23,11 @@ router = APIRouter(prefix="/api/companies", tags=["Companies"])
 
 @router.get("", response_model=list[CompanyResponse])
 async def list_companies(
+    include_archived: bool = False,
     _: None = Depends(require_database),
     __: dict = Depends(require_super_admin),
 ):
-    rows = await company_repo.list_companies()
+    rows = await company_repo.list_companies(include_archived=include_archived)
     return rows
 
 
@@ -111,6 +112,34 @@ async def delete_company(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     await company_repo.delete_company(company_id)
     return None
+
+
+@router.post("/{company_id}/archive", response_model=CompanyResponse)
+async def archive_company(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Archive a company. Archived companies are hidden throughout the platform."""
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    updated = await company_repo.archive_company(company_id)
+    return updated
+
+
+@router.post("/{company_id}/unarchive", response_model=CompanyResponse)
+async def unarchive_company(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Unarchive a company."""
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    updated = await company_repo.unarchive_company(company_id)
+    return updated
 
 
 @router.get("/{company_id}/assets", response_model=list[AssetResponse])

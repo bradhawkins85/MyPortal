@@ -2366,10 +2366,11 @@ async def _render_impersonation_dashboard(
 async def _get_company_management_scope(
     request: Request,
     user: dict[str, Any],
+    include_archived: bool = False,
 ) -> tuple[bool, list[dict[str, Any]], dict[int, dict[str, Any]]]:
     is_super_admin = bool(user.get("is_super_admin"))
     if is_super_admin:
-        companies = await company_repo.list_companies()
+        companies = await company_repo.list_companies(include_archived=include_archived)
         companies.sort(key=lambda item: (item.get("name") or "").lower())
         return True, companies, {}
 
@@ -2398,7 +2399,9 @@ async def _get_company_management_scope(
     for company_id in sorted(membership_lookup.keys()):
         company = await company_repo.get_company_by_id(company_id)
         if company:
-            companies.append(company)
+            # Filter archived companies for non-super admins unless explicitly requested
+            if include_archived or not company.get("archived"):
+                companies.append(company)
 
     if not companies:
         raise HTTPException(
@@ -2417,10 +2420,11 @@ async def _render_companies_dashboard(
     error_message: str | None = None,
     temporary_password: str | None = None,
     invited_email: str | None = None,
+    include_archived: bool = False,
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     is_super_admin, managed_companies, membership_lookup = await _get_company_management_scope(
-        request, user
+        request, user, include_archived=include_archived
     )
 
     ordered_company_ids: list[int] = [
