@@ -1901,6 +1901,45 @@ async def _load_license_context(
     return user, membership, company, company_id, None
 
 
+async def _load_subscription_context(request: Request):
+    """Load context for subscription-related pages.
+    
+    Requires user to have both can_manage_licenses AND can_access_cart permissions.
+    """
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return user, None, None, None, redirect
+    
+    is_super_admin = bool(user.get("is_super_admin"))
+    company_id_raw = user.get("company_id")
+    if company_id_raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No company associated with the current user",
+        )
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier")
+    
+    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    has_license = bool(membership and membership.get("can_manage_licenses"))
+    has_cart = bool(membership and membership.get("can_access_cart"))
+    
+    # Require both licenses and cart permissions (or super admin)
+    if not (is_super_admin or (has_license and has_cart)):
+        return (
+            user,
+            membership,
+            None,
+            company_id,
+            RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
+        )
+    
+    company = await company_repo.get_company_by_id(company_id)
+    return user, membership, company, company_id, None
+
+
 async def _load_asset_context(
     request: Request,
 ):
@@ -3418,6 +3457,99 @@ async def remove_license(request: Request, license_id: int):
         user_id=user.get("id"),
     )
     return JSONResponse({"success": True})
+
+
+@app.get("/subscriptions", response_class=HTMLResponse)
+async def subscriptions_page(request: Request):
+    """Display active subscriptions for the current company."""
+    user, membership, company, company_id, redirect = await _load_subscription_context(request)
+    if redirect:
+        return redirect
+    
+    # Fetch subscriptions for this company
+    from app.repositories import subscriptions as subscriptions_repo
+    subscriptions = await subscriptions_repo.list_subscriptions(
+        customer_id=company_id,
+        limit=500,
+    )
+    
+    # Format dates for display
+    formatted: list[dict[str, Any]] = []
+    for sub in subscriptions:
+        formatted_sub = dict(sub)
+        # Format dates
+        if isinstance(sub.get("start_date"), datetime):
+            formatted_sub["start_date"] = sub["start_date"].strftime("%Y-%m-%d")
+        elif isinstance(sub.get("start_date"), date):
+            formatted_sub["start_date"] = sub["start_date"].strftime("%Y-%m-%d")
+        
+        if isinstance(sub.get("end_date"), datetime):
+            formatted_sub["end_date"] = sub["end_date"].strftime("%Y-%m-%d")
+        elif isinstance(sub.get("end_date"), date):
+            formatted_sub["end_date"] = sub["end_date"].strftime("%Y-%m-%d")
+        
+        # Get contract term from the subscription if available
+        # For now, we'll leave it empty as the subscriptions table doesn't have this field
+        formatted_sub["contract_term"] = ""
+        
+        formatted.append(formatted_sub)
+    
+    is_super_admin = bool(user.get("is_super_admin"))
+    can_request_changes = bool(
+        is_super_admin or (membership and membership.get("can_manage_licenses") and membership.get("can_access_cart"))
+    )
+    
+    extra = {
+        "title": "Subscriptions",
+        "subscriptions": formatted,
+        "company": company,
+        "can_request_changes": can_request_changes,
+    }
+    return await _render_template("subscriptions/index.html", request, user, extra=extra)
+
+
+@app.post("/subscriptions/{subscription_id}/request-change", response_class=JSONResponse)
+async def request_subscription_change(request: Request, subscription_id: str):
+    """Request a quantity change for a subscription."""
+    user, membership, _, company_id, redirect = await _load_subscription_context(request)
+    if redirect:
+        return redirect
+    
+    # Verify subscription exists and belongs to this company
+    from app.repositories import subscriptions as subscriptions_repo
+    subscription = await subscriptions_repo.get_subscription(subscription_id)
+    if not subscription or int(subscription.get("customer_id", 0)) != company_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
+    
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload") from exc
+    
+    new_quantity = int(payload.get("quantity", 0) or 0)
+    reason = payload.get("reason")
+    
+    if new_quantity < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity cannot be negative")
+    
+    # Log the change request for audit purposes
+    log_info(
+        "Subscription change requested",
+        subscription_id=subscription_id,
+        company_id=company_id,
+        current_quantity=subscription.get("quantity"),
+        requested_quantity=new_quantity,
+        reason=reason,
+        user_id=user.get("id"),
+    )
+    
+    # For now, we just log the request. In a production system, you might:
+    # - Create a ticket
+    # - Send a notification to admins
+    # - Store the request in a pending changes table
+    # - Trigger a webhook
+    
+    return JSONResponse({"success": True, "message": "Change request submitted"})
 
 
 @app.post("/switch-company", response_class=RedirectResponse)
