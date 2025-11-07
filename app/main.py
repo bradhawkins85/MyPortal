@@ -8992,7 +8992,7 @@ async def admin_create_shop_product(
     if not cleaned_vendor_sku:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vendor SKU cannot be empty")
 
-    description_value = (description.strip() if description else None) or None
+    description_value = description.strip() if description and description.strip() else None
 
     try:
         price_decimal = Decimal(price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -9152,7 +9152,7 @@ async def admin_update_shop_product(
     if not cleaned_vendor_sku:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vendor SKU cannot be empty")
 
-    description_value = description.strip() if description else None
+    description_value = description.strip() if description and description.strip() else None
 
     feature_payload: list[dict[str, Any]] | None = None
     if features not in (None, ""):
