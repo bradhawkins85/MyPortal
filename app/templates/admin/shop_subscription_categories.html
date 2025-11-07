@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block header_title %}
+  <div class="header__title-content">
+    <span class="header__title-text">Subscription categories</span>
+    <a class="button button--ghost button--small header__title-button" href="/admin/shop">
+      Back to shop
+    </a>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  <a class="button button--ghost" href="/admin/shop/packages">Package admin</a>
+{% endblock %}
+
+{% block content %}
+  <div class="admin-grid admin-grid--columns">
+    <section class="card card--panel admin-grid__full" aria-labelledby="subscription-categories-heading">
+      <header class="card__header">
+        <div>
+          <h2 class="card__title" id="subscription-categories-heading">Subscription categories</h2>
+          <p class="card__subtitle">
+            Group products for co-terming subscriptions. Products in the same subscription category can renew together.
+          </p>
+        </div>
+        <span class="badge badge--muted">{{ categories|length }} total</span>
+      </header>
+      <div class="card__body">
+        <form action="/shop/admin/subscription-category" method="post" class="form-grid">
+          {% if csrf_token %}
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+          {% endif %}
+          <div class="form-field form-field--wide">
+            <label class="form-label" for="category-name">Category name</label>
+            <input class="form-input" id="category-name" name="name" required />
+          </div>
+          <div class="form-field form-field--wide">
+            <label class="form-label" for="category-description">Description (optional)</label>
+            <textarea class="form-input form-input--textarea" id="category-description" name="description" rows="3"></textarea>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="button">Add category</button>
+          </div>
+        </form>
+        <ul class="category-list">
+          {% for category in categories %}
+            <li class="category-list__item">
+              <span class="category-list__name">
+                <span class="category-list__label" id="category-{{ category.id }}-label">{{ category.name }}</span>
+                {% if category.description %}
+                  <span class="badge badge--muted">{{ category.description }}</span>
+                {% endif %}
+              </span>
+              <div class="category-list__actions">
+                <button 
+                  type="button" 
+                  class="button button--ghost button--small category-edit-btn"
+                  data-category-id="{{ category.id }}"
+                  data-category-name="{{ category.name }}"
+                  data-category-description="{{ category.description or '' }}"
+                >
+                  Edit
+                </button>
+                <form
+                  action="/shop/admin/subscription-category/{{ category.id }}/delete"
+                  method="post"
+                  class="inline-form"
+                  data-confirm="Delete this subscription category?"
+                >
+                  {% if csrf_token %}
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                  {% endif %}
+                  <button type="submit" class="button button--danger button--small">Delete</button>
+                </form>
+              </div>
+            </li>
+          {% else %}
+            <li class="category-list__item category-list__item--empty">No subscription categories defined.</li>
+          {% endfor %}
+        </ul>
+        
+        <!-- Edit Category Form (Hidden by default) -->
+        <div id="edit-category-form" class="edit-form" style="display: none;">
+          <h3 class="edit-form__title">Edit subscription category</h3>
+          <form id="edit-form" method="post" class="form-grid">
+            {% if csrf_token %}
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+            {% endif %}
+            <div class="form-field form-field--wide">
+              <label class="form-label" for="edit-category-name">Category name</label>
+              <input class="form-input" id="edit-category-name" name="name" required />
+            </div>
+            <div class="form-field form-field--wide">
+              <label class="form-label" for="edit-category-description">Description (optional)</label>
+              <textarea class="form-input form-input--textarea" id="edit-category-description" name="description" rows="3"></textarea>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="button">Save changes</button>
+              <button type="button" class="button button--ghost category-cancel-btn">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/shop_admin.js" defer></script>
+  <script>
+    // Use event delegation for better security and CSP compliance
+    document.addEventListener('DOMContentLoaded', function() {
+      // Handle edit button clicks
+      document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('category-edit-btn') || e.target.closest('.category-edit-btn')) {
+          const button = e.target.classList.contains('category-edit-btn') ? e.target : e.target.closest('.category-edit-btn');
+          const categoryId = button.getAttribute('data-category-id');
+          const categoryName = button.getAttribute('data-category-name');
+          const categoryDescription = button.getAttribute('data-category-description');
+          
+          editCategory(categoryId, categoryName, categoryDescription);
+        }
+      });
+      
+      // Handle cancel button clicks
+      document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('category-cancel-btn')) {
+          cancelEdit();
+        }
+      });
+    });
+    
+    function editCategory(categoryId, categoryName, categoryDescription) {
+      // Show the edit form
+      document.getElementById('edit-category-form').style.display = 'block';
+      
+      // Set the form action
+      document.getElementById('edit-form').action = '/shop/admin/subscription-category/' + categoryId + '/update';
+      
+      // Populate the form fields
+      document.getElementById('edit-category-name').value = categoryName;
+      document.getElementById('edit-category-description').value = categoryDescription || '';
+      
+      // Scroll to the form
+      document.getElementById('edit-category-form').scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    function cancelEdit() {
+      // Hide the edit form
+      document.getElementById('edit-category-form').style.display = 'none';
+      
+      // Clear the form
+      document.getElementById('edit-form').reset();
+    }
+  </script>
+{% endblock %}
