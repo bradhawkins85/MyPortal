@@ -93,6 +93,21 @@
             </select>
           </div>
           <div class="form-field">
+            <label class="form-label" for="product-subscription-category">Subscription category</label>
+            <select class="form-input" id="product-subscription-category" name="subscription_category_id">
+              <option value="">No subscription category</option>
+              {% for sub_category in subscription_categories %}
+                <option value="{{ sub_category.id }}">{{ sub_category.name }}</option>
+              {% endfor %}
+            </select>
+            <p class="form-helper">Products in the same subscription category can co-term together.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="product-term-days">Term days</label>
+            <input class="form-input" id="product-term-days" name="term_days" type="number" min="1" value="365" required />
+            <p class="form-helper">Length of the subscription term in days (default: 365).</p>
+          </div>
+          <div class="form-field">
             <label class="form-label" for="product-image">Image</label>
             <input class="form-input" id="product-image" name="image" type="file" accept="image/*" />
           </div>
