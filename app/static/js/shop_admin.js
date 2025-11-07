@@ -394,9 +394,25 @@
         if (subscriptionCategorySelect) {
           subscriptionCategorySelect.value = product.subscription_category_id || '';
         }
-        const termDaysInput = editForm.querySelector('#edit-product-term-days');
-        if (termDaysInput) {
-          termDaysInput.value = product.term_days != null ? product.term_days : 365;
+        const commitmentTypeSelect = editForm.querySelector('#edit-product-commitment-type');
+        if (commitmentTypeSelect) {
+          commitmentTypeSelect.value = product.commitment_type || '';
+        }
+        const paymentFrequencySelect = editForm.querySelector('#edit-product-payment-frequency');
+        if (paymentFrequencySelect) {
+          paymentFrequencySelect.value = product.payment_frequency || '';
+        }
+        const priceMonthlyCommitment = editForm.querySelector('#edit-product-price-monthly-commitment');
+        if (priceMonthlyCommitment) {
+          priceMonthlyCommitment.value = product.price_monthly_commitment != null ? product.price_monthly_commitment : '';
+        }
+        const priceAnnualMonthly = editForm.querySelector('#edit-product-price-annual-monthly');
+        if (priceAnnualMonthly) {
+          priceAnnualMonthly.value = product.price_annual_monthly_payment != null ? product.price_annual_monthly_payment : '';
+        }
+        const priceAnnualAnnual = editForm.querySelector('#edit-product-price-annual-annual');
+        if (priceAnnualAnnual) {
+          priceAnnualAnnual.value = product.price_annual_annual_payment != null ? product.price_annual_annual_payment : '';
         }
         const editCrossSelect = editForm.querySelector('#edit-product-cross-sell');
         const editUpsellSelect = editForm.querySelector('#edit-product-upsell');

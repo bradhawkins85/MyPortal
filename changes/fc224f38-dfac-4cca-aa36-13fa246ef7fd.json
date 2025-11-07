@@ -1,0 +1,8 @@
+{
+  "guid": "fc224f38-dfac-4cca-aa36-13fa246ef7fd",
+  "occurred_at": "2025-11-07T12:52:14.696Z",
+  "change_type": "feature",
+  "summary": "Changed subscription Term days to Commitment type and Payment frequency",
+  "content_hash": "848d4c394441b83aefe73a4d8348d3eb059beb659496ad4f1644da5c12e8f92a",
+  "details": "Subscriptions now support Monthly or Annual commitments with flexible payment options:\n- Monthly commitments can only be paid monthly (renew every 30 days)\n- Annual commitments can be paid monthly or annually (renew every 365 days)\n- Different pricing for each commitment/payment combination:\n  * Monthly Commitment with Monthly Payment\n  * Annual Commitment with Monthly Payment\n  * Annual Commitment with Annual Payment\n\nThe previous 'Term days' field has been replaced with these structured commitment and payment options, providing clearer subscription terms for customers."
+}

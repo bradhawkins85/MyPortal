@@ -757,7 +757,11 @@ async def create_product(
     cross_sell_product_ids: Iterable[int] | None = None,
     upsell_product_ids: Iterable[int] | None = None,
     subscription_category_id: int | None = None,
-    term_days: int = 365,
+    commitment_type: str | None = None,
+    payment_frequency: str | None = None,
+    price_monthly_commitment: Decimal | None = None,
+    price_annual_monthly_payment: Decimal | None = None,
+    price_annual_annual_payment: Decimal | None = None,
 ) -> dict[str, Any]:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -765,8 +769,9 @@ async def create_product(
                 """
                 INSERT INTO shop_products
                     (name, sku, vendor_sku, description, image_url, price, vip_price, stock,
-                     category_id, subscription_category_id, term_days)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     category_id, subscription_category_id, commitment_type, payment_frequency,
+                     price_monthly_commitment, price_annual_monthly_payment, price_annual_annual_payment)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     name,
@@ -779,7 +784,11 @@ async def create_product(
                     stock,
                     category_id,
                     subscription_category_id,
-                    term_days,
+                    commitment_type,
+                    payment_frequency,
+                    price_monthly_commitment,
+                    price_annual_monthly_payment,
+                    price_annual_annual_payment,
                 ),
             )
             product_id = int(cursor.lastrowid)
@@ -1085,7 +1094,11 @@ async def update_product(
     cross_sell_product_ids: Iterable[int] | None,
     upsell_product_ids: Iterable[int] | None,
     subscription_category_id: int | None = None,
-    term_days: int = 365,
+    commitment_type: str | None = None,
+    payment_frequency: str | None = None,
+    price_monthly_commitment: Decimal | None = None,
+    price_annual_monthly_payment: Decimal | None = None,
+    price_annual_annual_payment: Decimal | None = None,
 ) -> dict[str, Any] | None:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -1103,7 +1116,11 @@ async def update_product(
                     stock = %s,
                     category_id = %s,
                     subscription_category_id = %s,
-                    term_days = %s
+                    commitment_type = %s,
+                    payment_frequency = %s,
+                    price_monthly_commitment = %s,
+                    price_annual_monthly_payment = %s,
+                    price_annual_annual_payment = %s
                 WHERE id = %s
                 """,
                 (
@@ -1117,7 +1134,11 @@ async def update_product(
                     stock,
                     category_id,
                     subscription_category_id,
-                    term_days,
+                    commitment_type,
+                    payment_frequency,
+                    price_monthly_commitment,
+                    price_annual_monthly_payment,
+                    price_annual_annual_payment,
                     product_id,
                 ),
             )
@@ -1396,9 +1417,13 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     normalised["id"] = _coerce_int(row.get("id"))
     normalised["category_id"] = _coerce_optional_int(row.get("category_id"))
     normalised["subscription_category_id"] = _coerce_optional_int(row.get("subscription_category_id"))
-    normalised["term_days"] = _coerce_int(row.get("term_days"), default=365)
+    normalised["commitment_type"] = row.get("commitment_type")
+    normalised["payment_frequency"] = row.get("payment_frequency")
     normalised["price"] = _coerce_decimal(row.get("price"), default=0.0)
     normalised["vip_price"] = _coerce_optional_decimal(row.get("vip_price"))
+    normalised["price_monthly_commitment"] = _coerce_optional_decimal(row.get("price_monthly_commitment"))
+    normalised["price_annual_monthly_payment"] = _coerce_optional_decimal(row.get("price_annual_monthly_payment"))
+    normalised["price_annual_annual_payment"] = _coerce_optional_decimal(row.get("price_annual_annual_payment"))
     normalised["buy_price"] = _coerce_optional_decimal(row.get("buy_price"))
     normalised["weight"] = _coerce_optional_decimal(row.get("weight"))
     normalised["length"] = _coerce_optional_decimal(row.get("length"))
