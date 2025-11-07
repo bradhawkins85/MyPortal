@@ -84,10 +84,11 @@
           {% set can_access_forms = (can_access_forms | default(false)) or is_super_admin or membership.get('can_access_forms') %}
           {% set can_manage_assets = (can_manage_assets | default(false)) or is_super_admin or membership.get('can_manage_assets') %}
           {% set can_manage_licenses = (can_manage_licenses | default(false)) or is_super_admin or membership.get('can_manage_licenses') %}
+          {% set can_manage_subscriptions = (can_manage_subscriptions | default(false)) or is_super_admin or (membership.get('can_manage_licenses') and membership.get('can_access_cart')) %}
           {% set can_manage_invoices = (can_manage_invoices | default(false)) or is_super_admin or membership.get('can_manage_invoices') %}
           {% set can_manage_staff = (can_manage_staff | default(false)) or is_super_admin or membership.get('can_manage_staff') or (staff_permission > 0) %}
           {% set can_manage_issues = has_issue_tracker_access | default(is_super_admin or (is_helpdesk_technician | default(false))) %}
-          {% set has_company_section = can_access_tickets or can_manage_issues or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_invoices or can_manage_staff %}
+          {% set has_company_section = can_access_tickets or can_manage_issues or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_subscriptions or can_manage_invoices or can_manage_staff %}
           {% set is_company_admin = membership.get('is_admin') %}
           {% set has_admin_access = is_super_admin or is_company_admin %}
           <li class="menu__item">
@@ -197,6 +198,16 @@
                   <svg viewBox="0 0 24 24" focusable="false"><path d="M7 2h10a2 2 0 0 1 2 2v16l-7-3-7 3V4a2 2 0 0 1 2-2zm3 4v2h4V6zm0 4v2h6v-2zm0 4v2h4v-2z"/></svg>
                 </span>
                 <span class="menu__label">Licenses</span>
+              </a>
+            </li>
+          {% endif %}
+          {% if can_manage_subscriptions %}
+            <li class="menu__item">
+              <a href="/subscriptions" {% if current_path.startswith('/subscriptions') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm0 4v8h16V8zm2 2h3v4H6z"/></svg>
+                </span>
+                <span class="menu__label">Subscriptions</span>
               </a>
             </li>
           {% endif %}

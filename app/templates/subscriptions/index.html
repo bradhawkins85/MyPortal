@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+
+{% block title %}Subscriptions{% endblock %}
+
+{% block header_actions %}
+  <div class="header-actions">
+    <input type="search" id="subscription-filter" class="input" placeholder="Filter subscriptions" aria-label="Filter subscriptions" />
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <header class="panel__header">
+    <div>
+      <h2 class="panel__title">Active subscriptions</h2>
+      <p class="panel__subtitle">View your subscriptions and request changes to quantities.</p>
+    </div>
+    {% if company %}
+    <div class="panel__meta">
+      <span class="tag">{{ company.name }}</span>
+    </div>
+    {% endif %}
+  </header>
+  <div class="panel__body">
+    <div class="table-responsive">
+      <table class="table" data-subscription-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort-key="product_name">Product</th>
+            <th scope="col" data-sort-key="category_name">Category</th>
+            <th scope="col" data-sort-key="quantity">Quantity</th>
+            <th scope="col" data-sort-key="unit_price">Unit price</th>
+            <th scope="col" data-sort-key="start_date">Start date</th>
+            <th scope="col" data-sort-key="end_date">End date</th>
+            <th scope="col" data-sort-key="status">Status</th>
+            <th scope="col" data-sort-key="auto_renew">Auto-renew</th>
+            {% if can_request_changes %}<th scope="col">Actions</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for subscription in subscriptions %}
+          <tr>
+            <td data-column="product_name" data-value="{{ subscription.product_name or '' }}">{{ subscription.product_name or '—' }}</td>
+            <td data-column="category_name" data-value="{{ subscription.category_name or '' }}">{{ subscription.category_name or '—' }}</td>
+            <td data-column="quantity" data-value="{{ subscription.quantity }}">{{ subscription.quantity }}</td>
+            <td data-column="unit_price" data-value="{{ subscription.unit_price }}">£{{ subscription.unit_price }}</td>
+            <td data-column="start_date" data-value="{{ subscription.start_date }}">{{ subscription.start_date }}</td>
+            <td data-column="end_date" data-value="{{ subscription.end_date }}">{{ subscription.end_date }}</td>
+            <td data-column="status" data-value="{{ subscription.status }}">
+              <span class="tag {% if subscription.status == 'active' %}tag--success{% elif subscription.status == 'pending_renewal' %}tag--warning{% elif subscription.status == 'expired' %}tag--danger{% else %}tag--secondary{% endif %}">
+                {{ subscription.status | replace('_', ' ') | title }}
+              </span>
+            </td>
+            <td data-column="auto_renew" data-value="{{ subscription.auto_renew }}">{{ 'Yes' if subscription.auto_renew else 'No' }}</td>
+            {% if can_request_changes %}
+            <td>
+              <div class="button-group">
+                <button type="button" class="button button--small" data-subscription-change="{{ subscription.id }}" data-current-quantity="{{ subscription.quantity }}" data-contract-term="{{ subscription.contract_term or '' }}" data-end-date="{{ subscription.end_date }}">Request change</button>
+              </div>
+            </td>
+            {% endif %}
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="{% if can_request_changes %}9{% else %}8{% endif %}" class="text-center">No active subscriptions found.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<dialog id="change-dialog" class="dialog">
+  <form method="dialog" class="dialog__container" id="change-form">
+    <header class="dialog__header">
+      <h3 class="dialog__title">Request subscription change</h3>
+      <button type="button" class="dialog__close" aria-label="Close" data-dialog-close>
+        <span aria-hidden="true">&times;</span>
+      </button>
+    </header>
+    <div class="dialog__body">
+      <p id="change-info" class="mb-4"></p>
+      <div class="form-field">
+        <label for="new-quantity" class="form-field__label">New quantity</label>
+        <input type="number" id="new-quantity" name="quantity" class="input" min="0" required />
+        <p class="form-field__hint">Enter the desired quantity for this subscription.</p>
+      </div>
+      <div class="form-field">
+        <label for="change-reason" class="form-field__label">Reason (optional)</label>
+        <textarea id="change-reason" name="reason" class="input" rows="3" placeholder="Explain why you need this change..."></textarea>
+      </div>
+    </div>
+    <footer class="dialog__footer">
+      <button type="button" class="button button--secondary" data-dialog-close>Cancel</button>
+      <button type="submit" class="button" id="submit-change">Submit request</button>
+    </footer>
+  </form>
+</dialog>
+
+<div id="subscription-toast" class="toast" role="status" aria-live="polite"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    const csrfToken = {{ csrf_token | tojson }};
+    const filterInput = document.getElementById('subscription-filter');
+    const table = document.querySelector('[data-subscription-table]');
+    const toast = document.getElementById('subscription-toast');
+    const changeDialog = document.getElementById('change-dialog');
+    const changeForm = document.getElementById('change-form');
+    const changeInfo = document.getElementById('change-info');
+    const newQuantityInput = document.getElementById('new-quantity');
+    const changeReasonInput = document.getElementById('change-reason');
+    const submitButton = document.getElementById('submit-change');
+    let currentSubscriptionId = null;
+
+    function showToast(message, type = 'info') {
+      if (!toast) return;
+      toast.textContent = message;
+      toast.className = `toast toast--${type}`;
+      toast.setAttribute('aria-hidden', 'false');
+      setTimeout(() => {
+        toast.setAttribute('aria-hidden', 'true');
+      }, 4000);
+    }
+
+    function applyFilter() {
+      if (!filterInput || !table) return;
+      const term = filterInput.value.trim().toLowerCase();
+      const rows = table.tBodies[0].rows;
+      for (const row of rows) {
+        const text = row.textContent.toLowerCase();
+        row.style.display = term && !text.includes(term) ? 'none' : '';
+      }
+    }
+
+    function sortTable(columnKey, ascending) {
+      if (!table) return;
+      const rows = Array.from(table.tBodies[0].rows);
+      const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+      rows.sort((a, b) => {
+        const aCell = a.querySelector(`[data-column='${columnKey}']`);
+        const bCell = b.querySelector(`[data-column='${columnKey}']`);
+        const aText = aCell ? aCell.getAttribute('data-value') || aCell.textContent.trim() : '';
+        const bText = bCell ? bCell.getAttribute('data-value') || bCell.textContent.trim() : '';
+        return ascending ? collator.compare(aText, bText) : collator.compare(bText, aText);
+      });
+      const fragment = document.createDocumentFragment();
+      rows.forEach((row) => fragment.appendChild(row));
+      table.tBodies[0].appendChild(fragment);
+    }
+
+    if (filterInput) {
+      filterInput.addEventListener('input', applyFilter);
+    }
+
+    if (table) {
+      table.querySelectorAll('th[data-sort-key]').forEach((header) => {
+        let ascending = true;
+        header.addEventListener('click', () => {
+          table.querySelectorAll('th[data-sort-key]').forEach((h) => h.removeAttribute('aria-sort'));
+          header.setAttribute('aria-sort', ascending ? 'ascending' : 'descending');
+          sortTable(header.dataset.sortKey, ascending);
+          ascending = !ascending;
+        });
+      });
+    }
+
+    document.querySelectorAll('[data-subscription-change]').forEach((button) => {
+      button.addEventListener('click', () => {
+        currentSubscriptionId = button.dataset.subscriptionChange;
+        const currentQuantity = button.dataset.currentQuantity;
+        const contractTerm = button.dataset.contractTerm;
+        const endDate = button.dataset.endDate;
+        
+        let infoText = `Current quantity: ${currentQuantity}`;
+        if (contractTerm) {
+          infoText += `\nContract term: ${contractTerm}`;
+        }
+        if (endDate) {
+          infoText += `\nEnd date: ${endDate}`;
+        }
+        infoText += '\n\nNote: Changes to subscriptions may be subject to contract terms and proration.';
+        
+        changeInfo.textContent = infoText;
+        newQuantityInput.value = currentQuantity;
+        changeReasonInput.value = '';
+        
+        if (typeof changeDialog.showModal === 'function') {
+          changeDialog.showModal();
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-dialog-close]').forEach((button) => {
+      button.addEventListener('click', () => {
+        if (changeDialog && typeof changeDialog.close === 'function') {
+          changeDialog.close();
+        }
+      });
+    });
+
+    if (changeForm) {
+      changeForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        if (!currentSubscriptionId) return;
+        
+        const newQuantity = parseInt(newQuantityInput.value, 10);
+        const reason = changeReasonInput.value.trim();
+        
+        if (isNaN(newQuantity) || newQuantity < 0) {
+          showToast('Please enter a valid quantity.', 'error');
+          return;
+        }
+        
+        submitButton.disabled = true;
+        
+        try {
+          const response = await fetch(`/subscriptions/${currentSubscriptionId}/request-change`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': csrfToken || '',
+            },
+            body: JSON.stringify({ 
+              quantity: newQuantity,
+              reason: reason ? reason : null
+            }),
+          });
+          
+          if (!response.ok) {
+            const text = await response.text();
+            throw new Error(text || 'Request failed');
+          }
+          
+          showToast('Subscription change request submitted successfully.', 'success');
+          if (typeof changeDialog.close === 'function') {
+            changeDialog.close();
+          }
+          
+          // Reload the page to show updated data
+          setTimeout(() => window.location.reload(), 1500);
+        } catch (err) {
+          console.error(err);
+          showToast('Unable to submit subscription change request.', 'error');
+        } finally {
+          submitButton.disabled = false;
+        }
+      });
+    }
+  })();
+</script>
+{% endblock %}
