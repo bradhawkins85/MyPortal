@@ -2574,9 +2574,9 @@ button.header-title-menu__link {
   padding-left: 3rem;
 }
 
+/* Level-specific overrides for deeper nesting */
 .shop-categories__link--level-1 {
-  padding-left: 3rem;
-  font-size: 0.9rem;
+  /* Uses base --child styles (3rem, 0.9rem) */
 }
 
 .shop-categories__link--level-2 {
