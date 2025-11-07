@@ -352,6 +352,82 @@ async def update_stock_feed() -> int:
     return len(items)
 
 
+async def _get_or_create_category_hierarchy(category_path: str) -> int | None:
+    """
+    Parse a category path delimited by ' - ' and create/retrieve the hierarchy.
+    
+    For example, "Electronics - Computers - Laptops" will:
+    1. Create/get "Electronics" (parent)
+    2. Create/get "Computers" as child of "Electronics"
+    3. Create/get "Laptops" as child of "Computers"
+    4. Return the ID of the final category ("Laptops")
+    
+    Args:
+        category_path: A string with category names separated by ' - '
+        
+    Returns:
+        The ID of the final (deepest) category in the hierarchy, or None if invalid
+    """
+    if not category_path or not category_path.strip():
+        return None
+    
+    # Split by ' - ' delimiter and clean up each part
+    parts = [part.strip() for part in category_path.split(" - ")]
+    parts = [part for part in parts if part]  # Remove empty parts
+    
+    if not parts:
+        return None
+    
+    # Fetch all categories once to avoid N+1 queries
+    all_categories = await shop_repo.list_all_categories_flat()
+    
+    # Build lookup dictionary for O(1) access using (name, parent_id) as key
+    category_lookup: dict[tuple[str, int | None], dict[str, Any]] = {}
+    for cat in all_categories:
+        key = (cat["name"], cat.get("parent_id"))
+        category_lookup[key] = cat
+    
+    parent_id: int | None = None
+    
+    for category_name in parts:
+        # Look up existing category with this name and parent
+        lookup_key = (category_name, parent_id)
+        matching_category = category_lookup.get(lookup_key)
+        
+        if matching_category:
+            # Found exact match (same name and parent)
+            category_id = int(matching_category["id"])
+        else:
+            # Create new category with appropriate parent
+            try:
+                category_id = await shop_repo.create_category(
+                    name=category_name,
+                    parent_id=parent_id,
+                    display_order=0
+                )
+                # Add newly created category to our lookup dictionary
+                new_category = {
+                    "id": category_id,
+                    "name": category_name,
+                    "parent_id": parent_id,
+                    "display_order": 0,
+                }
+                category_lookup[lookup_key] = new_category
+            except Exception as exc:  # pragma: no cover - defensive guard
+                log_error(
+                    "Failed to create category in hierarchy",
+                    category=category_name,
+                    parent_id=parent_id,
+                    error=str(exc),
+                )
+                return None
+        
+        # This category becomes the parent for the next level
+        parent_id = category_id
+    
+    return parent_id
+
+
 async def _process_feed_item(
     item: Mapping[str, Any],
     existing_product: Mapping[str, Any] | None,
@@ -396,18 +472,8 @@ async def _process_feed_item(
     category_id: int | None = None
     category_name = str(item.get("category_name") or "").strip()
     if category_name:
-        category = await shop_repo.get_category_by_name(category_name)
-        if category:
-            category_id = int(category["id"])
-        else:
-            try:
-                category_id = await shop_repo.create_category(category_name)
-            except Exception as exc:  # pragma: no cover - defensive guard
-                log_error(
-                    "Failed to create product category from feed",
-                    category=category_name,
-                    error=str(exc),
-                )
+        # Parse and create category hierarchy (supports both single and multi-level categories)
+        category_id = await _get_or_create_category_hierarchy(category_name)
 
     stock_nsw = int(item.get("on_hand_nsw") or 0)
     stock_qld = int(item.get("on_hand_qld") or 0)
