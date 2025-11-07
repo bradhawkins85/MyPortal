@@ -52,11 +52,11 @@
         <ul class="category-list">
           {% for category in categories %}
             <li class="category-list__item {% if category.parent_id %}category-list__item--child{% endif %}">
-              <span>
+              <span class="category-list__name">
                 {% if category.parent_id %}
                   <span class="category-list__indent">└─</span>
                 {% endif %}
-                {{ category.name }}
+                <span class="category-list__label" id="category-{{ category.id }}-label">{{ category.name }}</span>
                 {% if category.parent_id %}
                   {% for parent in categories %}
                     {% if parent.id == category.parent_id %}
@@ -65,22 +65,62 @@
                   {% endfor %}
                 {% endif %}
               </span>
-              <form
-                action="/shop/admin/category/{{ category.id }}/delete"
-                method="post"
-                class="inline-form"
-                data-confirm="Delete this category?"
-              >
-                {% if csrf_token %}
-                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                {% endif %}
-                <button type="submit" class="button button--danger">Delete</button>
-              </form>
+              <div class="category-list__actions">
+                <button 
+                  type="button" 
+                  class="button button--ghost button--small category-edit-btn"
+                  data-category-id="{{ category.id }}"
+                  data-category-name="{{ category.name }}"
+                  data-category-parent="{{ category.parent_id or '' }}"
+                >
+                  Edit
+                </button>
+                <form
+                  action="/shop/admin/category/{{ category.id }}/delete"
+                  method="post"
+                  class="inline-form"
+                  data-confirm="Delete this category?"
+                >
+                  {% if csrf_token %}
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                  {% endif %}
+                  <button type="submit" class="button button--danger button--small">Delete</button>
+                </form>
+              </div>
             </li>
           {% else %}
             <li class="category-list__item category-list__item--empty">No categories defined.</li>
           {% endfor %}
         </ul>
+        
+        <!-- Edit Category Form (Hidden by default) -->
+        <div id="edit-category-form" class="edit-form" style="display: none;">
+          <h3 class="edit-form__title">Edit Category</h3>
+          <form id="edit-form" method="post" class="form-grid">
+            {% if csrf_token %}
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+            {% endif %}
+            <div class="form-field form-field--wide">
+              <label class="form-label" for="edit-category-name">Category name</label>
+              <input class="form-input" id="edit-category-name" name="name" required />
+            </div>
+            <div class="form-field form-field--wide">
+              <label class="form-label" for="edit-parent-category">Parent category (optional)</label>
+              <select class="form-input" id="edit-parent-category" name="parent_id">
+                <option value="">None (Top-level category)</option>
+                {% for cat in categories %}
+                  {% if not cat.parent_id %}
+                    <option value="{{ cat.id }}">{{ cat.name }}</option>
+                  {% endif %}
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="button">Save changes</button>
+              <button type="button" class="button button--ghost category-cancel-btn">Cancel</button>
+            </div>
+          </form>
+        </div>
       </div>
     </section>
   </div>
@@ -89,4 +129,60 @@
 {% block scripts %}
   {{ super() }}
   <script src="/static/js/shop_admin.js" defer></script>
+  <script>
+    // Use event delegation for better security and CSP compliance
+    document.addEventListener('DOMContentLoaded', function() {
+      // Handle edit button clicks
+      document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('category-edit-btn') || e.target.closest('.category-edit-btn')) {
+          const button = e.target.classList.contains('category-edit-btn') ? e.target : e.target.closest('.category-edit-btn');
+          const categoryId = button.getAttribute('data-category-id');
+          const categoryName = button.getAttribute('data-category-name');
+          const parentId = button.getAttribute('data-category-parent');
+          
+          editCategory(categoryId, categoryName, parentId || null);
+        }
+      });
+      
+      // Handle cancel button clicks
+      document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('category-cancel-btn')) {
+          cancelEdit();
+        }
+      });
+    });
+    
+    function editCategory(categoryId, categoryName, parentId) {
+      // Show the edit form
+      document.getElementById('edit-category-form').style.display = 'block';
+      
+      // Set the form action
+      document.getElementById('edit-form').action = '/shop/admin/category/' + categoryId + '/update';
+      
+      // Populate the form fields
+      document.getElementById('edit-category-name').value = categoryName;
+      document.getElementById('edit-parent-category').value = parentId || '';
+      
+      // Disable the option that represents the current category to prevent self-parenting
+      const parentSelect = document.getElementById('edit-parent-category');
+      for (let i = 0; i < parentSelect.options.length; i++) {
+        if (parentSelect.options[i].value == categoryId) {
+          parentSelect.options[i].disabled = true;
+        } else {
+          parentSelect.options[i].disabled = false;
+        }
+      }
+      
+      // Scroll to the form
+      document.getElementById('edit-category-form').scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    function cancelEdit() {
+      // Hide the edit form
+      document.getElementById('edit-category-form').style.display = 'none';
+      
+      // Clear the form
+      document.getElementById('edit-form').reset();
+    }
+  </script>
 {% endblock %}

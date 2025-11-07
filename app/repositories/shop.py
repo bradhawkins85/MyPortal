@@ -959,6 +959,16 @@ async def create_category(name: str, parent_id: int | None = None, display_order
     return category_id
 
 
+async def update_category(category_id: int, name: str, parent_id: int | None = None, display_order: int = 0) -> bool:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                "UPDATE shop_categories SET name = %s, parent_id = %s, display_order = %s WHERE id = %s",
+                (name, parent_id, display_order, category_id),
+            )
+            return cursor.rowcount > 0
+
+
 async def delete_category(category_id: int) -> bool:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
