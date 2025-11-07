@@ -823,8 +823,6 @@ async def update_ticket_view(
 ) -> TicketViewModel:
     """Update a saved ticket view"""
     update_data = payload.model_dump(exclude_unset=True)
-    if "filters" in update_data and update_data["filters"]:
-        update_data["filters"] = update_data["filters"]
     
     view = await ticket_views_repo.update_view(view_id, session.user_id, **update_data)
     if not view:

@@ -148,32 +148,12 @@
      * Setup grouping controls
      */
     setupGroupingControls() {
-      const groupingContainer = this.container.querySelector('[data-grouping-container]');
-      if (!groupingContainer) return;
-
-      // Add grouping selector if not already present
-      if (!this.container.querySelector('[data-grouping-select]')) {
-        const groupingHTML = `
-          <div class="form-field">
-            <label class="form-label" for="ticket-grouping">Group by</label>
-            <select id="ticket-grouping" name="grouping" class="form-input" data-grouping-select>
-              <option value="">No grouping</option>
-              <option value="status">Status</option>
-              <option value="priority">Priority</option>
-              <option value="company">Company</option>
-              <option value="assigned">Assigned user</option>
-            </select>
-          </div>
-        `;
-        groupingContainer.insertAdjacentHTML('beforeend', groupingHTML);
-        
-        // Re-attach event listener
-        const groupingSelect = this.container.querySelector('[data-grouping-select]');
-        if (groupingSelect) {
-          groupingSelect.addEventListener('change', (e) => {
-            this.setGrouping(e.target.value);
-          });
-        }
+      // Grouping selector is already in the template, just verify it exists
+      const groupingSelect = this.container.querySelector('[data-grouping-select]');
+      if (groupingSelect) {
+        groupingSelect.addEventListener('change', (e) => {
+          this.setGrouping(e.target.value);
+        });
       }
     }
 
