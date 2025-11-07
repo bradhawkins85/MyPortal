@@ -14,6 +14,7 @@ from app.core.logging import log_error
 from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
 from app.repositories import ticket_tasks as ticket_tasks_repo
+from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import tickets as tickets_repo
 from app.schemas.tickets import (
     LabourTypeCreateRequest,
@@ -41,6 +42,10 @@ from app.schemas.tickets import (
     TicketTaskListResponse,
     TicketTaskUpdate,
     TicketUpdate,
+    TicketViewCreate,
+    TicketViewListResponse,
+    TicketViewModel,
+    TicketViewUpdate,
     TicketWatcher,
     TicketWatcherUpdate,
 )
@@ -767,4 +772,74 @@ async def delete_ticket_task(
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     
     await ticket_tasks_repo.delete_task(task_id)
+
+
+@router.get("/views", response_model=TicketViewListResponse)
+async def list_ticket_views(
+    session: SessionData = Depends(get_current_session),
+) -> TicketViewListResponse:
+    """List all saved ticket views for the current user"""
+    views = await ticket_views_repo.list_views_for_user(session.user_id)
+    return TicketViewListResponse(items=[TicketViewModel(**view) for view in views])
+
+
+@router.post("/views", response_model=TicketViewModel, status_code=status.HTTP_201_CREATED)
+async def create_ticket_view(
+    payload: TicketViewCreate,
+    session: SessionData = Depends(get_current_session),
+) -> TicketViewModel:
+    """Create a new saved ticket view"""
+    filters_dict = payload.filters.model_dump() if payload.filters else None
+    view = await ticket_views_repo.create_view(
+        user_id=session.user_id,
+        name=payload.name,
+        description=payload.description,
+        filters=filters_dict,
+        grouping_field=payload.grouping_field,
+        sort_field=payload.sort_field,
+        sort_direction=payload.sort_direction,
+        is_default=payload.is_default,
+    )
+    return TicketViewModel(**view)
+
+
+@router.get("/views/{view_id}", response_model=TicketViewModel)
+async def get_ticket_view(
+    view_id: int,
+    session: SessionData = Depends(get_current_session),
+) -> TicketViewModel:
+    """Get a specific saved ticket view"""
+    view = await ticket_views_repo.get_view(view_id, session.user_id)
+    if not view:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
+    return TicketViewModel(**view)
+
+
+@router.put("/views/{view_id}", response_model=TicketViewModel)
+async def update_ticket_view(
+    view_id: int,
+    payload: TicketViewUpdate,
+    session: SessionData = Depends(get_current_session),
+) -> TicketViewModel:
+    """Update a saved ticket view"""
+    update_data = payload.model_dump(exclude_unset=True)
+    if "filters" in update_data and update_data["filters"]:
+        update_data["filters"] = update_data["filters"]
+    
+    view = await ticket_views_repo.update_view(view_id, session.user_id, **update_data)
+    if not view:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
+    return TicketViewModel(**view)
+
+
+@router.delete("/views/{view_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_ticket_view(
+    view_id: int,
+    session: SessionData = Depends(get_current_session),
+) -> None:
+    """Delete a saved ticket view"""
+    deleted = await ticket_views_repo.delete_view(view_id, session.user_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
+
 
