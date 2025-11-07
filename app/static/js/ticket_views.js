@@ -129,6 +129,14 @@
      */
     setupStatusFilters() {
       const statusCheckboxes = this.container.querySelectorAll('[data-status-filter]');
+      
+      // Initialize filterState.statuses with currently checked checkboxes
+      statusCheckboxes.forEach(checkbox => {
+        if (checkbox.checked && !this.filterState.statuses.includes(checkbox.value)) {
+          this.filterState.statuses.push(checkbox.value);
+        }
+      });
+      
       statusCheckboxes.forEach(checkbox => {
         checkbox.addEventListener('change', (e) => {
           const status = e.target.value;
