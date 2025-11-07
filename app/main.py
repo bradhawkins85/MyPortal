@@ -101,6 +101,7 @@ from app.repositories import roles as role_repo
 from app.repositories import shop as shop_repo
 from app.repositories import cart as cart_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
+from app.repositories import subscription_categories as subscription_categories_repo
 from app.repositories import staff as staff_repo
 from app.repositories import pending_staff_access as pending_staff_access_repo
 from app.repositories import tickets as tickets_repo
@@ -8553,9 +8554,10 @@ async def admin_shop_page(
     )
     restrictions_task = asyncio.create_task(shop_repo.list_product_restrictions())
     companies_task = asyncio.create_task(company_repo.list_companies())
+    subscription_categories_task = asyncio.create_task(subscription_categories_repo.list_categories())
 
-    categories, products, restrictions, companies = await asyncio.gather(
-        categories_task, products_task, restrictions_task, companies_task
+    categories, products, restrictions, companies, subscription_categories = await asyncio.gather(
+        categories_task, products_task, restrictions_task, companies_task, subscription_categories_task
     )
 
     restrictions_map: dict[int, list[dict[str, Any]]] = {}
@@ -8569,6 +8571,7 @@ async def admin_shop_page(
         "product_restrictions": restrictions_map,
         "all_companies": companies,
         "show_archived": show_archived,
+        "subscription_categories": subscription_categories,
     }
     return await _render_template("admin/shop.html", request, current_user, extra=extra)
 
@@ -8599,9 +8602,10 @@ async def admin_shop_product_create_page(request: Request):
         shop_repo.list_products(shop_repo.ProductFilters(include_archived=False))
     )
     restrictions_task = asyncio.create_task(shop_repo.list_product_restrictions())
+    subscription_categories_task = asyncio.create_task(subscription_categories_repo.list_categories())
 
-    categories, products, restrictions = await asyncio.gather(
-        categories_task, products_task, restrictions_task
+    categories, products, restrictions, subscription_categories = await asyncio.gather(
+        categories_task, products_task, restrictions_task, subscription_categories_task
     )
 
     restrictions_map: dict[int, list[dict[str, Any]]] = {}
@@ -8613,6 +8617,7 @@ async def admin_shop_product_create_page(request: Request):
         "categories": categories,
         "products": products,
         "product_restrictions": restrictions_map,
+        "subscription_categories": subscription_categories,
     }
     return await _render_template(
         "admin/shop_product_create.html", request, current_user, extra=extra
@@ -8834,6 +8839,8 @@ async def admin_create_shop_product(
     image: UploadFile | None = File(default=None),
     cross_sell_product_ids: list[int] | None = Form(default=None),
     upsell_product_ids: list[int] | None = Form(default=None),
+    subscription_category_id: str | None = Form(default=None),
+    term_days: str = Form(default="365"),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -8884,6 +8891,23 @@ async def admin_create_shop_product(
         if not category:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected category does not exist")
 
+    subscription_category_value: int | None = None
+    if subscription_category_id:
+        try:
+            subscription_category_value = int(subscription_category_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid subscription category selection")
+        sub_category = await subscription_categories_repo.get_category(subscription_category_value)
+        if not sub_category:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected subscription category does not exist")
+
+    try:
+        term_days_int = int(term_days)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Term days must be a whole number")
+    if term_days_int < 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Term days must be at least 1")
+
     cross_sell_ids = await _validate_recommendation_product_ids(
         cross_sell_product_ids,
         category_id=category_value,
@@ -8919,6 +8943,8 @@ async def admin_create_shop_product(
             image_url=image_url,
             cross_sell_product_ids=cross_sell_ids,
             upsell_product_ids=upsell_ids,
+            subscription_category_id=subscription_category_value,
+            term_days=term_days_int,
         )
     except aiomysql.IntegrityError as exc:
         if stored_path:
@@ -8966,6 +8992,8 @@ async def admin_update_shop_product(
     upsell_product_ids: list[int] | None = Form(default=None),
     cross_sell_sku: str | None = Form(default=None),
     upsell_sku: str | None = Form(default=None),
+    subscription_category_id: str | None = Form(default=None),
+    term_days: str = Form(default="365"),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -9055,6 +9083,23 @@ async def admin_update_shop_product(
         if not category:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected category does not exist")
 
+    subscription_category_value: int | None = None
+    if subscription_category_id:
+        try:
+            subscription_category_value = int(subscription_category_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid subscription category selection")
+        sub_category = await subscription_categories_repo.get_category(subscription_category_value)
+        if not sub_category:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected subscription category does not exist")
+
+    try:
+        term_days_int = int(term_days)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Term days must be a whole number")
+    if term_days_int < 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Term days must be at least 1")
+
     previous_image_url = product.get("image_url")
     image_url = previous_image_url
     stored_path: Path | None = None
@@ -9105,6 +9150,8 @@ async def admin_update_shop_product(
             image_url=image_url,
             cross_sell_product_ids=cross_sell_ids,
             upsell_product_ids=upsell_ids,
+            subscription_category_id=subscription_category_value,
+            term_days=term_days_int,
         )
     except aiomysql.IntegrityError as exc:
         if stored_path:

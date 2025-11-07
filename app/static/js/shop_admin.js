@@ -390,6 +390,14 @@
         if (categorySelect) {
           categorySelect.value = product.category_id || '';
         }
+        const subscriptionCategorySelect = editForm.querySelector('#edit-product-subscription-category');
+        if (subscriptionCategorySelect) {
+          subscriptionCategorySelect.value = product.subscription_category_id || '';
+        }
+        const termDaysInput = editForm.querySelector('#edit-product-term-days');
+        if (termDaysInput) {
+          termDaysInput.value = product.term_days != null ? product.term_days : 365;
+        }
         const editCrossSelect = editForm.querySelector('#edit-product-cross-sell');
         const editUpsellSelect = editForm.querySelector('#edit-product-upsell');
         updateRecommendationSelect(

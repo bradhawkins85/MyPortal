@@ -228,6 +228,21 @@
           {% endfor %}
         </select>
       </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-product-subscription-category">Subscription category</label>
+        <select class="form-input" id="edit-product-subscription-category" name="subscription_category_id">
+          <option value="">No subscription category</option>
+          {% for sub_category in subscription_categories %}
+            <option value="{{ sub_category.id }}">{{ sub_category.name }}</option>
+          {% endfor %}
+        </select>
+        <p class="form-helper">Products in the same subscription category can co-term together.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-product-term-days">Term days</label>
+        <input class="form-input" id="edit-product-term-days" name="term_days" type="number" min="1" value="365" required />
+        <p class="form-helper">Length of the subscription term in days (default: 365).</p>
+      </div>
       <div class="form-field form-field--wide">
         <label class="form-label" for="edit-product-features-filter">Features</label>
         <div class="form-actions form-actions--inline">
