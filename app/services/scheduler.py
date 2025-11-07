@@ -65,7 +65,7 @@ class SchedulerService:
     async def stop(self) -> None:
         if not self._started:
             return
-        self._scheduler.shutdown(wait=False)
+        self._scheduler.shutdown(wait=True)
         self._started = False
         log_info("Scheduler stopped")
 
