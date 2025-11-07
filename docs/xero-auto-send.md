@@ -2,13 +2,14 @@
 
 ## Overview
 
-The **Sync to Xero (Auto Send)** scheduled task provides automated invoice synchronization with automatic approval and email delivery to customers. This task extends the standard **Sync to Xero** functionality by automatically setting invoices to "Awaiting Payment" status and instructing Xero to email them to the contact.
+The **Sync to Xero (Auto Send)** scheduled task provides automated invoice synchronization with automatic approval and email delivery to customers. This task extends the standard **Sync to Xero** functionality by automatically setting invoices to "AUTHORISED" status (which displays as "Awaiting Payment" in the Xero UI) and instructing Xero to email them to the contact.
 
 ## Differences from Standard Sync to Xero
 
 | Feature | Sync to Xero | Sync to Xero (Auto Send) |
 |---------|--------------|---------------------------|
-| Invoice Status | DRAFT | AUTHORISED (Awaiting Payment) |
+| Invoice Status | DRAFT | AUTHORISED |
+| Displayed Status in Xero | Draft | Awaiting Payment |
 | Email Sent | No | Yes (via Xero) |
 | Use Case | Manual review before sending | Fully automated billing |
 
@@ -43,7 +44,7 @@ When the **Sync to Xero (Auto Send)** task runs:
 
 1. **Collects billable items**: Gathers unbilled time entries from tickets and recurring invoice items
 2. **Creates invoice payload**: Builds the invoice with line items, tax settings, and customer details
-3. **Sets AUTHORISED status**: Unlike DRAFT invoices, AUTHORISED invoices are immediately ready for payment
+3. **Sets AUTHORISED status**: Unlike DRAFT invoices, AUTHORISED invoices are immediately ready for payment (displays as "Awaiting Payment" in Xero)
 4. **Enables SentToContact flag**: Instructs Xero to send the invoice via email to the customer contact
 5. **Records billing**: Marks time entries as billed and updates ticket statuses to "Closed"
 6. **Logs the transaction**: Creates webhook monitor entries for tracking and debugging
