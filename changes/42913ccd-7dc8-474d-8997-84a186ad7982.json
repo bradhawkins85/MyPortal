@@ -1,8 +1,7 @@
 {
   "guid": "42913ccd-7dc8-474d-8997-84a186ad7982",
-  "occurred_at": "2025-11-07T04:10:48.662309+00:00",
-  "change_type": "feature",
+  "occurred_at": "2025-11-07T04:10Z",
+  "change_type": "Feature",
   "summary": "Billable tickets now sync to Xero with automatic invoice generation",
-  "content_hash": "832076db67c0488d0a3efd879787973cda974653d431c2d0010407da33876733",
-  "details": "When Sync to Xero runs, it now creates invoice line items for tickets matching billable statuses configured in the Xero module. Features include:\n\n- Tracks billable time entries to ensure they are only billed once\n- Creates one line item per ticket per labour type\n- Uses configurable line item description template\n- Moves billed tickets to Closed status automatically\n- Prevents further time entry on billed tickets\n- Displays invoice number on ticket detail page\n\nConfigure billable statuses in Admin > Modules > Xero settings."
+  "content_hash": "3616a44f174669819079ab1faae15dd6ccb875cbb8f973d74fb3cb42a3194f23"
 }
