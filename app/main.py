@@ -814,6 +814,44 @@ def _parse_int_in_range(value: Any, *, default: int, minimum: int, maximum: int)
     return parsed
 
 
+def _validate_subscription_commitment_and_payment(
+    subscription_category_id: int | None,
+    commitment_type: str | None,
+    payment_frequency: str | None,
+) -> tuple[str | None, str | None]:
+    """Validate subscription commitment type and payment frequency.
+    
+    Returns:
+        Tuple of (commitment_value, payment_frequency_value)
+        
+    Raises:
+        HTTPException: If validation fails
+    """
+    if not subscription_category_id:
+        return None, None
+        
+    if not commitment_type or commitment_type not in ("monthly", "annual"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Commitment type must be 'monthly' or 'annual' for subscription products"
+        )
+    
+    if not payment_frequency or payment_frequency not in ("monthly", "annual"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment frequency must be 'monthly' or 'annual' for subscription products"
+        )
+    
+    # Validate business rule: Monthly commitment can only have monthly payment
+    if commitment_type == "monthly" and payment_frequency != "monthly":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Monthly commitment can only have monthly payment"
+        )
+    
+    return commitment_type, payment_frequency
+
+
 def _parse_staff_selection(value: Any) -> int | None:
     if value is None:
         return None
@@ -9181,20 +9219,11 @@ async def admin_create_shop_product(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected subscription category does not exist")
 
     # Validate commitment type and payment frequency for subscriptions
-    commitment_value: str | None = None
-    payment_freq_value: str | None = None
-    if subscription_category_value:
-        if not commitment_type or commitment_type not in ("monthly", "annual"):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Commitment type must be 'monthly' or 'annual' for subscription products")
-        commitment_value = commitment_type
-        
-        if not payment_frequency or payment_frequency not in ("monthly", "annual"):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment frequency must be 'monthly' or 'annual' for subscription products")
-        payment_freq_value = payment_frequency
-        
-        # Validate business rule: Monthly commitment can only have monthly payment
-        if commitment_value == "monthly" and payment_freq_value != "monthly":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Monthly commitment can only have monthly payment")
+    commitment_value, payment_freq_value = _validate_subscription_commitment_and_payment(
+        subscription_category_value,
+        commitment_type,
+        payment_frequency,
+    )
 
     # Parse pricing fields
     price_monthly_comm: Decimal | None = None
@@ -9419,20 +9448,11 @@ async def admin_update_shop_product(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected subscription category does not exist")
 
     # Validate commitment type and payment frequency for subscriptions
-    commitment_value: str | None = None
-    payment_freq_value: str | None = None
-    if subscription_category_value:
-        if not commitment_type or commitment_type not in ("monthly", "annual"):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Commitment type must be 'monthly' or 'annual' for subscription products")
-        commitment_value = commitment_type
-        
-        if not payment_frequency or payment_frequency not in ("monthly", "annual"):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment frequency must be 'monthly' or 'annual' for subscription products")
-        payment_freq_value = payment_frequency
-        
-        # Validate business rule: Monthly commitment can only have monthly payment
-        if commitment_value == "monthly" and payment_freq_value != "monthly":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Monthly commitment can only have monthly payment")
+    commitment_value, payment_freq_value = _validate_subscription_commitment_and_payment(
+        subscription_category_value,
+        commitment_type,
+        payment_frequency,
+    )
 
     # Parse pricing fields
     price_monthly_comm: Decimal | None = None
