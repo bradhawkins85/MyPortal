@@ -84,6 +84,7 @@ from app.repositories import audit_logs as audit_repo
 from app.repositories import api_keys as api_key_repo
 from app.repositories import auth as auth_repo
 from app.repositories import assets as assets_repo
+from app.repositories import billing_contacts as billing_contacts_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
@@ -2890,6 +2891,14 @@ async def _render_company_edit_page(
         for item in items:
             recurring_invoice_items.append(_serialise_mapping(item))
 
+    # Fetch billing contacts for the company
+    billing_contacts = []
+    company_users = []
+    if is_super_admin:
+        billing_contacts = await billing_contacts_repo.list_billing_contacts_for_company(company_id)
+        # Get all users for this company for the dropdown
+        company_users = assignments  # Reuse assignments which already has user info
+
     assign_form = {
         "company_id": assign_company_id,
         "user_id": assign_user_id,
@@ -2920,6 +2929,8 @@ async def _render_company_edit_page(
         "automation_command_options": automation_command_options,
         "automation_company_options": automation_company_options,
         "recurring_invoice_items": recurring_invoice_items,
+        "billing_contacts": billing_contacts,
+        "company_users": company_users,
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
@@ -9419,6 +9430,10 @@ async def admin_update_shop_product(
     price_monthly_commitment: str | None = Form(default=None),
     price_annual_monthly_payment: str | None = Form(default=None),
     price_annual_annual_payment: str | None = Form(default=None),
+    scheduled_price: str | None = Form(default=None),
+    scheduled_vip_price: str | None = Form(default=None),
+    scheduled_buy_price: str | None = Form(default=None),
+    price_change_date: str | None = Form(default=None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -9553,6 +9568,43 @@ async def admin_update_shop_product(
         except (TypeError, InvalidOperation):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Annual commitment with annual payment price must be a valid number")
 
+    # Parse scheduled price change fields
+    scheduled_price_decimal: Decimal | None = None
+    if scheduled_price not in (None, ""):
+        try:
+            scheduled_price_decimal = Decimal(scheduled_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if scheduled_price_decimal < 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Scheduled price must be at least zero")
+        except (TypeError, InvalidOperation):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Scheduled price must be a valid number")
+
+    scheduled_vip_price_decimal: Decimal | None = None
+    if scheduled_vip_price not in (None, ""):
+        try:
+            scheduled_vip_price_decimal = Decimal(scheduled_vip_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if scheduled_vip_price_decimal < 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Scheduled VIP price must be at least zero")
+        except (TypeError, InvalidOperation):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Scheduled VIP price must be a valid number")
+
+    scheduled_buy_price_decimal: Decimal | None = None
+    if scheduled_buy_price not in (None, ""):
+        try:
+            scheduled_buy_price_decimal = Decimal(scheduled_buy_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if scheduled_buy_price_decimal < 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Scheduled buy price must be at least zero")
+        except (TypeError, InvalidOperation):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Scheduled buy price must be a valid number")
+
+    # Parse price change date
+    from datetime import datetime as dt
+    price_change_date_value: Any | None = None
+    if price_change_date and price_change_date.strip():
+        try:
+            price_change_date_value = dt.strptime(price_change_date.strip(), "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Price change date must be in YYYY-MM-DD format")
+
     previous_image_url = product.get("image_url")
     image_url = previous_image_url
     stored_path: Path | None = None
@@ -9609,6 +9661,10 @@ async def admin_update_shop_product(
             price_monthly_commitment=price_monthly_comm,
             price_annual_monthly_payment=price_annual_monthly,
             price_annual_annual_payment=price_annual_annual,
+            scheduled_price=scheduled_price_decimal,
+            scheduled_vip_price=scheduled_vip_price_decimal,
+            scheduled_buy_price=scheduled_buy_price_decimal,
+            price_change_date=price_change_date_value,
         )
     except aiomysql.IntegrityError as exc:
         if stored_path:

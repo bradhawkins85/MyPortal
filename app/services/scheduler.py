@@ -22,6 +22,7 @@ from app.services import imap as imap_service
 from app.services import m365 as m365_service
 from app.services import products as products_service
 from app.services import staff_importer
+from app.services import subscription_price_changes
 from app.services import subscription_renewals
 from app.services import tickets as tickets_service
 from app.services import value_templates
@@ -376,6 +377,14 @@ class SchedulerService:
                     else:
                         result = await imap_service.sync_account(account_id)
                         details = json.dumps(result, default=str) if result else None
+                elif command == "send_price_change_notifications":
+                    result = await subscription_price_changes.send_price_change_notifications()
+                    details = json.dumps(result, default=str)
+                    log_info("Price change notifications sent", **result)
+                elif command == "apply_scheduled_price_changes":
+                    result = await subscription_price_changes.apply_scheduled_price_changes()
+                    details = json.dumps(result, default=str)
+                    log_info("Scheduled price changes applied", **result)
                 else:
                     status = "skipped"
                     details = "No handler registered for command"
