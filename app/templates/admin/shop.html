@@ -210,11 +210,11 @@
         <label class="form-label" for="edit-product-description">Description</label>
         <textarea class="form-input form-input--textarea" id="edit-product-description" name="description"></textarea>
       </div>
-      <div class="form-field">
+      <div class="form-field" data-field-type="standard-price">
         <label class="form-label" for="edit-product-price">Price</label>
         <input class="form-input" id="edit-product-price" name="price" type="number" step="0.01" required />
       </div>
-      <div class="form-field">
+      <div class="form-field" data-field-type="standard-price">
         <label class="form-label" for="edit-product-vip">VIP price</label>
         <input class="form-input" id="edit-product-vip" name="vip_price" type="number" step="0.01" />
       </div>
@@ -241,7 +241,7 @@
         </select>
         <p class="form-helper">Products in the same subscription category can co-term together.</p>
       </div>
-      <div class="form-field">
+      <div class="form-field" data-field-type="subscription">
         <label class="form-label" for="edit-product-commitment-type">Commitment type</label>
         <select class="form-input" id="edit-product-commitment-type" name="commitment_type">
           <option value="">Select commitment type</option>
@@ -250,7 +250,7 @@
         </select>
         <p class="form-helper">Monthly commitments renew monthly, annual commitments renew annually.</p>
       </div>
-      <div class="form-field">
+      <div class="form-field" data-field-type="subscription">
         <label class="form-label" for="edit-product-payment-frequency">Payment frequency</label>
         <select class="form-input" id="edit-product-payment-frequency" name="payment_frequency">
           <option value="">Select payment frequency</option>
@@ -259,17 +259,17 @@
         </select>
         <p class="form-helper">Monthly commitments can only be paid monthly. Annual commitments can be paid monthly or annually.</p>
       </div>
-      <div class="form-field">
+      <div class="form-field" data-field-type="subscription">
         <label class="form-label" for="edit-product-price-monthly-commitment">Price - Monthly commitment</label>
         <input class="form-input" id="edit-product-price-monthly-commitment" name="price_monthly_commitment" type="number" step="0.01" />
         <p class="form-helper">Price for monthly commitment with monthly payment.</p>
       </div>
-      <div class="form-field">
+      <div class="form-field" data-field-type="subscription">
         <label class="form-label" for="edit-product-price-annual-monthly">Price - Annual commitment (monthly payment)</label>
         <input class="form-input" id="edit-product-price-annual-monthly" name="price_annual_monthly_payment" type="number" step="0.01" />
         <p class="form-helper">Price for annual commitment with monthly payment (per month).</p>
       </div>
-      <div class="form-field">
+      <div class="form-field" data-field-type="subscription">
         <label class="form-label" for="edit-product-price-annual-annual">Price - Annual commitment (annual payment)</label>
         <input class="form-input" id="edit-product-price-annual-annual" name="price_annual_annual_payment" type="number" step="0.01" />
         <p class="form-helper">Price for annual commitment with annual payment (full year).</p>

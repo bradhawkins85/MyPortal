@@ -55,6 +55,71 @@
     });
   }
 
+  function toggleFieldsBySubscriptionCategory(subscriptionCategorySelect, formContext) {
+    if (!subscriptionCategorySelect) {
+      return;
+    }
+
+    const updateFieldVisibility = () => {
+      const hasSubscriptionCategory = subscriptionCategorySelect.value && subscriptionCategorySelect.value !== '';
+      
+      // Get all standard price fields and subscription fields in the same form
+      const form = subscriptionCategorySelect.closest('form');
+      if (!form) {
+        return;
+      }
+
+      const standardPriceFields = form.querySelectorAll('[data-field-type="standard-price"]');
+      const subscriptionFields = form.querySelectorAll('[data-field-type="subscription"]');
+
+      if (hasSubscriptionCategory) {
+        // Hide standard price fields and clear their values
+        standardPriceFields.forEach((field) => {
+          field.style.display = 'none';
+          const input = field.querySelector('input');
+          if (input) {
+            input.value = '';
+            // Remove required attribute when hidden
+            if (input.hasAttribute('required')) {
+              input.removeAttribute('required');
+              input.dataset.wasRequired = 'true';
+            }
+          }
+        });
+
+        // Show subscription fields
+        subscriptionFields.forEach((field) => {
+          field.style.display = '';
+        });
+      } else {
+        // Show standard price fields
+        standardPriceFields.forEach((field) => {
+          field.style.display = '';
+          const input = field.querySelector('input');
+          if (input && input.dataset.wasRequired === 'true') {
+            input.setAttribute('required', '');
+            delete input.dataset.wasRequired;
+          }
+        });
+
+        // Hide subscription fields and clear their values
+        subscriptionFields.forEach((field) => {
+          field.style.display = 'none';
+          const input = field.querySelector('input, select');
+          if (input) {
+            input.value = '';
+          }
+        });
+      }
+    };
+
+    // Update on change
+    subscriptionCategorySelect.addEventListener('change', updateFieldVisibility);
+    
+    // Initial update
+    updateFieldVisibility();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const container = document.body;
     submitOnChange(container);
@@ -129,6 +194,12 @@
         refreshCreateSelects();
       });
       refreshCreateSelects();
+    }
+
+    // Initialize field visibility toggle for create form
+    const createSubscriptionCategorySelect = document.getElementById('product-subscription-category');
+    if (createSubscriptionCategorySelect) {
+      toggleFieldsBySubscriptionCategory(createSubscriptionCategorySelect, 'create');
     }
 
     const stockFilter = document.getElementById('stock-filter');
@@ -393,6 +464,8 @@
         const subscriptionCategorySelect = editForm.querySelector('#edit-product-subscription-category');
         if (subscriptionCategorySelect) {
           subscriptionCategorySelect.value = product.subscription_category_id || '';
+          // Initialize field visibility toggle for edit modal
+          toggleFieldsBySubscriptionCategory(subscriptionCategorySelect, 'edit');
         }
         const commitmentTypeSelect = editForm.querySelector('#edit-product-commitment-type');
         if (commitmentTypeSelect) {
