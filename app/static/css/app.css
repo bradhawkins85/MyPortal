@@ -2568,61 +2568,10 @@ button.header-title-menu__link {
   background: rgba(56, 189, 248, 0.45);
 }
 
-.shop-categories__parent {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-gap-tight);
-}
-
-.shop-categories__toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-gap-base);
-  padding: var(--space-compact) var(--space-gap-base);
-  border-radius: 0.75rem;
-  text-decoration: none;
-  color: inherit;
-  font-weight: 500;
-  background: rgba(148, 163, 184, 0.08);
-  transition: background-color 0.2s ease, color 0.2s ease;
-  border: none;
-  cursor: pointer;
-  width: 100%;
-  text-align: left;
-  font-size: inherit;
-  font-family: inherit;
-}
-
-.shop-categories__toggle:hover,
-.shop-categories__toggle:focus-visible {
-  background: rgba(148, 163, 184, 0.18);
-}
-
-.shop-categories__toggle.is-active {
-  background: rgba(56, 189, 248, 0.18);
-  color: #e0f2fe;
-}
-
-.shop-categories__icon--expand {
-  width: 1.25rem;
-  height: 1.25rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.2s ease;
-  font-size: 0.75rem;
-}
-
-.shop-categories__children {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-gap-tight);
-  padding-left: 2rem;
-}
-
 .shop-categories__link--child {
   font-size: 0.9rem;
   opacity: 0.9;
+  padding-left: 3rem;
 }
 
 .shop-toolbar {
