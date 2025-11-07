@@ -66,6 +66,7 @@ prepare_git_environment() {
 # when they are modified locally during normal Python execution.
 # This function resets all tracked __pycache__ files to their HEAD version.
 clean_pycache_files() {
+  git restore .
   echo "Cleaning __pycache__ files to prevent merge conflicts..."
   
   # Reset any local changes to __pycache__ files to prevent merge conflicts
