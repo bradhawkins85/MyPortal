@@ -269,3 +269,11 @@ async def count_subscriptions(
     )
     
     return int(row["count"]) if row else 0
+
+
+async def delete_subscription(subscription_id: str) -> None:
+    """Delete a subscription by ID."""
+    await db.execute(
+        "DELETE FROM subscriptions WHERE id = %s",
+        (subscription_id,),
+    )
