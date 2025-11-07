@@ -21,7 +21,7 @@ def calculate_coterm_price(
     - coterm_price = round_currency(daily_rate * days_inclusive)
     
     Always divides by 365 (even in leap years) as specified in requirements.
-    Uses banker's rounding (ROUND_HALF_UP) at currency precision (2 decimals).
+    Uses ROUND_HALF_UP rounding at currency precision (2 decimals).
     
     Args:
         item_price: Base price of the item for full term

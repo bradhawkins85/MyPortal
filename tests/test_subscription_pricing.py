@@ -65,7 +65,7 @@ class TestCotermPricing:
         assert result == Decimal("366.00")
     
     def test_rounding_half_up(self):
-        """Test that rounding uses ROUND_HALF_UP (banker's rounding)."""
+        """Test that rounding uses ROUND_HALF_UP (standard rounding)."""
         item_price = Decimal("100.00")
         today = date(2025, 1, 1)
         end_date = date(2025, 2, 10)  # 41 days inclusive
