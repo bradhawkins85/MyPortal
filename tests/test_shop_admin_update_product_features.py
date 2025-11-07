@@ -70,6 +70,8 @@ async def test_admin_update_shop_product_updates_features(monkeypatch):
         image=None,
         cross_sell_sku=None,
         upsell_sku=None,
+        subscription_category_id="",
+        term_days="365",
         features=json.dumps(
             [
                 {"name": "Colour", "value": "Blue"},
@@ -120,6 +122,8 @@ async def test_admin_update_shop_product_invalid_feature_json(monkeypatch):
             image=None,
             cross_sell_sku=None,
             upsell_sku=None,
+            subscription_category_id="",
+            term_days="365",
             features="not-json",
         )
 
@@ -156,6 +160,8 @@ async def test_admin_update_shop_product_rejects_blank_feature_name(monkeypatch)
             image=None,
             cross_sell_sku=None,
             upsell_sku=None,
+            subscription_category_id="",
+            term_days="365",
             features=json.dumps([
                 {"name": " ", "value": "example"},
             ]),
