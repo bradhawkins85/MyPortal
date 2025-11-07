@@ -352,6 +352,77 @@ async def update_stock_feed() -> int:
     return len(items)
 
 
+async def _get_or_create_category_hierarchy(category_path: str) -> int | None:
+    """
+    Parse a category path delimited by ' - ' and create/retrieve the hierarchy.
+    
+    For example, "Electronics - Computers - Laptops" will:
+    1. Create/get "Electronics" (parent)
+    2. Create/get "Computers" as child of "Electronics"
+    3. Create/get "Laptops" as child of "Computers"
+    4. Return the ID of the final category ("Laptops")
+    
+    Args:
+        category_path: A string with category names separated by ' - '
+        
+    Returns:
+        The ID of the final (deepest) category in the hierarchy, or None if invalid
+    """
+    if not category_path or not category_path.strip():
+        return None
+    
+    # Split by ' - ' delimiter and clean up each part
+    parts = [part.strip() for part in category_path.split(" - ")]
+    parts = [part for part in parts if part]  # Remove empty parts
+    
+    if not parts:
+        return None
+    
+    parent_id: int | None = None
+    
+    for category_name in parts:
+        # Try to find existing category with this name and parent
+        # Note: get_category_by_name doesn't check parent, so we need to check manually
+        existing = await shop_repo.get_category_by_name(category_name)
+        
+        if existing and existing.get("parent_id") == parent_id:
+            # Found exact match (same name and parent)
+            category_id = int(existing["id"])
+        else:
+            # Need to create new category or existing doesn't match parent
+            # First check if there's already a category with this name and parent_id
+            all_categories = await shop_repo.list_all_categories_flat()
+            matching_category = None
+            for cat in all_categories:
+                if cat["name"] == category_name and cat.get("parent_id") == parent_id:
+                    matching_category = cat
+                    break
+            
+            if matching_category:
+                category_id = int(matching_category["id"])
+            else:
+                # Create new category with appropriate parent
+                try:
+                    category_id = await shop_repo.create_category(
+                        name=category_name,
+                        parent_id=parent_id,
+                        display_order=0
+                    )
+                except Exception as exc:  # pragma: no cover - defensive guard
+                    log_error(
+                        "Failed to create category in hierarchy",
+                        category=category_name,
+                        parent_id=parent_id,
+                        error=str(exc),
+                    )
+                    return None
+        
+        # This category becomes the parent for the next level
+        parent_id = category_id
+    
+    return parent_id
+
+
 async def _process_feed_item(
     item: Mapping[str, Any],
     existing_product: Mapping[str, Any] | None,
@@ -396,18 +467,8 @@ async def _process_feed_item(
     category_id: int | None = None
     category_name = str(item.get("category_name") or "").strip()
     if category_name:
-        category = await shop_repo.get_category_by_name(category_name)
-        if category:
-            category_id = int(category["id"])
-        else:
-            try:
-                category_id = await shop_repo.create_category(category_name)
-            except Exception as exc:  # pragma: no cover - defensive guard
-                log_error(
-                    "Failed to create product category from feed",
-                    category=category_name,
-                    error=str(exc),
-                )
+        # Use hierarchical category creation if the name contains ' - ' delimiter
+        category_id = await _get_or_create_category_hierarchy(category_name)
 
     stock_nsw = int(item.get("on_hand_nsw") or 0)
     stock_qld = int(item.get("on_hand_qld") or 0)
