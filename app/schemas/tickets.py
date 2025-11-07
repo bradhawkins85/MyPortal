@@ -299,3 +299,63 @@ class TicketTask(BaseModel):
 
 class TicketTaskListResponse(BaseModel):
     items: list[TicketTask] = Field(default_factory=list)
+
+
+class TicketViewFilters(BaseModel):
+    """Filters that can be applied to ticket views"""
+    status: Optional[list[str]] = None
+    priority: Optional[list[str]] = None
+    company_id: Optional[list[int]] = None
+    assigned_user_id: Optional[list[int]] = None
+    module_slug: Optional[str] = None
+    search: Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TicketViewCreate(BaseModel):
+    """Request to create a new saved ticket view"""
+    name: str = Field(..., min_length=1, max_length=128)
+    description: Optional[str] = None
+    filters: Optional[TicketViewFilters] = None
+    grouping_field: Optional[str] = Field(default=None, max_length=64)
+    sort_field: Optional[str] = Field(default=None, max_length=64)
+    sort_direction: Optional[str] = Field(default=None, pattern="^(asc|desc)$")
+    is_default: bool = False
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TicketViewUpdate(BaseModel):
+    """Request to update an existing saved ticket view"""
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    description: Optional[str] = None
+    filters: Optional[TicketViewFilters] = None
+    grouping_field: Optional[str] = Field(default=None, max_length=64)
+    sort_field: Optional[str] = Field(default=None, max_length=64)
+    sort_direction: Optional[str] = Field(default=None, pattern="^(asc|desc)$")
+    is_default: Optional[bool] = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TicketViewModel(BaseModel):
+    """Saved ticket view model"""
+    id: int
+    user_id: int
+    name: str
+    description: Optional[str] = None
+    filters: Optional[dict] = None
+    grouping_field: Optional[str] = None
+    sort_field: Optional[str] = None
+    sort_direction: Optional[str] = None
+    is_default: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TicketViewListResponse(BaseModel):
+    """Response containing list of ticket views"""
+    items: list[TicketViewModel] = Field(default_factory=list)
