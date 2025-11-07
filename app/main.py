@@ -66,6 +66,7 @@ from app.api.routes import (
     scheduler as scheduler_api,
     roles,
     staff as staff_api,
+    subscriptions as subscriptions_api,
     tag_exclusions,
     tickets as tickets_api,
     users,
@@ -138,6 +139,7 @@ from app.services import staff_importer
 from app.services import staff_access as staff_access_service
 from app.services import company_importer
 from app.services import labour_types as labour_types_service
+from app.services import subscription_shop_integration
 from app.services import ticket_importer
 from app.services import tickets as tickets_service
 from app.services import template_variables
@@ -509,6 +511,7 @@ app.include_router(orders_api.router)
 app.include_router(staff_api.router)
 app.include_router(invoices_api.router)
 app.include_router(issues_api.router)
+app.include_router(subscriptions_api.router)
 app.include_router(audit_logs.router)
 app.include_router(api_keys.router)
 app.include_router(scheduler_api.router)
@@ -4869,6 +4872,23 @@ async def place_order(request: Request) -> RedirectResponse:
         )
 
     await cart_repo.clear_cart(session.id)
+    
+    # Create subscriptions for any subscription products in the order
+    try:
+        await subscription_shop_integration.create_subscriptions_from_order(
+            order_number=order_number,
+            company_id=company_id,
+            user_id=int(user["id"]),
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to create subscriptions from order",
+            order_number=order_number,
+            company_id=company_id,
+            error=str(exc),
+        )
+        # Don't fail the order, just log the error
+    
     success = quote("Your order is being processed.")
     return RedirectResponse(
         url=f"{request.url_for('cart_page')}?orderMessage={success}",
@@ -11932,6 +11952,72 @@ async def admin_delete_automation(automation_id: int, request: Request):
         url=f"/admin/automations?success={message}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+@app.get("/admin/subscriptions", response_class=HTMLResponse)
+async def admin_subscriptions_page(
+    request: Request,
+    status_filter: str | None = Query(default=None, alias="status"),
+    category_filter: str | None = Query(default=None, alias="category"),
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    """Admin page for viewing and managing subscriptions."""
+    current_user, membership, redirect = await _require_administration_access(request)
+    if redirect:
+        return redirect
+    
+    # Check that user has both License and Cart permissions
+    has_license = bool(membership and membership.get("can_manage_licenses"))
+    has_cart = bool(membership and membership.get("can_access_cart"))
+    
+    if not (current_user.get("is_super_admin") or (has_license and has_cart)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="License and Cart permissions required to access subscriptions"
+        )
+    
+    # Get active company ID
+    active_company_id = getattr(request.state, "active_company_id", None)
+    
+    # Load subscriptions
+    from app.repositories import subscriptions as subscriptions_repo
+    from app.repositories import subscription_categories as categories_repo
+    from collections import Counter
+    
+    try:
+        subscriptions = await subscriptions_repo.list_subscriptions(
+            customer_id=active_company_id if not current_user.get("is_super_admin") else None,
+            status=status_filter,
+            category_id=int(category_filter) if category_filter else None,
+            limit=500,
+        )
+        
+        categories = await categories_repo.list_categories()
+        
+        # Count by status
+        status_counts = Counter(sub.get("status") for sub in subscriptions)
+        
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to load subscriptions", error=str(exc))
+        subscriptions = []
+        categories = []
+        status_counts = {}
+    
+    extra = {
+        "title": "Subscriptions",
+        "subscriptions": subscriptions,
+        "categories": categories,
+        "filters": {
+            "status": status_filter,
+            "category": category_filter,
+        },
+        "status_counts": status_counts,
+        "success_message": _sanitize_message(success),
+        "error_message": _sanitize_message(error),
+    }
+    
+    return await _render_template("admin/subscriptions.html", request, current_user, extra=extra)
 
 
 async def _render_modules_dashboard(

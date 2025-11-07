@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+
+{% block title %}Subscriptions - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="admin-page">
+    <div class="admin-header">
+        <h1>Subscriptions</h1>
+        <p class="subtitle">Manage customer subscriptions and renewals</p>
+    </div>
+
+    {% if error_message %}
+    <div class="alert alert-error">
+        {{ error_message }}
+    </div>
+    {% endif %}
+
+    {% if success_message %}
+    <div class="alert alert-success">
+        {{ success_message }}
+    </div>
+    {% endif %}
+
+    <div class="filters">
+        <form method="get" action="/admin/subscriptions">
+            <div class="filter-row">
+                <label>
+                    Status:
+                    <select name="status">
+                        <option value="">All</option>
+                        <option value="active" {% if filters.status == 'active' %}selected{% endif %}>Active</option>
+                        <option value="pending_renewal" {% if filters.status == 'pending_renewal' %}selected{% endif %}>Pending Renewal</option>
+                        <option value="expired" {% if filters.status == 'expired' %}selected{% endif %}>Expired</option>
+                        <option value="canceled" {% if filters.status == 'canceled' %}selected{% endif %}>Canceled</option>
+                    </select>
+                </label>
+
+                <label>
+                    Category:
+                    <select name="category">
+                        <option value="">All Categories</option>
+                        {% for category in categories %}
+                        <option value="{{ category.id }}" {% if filters.category == category.id|string %}selected{% endif %}>
+                            {{ category.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </label>
+
+                <button type="submit">Filter</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="subscriptions-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Product</th>
+                    <th>Category</th>
+                    <th>Customer</th>
+                    <th>Quantity</th>
+                    <th>Start Date</th>
+                    <th>End Date</th>
+                    <th>Status</th>
+                    <th>Price</th>
+                    <th>Auto-Renew</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if subscriptions %}
+                    {% for sub in subscriptions %}
+                    <tr>
+                        <td><code>{{ sub.id[:8] }}</code></td>
+                        <td>{{ sub.product_name or 'N/A' }}</td>
+                        <td>{{ sub.category_name or 'N/A' }}</td>
+                        <td>Company #{{ sub.customer_id }}</td>
+                        <td>{{ sub.quantity }}</td>
+                        <td>{{ sub.start_date }}</td>
+                        <td>{{ sub.end_date }}</td>
+                        <td>
+                            <span class="badge badge-{{ sub.status }}">
+                                {{ sub.status }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if sub.prorated_price %}
+                                ${{ sub.prorated_price }}
+                                <span class="text-muted">(prorated from ${{ sub.unit_price }})</span>
+                            {% else %}
+                                ${{ sub.unit_price }}
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if sub.auto_renew %}
+                                <span class="text-success">✓</span>
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="10" class="text-center text-muted">
+                            No subscriptions found
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="stats">
+        <h3>Summary</h3>
+        <div class="stat-cards">
+            <div class="stat-card">
+                <div class="stat-label">Total Subscriptions</div>
+                <div class="stat-value">{{ subscriptions|length }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Active</div>
+                <div class="stat-value">{{ status_counts.active or 0 }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Pending Renewal</div>
+                <div class="stat-value">{{ status_counts.pending_renewal or 0 }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.admin-page {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+.admin-header h1 {
+    margin: 0 0 0.5rem;
+}
+
+.subtitle {
+    color: #666;
+    margin: 0 0 2rem;
+}
+
+.filters {
+    background: #f5f5f5;
+    padding: 1rem;
+    border-radius: 4px;
+    margin-bottom: 2rem;
+}
+
+.filter-row {
+    display: flex;
+    gap: 1rem;
+    align-items: end;
+}
+
+.filter-row label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.subscriptions-table {
+    overflow-x: auto;
+    margin-bottom: 2rem;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+th {
+    background: #f9f9f9;
+    font-weight: 600;
+}
+
+code {
+    background: #f0f0f0;
+    padding: 0.25rem 0.5rem;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 0.9em;
+}
+
+.badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.85em;
+    font-weight: 500;
+}
+
+.badge-active {
+    background: #d4edda;
+    color: #155724;
+}
+
+.badge-pending_renewal {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.badge-expired {
+    background: #e0e0e0;
+    color: #666;
+}
+
+.badge-canceled {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.text-muted {
+    color: #999;
+}
+
+.text-success {
+    color: #28a745;
+}
+
+.text-center {
+    text-align: center;
+}
+
+.stats {
+    margin-top: 2rem;
+}
+
+.stat-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.stat-card {
+    background: #f9f9f9;
+    padding: 1.5rem;
+    border-radius: 8px;
+}
+
+.stat-label {
+    font-size: 0.9em;
+    color: #666;
+    margin-bottom: 0.5rem;
+}
+
+.stat-value {
+    font-size: 2em;
+    font-weight: 600;
+    color: #333;
+}
+
+.alert {
+    padding: 1rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+}
+
+.alert-error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+.alert-success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+</style>
+{% endblock %}
