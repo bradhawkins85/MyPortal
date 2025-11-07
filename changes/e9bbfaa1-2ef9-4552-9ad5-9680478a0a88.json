@@ -1,0 +1,23 @@
+{
+  "guid": "e9bbfaa1-2ef9-4552-9ad5-9680478a0a88",
+  "occurred_at": "2025-11-07T12:29:27.000255+00:00",
+  "change_type": "feature",
+  "summary": "Enhanced ticket table with filtering, grouping, and saved views",
+  "content_hash": "2bb8ede4fc6558fbb064d179fc67e98a73879ab04c0d81b8e75cedfff2e3de3e",
+  "details": {
+    "features": [
+      "Multi-status filtering with checkboxes to show/hide tickets by status",
+      "Dynamic grouping by status, company, priority, or assigned user with collapsible sections",
+      "Save and manage custom views with filters and grouping preferences",
+      "Set default views for quick access",
+      "Improved ticket subject link color (white instead of blue/purple) for better readability on dark backgrounds"
+    ],
+    "technical": [
+      "Created ticket_views table for storing user preferences",
+      "Implemented full CRUD API endpoints at /api/tickets/views",
+      "Built TicketViewManager JavaScript class for frontend functionality",
+      "Added CSS styles for group headers and filter controls",
+      "Integrated view management UI in admin tickets template"
+    ]
+  }
+}
