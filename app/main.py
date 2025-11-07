@@ -8705,6 +8705,27 @@ async def admin_update_shop_category(
     # Prevent setting itself as parent or creating circular reference
     if parsed_parent_id == category_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A category cannot be its own parent")
+    
+    # Check if the new parent is a descendant of the category (which would create a circular reference)
+    if parsed_parent_id is not None:
+        all_categories = await shop_repo.list_all_categories_flat()
+        
+        # Build a parent-child map
+        def is_descendant(parent_id: int, potential_descendant_id: int) -> bool:
+            """Check if potential_descendant_id is in the tree under parent_id."""
+            for cat in all_categories:
+                if cat["id"] == potential_descendant_id:
+                    if cat["parent_id"] == parent_id:
+                        return True
+                    elif cat["parent_id"] is not None:
+                        return is_descendant(parent_id, cat["parent_id"])
+            return False
+        
+        if is_descendant(category_id, parsed_parent_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot move a category into one of its own descendants"
+            )
 
     try:
         updated = await shop_repo.update_category(

@@ -199,3 +199,55 @@ def test_update_category_not_found(monkeypatch):
     )
     
     assert result is False
+
+
+def test_update_category_preserves_display_order(monkeypatch):
+    """Test that updating a category preserves the display_order if not changed."""
+    
+    updated = {}
+    
+    class FakeCursor:
+        rowcount = 1
+        
+        async def execute(self, query, params):
+            updated["query"] = query
+            updated["params"] = params
+        
+        async def __aenter__(self):
+            return self
+        
+        async def __aexit__(self, *args):
+            pass
+    
+    class FakeConnection:
+        def cursor(self, cursor_class):
+            return FakeCursor()
+        
+        async def __aenter__(self):
+            return self
+        
+        async def __aexit__(self, *args):
+            pass
+    
+    class FakeAcquire:
+        async def __aenter__(self):
+            return FakeConnection()
+        
+        async def __aexit__(self, *args):
+            pass
+    
+    class FakeDB:
+        def acquire(self):
+            return FakeAcquire()
+    
+    monkeypatch.setattr(shop_repo, "db", FakeDB())
+    
+    # Test with explicit display_order of 5
+    result = asyncio.run(
+        shop_repo.update_category(10, "Test Category", parent_id=2, display_order=5)
+    )
+    
+    assert result is True
+    assert updated["params"] == ("Test Category", 2, 5, 10)
+    assert updated["params"][2] == 5  # display_order should be 5
+
