@@ -580,6 +580,7 @@ async def sync_billable_tickets(
     description_template: str | None = None,
     tenant_id: str,
     access_token: str,
+    auto_send: bool = False,
 ) -> dict[str, Any]:
     """Sync billable tickets for a company to Xero.
     
@@ -603,6 +604,7 @@ async def sync_billable_tickets(
         description_template: Template for line item descriptions
         tenant_id: Xero tenant ID
         access_token: Xero API access token
+        auto_send: If True, invoice will be set to AUTHORISED status and sent to contact
         
     Returns:
         Dictionary with sync status and details
@@ -723,8 +725,11 @@ async def sync_billable_tickets(
         "LineAmountTypes": line_amount_type,
         "Reference": invoice_data["reference"],
         "Date": date.today().isoformat(),
-        "Status": "DRAFT",
+        "Status": "AUTHORISED" if auto_send else "DRAFT",
     }
+    
+    if auto_send:
+        invoice_payload["SentToContact"] = True
     
     # Make API call to Xero
     api_url = "https://api.xero.com/api.xro/2.0/Invoices"
@@ -986,11 +991,15 @@ async def sync_billable_tickets(
         }
 
 
-async def sync_company(company_id: int) -> dict[str, Any]:
+async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, Any]:
     """Trigger a Xero synchronisation for the given company.
 
     This implementation makes HTTP calls to Xero API and records them
     in the webhook monitor for tracking and debugging.
+    
+    Args:
+        company_id: The company to sync
+        auto_send: If True, invoice will be set to AUTHORISED status and sent to contact
     """
 
     module = await modules_service.get_module("xero", redact=False)
@@ -1091,6 +1100,7 @@ async def sync_company(company_id: int) -> dict[str, Any]:
                 description_template=description_template,
                 tenant_id=tenant_id,
                 access_token=access_token,
+                auto_send=auto_send,
             )
 
     # If no line items from recurring, skip that part of the sync
@@ -1130,8 +1140,11 @@ async def sync_company(company_id: int) -> dict[str, Any]:
         "LineAmountTypes": line_amount_type,
         "Reference": reference_prefix,
         "Date": date.today().isoformat(),
-        "Status": "DRAFT",
+        "Status": "AUTHORISED" if auto_send else "DRAFT",
     }
+    
+    if auto_send:
+        invoice_payload["SentToContact"] = True
 
     # Prepare for API call
     api_url = f"https://api.xero.com/api.xro/2.0/Invoices"
