@@ -5136,7 +5136,7 @@ dialog.dialog::backdrop {
     max-width: 95vw;
     width: 95vw;
   }
-  
+
   .dialog__header,
   .dialog__body,
   .dialog__footer {
