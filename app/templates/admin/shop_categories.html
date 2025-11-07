@@ -68,11 +68,10 @@
               <div class="category-list__actions">
                 <button 
                   type="button" 
-                  class="button button--ghost button--small"
+                  class="button button--ghost button--small category-edit-btn"
                   data-category-id="{{ category.id }}"
                   data-category-name="{{ category.name }}"
                   data-category-parent="{{ category.parent_id or '' }}"
-                  onclick="editCategoryFromButton(this)"
                 >
                   Edit
                 </button>
@@ -118,7 +117,7 @@
             </div>
             <div class="form-actions">
               <button type="submit" class="button">Save changes</button>
-              <button type="button" class="button button--ghost" onclick="cancelEdit()">Cancel</button>
+              <button type="button" class="button button--ghost category-cancel-btn">Cancel</button>
             </div>
           </form>
         </div>
@@ -131,13 +130,27 @@
   {{ super() }}
   <script src="/static/js/shop_admin.js" defer></script>
   <script>
-    function editCategoryFromButton(button) {
-      const categoryId = button.getAttribute('data-category-id');
-      const categoryName = button.getAttribute('data-category-name');
-      const parentId = button.getAttribute('data-category-parent');
+    // Use event delegation for better security and CSP compliance
+    document.addEventListener('DOMContentLoaded', function() {
+      // Handle edit button clicks
+      document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('category-edit-btn') || e.target.closest('.category-edit-btn')) {
+          const button = e.target.classList.contains('category-edit-btn') ? e.target : e.target.closest('.category-edit-btn');
+          const categoryId = button.getAttribute('data-category-id');
+          const categoryName = button.getAttribute('data-category-name');
+          const parentId = button.getAttribute('data-category-parent');
+          
+          editCategory(categoryId, categoryName, parentId || null);
+        }
+      });
       
-      editCategory(categoryId, categoryName, parentId || null);
-    }
+      // Handle cancel button clicks
+      document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('category-cancel-btn')) {
+          cancelEdit();
+        }
+      });
+    });
     
     function editCategory(categoryId, categoryName, parentId) {
       // Show the edit form
