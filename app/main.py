@@ -8717,11 +8717,8 @@ async def admin_update_shop_category(
             if parent is not None:
                 children_map.setdefault(parent, []).append(cat["id"])
         
-        def get_all_descendants(cat_id: int, visited: set[int] | None = None) -> set[int]:
+        def get_all_descendants(cat_id: int, visited: set[int]) -> set[int]:
             """Get all descendants of a category."""
-            if visited is None:
-                visited = set()
-            
             # Prevent infinite loops by skipping already-visited nodes
             if cat_id in visited:
                 return set()
@@ -8730,14 +8727,13 @@ async def admin_update_shop_category(
             descendants = set()
             
             for child_id in children_map.get(cat_id, []):
-                if child_id not in visited:
-                    descendants.add(child_id)
-                    descendants.update(get_all_descendants(child_id, visited))
+                descendants.add(child_id)
+                descendants.update(get_all_descendants(child_id, visited))
             
             return descendants
         
         # Check if the new parent is in the descendants of the current category
-        descendants = get_all_descendants(category_id)
+        descendants = get_all_descendants(category_id, set())
         if parsed_parent_id in descendants:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
