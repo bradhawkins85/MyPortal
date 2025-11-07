@@ -351,8 +351,24 @@ async def build_order_invoice(
     fetch_summary: OrderSummaryFetcher,
     fetch_items: OrderItemsFetcher,
     fetch_company: CompanyFetcher,
+    user_name: str | None = None,
 ) -> dict[str, Any] | None:
-    """Prepare a Xero invoice payload for a shop order."""
+    """Prepare a Xero invoice payload for a shop order.
+    
+    Args:
+        order_number: The order number
+        company_id: The company ID
+        account_code: Xero account code
+        tax_type: Optional tax type
+        line_amount_type: Line amount type (Exclusive/Inclusive)
+        fetch_summary: Function to fetch order summary
+        fetch_items: Function to fetch order items
+        fetch_company: Function to fetch company details
+        user_name: Optional name of the user who placed the order
+        
+    Returns:
+        Invoice payload dictionary or None if order not found
+    """
 
     summary = await fetch_summary(order_number, company_id)
     items = await fetch_items(order_number, company_id) or []
@@ -396,12 +412,28 @@ async def build_order_invoice(
             }
         )
 
+    # Add line item with user information and order number
+    if user_name:
+        user_info_line = {
+            "Description": f"Order {order_number} placed by {user_name}",
+            "Quantity": 0,
+            "UnitAmount": 0,
+            "AccountCode": str(account_code or "").strip(),
+        }
+        if tax_type:
+            user_info_line["TaxType"] = str(tax_type).strip()
+        line_items.append(user_info_line)
+
+    # Use PO number as reference if available, otherwise use order number
+    po_number = summary.get("po_number")
+    reference = str(po_number).strip() if po_number else order_number
+
     invoice = {
         "type": "ACCREC",
         "contact": contact_payload,
         "line_items": line_items,
         "line_amount_type": line_amount_type or "Exclusive",
-        "reference": order_number,
+        "reference": reference,
         "context": {
             "order": summary,
             "items": context_items,
@@ -410,6 +442,7 @@ async def build_order_invoice(
                 "name": name,
                 "xero_id": company_record.get("xero_id"),
             },
+            "user_name": user_name,
         },
     }
     return invoice
@@ -1329,3 +1362,303 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
             "event_id": event_id,
         }
 
+
+
+async def send_order_to_xero(
+    order_number: str,
+    company_id: int,
+    user_name: str | None = None,
+) -> dict[str, Any]:
+    """Send a shop order to Xero for invoicing.
+    
+    Args:
+        order_number: The order number to invoice
+        company_id: The company ID
+        user_name: Optional name of the user who placed the order
+        
+    Returns:
+        Dictionary with status and details of the operation
+    """
+    
+    # Check if Xero module is enabled and configured
+    module = await modules_service.get_module("xero", redact=False)
+    if not module or not module.get("enabled"):
+        return {
+            "status": "skipped",
+            "reason": "Xero module is disabled",
+            "order_number": order_number,
+            "company_id": company_id,
+        }
+    
+    settings = dict(module.get("settings") or {})
+    required_fields = ["client_id", "client_secret", "refresh_token", "tenant_id"]
+    missing = [field for field in required_fields if not str(settings.get(field) or "").strip()]
+    if missing:
+        return {
+            "status": "skipped",
+            "reason": "Xero module not fully configured",
+            "missing": missing,
+            "order_number": order_number,
+            "company_id": company_id,
+        }
+    
+    # Get settings for invoice
+    account_code = str(settings.get("account_code", "")).strip() or "200"
+    tax_type = str(settings.get("tax_type", "")).strip() or None
+    line_amount_type = str(settings.get("line_amount_type", "")).strip() or "Exclusive"
+    tenant_id = str(settings.get("tenant_id", "")).strip()
+    
+    # Get access token
+    try:
+        access_token = await modules_service.acquire_xero_access_token()
+    except Exception as exc:
+        logger.error("Failed to acquire Xero access token for order", error=str(exc))
+        return {
+            "status": "error",
+            "reason": "Failed to acquire access token",
+            "error": str(exc),
+            "order_number": order_number,
+            "company_id": company_id,
+        }
+    
+    # Build invoice payload
+    from app.repositories import shop as shop_repo
+    
+    invoice_data = await build_order_invoice(
+        order_number=order_number,
+        company_id=company_id,
+        account_code=account_code,
+        tax_type=tax_type,
+        line_amount_type=line_amount_type,
+        fetch_summary=shop_repo.get_order_summary,
+        fetch_items=shop_repo.list_order_items,
+        fetch_company=company_repo.get_company_by_id,
+        user_name=user_name,
+    )
+    
+    if not invoice_data:
+        return {
+            "status": "skipped",
+            "reason": "Order not found or has no items",
+            "order_number": order_number,
+            "company_id": company_id,
+        }
+    
+    # Prepare Xero API payload
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        return {
+            "status": "error",
+            "reason": "Company not found",
+            "order_number": order_number,
+            "company_id": company_id,
+        }
+    
+    xero_payload = {
+        "Type": "ACCREC",
+        "Contact": invoice_data["contact"],
+        "LineItems": invoice_data["line_items"],
+        "LineAmountTypes": invoice_data["line_amount_type"],
+        "Reference": invoice_data["reference"],
+        "Date": date.today().isoformat(),
+        "Status": "DRAFT",
+    }
+    
+    # Make API call to Xero
+    api_url = "https://api.xero.com/api.xro/2.0/Invoices"
+    request_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "xero-tenant-id": tenant_id,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    
+    # Create webhook monitor event
+    webhook_payload = {
+        "order_number": order_number,
+        "company_id": company_id,
+        "company_name": company.get("name"),
+        "user_name": user_name,
+        "invoice": xero_payload,
+    }
+    
+    try:
+        event = await webhook_monitor.create_manual_event(
+            name="xero.order.created",
+            target_url=api_url,
+            payload=webhook_payload,
+            headers=request_headers,
+            max_attempts=1,
+            backoff_seconds=0,
+        )
+    except Exception as exc:
+        logger.error("Failed to create webhook monitor event for order", error=str(exc))
+        event = None
+    
+    event_id: int | None = None
+    if event and event.get("id") is not None:
+        try:
+            event_id = int(event["id"])
+        except (TypeError, ValueError):
+            event_id = None
+    
+    # Make HTTP request to Xero
+    response_status: int | None = None
+    response_body: str | None = None
+    response_headers: dict[str, Any] | None = None
+    xero_invoice_number: str | None = None
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                api_url,
+                json=xero_payload,
+                headers=request_headers,
+            )
+            response_status = response.status_code
+            response_body = response.text
+            response_headers = dict(response.headers)
+        
+        success = 200 <= response_status < 300
+        
+        # Parse invoice number from response
+        if success and response_body:
+            try:
+                response_data = json.loads(response_body)
+                invoices_list = response_data.get("Invoices", [])
+                if invoices_list:
+                    xero_invoice_number = invoices_list[0].get("InvoiceNumber")
+            except Exception as parse_exc:
+                logger.warning(
+                    "Failed to parse Xero invoice number from order response",
+                    error=str(parse_exc),
+                )
+        
+        if event_id is not None:
+            if success:
+                try:
+                    await webhook_monitor.record_manual_success(
+                        event_id,
+                        attempt_number=1,
+                        response_status=response_status,
+                        response_body=response_body,
+                        request_headers=request_headers,
+                        request_body=xero_payload,
+                        response_headers=response_headers,
+                    )
+                except Exception as record_exc:
+                    logger.error(
+                        "Failed to record webhook success for order",
+                        event_id=event_id,
+                        error=str(record_exc),
+                    )
+            else:
+                try:
+                    await webhook_monitor.record_manual_failure(
+                        event_id,
+                        attempt_number=1,
+                        status="failed",
+                        error_message=f"HTTP {response_status}",
+                        response_status=response_status,
+                        response_body=response_body,
+                        request_headers=request_headers,
+                        request_body=xero_payload,
+                        response_headers=response_headers,
+                    )
+                except Exception as record_exc:
+                    logger.error(
+                        "Failed to record webhook failure for order",
+                        event_id=event_id,
+                        error=str(record_exc),
+                    )
+        
+        if success:
+            logger.info(
+                "Successfully sent order to Xero",
+                order_number=order_number,
+                company_id=company_id,
+                invoice_number=xero_invoice_number,
+                response_status=response_status,
+                event_id=event_id,
+            )
+            return {
+                "status": "succeeded",
+                "order_number": order_number,
+                "company_id": company_id,
+                "invoice_number": xero_invoice_number,
+                "response_status": response_status,
+                "event_id": event_id,
+            }
+        else:
+            logger.error(
+                "Xero API returned error status for order",
+                order_number=order_number,
+                company_id=company_id,
+                response_status=response_status,
+                response_body=response_body,
+            )
+            return {
+                "status": "failed",
+                "order_number": order_number,
+                "company_id": company_id,
+                "response_status": response_status,
+                "error": f"HTTP {response_status}",
+                "event_id": event_id,
+            }
+    
+    except httpx.HTTPError as exc:
+        logger.error("Xero API request failed for order", order_number=order_number, error=str(exc))
+        if event_id is not None:
+            try:
+                await webhook_monitor.record_manual_failure(
+                    event_id,
+                    attempt_number=1,
+                    status="error",
+                    error_message=str(exc),
+                    response_status=response_status,
+                    response_body=response_body,
+                    request_headers=request_headers,
+                    request_body=xero_payload,
+                    response_headers=response_headers,
+                )
+            except Exception as record_exc:
+                logger.error(
+                    "Failed to record webhook error for order",
+                    event_id=event_id,
+                    error=str(record_exc),
+                )
+        return {
+            "status": "error",
+            "order_number": order_number,
+            "company_id": company_id,
+            "error": str(exc),
+            "event_id": event_id,
+        }
+    except Exception as exc:
+        logger.error("Unexpected error sending order to Xero", order_number=order_number, error=str(exc))
+        if event_id is not None:
+            try:
+                await webhook_monitor.record_manual_failure(
+                    event_id,
+                    attempt_number=1,
+                    status="error",
+                    error_message=str(exc),
+                    response_status=None,
+                    response_body=None,
+                    request_headers=request_headers,
+                    request_body=xero_payload,
+                    response_headers=None,
+                )
+            except Exception as record_exc:
+                logger.error(
+                    "Failed to record webhook error for order",
+                    event_id=event_id,
+                    error=str(record_exc),
+                )
+        return {
+            "status": "error",
+            "order_number": order_number,
+            "company_id": company_id,
+            "error": str(exc),
+            "event_id": event_id,
+        }

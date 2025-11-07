@@ -146,6 +146,7 @@ from app.services import ticket_importer
 from app.services import tickets as tickets_service
 from app.services import template_variables
 from app.services import webhook_monitor
+from app.services import xero as xero_service
 from app.services import issues as issues_service
 from app.services import impersonation as impersonation_service
 from app.services.realtime import refresh_notifier
@@ -5067,6 +5068,32 @@ async def place_order(request: Request) -> RedirectResponse:
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error(
             "Failed to create subscriptions from order",
+            order_number=order_number,
+            company_id=company_id,
+            error=str(exc),
+        )
+        # Don't fail the order, just log the error
+    
+    # Send order to Xero for invoicing
+    try:
+        user_record = await user_repo.get_user_by_id(int(user["id"]))
+        user_name = None
+        if user_record:
+            first_name = user_record.get("first_name", "").strip()
+            last_name = user_record.get("last_name", "").strip()
+            if first_name or last_name:
+                user_name = f"{first_name} {last_name}".strip()
+            elif user_record.get("email"):
+                user_name = str(user_record["email"])
+        
+        await xero_service.send_order_to_xero(
+            order_number=order_number,
+            company_id=company_id,
+            user_name=user_name,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to send order to Xero",
             order_number=order_number,
             company_id=company_id,
             error=str(exc),
