@@ -8557,7 +8557,7 @@ async def admin_shop_categories_page(request: Request):
     if redirect:
         return redirect
 
-    categories = await shop_repo.list_categories()
+    categories = await shop_repo.list_all_categories_flat()
 
     extra = {
         "title": "Product categories",
@@ -8606,6 +8606,7 @@ async def admin_shop_product_create_page(request: Request):
 async def admin_create_shop_category(
     request: Request,
     name: str = Form(...),
+    parent_id: int | None = Form(None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -8616,7 +8617,7 @@ async def admin_create_shop_category(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category name cannot be empty")
 
     try:
-        category_id = await shop_repo.create_category(cleaned_name)
+        category_id = await shop_repo.create_category(cleaned_name, parent_id=parent_id)
     except aiomysql.IntegrityError as exc:
         if exc.args and exc.args[0] == 1062:
             detail = "A category with that name already exists."
@@ -8628,6 +8629,7 @@ async def admin_create_shop_category(
         "Shop category created",
         category_id=category_id,
         name=cleaned_name,
+        parent_id=parent_id,
         created_by=current_user["id"] if current_user else None,
     )
     return RedirectResponse(url="/admin/shop/categories", status_code=status.HTTP_303_SEE_OTHER)

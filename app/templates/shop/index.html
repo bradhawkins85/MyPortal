@@ -71,14 +71,40 @@
         <span>All products</span>
       </a>
       {% for category in categories %}
-        <a
-          class="shop-categories__link {% if current_category and current_category == category.id %}is-active{% endif %}"
-          href="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}"
-          {% if current_category and current_category == category.id %}aria-current="page"{% endif %}
-        >
-          <span class="shop-categories__icon" aria-hidden="true"></span>
-          <span>{{ category.name }}</span>
-        </a>
+        {% if category.children %}
+          <div class="shop-categories__parent">
+            <button 
+              type="button"
+              class="shop-categories__toggle {% if current_category and current_category == category.id %}is-active{% endif %}"
+              data-category-toggle="{{ category.id }}"
+              aria-expanded="false"
+            >
+              <span class="shop-categories__icon shop-categories__icon--expand" aria-hidden="true">▶</span>
+              <span>{{ category.name }}</span>
+            </button>
+            <div class="shop-categories__children" data-category-children="{{ category.id }}" hidden>
+              {% for child in category.children %}
+                <a
+                  class="shop-categories__link shop-categories__link--child {% if current_category and current_category == child.id %}is-active{% endif %}"
+                  href="{{ request.url_for('shop_page') }}{{ shop_query(child.id) }}"
+                  {% if current_category and current_category == child.id %}aria-current="page"{% endif %}
+                >
+                  <span class="shop-categories__icon" aria-hidden="true"></span>
+                  <span>{{ child.name }}</span>
+                </a>
+              {% endfor %}
+            </div>
+          </div>
+        {% else %}
+          <a
+            class="shop-categories__link {% if current_category and current_category == category.id %}is-active{% endif %}"
+            href="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}"
+            {% if current_category and current_category == category.id %}aria-current="page"{% endif %}
+          >
+            <span class="shop-categories__icon" aria-hidden="true"></span>
+            <span>{{ category.name }}</span>
+          </a>
+        {% endif %}
       {% endfor %}
     </nav>
   </aside>
