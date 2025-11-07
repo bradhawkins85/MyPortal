@@ -67,7 +67,8 @@ async def list_all_categories_flat() -> list[dict[str, Any]]:
     
     Returns categories ordered alphabetically with children grouped under their parents.
     Parent categories are sorted alphabetically, and each parent's children are also
-    sorted alphabetically and appear immediately after their parent.
+    sorted alphabetically and appear immediately after their parent. This handles
+    all levels of nesting (grandchildren, great-grandchildren, etc.).
     """
     rows = await db.fetch_all(
         """
@@ -96,14 +97,20 @@ async def list_all_categories_flat() -> list[dict[str, Any]]:
     for children_list in parent_map.values():
         children_list.sort(key=lambda c: c["name"].lower())
     
-    # Build flat list: parent followed by its children
+    # Recursively build flat list: parent followed by all its descendants
+    def add_category_and_descendants(cat_id: int, result: list[dict[str, Any]]) -> None:
+        """Add a category and all its descendants to the result list."""
+        for child in parent_map.get(cat_id, []):
+            result.append(child)
+            # Recursively add this child's children
+            add_category_and_descendants(child["id"], result)
+    
     result: list[dict[str, Any]] = []
+    # Start with top-level categories (no parent)
     for parent in parent_map.get(None, []):
         result.append(parent)
-        # Add all children of this parent
-        parent_id = parent["id"]
-        for child in parent_map.get(parent_id, []):
-            result.append(child)
+        # Add all descendants of this parent
+        add_category_and_descendants(parent["id"], result)
     
     return result
 
