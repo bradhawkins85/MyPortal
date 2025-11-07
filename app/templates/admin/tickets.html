@@ -100,8 +100,59 @@
         </div>
       </header>
 
-      <div class="management__body">
+      <div class="management__body" data-ticket-view-manager>
         <div class="ticket-dashboard__overview">
+          <!-- View Controls -->
+          <div class="view-controls">
+            <div class="view-controls__selector">
+              <label class="visually-hidden" for="ticket-view-select">Saved View</label>
+              <select id="ticket-view-select" class="form-input" data-view-select>
+                <option value="">Select a view...</option>
+              </select>
+            </div>
+            <div class="view-controls__actions">
+              <button type="button" class="button button--ghost" data-save-view title="Save current view">
+                Save View
+              </button>
+              <button type="button" class="button button--ghost" data-delete-view title="Delete current view">
+                Delete View
+              </button>
+            </div>
+          </div>
+
+          <!-- Status Filter Group -->
+          <div class="status-filter-group">
+            <div class="status-filter-group__title">Show/Hide by Status:</div>
+            <div class="status-filter-group__options">
+              {% for status_option in ticket_status_definitions %}
+                <div class="status-filter-option">
+                  <input 
+                    type="checkbox" 
+                    id="status-filter-{{ status_option.tech_status }}"
+                    value="{{ status_option.tech_status }}"
+                    data-status-filter
+                    checked
+                  />
+                  <label for="status-filter-{{ status_option.tech_status }}">
+                    {{ status_option.tech_label }}
+                  </label>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+
+          <!-- Grouping Control -->
+          <div class="form-field" data-grouping-container>
+            <label class="form-label" for="ticket-grouping">Group by</label>
+            <select id="ticket-grouping" name="grouping" class="form-input" data-grouping-select>
+              <option value="">No grouping</option>
+              <option value="status">Status</option>
+              <option value="priority">Priority</option>
+              <option value="company">Company</option>
+              <option value="assigned">Assigned user</option>
+            </select>
+          </div>
+
           <form method="get" class="management__filters ticket-dashboard__filters">
             <label class="visually-hidden" for="ticket-filter-status">Status</label>
             <select id="ticket-filter-status" name="status" class="form-input">
@@ -180,6 +231,10 @@
               <span class="text-muted" data-bulk-delete-count hidden>0 selected</span>
             </form>
           {% endif %}
+        </div>
+
+        <div class="management__toolbar-info">
+          <span data-table-info>Showing {{ tickets|length }} tickets</span>
         </div>
 
         <div class="table-wrapper">
@@ -656,12 +711,66 @@
     </template>
   </div>
 </div>
+
+  <!-- Save View Modal -->
+  <div
+    class="modal"
+    id="save-view-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="save-view-title"
+    aria-hidden="true"
+    hidden
+  >
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-modal-close>
+        <span class="visually-hidden">Close save view form</span>
+        &times;
+      </button>
+      <h2 class="modal__title" id="save-view-title">Save Ticket View</h2>
+      <p class="modal__subtitle">Save the current filter and grouping settings for quick access later.</p>
+      <form id="save-view-form" class="form" data-save-view-form>
+        <div class="form-field">
+          <label class="form-label" for="view-name">View Name</label>
+          <input 
+            id="view-name" 
+            name="name" 
+            class="form-input" 
+            maxlength="128" 
+            required 
+            placeholder="e.g., My Open Tickets"
+          />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="view-description">Description (optional)</label>
+          <textarea
+            id="view-description"
+            name="description"
+            class="form-input form-input--textarea"
+            rows="3"
+            placeholder="Add notes about when to use this view"
+          ></textarea>
+        </div>
+        <div class="form-field">
+          <label class="form-checkbox">
+            <input type="checkbox" name="is_default" />
+            <span>Set as default view</span>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">Save View</button>
+          <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
   </div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/ticket_views.js" defer></script>
   <script src="/static/js/admin.js" defer></script>
 {% endblock %}
 
