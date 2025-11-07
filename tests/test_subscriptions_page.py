@@ -169,6 +169,20 @@ def test_subscriptions_page_requires_both_permissions(authorized_user_context):
     assert "Request change" in html
 
 
+def test_subscriptions_page_shows_dollar_sign_for_unit_price(authorized_user_context):
+    """Test that subscriptions page displays unit price with dollar sign, not pound or euro symbols."""
+    with TestClient(app) as client:
+        response = client.get("/subscriptions")
+
+    assert response.status_code == 200
+    html = response.text
+    # Check that the unit price is displayed with a dollar sign
+    assert "$10.00" in html or ">$10.00<" in html
+    # Ensure pound and euro symbols are not used for unit price
+    assert "£10.00" not in html
+    assert "€10.00" not in html
+
+
 def test_subscriptions_page_redirects_without_permissions(unauthorized_user_context):
     """Test that subscriptions page redirects users without permissions."""
     with TestClient(app) as client:
