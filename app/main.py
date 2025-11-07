@@ -8798,6 +8798,134 @@ async def admin_update_shop_category(
     return RedirectResponse(url="/admin/shop/categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.get("/admin/shop/subscription-categories", response_class=HTMLResponse)
+async def admin_shop_subscription_categories_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    categories = await subscription_categories_repo.list_categories()
+
+    extra = {
+        "title": "Subscription categories",
+        "categories": categories,
+    }
+    return await _render_template("admin/shop_subscription_categories.html", request, current_user, extra=extra)
+
+
+@app.post(
+    "/shop/admin/subscription-category",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Create a subscription category",
+    tags=["Shop"],
+)
+async def admin_create_subscription_category(
+    request: Request,
+    name: str = Form(...),
+    description: str = Form(""),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    cleaned_name = name.strip()
+    if not cleaned_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category name cannot be empty")
+
+    cleaned_description = description.strip() if description else None
+
+    try:
+        await subscription_categories_repo.create_category(cleaned_name, description=cleaned_description)
+    except aiomysql.IntegrityError as exc:
+        if exc.args and exc.args[0] == 1062:
+            detail = "A subscription category with that name already exists."
+        else:
+            detail = "Unable to create subscription category."
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
+
+    log_info(
+        "Subscription category created",
+        name=cleaned_name,
+        description=cleaned_description,
+        created_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop/subscription-categories", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
+    "/shop/admin/subscription-category/{category_id}/delete",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Delete a subscription category",
+    tags=["Shop"],
+)
+async def admin_delete_subscription_category(request: Request, category_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    category = await subscription_categories_repo.get_category(category_id)
+    if not category:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription category not found")
+
+    await subscription_categories_repo.delete_category(category_id)
+
+    log_info(
+        "Subscription category deleted",
+        category_id=category_id,
+        deleted_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop/subscription-categories", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
+    "/shop/admin/subscription-category/{category_id}/update",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Update a subscription category",
+    tags=["Shop"],
+)
+async def admin_update_subscription_category(
+    request: Request,
+    category_id: int,
+    name: str = Form(...),
+    description: str = Form(""),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    category = await subscription_categories_repo.get_category(category_id)
+    if not category:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription category not found")
+
+    cleaned_name = name.strip()
+    if not cleaned_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category name cannot be empty")
+
+    cleaned_description = description.strip() if description else None
+
+    try:
+        await subscription_categories_repo.update_category(
+            category_id,
+            name=cleaned_name,
+            description=cleaned_description,
+        )
+    except aiomysql.IntegrityError as exc:
+        if exc.args and exc.args[0] == 1062:
+            detail = "A subscription category with that name already exists."
+        else:
+            detail = "Unable to update subscription category."
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
+
+    log_info(
+        "Subscription category updated",
+        category_id=category_id,
+        name=cleaned_name,
+        description=cleaned_description,
+        updated_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop/subscription-categories", status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.post(
     "/shop/admin/product/import",
     status_code=status.HTTP_303_SEE_OTHER,
