@@ -358,6 +358,33 @@
             </div>
           </article>
 
+          {% if ticket.xero_invoice_number %}
+            <article class="card card--panel">
+              <header class="card__header">
+                <h2 class="card__title">Xero Invoice</h2>
+              </header>
+              <div class="card__body">
+                <dl class="definition-list definition-list--vertical">
+                  <div class="definition-list__item">
+                    <dt>Invoice Number</dt>
+                    <dd>
+                      <strong>{{ ticket.xero_invoice_number }}</strong>
+                    </dd>
+                  </div>
+                  {% if ticket.billed_at %}
+                  <div class="definition-list__item">
+                    <dt>Billed At</dt>
+                    <dd>{{ ticket.billed_at.strftime('%Y-%m-%d %H:%M') if ticket.billed_at }}</dd>
+                  </div>
+                  {% endif %}
+                </dl>
+                <p class="card__help" style="margin-top: 1rem;">
+                  This ticket has been billed and closed. No further time can be added.
+                </p>
+              </div>
+            </article>
+          {% endif %}
+
           {% if relevant_kb_articles %}
             <article class="card card--panel">
               <header class="card__header">
