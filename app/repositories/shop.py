@@ -27,13 +27,61 @@ class PackageFilters:
 
 async def list_categories() -> list[dict[str, Any]]:
     rows = await db.fetch_all(
-        "SELECT id, name FROM shop_categories ORDER BY name"
+        """
+        SELECT id, name, parent_id, display_order 
+        FROM shop_categories 
+        ORDER BY 
+            COALESCE(parent_id, id), 
+            display_order, 
+            name
+        """
     )
-    return [
-        {"id": int(row["id"]), "name": row["name"]}
+    categories = [
+        {
+            "id": int(row["id"]), 
+            "name": row["name"],
+            "parent_id": _coerce_optional_int(row.get("parent_id")),
+            "display_order": _coerce_int(row.get("display_order"), default=0),
+        }
         for row in rows
     ]
+    
+    # Build hierarchical structure
+    parent_map: dict[int | None, list[dict[str, Any]]] = {}
+    for category in categories:
+        parent_id = category.get("parent_id")
+        parent_map.setdefault(parent_id, []).append(category)
+    
+    # Attach children to parents
+    for category in categories:
+        category_id = category["id"]
+        category["children"] = parent_map.get(category_id, [])
+    
+    # Return only top-level categories (those without parents)
+    return parent_map.get(None, [])
 
+
+async def list_all_categories_flat() -> list[dict[str, Any]]:
+    """List all categories in a flat structure for admin purposes."""
+    rows = await db.fetch_all(
+        """
+        SELECT id, name, parent_id, display_order 
+        FROM shop_categories 
+        ORDER BY 
+            COALESCE(parent_id, id), 
+            display_order, 
+            name
+        """
+    )
+    return [
+        {
+            "id": int(row["id"]), 
+            "name": row["name"],
+            "parent_id": _coerce_optional_int(row.get("parent_id")),
+            "display_order": _coerce_int(row.get("display_order"), default=0),
+        }
+        for row in rows
+    ]
 
 async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
     query_parts: list[str] = [
@@ -530,12 +578,17 @@ async def list_product_restrictions() -> list[dict[str, Any]]:
 
 async def get_category(category_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
-        "SELECT id, name FROM shop_categories WHERE id = %s",
+        "SELECT id, name, parent_id, display_order FROM shop_categories WHERE id = %s",
         (category_id,),
     )
     if not row:
         return None
-    return {"id": int(row["id"]), "name": row["name"]}
+    return {
+        "id": int(row["id"]), 
+        "name": row["name"],
+        "parent_id": _coerce_optional_int(row.get("parent_id")),
+        "display_order": _coerce_int(row.get("display_order"), default=0),
+    }
 
 
 async def get_product_by_id(
@@ -882,20 +935,25 @@ async def list_order_items(order_number: str, company_id: int) -> list[dict[str,
 
 async def get_category_by_name(name: str) -> dict[str, Any] | None:
     row = await db.fetch_one(
-        "SELECT id, name FROM shop_categories WHERE name = %s",
+        "SELECT id, name, parent_id, display_order FROM shop_categories WHERE name = %s",
         (name,),
     )
     if not row:
         return None
-    return {"id": int(row["id"]), "name": row["name"]}
+    return {
+        "id": int(row["id"]), 
+        "name": row["name"],
+        "parent_id": _coerce_optional_int(row.get("parent_id")),
+        "display_order": _coerce_int(row.get("display_order"), default=0),
+    }
 
 
-async def create_category(name: str) -> int:
+async def create_category(name: str, parent_id: int | None = None, display_order: int = 0) -> int:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
             await cursor.execute(
-                "INSERT INTO shop_categories (name) VALUES (%s)",
-                (name,),
+                "INSERT INTO shop_categories (name, parent_id, display_order) VALUES (%s, %s, %s)",
+                (name, parent_id, display_order),
             )
             category_id = int(cursor.lastrowid)
     return category_id
