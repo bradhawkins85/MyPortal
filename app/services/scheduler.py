@@ -22,6 +22,7 @@ from app.services import imap as imap_service
 from app.services import m365 as m365_service
 from app.services import products as products_service
 from app.services import staff_importer
+from app.services import subscription_renewals
 from app.services import tickets as tickets_service
 from app.services import value_templates
 from app.services import webhook_monitor
@@ -125,6 +126,16 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        # Run subscription renewal job daily at 02:00 (store timezone)
+        if not self._scheduler.get_job("subscription-renewals"):
+            self._scheduler.add_job(
+                self._run_subscription_renewals,
+                CronTrigger(hour=2, minute=0, timezone=self._scheduler.timezone),
+                id="subscription-renewals",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
 
     async def _run_webhook_monitor(self) -> None:
         """Run webhook monitoring with distributed lock to prevent duplicate execution."""
@@ -149,6 +160,30 @@ class SchedulerService:
                 log_info("Automation runner already running on another worker, skipping")
                 return
             await automations_service.process_due_automations()
+    
+    async def _run_subscription_renewals(self) -> None:
+        """Run subscription renewal invoice creation (T-60 job) with distributed lock."""
+        async with db.acquire_lock("subscription_renewals", timeout=5) as lock_acquired:
+            if not lock_acquired:
+                log_info("Subscription renewals already running on another worker, skipping")
+                return
+            
+            from datetime import date
+            today = date.today()
+            log_info("Starting subscription renewal invoice creation", date=today)
+            
+            try:
+                result = await subscription_renewals.create_renewal_invoices_for_date(today)
+                log_info(
+                    "Subscription renewal invoice creation completed",
+                    **result
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error(
+                    "Subscription renewal invoice creation failed",
+                    date=today,
+                    error=str(exc),
+                )
 
     def _build_trigger(self, task: dict[str, Any]) -> CronTrigger | None:
         try:

@@ -66,6 +66,7 @@ from app.api.routes import (
     scheduler as scheduler_api,
     roles,
     staff as staff_api,
+    subscriptions as subscriptions_api,
     tag_exclusions,
     tickets as tickets_api,
     users,
@@ -509,6 +510,7 @@ app.include_router(orders_api.router)
 app.include_router(staff_api.router)
 app.include_router(invoices_api.router)
 app.include_router(issues_api.router)
+app.include_router(subscriptions_api.router)
 app.include_router(audit_logs.router)
 app.include_router(api_keys.router)
 app.include_router(scheduler_api.router)
