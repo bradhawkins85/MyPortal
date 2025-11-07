@@ -43,7 +43,7 @@
             <td data-column="product_name" data-value="{{ subscription.product_name or '' }}">{{ subscription.product_name or '—' }}</td>
             <td data-column="category_name" data-value="{{ subscription.category_name or '' }}">{{ subscription.category_name or '—' }}</td>
             <td data-column="quantity" data-value="{{ subscription.quantity }}">{{ subscription.quantity }}</td>
-            <td data-column="unit_price" data-value="{{ subscription.unit_price }}">£{{ subscription.unit_price }}</td>
+            <td data-column="unit_price" data-value="{{ subscription.unit_price }}">${{ subscription.unit_price }}</td>
             <td data-column="start_date" data-value="{{ subscription.start_date }}">{{ subscription.start_date }}</td>
             <td data-column="end_date" data-value="{{ subscription.end_date }}">{{ subscription.end_date }}</td>
             <td data-column="status" data-value="{{ subscription.status }}">
