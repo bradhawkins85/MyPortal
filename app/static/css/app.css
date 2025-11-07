@@ -3783,6 +3783,34 @@ button.header-title-menu__link {
   margin-right: 0.5rem;
 }
 
+.category-list__name {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.category-list__actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.edit-form {
+  margin-top: var(--space-gap-roomy);
+  padding: var(--space-gap-roomy);
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.edit-form__title {
+  margin: 0 0 var(--space-gap-base) 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
 .visibility-grid {
   display: grid;
   gap: var(--space-gap-base);

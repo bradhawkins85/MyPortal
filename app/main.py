@@ -8671,6 +8671,68 @@ async def admin_delete_shop_category(request: Request, category_id: int):
 
 
 @app.post(
+    "/shop/admin/category/{category_id}/update",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Update a shop category",
+    tags=["Shop"],
+)
+async def admin_update_shop_category(
+    request: Request,
+    category_id: int,
+    name: str = Form(...),
+    parent_id: str = Form(""),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    category = await shop_repo.get_category(category_id)
+    if not category:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+
+    cleaned_name = name.strip()
+    if not cleaned_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category name cannot be empty")
+
+    # Convert empty string to None for parent_id
+    parsed_parent_id: int | None = None
+    if parent_id and parent_id.strip():
+        try:
+            parsed_parent_id = int(parent_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid parent category")
+
+    # Prevent setting itself as parent or creating circular reference
+    if parsed_parent_id == category_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A category cannot be its own parent")
+
+    try:
+        updated = await shop_repo.update_category(
+            category_id,
+            cleaned_name,
+            parent_id=parsed_parent_id,
+            display_order=category.get("display_order", 0),
+        )
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+    except aiomysql.IntegrityError as exc:
+        if exc.args and exc.args[0] == 1062:
+            detail = "A category with that name already exists."
+        else:
+            detail = "Unable to update category."
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
+
+    log_info(
+        "Shop category updated",
+        category_id=category_id,
+        name=cleaned_name,
+        parent_id=parsed_parent_id,
+        updated_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop/categories", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post(
     "/shop/admin/product/import",
     status_code=status.HTTP_303_SEE_OTHER,
     summary="Import a shop product from the stock feed",
