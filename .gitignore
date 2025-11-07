@@ -12,3 +12,4 @@ var/
 .pytest_cache/
 venv/
 test_venv/
+changes/*.json
