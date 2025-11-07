@@ -116,3 +116,42 @@ def test_list_all_categories_flat_sorts_children_alphabetically(monkeypatch):
     assert categories[1]["name"] == "Alpha Child"
     assert categories[2]["name"] == "Beta Child"
     assert categories[3]["name"] == "Zebra Child"
+
+
+def test_list_all_categories_flat_handles_nested_hierarchies(monkeypatch):
+    """Test that flat list properly handles grandchildren and deeper nesting."""
+    
+    async def fake_fetch_all(query, params=None):
+        return [
+            {"id": 1, "name": "Electronics", "parent_id": None, "display_order": 0},
+            {"id": 2, "name": "Computers", "parent_id": 1, "display_order": 0},
+            {"id": 3, "name": "Laptops", "parent_id": 2, "display_order": 0},
+            {"id": 4, "name": "Desktops", "parent_id": 2, "display_order": 1},
+            {"id": 5, "name": "Gaming Laptops", "parent_id": 3, "display_order": 0},
+        ]
+    
+    monkeypatch.setattr(shop_repo.db, "fetch_all", fake_fetch_all)
+    
+    categories = asyncio.run(shop_repo.list_all_categories_flat())
+    
+    # Should include all categories at all nesting levels
+    assert len(categories) == 5
+    
+    # Order should be: Electronics (parent), Computers (child), Desktops (grandchild),
+    # Laptops (grandchild), Gaming Laptops (great-grandchild)
+    assert categories[0]["name"] == "Electronics"
+    assert categories[0]["parent_id"] is None
+    
+    assert categories[1]["name"] == "Computers"
+    assert categories[1]["parent_id"] == 1
+    
+    # Desktops and Laptops are both children of Computers, sorted alphabetically
+    assert categories[2]["name"] == "Desktops"
+    assert categories[2]["parent_id"] == 2
+    
+    assert categories[3]["name"] == "Laptops"
+    assert categories[3]["parent_id"] == 2
+    
+    # Gaming Laptops is a child of Laptops, appears after all Laptops' siblings
+    assert categories[4]["name"] == "Gaming Laptops"
+    assert categories[4]["parent_id"] == 3
