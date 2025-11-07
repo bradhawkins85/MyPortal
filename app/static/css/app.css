@@ -2574,6 +2574,21 @@ button.header-title-menu__link {
   padding-left: 3rem;
 }
 
+.shop-categories__link--level-2 {
+  padding-left: 4.5rem;
+  font-size: 0.85rem;
+}
+
+.shop-categories__link--level-3 {
+  padding-left: 6rem;
+  font-size: 0.8rem;
+}
+
+.shop-categories__link--level-4 {
+  padding-left: 7.5rem;
+  font-size: 0.8rem;
+}
+
 .shop-toolbar {
   flex-wrap: wrap;
   justify-content: flex-end;
