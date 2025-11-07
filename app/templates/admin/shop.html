@@ -224,7 +224,7 @@
         <select class="form-input" id="edit-product-category" name="category_id">
           <option value="">No category</option>
           {% for category in categories %}
-            <option value="{{ category.id }}">{{ category.name }}</option>
+            <option value="{{ category.id }}">{% if category.parent_id %}└─ {% endif %}{{ category.name }}</option>
           {% endfor %}
         </select>
       </div>
