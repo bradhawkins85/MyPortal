@@ -34,14 +34,37 @@
             <label class="form-label" for="category-name">Category name</label>
             <input class="form-input" id="category-name" name="name" required />
           </div>
+          <div class="form-field form-field--wide">
+            <label class="form-label" for="parent-category">Parent category (optional)</label>
+            <select class="form-input" id="parent-category" name="parent_id">
+              <option value="">None (Top-level category)</option>
+              {% for cat in categories %}
+                {% if not cat.parent_id %}
+                  <option value="{{ cat.id }}">{{ cat.name }}</option>
+                {% endif %}
+              {% endfor %}
+            </select>
+          </div>
           <div class="form-actions">
             <button type="submit" class="button">Add category</button>
           </div>
         </form>
         <ul class="category-list">
           {% for category in categories %}
-            <li class="category-list__item">
-              <span>{{ category.name }}</span>
+            <li class="category-list__item {% if category.parent_id %}category-list__item--child{% endif %}">
+              <span>
+                {% if category.parent_id %}
+                  <span class="category-list__indent">└─</span>
+                {% endif %}
+                {{ category.name }}
+                {% if category.parent_id %}
+                  {% for parent in categories %}
+                    {% if parent.id == category.parent_id %}
+                      <span class="badge badge--muted">child of {{ parent.name }}</span>
+                    {% endif %}
+                  {% endfor %}
+                {% endif %}
+              </span>
               <form
                 action="/shop/admin/category/{{ category.id }}/delete"
                 method="post"
