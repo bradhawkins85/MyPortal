@@ -164,8 +164,8 @@
       document.getElementById('edit-parent-category').value = parentId || '';
       
       // Disable the option that represents the current category to prevent self-parenting
-      var parentSelect = document.getElementById('edit-parent-category');
-      for (var i = 0; i < parentSelect.options.length; i++) {
+      const parentSelect = document.getElementById('edit-parent-category');
+      for (let i = 0; i < parentSelect.options.length; i++) {
         if (parentSelect.options[i].value == categoryId) {
           parentSelect.options[i].disabled = true;
         } else {
