@@ -53,6 +53,20 @@
         <p class="card__subtitle">Choose a catalogue section to focus the product list.</p>
       </div>
     </header>
+    {% macro render_category(category, level=0) -%}
+      <a
+        class="shop-categories__link {% if level > 0 %}shop-categories__link--child shop-categories__link--level-{{ level }}{% endif %} {% if current_category and current_category == category.id %}is-active{% endif %}"
+        href="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}"
+        {% if current_category and current_category == category.id %}aria-current="page"{% endif %}
+      >
+        <span class="shop-categories__icon" aria-hidden="true"></span>
+        <span>{{ category.name }}</span>
+      </a>
+      {% for child in category.children %}
+        {{ render_category(child, level + 1) }}
+      {% endfor %}
+    {%- endmacro %}
+    
     <nav class="shop-categories" aria-label="Product categories">
       <a
         class="shop-categories__link {% if current_category == 'packages' %}is-active{% endif %}"
@@ -71,24 +85,7 @@
         <span>All products</span>
       </a>
       {% for category in categories %}
-        <a
-          class="shop-categories__link {% if category.parent_id %}shop-categories__link--child{% endif %} {% if current_category and current_category == category.id %}is-active{% endif %}"
-          href="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}"
-          {% if current_category and current_category == category.id %}aria-current="page"{% endif %}
-        >
-          <span class="shop-categories__icon" aria-hidden="true"></span>
-          <span>{{ category.name }}</span>
-        </a>
-        {% for child in category.children %}
-          <a
-            class="shop-categories__link shop-categories__link--child {% if current_category and current_category == child.id %}is-active{% endif %}"
-            href="{{ request.url_for('shop_page') }}{{ shop_query(child.id) }}"
-            {% if current_category and current_category == child.id %}aria-current="page"{% endif %}
-          >
-            <span class="shop-categories__icon" aria-hidden="true"></span>
-            <span>{{ child.name }}</span>
-          </a>
-        {% endfor %}
+        {{ render_category(category, 0) }}
       {% endfor %}
     </nav>
   </aside>
