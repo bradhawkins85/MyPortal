@@ -137,15 +137,30 @@ async def get_category_descendants(category_id: int) -> list[int]:
         if parent_id is not None:
             parent_map.setdefault(parent_id, []).append(child_id)
     
-    # Recursively collect all descendants
-    def collect_descendants(cat_id: int, result: set[int]) -> None:
-        """Recursively add all descendants to the result set."""
+    # Recursively collect all descendants with cycle detection
+    def collect_descendants(cat_id: int, result: set[int], visited: set[int], depth: int = 0) -> None:
+        """Recursively add all descendants to the result set.
+        
+        Args:
+            cat_id: Category ID to process
+            result: Set of all descendant IDs found
+            visited: Set of IDs currently being processed (for cycle detection)
+            depth: Current recursion depth (for safety limit)
+        """
+        # Safety limits to prevent infinite recursion
+        if depth > 50:  # Reasonable max depth for category hierarchies
+            return
+        if cat_id in visited:  # Cycle detection
+            return
+        
+        visited.add(cat_id)
         for child_id in parent_map.get(cat_id, []):
             result.add(child_id)
-            collect_descendants(child_id, result)
+            collect_descendants(child_id, result, visited, depth + 1)
+        visited.remove(cat_id)
     
     descendants: set[int] = {category_id}
-    collect_descendants(category_id, descendants)
+    collect_descendants(category_id, descendants, set(), 0)
     
     return list(descendants)
 
