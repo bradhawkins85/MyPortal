@@ -4119,7 +4119,7 @@ button.header-title-menu__link {
 
 .management__stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 1rem;
 }
 
