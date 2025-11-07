@@ -10,6 +10,7 @@ from loguru import logger
 
 from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import scheduled_invoices as invoices_repo
+from app.repositories import shop as shop_repo
 
 
 async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
@@ -117,7 +118,6 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
             next_term_start = sub["end_date"] + timedelta(days=1)
             
             # Fetch product to determine commitment type and term length
-            from app.repositories import shop as shop_repo
             product = await shop_repo.get_product_by_id(sub["product_id"])
             
             # Determine term length based on commitment type
