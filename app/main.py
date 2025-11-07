@@ -8543,7 +8543,7 @@ async def admin_shop_page(
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    categories_task = asyncio.create_task(shop_repo.list_categories())
+    categories_task = asyncio.create_task(shop_repo.list_all_categories_flat())
     products_task = asyncio.create_task(
         shop_repo.list_products(
             shop_repo.ProductFilters(include_archived=show_archived)
@@ -8592,7 +8592,7 @@ async def admin_shop_product_create_page(request: Request):
     if redirect:
         return redirect
 
-    categories_task = asyncio.create_task(shop_repo.list_categories())
+    categories_task = asyncio.create_task(shop_repo.list_all_categories_flat())
     products_task = asyncio.create_task(
         shop_repo.list_products(shop_repo.ProductFilters(include_archived=False))
     )
