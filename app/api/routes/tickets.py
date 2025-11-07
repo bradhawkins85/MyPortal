@@ -417,6 +417,14 @@ async def add_reply(
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    # Prevent adding time to billed tickets
+    if ticket.get("xero_invoice_number"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot add replies to a billed ticket. This ticket has been invoiced and closed.",
+        )
+    
     has_helpdesk_access = await _has_helpdesk_permission(current_user)
     if not has_helpdesk_access and ticket.get("requester_id") != session.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
@@ -478,6 +486,14 @@ async def update_reply_time_entry(
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    # Prevent updating time on billed tickets
+    if ticket.get("xero_invoice_number"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot update time entries on a billed ticket. This ticket has been invoiced and closed.",
+        )
+    
     reply = await tickets_repo.get_reply_by_id(reply_id)
     if not reply or reply.get("ticket_id") != ticket_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reply not found")
