@@ -11391,6 +11391,17 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    # Prevent adding time to billed tickets
+    if ticket.get("xero_invoice_number"):
+        return await _render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Cannot add replies to a billed ticket. This ticket has been invoiced and closed.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    
     try:
         author_id = current_user.get("id")
         await tickets_repo.create_reply(
