@@ -21,22 +21,22 @@ def test_list_categories_returns_hierarchy(monkeypatch):
     
     categories = asyncio.run(shop_repo.list_categories())
     
-    # Should return only top-level categories
+    # Should return only top-level categories, sorted alphabetically
     assert len(categories) == 2
-    assert categories[0]["name"] == "Electronics"
-    assert categories[1]["name"] == "Clothing"
+    assert categories[0]["name"] == "Clothing"
+    assert categories[1]["name"] == "Electronics"
     
-    # Electronics should have children
-    assert len(categories[0]["children"]) == 2
-    assert categories[0]["children"][0]["name"] == "Computers"
-    assert categories[0]["children"][1]["name"] == "Accessories"
+    # Electronics should have children, sorted alphabetically
+    assert len(categories[1]["children"]) == 2
+    assert categories[1]["children"][0]["name"] == "Accessories"
+    assert categories[1]["children"][1]["name"] == "Computers"
     
     # Computers should have children (nested)
-    assert len(categories[0]["children"][0]["children"]) == 1
-    assert categories[0]["children"][0]["children"][0]["name"] == "Laptops"
+    assert len(categories[1]["children"][1]["children"]) == 1
+    assert categories[1]["children"][1]["children"][0]["name"] == "Laptops"
     
     # Clothing should have no children
-    assert len(categories[1]["children"]) == 0
+    assert len(categories[0]["children"]) == 0
 
 
 def test_list_all_categories_flat_returns_all(monkeypatch):
@@ -53,14 +53,15 @@ def test_list_all_categories_flat_returns_all(monkeypatch):
     
     categories = asyncio.run(shop_repo.list_all_categories_flat())
     
-    # Should return all categories in flat list
+    # Should return all categories in flat list, grouped by parent (alphabetically)
+    # Order: Clothing (parent), Electronics (parent), Computers (child of Electronics)
     assert len(categories) == 3
-    assert categories[0]["name"] == "Electronics"
+    assert categories[0]["name"] == "Clothing"
     assert categories[0]["parent_id"] is None
-    assert categories[1]["name"] == "Computers"
-    assert categories[1]["parent_id"] == 1
-    assert categories[2]["name"] == "Clothing"
-    assert categories[2]["parent_id"] is None
+    assert categories[1]["name"] == "Electronics"
+    assert categories[1]["parent_id"] is None
+    assert categories[2]["name"] == "Computers"
+    assert categories[2]["parent_id"] == 1
 
 
 def test_create_category_with_parent(monkeypatch):
