@@ -381,15 +381,18 @@ async def _get_or_create_category_hierarchy(category_path: str) -> int | None:
     # Fetch all categories once to avoid N+1 queries
     all_categories = await shop_repo.list_all_categories_flat()
     
+    # Build lookup dictionary for O(1) access using (name, parent_id) as key
+    category_lookup: dict[tuple[str, int | None], dict[str, Any]] = {}
+    for cat in all_categories:
+        key = (cat["name"], cat.get("parent_id"))
+        category_lookup[key] = cat
+    
     parent_id: int | None = None
     
     for category_name in parts:
-        # Find existing category with this name and parent
-        matching_category = None
-        for cat in all_categories:
-            if cat["name"] == category_name and cat.get("parent_id") == parent_id:
-                matching_category = cat
-                break
+        # Look up existing category with this name and parent
+        lookup_key = (category_name, parent_id)
+        matching_category = category_lookup.get(lookup_key)
         
         if matching_category:
             # Found exact match (same name and parent)
@@ -402,13 +405,14 @@ async def _get_or_create_category_hierarchy(category_path: str) -> int | None:
                     parent_id=parent_id,
                     display_order=0
                 )
-                # Add newly created category to our local list to avoid refetching
-                all_categories.append({
+                # Add newly created category to our lookup dictionary
+                new_category = {
                     "id": category_id,
                     "name": category_name,
                     "parent_id": parent_id,
                     "display_order": 0,
-                })
+                }
+                category_lookup[lookup_key] = new_category
             except Exception as exc:  # pragma: no cover - defensive guard
                 log_error(
                     "Failed to create category in hierarchy",
@@ -468,7 +472,7 @@ async def _process_feed_item(
     category_id: int | None = None
     category_name = str(item.get("category_name") or "").strip()
     if category_name:
-        # Use hierarchical category creation if the name contains ' - ' delimiter
+        # Parse and create category hierarchy (supports both single and multi-level categories)
         category_id = await _get_or_create_category_hierarchy(category_name)
 
     stock_nsw = int(item.get("on_hand_nsw") or 0)

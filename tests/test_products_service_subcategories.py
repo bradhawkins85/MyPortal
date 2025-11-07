@@ -34,7 +34,6 @@ async def test_get_or_create_category_hierarchy_simple(monkeypatch):
     mock_create.assert_awaited_once_with(name="Electronics", parent_id=None, display_order=0)
 
 
-
 @pytest.mark.anyio("asyncio")
 async def test_get_or_create_category_hierarchy_two_levels(monkeypatch):
     """Test creating a two-level category hierarchy."""
@@ -223,7 +222,6 @@ async def test_get_or_create_category_hierarchy_strips_whitespace(monkeypatch):
     assert create_calls[0]["name"] == "Electronics"
     assert create_calls[1]["name"] == "Computers"
     assert create_calls[2]["name"] == "Laptops"
-
 
 
 @pytest.mark.anyio("asyncio")
