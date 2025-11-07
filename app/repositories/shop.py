@@ -709,7 +709,8 @@ async def create_product(
             await cursor.execute(
                 """
                 INSERT INTO shop_products
-                    (name, sku, vendor_sku, description, image_url, price, vip_price, stock, category_id, subscription_category_id, term_days)
+                    (name, sku, vendor_sku, description, image_url, price, vip_price, stock,
+                     category_id, subscription_category_id, term_days)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
