@@ -175,7 +175,7 @@
       const tbody = table.querySelector('tbody');
       if (!tbody) return;
 
-      const rows = tbody.querySelectorAll('tr');
+      const rows = tbody.querySelectorAll('tr:not(.ticket-group-header)');
       let visibleCount = 0;
 
       rows.forEach(row => {
@@ -196,10 +196,10 @@
         }
 
         if (shouldShow) {
-          row.style.display = '';
+          row.classList.remove('ticket-filtered-hidden');
           visibleCount++;
         } else {
-          row.style.display = 'none';
+          row.classList.add('ticket-filtered-hidden');
         }
       });
 
@@ -237,8 +237,9 @@
       // Remove existing grouping
       this.removeGrouping();
 
-      // Get all visible rows
-      const rows = Array.from(tbody.querySelectorAll('tr')).filter(row => row.style.display !== 'none');
+      // Get all visible rows (not filtered out)
+      const rows = Array.from(tbody.querySelectorAll('tr:not(.ticket-group-header)'))
+        .filter(row => !row.classList.contains('ticket-filtered-hidden'));
       
       // Group rows by the selected field
       const groups = {};
@@ -319,7 +320,11 @@
       const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
 
       groupRows.forEach(row => {
-        row.style.display = isExpanded ? 'none' : '';
+        if (isExpanded) {
+          row.classList.add('ticket-group-hidden');
+        } else {
+          row.classList.remove('ticket-group-hidden');
+        }
       });
 
       toggle.setAttribute('aria-expanded', !isExpanded);
@@ -336,9 +341,10 @@
       // Remove group headers
       tbody.querySelectorAll('.ticket-group-header').forEach(el => el.remove());
       
-      // Remove group attributes
+      // Remove group attributes and classes
       tbody.querySelectorAll('tr[data-group]').forEach(row => {
         row.removeAttribute('data-group');
+        row.classList.remove('ticket-group-hidden');
       });
     }
 
@@ -399,6 +405,15 @@
         search: ''
       };
       this.groupingField = null;
+      
+      // Remove all filter classes from rows
+      const tbody = this.container.querySelector('tbody');
+      if (tbody) {
+        tbody.querySelectorAll('tr').forEach(row => {
+          row.classList.remove('ticket-filtered-hidden', 'ticket-group-hidden');
+        });
+      }
+      
       this.updateFilterUI();
       this.removeGrouping();
       this.applyFilters();
