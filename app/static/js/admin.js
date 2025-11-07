@@ -2744,6 +2744,72 @@
     });
   }
 
+  function bindCompanyArchiveButtons() {
+    document.querySelectorAll('[data-company-archive]').forEach((button) => {
+      button.addEventListener('click', async (event) => {
+        const companyId = button.dataset.companyId;
+        const companyName = button.dataset.companyName || 'this company';
+        
+        if (!companyId) {
+          return;
+        }
+
+        if (!confirm(`Archive ${companyName}? Archived companies are hidden throughout the platform.`)) {
+          return;
+        }
+
+        try {
+          await requestJson(`/api/companies/${companyId}/archive`, {
+            method: 'POST',
+          });
+          const currentParams = new URLSearchParams(window.location.search);
+          const showArchived = currentParams.get('show_archived') === 'true';
+          const redirectUrl = showArchived 
+            ? `/admin/companies?show_archived=true&success=${encodeURIComponent('Company archived.')}`
+            : `/admin/companies?success=${encodeURIComponent('Company archived.')}`;
+          window.location.href = redirectUrl;
+        } catch (error) {
+          console.error('Failed to archive company:', error);
+          const message = error instanceof Error ? error.message : 'Failed to archive company. Please try again.';
+          alert(message);
+        }
+      });
+    });
+  }
+
+  function bindCompanyUnarchiveButtons() {
+    document.querySelectorAll('[data-company-unarchive]').forEach((button) => {
+      button.addEventListener('click', async (event) => {
+        const companyId = button.dataset.companyId;
+        const companyName = button.dataset.companyName || 'this company';
+        
+        if (!companyId) {
+          return;
+        }
+
+        if (!confirm(`Unarchive ${companyName}?`)) {
+          return;
+        }
+
+        try {
+          await requestJson(`/api/companies/${companyId}/unarchive`, {
+            method: 'POST',
+          });
+          const currentParams = new URLSearchParams(window.location.search);
+          const showArchived = currentParams.get('show_archived') === 'true';
+          const redirectUrl = showArchived 
+            ? `/admin/companies?show_archived=true&success=${encodeURIComponent('Company unarchived.')}`
+            : `/admin/companies?success=${encodeURIComponent('Company unarchived.')}`;
+          window.location.href = redirectUrl;
+        } catch (error) {
+          console.error('Failed to unarchive company:', error);
+          const message = error instanceof Error ? error.message : 'Failed to unarchive company. Please try again.';
+          alert(message);
+        }
+      });
+    });
+  }
+
   function bindOrderDeleteButtons() {
     document.querySelectorAll('[data-order-delete]').forEach((button) => {
       button.addEventListener('click', async (event) => {
@@ -2796,6 +2862,8 @@
     bindLabourTypeManager();
     bindTicketRequesterField();
     bindCompanyDeleteButtons();
+    bindCompanyArchiveButtons();
+    bindCompanyUnarchiveButtons();
     bindOrderDeleteButtons();
     bindModal({ modalId: 'add-company-modal', triggerSelector: '[data-add-company-modal-open]' });
     bindModal({ modalId: 'create-ticket-modal', triggerSelector: '[data-create-ticket-modal-open]' });
