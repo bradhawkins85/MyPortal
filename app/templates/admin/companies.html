@@ -36,6 +36,17 @@
             <p class="card__subtitle">Review the customer directory and open a company to edit identifiers or VIP status.</p>
           </div>
           <div class="card__controls">
+            <div class="form-field form-field--checkbox" style="margin-right: 1rem;">
+              <label class="checkbox" for="show-archived">
+                <input 
+                  id="show-archived" 
+                  type="checkbox" 
+                  {% if show_archived %}checked{% endif %}
+                  onchange="window.location.href = this.checked ? '/admin/companies?show_archived=true' : '/admin/companies';"
+                />
+                <span>Show archived</span>
+              </label>
+            </div>
             <input
               type="search"
               class="form-input card__control"
@@ -54,6 +65,7 @@
                 <th scope="col" data-sort="string">Xero ID</th>
                 <th scope="col" data-sort="string">Email domains</th>
                 <th scope="col" data-sort="number">VIP</th>
+                <th scope="col" data-sort="string">Status</th>
                 <th scope="col" class="table__actions">Actions</th>
               </tr>
             </thead>
@@ -91,11 +103,40 @@
                         <span class="tag tag--muted">Standard</span>
                       {% endif %}
                     </td>
+                    {% set is_archived = 1 if company.archived else 0 %}
+                    <td data-label="Status" data-value="{{ is_archived }}">
+                      {% if company.archived %}
+                        <span class="tag tag--muted">Archived</span>
+                      {% else %}
+                        <span class="tag tag--success">Active</span>
+                      {% endif %}
+                    </td>
                     <td class="table__actions">
                       <div class="table__action-buttons">
                         <a class="button button--ghost" href="/admin/companies/{{ company.id }}/edit">
                           Edit
                         </a>
+                        {% if company.archived %}
+                          <button 
+                            type="button" 
+                            class="button button--ghost" 
+                            data-company-unarchive
+                            data-company-id="{{ company.id }}"
+                            data-company-name="{{ company.name }}"
+                          >
+                            Unarchive
+                          </button>
+                        {% else %}
+                          <button 
+                            type="button" 
+                            class="button button--ghost" 
+                            data-company-archive
+                            data-company-id="{{ company.id }}"
+                            data-company-name="{{ company.name }}"
+                          >
+                            Archive
+                          </button>
+                        {% endif %}
                         <button 
                           type="button" 
                           class="button button--ghost button--danger" 
@@ -111,7 +152,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="6" class="table__empty">No companies have been registered.</td>
+                  <td colspan="7" class="table__empty">No companies have been registered.</td>
                 </tr>
               {% endif %}
             </tbody>

@@ -2482,6 +2482,7 @@ async def _render_companies_dashboard(
         "error_message": error_message,
         "temporary_password": temporary_password,
         "invited_email": invited_email,
+        "show_archived": include_archived,
     }
 
     response = await _render_template("admin/companies.html", request, user, extra=extra)
@@ -6318,6 +6319,7 @@ async def admin_companies_page(
     company_id: int | None = Query(default=None),
     success: str | None = Query(default=None),
     error: str | None = Query(default=None),
+    show_archived: bool = Query(default=False),
 ):
     current_user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -6328,6 +6330,7 @@ async def admin_companies_page(
         selected_company_id=company_id,
         success_message=_sanitize_message(success),
         error_message=_sanitize_message(error),
+        include_archived=show_archived,
     )
 
 
