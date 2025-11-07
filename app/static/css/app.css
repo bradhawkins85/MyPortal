@@ -5279,3 +5279,85 @@ dialog.dialog::backdrop {
   }
 }
 
+
+/* Billing Contacts Section */
+.billing-contacts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.billing-contact-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.375rem;
+}
+
+.billing-contact-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.billing-contact-email {
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.billing-contact-name {
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+/* Form collapsible for price change section */
+.form-collapsible {
+  border: 1px solid #e2e8f0;
+  border-radius: 0.375rem;
+  padding: 0;
+  margin: 1rem 0;
+}
+
+.form-collapsible__summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.form-collapsible__summary::-webkit-details-marker {
+  display: none;
+}
+
+.form-collapsible__title {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.form-collapsible__icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  transition: transform 0.2s ease;
+}
+
+.form-collapsible__icon::after {
+  content: "▼";
+  display: block;
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.form-collapsible[open] .form-collapsible__icon {
+  transform: rotate(180deg);
+}
+
+.form-collapsible__content {
+  padding: 0 1rem 1rem;
+}
