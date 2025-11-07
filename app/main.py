@@ -8722,7 +8722,7 @@ async def admin_update_shop_category(
             if visited is None:
                 visited = set()
             
-            # Prevent infinite loops
+            # Prevent infinite loops by skipping already-visited nodes
             if cat_id in visited:
                 return set()
             
@@ -8730,8 +8730,9 @@ async def admin_update_shop_category(
             descendants = set()
             
             for child_id in children_map.get(cat_id, []):
-                descendants.add(child_id)
-                descendants.update(get_all_descendants(child_id, visited))
+                if child_id not in visited:
+                    descendants.add(child_id)
+                    descendants.update(get_all_descendants(child_id, visited))
             
             return descendants
         
