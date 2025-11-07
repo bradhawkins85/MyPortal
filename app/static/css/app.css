@@ -2574,6 +2574,31 @@ button.header-title-menu__link {
   padding-left: 3rem;
 }
 
+/* Level-specific overrides for deeper nesting */
+.shop-categories__link--level-1 {
+  /* Uses base --child styles (3rem, 0.9rem) */
+}
+
+.shop-categories__link--level-2 {
+  padding-left: 4.5rem;
+  font-size: 0.85rem;
+}
+
+.shop-categories__link--level-3 {
+  padding-left: 6rem;
+  font-size: 0.8rem;
+}
+
+.shop-categories__link--level-4,
+.shop-categories__link--level-5,
+.shop-categories__link--level-6,
+.shop-categories__link--level-7,
+.shop-categories__link--level-8,
+.shop-categories__link--level-9 {
+  padding-left: 7.5rem;
+  font-size: 0.8rem;
+}
+
 .shop-toolbar {
   flex-wrap: wrap;
   justify-content: flex-end;
