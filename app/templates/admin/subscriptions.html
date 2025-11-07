@@ -66,6 +66,9 @@
                     <th>Status</th>
                     <th>Price</th>
                     <th>Auto-Renew</th>
+                    {% if is_super_admin %}
+                    <th>Actions</th>
+                    {% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -99,11 +102,17 @@
                                 <span class="text-muted">—</span>
                             {% endif %}
                         </td>
+                        {% if is_super_admin %}
+                        <td>
+                            <button class="btn-edit" onclick="editSubscription('{{ sub.id }}', '{{ sub.status }}', {{ 'true' if sub.auto_renew else 'false' }})">Edit</button>
+                            <button class="btn-delete" onclick="deleteSubscription('{{ sub.id }}')">Delete</button>
+                        </td>
+                        {% endif %}
                     </tr>
                     {% endfor %}
                 {% else %}
                     <tr>
-                        <td colspan="10" class="text-center text-muted">
+                        <td colspan="{% if is_super_admin %}11{% else %}10{% endif %}" class="text-center text-muted">
                             No subscriptions found
                         </td>
                     </tr>
@@ -127,6 +136,41 @@
                 <div class="stat-label">Pending Renewal</div>
                 <div class="stat-value">{{ status_counts.pending_renewal or 0 }}</div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Subscription Modal -->
+<div id="editModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Edit Subscription</h2>
+            <span class="close" onclick="closeEditModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <form id="editForm">
+                <input type="hidden" id="editSubscriptionId">
+                <div class="form-group">
+                    <label for="editStatus">Status:</label>
+                    <select id="editStatus" required>
+                        <option value="active">Active</option>
+                        <option value="pending_renewal">Pending Renewal</option>
+                        <option value="expired">Expired</option>
+                        <option value="canceled">Canceled</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="editAutoRenew">Auto-Renew:</label>
+                    <select id="editAutoRenew" required>
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="button" onclick="closeEditModal()">Cancel</button>
+                    <button type="submit">Save</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
@@ -281,5 +325,212 @@ code {
     color: #155724;
     border: 1px solid #c3e6cb;
 }
+
+.btn-edit, .btn-delete {
+    padding: 0.4rem 0.8rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85em;
+    margin-right: 0.25rem;
+}
+
+.btn-edit {
+    background: #007bff;
+    color: white;
+}
+
+.btn-edit:hover {
+    background: #0056b3;
+}
+
+.btn-delete {
+    background: #dc3545;
+    color: white;
+}
+
+.btn-delete:hover {
+    background: #c82333;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+    background-color: #fff;
+    margin: 10% auto;
+    padding: 0;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 500px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.modal-header {
+    padding: 1.5rem;
+    border-bottom: 1px solid #e0e0e0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-size: 1.5em;
+}
+
+.close {
+    color: #aaa;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close:hover {
+    color: #000;
+}
+
+.modal-body {
+    padding: 1.5rem;
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.form-group select {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 1em;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+}
+
+.form-actions button {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1em;
+}
+
+.form-actions button[type="button"] {
+    background: #6c757d;
+    color: white;
+}
+
+.form-actions button[type="button"]:hover {
+    background: #5a6268;
+}
+
+.form-actions button[type="submit"] {
+    background: #28a745;
+    color: white;
+}
+
+.form-actions button[type="submit"]:hover {
+    background: #218838;
+}
 </style>
+
+<script>
+function editSubscription(id, status, autoRenew) {
+    document.getElementById('editSubscriptionId').value = id;
+    document.getElementById('editStatus').value = status;
+    document.getElementById('editAutoRenew').value = autoRenew.toString();
+    document.getElementById('editModal').style.display = 'block';
+}
+
+function closeEditModal() {
+    document.getElementById('editModal').style.display = 'none';
+}
+
+function deleteSubscription(id) {
+    if (!confirm('Are you sure you want to delete this subscription? This action cannot be undone.')) {
+        return;
+    }
+    
+    fetch(`/api/v1/subscriptions/${id}`, {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        credentials: 'include'
+    })
+    .then(response => {
+        if (response.ok) {
+            window.location.href = '/admin/subscriptions?success=Subscription deleted successfully';
+        } else {
+            return response.json().then(data => {
+                throw new Error(data.detail || 'Failed to delete subscription');
+            });
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error.message);
+    });
+}
+
+document.getElementById('editForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const id = document.getElementById('editSubscriptionId').value;
+    const status = document.getElementById('editStatus').value;
+    const autoRenew = document.getElementById('editAutoRenew').value === 'true';
+    
+    fetch(`/api/v1/subscriptions/${id}`, {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+            status: status,
+            autoRenew: autoRenew
+        })
+    })
+    .then(response => {
+        if (response.ok) {
+            window.location.href = '/admin/subscriptions?success=Subscription updated successfully';
+        } else {
+            return response.json().then(data => {
+                throw new Error(data.detail || 'Failed to update subscription');
+            });
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error.message);
+        closeEditModal();
+    });
+});
+
+// Close modal when clicking outside of it
+window.onclick = function(event) {
+    const modal = document.getElementById('editModal');
+    if (event.target == modal) {
+        closeEditModal();
+    }
+}
+</script>
 {% endblock %}

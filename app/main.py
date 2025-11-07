@@ -12351,6 +12351,7 @@ async def admin_subscriptions_page(
         "status_counts": status_counts,
         "success_message": _sanitize_message(success),
         "error_message": _sanitize_message(error),
+        "is_super_admin": current_user.get("is_super_admin", False),
     }
     
     return await _render_template("admin/subscriptions.html", request, current_user, extra=extra)

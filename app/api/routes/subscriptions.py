@@ -160,3 +160,104 @@ async def get_subscription(
     )
     
     return SubscriptionResponse.model_validate(sub_dict)
+
+
+class UpdateSubscriptionRequest(BaseModel):
+    """Request model for updating a subscription (super admin only)."""
+    
+    status: str | None = None
+    auto_renew: bool | None = Field(None, alias="autoRenew")
+    
+    class Config:
+        populate_by_name = True
+
+
+@router.patch("/{subscription_id}", response_model=SubscriptionResponse)
+async def update_subscription(
+    subscription_id: str,
+    update_data: UpdateSubscriptionRequest,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+) -> SubscriptionResponse:
+    """Update a subscription (super admin only - can edit status and auto_renew)."""
+    # Only super admins can update subscriptions
+    if not current_user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin privileges required to update subscriptions"
+        )
+    
+    # Get the subscription to ensure it exists
+    subscription = await subscriptions_repo.get_subscription(subscription_id)
+    if not subscription:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subscription not found"
+        )
+    
+    # Validate status if provided
+    if update_data.status is not None:
+        valid_statuses = ["active", "pending_renewal", "expired", "canceled"]
+        if update_data.status not in valid_statuses:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
+            )
+    
+    # Update the subscription
+    await subscriptions_repo.update_subscription(
+        subscription_id,
+        status=update_data.status,
+        auto_renew=update_data.auto_renew,
+    )
+    
+    # Fetch and return the updated subscription
+    updated = await subscriptions_repo.get_subscription(subscription_id)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch updated subscription"
+        )
+    
+    # Convert Decimal to string for JSON
+    sub_dict = dict(updated)
+    sub_dict["unit_price"] = str(updated["unit_price"])
+    sub_dict["prorated_price"] = (
+        str(updated["prorated_price"]) 
+        if updated["prorated_price"] is not None 
+        else None
+    )
+    sub_dict["created_at"] = (
+        updated["created_at"].isoformat() if updated.get("created_at") else None
+    )
+    sub_dict["updated_at"] = (
+        updated["updated_at"].isoformat() if updated.get("updated_at") else None
+    )
+    
+    return SubscriptionResponse.model_validate(sub_dict)
+
+
+@router.delete("/{subscription_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_subscription(
+    subscription_id: str,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+) -> None:
+    """Delete a subscription (super admin only)."""
+    # Only super admins can delete subscriptions
+    if not current_user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin privileges required to delete subscriptions"
+        )
+    
+    # Get the subscription to ensure it exists
+    subscription = await subscriptions_repo.get_subscription(subscription_id)
+    if not subscription:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subscription not found"
+        )
+    
+    # Delete the subscription
+    await subscriptions_repo.delete_subscription(subscription_id)
