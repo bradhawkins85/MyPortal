@@ -910,5 +910,112 @@
   <script src="/static/js/admin.js" defer></script>
   {% if is_super_admin %}
     <script src="/static/js/automation.js" defer></script>
+    <script>
+      // Billing contacts management
+      document.addEventListener('DOMContentLoaded', function() {
+        const companyId = {{ company.id }};
+        const select = document.getElementById('billing-contact-select');
+        const list = document.getElementById('billing-contacts-list');
+        
+        if (!select || !list) return;
+        
+        // Handle adding billing contact
+        select.addEventListener('change', async function() {
+          const userId = this.value;
+          if (!userId) return;
+          
+          const option = this.options[this.selectedIndex];
+          const email = option.dataset.email || '';
+          const name = option.dataset.name || '';
+          
+          try {
+            const response = await fetch(`/admin/companies/${companyId}/billing-contacts/add`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': document.querySelector('input[name="_csrf"]')?.value || ''
+              },
+              body: JSON.stringify({ user_id: userId })
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              addBillingContactToList(data.contact);
+              this.value = '';  // Reset select
+            } else {
+              const error = await response.json();
+              alert(error.detail || 'Failed to add billing contact');
+            }
+          } catch (err) {
+            console.error('Error adding billing contact:', err);
+            alert('Failed to add billing contact');
+          }
+        });
+        
+        // Handle removing billing contact
+        list.addEventListener('click', async function(e) {
+          const btn = e.target.closest('[data-billing-contact-remove]');
+          if (!btn) return;
+          
+          const userId = btn.dataset.billingContactRemove;
+          const item = btn.closest('.billing-contact-item');
+          
+          try {
+            const response = await fetch(`/admin/companies/${companyId}/billing-contacts/${userId}/remove`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': document.querySelector('input[name="_csrf"]')?.value || ''
+              }
+            });
+            
+            if (response.ok) {
+              item.remove();
+              // Show empty message if no contacts left
+              if (list.querySelectorAll('.billing-contact-item').length === 0) {
+                list.innerHTML = '<p class="text-muted" data-empty-message>No billing contacts configured yet.</p>';
+              }
+            } else {
+              alert('Failed to remove billing contact');
+            }
+          } catch (err) {
+            console.error('Error removing billing contact:', err);
+            alert('Failed to remove billing contact');
+          }
+        });
+        
+        function addBillingContactToList(contact) {
+          // Remove empty message if it exists
+          const emptyMsg = list.querySelector('[data-empty-message]');
+          if (emptyMsg) emptyMsg.remove();
+          
+          const fullName = [contact.first_name, contact.last_name].filter(Boolean).join(' ');
+          const item = document.createElement('div');
+          item.className = 'billing-contact-item';
+          item.dataset.userId = contact.user_id;
+          item.innerHTML = `
+            <div class="billing-contact-info">
+              <span class="billing-contact-email">${escapeHtml(contact.email)}</span>
+              ${fullName ? `<span class="billing-contact-name">${escapeHtml(fullName)}</span>` : ''}
+            </div>
+            <button 
+              type="button" 
+              class="button button--ghost button--small" 
+              data-billing-contact-remove="${contact.user_id}"
+              title="Remove billing contact"
+            >
+              Remove
+            </button>
+          `;
+          list.appendChild(item);
+        }
+        
+        function escapeHtml(text) {
+          const div = document.createElement('div');
+          div.textContent = text;
+          return div.innerHTML;
+        }
+      });
+    </script>
   {% endif %}
 {% endblock %}
