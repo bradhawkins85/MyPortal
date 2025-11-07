@@ -243,130 +243,147 @@ async def _execute_automation(
     context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     automation_id = int(automation.get("id"))
-    await automation_repo.mark_started(automation_id)
-    started_at = datetime.now(timezone.utc)
-    status = "succeeded"
-    result_payload: Any = None
-    error_message: str | None = None
-    payload = automation.get("action_payload")
-    actions = _normalise_actions(payload.get("actions")) if isinstance(payload, Mapping) else []
-    try:
-        if actions:
-            results: list[dict[str, Any]] = []
-            for action in actions:
-                module_slug = action["module"]
-                payload_source = action.get("payload")
-                module_payload = (
-                    dict(payload_source)
-                    if isinstance(payload_source, Mapping)
-                    else {}
-                )
-                module_payload = await value_templates.render_value_async(module_payload, context)
-                if context:
-                    module_payload.setdefault("context", context)
-                try:
-                    action_result = await modules_service.trigger_module(
-                        module_slug,
-                        module_payload,
-                        background=False,
+    
+    # Use a distributed lock to ensure only one worker executes this automation
+    lock_name = f"automation_exec_{automation_id}"
+    
+    async with db.acquire_lock(lock_name, timeout=1) as lock_acquired:
+        if not lock_acquired:
+            # Another worker is already executing this automation, skip silently
+            logger.info(
+                "Automation already running on another worker, skipping",
+                automation_id=automation_id,
+            )
+            return {
+                "status": "skipped",
+                "reason": "Already running on another worker",
+                "automation_id": automation_id,
+            }
+    
+        await automation_repo.mark_started(automation_id)
+        started_at = datetime.now(timezone.utc)
+        status = "succeeded"
+        result_payload: Any = None
+        error_message: str | None = None
+        payload = automation.get("action_payload")
+        actions = _normalise_actions(payload.get("actions")) if isinstance(payload, Mapping) else []
+        try:
+            if actions:
+                results: list[dict[str, Any]] = []
+                for action in actions:
+                    module_slug = action["module"]
+                    payload_source = action.get("payload")
+                    module_payload = (
+                        dict(payload_source)
+                        if isinstance(payload_source, Mapping)
+                        else {}
                     )
-                except Exception as exc:  # pragma: no cover - network/runtime guard
-                    status = "failed"
-                    error_message = str(exc)
-                    results.append(
-                        {"module": module_slug, "status": "failed", "error": str(exc)}
-                    )
-                    logger.error(
-                        "Automation execution failed",
-                        automation_id=automation_id,
-                        module=module_slug,
-                        error=str(exc),
-                    )
-                    break
+                    module_payload = await value_templates.render_value_async(module_payload, context)
+                    if context:
+                        module_payload.setdefault("context", context)
+                    try:
+                        action_result = await modules_service.trigger_module(
+                            module_slug,
+                            module_payload,
+                            background=False,
+                        )
+                    except Exception as exc:  # pragma: no cover - network/runtime guard
+                        status = "failed"
+                        error_message = str(exc)
+                        results.append(
+                            {"module": module_slug, "status": "failed", "error": str(exc)}
+                        )
+                        logger.error(
+                            "Automation execution failed",
+                            automation_id=automation_id,
+                            module=module_slug,
+                            error=str(exc),
+                        )
+                        break
 
-                if isinstance(action_result, Mapping):
-                    action_status_raw = action_result.get("status") or action_result.get("event_status")
-                    action_error = (
-                        action_result.get("error")
-                        or action_result.get("last_error")
-                        or None
-                    )
-                    action_reason = action_result.get("reason")
-                else:
-                    action_status_raw = None
-                    action_error = None
-                    action_reason = None
+                    if isinstance(action_result, Mapping):
+                        action_status_raw = action_result.get("status") or action_result.get("event_status")
+                        action_error = (
+                            action_result.get("error")
+                            or action_result.get("last_error")
+                            or None
+                        )
+                        action_reason = action_result.get("reason")
+                    else:
+                        action_status_raw = None
+                        action_error = None
+                        action_reason = None
 
-                action_status = str(action_status_raw or "").strip().lower() or "unknown"
+                    action_status = str(action_status_raw or "").strip().lower() or "unknown"
 
-                result_entry: dict[str, Any] = {
-                    "module": module_slug,
-                    "status": action_status,
-                    "result": action_result,
-                }
-                if action_error:
-                    result_entry["error"] = action_error
-                if action_reason:
-                    result_entry["reason"] = action_reason
-                results.append(result_entry)
+                    result_entry: dict[str, Any] = {
+                        "module": module_slug,
+                        "status": action_status,
+                        "result": action_result,
+                    }
+                    if action_error:
+                        result_entry["error"] = action_error
+                    if action_reason:
+                        result_entry["reason"] = action_reason
+                    results.append(result_entry)
 
-                if action_status in {"failed", "error"} or (
-                    action_status == "unknown" and action_error
-                ):
-                    status = "failed"
-                    if not error_message:
-                        error_message = str(action_error or "Module action failed")
-                    break
-            if status == "failed" and not error_message:
-                error_message = "One or more trigger actions failed"
-            result_payload = results
-        else:
-            if not isinstance(payload, Mapping):
-                payload = {}
-            module_slug = automation.get("action_module")
-            if module_slug:
-                module_payload = await value_templates.render_value_async(dict(payload), context)
-                if context:
-                    module_payload.setdefault("context", context)
-                result_payload = await modules_service.trigger_module(
-                    str(module_slug), module_payload, background=False
-                )
+                    if action_status in {"failed", "error"} or (
+                        action_status == "unknown" and action_error
+                    ):
+                        status = "failed"
+                        if not error_message:
+                            error_message = str(action_error or "Module action failed")
+                        break
+                if status == "failed" and not error_message:
+                    error_message = "One or more trigger actions failed"
+                result_payload = results
             else:
-                result_payload = {"status": "skipped", "reason": "No action module configured"}
-    except Exception as exc:  # pragma: no cover - network/runtime guard
-        status = "failed"
-        error_message = str(exc)
-        logger.error(
-            "Automation execution failed",
+                if not isinstance(payload, Mapping):
+                    payload = {}
+                module_slug = automation.get("action_module")
+                if module_slug:
+                    module_payload = await value_templates.render_value_async(dict(payload), context)
+                    if context:
+                        module_payload.setdefault("context", context)
+                    result_payload = await modules_service.trigger_module(
+                        str(module_slug), module_payload, background=False
+                    )
+                else:
+                    result_payload = {"status": "skipped", "reason": "No action module configured"}
+        except Exception as exc:  # pragma: no cover - network/runtime guard
+            status = "failed"
+            error_message = str(exc)
+            logger.error(
+                "Automation execution failed",
+                automation_id=automation_id,
+                error=str(exc),
+            )
+        finished_at = datetime.now(timezone.utc)
+        duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+        await automation_repo.record_run(
             automation_id=automation_id,
-            error=str(exc),
+            status=status,
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_ms=duration_ms,
+            result_payload=result_payload,
+            error_message=error_message,
         )
-    finished_at = datetime.now(timezone.utc)
-    duration_ms = int((finished_at - started_at).total_seconds() * 1000)
-    await automation_repo.record_run(
-        automation_id=automation_id,
-        status=status,
-        started_at=started_at,
-        finished_at=finished_at,
-        duration_ms=duration_ms,
-        result_payload=result_payload,
-        error_message=error_message,
-    )
-    if status == "failed":
-        await automation_repo.set_last_error(automation_id, error_message)
-    else:
-        await automation_repo.set_last_error(automation_id, None)
-    next_reference = finished_at if status == "succeeded" else datetime.now(timezone.utc)
-    next_run = calculate_next_run(automation, reference=next_reference)
-    await automation_repo.set_next_run(automation_id, next_run)
-    return {
-        "status": status,
-        "result": result_payload,
-        "error": error_message,
-        "started_at": started_at,
-        "finished_at": finished_at,
-        "next_run_at": next_run,
-    }
+        if status == "failed":
+            await automation_repo.set_last_error(automation_id, error_message)
+        else:
+            await automation_repo.set_last_error(automation_id, None)
+        next_reference = finished_at if status == "succeeded" else datetime.now(timezone.utc)
+        next_run = calculate_next_run(automation, reference=next_reference)
+        await automation_repo.set_next_run(automation_id, next_run)
+        return {
+            "status": status,
+            "result": result_payload,
+            "error": error_message,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "next_run_at": next_run,
+        }
 
 
 async def process_due_automations(limit: int = 20) -> None:
