@@ -545,9 +545,13 @@
       }
       input.addEventListener('input', () => {
         const term = input.value.trim().toLowerCase();
-        table.querySelectorAll('tbody tr').forEach((row) => {
+        table.querySelectorAll('tbody tr:not(.ticket-group-header)').forEach((row) => {
           const text = row.textContent || '';
-          row.style.display = !term || text.toLowerCase().includes(term) ? '' : 'none';
+          if (!term || text.toLowerCase().includes(term)) {
+            row.classList.remove('table-search-hidden');
+          } else {
+            row.classList.add('table-search-hidden');
+          }
         });
       });
     });
