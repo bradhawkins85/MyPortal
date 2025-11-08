@@ -107,6 +107,7 @@ from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import staff as staff_repo
 from app.repositories import pending_staff_access as pending_staff_access_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import automations as automation_repo
 from app.repositories import integration_modules as integration_modules_repo
 from app.repositories import webhook_events as webhook_events_repo
@@ -5372,6 +5373,25 @@ async def portal_tickets_page(request: Request):
     search_term = (params.get("q") or "").strip() or None
     success_message = params.get("success")
     error_message = params.get("error")
+
+    # If no explicit filters are provided, try to load the default view
+    if not status_filter and not search_term:
+        try:
+            user_id = int(user.get("id"))
+            default_view = await ticket_views_repo.get_default_view(user_id)
+            if default_view:
+                filters = default_view.get("filters") or {}
+                # Apply status filter from default view
+                if filters.get("status"):
+                    status_list = filters["status"]
+                    if isinstance(status_list, list) and status_list:
+                        status_filter = ",".join(str(s) for s in status_list)
+                # Apply search filter from default view
+                if filters.get("search"):
+                    search_term = str(filters["search"])
+        except (TypeError, ValueError, RuntimeError):
+            # If we can't load the default view, just continue without it
+            pass
 
     return await _render_portal_tickets_page(
         request,
