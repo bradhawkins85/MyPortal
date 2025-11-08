@@ -1,4 +1,11 @@
-"""Service for managing live subscription changes with prorata pricing."""
+"""Service for managing live subscription changes with prorata pricing.
+
+This service handles:
+- Immediate license additions with prorated charges
+- License decrease requests processed at term end
+- Stacking of multiple changes with net impact calculation
+- Preview of changes before applying
+"""
 from __future__ import annotations
 
 from datetime import date, datetime
