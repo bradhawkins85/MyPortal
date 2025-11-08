@@ -3592,6 +3592,14 @@ async def request_subscription_change(request: Request, subscription_id: str):
     if new_quantity < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity cannot be negative")
     
+    # Check if the quantity is actually changing
+    current_quantity = subscription.get("quantity", 0)
+    if new_quantity == current_quantity:
+        return JSONResponse({
+            "success": False,
+            "message": "No change requested - the new quantity is the same as the current quantity",
+        })
+    
     reason = payload.get("reason")
     
     # Log the change request for audit purposes
@@ -3607,7 +3615,6 @@ async def request_subscription_change(request: Request, subscription_id: str):
     
     # Create a ticket for the subscription change request
     product_name = subscription.get("product_name") or "Unknown Product"
-    current_quantity = subscription.get("quantity", 0)
     
     # Build ticket subject
     subject = f"Subscription Change Request - {product_name}"

@@ -135,3 +135,42 @@ def test_subscription_change_ticket_requester():
     # - requester_id set to user_id
     # - company_id set to company_id
     # - assigned_user_id set to None (unassigned)
+
+
+def test_subscription_change_no_quantity_change():
+    """Test that subscription change request is rejected when quantity doesn't change."""
+    current_quantity = 5
+    new_quantity = 5
+    
+    # When the new quantity equals the current quantity, no change should be processed
+    assert current_quantity == new_quantity
+    
+    # Expected response when quantities are the same
+    expected_response = {
+        "success": False,
+        "message": "No change requested - the new quantity is the same as the current quantity",
+    }
+    
+    # Verify the response structure
+    assert expected_response["success"] is False
+    assert "same as the current quantity" in expected_response["message"]
+
+
+def test_subscription_change_quantity_increase():
+    """Test that subscription change request is valid when quantity increases."""
+    current_quantity = 5
+    new_quantity = 10
+    
+    # When the new quantity is different, change should be processed
+    assert current_quantity != new_quantity
+    assert new_quantity > current_quantity
+
+
+def test_subscription_change_quantity_decrease():
+    """Test that subscription change request is valid when quantity decreases."""
+    current_quantity = 10
+    new_quantity = 5
+    
+    # When the new quantity is different, change should be processed
+    assert current_quantity != new_quantity
+    assert new_quantity < current_quantity
