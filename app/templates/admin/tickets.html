@@ -153,33 +153,6 @@
             </select>
           </div>
 
-          <form method="get" class="management__filters ticket-dashboard__filters">
-            <label class="visually-hidden" for="ticket-filter-status">Status</label>
-            <select id="ticket-filter-status" name="status" class="form-input">
-              <option value="">All statuses</option>
-              {% set status_namespace = namespace(seen=[]) %}
-              {% for status_option in ticket_status_definitions %}
-                {% set option_value = status_option.tech_status %}
-                <option value="{{ option_value }}" {% if ticket_filters.status == option_value %}selected{% endif %}>{{ status_option.tech_label }}</option>
-                {% set status_namespace.seen = status_namespace.seen + [option_value] %}
-              {% endfor %}
-              {% for status_option in ticket_available_statuses %}
-                {% if status_option not in status_namespace.seen %}
-                  {% set fallback_label = ticket_status_label_map.get(status_option, status_option.replace('_', ' ').title()) %}
-                  <option value="{{ status_option }}" {% if ticket_filters.status == status_option %}selected{% endif %}>{{ fallback_label }}</option>
-                {% endif %}
-              {% endfor %}
-            </select>
-            <label class="visually-hidden" for="ticket-filter-module">Module</label>
-            <select id="ticket-filter-module" name="module" class="form-input">
-              <option value="">All modules</option>
-              {% for module in ticket_modules %}
-                <option value="{{ module.slug }}" {% if ticket_filters.module == module.slug %}selected{% endif %}>{{ module.name }}</option>
-              {% endfor %}
-            </select>
-            <button type="submit" class="button">Apply filters</button>
-          </form>
-
           <div class="ticket-dashboard__stats management__stats" data-ticket-stats>
             <article class="stat-card">
               <h3 class="stat-card__title">Open tickets</h3>

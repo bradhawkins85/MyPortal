@@ -179,6 +179,8 @@
       <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
       {% endif %}
       <input type="hidden" id="edit-product-id" />
+      
+      <!-- Row 1: Name, SKU, Vendor SKU, Category -->
       <div class="form-field">
         <label class="form-label" for="edit-product-name">Name</label>
         <input class="form-input" id="edit-product-name" name="name" required />
@@ -191,6 +193,42 @@
         <label class="form-label" for="edit-product-vendor">Vendor SKU</label>
         <input class="form-input" id="edit-product-vendor" name="vendor_sku" required />
       </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-product-category">Category</label>
+        <select class="form-input" id="edit-product-category" name="category_id">
+          <option value="">No category</option>
+          {% for category in categories %}
+            <option value="{{ category.id }}">{% if category.parent_id %}└─ {% endif %}{{ category.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      
+      <!-- Row 2: Price, VIP Price, Stock, Image -->
+      <div class="form-field" data-field-type="standard-price">
+        <label class="form-label" for="edit-product-price">Price</label>
+        <input class="form-input" id="edit-product-price" name="price" type="number" step="0.01" required />
+      </div>
+      <div class="form-field" data-field-type="standard-price">
+        <label class="form-label" for="edit-product-vip">VIP price</label>
+        <input class="form-input" id="edit-product-vip" name="vip_price" type="number" step="0.01" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-product-stock">Stock</label>
+        <input class="form-input" id="edit-product-stock" name="stock" type="number" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="edit-product-image">Image</label>
+        <input class="form-input" id="edit-product-image" name="image" type="file" accept="image/*" />
+        <img id="edit-product-preview" alt="Current product image" class="product-preview" hidden />
+      </div>
+      
+      <!-- Row 3: Description -->
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="edit-product-description">Description</label>
+        <textarea class="form-input form-input--textarea" id="edit-product-description" name="description"></textarea>
+      </div>
+      
+      <!-- Row 4: Cross-sell and Up-sell products -->
       <div class="form-field form-field--wide">
         <label class="form-label" for="edit-product-cross-sell">Cross-sell products</label>
         <select
@@ -217,31 +255,8 @@
         </select>
         <p class="form-helper">Offer upgrade paths that remain in the same category.</p>
       </div>
-      <div class="form-field form-field--wide">
-        <label class="form-label" for="edit-product-description">Description</label>
-        <textarea class="form-input form-input--textarea" id="edit-product-description" name="description"></textarea>
-      </div>
-      <div class="form-field" data-field-type="standard-price">
-        <label class="form-label" for="edit-product-price">Price</label>
-        <input class="form-input" id="edit-product-price" name="price" type="number" step="0.01" required />
-      </div>
-      <div class="form-field" data-field-type="standard-price">
-        <label class="form-label" for="edit-product-vip">VIP price</label>
-        <input class="form-input" id="edit-product-vip" name="vip_price" type="number" step="0.01" />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-product-stock">Stock</label>
-        <input class="form-input" id="edit-product-stock" name="stock" type="number" required />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-product-category">Category</label>
-        <select class="form-input" id="edit-product-category" name="category_id">
-          <option value="">No category</option>
-          {% for category in categories %}
-            <option value="{{ category.id }}">{% if category.parent_id %}└─ {% endif %}{{ category.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
+      
+      <!-- Row 5: Subscription-related fields -->
       <div class="form-field">
         <label class="form-label" for="edit-product-subscription-category">Subscription category</label>
         <select class="form-input" id="edit-product-subscription-category" name="subscription_category_id">
@@ -315,6 +330,8 @@
           </div>
         </div>
       </details>
+      
+      <!-- Features section (keeping at the end) -->
       <div class="form-field form-field--wide">
         <label class="form-label" for="edit-product-features-filter">Features</label>
         <div class="form-actions form-actions--inline">
@@ -342,11 +359,7 @@
         </div>
         <input type="hidden" name="features" id="edit-product-features-data" value="[]" />
       </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-product-image">Image</label>
-        <input class="form-input" id="edit-product-image" name="image" type="file" accept="image/*" />
-        <img id="edit-product-preview" alt="Current product image" class="product-preview" hidden />
-      </div>
+      
       <div class="form-actions">
         <button type="submit" class="button">Save product</button>
         <button type="button" class="button button--ghost" data-modal-close>Cancel</button>

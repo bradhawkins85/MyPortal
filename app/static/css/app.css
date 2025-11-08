@@ -2532,6 +2532,20 @@ button.header-title-menu__link {
   white-space: nowrap;
   border: 0;
 }
+
+/* Ticket filtering and grouping visibility classes */
+.ticket-filtered-hidden {
+  display: none !important;
+}
+
+.ticket-group-hidden {
+  display: none !important;
+}
+
+/* Table search filter visibility class */
+.table-search-hidden {
+  display: none !important;
+}
 .page-grid {
   display: grid;
   gap: 2rem;
