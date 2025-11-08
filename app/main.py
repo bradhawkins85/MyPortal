@@ -10271,25 +10271,16 @@ async def _render_tickets_dashboard(
     request: Request,
     user: dict[str, Any],
     *,
-    status_filter: str | None = None,
-    module_filter: str | None = None,
     success_message: str | None = None,
     error_message: str | None = None,
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     dashboard = await tickets_service.load_dashboard_state(
-        status_filter=status_filter,
-        module_filter=module_filter,
+        status_filter=None,
+        module_filter=None,
         limit=200,
     )
-    query_params: dict[str, str] = {}
-    if status_filter:
-        query_params["status"] = status_filter
-    if module_filter:
-        query_params["module"] = module_filter
     dashboard_endpoint = "/api/tickets/dashboard"
-    if query_params:
-        dashboard_endpoint = f"{dashboard_endpoint}?{urlencode(query_params)}"
     status_definitions_payload = [
         {
             "tech_status": definition.tech_status,
@@ -10314,7 +10305,6 @@ async def _render_tickets_dashboard(
         "ticket_status_definitions": status_definitions_payload,
         "ticket_status_label_map": status_label_map,
         "ticket_public_status_map": public_status_map,
-        "ticket_filters": {"status": status_filter, "module": module_filter},
         "ticket_modules": dashboard.modules,
         "ticket_company_options": dashboard.companies,
         "ticket_user_options": dashboard.technicians,
@@ -11038,8 +11028,6 @@ async def admin_delete_issue_assignment(
 @app.get("/admin/tickets", response_class=HTMLResponse)
 async def admin_tickets_page(
     request: Request,
-    status: str | None = Query(default=None),
-    module: str | None = Query(default=None),
     success: str | None = Query(default=None),
     error: str | None = Query(default=None),
 ):
@@ -11049,8 +11037,6 @@ async def admin_tickets_page(
     return await _render_tickets_dashboard(
         request,
         current_user,
-        status_filter=status,
-        module_filter=module,
         success_message=_sanitize_message(success),
         error_message=_sanitize_message(error),
     )
