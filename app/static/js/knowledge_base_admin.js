@@ -299,6 +299,7 @@
       { command: 'insertOrderedList', label: '1. List' },
       { command: 'formatBlock', value: 'blockquote', label: '&ldquo;Quote&rdquo;' },
       { command: 'createLink', label: 'Link' },
+      { command: 'insertConditional', label: 'If Company...' },
       { command: 'removeFormat', label: 'Clear' },
     ];
 
@@ -953,6 +954,21 @@
               anchor.target = '_blank';
               anchor.rel = 'noopener';
             });
+          } else if (command === 'insertConditional') {
+            const companyName = window.prompt('Enter the company name for this conditional content:');
+            if (!companyName || !companyName.trim()) {
+              return;
+            }
+            const selection = window.getSelection();
+            const selectedText = selection.toString();
+            
+            // Create the conditional block HTML
+            const conditionalHtml = `<kb-if company="${escapeHtml(companyName.trim())}">` +
+              (selectedText || 'Content for ' + escapeHtml(companyName.trim())) +
+              `</kb-if>`;
+            
+            // Insert the HTML at the cursor position
+            document.execCommand('insertHTML', false, conditionalHtml);
           } else if (command === 'formatBlock') {
             document.execCommand('formatBlock', false, value || 'p');
           } else if (command === 'removeFormat') {
