@@ -20,16 +20,6 @@
           />
         </div>
       </header>
-      {% if impersonation_success or impersonation_error %}
-        <div class="stacked" style="gap: 0.75rem; margin-bottom: 1.25rem;">
-          {% if impersonation_success %}
-            <div class="alert" role="status">{{ impersonation_success }}</div>
-          {% endif %}
-          {% if impersonation_error %}
-            <div class="alert alert--error" role="alert">{{ impersonation_error }}</div>
-          {% endif %}
-        </div>
-      {% endif %}
       <div class="table-wrapper">
         <table class="table" id="impersonation-table" data-table>
           <thead>
