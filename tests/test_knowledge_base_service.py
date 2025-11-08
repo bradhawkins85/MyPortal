@@ -99,7 +99,12 @@ async def test_get_article_by_slug_respects_user_permissions(monkeypatch):
 @pytest.mark.anyio("asyncio")
 async def test_search_articles_returns_ollama_summary(monkeypatch):
     articles = [
-        _article_factory(content="Portal onboarding guide", slug="guide"),
+        _article_factory(
+            title="Onboarding Guide",
+            content="Portal onboarding guide",
+            slug="guide",
+            ai_tags=["onboarding", "guide"]
+        ),
         _article_factory(id=4, slug="internal", permission_scope="super_admin"),
     ]
     monkeypatch.setattr(
