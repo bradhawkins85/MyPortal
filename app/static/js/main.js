@@ -610,10 +610,28 @@
     });
   }
 
+  function setupAutoAlerts() {
+    const toast = createToastController(document.querySelector('[data-global-toast]'));
+    if (!toast) {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const successMessage = params.get('success');
+    const errorMessage = params.get('error');
+
+    if (successMessage) {
+      toast.show(successMessage, { variant: 'success', autoHideMs: 5000 });
+    } else if (errorMessage) {
+      toast.show(errorMessage, { variant: 'error', autoHideMs: 7000 });
+    }
+  }
+
   function initialise() {
     setupAutoRefresh();
     setupForceRefresh();
     setupHeaderMenus();
+    setupAutoAlerts();
   }
 
   if (document.readyState === 'loading') {

@@ -1,17 +1,6 @@
 {% extends "base.html" %}
 
 {% block content %}
-  {% if success_message or error_message %}
-    <div class="alert-stack">
-      {% if success_message %}
-        <div class="alert" role="status">{{ success_message }}</div>
-      {% endif %}
-      {% if error_message %}
-        <div class="alert alert--error" role="alert">{{ error_message }}</div>
-      {% endif %}
-    </div>
-  {% endif %}
-
   {% set module = syncro_module or {} %}
   {% set base_url = module.base_url or '' %}
   {% set effective_base_url = module.effective_base_url or '' %}
