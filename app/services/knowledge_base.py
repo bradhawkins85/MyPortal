@@ -16,7 +16,7 @@ from app.services import company_access
 from app.services import modules as modules_service
 from app.services.tagging import filter_helpful_texts
 from app.services.realtime import RefreshNotifier, refresh_notifier
-from app.services.knowledge_base_conditionals import process_conditionals
+from app.services.knowledge_base_conditionals import process_conditionals, validate_conditional_syntax
 
 PermissionScope = str
 
@@ -43,6 +43,7 @@ _ALLOWED_TAGS: Sequence[str] = (
     "th",
     "td",
     "img",
+    "kb-if",
 )
 
 _ALLOWED_ATTRIBUTES: Mapping[str, Sequence[str]] = {
@@ -51,6 +52,7 @@ _ALLOWED_ATTRIBUTES: Mapping[str, Sequence[str]] = {
     "img": ("src", "alt", "title"),
     "th": ("colspan", "rowspan", "scope"),
     "td": ("colspan", "rowspan", "headers"),
+    "kb-if": ("company",),
 }
 
 _ALLOWED_PROTOCOLS: Sequence[str] = ("http", "https", "mailto")
@@ -90,11 +92,19 @@ def _prepare_sections(
     fallback_title: str | None,
 ) -> tuple[list[dict[str, Any]], str]:
     prepared: list[dict[str, Any]] = []
+    validation_errors: list[str] = []
+    
     if sections:
         for index, section in enumerate(sections, start=1):
             content = section.get("content") or ""
             if not isinstance(content, str):
                 content = str(content)
+            
+            # Validate conditional syntax before sanitizing
+            errors = validate_conditional_syntax(content)
+            if errors:
+                validation_errors.extend([f"Section {index}: {err}" for err in errors])
+            
             content = _sanitise_html(content)
             heading = section.get("heading")
             heading_text = str(heading).strip() if isinstance(heading, str) else ""
@@ -110,6 +120,12 @@ def _prepare_sections(
                 }
             )
     if not prepared and fallback_content:
+        # Validate fallback content as well
+        if fallback_content:
+            errors = validate_conditional_syntax(str(fallback_content))
+            if errors:
+                validation_errors.extend(errors)
+        
         content = _sanitise_html(str(fallback_content))
         heading_text = (fallback_title or "").strip()
         prepared.append(
@@ -119,6 +135,11 @@ def _prepare_sections(
                 "position": 1,
             }
         )
+    
+    # Raise an error if there are validation issues
+    if validation_errors:
+        raise ValueError("Conditional syntax errors: " + "; ".join(validation_errors))
+    
     combined = _combine_sections_html(prepared)
     return prepared, combined
 
