@@ -4573,6 +4573,29 @@ button.header-title-menu__link {
   border-radius: var(--radius-sm);
 }
 
+.kb-admin__editor kb-if {
+  display: block;
+  position: relative;
+  border: 2px dashed rgba(96, 165, 250, 0.5);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+  background-color: rgba(96, 165, 250, 0.05);
+}
+
+.kb-admin__editor kb-if::before {
+  content: "If company: " attr(company);
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(96, 165, 250, 0.9);
+  margin-bottom: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background-color: rgba(96, 165, 250, 0.15);
+  border-radius: var(--radius-xs);
+  width: fit-content;
+}
+
 .kb-admin__section-controls {
   display: flex;
   flex-wrap: wrap;
