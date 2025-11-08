@@ -714,15 +714,41 @@ def _score_article(article: Mapping[str, Any], *, query: str, tokens: Sequence[s
 
     score = 0
     query_lower = query.lower()
-    if query_lower and query_lower in haystack_text:
-        score += max(len(query_lower), 4)
-
+    
+    # Count token occurrences first to determine actual relevance
     haystack_tokens = Counter(_tokenise(haystack_text))
+    token_score = 0
+    matched_tokens = 0
     for token in tokens:
         occurrences = haystack_tokens.get(token, 0)
         if occurrences:
-            score += min(occurrences, 3)
-
+            token_score += min(occurrences, 3)
+            matched_tokens += 1
+    
+    # Only apply exact query bonus if there's also good token coverage
+    # This prevents articles that just mention a word once from scoring highly
+    if query_lower and query_lower in haystack_text:
+        # For single-word queries, only add bonus if word appears multiple times (token_score >= 2)
+        # For multi-word queries, add bonus if at least half the tokens are present
+        if len(tokens) == 1:
+            # Single word: only bonus if it appears at least twice
+            if token_score >= 2:
+                score += max(len(query_lower), 4)
+        else:
+            # Multi-word: bonus if reasonable token coverage
+            # Require matching at least half the query tokens
+            if matched_tokens >= (len(tokens) + 1) // 2:
+                score += max(len(query_lower), 4)
+    
+    score += token_score
+    
+    # For multi-word queries, require matching multiple distinct tokens
+    # to avoid false positives from common/generic words
+    if len(tokens) >= 4 and matched_tokens < 3:
+        return 0
+    elif len(tokens) == 3 and matched_tokens < 2:
+        return 0
+    
     return score
 
 
@@ -737,13 +763,18 @@ async def search_articles(
     visible: list[dict[str, Any]] = []
     tokens = _tokenise(query)
     scored: list[tuple[int, float, Mapping[str, Any]]] = []
+    
+    # Minimum score threshold to filter out weakly related articles
+    # Articles must have meaningful relevance to be included
+    min_score_threshold = 3
+    
     for article in candidates:
         if not article.get("is_published") and not context.is_super_admin:
             continue
         if not _article_visible(article, context):
             continue
         score = _score_article(article, query=query, tokens=tokens)
-        if score <= 0:
+        if score < min_score_threshold:
             continue
         updated = article.get("updated_at_utc") or article.get("updated_at")
         updated_ts = 0.0
