@@ -237,11 +237,10 @@
       // Remove existing grouping
       this.removeGrouping();
 
-      // Get all visible rows (not filtered out)
-      const rows = Array.from(tbody.querySelectorAll('tr:not(.ticket-group-header)'))
-        .filter(row => !row.classList.contains('ticket-filtered-hidden'));
+      // Get ALL rows (including filtered ones) to preserve them
+      const allRows = Array.from(tbody.querySelectorAll('tr:not(.ticket-group-header)'));
       
-      // Group rows by the selected field
+      // Group ALL rows by the selected field (including hidden ones)
       const groups = {};
       const fieldMap = {
         'status': 'Status',
@@ -251,7 +250,7 @@
       };
       const fieldLabel = fieldMap[this.groupingField];
 
-      rows.forEach(row => {
+      allRows.forEach(row => {
         const cell = row.querySelector(`[data-label="${fieldLabel}"]`);
         let groupKey = cell ? (cell.getAttribute('data-value') || cell.textContent.trim()) : 'Unspecified';
         
@@ -266,6 +265,9 @@
       const groupKeys = Object.keys(groups).sort();
 
       groupKeys.forEach(groupKey => {
+        // Count only visible rows for the header
+        const visibleRowsInGroup = groups[groupKey].filter(row => !row.classList.contains('ticket-filtered-hidden'));
+        
         // Create group header row
         const headerRow = document.createElement('tr');
         headerRow.className = 'ticket-group-header';
@@ -281,13 +283,13 @@
               </svg>
             </button>
             <span class="ticket-group-header__title">${groupKey}</span>
-            <span class="ticket-group-header__count">${groups[groupKey].length} ticket${groups[groupKey].length !== 1 ? 's' : ''}</span>
+            <span class="ticket-group-header__count">${visibleRowsInGroup.length} ticket${visibleRowsInGroup.length !== 1 ? 's' : ''}</span>
           </div>
         `;
         headerRow.appendChild(headerCell);
         fragment.appendChild(headerRow);
 
-        // Add rows for this group
+        // Add ALL rows for this group (including filtered ones)
         groups[groupKey].forEach(row => {
           row.setAttribute('data-group', groupKey);
           fragment.appendChild(row);
