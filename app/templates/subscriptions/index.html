@@ -55,7 +55,8 @@
             {% if can_request_changes %}
             <td>
               <div class="button-group">
-                <button type="button" class="button button--small" data-subscription-change="{{ subscription.id }}" data-current-quantity="{{ subscription.quantity }}" data-contract-term="{{ subscription.contract_term or '' }}" data-end-date="{{ subscription.end_date }}">Request change</button>
+                <button type="button" class="button button--small button--success" data-subscription-add="{{ subscription.id }}" data-current-quantity="{{ subscription.quantity }}" data-end-date="{{ subscription.end_date }}">Add licenses</button>
+                <button type="button" class="button button--small button--warning" data-subscription-decrease="{{ subscription.id }}" data-current-quantity="{{ subscription.quantity }}" data-end-date="{{ subscription.end_date }}">Request decrease</button>
               </div>
             </td>
             {% endif %}
@@ -74,26 +75,39 @@
 <dialog id="change-dialog" class="dialog">
   <form method="dialog" class="dialog__container" id="change-form">
     <header class="dialog__header">
-      <h3 class="dialog__title">Request subscription change</h3>
+      <h3 class="dialog__title" id="dialog-title">Modify subscription</h3>
       <button type="button" class="dialog__close" aria-label="Close" data-dialog-close>
         <span aria-hidden="true">&times;</span>
       </button>
     </header>
     <div class="dialog__body">
-      <p id="change-info" class="mb-4"></p>
-      <div class="form-field">
-        <label for="new-quantity" class="form-field__label">New quantity</label>
-        <input type="number" id="new-quantity" name="quantity" class="input" min="0" required />
-        <p class="form-field__hint">Enter the desired quantity for this subscription.</p>
+      <div id="change-info" class="mb-4"></div>
+      
+      <div id="pending-changes-section" style="display: none;" class="mb-4 p-3" style="background-color: #f9fafb; border-radius: 4px; border: 1px solid #e5e7eb;">
+        <h4 class="text-sm font-semibold mb-2">Pending Changes:</h4>
+        <ul id="pending-changes-list" class="text-sm space-y-1"></ul>
       </div>
+      
+      <div id="preview-section" style="display: none;" class="mb-4 p-3" style="background-color: #eff6ff; border-radius: 4px; border: 1px solid #bfdbfe;">
+        <h4 class="text-sm font-semibold mb-2">Change Preview:</h4>
+        <div id="preview-content" class="text-sm space-y-1"></div>
+      </div>
+      
       <div class="form-field">
-        <label for="change-reason" class="form-field__label">Reason (optional)</label>
-        <textarea id="change-reason" name="reason" class="input" rows="3" placeholder="Explain why you need this change..."></textarea>
+        <label for="new-quantity" class="form-field__label">Number of licenses</label>
+        <input type="number" id="new-quantity" name="quantity" class="input" min="1" required />
+        <p class="form-field__hint" id="quantity-hint">Enter the number of licenses to add or remove.</p>
+      </div>
+      
+      <div class="form-field">
+        <label for="change-reason" class="form-field__label">Notes (optional)</label>
+        <textarea id="change-reason" name="reason" class="input" rows="3" placeholder="Add any notes about this change..."></textarea>
       </div>
     </div>
     <footer class="dialog__footer">
       <button type="button" class="button button--secondary" data-dialog-close>Cancel</button>
-      <button type="submit" class="button" id="submit-change">Submit request</button>
+      <button type="button" class="button" id="preview-change-btn">Preview Change</button>
+      <button type="submit" class="button" id="submit-change" style="display: none;">Confirm</button>
     </footer>
   </form>
 </dialog>
@@ -110,11 +124,21 @@
     const toast = document.getElementById('subscription-toast');
     const changeDialog = document.getElementById('change-dialog');
     const changeForm = document.getElementById('change-form');
+    const dialogTitle = document.getElementById('dialog-title');
     const changeInfo = document.getElementById('change-info');
+    const pendingChangesSection = document.getElementById('pending-changes-section');
+    const pendingChangesList = document.getElementById('pending-changes-list');
+    const previewSection = document.getElementById('preview-section');
+    const previewContent = document.getElementById('preview-content');
     const newQuantityInput = document.getElementById('new-quantity');
+    const quantityHint = document.getElementById('quantity-hint');
     const changeReasonInput = document.getElementById('change-reason');
+    const previewButton = document.getElementById('preview-change-btn');
     const submitButton = document.getElementById('submit-change');
+    
     let currentSubscriptionId = null;
+    let currentChangeType = null;
+    let currentPreview = null;
 
     function showToast(message, type = 'info') {
       if (!toast) return;
@@ -152,6 +176,165 @@
       table.tBodies[0].appendChild(fragment);
     }
 
+    async function loadPendingChanges(subscriptionId) {
+      try {
+        const response = await fetch(`/api/v1/subscriptions/${subscriptionId}/pending-changes`, {
+          headers: {
+            'X-CSRF-Token': csrfToken || '',
+          },
+        });
+        
+        if (!response.ok) return [];
+        
+        return await response.json();
+      } catch (err) {
+        console.error('Failed to load pending changes:', err);
+        return [];
+      }
+    }
+
+    async function previewChange() {
+      const quantity = parseInt(newQuantityInput.value, 10);
+      
+      if (isNaN(quantity) || quantity < 1) {
+        showToast('Please enter a valid quantity.', 'error');
+        return;
+      }
+      
+      previewButton.disabled = true;
+      
+      try {
+        const response = await fetch(`/api/v1/subscriptions/${currentSubscriptionId}/preview-change`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken || '',
+          },
+          body: JSON.stringify({ 
+            quantityChange: quantity,
+            changeType: currentChangeType
+          }),
+        });
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || 'Preview failed');
+        }
+        
+        currentPreview = await response.json();
+        displayPreview(currentPreview);
+        
+        submitButton.style.display = 'inline-block';
+      } catch (err) {
+        console.error(err);
+        showToast(err.message || 'Unable to preview change.', 'error');
+      } finally {
+        previewButton.disabled = false;
+      }
+    }
+
+    function displayPreview(preview) {
+      previewSection.style.display = 'block';
+      
+      let html = '<ul class="space-y-1">';
+      html += `<li><strong>Current quantity:</strong> ${preview.currentQuantity}</li>`;
+      
+      if (currentChangeType === 'addition') {
+        html += `<li><strong>Licenses to add:</strong> ${preview.requestedChange}</li>`;
+        html += `<li><strong>Prorated charge:</strong> $${preview.proratedCharge}</li>`;
+        if (preview.proratedExplanation) {
+          html += `<li class="text-xs text-gray-600">${preview.proratedExplanation.formula}</li>`;
+        }
+      } else {
+        html += `<li><strong>Licenses to remove:</strong> ${preview.requestedChange}</li>`;
+        html += `<li><em>No charges for decreases</em></li>`;
+      }
+      
+      if (preview.pendingChangesCount > 0) {
+        html += `<li class="mt-2"><strong>Net change at term end:</strong> ${preview.newNetChange > 0 ? '+' : ''}${preview.newNetChange}</li>`;
+        html += `<li><strong>Quantity at term end:</strong> ${preview.newQuantityAtTermEnd}</li>`;
+        if (preview.newTotalCharges > 0) {
+          html += `<li><strong>Total pending charges:</strong> $${preview.newTotalCharges}</li>`;
+        }
+      } else {
+        if (currentChangeType === 'addition') {
+          html += `<li><strong>New quantity:</strong> ${preview.newQuantityAtTermEnd} (effective immediately)</li>`;
+        } else {
+          html += `<li><strong>Quantity at term end:</strong> ${preview.newQuantityAtTermEnd}</li>`;
+        }
+      }
+      
+      html += `<li class="text-xs text-gray-600 mt-2">Term ends: ${preview.endDate}</li>`;
+      html += '</ul>';
+      
+      previewContent.innerHTML = html;
+    }
+
+    function displayPendingChanges(changes) {
+      if (!changes || changes.length === 0) {
+        pendingChangesSection.style.display = 'none';
+        return;
+      }
+      
+      pendingChangesSection.style.display = 'block';
+      
+      let html = '';
+      for (const change of changes) {
+        const icon = change.changeType === 'addition' ? '➕' : '➖';
+        const chargeInfo = change.proratedCharge ? ` ($${change.proratedCharge})` : '';
+        html += `<li>${icon} ${change.changeType === 'addition' ? 'Add' : 'Remove'} ${change.quantityChange} license(s)${chargeInfo}</li>`;
+      }
+      
+      pendingChangesList.innerHTML = html;
+    }
+
+    async function openAddDialog(subscriptionId, currentQuantity, endDate) {
+      currentSubscriptionId = subscriptionId;
+      currentChangeType = 'addition';
+      currentPreview = null;
+      
+      dialogTitle.textContent = 'Add Licenses';
+      changeInfo.innerHTML = `<p><strong>Current quantity:</strong> ${currentQuantity}</p><p>Adding licenses will be applied immediately with prorated charges based on the remaining term until ${endDate}.</p>`;
+      quantityHint.textContent = 'Enter the number of licenses to add.';
+      newQuantityInput.value = '1';
+      newQuantityInput.min = '1';
+      changeReasonInput.value = '';
+      
+      previewSection.style.display = 'none';
+      submitButton.style.display = 'none';
+      
+      const pendingChanges = await loadPendingChanges(subscriptionId);
+      displayPendingChanges(pendingChanges);
+      
+      if (typeof changeDialog.showModal === 'function') {
+        changeDialog.showModal();
+      }
+    }
+
+    async function openDecreaseDialog(subscriptionId, currentQuantity, endDate) {
+      currentSubscriptionId = subscriptionId;
+      currentChangeType = 'decrease';
+      currentPreview = null;
+      
+      dialogTitle.textContent = 'Request License Decrease';
+      changeInfo.innerHTML = `<p><strong>Current quantity:</strong> ${currentQuantity}</p><p>Decrease requests will be applied at the end of the current term on ${endDate}. No charges will be incurred.</p>`;
+      quantityHint.textContent = 'Enter the number of licenses to remove at term end.';
+      newQuantityInput.value = '1';
+      newQuantityInput.min = '1';
+      newQuantityInput.max = currentQuantity.toString();
+      changeReasonInput.value = '';
+      
+      previewSection.style.display = 'none';
+      submitButton.style.display = 'none';
+      
+      const pendingChanges = await loadPendingChanges(subscriptionId);
+      displayPendingChanges(pendingChanges);
+      
+      if (typeof changeDialog.showModal === 'function') {
+        changeDialog.showModal();
+      }
+    }
+
     if (filterInput) {
       filterInput.addEventListener('input', applyFilter);
     }
@@ -168,29 +351,21 @@
       });
     }
 
-    document.querySelectorAll('[data-subscription-change]').forEach((button) => {
+    document.querySelectorAll('[data-subscription-add]').forEach((button) => {
       button.addEventListener('click', () => {
-        currentSubscriptionId = button.dataset.subscriptionChange;
+        const subscriptionId = button.dataset.subscriptionAdd;
         const currentQuantity = button.dataset.currentQuantity;
-        const contractTerm = button.dataset.contractTerm;
         const endDate = button.dataset.endDate;
-        
-        let infoText = `Current quantity: ${currentQuantity}`;
-        if (contractTerm) {
-          infoText += `\nContract term: ${contractTerm}`;
-        }
-        if (endDate) {
-          infoText += `\nEnd date: ${endDate}`;
-        }
-        infoText += '\n\nNote: Changes to subscriptions may be subject to contract terms and proration.';
-        
-        changeInfo.textContent = infoText;
-        newQuantityInput.value = currentQuantity;
-        changeReasonInput.value = '';
-        
-        if (typeof changeDialog.showModal === 'function') {
-          changeDialog.showModal();
-        }
+        openAddDialog(subscriptionId, currentQuantity, endDate);
+      });
+    });
+
+    document.querySelectorAll('[data-subscription-decrease]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const subscriptionId = button.dataset.subscriptionDecrease;
+        const currentQuantity = button.dataset.currentQuantity;
+        const endDate = button.dataset.endDate;
+        openDecreaseDialog(subscriptionId, currentQuantity, endDate);
       });
     });
 
@@ -202,16 +377,23 @@
       });
     });
 
+    if (previewButton) {
+      previewButton.addEventListener('click', previewChange);
+    }
+
     if (changeForm) {
       changeForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         
-        if (!currentSubscriptionId) return;
+        if (!currentSubscriptionId || !currentPreview) {
+          showToast('Please preview the change first.', 'error');
+          return;
+        }
         
-        const newQuantity = parseInt(newQuantityInput.value, 10);
-        const reason = changeReasonInput.value.trim();
+        const quantity = parseInt(newQuantityInput.value, 10);
+        const notes = changeReasonInput.value.trim();
         
-        if (isNaN(newQuantity) || newQuantity < 0) {
+        if (isNaN(quantity) || quantity < 1) {
           showToast('Please enter a valid quantity.', 'error');
           return;
         }
@@ -219,24 +401,41 @@
         submitButton.disabled = true;
         
         try {
-          const response = await fetch(`/subscriptions/${currentSubscriptionId}/request-change`, {
-            method: 'POST',
+          let endpoint, method, body;
+          
+          if (currentChangeType === 'addition') {
+            endpoint = `/api/v1/subscriptions/${currentSubscriptionId}/add-licenses`;
+            method = 'POST';
+            body = JSON.stringify({ 
+              quantity: quantity,
+              notes: notes || null
+            });
+          } else {
+            endpoint = `/api/v1/subscriptions/${currentSubscriptionId}/request-decrease`;
+            method = 'POST';
+            body = JSON.stringify({ 
+              quantity: quantity,
+              notes: notes || null
+            });
+          }
+          
+          const response = await fetch(endpoint, {
+            method: method,
             headers: {
               'Content-Type': 'application/json',
               'X-CSRF-Token': csrfToken || '',
             },
-            body: JSON.stringify({ 
-              quantity: newQuantity,
-              reason: reason ? reason : null
-            }),
+            body: body,
           });
           
           if (!response.ok) {
-            const text = await response.text();
-            throw new Error(text || 'Request failed');
+            const error = await response.json();
+            throw new Error(error.detail || 'Request failed');
           }
           
-          showToast('Subscription change request submitted successfully.', 'success');
+          const result = await response.json();
+          showToast(result.message || 'Change applied successfully.', 'success');
+          
           if (typeof changeDialog.close === 'function') {
             changeDialog.close();
           }
@@ -245,7 +444,7 @@
           setTimeout(() => window.location.reload(), 1500);
         } catch (err) {
           console.error(err);
-          showToast('Unable to submit subscription change request.', 'error');
+          showToast(err.message || 'Unable to apply change.', 'error');
         } finally {
           submitButton.disabled = false;
         }
