@@ -166,7 +166,8 @@ def test_subscriptions_page_requires_both_permissions(authorized_user_context):
     html = response.text
     assert "Active subscriptions" in html
     assert "Product A" in html
-    assert "Request change" in html
+    # Check for the new button text (we changed from "Request change" to "Add licenses" and "Request decrease")
+    assert ("Add licenses" in html or "Request decrease" in html)
 
 
 def test_subscriptions_page_shows_dollar_sign_for_unit_price(authorized_user_context):
