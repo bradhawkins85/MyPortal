@@ -1099,6 +1099,10 @@ async def update_product(
     price_monthly_commitment: Decimal | None = None,
     price_annual_monthly_payment: Decimal | None = None,
     price_annual_annual_payment: Decimal | None = None,
+    scheduled_price: Decimal | None = None,
+    scheduled_vip_price: Decimal | None = None,
+    scheduled_buy_price: Decimal | None = None,
+    price_change_date: Any | None = None,
 ) -> dict[str, Any] | None:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -1120,7 +1124,16 @@ async def update_product(
                     payment_frequency = %s,
                     price_monthly_commitment = %s,
                     price_annual_monthly_payment = %s,
-                    price_annual_annual_payment = %s
+                    price_annual_annual_payment = %s,
+                    scheduled_price = %s,
+                    scheduled_vip_price = %s,
+                    scheduled_buy_price = %s,
+                    price_change_date = %s,
+                    price_change_notified = CASE
+                        WHEN %s IS NULL THEN 0
+                        WHEN price_change_date <> %s THEN 0
+                        ELSE price_change_notified
+                    END
                 WHERE id = %s
                 """,
                 (
@@ -1139,6 +1152,12 @@ async def update_product(
                     price_monthly_commitment,
                     price_annual_monthly_payment,
                     price_annual_annual_payment,
+                    scheduled_price,
+                    scheduled_vip_price,
+                    scheduled_buy_price,
+                    price_change_date,
+                    price_change_date,
+                    price_change_date,
                     product_id,
                 ),
             )
