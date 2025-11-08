@@ -16,6 +16,7 @@ from app.services import company_access
 from app.services import modules as modules_service
 from app.services.tagging import filter_helpful_texts
 from app.services.realtime import RefreshNotifier, refresh_notifier
+from app.services.knowledge_base_conditionals import process_conditionals, validate_conditional_syntax
 
 PermissionScope = str
 
@@ -42,6 +43,7 @@ _ALLOWED_TAGS: Sequence[str] = (
     "th",
     "td",
     "img",
+    "kb-if",
 )
 
 _ALLOWED_ATTRIBUTES: Mapping[str, Sequence[str]] = {
@@ -50,6 +52,7 @@ _ALLOWED_ATTRIBUTES: Mapping[str, Sequence[str]] = {
     "img": ("src", "alt", "title"),
     "th": ("colspan", "rowspan", "scope"),
     "td": ("colspan", "rowspan", "headers"),
+    "kb-if": ("company",),
 }
 
 _ALLOWED_PROTOCOLS: Sequence[str] = ("http", "https", "mailto")
@@ -89,11 +92,19 @@ def _prepare_sections(
     fallback_title: str | None,
 ) -> tuple[list[dict[str, Any]], str]:
     prepared: list[dict[str, Any]] = []
+    validation_errors: list[str] = []
+    
     if sections:
         for index, section in enumerate(sections, start=1):
             content = section.get("content") or ""
             if not isinstance(content, str):
                 content = str(content)
+            
+            # Validate conditional syntax before sanitizing
+            errors = validate_conditional_syntax(content)
+            if errors:
+                validation_errors.extend([f"Section {index}: {err}" for err in errors])
+            
             content = _sanitise_html(content)
             heading = section.get("heading")
             heading_text = str(heading).strip() if isinstance(heading, str) else ""
@@ -109,6 +120,12 @@ def _prepare_sections(
                 }
             )
     if not prepared and fallback_content:
+        # Validate fallback content as well
+        if fallback_content:
+            errors = validate_conditional_syntax(str(fallback_content))
+            if errors:
+                validation_errors.extend(errors)
+        
         content = _sanitise_html(str(fallback_content))
         heading_text = (fallback_title or "").strip()
         prepared.append(
@@ -118,6 +135,11 @@ def _prepare_sections(
                 "position": 1,
             }
         )
+    
+    # Raise an error if there are validation issues
+    if validation_errors:
+        raise ValueError("Conditional syntax errors: " + "; ".join(validation_errors))
+    
     combined = _combine_sections_html(prepared)
     return prepared, combined
 
@@ -369,11 +391,31 @@ def _article_visible(article: Mapping[str, Any], context: ArticleAccessContext) 
     return False
 
 
+def _get_primary_company_name(context: ArticleAccessContext) -> str | None:
+    """Get the primary company name for the user context.
+    
+    Returns the name of the first company in the user's memberships,
+    or None if the user has no company memberships.
+    """
+    if not context.memberships:
+        return None
+    
+    # Get the first company from memberships
+    # Memberships are stored as {company_id: membership_data}
+    for membership in context.memberships.values():
+        company_name = membership.get("company_name")
+        if company_name:
+            return str(company_name)
+    
+    return None
+
+
 def _serialise_article(
     article: Mapping[str, Any],
     *,
     include_content: bool,
     include_permissions: bool,
+    context: ArticleAccessContext | None = None,
 ) -> dict[str, Any]:
     base = {
         "id": int(article.get("id")),
@@ -396,11 +438,21 @@ def _serialise_article(
         "created_at": article.get("created_at_utc"),
         "created_at_iso": _isoformat(article.get("created_at_utc")),
     }
+    
+    # Determine company name for conditional processing
+    company_name = _get_primary_company_name(context) if context else None
+    
     sections_payload = article.get("sections") or []
     serialised_sections: list[dict[str, Any]] = []
     for index, section in enumerate(sections_payload, start=1):
         content = section.get("content") or ""
         heading = section.get("heading")
+        
+        # Process conditional blocks in section content
+        if content and not include_permissions:
+            # Only process conditionals for end-user views, not for admin editing
+            content = process_conditionals(content, company_name=company_name)
+        
         serialised_sections.append(
             {
                 "position": section.get("position") or index,
@@ -413,6 +465,10 @@ def _serialise_article(
         article_content = article.get("content")
         if not article_content and serialised_sections:
             article_content = _combine_sections_html(serialised_sections)
+        else:
+            # Process conditionals in the combined content as well
+            if article_content and not include_permissions:
+                article_content = process_conditionals(article_content, company_name=company_name)
         base["content"] = article_content or ""
     if include_permissions:
         base.update(
@@ -441,6 +497,7 @@ async def list_articles_for_context(
                         article,
                         include_content=False,
                         include_permissions=include_permissions,
+                        context=context,
                     )
                 )
         elif include_permissions and context.is_super_admin:
@@ -449,6 +506,7 @@ async def list_articles_for_context(
                     article,
                     include_content=False,
                     include_permissions=True,
+                    context=context,
                 )
             )
     return visible
@@ -472,6 +530,7 @@ async def get_article_by_slug_for_context(
         article,
         include_content=True,
         include_permissions=include_permissions,
+        context=context,
     )
 
 
