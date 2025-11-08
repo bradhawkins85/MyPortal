@@ -2,17 +2,6 @@
 
 {% block content %}
   <div data-company-id="{{ company.id }}">
-  {% if error_message or success_message %}
-    <div class="stacked" style="margin-bottom: 1.5rem; gap: 1rem;">
-      {% if success_message %}
-        <div class="alert" role="status">{{ success_message }}</div>
-      {% endif %}
-      {% if error_message %}
-        <div class="alert alert--error" role="alert">{{ error_message }}</div>
-      {% endif %}
-    </div>
-  {% endif %}
-
   <div class="admin-grid admin-grid--columns">
     <section class="card card--panel admin-grid__full">
       <header class="card__header card__header--actions">
