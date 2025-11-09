@@ -10,6 +10,7 @@ from loguru import logger
 
 from app.repositories import call_recordings as call_recordings_repo
 from app.repositories import integration_modules as modules_repo
+from app.services import webhook_monitor
 
 
 _AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac"}
@@ -309,16 +310,55 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
         transcription_status="processing",
     )
 
+    # Prepare webhook event
+    file_path = recording["file_path"]
+    target_url = f"{base_url.rstrip('/')}/asr"
+    
+    # Log the transcription attempt
+    logger.info(
+        "Starting transcription for recording {}: file={}, url={}",
+        recording_id,
+        recording["file_name"],
+        target_url,
+    )
+
+    # Create webhook event for tracking
+    webhook_event = None
+    try:
+        webhook_event = await webhook_monitor.create_manual_event(
+            name=f"whisperx_transcription_{recording_id}",
+            target_url=target_url,
+            payload={
+                "recording_id": recording_id,
+                "file_name": recording["file_name"],
+                "file_path": file_path,
+                "language": settings.get("language"),
+            },
+            headers={"Content-Type": "multipart/form-data"},
+            max_attempts=1,
+        )
+        webhook_event_id = webhook_event.get("id") if webhook_event else None
+        logger.debug(f"Created webhook event {webhook_event_id} for transcription tracking")
+    except Exception as exc:
+        logger.warning(f"Failed to create webhook event for transcription tracking: {exc}")
+        webhook_event_id = None
+
     try:
         # Call WhisperX API
         headers = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            # Read the audio file and prepare for upload
-            file_path = recording["file_path"]
+        # Log request details (redact authorization header)
+        safe_headers = {k: ("***REDACTED***" if k.lower() == "authorization" else v) for k, v in headers.items()}
+        logger.debug(
+            "WhisperX API request: url={}, headers={}, language={}",
+            target_url,
+            safe_headers,
+            settings.get("language"),
+        )
 
+        async with httpx.AsyncClient(timeout=300.0) as client:
             # Open and read the file
             try:
                 with open(file_path, "rb") as audio_file:
@@ -329,35 +369,106 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                     if settings.get("language"):
                         data["language"] = settings.get("language")
 
+                    logger.debug(f"Sending audio file to WhisperX: size={Path(file_path).stat().st_size} bytes")
+                    
                     response = await client.post(
-                        f"{base_url.rstrip('/')}/asr",
+                        target_url,
                         files=files,
                         data=data if data else None,
                         headers=headers,
                     )
+                    
+                    # Log response details
+                    logger.info(
+                        "WhisperX API response: status={}, content_length={}",
+                        response.status_code,
+                        len(response.content),
+                    )
+                    
                     response.raise_for_status()
+                    
                     try:
                         result = response.json()
+                        logger.debug(f"WhisperX response body: {result}")
                     except ValueError as exc:
+                        error_message = f"Invalid JSON response: {response.text[:500]}"
                         logger.error(
                             "Invalid JSON response while transcribing recording {}: {}",
                             recording_id,
-                            response.text,
+                            response.text[:500],
                         )
+                        
+                        # Record webhook failure
+                        if webhook_event_id:
+                            try:
+                                await webhook_monitor.record_manual_failure(
+                                    webhook_event_id,
+                                    attempt_number=1,
+                                    status="failed",
+                                    error_message=error_message,
+                                    response_status=response.status_code,
+                                    response_body=response.text[:4000],
+                                    request_headers=safe_headers,
+                                    request_body={"file_name": recording["file_name"]},
+                                    response_headers=dict(response.headers),
+                                )
+                            except Exception as webhook_exc:
+                                logger.warning(f"Failed to record webhook failure: {webhook_exc}")
+                        
                         await call_recordings_repo.update_call_recording(
                             recording_id,
                             transcription_status="failed",
                         )
                         raise ValueError("Invalid response from transcription service") from exc
+                        
             except FileNotFoundError:
-                logger.error(f"Audio file not found: {file_path}")
+                error_message = f"Audio file not found: {file_path}"
+                logger.error(error_message)
+                
+                # Record webhook failure
+                if webhook_event_id:
+                    try:
+                        await webhook_monitor.record_manual_failure(
+                            webhook_event_id,
+                            attempt_number=1,
+                            status="error",
+                            error_message=error_message,
+                            response_status=None,
+                            response_body=None,
+                            request_headers=safe_headers,
+                            request_body={"file_path": file_path},
+                        )
+                    except Exception as webhook_exc:
+                        logger.warning(f"Failed to record webhook failure: {webhook_exc}")
+                
                 await call_recordings_repo.update_call_recording(
                     recording_id,
                     transcription_status="failed",
                 )
-                raise ValueError(f"Audio file not found: {file_path}")
+                raise ValueError(error_message)
 
             transcription = result.get("text", "")
+            
+            logger.info(
+                "Transcription completed for recording {}: length={}",
+                recording_id,
+                len(transcription),
+            )
+
+            # Record webhook success
+            if webhook_event_id:
+                try:
+                    await webhook_monitor.record_manual_success(
+                        webhook_event_id,
+                        attempt_number=1,
+                        response_status=response.status_code,
+                        response_body=json.dumps(result)[:4000],
+                        request_headers=safe_headers,
+                        request_body={"file_name": recording["file_name"]},
+                        response_headers=dict(response.headers),
+                    )
+                except Exception as webhook_exc:
+                    logger.warning(f"Failed to record webhook success: {webhook_exc}")
 
             # Update recording with transcription
             updated = await call_recordings_repo.update_call_recording(
@@ -369,15 +480,71 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
             logger.info(f"Successfully transcribed recording {recording_id}")
             return updated
 
+    except ValueError as e:
+        # ValueError is raised for known errors (file not found, invalid JSON)
+        # These have already been logged and webhook recorded, so just re-raise
+        raise
     except httpx.HTTPError as e:
-        logger.error(f"Failed to transcribe recording {recording_id}: {e}")
+        error_message = f"HTTP error during transcription: {str(e)}"
+        logger.error(f"Failed to transcribe recording {recording_id}: {error_message}")
+        
+        # Extract response details if available
+        response_status = None
+        response_body = None
+        response_headers = None
+        if hasattr(e, "response") and e.response is not None:
+            response_status = e.response.status_code
+            response_body = e.response.text[:4000]
+            response_headers = dict(e.response.headers)
+            logger.error(
+                "WhisperX error response: status={}, body={}",
+                response_status,
+                response_body[:500],
+            )
+        
+        # Record webhook failure
+        if webhook_event_id:
+            try:
+                await webhook_monitor.record_manual_failure(
+                    webhook_event_id,
+                    attempt_number=1,
+                    status="failed",
+                    error_message=error_message,
+                    response_status=response_status,
+                    response_body=response_body,
+                    request_headers=safe_headers,
+                    request_body={"file_name": recording["file_name"]},
+                    response_headers=response_headers,
+                )
+            except Exception as webhook_exc:
+                logger.warning(f"Failed to record webhook failure: {webhook_exc}")
+        
         await call_recordings_repo.update_call_recording(
             recording_id,
             transcription_status="failed",
         )
         raise ValueError(f"Failed to transcribe recording: {e}")
+        
     except Exception as e:
-        logger.error(f"Unexpected error transcribing recording {recording_id}: {e}")
+        error_message = f"Unexpected error: {str(e)}"
+        logger.error(f"Unexpected error transcribing recording {recording_id}: {error_message}")
+        
+        # Record webhook failure
+        if webhook_event_id:
+            try:
+                await webhook_monitor.record_manual_failure(
+                    webhook_event_id,
+                    attempt_number=1,
+                    status="error",
+                    error_message=error_message,
+                    response_status=None,
+                    response_body=None,
+                    request_headers=safe_headers,
+                    request_body={"file_name": recording["file_name"]},
+                )
+            except Exception as webhook_exc:
+                logger.warning(f"Failed to record webhook failure: {webhook_exc}")
+        
         await call_recordings_repo.update_call_recording(
             recording_id,
             transcription_status="failed",
