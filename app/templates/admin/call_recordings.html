@@ -85,14 +85,14 @@
 
         <!-- Recordings Table -->
         <div class="data-table-wrapper">
-          <table class="data-table" id="recordings-table">
+          <table class="data-table" id="recordings-table" data-table>
             <thead>
               <tr>
-                <th>Date/Time</th>
-                <th>Phone Number</th>
-                <th>Duration</th>
-                <th>Transcription Status</th>
-                <th>Linked Ticket</th>
+                <th data-sort="date">Date/Time</th>
+                <th data-sort="string">Phone Number</th>
+                <th data-sort="number">Duration</th>
+                <th data-sort="string">Transcription Status</th>
+                <th data-sort="string">Linked Ticket</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -177,6 +177,21 @@
     let currentStatusFilter = '';
     let currentLinkedFilter = '';
 
+    // Format date as yyyy-mm-dd hh:MM
+    function formatDateTime(dateString) {
+      if (!dateString) return 'N/A';
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return 'N/A';
+      
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      
+      return `${year}-${month}-${day} ${hours}:${minutes}`;
+    }
+
     // Load recordings
     async function loadRecordings() {
       const tbody = document.getElementById('recordings-tbody');
@@ -222,20 +237,23 @@
               }
             }
             
-            const date = rec.call_date ? new Date(rec.call_date).toLocaleString() : 'N/A';
+            const date = formatDateTime(rec.call_date);
+            const dateValue = rec.call_date || '';
             const duration = rec.duration_seconds ? `${Math.floor(rec.duration_seconds / 60)}:${String(rec.duration_seconds % 60).padStart(2, '0')}` : 'N/A';
+            const durationValue = rec.duration_seconds || 0;
             const statusBadge = getStatusBadge(rec.transcription_status);
             const linkedTicket = rec.linked_ticket_number 
               ? `<a href="/admin/tickets/${rec.linked_ticket_id}" class="link">#${rec.linked_ticket_number}</a>` 
               : '<span class="text-muted">—</span>';
+            const linkedTicketValue = rec.linked_ticket_number || '';
 
             return `
               <tr>
-                <td>${date}</td>
-                <td>${displayName}</td>
-                <td>${duration}</td>
-                <td>${statusBadge}</td>
-                <td>${linkedTicket}</td>
+                <td data-value="${dateValue}">${date}</td>
+                <td data-value="${displayName}">${displayName}</td>
+                <td data-value="${durationValue}">${duration}</td>
+                <td data-value="${rec.transcription_status || ''}">${statusBadge}</td>
+                <td data-value="${linkedTicketValue}">${linkedTicket}</td>
                 <td>
                   <div class="button-group button-group--compact">
                     ${rec.transcription ? `<button class="button button--ghost button--small" onclick="viewTranscript(${rec.id})">View</button>` : ''}
@@ -256,6 +274,12 @@
         document.getElementById('page-info').textContent = `Page ${currentPage}`;
         document.getElementById('prev-page').disabled = currentPage <= 1;
         document.getElementById('next-page').disabled = recordings.length < pageSize;
+        
+        // Trigger table update event for sorting/filtering to re-attach
+        const table = document.getElementById('recordings-table');
+        if (table) {
+          table.dispatchEvent(new CustomEvent('table:rows-updated'));
+        }
       } catch (error) {
         console.error('Error loading recordings:', error);
         tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Error loading recordings</td></tr>';
@@ -291,7 +315,7 @@
           staffName = `${recording.callee_first_name} ${recording.callee_last_name}`;
         }
         
-        const date = new Date(recording.call_date).toLocaleString();
+        const date = formatDateTime(recording.call_date);
         const phoneNumber = recording.phone_number_e164 || recording.phone_number || 'Unknown';
         
         info.innerHTML = `
@@ -579,6 +603,28 @@
       color: #f9fafb;
     }
 
+    /* Ensure modal header elements are white */
+    #transcript-modal .modal__title,
+    #link-ticket-modal .modal__title {
+      color: #ffffff;
+    }
+
+    #transcript-modal .modal__close,
+    #link-ticket-modal .modal__close {
+      color: #ffffff;
+    }
+
+    #transcript-modal .modal__close:hover,
+    #link-ticket-modal .modal__close:hover {
+      color: #e5e7eb;
+      opacity: 0.8;
+    }
+
+    #transcript-modal .modal__close svg,
+    #link-ticket-modal .modal__close svg {
+      fill: currentColor;
+    }
+
     .divider {
       text-align: center;
       margin: 1rem 0;
@@ -669,4 +715,7 @@
       }
     }
   </style>
+
+  <!-- Load tables.js for sorting and filtering functionality -->
+  <script src="/static/js/tables.js"></script>
 {% endblock %}
