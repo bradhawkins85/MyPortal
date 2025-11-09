@@ -27,6 +27,7 @@ from app.repositories import companies as company_repo
 from app.repositories import integration_modules as module_repo
 from app.repositories import webhook_events as webhook_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
+from app.services import call_recordings as call_recordings_service
 from app.services import email as email_service, webhook_monitor
 from app.services.realtime import RefreshNotifier, refresh_notifier
 from app.services import tickets as tickets_service
@@ -2116,16 +2117,42 @@ async def _validate_call_recordings(
     *,
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
-    """Validate call-recordings module configuration.
-    
-    Returns a status object indicating the configured recordings path.
-    """
-    recordings_path = str(settings.get("recordings_path") or "").strip()
-    return {
-        "status": "ok",
-        "recordings_path": recordings_path or "/var/lib/myportal/call_recordings",
-        "has_recordings_path": bool(recordings_path),
-    }
+    """Validate configuration and synchronise recordings from disk."""
+    configured_path = str(settings.get("recordings_path") or "").strip()
+    override_path = str(payload.get("path") or payload.get("recordings_path") or "").strip()
+    recordings_path = override_path or configured_path
+
+    if not recordings_path:
+        return {
+            "status": "skipped",
+            "recordings_path": "/var/lib/myportal/call_recordings",
+            "has_recordings_path": False,
+            "message": "No recordings path configured",
+        }
+
+    try:
+        sync_result = await call_recordings_service.sync_recordings_from_filesystem(recordings_path)
+        return {
+            **sync_result,
+            "recordings_path": recordings_path,
+            "has_recordings_path": True,
+        }
+    except FileNotFoundError as exc:
+        logger.error("Recordings path does not exist", path=recordings_path)
+        return {
+            "status": "error",
+            "recordings_path": recordings_path,
+            "has_recordings_path": False,
+            "error": str(exc),
+        }
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("Failed to synchronise call recordings", path=recordings_path)
+        return {
+            "status": "error",
+            "recordings_path": recordings_path,
+            "has_recordings_path": True,
+            "error": str(exc),
+        }
 
 
 async def _discover_xero_tenant_id(
