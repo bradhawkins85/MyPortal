@@ -1,6 +1,7 @@
 """Tests for call recordings functionality."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -375,7 +376,7 @@ async def test_call_recording_response_schema():
 async def test_call_recording_create_schema():
     """Test CallRecordingCreate schema with aliases."""
     from app.schemas.call_recordings import CallRecordingCreate
-    
+
     data = {
         "filePath": "/recordings/test.wav",
         "fileName": "test.wav",
@@ -384,10 +385,90 @@ async def test_call_recording_create_schema():
         "callDate": datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc),
         "durationSeconds": 300,
     }
-    
+
     schema = CallRecordingCreate.model_validate(data)
-    
+
     assert schema.file_path == "/recordings/test.wav"
     assert schema.file_name == "test.wav"
     assert schema.caller_number == "+1234567890"
     assert schema.duration_seconds == 300
+
+
+@pytest.mark.asyncio
+async def test_sync_recordings_from_filesystem_creates_records(tmp_path):
+    """The sync helper should create new call recording entries from metadata files."""
+    from app.services import call_recordings as service
+    from app.repositories import call_recordings as repo
+
+    audio_path = tmp_path / "call1.wav"
+    audio_path.write_bytes(b"fake audio")
+    metadata = {
+        "callDate": "2024-01-15T10:30:00Z",
+        "caller_number": "+123456789",
+        "callee_number": "+987654321",
+        "duration_seconds": "300",
+        "transcription": "Call transcript",
+        "transcription_status": "completed",
+    }
+    (tmp_path / "call1.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    with patch.object(repo, "get_call_recording_by_file_path", new_callable=AsyncMock) as mock_get, \
+         patch.object(repo, "create_call_recording", new_callable=AsyncMock) as mock_create, \
+         patch.object(repo, "update_call_recording", new_callable=AsyncMock) as mock_update:
+        mock_get.return_value = None
+        mock_create.return_value = {"id": 1}
+
+        result = await service.sync_recordings_from_filesystem(str(tmp_path))
+
+        assert result["created"] == 1
+        assert result["updated"] == 0
+        mock_update.assert_not_called()
+        assert mock_create.await_count == 1
+
+        call_kwargs = mock_create.await_args.kwargs
+        assert call_kwargs["file_path"] == str(audio_path)
+        assert call_kwargs["file_name"] == "call1.wav"
+        assert call_kwargs["caller_number"] == "+123456789"
+        assert call_kwargs["callee_number"] == "+987654321"
+        assert call_kwargs["duration_seconds"] == 300
+        assert call_kwargs["transcription"] == "Call transcript"
+        assert call_kwargs["transcription_status"] == "completed"
+        assert isinstance(call_kwargs["call_date"], datetime)
+
+
+@pytest.mark.asyncio
+async def test_sync_recordings_from_filesystem_updates_existing(tmp_path):
+    """Existing recordings should be updated when transcripts are discovered."""
+    from app.services import call_recordings as service
+    from app.repositories import call_recordings as repo
+
+    audio_path = tmp_path / "call2.wav"
+    audio_path.write_bytes(b"fake audio")
+    (tmp_path / "call2.txt").write_text("Fresh transcript", encoding="utf-8")
+
+    existing = {"id": 42, "transcription": None, "transcription_status": "pending"}
+
+    with patch.object(repo, "get_call_recording_by_file_path", new_callable=AsyncMock) as mock_get, \
+         patch.object(repo, "create_call_recording", new_callable=AsyncMock) as mock_create, \
+         patch.object(repo, "update_call_recording", new_callable=AsyncMock) as mock_update:
+        mock_get.return_value = existing
+
+        result = await service.sync_recordings_from_filesystem(str(tmp_path))
+
+        assert result["updated"] == 1
+        mock_create.assert_not_called()
+        mock_update.assert_awaited_once_with(
+            42,
+            transcription="Fresh transcript",
+            transcription_status="completed",
+        )
+
+
+@pytest.mark.asyncio
+async def test_sync_recordings_from_filesystem_missing_path(tmp_path):
+    """A missing recordings path should raise FileNotFoundError."""
+    from app.services import call_recordings as service
+
+    missing = tmp_path / "does-not-exist"
+    with pytest.raises(FileNotFoundError):
+        await service.sync_recordings_from_filesystem(str(missing))
