@@ -222,6 +222,130 @@ async def test_summarize_transcription():
 
 
 @pytest.mark.asyncio
+async def test_transcribe_recording_with_file_upload():
+    """Test transcribing a call recording with file upload to /asr endpoint."""
+    from app.services import call_recordings as service
+    from app.repositories import call_recordings as call_recordings_repo
+    from app.repositories import integration_modules as modules_repo
+    import tempfile
+    import os
+    
+    # Create a temporary audio file for testing
+    with tempfile.NamedTemporaryFile(mode='wb', suffix='.wav', delete=False) as tmp_file:
+        tmp_file.write(b"fake audio data")
+        temp_audio_path = tmp_file.name
+    
+    try:
+        recording = {
+            "id": 1,
+            "file_path": temp_audio_path,
+            "file_name": "test_call.wav",
+            "transcription": None,
+            "transcription_status": "pending",
+        }
+        
+        with patch.object(call_recordings_repo, "get_call_recording_by_id", new_callable=AsyncMock) as mock_get, \
+             patch.object(modules_repo, "get_module", new_callable=AsyncMock) as mock_get_module, \
+             patch.object(call_recordings_repo, "update_call_recording", new_callable=AsyncMock) as mock_update, \
+             patch("httpx.AsyncClient") as mock_client_class:
+            
+            # Mock the recording lookup
+            mock_get.return_value = recording
+            
+            # Mock WhisperX module settings
+            mock_get_module.return_value = {
+                "slug": "whisperx",
+                "enabled": True,
+                "settings": {
+                    "base_url": "http://localhost:9000",
+                    "api_key": "test-api-key",
+                    "language": "en",
+                },
+            }
+            
+            # Mock httpx client response
+            mock_response = MagicMock()
+            mock_response.json.return_value = {"text": "This is a transcribed text from the audio file."}
+            mock_response.raise_for_status = MagicMock()
+            
+            mock_client = MagicMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value = mock_client
+            
+            # Mock the update to return completed recording
+            mock_update.return_value = {
+                **recording,
+                "transcription": "This is a transcribed text from the audio file.",
+                "transcription_status": "completed",
+            }
+            
+            # Call the transcribe function
+            result = await service.transcribe_recording(1, force=False)
+            
+            # Verify the result
+            assert result["transcription"] == "This is a transcribed text from the audio file."
+            assert result["transcription_status"] == "completed"
+            
+            # Verify the API was called correctly
+            mock_client.post.assert_called_once()
+            call_args = mock_client.post.call_args
+            
+            # Verify endpoint is /asr
+            assert call_args[0][0] == "http://localhost:9000/asr"
+            
+            # Verify files were passed
+            assert "files" in call_args[1]
+            
+            # Verify authorization header
+            assert "headers" in call_args[1]
+            assert call_args[1]["headers"]["Authorization"] == "Bearer test-api-key"
+            
+    finally:
+        # Clean up temp file
+        if os.path.exists(temp_audio_path):
+            os.unlink(temp_audio_path)
+
+
+@pytest.mark.asyncio
+async def test_transcribe_recording_file_not_found():
+    """Test transcription handling when audio file doesn't exist."""
+    from app.services import call_recordings as service
+    from app.repositories import call_recordings as call_recordings_repo
+    from app.repositories import integration_modules as modules_repo
+    
+    recording = {
+        "id": 1,
+        "file_path": "/nonexistent/path/audio.wav",
+        "file_name": "audio.wav",
+        "transcription": None,
+        "transcription_status": "pending",
+    }
+    
+    with patch.object(call_recordings_repo, "get_call_recording_by_id", new_callable=AsyncMock) as mock_get, \
+         patch.object(modules_repo, "get_module", new_callable=AsyncMock) as mock_get_module, \
+         patch.object(call_recordings_repo, "update_call_recording", new_callable=AsyncMock) as mock_update:
+        
+        mock_get.return_value = recording
+        
+        mock_get_module.return_value = {
+            "slug": "whisperx",
+            "enabled": True,
+            "settings": {
+                "base_url": "http://localhost:9000",
+            },
+        }
+        
+        # Should raise ValueError for file not found
+        with pytest.raises(ValueError, match="Audio file not found"):
+            await service.transcribe_recording(1, force=False)
+        
+        # Verify status was updated to failed
+        mock_update.assert_called_with(1, transcription_status="failed")
+
+
+@pytest.mark.asyncio
 async def test_call_recording_response_schema():
     """Test CallRecordingResponse schema validation."""
     from app.schemas.call_recordings import CallRecordingResponse
