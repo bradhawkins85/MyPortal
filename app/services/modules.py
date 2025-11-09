@@ -496,6 +496,15 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "icon": "✓",
         "settings": {},
     },
+    {
+        "slug": "call-recordings",
+        "name": "Call Recordings",
+        "description": "Configure the storage location for call recording files. Set the base directory path where recording files should be stored or retrieved.",
+        "icon": "📞",
+        "settings": {
+            "recordings_path": "/var/lib/myportal/call_recordings",
+        },
+    },
 ]
 
 
@@ -793,6 +802,7 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "uptimekuma",     # Uptime Kuma - removed from trigger actions  
     "syncro",         # Syncro - removed from trigger actions
     "chatgpt-mcp",    # ChatGPT MCP - removed from trigger actions
+    "call-recordings", # Call Recordings - configuration only, not an action module
 }
 
 
@@ -872,6 +882,7 @@ async def trigger_module(
         "sms-gateway": _invoke_sms_gateway,
         "create-ticket": _invoke_create_ticket,
         "create-task": _invoke_create_task,
+        "call-recordings": _validate_call_recordings,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -2096,6 +2107,24 @@ async def _validate_uptimekuma(
     return {
         "status": "ok",
         "has_shared_secret": bool(shared_secret_hash),
+    }
+
+
+async def _validate_call_recordings(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Validate call-recordings module configuration.
+    
+    Returns a status object indicating the configured recordings path.
+    """
+    recordings_path = str(settings.get("recordings_path") or "").strip()
+    return {
+        "status": "ok",
+        "recordings_path": recordings_path or "/var/lib/myportal/call_recordings",
+        "has_recordings_path": bool(recordings_path),
     }
 
 
