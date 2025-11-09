@@ -174,9 +174,13 @@
         if (currentLinkedFilter) params.append('linkedTicketId', currentLinkedFilter);
 
         const response = await fetch(`/api/call-recordings?${params}`);
-        if (!response.ok) throw new Error('Failed to load recordings');
+        if (!response.ok) {
+          console.error('API error:', response.status, response.statusText);
+          throw new Error(`Failed to load recordings: ${response.status} ${response.statusText}`);
+        }
         
         const recordings = await response.json();
+        console.log('Loaded recordings:', recordings.length);
         
         if (recordings.length === 0) {
           tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No recordings found</td></tr>';
@@ -184,38 +188,48 @@
         }
 
         tbody.innerHTML = recordings.map(rec => {
-          const caller = rec.caller_first_name 
-            ? `${rec.caller_first_name} ${rec.caller_last_name}` 
-            : rec.caller_number || 'Unknown';
-          const callee = rec.callee_first_name 
-            ? `${rec.callee_first_name} ${rec.callee_last_name}` 
-            : rec.callee_number || 'Unknown';
-          const date = new Date(rec.call_date).toLocaleString();
-          const duration = rec.duration_seconds ? `${Math.floor(rec.duration_seconds / 60)}:${String(rec.duration_seconds % 60).padStart(2, '0')}` : 'N/A';
-          const statusBadge = getStatusBadge(rec.transcription_status);
-          const linkedTicket = rec.linked_ticket_number 
-            ? `<a href="/admin/tickets/${rec.linked_ticket_id}" class="link">#${rec.linked_ticket_number}</a>` 
-            : '<span class="text-muted">—</span>';
+          try {
+            const caller = rec.caller_first_name 
+              ? `${rec.caller_first_name} ${rec.caller_last_name}` 
+              : rec.caller_number || 'Unknown';
+            const callee = rec.callee_first_name 
+              ? `${rec.callee_first_name} ${rec.callee_last_name}` 
+              : rec.callee_number || 'Unknown';
+            const date = rec.call_date ? new Date(rec.call_date).toLocaleString() : 'N/A';
+            const duration = rec.duration_seconds ? `${Math.floor(rec.duration_seconds / 60)}:${String(rec.duration_seconds % 60).padStart(2, '0')}` : 'N/A';
+            const statusBadge = getStatusBadge(rec.transcription_status);
+            const linkedTicket = rec.linked_ticket_number 
+              ? `<a href="/admin/tickets/${rec.linked_ticket_id}" class="link">#${rec.linked_ticket_number}</a>` 
+              : '<span class="text-muted">—</span>';
 
-          return `
-            <tr>
-              <td>${date}</td>
-              <td>${caller}</td>
-              <td>${callee}</td>
-              <td>${duration}</td>
-              <td>${statusBadge}</td>
-              <td>${linkedTicket}</td>
-              <td>
-                <div class="button-group button-group--compact">
-                  ${rec.transcription ? `<button class="button button--ghost button--small" onclick="viewTranscript(${rec.id})">View</button>` : ''}
-                  ${rec.transcription && !rec.linked_ticket_id ? `<button class="button button--primary button--small" onclick="createTicket(${rec.id})">Create Ticket</button>` : ''}
-                  ${!rec.linked_ticket_id ? `<button class="button button--ghost button--small" onclick="linkToTicket(${rec.id})">Link</button>` : ''}
-                  ${rec.transcription_status !== 'completed' ? `<button class="button button--ghost button--small" onclick="transcribe(${rec.id})">Transcribe</button>` : ''}
-                </div>
-              </td>
-            </tr>
-          `;
+            return `
+              <tr>
+                <td>${date}</td>
+                <td>${caller}</td>
+                <td>${callee}</td>
+                <td>${duration}</td>
+                <td>${statusBadge}</td>
+                <td>${linkedTicket}</td>
+                <td>
+                  <div class="button-group button-group--compact">
+                    ${rec.transcription ? `<button class="button button--ghost button--small" onclick="viewTranscript(${rec.id})">View</button>` : ''}
+                    ${rec.transcription && !rec.linked_ticket_id ? `<button class="button button--primary button--small" onclick="createTicket(${rec.id})">Create Ticket</button>` : ''}
+                    ${!rec.linked_ticket_id ? `<button class="button button--ghost button--small" onclick="linkToTicket(${rec.id})">Link</button>` : ''}
+                    ${rec.transcription_status !== 'completed' ? `<button class="button button--ghost button--small" onclick="transcribe(${rec.id})">Transcribe</button>` : ''}
+                  </div>
+                </td>
+              </tr>
+            `;
+          } catch (err) {
+            console.error('Error rendering recording row:', rec, err);
+            return `<tr><td colspan="7" class="text-center text-danger">Error rendering recording ID ${rec.id || 'unknown'}</td></tr>`;
+          }
         }).join('');
+        
+        // Update pagination info
+        document.getElementById('page-info').textContent = `Page ${currentPage}`;
+        document.getElementById('prev-page').disabled = currentPage <= 1;
+        document.getElementById('next-page').disabled = recordings.length < pageSize;
       } catch (error) {
         console.error('Error loading recordings:', error);
         tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Error loading recordings</td></tr>';
