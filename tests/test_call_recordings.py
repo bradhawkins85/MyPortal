@@ -539,3 +539,111 @@ async def test_sync_recordings_from_filesystem_missing_path(tmp_path):
     missing = tmp_path / "does-not-exist"
     with pytest.raises(FileNotFoundError):
         await service.sync_recordings_from_filesystem(str(missing))
+
+
+@pytest.mark.asyncio
+async def test_sync_recordings_preserves_processing_status(tmp_path):
+    """Sync should not override 'processing' status when no new transcription is found."""
+    from app.services import call_recordings as service
+    from app.repositories import call_recordings as repo
+
+    audio_path = tmp_path / "call3.wav"
+    audio_path.write_bytes(b"fake audio")
+    
+    # Create metadata file with "pending" status
+    metadata = {
+        "transcription_status": "pending",
+    }
+    (tmp_path / "call3.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    # Existing recording has "processing" status (transcription in progress)
+    existing = {
+        "id": 99,
+        "transcription": None,
+        "transcription_status": "processing",
+    }
+
+    with patch.object(repo, "get_call_recording_by_file_path", new_callable=AsyncMock) as mock_get, \
+         patch.object(repo, "create_call_recording", new_callable=AsyncMock) as mock_create, \
+         patch.object(repo, "update_call_recording", new_callable=AsyncMock) as mock_update:
+        mock_get.return_value = existing
+
+        result = await service.sync_recordings_from_filesystem(str(tmp_path))
+
+        # Should skip the update entirely - no new transcription data
+        assert result["skipped"] == 1
+        assert result["updated"] == 0
+        mock_create.assert_not_called()
+        mock_update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_recordings_preserves_completed_status(tmp_path):
+    """Sync should not override 'completed' status when no new transcription is found."""
+    from app.services import call_recordings as service
+    from app.repositories import call_recordings as repo
+
+    audio_path = tmp_path / "call4.wav"
+    audio_path.write_bytes(b"fake audio")
+    
+    # Create metadata file with "pending" status
+    metadata = {
+        "transcription_status": "pending",
+    }
+    (tmp_path / "call4.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    # Existing recording has "completed" status with transcription
+    existing = {
+        "id": 100,
+        "transcription": "This is already transcribed text.",
+        "transcription_status": "completed",
+    }
+
+    with patch.object(repo, "get_call_recording_by_file_path", new_callable=AsyncMock) as mock_get, \
+         patch.object(repo, "create_call_recording", new_callable=AsyncMock) as mock_create, \
+         patch.object(repo, "update_call_recording", new_callable=AsyncMock) as mock_update:
+        mock_get.return_value = existing
+
+        result = await service.sync_recordings_from_filesystem(str(tmp_path))
+
+        # Should skip the update - existing transcription matches, no status change
+        assert result["skipped"] == 1
+        assert result["updated"] == 0
+        mock_create.assert_not_called()
+        mock_update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_recordings_preserves_failed_status(tmp_path):
+    """Sync should not override 'failed' status when no new transcription is found."""
+    from app.services import call_recordings as service
+    from app.repositories import call_recordings as repo
+
+    audio_path = tmp_path / "call5.wav"
+    audio_path.write_bytes(b"fake audio")
+    
+    # Create metadata file with "pending" status
+    metadata = {
+        "transcription_status": "pending",
+    }
+    (tmp_path / "call5.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    # Existing recording has "failed" status (transcription failed)
+    existing = {
+        "id": 101,
+        "transcription": None,
+        "transcription_status": "failed",
+    }
+
+    with patch.object(repo, "get_call_recording_by_file_path", new_callable=AsyncMock) as mock_get, \
+         patch.object(repo, "create_call_recording", new_callable=AsyncMock) as mock_create, \
+         patch.object(repo, "update_call_recording", new_callable=AsyncMock) as mock_update:
+        mock_get.return_value = existing
+
+        result = await service.sync_recordings_from_filesystem(str(tmp_path))
+
+        # Should skip the update - no new transcription data
+        assert result["skipped"] == 1
+        assert result["updated"] == 0
+        mock_create.assert_not_called()
+        mock_update.assert_not_called()

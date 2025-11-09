@@ -222,12 +222,6 @@ async def sync_recordings_from_filesystem(recordings_path: str) -> dict[str, Any
             if transcription and transcription != existing.get("transcription"):
                 updates["transcription"] = transcription
                 updates["transcription_status"] = transcription_status or "completed"
-            elif (
-                not transcription
-                and transcription_status
-                and transcription_status != existing.get("transcription_status")
-            ):
-                updates["transcription_status"] = transcription_status
 
             if updates:
                 await call_recordings_repo.update_call_recording(existing["id"], **updates)
