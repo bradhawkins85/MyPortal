@@ -181,7 +181,7 @@ async def link_recording_to_ticket(
     
     # Verify ticket exists
     from app.repositories import tickets as tickets_repo
-    ticket = await tickets_repo.get_ticket_by_id(payload.ticket_id)
+    ticket = await tickets_repo.get_ticket(payload.ticket_id)
     if not ticket:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
