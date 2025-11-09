@@ -3424,6 +3424,11 @@ button.header-title-menu__link {
   display: none;
 }
 
+/* Hide dialog elements with .modal class when not open */
+dialog.modal:not([open]) {
+  display: none;
+}
+
 .modal__content {
   background: rgba(15, 23, 42, 0.95);
   border-radius: 1rem;
