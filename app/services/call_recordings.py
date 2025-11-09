@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -14,6 +15,66 @@ from app.services import webhook_monitor
 
 
 _AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac"}
+
+
+def _extract_phone_from_title(title: str | None) -> str | None:
+    """Extract phone number from recording title."""
+    if not title:
+        return None
+    
+    # Pattern 1: Look for +country_code followed by digits (e.g., +61439531124)
+    match = re.search(r'\+\d{10,15}', title)
+    if match:
+        return match.group(0)
+    
+    # Pattern 2: Look for standalone digits (10-15 digits) without +
+    # This should match numbers like 61410553956 but avoid matching dates/times
+    match = re.search(r'\b(\d{10,15})\b', title)
+    if match:
+        return match.group(1)
+    
+    return None
+
+
+def _extract_datetime_from_title(title: str | None) -> datetime | None:
+    """Extract date and time from recording title."""
+    if not title:
+        return None
+    
+    # Pattern: YYYY-MM-DD HH:MM at the end of the title
+    match = re.search(r'(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})(?:\s|$)', title)
+    if match:
+        date_str = f"{match.group(1)} {match.group(2)}"
+        try:
+            parsed = datetime.strptime(date_str, "%Y-%m-%d %H:%M")
+            # Assume UTC timezone
+            return parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    
+    return None
+
+
+def _read_audio_title(audio_path: Path) -> str | None:
+    """Read the title tag from an audio file (MP3 ID3 TIT2 tag)."""
+    try:
+        # Only try to read ID3 tags from MP3 files
+        if audio_path.suffix.lower() == ".mp3":
+            from mutagen.mp3 import MP3
+            from mutagen.id3 import ID3, TIT2
+            
+            try:
+                audio = MP3(str(audio_path))
+                if audio.tags and "TIT2" in audio.tags:
+                    title = str(audio.tags["TIT2"])
+                    return title.strip() if title else None
+            except Exception as exc:
+                logger.debug(f"Could not read ID3 tags from {audio_path}: {exc}")
+                return None
+    except Exception as exc:  # pragma: no cover
+        logger.debug(f"Could not read audio metadata from {audio_path}: {exc}")
+    
+    return None
 
 
 def _iter_audio_files(base_path: Path) -> list[Path]:
@@ -162,6 +223,11 @@ async def sync_recordings_from_filesystem(recordings_path: str) -> dict[str, Any
     errors: list[str] = []
 
     for audio_file in _iter_audio_files(base_path):
+        # Try to extract phone number and date from audio file title (MP3 ID3 tag)
+        audio_title = _read_audio_title(audio_file)
+        phone_from_title = _extract_phone_from_title(audio_title) if audio_title else None
+        date_from_title = _extract_datetime_from_title(audio_title) if audio_title else None
+        
         metadata = _load_json_metadata(audio_file, errors=errors)
         transcription = _read_transcription(audio_file, metadata)
         transcription_status = (
@@ -171,18 +237,21 @@ async def sync_recordings_from_filesystem(recordings_path: str) -> dict[str, Any
         if not transcription_status:
             transcription_status = "completed" if transcription else "pending"
 
-        call_date_value = _first_non_empty(
-            metadata,
-            "call_date",
-            "callDate",
-            "started_at",
-            "start_time",
-            "startTime",
-            "timestamp",
-            "created_at",
-            "createdAt",
-        )
-        call_date = _coerce_datetime_value(call_date_value)
+        # Use date from title if available, otherwise use metadata or file mtime
+        call_date = date_from_title
+        if call_date is None:
+            call_date_value = _first_non_empty(
+                metadata,
+                "call_date",
+                "callDate",
+                "started_at",
+                "start_time",
+                "startTime",
+                "timestamp",
+                "created_at",
+                "createdAt",
+            )
+            call_date = _coerce_datetime_value(call_date_value)
         if call_date is None:
             call_date = datetime.fromtimestamp(audio_file.stat().st_mtime, tz=timezone.utc)
 
@@ -197,24 +266,27 @@ async def sync_recordings_from_filesystem(recordings_path: str) -> dict[str, Any
             )
         )
 
-        caller_number = _first_non_empty(
-            metadata,
-            "caller_number",
-            "callerNumber",
-            "from",
-            "from_number",
-            "fromNumber",
-            "caller",
-        )
-        callee_number = _first_non_empty(
-            metadata,
-            "callee_number",
-            "calleeNumber",
-            "to",
-            "to_number",
-            "toNumber",
-            "callee",
-        )
+        # Use phone number from title if available, otherwise use metadata
+        phone_number = phone_from_title
+        if not phone_number:
+            # Fallback to metadata fields (legacy support)
+            phone_number = _first_non_empty(
+                metadata,
+                "phone_number",
+                "phoneNumber",
+                "caller_number",
+                "callerNumber",
+                "callee_number",
+                "calleeNumber",
+                "from",
+                "from_number",
+                "fromNumber",
+                "to",
+                "to_number",
+                "toNumber",
+                "caller",
+                "callee",
+            )
 
         existing = await call_recordings_repo.get_call_recording_by_file_path(str(audio_file))
         if existing:
@@ -234,8 +306,7 @@ async def sync_recordings_from_filesystem(recordings_path: str) -> dict[str, Any
             await call_recordings_repo.create_call_recording(
                 file_path=str(audio_file),
                 file_name=audio_file.name,
-                caller_number=str(caller_number) if caller_number else None,
-                callee_number=str(callee_number) if callee_number else None,
+                phone_number=str(phone_number) if phone_number else None,
                 call_date=call_date,
                 duration_seconds=duration,
                 transcription=transcription,
@@ -769,27 +840,24 @@ async def create_ticket_from_recording(
     subject_lines = summary.split("\n")
     subject = subject_lines[0][:100] if subject_lines else "Call Recording"
 
-    # Determine caller/callee names
-    caller_name = "Unknown Caller"
+    # Determine staff names and phone number
+    staff_name = "Unknown"
     if recording.get("caller_first_name") and recording.get("caller_last_name"):
-        caller_name = f"{recording['caller_first_name']} {recording['caller_last_name']}"
-    elif recording.get("caller_number"):
-        caller_name = recording["caller_number"]
-
-    callee_name = "Unknown Callee"
-    if recording.get("callee_first_name") and recording.get("callee_last_name"):
-        callee_name = f"{recording['callee_first_name']} {recording['callee_last_name']}"
-    elif recording.get("callee_number"):
-        callee_name = recording["callee_number"]
+        staff_name = f"{recording['caller_first_name']} {recording['caller_last_name']}"
+    elif recording.get("callee_first_name") and recording.get("callee_last_name"):
+        staff_name = f"{recording['callee_first_name']} {recording['callee_last_name']}"
+    elif recording.get("phone_number"):
+        staff_name = recording["phone_number"]
 
     # Build full description with summary and link to transcript
     call_date = recording.get("call_date")
     call_date_str = call_date.strftime("%Y-%m-%d %H:%M:%S") if isinstance(call_date, datetime) else "Unknown"
+    phone_number = recording.get("phone_number", "Unknown")
     description = f"""**Call Recording Summary**
 
 **Date:** {call_date_str}
-**Caller:** {caller_name}
-**Callee:** {callee_name}
+**Phone Number:** {phone_number}
+**Staff:** {staff_name}
 **Duration:** {recording.get('duration_seconds', 0)} seconds
 
 **Summary:**

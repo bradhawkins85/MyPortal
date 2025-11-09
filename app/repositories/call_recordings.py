@@ -74,12 +74,12 @@ async def list_call_recordings(
     
     if search:
         conditions.append(
-            "(cr.file_name LIKE %s OR cr.caller_number LIKE %s OR cr.callee_number LIKE %s "
+            "(cr.file_name LIKE %s OR cr.phone_number LIKE %s "
             "OR cs.first_name LIKE %s OR cs.last_name LIKE %s "
             "OR ce.first_name LIKE %s OR ce.last_name LIKE %s)"
         )
         search_pattern = f"%{search}%"
-        params.extend([search_pattern] * 7)
+        params.extend([search_pattern] * 6)
     
     if transcription_status:
         conditions.append("cr.transcription_status = %s")
@@ -134,12 +134,12 @@ async def count_call_recordings(
     
     if search:
         conditions.append(
-            "(cr.file_name LIKE %s OR cr.caller_number LIKE %s OR cr.callee_number LIKE %s "
+            "(cr.file_name LIKE %s OR cr.phone_number LIKE %s "
             "OR cs.first_name LIKE %s OR cs.last_name LIKE %s "
             "OR ce.first_name LIKE %s OR ce.last_name LIKE %s)"
         )
         search_pattern = f"%{search}%"
-        params.extend([search_pattern] * 7)
+        params.extend([search_pattern] * 6)
     
     if transcription_status:
         conditions.append("cr.transcription_status = %s")
@@ -223,38 +223,38 @@ async def create_call_recording(
     *,
     file_path: str,
     file_name: str,
-    caller_number: str | None = None,
-    callee_number: str | None = None,
+    phone_number: str | None = None,
+    caller_number: str | None = None,  # Deprecated, for backward compatibility
+    callee_number: str | None = None,  # Deprecated, for backward compatibility
     call_date: datetime,
     duration_seconds: int | None = None,
     transcription: str | None = None,
     transcription_status: str = "pending",
 ) -> dict[str, Any]:
     """Create a new call recording."""
-    # Lookup staff by phone numbers
-    caller_staff_id = None
-    callee_staff_id = None
+    # Use phone_number if provided, otherwise fall back to caller_number for backward compatibility
+    if phone_number is None:
+        phone_number = caller_number or callee_number
     
-    if caller_number:
-        caller_staff_id = await _lookup_staff_by_phone(caller_number)
-    if callee_number:
-        callee_staff_id = await _lookup_staff_by_phone(callee_number)
+    # Lookup staff by phone number
+    staff_id = None
+    if phone_number:
+        staff_id = await _lookup_staff_by_phone(phone_number)
     
     await db.execute(
         """
         INSERT INTO call_recordings (
-            file_path, file_name, caller_number, callee_number,
+            file_path, file_name, phone_number,
             caller_staff_id, callee_staff_id, call_date, duration_seconds,
             transcription, transcription_status
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             file_path,
             file_name,
-            caller_number,
-            callee_number,
-            caller_staff_id,
-            callee_staff_id,
+            phone_number,
+            staff_id,  # Use as caller_staff_id for now
+            None,  # callee_staff_id deprecated
             _coerce_datetime(call_date),
             duration_seconds,
             transcription,
