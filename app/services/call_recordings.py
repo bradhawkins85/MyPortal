@@ -1007,7 +1007,14 @@ async def create_ticket_from_recording(
     # Build full description with summary and link to transcript
     call_date = recording.get("call_date")
     call_date_str = call_date.strftime("%Y-%m-%d %H:%M:%S") if isinstance(call_date, datetime) else "Unknown"
+    
+    # Use E.164 format for phone number in ticket description
+    from app.core.phone_utils import normalize_to_e164
     phone_number = recording.get("phone_number", "Unknown")
+    if phone_number != "Unknown":
+        e164_number = normalize_to_e164(phone_number)
+        phone_number = e164_number if e164_number else phone_number
+    
     description = f"""**Call Recording Summary**
 
 **Date:** {call_date_str}
