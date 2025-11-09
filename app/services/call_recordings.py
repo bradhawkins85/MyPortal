@@ -256,6 +256,107 @@ async def sync_recordings_from_filesystem(recordings_path: str) -> dict[str, Any
     }
 
 
+async def queue_pending_transcriptions() -> dict[str, Any]:
+    """
+    Queue all pending recordings for transcription.
+    
+    This marks recordings with status 'pending' as 'queued' to prevent
+    duplicate transcription attempts when the scheduled task runs repeatedly.
+    
+    Returns:
+        Dictionary with count of recordings queued
+    """
+    # Get all recordings that are pending (not yet queued, processing, completed, or failed)
+    recordings = await call_recordings_repo.list_call_recordings(
+        transcription_status="pending",
+        limit=1000,  # Process in batches
+    )
+    
+    queued_count = 0
+    for recording in recordings:
+        # Mark as queued to prevent re-processing
+        await call_recordings_repo.update_call_recording(
+            recording["id"],
+            transcription_status="queued",
+        )
+        queued_count += 1
+    
+    logger.info(f"Queued {queued_count} recordings for transcription")
+    
+    return {
+        "status": "ok",
+        "queued": queued_count,
+    }
+
+
+async def process_queued_transcriptions() -> dict[str, Any]:
+    """
+    Process queued transcriptions one at a time.
+    
+    This function:
+    1. Finds the next queued recording
+    2. Attempts to transcribe it
+    3. Updates the status based on success or failure
+    4. Returns immediately after processing one recording
+    
+    Failed recordings are marked as 'failed' and can be retried by
+    manually updating their status back to 'pending' or 'queued'.
+    
+    Returns:
+        Dictionary with processing results
+    """
+    # Get the next queued recording (oldest first)
+    queued_recordings = await call_recordings_repo.list_call_recordings(
+        transcription_status="queued",
+        limit=1,
+    )
+    
+    if not queued_recordings:
+        # Also check for failed recordings that should be retried
+        failed_recordings = await call_recordings_repo.list_call_recordings(
+            transcription_status="failed",
+            limit=1,
+        )
+        
+        if not failed_recordings:
+            logger.debug("No queued or failed recordings to process")
+            return {
+                "status": "ok",
+                "processed": 0,
+                "message": "No recordings to process",
+            }
+        
+        recording = failed_recordings[0]
+        logger.info(f"Retrying failed recording {recording['id']}")
+    else:
+        recording = queued_recordings[0]
+    
+    recording_id = recording["id"]
+    
+    try:
+        # Transcribe the recording (this updates status to processing, then completed or failed)
+        await transcribe_recording(recording_id, force=False)
+        
+        logger.info(f"Successfully transcribed recording {recording_id}")
+        
+        return {
+            "status": "ok",
+            "processed": 1,
+            "recording_id": recording_id,
+        }
+    except Exception as exc:
+        # The transcribe_recording function already marks as failed,
+        # but log the error here for monitoring
+        logger.error(f"Failed to transcribe recording {recording_id}: {exc}")
+        
+        return {
+            "status": "error",
+            "processed": 0,
+            "recording_id": recording_id,
+            "error": str(exc),
+        }
+
+
 async def transcribe_recording(recording_id: int, *, force: bool = False) -> dict[str, Any]:
     """
     Transcribe a call recording using WhisperX service.
@@ -274,6 +375,11 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
     # Check if already transcribed
     if not force and recording.get("transcription") and recording.get("transcription_status") == "completed":
         logger.info(f"Recording {recording_id} already transcribed, skipping")
+        return recording
+    
+    # Skip if already processing (prevents concurrent processing)
+    if not force and recording.get("transcription_status") == "processing":
+        logger.info(f"Recording {recording_id} already being processed, skipping")
         return recording
 
     # Get WhisperX module settings

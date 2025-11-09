@@ -385,6 +385,40 @@ class SchedulerService:
                     result = await subscription_price_changes.apply_scheduled_price_changes()
                     details = json.dumps(result, default=str)
                     log_info("Scheduled price changes applied", **result)
+                elif command == "sync_recordings":
+                    from app.services import call_recordings as call_recordings_service
+                    from app.repositories import integration_modules as modules_repo
+                    
+                    # Get recordings path from module settings
+                    module = await modules_repo.get_module("call-recordings")
+                    if module and module.get("settings"):
+                        recordings_path = module["settings"].get("recordings_path")
+                        if recordings_path:
+                            result = await call_recordings_service.sync_recordings_from_filesystem(recordings_path)
+                            details = json.dumps(result, default=str)
+                            log_info("Call recordings synced", **result)
+                        else:
+                            status = "skipped"
+                            details = "No recordings path configured in call-recordings module"
+                            log_info("Call recordings sync skipped", reason=details)
+                    else:
+                        status = "skipped"
+                        details = "Call recordings module not configured"
+                        log_info("Call recordings sync skipped", reason=details)
+                elif command == "queue_transcriptions":
+                    from app.services import call_recordings as call_recordings_service
+                    
+                    result = await call_recordings_service.queue_pending_transcriptions()
+                    details = json.dumps(result, default=str)
+                    log_info("Transcriptions queued", **result)
+                elif command == "process_transcription":
+                    from app.services import call_recordings as call_recordings_service
+                    
+                    result = await call_recordings_service.process_queued_transcriptions()
+                    details = json.dumps(result, default=str)
+                    if result.get("status") == "error":
+                        status = "failed"
+                    log_info("Transcription processed", **result)
                 else:
                     status = "skipped"
                     details = "No handler registered for command"
