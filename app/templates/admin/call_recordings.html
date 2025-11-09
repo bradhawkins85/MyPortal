@@ -294,12 +294,26 @@
 
     async function linkToTicket(recordingId) {
       currentRecordingId = recordingId;
-      const modal = document.getElementById('link-ticket-modal');
-      modal.showModal();
       
-      // Load open tickets for the staff member
-      // For now, just show the manual entry option
-      document.getElementById('open-tickets-list').innerHTML = '<p class="text-muted">Enter a ticket number above to link this recording.</p>';
+      // Verify the recording exists before showing the modal
+      try {
+        const response = await fetch(`/api/call-recordings/${recordingId}`);
+        if (!response.ok) {
+          alert('Recording not found');
+          return;
+        }
+        
+        // Load open tickets for the staff member
+        // For now, just show the manual entry option
+        document.getElementById('open-tickets-list').innerHTML = '<p class="text-muted">Enter a ticket number above to link this recording.</p>';
+        
+        // Only show the modal after data is ready
+        const modal = document.getElementById('link-ticket-modal');
+        modal.showModal();
+      } catch (error) {
+        console.error('Error loading recording:', error);
+        alert('Failed to load recording details');
+      }
     }
 
     async function transcribe(recordingId) {
