@@ -79,15 +79,20 @@ async def sync_call_recordings(
     try:
         result = await call_recordings_service.sync_recordings_from_filesystem(recordings_path)
         return result
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
+            detail="Recordings path does not exist or is not accessible.",
         )
-    except Exception as e:
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid recordings path configuration.",
+        )
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to sync recordings: {str(e)}",
+            detail="Failed to sync recordings. Please check the logs for details.",
         )
 
 
