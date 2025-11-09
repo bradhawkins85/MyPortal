@@ -343,6 +343,12 @@
                   <input id="whisperx-language" name="settings.language" class="form-input" value="{{ settings.language or 'en' }}" placeholder="en" />
                   <p class="form-help">Language code for transcription (e.g., en, es, fr, de).</p>
                 </div>
+              {% elif module.slug == 'call-recordings' %}
+                <div class="form-field">
+                  <label class="form-label" for="call-recordings-path">Recordings Path</label>
+                  <input id="call-recordings-path" name="settings.recordings_path" class="form-input" value="{{ settings.recordings_path or '/var/lib/myportal/call_recordings' }}" placeholder="/var/lib/myportal/call_recordings" />
+                  <p class="form-help">The base directory path where call recording files are stored. Ensure the application has read/write permissions to this location.</p>
+                </div>
               {% else %}
                 {% for key, value in settings.items() %}
                   <div class="form-field">
