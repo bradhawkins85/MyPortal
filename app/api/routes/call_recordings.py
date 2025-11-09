@@ -84,7 +84,7 @@ async def sync_call_recordings(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Recordings path does not exist or is not accessible.",
         )
-    except ValueError as e:
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid recordings path configuration.",
@@ -124,7 +124,7 @@ async def force_sync_call_recordings(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Recordings path does not exist or is not accessible.",
         )
-    except ValueError as e:
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid recordings path configuration.",
