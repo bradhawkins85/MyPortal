@@ -117,6 +117,7 @@ from app.repositories import users as user_repo
 from app.repositories import issues as issues_repo
 from app.schemas.api_keys import ALLOWED_API_KEY_HTTP_METHODS
 from app.schemas.tickets import SyncroTicketImportRequest
+from app.security.cache_control import CacheControlMiddleware
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import encrypt_secret
 from app.security.rate_limiter import RateLimiterMiddleware, SimpleRateLimiter
@@ -341,6 +342,11 @@ app.add_middleware(
     RateLimiterMiddleware,
     rate_limiter=general_rate_limiter,
     exempt_paths=(SWAGGER_UI_PATH, PROTECTED_OPENAPI_PATH, "/static"),
+)
+
+app.add_middleware(
+    CacheControlMiddleware,
+    exempt_paths=("/static",),
 )
 
 app.add_middleware(CSRFMiddleware)
