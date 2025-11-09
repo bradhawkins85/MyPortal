@@ -30,6 +30,7 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from fastapi.security import APIKeyHeader
 from fastapi.params import Form as FormField
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
@@ -316,6 +317,39 @@ app = FastAPI(
     openapi_url=None,
     openapi_tags=tags_metadata,
 )
+
+
+# Configure API Key security scheme for OpenAPI/Swagger UI
+def custom_openapi():
+    """Customize the OpenAPI schema to include API Key authentication."""
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    from fastapi.openapi.utils import get_openapi
+    
+    openapi_schema = get_openapi(
+        title=app.title,
+        version="1.0.0",
+        description=app.description,
+        routes=app.routes,
+        tags=app.openapi_tags,
+    )
+    
+    # Add API Key security scheme
+    openapi_schema["components"]["securitySchemes"] = {
+        "ApiKeyAuth": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "x-api-key",
+            "description": "API Key for authentication. Create an API key in the admin panel under API Keys.",
+        }
+    }
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 @app.on_event("startup")
