@@ -24,6 +24,9 @@ class CallRecordingUpdate(BaseModel):
     transcription: Optional[str] = None
     transcription_status: Optional[str] = Field(default=None, validation_alias="transcriptionStatus")
     linked_ticket_id: Optional[int] = Field(default=None, validation_alias="linkedTicketId")
+    minutes_spent: Optional[int] = Field(default=None, validation_alias="minutesSpent")
+    is_billable: Optional[bool] = Field(default=None, validation_alias="isBillable")
+    labour_type_id: Optional[int] = Field(default=None, validation_alias="labourTypeId")
 
 
 class CallRecordingResponse(BaseModel):
@@ -39,6 +42,9 @@ class CallRecordingResponse(BaseModel):
     transcription: Optional[str] = None
     transcription_status: str
     linked_ticket_id: Optional[int] = None
+    minutes_spent: Optional[int] = None
+    is_billable: bool = False
+    labour_type_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     
@@ -51,6 +57,8 @@ class CallRecordingResponse(BaseModel):
     callee_email: Optional[str] = None
     linked_ticket_number: Optional[int] = None
     linked_ticket_subject: Optional[str] = None
+    labour_type_name: Optional[str] = None
+    labour_type_code: Optional[str] = None
 
     model_config = {
         "from_attributes": True,

@@ -10342,6 +10342,10 @@ async def _render_portal_ticket_detail(
 
     replies = await tickets_repo.list_replies(ticket_id, include_internal=has_helpdesk_access)
     ordered_replies = list(reversed(replies))
+    
+    # Fetch call recordings linked to this ticket
+    from app.repositories import call_recordings as call_recordings_repo
+    call_recordings = await call_recordings_repo.list_ticket_call_recordings(ticket_id)
 
     related_user_ids: set[int] = set()
     for key in ("assigned_user_id", "requester_id"):
@@ -10409,6 +10413,7 @@ async def _render_portal_ticket_detail(
         timeline_entries.append(
             {
                 "id": reply.get("id"),
+                "type": "reply",
                 "author": author_record,
                 "author_label": _format_user_label(author_record),
                 "created_iso": created_iso,
@@ -10420,6 +10425,59 @@ async def _render_portal_ticket_detail(
                 "labour_type_code": reply.get("labour_type_code"),
             }
         )
+    
+    # Add call recordings to timeline
+    for recording in call_recordings:
+        call_date = recording.get("call_date")
+        call_date_iso = (
+            call_date.astimezone(timezone.utc).isoformat()
+            if hasattr(call_date, "astimezone")
+            else ""
+        )
+        
+        minutes_value = recording.get("minutes_spent")
+        minutes_spent = minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
+        billable_flag = bool(recording.get("is_billable"))
+        labour_type_name = str(recording.get("labour_type_name") or "").strip() or None
+        time_summary = tickets_service.format_reply_time_summary(
+            minutes_spent,
+            billable_flag,
+            labour_type_name,
+        )
+        
+        # Format caller/callee information
+        caller_name = None
+        if recording.get("caller_first_name") or recording.get("caller_last_name"):
+            caller_name = f"{recording.get('caller_first_name', '')} {recording.get('caller_last_name', '')}".strip()
+        elif recording.get("caller_number"):
+            caller_name = recording.get("caller_number")
+        
+        callee_name = None
+        if recording.get("callee_first_name") or recording.get("callee_last_name"):
+            callee_name = f"{recording.get('callee_first_name', '')} {recording.get('callee_last_name', '')}".strip()
+        elif recording.get("callee_number"):
+            callee_name = recording.get("callee_number")
+        
+        timeline_entries.append(
+            {
+                "id": recording.get("id"),
+                "type": "call_recording",
+                "created_iso": call_date_iso,
+                "file_name": recording.get("file_name"),
+                "caller_name": caller_name or "Unknown",
+                "callee_name": callee_name or "Unknown",
+                "duration_seconds": recording.get("duration_seconds"),
+                "transcription": recording.get("transcription"),
+                "time_summary": time_summary,
+                "minutes_spent": minutes_spent,
+                "is_billable": billable_flag,
+                "labour_type_name": labour_type_name,
+                "labour_type_code": recording.get("labour_type_code"),
+            }
+        )
+    
+    # Sort timeline entries by date
+    timeline_entries.sort(key=lambda e: e.get("created_iso", ""), reverse=True)
 
     # Find relevant knowledge base articles based on AI tag matching
     relevant_articles: list[dict[str, Any]] = []
@@ -10627,6 +10685,10 @@ async def _render_ticket_detail(
                 tactical_base_url = base_url.rstrip("/")
 
     ordered_replies = list(reversed(replies))
+    
+    # Fetch call recordings linked to this ticket
+    from app.repositories import call_recordings as call_recordings_repo
+    call_recordings = await call_recordings_repo.list_ticket_call_recordings(ticket_id)
 
     total_billable_minutes = 0
     total_non_billable_minutes = 0
@@ -10655,6 +10717,49 @@ async def _render_ticket_detail(
                 "author": author,
                 "body": sanitized_reply.html,
                 "text_body": sanitized_reply.text_content,
+                "minutes_spent": minutes_spent,
+                "is_billable": billable_flag,
+                "time_summary": time_summary,
+                "labour_type_name": labour_type_name,
+            }
+        )
+    
+    # Process call recordings
+    enriched_recordings: list[dict[str, Any]] = []
+    for recording in call_recordings:
+        minutes_value = recording.get("minutes_spent")
+        minutes_spent = minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
+        billable_flag = bool(recording.get("is_billable"))
+        if minutes_spent is not None:
+            if billable_flag:
+                total_billable_minutes += minutes_spent
+            else:
+                total_non_billable_minutes += minutes_spent
+        labour_type_name = str(recording.get("labour_type_name") or "").strip() or None
+        time_summary = tickets_service.format_reply_time_summary(
+            minutes_spent,
+            billable_flag,
+            labour_type_name,
+        )
+        
+        # Format caller/callee information
+        caller_name = None
+        if recording.get("caller_first_name") or recording.get("caller_last_name"):
+            caller_name = f"{recording.get('caller_first_name', '')} {recording.get('caller_last_name', '')}".strip()
+        elif recording.get("caller_number"):
+            caller_name = recording.get("caller_number")
+        
+        callee_name = None
+        if recording.get("callee_first_name") or recording.get("callee_last_name"):
+            callee_name = f"{recording.get('callee_first_name', '')} {recording.get('callee_last_name', '')}".strip()
+        elif recording.get("callee_number"):
+            callee_name = recording.get("callee_number")
+        
+        enriched_recordings.append(
+            {
+                **recording,
+                "caller_name": caller_name,
+                "callee_name": callee_name,
                 "minutes_spent": minutes_spent,
                 "is_billable": billable_flag,
                 "time_summary": time_summary,
@@ -10799,6 +10904,7 @@ async def _render_ticket_detail(
         "ticket_assigned_user": user_lookup.get(ticket.get("assigned_user_id")),
         "ticket_requester": user_lookup.get(ticket.get("requester_id")),
         "ticket_replies": enriched_replies,
+        "ticket_call_recordings": enriched_recordings,
         "ticket_watchers": enriched_watchers,
         "ticket_labour_types": labour_types,
         "ticket_billable_minutes": total_billable_minutes,

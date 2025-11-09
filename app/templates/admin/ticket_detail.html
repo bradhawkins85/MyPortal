@@ -724,7 +724,7 @@
               <h2 class="card__title">Conversation history</h2>
             </header>
             <div class="card__body">
-              {% if ticket_replies %}
+              {% if ticket_replies or ticket_call_recordings %}
                 <div class="timeline" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
                   {% for reply in ticket_replies %}
                     <article
@@ -798,9 +798,82 @@
                       </div>
                     </article>
                   {% endfor %}
+                  
+                  {% for recording in ticket_call_recordings %}
+                    <article
+                      class="timeline__event timeline__event--call-recording"
+                      data-call-recording
+                      data-recording-id="{{ recording.id }}"
+                      data-recording-minutes="{{ recording.minutes_spent if recording.minutes_spent is not none else '' }}"
+                      data-recording-billable="{{ 'true' if recording.is_billable else 'false' }}"
+                      data-recording-labour="{{ recording.labour_type_id if recording.labour_type_id is not none else '' }}"
+                    >
+                      <header class="timeline__header">
+                        <div class="timeline__header-main">
+                          <span class="timeline__timestamp">
+                            {{ recording.call_date.astimezone().strftime('%Y-%m-%d %H:%M') if recording.call_date else '—' }}
+                          </span>
+                          <span class="timeline__action">
+                            <strong>📞 Call Recording:</strong> {{ recording.caller_name or 'Unknown' }} → {{ recording.callee_name or 'Unknown' }}
+                          </span>
+                          <span
+                            class="timeline__meta text-muted"
+                            data-recording-time-summary
+                            {% if not recording.time_summary %}hidden{% endif %}
+                          >
+                            {{ recording.time_summary or '' }}
+                          </span>
+                        </div>
+                        <div class="timeline__header-controls">
+                          <button
+                            type="button"
+                            class="button button--ghost button--icon timeline__edit-button"
+                            data-recording-edit
+                            aria-label="Edit time entry"
+                            aria-controls="recording-time-modal"
+                            aria-haspopup="dialog"
+                            title="Edit time entry"
+                          >
+                            <span class="visually-hidden">Edit time entry</span>
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                              <path d="M20.71 7.04a1 1 0 0 0 0-1.41L18.37 3.3a1 1 0 0 0-1.41 0L6 14.25V18h3.75l10.96-10.96Z" />
+                              <path d="M5 20h14a1 1 0 1 0 0-2H5a1 1 0 1 0 0 2Z" />
+                            </svg>
+                          </button>
+                        </div>
+                      </header>
+                      <div class="timeline__body">
+                        <div class="timeline__message" data-timeline-message>
+                          <p><strong>File:</strong> {{ recording.file_name }}</p>
+                          {% if recording.duration_seconds %}
+                            <p><strong>Duration:</strong> {{ recording.duration_seconds }} seconds</p>
+                          {% endif %}
+                          {% if recording.transcription %}
+                            <div class="timeline__message-content" data-timeline-message-content>
+                              <p><strong>Transcription:</strong></p>
+                              <div class="rich-text-viewer">{{ recording.transcription }}</div>
+                            </div>
+                            <button
+                              type="button"
+                              class="button button--ghost button--small timeline__message-toggle"
+                              data-timeline-message-toggle
+                              data-more-label="Show transcription"
+                              data-less-label="Hide transcription"
+                              hidden
+                              aria-expanded="false"
+                            >
+                              Show transcription
+                            </button>
+                          {% else %}
+                            <p class="text-muted">No transcription available.</p>
+                          {% endif %}
+                        </div>
+                      </div>
+                    </article>
+                  {% endfor %}
                 </div>
               {% else %}
-                <p class="card__empty">No replies have been posted yet.</p>
+                <p class="card__empty">No replies or call recordings have been posted yet.</p>
               {% endif %}
             </div>
           </article>
@@ -852,6 +925,54 @@
         <p class="form-help form-help--error" data-reply-time-error role="alert" hidden></p>
         <div class="form-actions">
           <button type="submit" class="button button--primary" data-reply-time-submit>Save changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  
+  <div class="modal" id="recording-time-modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-modal-close>
+        <span class="visually-hidden">Close time entry editor</span>
+        &times;
+      </button>
+      <h2 class="modal__title">Edit call recording time entry</h2>
+      <form class="form-grid" data-recording-time-form novalidate>
+        <p class="form-help">Adjust the minutes recorded for this call and whether the work is billable.</p>
+        <div class="form-field">
+          <label class="form-label" for="recording-time-minutes">Minutes spent</label>
+          <input
+            class="form-input"
+            id="recording-time-minutes"
+            type="number"
+            min="0"
+            max="1440"
+            step="1"
+            inputmode="numeric"
+            data-recording-time-minutes
+          />
+          <p class="form-help">Leave blank to remove the time entry from this call recording.</p>
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="checkbox">
+            <input type="checkbox" data-recording-time-billable />
+            <span>Billable</span>
+          </label>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="recording-time-labour">Labour type</label>
+          <select id="recording-time-labour" class="form-input" data-recording-time-labour>
+            <option value="">No labour type</option>
+            {% for labour_type in ticket_labour_types %}
+              <option value="{{ labour_type.id }}">
+                {{ labour_type.name }}{% if labour_type.code %} ({{ labour_type.code }}){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <p class="form-help form-help--error" data-recording-time-error role="alert" hidden></p>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary" data-recording-time-submit>Save changes</button>
         </div>
       </form>
     </div>
