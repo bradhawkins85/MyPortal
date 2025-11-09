@@ -63,19 +63,34 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
             headers["Authorization"] = f"Bearer {api_key}"
         
         async with httpx.AsyncClient(timeout=300.0) as client:
-            # Prepare the request
-            data = {
-                "file_path": recording["file_path"],
-                "language": settings.get("language", "en"),
-            }
+            # Read the audio file and prepare for upload
+            file_path = recording["file_path"]
             
-            response = await client.post(
-                f"{base_url.rstrip('/')}/transcribe",
-                json=data,
-                headers=headers,
-            )
-            response.raise_for_status()
-            result = response.json()
+            # Open and read the file
+            try:
+                with open(file_path, "rb") as audio_file:
+                    files = {"audio_file": (recording["file_name"], audio_file, "audio/wav")}
+                    
+                    # Prepare form data if language is specified
+                    data = {}
+                    if settings.get("language"):
+                        data["language"] = settings.get("language")
+                    
+                    response = await client.post(
+                        f"{base_url.rstrip('/')}/asr",
+                        files=files,
+                        data=data if data else None,
+                        headers=headers,
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+            except FileNotFoundError:
+                logger.error(f"Audio file not found: {file_path}")
+                await call_recordings_repo.update_call_recording(
+                    recording_id,
+                    transcription_status="failed",
+                )
+                raise ValueError(f"Audio file not found: {file_path}")
             
             transcription = result.get("text", "")
             
