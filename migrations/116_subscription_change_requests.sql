@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS subscription_change_requests (
   change_type ENUM('addition', 'decrease') NOT NULL,
   quantity_change INT NOT NULL,
   requested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  requested_by INT NOT NULL,
+  requested_by INT NULL,
   status ENUM('pending', 'applied', 'cancelled') NOT NULL DEFAULT 'pending',
   applied_at TIMESTAMP NULL,
   prorated_charge DECIMAL(10,2) NULL,
