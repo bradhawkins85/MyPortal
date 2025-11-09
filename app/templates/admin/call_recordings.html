@@ -606,5 +606,52 @@
         transform: rotate(360deg);
       }
     }
+
+    /* Mobile responsive styles */
+    @media (max-width: 720px) {
+      .data-table-wrapper {
+        overflow-x: visible;
+      }
+
+      .data-table {
+        min-width: 0;
+        width: 100%;
+        max-width: 100%;
+      }
+
+      .data-table th,
+      .data-table td {
+        white-space: normal;
+        word-break: break-word;
+        padding: 0.5rem;
+        font-size: 0.875rem;
+      }
+
+      .management__header-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .search-box {
+        min-width: 0;
+        width: 100%;
+      }
+
+      .button-group {
+        flex-wrap: wrap;
+      }
+    }
+
+    /* Portrait mobile - hide less critical columns */
+    @media (max-width: 720px) and (orientation: portrait) {
+      .data-table th:nth-child(3),
+      .data-table td:nth-child(3),
+      .data-table th:nth-child(4),
+      .data-table td:nth-child(4),
+      .data-table th:nth-child(5),
+      .data-table td:nth-child(5) {
+        display: none;
+      }
+    }
   </style>
 {% endblock %}
