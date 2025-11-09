@@ -2853,6 +2853,9 @@ async def _render_company_edit_page(
             {"value": "sync_to_xero", "label": "Sync to Xero"},
             {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
             {"value": "create_scheduled_ticket", "label": "Create scheduled ticket"},
+            {"value": "sync_recordings", "label": "Sync call recordings"},
+            {"value": "queue_transcriptions", "label": "Queue transcriptions"},
+            {"value": "process_transcription", "label": "Process transcription"},
         ]
         default_command_values = {option["value"] for option in automation_command_options}
 
@@ -8031,6 +8034,9 @@ async def admin_automation(request: Request):
         {"value": "sync_to_xero", "label": "Sync to Xero"},
         {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
         {"value": "create_scheduled_ticket", "label": "Create scheduled ticket"},
+        {"value": "sync_recordings", "label": "Sync call recordings"},
+        {"value": "queue_transcriptions", "label": "Queue transcriptions"},
+        {"value": "process_transcription", "label": "Process transcription"},
     ]
     existing_commands = {task.get("command") for task in tasks if task.get("command")}
     for command in sorted(existing_commands):
