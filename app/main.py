@@ -48,6 +48,7 @@ from app.api.routes import (
     audit_logs,
     auth,
     automations as automations_api,
+    call_recordings as call_recordings_api,
     companies,
     forms as forms_api,
     invoices as invoices_api,
@@ -502,6 +503,7 @@ async def authenticated_swagger_ui(request: Request) -> Response:
 app.include_router(auth.router)
 app.include_router(agent.router)
 app.include_router(users.router)
+app.include_router(call_recordings_api.router)
 app.include_router(companies.router)
 app.include_router(licenses_api.router)
 app.include_router(forms_api.router)
@@ -8271,6 +8273,26 @@ async def admin_tag_exclusions_page(
     )
     return templates.TemplateResponse(
         "admin/tag_exclusions.html",
+        context,
+    )
+
+
+@app.get("/admin/call-recordings", response_class=HTMLResponse)
+async def admin_call_recordings_page(request: Request):
+    """Admin page for viewing call recordings and transcriptions (super admin only)."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    
+    context = await _build_base_context(
+        request,
+        current_user,
+        extra={
+            "title": "Call Recordings & Transcriptions",
+        },
+    )
+    return templates.TemplateResponse(
+        "admin/call_recordings.html",
         context,
     )
 

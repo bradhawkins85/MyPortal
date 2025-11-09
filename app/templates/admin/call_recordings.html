@@ -1,0 +1,504 @@
+{% extends "base.html" %}
+
+{% block header_title %}
+  <div class="header-title-menu">
+    <span class="header-title-menu__label">Call Recordings</span>
+    <details class="header-title-menu__dropdown" data-header-menu>
+      <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+        Settings
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+          <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
+        </svg>
+        <span class="visually-hidden">Toggle settings menu</span>
+      </summary>
+      <ul class="header-title-menu__list" role="menu">
+        <li class="header-title-menu__item" role="none">
+          <a href="/admin/modules" class="header-title-menu__link" role="menuitem">WhisperX Configuration</a>
+        </li>
+      </ul>
+    </details>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="management management--single" data-layout>
+    <section class="management__content">
+      <header class="management__header">
+        <div>
+          <h1 class="management__title">Call Recordings & Transcriptions</h1>
+          <p class="management__subtitle">Review call recordings, view transcriptions, and create tickets from customer conversations.</p>
+        </div>
+        <div class="management__header-actions">
+          <div class="search-box">
+            <input
+              type="search"
+              id="recording-search"
+              class="form-input search-box__input"
+              placeholder="Search recordings..."
+              aria-label="Search recordings"
+            />
+          </div>
+        </div>
+      </header>
+
+      <div class="management__body">
+        <!-- Filters -->
+        <div class="filters-bar">
+          <label class="form-label">
+            Status
+            <select id="status-filter" class="form-input">
+              <option value="">All Statuses</option>
+              <option value="pending">Pending Transcription</option>
+              <option value="processing">Processing</option>
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
+            </select>
+          </label>
+          <label class="form-label">
+            Linked Tickets
+            <select id="linked-filter" class="form-input">
+              <option value="">All Recordings</option>
+              <option value="0">Unlinked Only</option>
+            </select>
+          </label>
+        </div>
+
+        <!-- Recordings Table -->
+        <div class="data-table-wrapper">
+          <table class="data-table" id="recordings-table">
+            <thead>
+              <tr>
+                <th>Date/Time</th>
+                <th>Caller</th>
+                <th>Callee</th>
+                <th>Duration</th>
+                <th>Transcription Status</th>
+                <th>Linked Ticket</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="recordings-tbody">
+              <tr>
+                <td colspan="7" class="data-table__loading">Loading recordings...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination" id="pagination">
+          <button class="button button--ghost" id="prev-page" disabled>Previous</button>
+          <span id="page-info">Page 1</span>
+          <button class="button button--ghost" id="next-page">Next</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- View Transcript Modal -->
+  <dialog id="transcript-modal" class="modal" aria-labelledby="transcript-modal-title">
+    <div class="modal__content">
+      <header class="modal__header">
+        <h2 class="modal__title" id="transcript-modal-title">Call Transcription</h2>
+        <button type="button" class="modal__close" data-close-modal aria-label="Close">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+          </svg>
+        </button>
+      </header>
+      <div class="modal__body">
+        <div id="transcript-info" class="transcript-info"></div>
+        <div id="transcript-content" class="transcript-content"></div>
+      </div>
+      <footer class="modal__footer">
+        <button type="button" class="button button--ghost" data-close-modal>Close</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <!-- Link to Ticket Modal -->
+  <dialog id="link-ticket-modal" class="modal" aria-labelledby="link-ticket-modal-title">
+    <div class="modal__content">
+      <header class="modal__header">
+        <h2 class="modal__title" id="link-ticket-modal-title">Link to Ticket</h2>
+        <button type="button" class="modal__close" data-close-modal aria-label="Close">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+          </svg>
+        </button>
+      </header>
+      <div class="modal__body">
+        <div class="form-field">
+          <label class="form-label" for="ticket-number-input">Enter Ticket Number</label>
+          <input
+            type="number"
+            id="ticket-number-input"
+            class="form-input"
+            placeholder="Enter ticket number..."
+          />
+        </div>
+        <div class="divider">OR</div>
+        <div id="open-tickets-list" class="tickets-list">
+          <p class="text-muted">Loading open tickets for staff member...</p>
+        </div>
+      </div>
+      <footer class="modal__footer">
+        <button type="button" class="button button--ghost" data-close-modal>Cancel</button>
+        <button type="button" class="button button--primary" id="link-ticket-btn">Link to Ticket</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <script>
+    // State
+    let currentPage = 1;
+    const pageSize = 50;
+    let currentRecordingId = null;
+    let currentSearch = '';
+    let currentStatusFilter = '';
+    let currentLinkedFilter = '';
+
+    // Load recordings
+    async function loadRecordings() {
+      const tbody = document.getElementById('recordings-tbody');
+      tbody.innerHTML = '<tr><td colspan="7" class="data-table__loading">Loading...</td></tr>';
+
+      try {
+        const params = new URLSearchParams({
+          limit: pageSize,
+          offset: (currentPage - 1) * pageSize,
+        });
+        
+        if (currentSearch) params.append('search', currentSearch);
+        if (currentStatusFilter) params.append('transcriptionStatus', currentStatusFilter);
+        if (currentLinkedFilter) params.append('linkedTicketId', currentLinkedFilter);
+
+        const response = await fetch(`/api/call-recordings?${params}`);
+        if (!response.ok) throw new Error('Failed to load recordings');
+        
+        const recordings = await response.json();
+        
+        if (recordings.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No recordings found</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = recordings.map(rec => {
+          const caller = rec.caller_first_name 
+            ? `${rec.caller_first_name} ${rec.caller_last_name}` 
+            : rec.caller_number || 'Unknown';
+          const callee = rec.callee_first_name 
+            ? `${rec.callee_first_name} ${rec.callee_last_name}` 
+            : rec.callee_number || 'Unknown';
+          const date = new Date(rec.call_date).toLocaleString();
+          const duration = rec.duration_seconds ? `${Math.floor(rec.duration_seconds / 60)}:${String(rec.duration_seconds % 60).padStart(2, '0')}` : 'N/A';
+          const statusBadge = getStatusBadge(rec.transcription_status);
+          const linkedTicket = rec.linked_ticket_number 
+            ? `<a href="/admin/tickets/${rec.linked_ticket_id}" class="link">#${rec.linked_ticket_number}</a>` 
+            : '<span class="text-muted">—</span>';
+
+          return `
+            <tr>
+              <td>${date}</td>
+              <td>${caller}</td>
+              <td>${callee}</td>
+              <td>${duration}</td>
+              <td>${statusBadge}</td>
+              <td>${linkedTicket}</td>
+              <td>
+                <div class="button-group button-group--compact">
+                  ${rec.transcription ? `<button class="button button--ghost button--small" onclick="viewTranscript(${rec.id})">View</button>` : ''}
+                  ${rec.transcription && !rec.linked_ticket_id ? `<button class="button button--primary button--small" onclick="createTicket(${rec.id})">Create Ticket</button>` : ''}
+                  ${!rec.linked_ticket_id ? `<button class="button button--ghost button--small" onclick="linkToTicket(${rec.id})">Link</button>` : ''}
+                  ${rec.transcription_status !== 'completed' ? `<button class="button button--ghost button--small" onclick="transcribe(${rec.id})">Transcribe</button>` : ''}
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (error) {
+        console.error('Error loading recordings:', error);
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Error loading recordings</td></tr>';
+      }
+    }
+
+    function getStatusBadge(status) {
+      const badges = {
+        pending: '<span class="badge badge--warning">Pending</span>',
+        processing: '<span class="badge badge--info">Processing</span>',
+        completed: '<span class="badge badge--success">Completed</span>',
+        failed: '<span class="badge badge--danger">Failed</span>',
+      };
+      return badges[status] || '<span class="badge">Unknown</span>';
+    }
+
+    async function viewTranscript(recordingId) {
+      try {
+        const response = await fetch(`/api/call-recordings/${recordingId}`);
+        if (!response.ok) throw new Error('Failed to load recording');
+        
+        const recording = await response.json();
+        
+        const modal = document.getElementById('transcript-modal');
+        const info = document.getElementById('transcript-info');
+        const content = document.getElementById('transcript-content');
+        
+        const caller = recording.caller_first_name 
+          ? `${recording.caller_first_name} ${recording.caller_last_name}` 
+          : recording.caller_number || 'Unknown';
+        const callee = recording.callee_first_name 
+          ? `${recording.callee_first_name} ${recording.callee_last_name}` 
+          : recording.callee_number || 'Unknown';
+        const date = new Date(recording.call_date).toLocaleString();
+        
+        info.innerHTML = `
+          <p><strong>Date:</strong> ${date}</p>
+          <p><strong>Caller:</strong> ${caller}</p>
+          <p><strong>Callee:</strong> ${callee}</p>
+          <p><strong>Duration:</strong> ${recording.duration_seconds ? Math.floor(recording.duration_seconds / 60) + ':' + String(recording.duration_seconds % 60).padStart(2, '0') : 'N/A'}</p>
+        `;
+        
+        content.textContent = recording.transcription || 'No transcription available';
+        
+        modal.showModal();
+      } catch (error) {
+        console.error('Error viewing transcript:', error);
+        alert('Failed to load transcript');
+      }
+    }
+
+    async function createTicket(recordingId) {
+      if (!confirm('Create a ticket from this call recording?')) return;
+      
+      const companyId = prompt('Enter company ID for the ticket:');
+      if (!companyId) return;
+      
+      try {
+        const response = await fetch(`/api/call-recordings/${recordingId}/create-ticket?companyId=${companyId}`, {
+          method: 'POST',
+          headers: {
+            'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content,
+          },
+        });
+        
+        if (!response.ok) throw new Error('Failed to create ticket');
+        
+        const result = await response.json();
+        alert(`Ticket #${result.ticket_number} created successfully!`);
+        loadRecordings();
+      } catch (error) {
+        console.error('Error creating ticket:', error);
+        alert('Failed to create ticket');
+      }
+    }
+
+    async function linkToTicket(recordingId) {
+      currentRecordingId = recordingId;
+      const modal = document.getElementById('link-ticket-modal');
+      modal.showModal();
+      
+      // Load open tickets for the staff member
+      // For now, just show the manual entry option
+      document.getElementById('open-tickets-list').innerHTML = '<p class="text-muted">Enter a ticket number above to link this recording.</p>';
+    }
+
+    async function transcribe(recordingId) {
+      if (!confirm('Start transcription for this recording?')) return;
+      
+      try {
+        const response = await fetch(`/api/call-recordings/${recordingId}/transcribe`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content,
+          },
+          body: JSON.stringify({ recordingId, force: false }),
+        });
+        
+        if (!response.ok) throw new Error('Failed to start transcription');
+        
+        alert('Transcription started successfully!');
+        loadRecordings();
+      } catch (error) {
+        console.error('Error starting transcription:', error);
+        alert('Failed to start transcription');
+      }
+    }
+
+    // Event listeners
+    document.getElementById('recording-search').addEventListener('input', (e) => {
+      currentSearch = e.target.value;
+      currentPage = 1;
+      loadRecordings();
+    });
+
+    document.getElementById('status-filter').addEventListener('change', (e) => {
+      currentStatusFilter = e.target.value;
+      currentPage = 1;
+      loadRecordings();
+    });
+
+    document.getElementById('linked-filter').addEventListener('change', (e) => {
+      currentLinkedFilter = e.target.value;
+      currentPage = 1;
+      loadRecordings();
+    });
+
+    document.getElementById('prev-page').addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage--;
+        loadRecordings();
+      }
+    });
+
+    document.getElementById('next-page').addEventListener('click', () => {
+      currentPage++;
+      loadRecordings();
+    });
+
+    document.getElementById('link-ticket-btn').addEventListener('click', async () => {
+      const ticketNumber = document.getElementById('ticket-number-input').value;
+      if (!ticketNumber) {
+        alert('Please enter a ticket number');
+        return;
+      }
+      
+      try {
+        const response = await fetch(`/api/call-recordings/${currentRecordingId}/link`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content,
+          },
+          body: JSON.stringify({ ticketId: parseInt(ticketNumber) }),
+        });
+        
+        if (!response.ok) throw new Error('Failed to link recording');
+        
+        alert('Recording linked to ticket successfully!');
+        document.getElementById('link-ticket-modal').close();
+        loadRecordings();
+      } catch (error) {
+        console.error('Error linking recording:', error);
+        alert('Failed to link recording to ticket');
+      }
+    });
+
+    // Close modal handlers
+    document.querySelectorAll('[data-close-modal]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.target.closest('dialog').close();
+      });
+    });
+
+    // Initial load
+    loadRecordings();
+  </script>
+
+  <style>
+    .filters-bar {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .filters-bar .form-label {
+      margin: 0;
+    }
+
+    .search-box {
+      min-width: 250px;
+    }
+
+    .data-table-wrapper {
+      overflow-x: auto;
+      margin-bottom: 1rem;
+    }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .data-table th,
+    .data-table td {
+      padding: 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .data-table th {
+      font-weight: 600;
+      background-color: var(--color-background-secondary);
+    }
+
+    .data-table__loading {
+      text-align: center;
+      color: var(--color-text-muted);
+      padding: 2rem;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .button-group--compact .button {
+      padding: 0.25rem 0.5rem;
+      font-size: 0.875rem;
+    }
+
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .transcript-info {
+      margin-bottom: 1rem;
+      padding: 1rem;
+      background-color: var(--color-background-secondary);
+      border-radius: 0.25rem;
+    }
+
+    .transcript-content {
+      white-space: pre-wrap;
+      line-height: 1.6;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .divider {
+      text-align: center;
+      margin: 1rem 0;
+      color: var(--color-text-muted);
+      position: relative;
+    }
+
+    .divider::before,
+    .divider::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      width: 45%;
+      height: 1px;
+      background-color: var(--color-border);
+    }
+
+    .divider::before {
+      left: 0;
+    }
+
+    .divider::after {
+      right: 0;
+    }
+
+    .tickets-list {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+  </style>
+{% endblock %}
