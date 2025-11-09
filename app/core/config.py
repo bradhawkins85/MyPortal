@@ -81,7 +81,7 @@ class Settings(BaseSettings):
         default=False, validation_alias="ENABLE_AUTO_REFRESH"
     )
     disable_caching: bool = Field(
-        default=False, validation_alias="DISABLE_CACHING"
+        default=True, validation_alias="DISABLE_CACHING"
     )
     swagger_ui_url: str = Field(default="/docs", validation_alias="SWAGGER_UI_URL")
     opnform_base_url: AnyHttpUrl | None = Field(

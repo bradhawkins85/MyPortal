@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 from app.security.cache_control import CacheControlMiddleware
 
 
-def test_cache_control_disabled_by_default():
-    """Test that cache control headers are not added when DISABLE_CACHING is false."""
+def test_cache_control_enabled_by_default():
+    """Test that cache control headers are added by default (DISABLE_CACHING defaults to true)."""
     app = FastAPI()
     app.add_middleware(CacheControlMiddleware)
 
@@ -22,7 +22,8 @@ def test_cache_control_disabled_by_default():
 
     client = TestClient(app)
     
-    with patch.dict(os.environ, {"DISABLE_CACHING": "false"}):
+    # Don't set DISABLE_CACHING, let it use the default (true)
+    with patch.dict(os.environ, {}, clear=False):
         # Force settings reload
         from app.core.config import get_settings
         get_settings.cache_clear()
@@ -30,12 +31,14 @@ def test_cache_control_disabled_by_default():
         response = client.get("/test")
         
         assert response.status_code == 200
-        assert "Cache-Control" not in response.headers or "no-store" not in response.headers.get("Cache-Control", "")
-        assert "Pragma" not in response.headers
+        # Since default is now true, cache control headers should be present
+        assert "Cache-Control" in response.headers
+        assert "no-store" in response.headers["Cache-Control"]
+        assert response.headers.get("Pragma") == "no-cache"
 
 
-def test_cache_control_enabled():
-    """Test that cache control headers are added when DISABLE_CACHING is true."""
+def test_cache_control_explicitly_enabled():
+    """Test that cache control headers are added when DISABLE_CACHING is explicitly set to true."""
     app = FastAPI()
     app.add_middleware(CacheControlMiddleware)
 
@@ -61,6 +64,29 @@ def test_cache_control_enabled():
         assert "max-age=0" in response.headers["Cache-Control"]
         assert response.headers.get("Pragma") == "no-cache"
         assert response.headers.get("Expires") == "0"
+
+
+def test_cache_control_can_be_disabled():
+    """Test that cache control headers are not added when DISABLE_CACHING is set to false."""
+    app = FastAPI()
+    app.add_middleware(CacheControlMiddleware)
+
+    @app.get("/test")
+    async def test_endpoint():
+        return JSONResponse({"message": "test"})
+
+    client = TestClient(app)
+    
+    with patch.dict(os.environ, {"DISABLE_CACHING": "false"}):
+        # Force settings reload
+        from app.core.config import get_settings
+        get_settings.cache_clear()
+        
+        response = client.get("/test")
+        
+        assert response.status_code == 200
+        assert "Cache-Control" not in response.headers or "no-store" not in response.headers.get("Cache-Control", "")
+        assert "Pragma" not in response.headers
 
 
 def test_cache_control_exempt_paths():
