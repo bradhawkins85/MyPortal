@@ -1200,6 +1200,302 @@
     });
   }
 
+  function initialiseCallRecordingTimeEditing() {
+    const modal = document.getElementById('recording-time-modal');
+    const timeline = document.querySelector('[data-ticket-timeline]');
+    if (!modal || !timeline) {
+      return;
+    }
+
+    const ticketId = timeline.getAttribute('data-ticket-id');
+    const form = modal.querySelector('[data-recording-time-form]');
+    const minutesInput = modal.querySelector('[data-recording-time-minutes]');
+    const billableCheckbox = modal.querySelector('[data-recording-time-billable]');
+    const labourSelect = modal.querySelector('[data-recording-time-labour]');
+    const errorMessage = modal.querySelector('[data-recording-time-error]');
+    const submitButton = modal.querySelector('[data-recording-time-submit]');
+    const triggers = document.querySelectorAll('[data-recording-edit]');
+    if (
+      !form ||
+      !minutesInput ||
+      !billableCheckbox ||
+      !errorMessage ||
+      !submitButton ||
+      !labourSelect ||
+      !triggers.length
+    ) {
+      return;
+    }
+
+    const focusableSelector =
+      'a[href], button:not([disabled]), textarea, input:not([type="hidden"]):not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    let activeTrigger = null;
+    let activeRecording = null;
+
+    function setError(message) {
+      if (!errorMessage) {
+        return;
+      }
+      if (message) {
+        errorMessage.textContent = message;
+        errorMessage.hidden = false;
+      } else {
+        errorMessage.textContent = '';
+        errorMessage.hidden = true;
+      }
+    }
+
+    function getFocusableElements() {
+      return Array.from(modal.querySelectorAll(focusableSelector)).filter((element) => {
+        if (element.hasAttribute('disabled')) {
+          return false;
+        }
+        if (element.getAttribute('aria-hidden') === 'true') {
+          return false;
+        }
+        return element.offsetParent !== null;
+      });
+    }
+
+    function focusFirstElement() {
+      const [first] = getFocusableElements();
+      if (first && typeof first.focus === 'function') {
+        first.focus();
+      }
+    }
+
+    function closeModal() {
+      modal.classList.remove('is-visible');
+      modal.hidden = true;
+      modal.setAttribute('aria-hidden', 'true');
+      document.removeEventListener('keydown', handleKeydown);
+      setError('');
+      if (activeTrigger && typeof activeTrigger.focus === 'function') {
+        activeTrigger.focus();
+      }
+      activeTrigger = null;
+      activeRecording = null;
+      form.reset();
+    }
+
+    function handleKeydown(event) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeModal();
+        return;
+      }
+      if (event.key !== 'Tab') {
+        return;
+      }
+      const focusable = getFocusableElements();
+      if (!focusable.length) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const current = document.activeElement;
+      if (event.shiftKey) {
+        if (current === first) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (current === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    function openModal(trigger, recordingArticle) {
+      activeTrigger = trigger instanceof HTMLElement ? trigger : null;
+      activeRecording = recordingArticle;
+      modal.hidden = false;
+      modal.classList.add('is-visible');
+      modal.setAttribute('aria-hidden', 'false');
+      document.addEventListener('keydown', handleKeydown);
+      focusFirstElement();
+    }
+
+    function updateRecordingDisplay(recordingArticle, minutes, billable, summary, labourTypeId, labourTypeName) {
+      if (!recordingArticle) {
+        return;
+      }
+      recordingArticle.dataset.recordingMinutes = typeof minutes === 'number' ? String(minutes) : '';
+      recordingArticle.dataset.recordingBillable = billable ? 'true' : 'false';
+      recordingArticle.dataset.recordingLabour =
+        typeof labourTypeId === 'number' && !Number.isNaN(labourTypeId) && labourTypeId > 0
+          ? String(labourTypeId)
+          : '';
+      const summaryElement = recordingArticle.querySelector('[data-recording-time-summary]');
+      if (summaryElement) {
+        const text = summary || formatTimeSummary(minutes, billable, labourTypeName);
+        if (text) {
+          summaryElement.textContent = text;
+          summaryElement.hidden = false;
+        } else {
+          summaryElement.textContent = '';
+          summaryElement.hidden = true;
+        }
+      }
+    }
+
+    triggers.forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        if (!ticketId) {
+          return;
+        }
+        const recordingArticle = button.closest('[data-call-recording]');
+        if (!(recordingArticle instanceof HTMLElement)) {
+          return;
+        }
+        const minutesValue = recordingArticle.getAttribute('data-recording-minutes') || '';
+        const billableValue = recordingArticle.getAttribute('data-recording-billable') === 'true';
+        const labourValue = recordingArticle.getAttribute('data-recording-labour') || '';
+        minutesInput.value = minutesValue;
+        billableCheckbox.checked = billableValue;
+        labourSelect.value = labourValue;
+        setError('');
+        openModal(button, recordingArticle);
+      });
+    });
+
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) {
+        closeModal();
+      }
+    });
+
+    modal.querySelectorAll('[data-modal-close]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        closeModal();
+      });
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!ticketId || !(activeRecording instanceof HTMLElement)) {
+        setError('Unable to determine which call recording to update.');
+        return;
+      }
+      const recordingId = activeRecording.getAttribute('data-recording-id');
+      if (!recordingId) {
+        setError('Unable to determine which call recording to update.');
+        return;
+      }
+
+      const rawMinutes = minutesInput.value.trim();
+      const labourValue = labourSelect.value.trim();
+      let minutes = null;
+      if (rawMinutes !== '') {
+        const parsed = Number.parseInt(rawMinutes, 10);
+        if (Number.isNaN(parsed)) {
+          setError('Enter minutes as a whole number.');
+          return;
+        }
+        if (parsed < 0) {
+          setError('Minutes cannot be negative.');
+          return;
+        }
+        if (parsed > 1440) {
+          setError('Minutes cannot exceed 1440.');
+          return;
+        }
+        minutes = parsed;
+      }
+
+      const isBillable = billableCheckbox.checked;
+      let labourTypeId = null;
+      if (labourValue !== '') {
+        const parsedLabour = Number.parseInt(labourValue, 10);
+        if (Number.isNaN(parsedLabour) || parsedLabour <= 0) {
+          setError('Select a valid labour type.');
+          return;
+        }
+        labourTypeId = parsedLabour;
+      }
+      const csrfToken = getCsrfToken();
+      const headers = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      };
+      if (csrfToken) {
+        headers['X-CSRF-Token'] = csrfToken;
+      }
+
+      const previousMinutes = parseMinutesValue(activeRecording.getAttribute('data-recording-minutes'));
+      const previousBillable = activeRecording.getAttribute('data-recording-billable') === 'true';
+
+      submitButton.disabled = true;
+      submitButton.setAttribute('aria-busy', 'true');
+      setError('');
+
+      try {
+        const response = await fetch(`/api/call-recordings/${recordingId}`, {
+          method: 'PUT',
+          credentials: 'same-origin',
+          headers,
+          body: JSON.stringify({
+            minutesSpent: minutes,
+            isBillable: isBillable,
+            labourTypeId: labourTypeId,
+          }),
+        });
+
+        if (!response.ok) {
+          let detail = `${response.status} ${response.statusText}`;
+          try {
+            const payload = await response.json();
+            if (payload && payload.detail) {
+              detail = Array.isArray(payload.detail)
+                ? payload.detail.map((entry) => entry.msg || entry).join(', ')
+                : payload.detail;
+            }
+          } catch (error) {
+            /* ignore parse errors */
+          }
+          throw new Error(detail);
+        }
+
+        const data = await response.json();
+        if (!data) {
+          throw new Error('No recording data returned.');
+        }
+        const updatedMinutes =
+          typeof data.minutes_spent === 'number' ? data.minutes_spent : null;
+        const updatedBillable = Boolean(data.is_billable);
+        
+        // Format the time summary manually since the API doesn't return it
+        const labourName = typeof data.labour_type_name === 'string' ? data.labour_type_name : '';
+        const summaryText = formatTimeSummary(updatedMinutes, updatedBillable, labourName);
+        
+        const updatedLabourId =
+          typeof data.labour_type_id === 'number' && data.labour_type_id > 0
+            ? data.labour_type_id
+            : null;
+
+        updateRecordingDisplay(
+          activeRecording,
+          updatedMinutes,
+          updatedBillable,
+          summaryText,
+          updatedLabourId,
+          labourName,
+        );
+        adjustTimeTotals(previousMinutes, previousBillable, updatedMinutes, updatedBillable);
+        closeModal();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to update time entry.';
+        setError(message);
+      } finally {
+        submitButton.disabled = false;
+        submitButton.removeAttribute('aria-busy');
+      }
+    });
+  }
+
   function ready() {
     const messageWrappers = document.querySelectorAll('[data-timeline-message]');
 
@@ -1213,6 +1509,7 @@
     });
 
     initialiseReplyTimeEditing();
+    initialiseCallRecordingTimeEditing();
     initialiseAssetSelector();
     initialiseTaskManagement();
   }

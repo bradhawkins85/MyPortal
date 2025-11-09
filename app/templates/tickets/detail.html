@@ -184,6 +184,54 @@
               {% if ticket_replies %}
                 <div class="timeline" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
                   {% for reply in ticket_replies %}
+                    {% if reply.type == 'call_recording' %}
+                    <article class="timeline__event timeline__event--call-recording" data-recording-id="{{ reply.id }}">
+                      <header class="timeline__header">
+                        <div class="timeline__header-main">
+                          <span class="timeline__timestamp">
+                            {% if reply.created_iso %}
+                              <span data-utc="{{ reply.created_iso }}"></span>
+                            {% else %}
+                              <span class="text-muted">—</span>
+                            {% endif %}
+                          </span>
+                          <span class="timeline__action">
+                            <strong>📞 Call Recording:</strong> {{ reply.caller_name }} → {{ reply.callee_name }}
+                          </span>
+                          {% if reply.time_summary %}
+                            <span class="timeline__meta text-muted">{{ reply.time_summary }}</span>
+                          {% endif %}
+                        </div>
+                      </header>
+                      <div class="timeline__body">
+                        <div class="timeline__message" data-timeline-message>
+                          <p><strong>File:</strong> {{ reply.file_name }}</p>
+                          {% if reply.duration_seconds %}
+                            <p><strong>Duration:</strong> {{ reply.duration_seconds }} seconds</p>
+                          {% endif %}
+                          {% if reply.transcription %}
+                            <div class="timeline__message-content" data-timeline-message-content>
+                              <p><strong>Transcription:</strong></p>
+                              <div class="rich-text-viewer">{{ reply.transcription }}</div>
+                            </div>
+                            <button
+                              type="button"
+                              class="button button--ghost button--small timeline__message-toggle"
+                              data-timeline-message-toggle
+                              data-more-label="Show transcription"
+                              data-less-label="Hide transcription"
+                              hidden
+                              aria-expanded="false"
+                            >
+                              Show transcription
+                            </button>
+                          {% else %}
+                            <p class="text-muted">No transcription available.</p>
+                          {% endif %}
+                        </div>
+                      </div>
+                    </article>
+                    {% else %}
                     <article class="timeline__event">
                       <header class="timeline__header">
                         <div class="timeline__header-main">
@@ -228,6 +276,7 @@
                         {% endif %}
                       </div>
                     </article>
+                    {% endif %}
                   {% endfor %}
                 </div>
               {% else %}
