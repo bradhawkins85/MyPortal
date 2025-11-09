@@ -22,15 +22,24 @@ async def test_trigger_call_recordings_module():
             }
         return None
     
-    with patch.object(module_repo, "get_module", new_callable=AsyncMock) as mock_get:
+    with patch.object(module_repo, "get_module", new_callable=AsyncMock) as mock_get, \
+         patch.object(modules.call_recordings_service, "sync_recordings_from_filesystem", new_callable=AsyncMock) as mock_sync:
         mock_get.side_effect = fake_get_module
-        
-        # This should not raise ValueError("No handler registered for module call-recordings")
+        mock_sync.return_value = {
+            "status": "ok",
+            "created": 2,
+            "updated": 1,
+            "skipped": 0,
+            "errors": [],
+        }
+
         result = await modules.trigger_module("call-recordings", {}, background=False)
-        
+
         assert result is not None
         assert result.get("status") == "ok"
-        assert "recordings_path" in result
+        assert result.get("created") == 2
+        assert result.get("recordings_path") == "/test/path/recordings"
+        mock_sync.assert_awaited_once_with("/test/path/recordings")
 
 
 @pytest.mark.asyncio
