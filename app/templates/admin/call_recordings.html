@@ -13,6 +13,26 @@
       </summary>
       <ul class="header-title-menu__list" role="menu">
         <li class="header-title-menu__item" role="none">
+          <button
+            type="button"
+            class="header-title-menu__link"
+            role="menuitem"
+            id="sync-recordings-menu-btn"
+          >
+            Sync Recordings
+          </button>
+        </li>
+        <li class="header-title-menu__item" role="none">
+          <button
+            type="button"
+            class="header-title-menu__link"
+            role="menuitem"
+            id="force-sync-recordings-btn"
+          >
+            Force Sync Recordings
+          </button>
+        </li>
+        <li class="header-title-menu__item" role="none">
           <a href="/admin/modules" class="header-title-menu__link" role="menuitem">WhisperX Configuration</a>
         </li>
       </ul>
@@ -29,17 +49,6 @@
           <p class="management__subtitle">Review call recordings, view transcriptions, and create tickets from customer conversations.</p>
         </div>
         <div class="management__header-actions">
-          <button 
-            type="button" 
-            id="sync-recordings-btn" 
-            class="button button--primary"
-            title="Sync recordings from filesystem"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
-              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-            </svg>
-            Sync Recordings
-          </button>
           <div class="search-box">
             <input
               type="search"
@@ -373,16 +382,12 @@
       }
     }
 
-    async function syncRecordings() {
-      const syncBtn = document.getElementById('sync-recordings-btn');
-      const originalText = syncBtn.innerHTML;
+    async function syncRecordings(force = false) {
+      const actionText = force ? 'Force syncing' : 'Syncing';
+      const endpoint = force ? '/api/call-recordings/force-sync' : '/api/call-recordings/sync';
       
       try {
-        // Disable button and show loading state
-        syncBtn.disabled = true;
-        syncBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px; animation: spin 1s linear infinite;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>Syncing...';
-        
-        const response = await fetch('/api/call-recordings/sync', {
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: {
             'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content,
@@ -391,13 +396,13 @@
         
         if (!response.ok) {
           const error = await response.json();
-          throw new Error(error.detail || 'Failed to sync recordings');
+          throw new Error(error.detail || `Failed to ${force ? 'force sync' : 'sync'} recordings`);
         }
         
         const result = await response.json();
         
         // Show results
-        let message = `Sync completed!\n\n`;
+        let message = `${force ? 'Force sync' : 'Sync'} completed!\n\n`;
         message += `Created: ${result.created || 0}\n`;
         message += `Updated: ${result.updated || 0}\n`;
         message += `Skipped: ${result.skipped || 0}\n`;
@@ -415,17 +420,18 @@
         // Reload the recordings list
         loadRecordings();
       } catch (error) {
-        console.error('Error syncing recordings:', error);
-        alert(`Failed to sync recordings: ${error.message}`);
-      } finally {
-        // Restore button state
-        syncBtn.disabled = false;
-        syncBtn.innerHTML = originalText;
+        console.error(`Error ${force ? 'force syncing' : 'syncing'} recordings:`, error);
+        alert(`Failed to ${force ? 'force sync' : 'sync'} recordings: ${error.message}`);
       }
     }
 
     // Event listeners
-    document.getElementById('sync-recordings-btn').addEventListener('click', syncRecordings);
+    document.getElementById('sync-recordings-menu-btn').addEventListener('click', () => syncRecordings(false));
+    document.getElementById('force-sync-recordings-btn').addEventListener('click', () => {
+      if (confirm('Force sync will reload all recording details from the filesystem while preserving ticket linkages and transcriptions. Continue?')) {
+        syncRecordings(true);
+      }
+    });
     document.getElementById('recording-search').addEventListener('input', (e) => {
       currentSearch = e.target.value;
       currentPage = 1;
