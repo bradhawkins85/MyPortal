@@ -49,9 +49,13 @@ def _map_recording_row(row: dict[str, Any]) -> dict[str, Any]:
         mapped["updated_at"] = _coerce_datetime(mapped["updated_at"])
     
     # Convert int fields
-    for field in ["id", "caller_staff_id", "callee_staff_id", "duration_seconds", "linked_ticket_id"]:
+    for field in ["id", "caller_staff_id", "callee_staff_id", "duration_seconds", "linked_ticket_id", "minutes_spent", "labour_type_id"]:
         if field in mapped and mapped[field] is not None:
             mapped[field] = int(mapped[field])
+    
+    # Convert boolean fields
+    if "is_billable" in mapped:
+        mapped["is_billable"] = bool(mapped["is_billable"])
     
     return mapped
 
@@ -100,11 +104,14 @@ async def list_call_recordings(
             ce.last_name AS callee_last_name,
             ce.email AS callee_email,
             t.ticket_number AS linked_ticket_number,
-            t.subject AS linked_ticket_subject
+            t.subject AS linked_ticket_subject,
+            lt.name AS labour_type_name,
+            lt.code AS labour_type_code
         FROM call_recordings cr
         LEFT JOIN staff cs ON cr.caller_staff_id = cs.id
         LEFT JOIN staff ce ON cr.callee_staff_id = ce.id
         LEFT JOIN tickets t ON cr.linked_ticket_id = t.id
+        LEFT JOIN ticket_labour_types lt ON cr.labour_type_id = lt.id
         WHERE {where_clause}
         ORDER BY cr.call_date DESC
         LIMIT %s OFFSET %s
@@ -171,11 +178,14 @@ async def get_call_recording_by_id(recording_id: int) -> dict[str, Any] | None:
             ce.last_name AS callee_last_name,
             ce.email AS callee_email,
             t.ticket_number AS linked_ticket_number,
-            t.subject AS linked_ticket_subject
+            t.subject AS linked_ticket_subject,
+            lt.name AS labour_type_name,
+            lt.code AS labour_type_code
         FROM call_recordings cr
         LEFT JOIN staff cs ON cr.caller_staff_id = cs.id
         LEFT JOIN staff ce ON cr.callee_staff_id = ce.id
         LEFT JOIN tickets t ON cr.linked_ticket_id = t.id
+        LEFT JOIN ticket_labour_types lt ON cr.labour_type_id = lt.id
         WHERE cr.id = %s
     """
     row = await db.fetch_one(sql, (recording_id,))
@@ -194,11 +204,14 @@ async def get_call_recording_by_file_path(file_path: str) -> dict[str, Any] | No
             ce.last_name AS callee_last_name,
             ce.email AS callee_email,
             t.ticket_number AS linked_ticket_number,
-            t.subject AS linked_ticket_subject
+            t.subject AS linked_ticket_subject,
+            lt.name AS labour_type_name,
+            lt.code AS labour_type_code
         FROM call_recordings cr
         LEFT JOIN staff cs ON cr.caller_staff_id = cs.id
         LEFT JOIN staff ce ON cr.callee_staff_id = ce.id
         LEFT JOIN tickets t ON cr.linked_ticket_id = t.id
+        LEFT JOIN ticket_labour_types lt ON cr.labour_type_id = lt.id
         WHERE cr.file_path = %s
         LIMIT 1
     """
@@ -261,6 +274,9 @@ async def update_call_recording(
     transcription: str | None = None,
     transcription_status: str | None = None,
     linked_ticket_id: int | None = None,
+    minutes_spent: int | None = None,
+    is_billable: bool | None = None,
+    labour_type_id: int | None = None,
 ) -> dict[str, Any]:
     """Update an existing call recording."""
     updates: list[str] = []
@@ -277,6 +293,18 @@ async def update_call_recording(
     if linked_ticket_id is not None:
         updates.append("linked_ticket_id = %s")
         params.append(linked_ticket_id)
+    
+    if minutes_spent is not None:
+        updates.append("minutes_spent = %s")
+        params.append(minutes_spent)
+    
+    if is_billable is not None:
+        updates.append("is_billable = %s")
+        params.append(1 if is_billable else 0)
+    
+    if labour_type_id is not None:
+        updates.append("labour_type_id = %s")
+        params.append(labour_type_id)
     
     if not updates:
         # No updates to perform
@@ -312,6 +340,30 @@ async def unlink_recording_from_ticket(recording_id: int) -> dict[str, Any]:
     if not updated:
         raise ValueError("Call recording not found after unlink")
     return updated
+
+
+async def list_ticket_call_recordings(ticket_id: int) -> list[dict[str, Any]]:
+    """List all call recordings linked to a specific ticket."""
+    sql = """
+        SELECT
+            cr.*,
+            cs.first_name AS caller_first_name,
+            cs.last_name AS caller_last_name,
+            cs.email AS caller_email,
+            ce.first_name AS callee_first_name,
+            ce.last_name AS callee_last_name,
+            ce.email AS callee_email,
+            lt.name AS labour_type_name,
+            lt.code AS labour_type_code
+        FROM call_recordings cr
+        LEFT JOIN staff cs ON cr.caller_staff_id = cs.id
+        LEFT JOIN staff ce ON cr.callee_staff_id = ce.id
+        LEFT JOIN ticket_labour_types lt ON cr.labour_type_id = lt.id
+        WHERE cr.linked_ticket_id = %s
+        ORDER BY cr.call_date ASC
+    """
+    rows = await db.fetch_all(sql, (ticket_id,))
+    return [_map_recording_row(row) for row in rows]
 
 
 async def _lookup_staff_by_phone(phone_number: str) -> int | None:
