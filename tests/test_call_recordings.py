@@ -47,15 +47,14 @@ async def test_create_call_recording():
          patch.object(repo.db, "fetch_one", new_callable=AsyncMock) as mock_fetch_one, \
          patch.object(repo, "_lookup_staff_by_phone", new_callable=AsyncMock) as mock_lookup:
         
-        mock_lookup.side_effect = [10, 20]  # caller_staff_id, callee_staff_id
+        mock_lookup.return_value = 10  # Only called once for phone_number
         mock_fetch_one.return_value = {
             "id": 1,
             "file_path": "/recordings/test.wav",
             "file_name": "test.wav",
-            "caller_number": "+1234567890",
-            "callee_number": "+0987654321",
+            "phone_number": "+1234567890",
             "caller_staff_id": 10,
-            "callee_staff_id": 20,
+            "callee_staff_id": None,
             "call_date": datetime(2024, 1, 15, 10, 30, 0),
             "duration_seconds": 300,
             "transcription": None,
@@ -68,18 +67,17 @@ async def test_create_call_recording():
         result = await repo.create_call_recording(
             file_path="/recordings/test.wav",
             file_name="test.wav",
-            caller_number="+1234567890",
-            callee_number="+0987654321",
+            phone_number="+1234567890",
             call_date=datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc),
             duration_seconds=300,
         )
         
         assert result["id"] == 1
         assert result["file_name"] == "test.wav"
+        assert result["phone_number"] == "+1234567890"
         assert result["caller_staff_id"] == 10
-        assert result["callee_staff_id"] == 20
         assert mock_execute.called
-        assert mock_lookup.call_count == 2
+        assert mock_lookup.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -510,8 +508,7 @@ async def test_call_recording_create_schema():
     data = {
         "filePath": "/recordings/test.wav",
         "fileName": "test.wav",
-        "callerNumber": "+1234567890",
-        "calleeNumber": "+0987654321",
+        "phoneNumber": "+1234567890",
         "callDate": datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc),
         "durationSeconds": 300,
     }
@@ -520,7 +517,7 @@ async def test_call_recording_create_schema():
 
     assert schema.file_path == "/recordings/test.wav"
     assert schema.file_name == "test.wav"
-    assert schema.caller_number == "+1234567890"
+    assert schema.phone_number == "+1234567890"
     assert schema.duration_seconds == 300
 
 
@@ -534,8 +531,7 @@ async def test_sync_recordings_from_filesystem_creates_records(tmp_path):
     audio_path.write_bytes(b"fake audio")
     metadata = {
         "callDate": "2024-01-15T10:30:00Z",
-        "caller_number": "+123456789",
-        "callee_number": "+987654321",
+        "phone_number": "+123456789",
         "duration_seconds": "300",
         "transcription": "Call transcript",
         "transcription_status": "completed",
@@ -558,8 +554,7 @@ async def test_sync_recordings_from_filesystem_creates_records(tmp_path):
         call_kwargs = mock_create.await_args.kwargs
         assert call_kwargs["file_path"] == str(audio_path)
         assert call_kwargs["file_name"] == "call1.wav"
-        assert call_kwargs["caller_number"] == "+123456789"
-        assert call_kwargs["callee_number"] == "+987654321"
+        assert call_kwargs["phone_number"] == "+123456789"
         assert call_kwargs["duration_seconds"] == 300
         assert call_kwargs["transcription"] == "Call transcript"
         assert call_kwargs["transcription_status"] == "completed"
@@ -710,3 +705,141 @@ async def test_sync_recordings_preserves_failed_status(tmp_path):
         assert result["updated"] == 0
         mock_create.assert_not_called()
         mock_update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_extract_phone_from_title():
+    """Test phone number extraction from recording title."""
+    from app.services.call_recordings import _extract_phone_from_title
+    
+    # Test with + prefix
+    title1 = "Recording +61439531124 0001 2025-10-13 14:56"
+    phone1 = _extract_phone_from_title(title1)
+    assert phone1 == "+61439531124"
+    
+    # Test without + prefix
+    title2 = 'Recording in_memory_ring_flow:{"items":[{"id":"contact-24e3e112"}]} 61410553956 2025-10-24 15:43'
+    phone2 = _extract_phone_from_title(title2)
+    assert phone2 == "61410553956"
+    
+    # Test with no phone number
+    title3 = "Recording without phone"
+    phone3 = _extract_phone_from_title(title3)
+    assert phone3 is None
+    
+    # Test with None
+    phone4 = _extract_phone_from_title(None)
+    assert phone4 is None
+
+
+@pytest.mark.asyncio
+async def test_extract_datetime_from_title():
+    """Test date/time extraction from recording title."""
+    from app.services.call_recordings import _extract_datetime_from_title
+    
+    # Test standard format
+    title1 = "Recording +61439531124 0001 2025-10-13 14:56"
+    date1 = _extract_datetime_from_title(title1)
+    assert date1 is not None
+    assert date1.year == 2025
+    assert date1.month == 10
+    assert date1.day == 13
+    assert date1.hour == 14
+    assert date1.minute == 56
+    
+    # Test with JSON in title
+    title2 = 'Recording in_memory_ring_flow:{"items":[]} 61410553956 2025-10-24 15:43'
+    date2 = _extract_datetime_from_title(title2)
+    assert date2 is not None
+    assert date2.year == 2025
+    assert date2.month == 10
+    assert date2.day == 24
+    assert date2.hour == 15
+    assert date2.minute == 43
+    
+    # Test with no date
+    title3 = "Recording without date"
+    date3 = _extract_datetime_from_title(title3)
+    assert date3 is None
+    
+    # Test with None
+    date4 = _extract_datetime_from_title(None)
+    assert date4 is None
+
+
+@pytest.mark.asyncio
+async def test_sync_recordings_uses_title_extraction(tmp_path):
+    """Test that sync uses phone number and date from MP3 title."""
+    from app.services.call_recordings import _read_audio_title
+    from app.services import call_recordings as service
+    from app.repositories import call_recordings as repo
+    
+    # Create a test MP3 file (empty is fine for this test)
+    audio_path = tmp_path / "test_call.mp3"
+    audio_path.write_bytes(b"fake mp3 data")
+    
+    # Mock the title reading to return a sample title
+    test_title = "Recording +61439531124 0001 2025-10-13 14:56"
+    
+    with patch.object(service, "_read_audio_title", return_value=test_title) as mock_read_title, \
+         patch.object(repo, "get_call_recording_by_file_path", new_callable=AsyncMock) as mock_get, \
+         patch.object(repo, "create_call_recording", new_callable=AsyncMock) as mock_create:
+        
+        mock_get.return_value = None  # No existing recording
+        mock_create.return_value = {"id": 1}
+        
+        result = await service.sync_recordings_from_filesystem(str(tmp_path))
+        
+        assert result["created"] == 1
+        assert mock_create.await_count == 1
+        
+        # Verify phone number was extracted from title
+        call_kwargs = mock_create.await_args.kwargs
+        assert call_kwargs["phone_number"] == "+61439531124"
+        
+        # Verify date was extracted from title
+        assert call_kwargs["call_date"] is not None
+        assert call_kwargs["call_date"].year == 2025
+        assert call_kwargs["call_date"].month == 10
+        assert call_kwargs["call_date"].day == 13
+
+
+@pytest.mark.asyncio
+async def test_create_call_recording_with_phone_number():
+    """Test creating a call recording with phone_number field."""
+    from app.repositories import call_recordings as repo
+    
+    with patch.object(repo.db, "execute", new_callable=AsyncMock) as mock_execute, \
+         patch.object(repo.db, "fetch_one", new_callable=AsyncMock) as mock_fetch_one, \
+         patch.object(repo, "_lookup_staff_by_phone", new_callable=AsyncMock) as mock_lookup:
+        
+        mock_lookup.return_value = 42  # staff_id
+        mock_fetch_one.return_value = {
+            "id": 1,
+            "file_path": "/recordings/test.mp3",
+            "file_name": "test.mp3",
+            "phone_number": "+61439531124",
+            "caller_staff_id": 42,
+            "callee_staff_id": None,
+            "call_date": datetime(2025, 10, 13, 14, 56, 0),
+            "duration_seconds": 120,
+            "transcription": None,
+            "transcription_status": "pending",
+            "linked_ticket_id": None,
+            "created_at": datetime(2025, 10, 13, 15, 0, 0),
+            "updated_at": datetime(2025, 10, 13, 15, 0, 0),
+        }
+        
+        result = await repo.create_call_recording(
+            file_path="/recordings/test.mp3",
+            file_name="test.mp3",
+            phone_number="+61439531124",
+            call_date=datetime(2025, 10, 13, 14, 56, 0, tzinfo=timezone.utc),
+            duration_seconds=120,
+        )
+        
+        assert result["id"] == 1
+        assert result["phone_number"] == "+61439531124"
+        assert result["caller_staff_id"] == 42
+        assert mock_execute.called
+        assert mock_lookup.call_count == 1

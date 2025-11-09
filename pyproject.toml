@@ -28,6 +28,7 @@ dependencies = [
     "email-validator",
     "python-multipart",
     "bleach",
+    "mutagen",
 ]
 
 [project.optional-dependencies]

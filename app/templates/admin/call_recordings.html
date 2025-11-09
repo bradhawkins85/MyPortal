@@ -80,8 +80,7 @@
             <thead>
               <tr>
                 <th>Date/Time</th>
-                <th>Caller</th>
-                <th>Callee</th>
+                <th>Phone Number</th>
                 <th>Duration</th>
                 <th>Transcription Status</th>
                 <th>Linked Ticket</th>
@@ -90,7 +89,7 @@
             </thead>
             <tbody id="recordings-tbody">
               <tr>
-                <td colspan="7" class="data-table__loading">Loading recordings...</td>
+                <td colspan="6" class="data-table__loading">Loading recordings...</td>
               </tr>
             </tbody>
           </table>
@@ -172,7 +171,7 @@
     // Load recordings
     async function loadRecordings() {
       const tbody = document.getElementById('recordings-tbody');
-      tbody.innerHTML = '<tr><td colspan="7" class="data-table__loading">Loading...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="data-table__loading">Loading...</td></tr>';
 
       try {
         const params = new URLSearchParams({
@@ -194,18 +193,26 @@
         console.log('Loaded recordings:', recordings.length);
         
         if (recordings.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No recordings found</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No recordings found</td></tr>';
           return;
         }
 
         tbody.innerHTML = recordings.map(rec => {
           try {
-            const caller = rec.caller_first_name 
-              ? `${rec.caller_first_name} ${rec.caller_last_name}` 
-              : rec.caller_number || 'Unknown';
-            const callee = rec.callee_first_name 
-              ? `${rec.callee_first_name} ${rec.callee_last_name}` 
-              : rec.callee_number || 'Unknown';
+            // Display staff name if available, otherwise show phone number
+            let displayName = rec.phone_number || 'Unknown';
+            if (rec.caller_first_name && rec.caller_last_name) {
+              displayName = `${rec.caller_first_name} ${rec.caller_last_name}`;
+              if (rec.phone_number) {
+                displayName += ` (${rec.phone_number})`;
+              }
+            } else if (rec.callee_first_name && rec.callee_last_name) {
+              displayName = `${rec.callee_first_name} ${rec.callee_last_name}`;
+              if (rec.phone_number) {
+                displayName += ` (${rec.phone_number})`;
+              }
+            }
+            
             const date = rec.call_date ? new Date(rec.call_date).toLocaleString() : 'N/A';
             const duration = rec.duration_seconds ? `${Math.floor(rec.duration_seconds / 60)}:${String(rec.duration_seconds % 60).padStart(2, '0')}` : 'N/A';
             const statusBadge = getStatusBadge(rec.transcription_status);
@@ -216,8 +223,7 @@
             return `
               <tr>
                 <td>${date}</td>
-                <td>${caller}</td>
-                <td>${callee}</td>
+                <td>${displayName}</td>
                 <td>${duration}</td>
                 <td>${statusBadge}</td>
                 <td>${linkedTicket}</td>
@@ -233,7 +239,7 @@
             `;
           } catch (err) {
             console.error('Error rendering recording row:', rec, err);
-            return `<tr><td colspan="7" class="text-center text-danger">Error rendering recording ID ${rec.id || 'unknown'}</td></tr>`;
+            return `<tr><td colspan="6" class="text-center text-danger">Error rendering recording ID ${rec.id || 'unknown'}</td></tr>`;
           }
         }).join('');
         
@@ -243,7 +249,7 @@
         document.getElementById('next-page').disabled = recordings.length < pageSize;
       } catch (error) {
         console.error('Error loading recordings:', error);
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Error loading recordings</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Error loading recordings</td></tr>';
       }
     }
 
@@ -268,18 +274,21 @@
         const info = document.getElementById('transcript-info');
         const content = document.getElementById('transcript-content');
         
-        const caller = recording.caller_first_name 
-          ? `${recording.caller_first_name} ${recording.caller_last_name}` 
-          : recording.caller_number || 'Unknown';
-        const callee = recording.callee_first_name 
-          ? `${recording.callee_first_name} ${recording.callee_last_name}` 
-          : recording.callee_number || 'Unknown';
+        // Display staff name if available
+        let staffName = 'Unknown';
+        if (recording.caller_first_name && recording.caller_last_name) {
+          staffName = `${recording.caller_first_name} ${recording.caller_last_name}`;
+        } else if (recording.callee_first_name && recording.callee_last_name) {
+          staffName = `${recording.callee_first_name} ${recording.callee_last_name}`;
+        }
+        
         const date = new Date(recording.call_date).toLocaleString();
+        const phoneNumber = recording.phone_number || 'Unknown';
         
         info.innerHTML = `
           <p><strong>Date:</strong> ${date}</p>
-          <p><strong>Caller:</strong> ${caller}</p>
-          <p><strong>Callee:</strong> ${callee}</p>
+          <p><strong>Phone Number:</strong> ${phoneNumber}</p>
+          <p><strong>Staff:</strong> ${staffName}</p>
           <p><strong>Duration:</strong> ${recording.duration_seconds ? Math.floor(recording.duration_seconds / 60) + ':' + String(recording.duration_seconds % 60).padStart(2, '0') : 'N/A'}</p>
         `;
         
@@ -649,9 +658,7 @@
       .data-table th:nth-child(3),
       .data-table td:nth-child(3),
       .data-table th:nth-child(4),
-      .data-table td:nth-child(4),
-      .data-table th:nth-child(5),
-      .data-table td:nth-child(5) {
+      .data-table td:nth-child(4) {
         display: none;
       }
     }
