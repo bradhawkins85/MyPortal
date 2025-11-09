@@ -327,6 +327,161 @@ async def sync_recordings_from_filesystem(recordings_path: str) -> dict[str, Any
     }
 
 
+async def force_sync_recordings_from_filesystem(recordings_path: str) -> dict[str, Any]:
+    """
+    Force sync recordings from filesystem, reloading all details while preserving ticket linkages and transcriptions.
+    
+    This is similar to sync_recordings_from_filesystem but updates ALL metadata from the filesystem
+    for existing recordings, except for:
+    - linked_ticket_id (preserved)
+    - transcription (only updated if found in filesystem)
+    - labour-related fields (preserved)
+    """
+    # Validate and resolve the path
+    try:
+        base_path = Path(recordings_path).expanduser().resolve()
+    except (ValueError, OSError) as e:
+        raise ValueError(f"Invalid recordings path: {recordings_path}")
+    
+    if not base_path.exists() or not base_path.is_dir():
+        raise FileNotFoundError(f"Recordings path does not exist: {recordings_path}")
+
+    created = 0
+    updated = 0
+    skipped = 0
+    errors: list[str] = []
+
+    for audio_file in _iter_audio_files(base_path):
+        # Try to extract phone number and date from audio file title (MP3 ID3 tag)
+        audio_title = _read_audio_title(audio_file)
+        phone_from_title = _extract_phone_from_title(audio_title) if audio_title else None
+        date_from_title = _extract_datetime_from_title(audio_title) if audio_title else None
+        
+        metadata = _load_json_metadata(audio_file, errors=errors)
+        transcription = _read_transcription(audio_file, metadata)
+        transcription_status = (
+            _first_non_empty(metadata, "transcription_status", "transcriptionStatus")
+            or ("completed" if transcription else metadata.get("status"))
+        )
+        if not transcription_status:
+            transcription_status = "completed" if transcription else "pending"
+
+        # Use date from title if available, otherwise use metadata or file mtime
+        call_date = date_from_title
+        if call_date is None:
+            call_date_value = _first_non_empty(
+                metadata,
+                "call_date",
+                "callDate",
+                "started_at",
+                "start_time",
+                "startTime",
+                "timestamp",
+                "created_at",
+                "createdAt",
+            )
+            call_date = _coerce_datetime_value(call_date_value)
+        if call_date is None:
+            call_date = datetime.fromtimestamp(audio_file.stat().st_mtime, tz=timezone.utc)
+
+        duration = _coerce_duration(
+            _first_non_empty(
+                metadata,
+                "duration_seconds",
+                "duration",
+                "durationSeconds",
+                "length",
+                "length_seconds",
+            )
+        )
+
+        # Use phone number from title if available, otherwise use metadata
+        phone_number = phone_from_title
+        if not phone_number:
+            # Fallback to metadata fields (legacy support)
+            phone_number = _first_non_empty(
+                metadata,
+                "phone_number",
+                "phoneNumber",
+                "caller_number",
+                "callerNumber",
+                "callee_number",
+                "calleeNumber",
+                "from",
+                "from_number",
+                "fromNumber",
+                "to",
+                "to_number",
+                "toNumber",
+                "caller",
+                "callee",
+            )
+
+        existing = await call_recordings_repo.get_call_recording_by_file_path(str(audio_file))
+        if existing:
+            # Force update all metadata from filesystem, but preserve ticket linkages and transcriptions
+            updates: dict[str, Any] = {}
+            
+            # Always update file name in case it changed
+            if audio_file.name != existing.get("file_name"):
+                updates["file_name"] = audio_file.name
+            
+            # Update phone number if found in filesystem
+            if phone_number and phone_number != existing.get("phone_number"):
+                updates["phone_number"] = str(phone_number)
+            
+            # Update call date if found in filesystem
+            if call_date and call_date != existing.get("call_date"):
+                updates["call_date"] = call_date
+            
+            # Update duration if found in filesystem
+            if duration is not None and duration != existing.get("duration_seconds"):
+                updates["duration_seconds"] = duration
+            
+            # Update transcription only if found in filesystem and different
+            if transcription and transcription != existing.get("transcription"):
+                updates["transcription"] = transcription
+                updates["transcription_status"] = transcription_status or "completed"
+            
+            # Lookup staff by phone number and update if changed
+            if phone_number:
+                staff_id = await call_recordings_repo.lookup_staff_by_phone(phone_number)
+                if staff_id and staff_id != existing.get("caller_staff_id"):
+                    updates["caller_staff_id"] = staff_id
+
+            if updates:
+                await call_recordings_repo.force_update_call_recording(existing["id"], **updates)
+                updated += 1
+            else:
+                skipped += 1
+            continue
+
+        # Create new recording if not exists
+        try:
+            await call_recordings_repo.create_call_recording(
+                file_path=str(audio_file),
+                file_name=audio_file.name,
+                phone_number=str(phone_number) if phone_number else None,
+                call_date=call_date,
+                duration_seconds=duration,
+                transcription=transcription,
+                transcription_status=transcription_status,
+            )
+            created += 1
+        except Exception as exc:  # pragma: no cover - database dependent
+            message = f"Failed to persist call recording {audio_file}: {exc}"
+            logger.error(message)
+            errors.append(message)
+
+    return {
+        "status": "ok",
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
 async def queue_pending_transcriptions() -> dict[str, Any]:
     """
     Queue all pending recordings for transcription.
