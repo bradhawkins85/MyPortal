@@ -327,6 +327,22 @@
                   />
                   <p class="form-help">Authorization header value (e.g., "Bearer token123"). Leave blank to keep the existing value.</p>
                 </div>
+              {% elif module.slug == 'whisperx' %}
+                <div class="form-field">
+                  <label class="form-label" for="whisperx-base-url">Base URL</label>
+                  <input id="whisperx-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="http://whisperx-server:8000" />
+                  <p class="form-help">The WhisperX server endpoint for transcription requests.</p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="whisperx-api-key">API Key (optional)</label>
+                  <input id="whisperx-api-key" name="settings.api_key" class="form-input" type="password" autocomplete="off" placeholder="Enter a new API key" />
+                  <p class="form-help">Bearer token for authentication. Leave blank to keep existing value or if no auth required.</p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="whisperx-language">Default Language</label>
+                  <input id="whisperx-language" name="settings.language" class="form-input" value="{{ settings.language or 'en' }}" placeholder="en" />
+                  <p class="form-help">Language code for transcription (e.g., en, es, fr, de).</p>
+                </div>
               {% else %}
                 {% for key, value in settings.items() %}
                   <div class="form-field">
