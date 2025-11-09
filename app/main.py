@@ -3136,6 +3136,11 @@ async def index(request: Request):
     if redirect:
         return redirect
     overview = await _build_consolidated_overview(request, user)
+    
+    # Check if Ollama module is enabled for the Agent section
+    ollama_module = await modules_service.get_module("ollama", redact=False)
+    ollama_enabled = ollama_module.get("enabled", False) if ollama_module else False
+    
     return await _render_template(
         "dashboard.html",
         request,
@@ -3144,6 +3149,7 @@ async def index(request: Request):
             "title": "Consolidated overview",
             "overview": overview,
             "notification_unread_count": overview.get("unread_notifications", 0),
+            "ollama_enabled": ollama_enabled,
         },
     )
 
