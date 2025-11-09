@@ -29,7 +29,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
         return recording
     
     # Get WhisperX module settings
-    module = await modules_repo.get_module_by_slug("whisperx")
+    module = await modules_repo.get_module("whisperx")
     if not module or not module.get("enabled"):
         logger.warning("WhisperX module not enabled")
         await call_recordings_repo.update_call_recording(
@@ -119,7 +119,7 @@ async def summarize_transcription(transcription: str) -> str:
         return "No transcription available to summarize."
     
     # Get Ollama module settings
-    module = await modules_repo.get_module_by_slug("ollama")
+    module = await modules_repo.get_module("ollama")
     if not module or not module.get("enabled"):
         logger.warning("Ollama module not enabled for summarization")
         return transcription[:500] + ("..." if len(transcription) > 500 else "")
