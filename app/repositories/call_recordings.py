@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.core.database import db
+from app.core.phone_utils import normalize_to_e164
 
 
 def _ensure_utc(value: datetime | None) -> datetime | None:
@@ -427,17 +428,34 @@ async def list_ticket_call_recordings(ticket_id: int) -> list[dict[str, Any]]:
 
 
 async def lookup_staff_by_phone(phone_number: str) -> int | None:
-    """Look up staff member by phone number (mobile or normalized)."""
-    # Normalize phone number by removing common separators
-    normalized = "".join(c for c in phone_number if c.isdigit() or c == "+")
+    """
+    Look up staff member by phone number.
     
-    # Try exact match first
+    Normalizes the phone number to E.164 format before attempting to match.
+    Falls back to partial matching if E.164 normalization fails.
+    """
+    # Normalize to E.164 format first
+    e164_number = normalize_to_e164(phone_number)
+    
+    # Try exact match with E.164 format
+    if e164_number:
+        row = await db.fetch_one(
+            "SELECT id FROM staff WHERE mobile_phone = %s LIMIT 1",
+            (e164_number,)
+        )
+        if row:
+            return int(row["id"])
+    
+    # Try exact match with original format
     row = await db.fetch_one(
         "SELECT id FROM staff WHERE mobile_phone = %s LIMIT 1",
         (phone_number,)
     )
     if row:
         return int(row["id"])
+    
+    # Fallback: normalize by removing common separators
+    normalized = "".join(c for c in phone_number if c.isdigit() or c == "+")
     
     # Try normalized match
     if normalized != phone_number:
