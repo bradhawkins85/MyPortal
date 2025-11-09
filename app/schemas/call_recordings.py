@@ -9,8 +9,7 @@ from pydantic import BaseModel, Field
 class CallRecordingBase(BaseModel):
     file_path: str = Field(validation_alias="filePath")
     file_name: str = Field(validation_alias="fileName")
-    caller_number: Optional[str] = Field(default=None, validation_alias="callerNumber")
-    callee_number: Optional[str] = Field(default=None, validation_alias="calleeNumber")
+    phone_number: Optional[str] = Field(default=None, validation_alias="phoneNumber")
     call_date: datetime = Field(validation_alias="callDate")
     duration_seconds: Optional[int] = Field(default=None, validation_alias="durationSeconds")
 
@@ -33,8 +32,7 @@ class CallRecordingResponse(BaseModel):
     id: int
     file_path: str
     file_name: str
-    caller_number: Optional[str] = None
-    callee_number: Optional[str] = None
+    phone_number: Optional[str] = None
     caller_staff_id: Optional[int] = None
     callee_staff_id: Optional[int] = None
     call_date: datetime
