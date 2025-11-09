@@ -162,7 +162,7 @@ async def count_call_recordings(
 async def get_call_recording_by_id(recording_id: int) -> dict[str, Any] | None:
     """Get a single call recording by ID."""
     sql = """
-        SELECT 
+        SELECT
             cr.*,
             cs.first_name AS caller_first_name,
             cs.last_name AS caller_last_name,
@@ -179,6 +179,30 @@ async def get_call_recording_by_id(recording_id: int) -> dict[str, Any] | None:
         WHERE cr.id = %s
     """
     row = await db.fetch_one(sql, (recording_id,))
+    return _map_recording_row(row) if row else None
+
+
+async def get_call_recording_by_file_path(file_path: str) -> dict[str, Any] | None:
+    """Return the call recording matching a file path, if it exists."""
+    sql = """
+        SELECT
+            cr.*,
+            cs.first_name AS caller_first_name,
+            cs.last_name AS caller_last_name,
+            cs.email AS caller_email,
+            ce.first_name AS callee_first_name,
+            ce.last_name AS callee_last_name,
+            ce.email AS callee_email,
+            t.ticket_number AS linked_ticket_number,
+            t.subject AS linked_ticket_subject
+        FROM call_recordings cr
+        LEFT JOIN staff cs ON cr.caller_staff_id = cs.id
+        LEFT JOIN staff ce ON cr.callee_staff_id = ce.id
+        LEFT JOIN tickets t ON cr.linked_ticket_id = t.id
+        WHERE cr.file_path = %s
+        LIMIT 1
+    """
+    row = await db.fetch_one(sql, (file_path,))
     return _map_recording_row(row) if row else None
 
 
