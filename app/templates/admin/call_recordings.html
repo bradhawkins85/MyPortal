@@ -216,6 +216,11 @@
             </tr>
           `;
         }).join('');
+        
+        // Update pagination info
+        document.getElementById('page-info').textContent = `Page ${currentPage}`;
+        document.getElementById('prev-page').disabled = currentPage <= 1;
+        document.getElementById('next-page').disabled = recordings.length < pageSize;
       } catch (error) {
         console.error('Error loading recordings:', error);
         tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Error loading recordings</td></tr>';
