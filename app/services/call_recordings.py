@@ -387,39 +387,55 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                     
                     response.raise_for_status()
                     
+                    # Try to parse as JSON first
+                    transcription = None
+                    result = None
                     try:
                         result = response.json()
-                        logger.debug(f"WhisperX response body: {result}")
+                        logger.debug(f"WhisperX response body (JSON): {result}")
+                        transcription = result.get("text", "")
                     except ValueError as exc:
-                        error_message = f"Invalid JSON response: {response.text[:500]}"
-                        logger.error(
-                            "Invalid JSON response while transcribing recording {}: {}",
-                            recording_id,
-                            response.text[:500],
-                        )
-                        
-                        # Record webhook failure
-                        if webhook_event_id:
-                            try:
-                                await webhook_monitor.record_manual_failure(
-                                    webhook_event_id,
-                                    attempt_number=1,
-                                    status="failed",
-                                    error_message=error_message,
-                                    response_status=response.status_code,
-                                    response_body=response.text[:4000],
-                                    request_headers=safe_headers,
-                                    request_body={"file_name": recording["file_name"]},
-                                    response_headers=dict(response.headers),
-                                )
-                            except Exception as webhook_exc:
-                                logger.warning(f"Failed to record webhook failure: {webhook_exc}")
-                        
-                        await call_recordings_repo.update_call_recording(
-                            recording_id,
-                            transcription_status="failed",
-                        )
-                        raise ValueError("Invalid response from transcription service") from exc
+                        # Not JSON - check if it's plain text
+                        content_type = response.headers.get("content-type", "").lower()
+                        if "text/plain" in content_type or not content_type.startswith("application/json"):
+                            # Accept plain text response
+                            transcription = response.text.strip()
+                            logger.info(
+                                "WhisperX returned plain text response for recording {}: length={}",
+                                recording_id,
+                                len(transcription),
+                            )
+                        else:
+                            # Unexpected content type
+                            error_message = f"Invalid response format (content-type: {content_type}): {response.text[:500]}"
+                            logger.error(
+                                "Invalid response format while transcribing recording {}: {}",
+                                recording_id,
+                                response.text[:500],
+                            )
+                            
+                            # Record webhook failure
+                            if webhook_event_id:
+                                try:
+                                    await webhook_monitor.record_manual_failure(
+                                        webhook_event_id,
+                                        attempt_number=1,
+                                        status="failed",
+                                        error_message=error_message,
+                                        response_status=response.status_code,
+                                        response_body=response.text[:4000],
+                                        request_headers=safe_headers,
+                                        request_body={"file_name": recording["file_name"]},
+                                        response_headers=dict(response.headers),
+                                    )
+                                except Exception as webhook_exc:
+                                    logger.warning(f"Failed to record webhook failure: {webhook_exc}")
+                            
+                            await call_recordings_repo.update_call_recording(
+                                recording_id,
+                                transcription_status="failed",
+                            )
+                            raise ValueError("Invalid response from transcription service") from exc
                         
             except FileNotFoundError:
                 error_message = f"Audio file not found: {file_path}"
@@ -447,7 +463,15 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                 )
                 raise ValueError(error_message)
 
-            transcription = result.get("text", "")
+            # Transcription is already set from either JSON or plain text above
+            if not transcription:
+                error_message = "Empty transcription received from WhisperX"
+                logger.error(error_message)
+                await call_recordings_repo.update_call_recording(
+                    recording_id,
+                    transcription_status="failed",
+                )
+                raise ValueError(error_message)
             
             logger.info(
                 "Transcription completed for recording {}: length={}",
@@ -458,11 +482,13 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
             # Record webhook success
             if webhook_event_id:
                 try:
+                    # Use result for JSON responses, or response.text for plain text
+                    response_body_for_log = json.dumps(result)[:4000] if result else response.text[:4000]
                     await webhook_monitor.record_manual_success(
                         webhook_event_id,
                         attempt_number=1,
                         response_status=response.status_code,
-                        response_body=json.dumps(result)[:4000],
+                        response_body=response_body_for_log,
                         request_headers=safe_headers,
                         request_body={"file_name": recording["file_name"]},
                         response_headers=dict(response.headers),
