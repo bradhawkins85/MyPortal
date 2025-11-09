@@ -187,6 +187,69 @@ async def test_list_call_recordings_with_filters():
 
 
 @pytest.mark.asyncio
+async def test_list_call_recordings_sorted_by_created_at():
+    """Test that call recordings are sorted by created_at DESC (most recent first)."""
+    from app.repositories import call_recordings as repo
+    
+    with patch.object(repo.db, "fetch_all", new_callable=AsyncMock) as mock_fetch_all:
+        # Mock data with different created_at timestamps
+        mock_fetch_all.return_value = [
+            {
+                "id": 3,
+                "file_name": "newest.wav",
+                "transcription_status": "pending",
+                "linked_ticket_id": None,
+                "call_date": datetime(2024, 1, 10, 10, 0, 0),
+                "caller_staff_id": 10,
+                "callee_staff_id": 20,
+                "duration_seconds": 300,
+                "created_at": datetime(2024, 1, 20, 15, 0, 0),  # Most recent
+                "updated_at": datetime(2024, 1, 20, 15, 0, 0),
+            },
+            {
+                "id": 2,
+                "file_name": "middle.wav",
+                "transcription_status": "pending",
+                "linked_ticket_id": None,
+                "call_date": datetime(2024, 1, 15, 10, 0, 0),
+                "caller_staff_id": 10,
+                "callee_staff_id": 20,
+                "duration_seconds": 300,
+                "created_at": datetime(2024, 1, 18, 12, 0, 0),  # Middle
+                "updated_at": datetime(2024, 1, 18, 12, 0, 0),
+            },
+            {
+                "id": 1,
+                "file_name": "oldest.wav",
+                "transcription_status": "pending",
+                "linked_ticket_id": None,
+                "call_date": datetime(2024, 1, 20, 10, 0, 0),  # Most recent call_date but oldest created_at
+                "caller_staff_id": 10,
+                "callee_staff_id": 20,
+                "duration_seconds": 300,
+                "created_at": datetime(2024, 1, 16, 9, 0, 0),  # Oldest
+                "updated_at": datetime(2024, 1, 16, 9, 0, 0),
+            }
+        ]
+        
+        result = await repo.list_call_recordings(limit=10, offset=0)
+        
+        # Verify the function was called
+        assert mock_fetch_all.called
+        
+        # Verify SQL contains ORDER BY created_at DESC
+        call_args = mock_fetch_all.call_args
+        sql_query = call_args[0][0]
+        assert "ORDER BY cr.created_at DESC" in sql_query, "Query should order by created_at DESC"
+        
+        # Verify results are in expected order (newest created_at first)
+        assert len(result) == 3
+        assert result[0]["file_name"] == "newest.wav"
+        assert result[1]["file_name"] == "middle.wav"
+        assert result[2]["file_name"] == "oldest.wav"
+
+
+@pytest.mark.asyncio
 async def test_count_call_recordings():
     """Test counting call recordings."""
     from app.repositories import call_recordings as repo
