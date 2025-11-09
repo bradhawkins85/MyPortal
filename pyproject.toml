@@ -29,6 +29,7 @@ dependencies = [
     "python-multipart",
     "bleach",
     "mutagen",
+    "phonenumbers",
 ]
 
 [project.optional-dependencies]
