@@ -84,7 +84,7 @@ async def sync_call_recordings(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Recordings path does not exist or is not accessible.",
         )
-    except ValueError as e:
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid recordings path configuration.",
@@ -93,6 +93,46 @@ async def sync_call_recordings(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to sync recordings. Please check the logs for details.",
+        )
+
+
+@router.post("/force-sync", response_model=dict[str, int | str | list[str]])
+async def force_sync_call_recordings(
+    recordings_path: str | None = Query(default=None, alias="recordingsPath"),
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Force sync call recordings from filesystem, reloading all details while preserving ticket linkages and transcriptions (super admin only)."""
+    # Get the recordings path from query param or module settings
+    if not recordings_path:
+        from app.repositories import integration_modules as modules_repo
+        module = await modules_repo.get_module("call-recordings")
+        if module and module.get("settings"):
+            recordings_path = module["settings"].get("recordings_path")
+    
+    if not recordings_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No recordings path configured. Please configure the call-recordings module or provide a path.",
+        )
+    
+    try:
+        result = await call_recordings_service.force_sync_recordings_from_filesystem(recordings_path)
+        return result
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Recordings path does not exist or is not accessible.",
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid recordings path configuration.",
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to force sync recordings. Please check the logs for details.",
         )
 
 

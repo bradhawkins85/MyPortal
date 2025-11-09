@@ -320,6 +320,66 @@ async def update_call_recording(
     return updated
 
 
+async def force_update_call_recording(
+    recording_id: int,
+    *,
+    file_name: str | None = None,
+    phone_number: str | None = None,
+    caller_staff_id: int | None = None,
+    call_date: datetime | None = None,
+    duration_seconds: int | None = None,
+    transcription: str | None = None,
+    transcription_status: str | None = None,
+) -> dict[str, Any]:
+    """
+    Force update call recording metadata from filesystem.
+    This updates file-related fields while preserving ticket linkages and labour fields.
+    """
+    updates: list[str] = []
+    params: list[Any] = []
+    
+    if file_name is not None:
+        updates.append("file_name = %s")
+        params.append(file_name)
+    
+    if phone_number is not None:
+        updates.append("phone_number = %s")
+        params.append(phone_number)
+    
+    if caller_staff_id is not None:
+        updates.append("caller_staff_id = %s")
+        params.append(caller_staff_id)
+    
+    if call_date is not None:
+        updates.append("call_date = %s")
+        params.append(_coerce_datetime(call_date))
+    
+    if duration_seconds is not None:
+        updates.append("duration_seconds = %s")
+        params.append(duration_seconds)
+    
+    if transcription is not None:
+        updates.append("transcription = %s")
+        params.append(transcription)
+    
+    if transcription_status is not None:
+        updates.append("transcription_status = %s")
+        params.append(transcription_status)
+    
+    if not updates:
+        # No updates to perform
+        return await get_call_recording_by_id(recording_id)
+    
+    params.append(recording_id)
+    sql = f"UPDATE call_recordings SET {', '.join(updates)} WHERE id = %s"
+    await db.execute(sql, tuple(params))
+    
+    updated = await get_call_recording_by_id(recording_id)
+    if not updated:
+        raise ValueError("Call recording not found after update")
+    return updated
+
+
 async def delete_call_recording(recording_id: int) -> None:
     """Delete a call recording."""
     await db.execute("DELETE FROM call_recordings WHERE id = %s", (recording_id,))
@@ -366,7 +426,7 @@ async def list_ticket_call_recordings(ticket_id: int) -> list[dict[str, Any]]:
     return [_map_recording_row(row) for row in rows]
 
 
-async def _lookup_staff_by_phone(phone_number: str) -> int | None:
+async def lookup_staff_by_phone(phone_number: str) -> int | None:
     """Look up staff member by phone number (mobile or normalized)."""
     # Normalize phone number by removing common separators
     normalized = "".join(c for c in phone_number if c.isdigit() or c == "+")
@@ -399,3 +459,7 @@ async def _lookup_staff_by_phone(phone_number: str) -> int | None:
             return int(row["id"])
     
     return None
+
+
+# Keep the private version for backward compatibility
+_lookup_staff_by_phone = lookup_staff_by_phone
