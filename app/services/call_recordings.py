@@ -336,7 +336,19 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                         headers=headers,
                     )
                     response.raise_for_status()
-                    result = response.json()
+                    try:
+                        result = response.json()
+                    except ValueError as exc:
+                        logger.error(
+                            "Invalid JSON response while transcribing recording {}: {}",
+                            recording_id,
+                            response.text,
+                        )
+                        await call_recordings_repo.update_call_recording(
+                            recording_id,
+                            transcription_status="failed",
+                        )
+                        raise ValueError("Invalid response from transcription service") from exc
             except FileNotFoundError:
                 logger.error(f"Audio file not found: {file_path}")
                 await call_recordings_repo.update_call_recording(
