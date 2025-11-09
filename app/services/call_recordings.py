@@ -146,7 +146,12 @@ def _first_non_empty(mapping: Mapping[str, Any], *keys: str) -> Any:
 
 async def sync_recordings_from_filesystem(recordings_path: str) -> dict[str, Any]:
     """Discover recordings on disk and persist them to the database."""
-    base_path = Path(recordings_path).expanduser()
+    # Validate and resolve the path
+    try:
+        base_path = Path(recordings_path).expanduser().resolve()
+    except (ValueError, OSError) as e:
+        raise ValueError(f"Invalid recordings path: {recordings_path}")
+    
     if not base_path.exists() or not base_path.is_dir():
         raise FileNotFoundError(f"Recordings path does not exist: {recordings_path}")
 

@@ -29,6 +29,17 @@
           <p class="management__subtitle">Review call recordings, view transcriptions, and create tickets from customer conversations.</p>
         </div>
         <div class="management__header-actions">
+          <button 
+            type="button" 
+            id="sync-recordings-btn" 
+            class="button button--primary"
+            title="Sync recordings from filesystem"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+            </svg>
+            Sync Recordings
+          </button>
           <div class="search-box">
             <input
               type="search"
@@ -353,7 +364,59 @@
       }
     }
 
+    async function syncRecordings() {
+      const syncBtn = document.getElementById('sync-recordings-btn');
+      const originalText = syncBtn.innerHTML;
+      
+      try {
+        // Disable button and show loading state
+        syncBtn.disabled = true;
+        syncBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px; animation: spin 1s linear infinite;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>Syncing...';
+        
+        const response = await fetch('/api/call-recordings/sync', {
+          method: 'POST',
+          headers: {
+            'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content,
+          },
+        });
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || 'Failed to sync recordings');
+        }
+        
+        const result = await response.json();
+        
+        // Show results
+        let message = `Sync completed!\n\n`;
+        message += `Created: ${result.created || 0}\n`;
+        message += `Updated: ${result.updated || 0}\n`;
+        message += `Skipped: ${result.skipped || 0}\n`;
+        
+        if (result.errors && result.errors.length > 0) {
+          message += `\nErrors (${result.errors.length}):\n`;
+          message += result.errors.slice(0, 5).join('\n');
+          if (result.errors.length > 5) {
+            message += `\n... and ${result.errors.length - 5} more`;
+          }
+        }
+        
+        alert(message);
+        
+        // Reload the recordings list
+        loadRecordings();
+      } catch (error) {
+        console.error('Error syncing recordings:', error);
+        alert(`Failed to sync recordings: ${error.message}`);
+      } finally {
+        // Restore button state
+        syncBtn.disabled = false;
+        syncBtn.innerHTML = originalText;
+      }
+    }
+
     // Event listeners
+    document.getElementById('sync-recordings-btn').addEventListener('click', syncRecordings);
     document.getElementById('recording-search').addEventListener('input', (e) => {
       currentSearch = e.target.value;
       currentPage = 1;
@@ -527,6 +590,21 @@
     .tickets-list {
       max-height: 300px;
       overflow-y: auto;
+    }
+
+    .management__header-actions {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+
+    @keyframes spin {
+      from {
+        transform: rotate(0deg);
+      }
+      to {
+        transform: rotate(360deg);
+      }
     }
   </style>
 {% endblock %}
