@@ -302,9 +302,76 @@ async def test_transcribe_recording_with_file_upload():
             # Verify authorization header
             assert "headers" in call_args[1]
             assert call_args[1]["headers"]["Authorization"] == "Bearer test-api-key"
-            
+
     finally:
         # Clean up temp file
+        if os.path.exists(temp_audio_path):
+            os.unlink(temp_audio_path)
+
+
+@pytest.mark.asyncio
+async def test_transcribe_recording_invalid_json_response():
+    """Test handling when transcription service returns invalid JSON."""
+    from app.services import call_recordings as service
+    from app.repositories import call_recordings as call_recordings_repo
+    from app.repositories import integration_modules as modules_repo
+    import tempfile
+    import os
+
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".wav", delete=False) as tmp_file:
+        tmp_file.write(b"fake audio data")
+        temp_audio_path = tmp_file.name
+
+    try:
+        recording = {
+            "id": 1,
+            "file_path": temp_audio_path,
+            "file_name": "test_call.wav",
+            "transcription": None,
+            "transcription_status": "pending",
+        }
+
+        with patch.object(call_recordings_repo, "get_call_recording_by_id", new_callable=AsyncMock) as mock_get, \
+             patch.object(modules_repo, "get_module", new_callable=AsyncMock) as mock_get_module, \
+             patch.object(call_recordings_repo, "update_call_recording", new_callable=AsyncMock) as mock_update, \
+             patch("httpx.AsyncClient") as mock_client_class:
+
+            mock_get.return_value = recording
+
+            mock_get_module.return_value = {
+                "slug": "whisperx",
+                "enabled": True,
+                "settings": {
+                    "base_url": "http://localhost:9000",
+                },
+            }
+
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_response.json.side_effect = ValueError("Expecting value: line 1 column 1 (char 0)")
+            mock_response.text = ""
+
+            mock_client = MagicMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value = mock_client
+
+            with pytest.raises(ValueError, match="Invalid response from transcription service"):
+                await service.transcribe_recording(1, force=False)
+
+            assert mock_client.post.await_count == 1
+
+            assert mock_update.await_args_list[0].args[0] == 1
+            assert mock_update.await_args_list[0].kwargs == {
+                "transcription_status": "processing",
+            }
+            assert mock_update.await_args_list[1].args[0] == 1
+            assert mock_update.await_args_list[1].kwargs == {
+                "transcription_status": "failed",
+            }
+
+    finally:
         if os.path.exists(temp_audio_path):
             os.unlink(temp_audio_path)
 
