@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
+
+from app.core.phone_utils import normalize_to_e164
 
 
 class CallRecordingBase(BaseModel):
@@ -62,6 +64,15 @@ class CallRecordingResponse(BaseModel):
         "from_attributes": True,
         "populate_by_name": True,
     }
+    
+    @computed_field
+    @property
+    def phone_number_e164(self) -> Optional[str]:
+        """Return phone number in E.164 format if possible, otherwise return original."""
+        if not self.phone_number:
+            return None
+        e164 = normalize_to_e164(self.phone_number)
+        return e164 if e164 else self.phone_number
 
 
 class LinkRecordingRequest(BaseModel):
