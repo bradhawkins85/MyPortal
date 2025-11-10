@@ -54,6 +54,7 @@ app/core/notifications.py
 app/core/phone_utils.py
 app/models/__init__.py
 app/models/bc_models.py
+app/models/bcp_models.py
 app/repositories/__init__.py
 app/repositories/api_keys.py
 app/repositories/apps.py
@@ -119,6 +120,7 @@ app/schemas/auth.py
 app/schemas/automations.py
 app/schemas/bc3_models.py
 app/schemas/bc5_models.py
+app/schemas/bcp_models.py
 app/schemas/bcp_template.py
 app/schemas/business_continuity_plans.py
 app/schemas/call_recordings.py
@@ -250,12 +252,15 @@ tests/test_bc13_automatic_migrations.py
 tests/test_bc13_sqlite_fallback.py
 tests/test_bc14_comprehensive.py
 tests/test_bc15_change_log_entry.py
+tests/test_bc18_acceptance_criteria.py
+tests/test_bc18_plan_creation.py
 tests/test_bc3_models.py
 tests/test_bc4_migrations.py
 tests/test_bc5_api.py
 tests/test_bc6_schemas.py
 tests/test_bc7_services.py
 tests/test_bc8_export.py
+tests/test_bcp02_models.py
 tests/test_bcp_template.py
 tests/test_bcp_template_api.py
 tests/test_bcp_template_bootstrap.py
@@ -277,6 +282,7 @@ tests/test_company_id_lookup.py
 tests/test_company_importer.py
 tests/test_company_lookup_api.py
 tests/test_company_memberships.py
+tests/test_company_name_normalization.py
 tests/test_company_recurring_invoice_items.py
 tests/test_conditional_expressions.py
 tests/test_create_task_module.py
