@@ -1129,3 +1129,593 @@ async def create_or_update_impact(
     
     # Return the updated activity with impact
     return await get_critical_activity_by_id(critical_activity_id)
+
+
+# ============================================================================
+# Incident Management
+# ============================================================================
+
+
+async def list_incidents(plan_id: int) -> list[dict[str, Any]]:
+    """Get all incidents for a plan."""
+    query = """
+        SELECT id, plan_id, started_at, status, source, created_at, updated_at
+        FROM bcp_incident
+        WHERE plan_id = %s
+        ORDER BY started_at DESC
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id,))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "started_at": row[2],
+                    "status": row[3],
+                    "source": row[4],
+                    "created_at": row[5],
+                    "updated_at": row[6],
+                }
+                for row in rows
+            ]
+
+
+async def get_incident_by_id(incident_id: int) -> dict[str, Any] | None:
+    """Get an incident by ID."""
+    query = """
+        SELECT id, plan_id, started_at, status, source, created_at, updated_at
+        FROM bcp_incident
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (incident_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "started_at": row[2],
+                "status": row[3],
+                "source": row[4],
+                "created_at": row[5],
+                "updated_at": row[6],
+            }
+
+
+async def get_active_incident(plan_id: int) -> dict[str, Any] | None:
+    """Get the active incident for a plan, if any."""
+    query = """
+        SELECT id, plan_id, started_at, status, source, created_at, updated_at
+        FROM bcp_incident
+        WHERE plan_id = %s AND status = 'Active'
+        ORDER BY started_at DESC
+        LIMIT 1
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "started_at": row[2],
+                "status": row[3],
+                "source": row[4],
+                "created_at": row[5],
+                "updated_at": row[6],
+            }
+
+
+async def create_incident(
+    plan_id: int,
+    started_at: datetime,
+    source: str = "Manual",
+) -> dict[str, Any]:
+    """Create a new incident."""
+    query = """
+        INSERT INTO bcp_incident (plan_id, started_at, status, source)
+        VALUES (%s, %s, 'Active', %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id, started_at, source))
+            await conn.commit()
+            incident_id = cursor.lastrowid
+    
+    return await get_incident_by_id(incident_id)
+
+
+async def close_incident(incident_id: int) -> dict[str, Any] | None:
+    """Close an incident."""
+    query = """
+        UPDATE bcp_incident
+        SET status = 'Closed'
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (incident_id,))
+            await conn.commit()
+    
+    return await get_incident_by_id(incident_id)
+
+
+# ============================================================================
+# Checklist Management
+# ============================================================================
+
+
+async def list_checklist_items(plan_id: int, phase: str = None) -> list[dict[str, Any]]:
+    """Get all checklist items for a plan, optionally filtered by phase."""
+    if phase:
+        query = """
+            SELECT id, plan_id, phase, label, default_order, created_at, updated_at
+            FROM bcp_checklist_item
+            WHERE plan_id = %s AND phase = %s
+            ORDER BY default_order, id
+        """
+        params = (plan_id, phase)
+    else:
+        query = """
+            SELECT id, plan_id, phase, label, default_order, created_at, updated_at
+            FROM bcp_checklist_item
+            WHERE plan_id = %s
+            ORDER BY phase, default_order, id
+        """
+        params = (plan_id,)
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, params)
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "phase": row[2],
+                    "label": row[3],
+                    "default_order": row[4],
+                    "created_at": row[5],
+                    "updated_at": row[6],
+                }
+                for row in rows
+            ]
+
+
+async def create_checklist_item(
+    plan_id: int,
+    phase: str,
+    label: str,
+    default_order: int = 0,
+) -> dict[str, Any]:
+    """Create a new checklist item."""
+    query = """
+        INSERT INTO bcp_checklist_item (plan_id, phase, label, default_order)
+        VALUES (%s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id, phase, label, default_order))
+            await conn.commit()
+            item_id = cursor.lastrowid
+    
+    return await get_checklist_item_by_id(item_id)
+
+
+async def get_checklist_item_by_id(item_id: int) -> dict[str, Any] | None:
+    """Get a checklist item by ID."""
+    query = """
+        SELECT id, plan_id, phase, label, default_order, created_at, updated_at
+        FROM bcp_checklist_item
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (item_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "phase": row[2],
+                "label": row[3],
+                "default_order": row[4],
+                "created_at": row[5],
+                "updated_at": row[6],
+            }
+
+
+async def seed_default_checklist_items(plan_id: int) -> None:
+    """Seed default immediate response checklist items."""
+    default_items = [
+        "Assess incident severity",
+        "Evacuate if required",
+        "Account for all personnel",
+        "Identify injuries",
+        "Contact emergency services",
+        "Implement incident response plan",
+        "Start event log",
+        "Activate staff/resources",
+        "Appoint spokesperson",
+        "Prioritise information gathering",
+        "Brief team on incident",
+        "Allocate roles/responsibilities",
+        "Identify damage",
+        "Identify disrupted critical activities",
+        "Keep staff informed",
+        "Contact key stakeholders",
+        "Ensure regulatory/compliance requirements are met",
+        "Initiate media/PR response",
+    ]
+    
+    for index, label in enumerate(default_items):
+        await create_checklist_item(plan_id, "Immediate", label, default_order=index)
+
+
+async def get_checklist_ticks_for_incident(incident_id: int) -> list[dict[str, Any]]:
+    """Get all checklist ticks for an incident."""
+    query = """
+        SELECT ct.id, ct.plan_id, ct.checklist_item_id, ct.incident_id,
+               ct.is_done, ct.done_at, ct.done_by, ct.created_at, ct.updated_at,
+               ci.label, ci.phase, ci.default_order
+        FROM bcp_checklist_tick ct
+        JOIN bcp_checklist_item ci ON ci.id = ct.checklist_item_id
+        WHERE ct.incident_id = %s
+        ORDER BY ci.default_order, ci.id
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (incident_id,))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "checklist_item_id": row[2],
+                    "incident_id": row[3],
+                    "is_done": row[4],
+                    "done_at": row[5],
+                    "done_by": row[6],
+                    "created_at": row[7],
+                    "updated_at": row[8],
+                    "label": row[9],
+                    "phase": row[10],
+                    "default_order": row[11],
+                }
+                for row in rows
+            ]
+
+
+async def initialize_checklist_ticks(plan_id: int, incident_id: int) -> None:
+    """Initialize checklist ticks for a new incident."""
+    # Get all immediate response checklist items
+    items = await list_checklist_items(plan_id, phase="Immediate")
+    
+    # Create a tick for each item
+    query = """
+        INSERT INTO bcp_checklist_tick 
+        (plan_id, checklist_item_id, incident_id, is_done)
+        VALUES (%s, %s, %s, FALSE)
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            for item in items:
+                await cursor.execute(query, (plan_id, item["id"], incident_id))
+            await conn.commit()
+
+
+async def toggle_checklist_tick(
+    tick_id: int,
+    is_done: bool,
+    done_by: int,
+    done_at: datetime,
+) -> dict[str, Any] | None:
+    """Toggle a checklist tick."""
+    query = """
+        UPDATE bcp_checklist_tick
+        SET is_done = %s, done_at = %s, done_by = %s
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (is_done, done_at if is_done else None, done_by if is_done else None, tick_id))
+            await conn.commit()
+    
+    return await get_checklist_tick_by_id(tick_id)
+
+
+async def get_checklist_tick_by_id(tick_id: int) -> dict[str, Any] | None:
+    """Get a checklist tick by ID."""
+    query = """
+        SELECT ct.id, ct.plan_id, ct.checklist_item_id, ct.incident_id,
+               ct.is_done, ct.done_at, ct.done_by, ct.created_at, ct.updated_at,
+               ci.label, ci.phase, ci.default_order
+        FROM bcp_checklist_tick ct
+        JOIN bcp_checklist_item ci ON ci.id = ct.checklist_item_id
+        WHERE ct.id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (tick_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "checklist_item_id": row[2],
+                "incident_id": row[3],
+                "is_done": row[4],
+                "done_at": row[5],
+                "done_by": row[6],
+                "created_at": row[7],
+                "updated_at": row[8],
+                "label": row[9],
+                "phase": row[10],
+                "default_order": row[11],
+            }
+
+
+# ============================================================================
+# Contacts Management
+# ============================================================================
+
+
+async def list_contacts(plan_id: int, kind: str = None) -> list[dict[str, Any]]:
+    """Get all contacts for a plan, optionally filtered by kind."""
+    if kind:
+        query = """
+            SELECT id, plan_id, kind, person_or_org, phones, email, 
+                   responsibility_or_agency, created_at, updated_at
+            FROM bcp_contact
+            WHERE plan_id = %s AND kind = %s
+            ORDER BY person_or_org
+        """
+        params = (plan_id, kind)
+    else:
+        query = """
+            SELECT id, plan_id, kind, person_or_org, phones, email, 
+                   responsibility_or_agency, created_at, updated_at
+            FROM bcp_contact
+            WHERE plan_id = %s
+            ORDER BY kind, person_or_org
+        """
+        params = (plan_id,)
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, params)
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "kind": row[2],
+                    "person_or_org": row[3],
+                    "phones": row[4],
+                    "email": row[5],
+                    "responsibility_or_agency": row[6],
+                    "created_at": row[7],
+                    "updated_at": row[8],
+                }
+                for row in rows
+            ]
+
+
+async def create_contact(
+    plan_id: int,
+    kind: str,
+    person_or_org: str,
+    phones: str | None = None,
+    email: str | None = None,
+    responsibility_or_agency: str | None = None,
+) -> dict[str, Any]:
+    """Create a new contact."""
+    query = """
+        INSERT INTO bcp_contact 
+        (plan_id, kind, person_or_org, phones, email, responsibility_or_agency)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                query,
+                (plan_id, kind, person_or_org, phones, email, responsibility_or_agency),
+            )
+            await conn.commit()
+            contact_id = cursor.lastrowid
+    
+    return await get_contact_by_id(contact_id)
+
+
+async def get_contact_by_id(contact_id: int) -> dict[str, Any] | None:
+    """Get a contact by ID."""
+    query = """
+        SELECT id, plan_id, kind, person_or_org, phones, email, 
+               responsibility_or_agency, created_at, updated_at
+        FROM bcp_contact
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (contact_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "kind": row[2],
+                "person_or_org": row[3],
+                "phones": row[4],
+                "email": row[5],
+                "responsibility_or_agency": row[6],
+                "created_at": row[7],
+                "updated_at": row[8],
+            }
+
+
+async def update_contact(
+    contact_id: int,
+    kind: str | None = None,
+    person_or_org: str | None = None,
+    phones: str | None = None,
+    email: str | None = None,
+    responsibility_or_agency: str | None = None,
+) -> dict[str, Any] | None:
+    """Update a contact."""
+    updates = []
+    values = []
+    
+    if kind is not None:
+        updates.append("kind = %s")
+        values.append(kind)
+    if person_or_org is not None:
+        updates.append("person_or_org = %s")
+        values.append(person_or_org)
+    if phones is not None:
+        updates.append("phones = %s")
+        values.append(phones)
+    if email is not None:
+        updates.append("email = %s")
+        values.append(email)
+    if responsibility_or_agency is not None:
+        updates.append("responsibility_or_agency = %s")
+        values.append(responsibility_or_agency)
+    
+    if not updates:
+        return await get_contact_by_id(contact_id)
+    
+    values.append(contact_id)
+    query = f"""
+        UPDATE bcp_contact
+        SET {', '.join(updates)}
+        WHERE id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, values)
+            await conn.commit()
+    
+    return await get_contact_by_id(contact_id)
+
+
+async def delete_contact(contact_id: int) -> bool:
+    """Delete a contact."""
+    query = "DELETE FROM bcp_contact WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (contact_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+
+
+# ============================================================================
+# Event Log Management
+# ============================================================================
+
+
+async def list_event_log_entries(
+    plan_id: int,
+    incident_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """Get event log entries for a plan, optionally filtered by incident."""
+    if incident_id:
+        query = """
+            SELECT id, plan_id, incident_id, happened_at, author_id, notes, initials,
+                   created_at, updated_at
+            FROM bcp_event_log_entry
+            WHERE plan_id = %s AND incident_id = %s
+            ORDER BY happened_at DESC
+        """
+        params = (plan_id, incident_id)
+    else:
+        query = """
+            SELECT id, plan_id, incident_id, happened_at, author_id, notes, initials,
+                   created_at, updated_at
+            FROM bcp_event_log_entry
+            WHERE plan_id = %s
+            ORDER BY happened_at DESC
+        """
+        params = (plan_id,)
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, params)
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "incident_id": row[2],
+                    "happened_at": row[3],
+                    "author_id": row[4],
+                    "notes": row[5],
+                    "initials": row[6],
+                    "created_at": row[7],
+                    "updated_at": row[8],
+                }
+                for row in rows
+            ]
+
+
+async def create_event_log_entry(
+    plan_id: int,
+    incident_id: int | None,
+    happened_at: datetime,
+    notes: str,
+    author_id: int | None = None,
+    initials: str | None = None,
+) -> dict[str, Any]:
+    """Create a new event log entry."""
+    query = """
+        INSERT INTO bcp_event_log_entry 
+        (plan_id, incident_id, happened_at, author_id, notes, initials)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                query,
+                (plan_id, incident_id, happened_at, author_id, notes, initials),
+            )
+            await conn.commit()
+            entry_id = cursor.lastrowid
+    
+    return await get_event_log_entry_by_id(entry_id)
+
+
+async def get_event_log_entry_by_id(entry_id: int) -> dict[str, Any] | None:
+    """Get an event log entry by ID."""
+    query = """
+        SELECT id, plan_id, incident_id, happened_at, author_id, notes, initials,
+               created_at, updated_at
+        FROM bcp_event_log_entry
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (entry_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "incident_id": row[2],
+                "happened_at": row[3],
+                "author_id": row[4],
+                "notes": row[5],
+                "initials": row[6],
+                "created_at": row[7],
+                "updated_at": row[8],
+            }
