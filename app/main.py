@@ -48,6 +48,7 @@ from app.api.routes import (
     audit_logs,
     auth,
     automations as automations_api,
+    business_continuity_plans as bc_plans_api,
     call_recordings as call_recordings_api,
     companies,
     forms as forms_api,
@@ -86,6 +87,7 @@ from app.repositories import api_keys as api_key_repo
 from app.repositories import auth as auth_repo
 from app.repositories import assets as assets_repo
 from app.repositories import billing_contacts as billing_contacts_repo
+from app.repositories import business_continuity_plans as bc_plans_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
@@ -514,6 +516,7 @@ app.include_router(companies.router)
 app.include_router(licenses_api.router)
 app.include_router(forms_api.router)
 app.include_router(knowledge_base_api.router)
+app.include_router(bc_plans_api.router)
 app.include_router(roles.router)
 app.include_router(memberships.router)
 app.include_router(m365_api.router)
@@ -8429,6 +8432,70 @@ async def admin_edit_knowledge_base_article_page(request: Request, slug: str):
         "kb_catalogue_payload": [{"slug": serialised_article.get("slug")}],
     }
     return await _render_template("admin/knowledge_base_editor.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/business-continuity-plans", response_class=HTMLResponse)
+async def admin_business_continuity_plans_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    plans = await bc_plans_repo.list_plans()
+    
+    # Add ISO datetime strings for client-side rendering
+    for plan in plans:
+        if plan.get("updated_at"):
+            plan["updated_at_iso"] = plan["updated_at"].isoformat() if isinstance(plan["updated_at"], datetime) else str(plan["updated_at"])
+        if plan.get("last_reviewed_at"):
+            plan["last_reviewed_at_iso"] = plan["last_reviewed_at"].isoformat() if isinstance(plan["last_reviewed_at"], datetime) else str(plan["last_reviewed_at"])
+    
+    serialised_plans = jsonable_encoder(plans)
+    extra = {
+        "title": "Business Continuity Plans",
+        "bc_plans": serialised_plans,
+    }
+    return await _render_template("admin/business_continuity_plans.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/business-continuity-plans/new", response_class=HTMLResponse)
+async def admin_new_business_continuity_plan_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    users = await user_repo.list_users()
+    companies = await company_repo.list_companies()
+    
+    extra = {
+        "title": "New Business Continuity Plan",
+        "plan": None,
+        "users": jsonable_encoder(users),
+        "companies": jsonable_encoder(companies),
+    }
+    return await _render_template("admin/business_continuity_plan_editor.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/business-continuity-plans/{plan_id}", response_class=HTMLResponse)
+async def admin_edit_business_continuity_plan_page(request: Request, plan_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    plan = await bc_plans_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+
+    users = await user_repo.list_users()
+    companies = await company_repo.list_companies()
+    
+    serialised_plan = jsonable_encoder(plan)
+    extra = {
+        "title": f"Edit Plan · {plan.get('title') or f'Plan #{plan_id}'}",
+        "plan": serialised_plan,
+        "users": jsonable_encoder(users),
+        "companies": jsonable_encoder(companies),
+    }
+    return await _render_template("admin/business_continuity_plan_editor.html", request, current_user, extra=extra)
 
 
 @app.post("/myforms/admin")
