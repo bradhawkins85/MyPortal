@@ -248,6 +248,7 @@ tests/test_bc11_supportive_entities.py
 tests/test_bc12_security.py
 tests/test_bc13_automatic_migrations.py
 tests/test_bc13_sqlite_fallback.py
+tests/test_bc14_comprehensive.py
 tests/test_bc3_models.py
 tests/test_bc4_migrations.py
 tests/test_bc5_api.py
@@ -256,6 +257,7 @@ tests/test_bc7_services.py
 tests/test_bc8_export.py
 tests/test_bcp_template.py
 tests/test_bcp_template_api.py
+tests/test_bcp_template_bootstrap.py
 tests/test_business_continuity_plans.py
 tests/test_cache_control_middleware.py
 tests/test_call_recordings.py
