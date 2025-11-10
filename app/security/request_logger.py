@@ -6,7 +6,7 @@ from typing import Iterable
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.core.logging import log_debug, log_info
+from app.core.logging import log_debug, log_error, log_info
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -47,14 +47,33 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         )
 
         # Process request
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            duration = time.time() - start_time
+            log_error(
+                "Request raised unhandled exception",
+                method=request.method,
+                path=path,
+                duration_ms=round(duration * 1000, 2),
+                client_ip=client_ip,
+                error=str(exc),
+            )
+            raise
 
         # Calculate request duration
         duration = time.time() - start_time
 
         # Log response
-        log_info(
-            "Request completed",
+        log_function = log_error if response.status_code >= 500 else log_info
+        message = (
+            "Request completed with server error"
+            if response.status_code >= 500
+            else "Request completed"
+        )
+
+        log_function(
+            message,
             method=request.method,
             path=path,
             status_code=response.status_code,
