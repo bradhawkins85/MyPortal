@@ -256,13 +256,35 @@ async def bcp_risks(request: Request, severity: str = Query(None), heatmap_filte
 
 
 @router.get("/bia", response_class=HTMLResponse, include_in_schema=False)
-async def bcp_bia(request: Request):
-    """BCP Business Impact Analysis page (stub)."""
+async def bcp_bia(request: Request, sort_by: str = Query("importance")):
+    """BCP Business Impact Analysis page with critical activities list."""
     user, company_id = await _require_bcp_view(request)
     
     from app.main import _build_base_context
     from app.core.config import get_templates_config
     from fastapi.templating import Jinja2Templates
+    from app.services.time_utils import humanize_hours
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    # Validate sort_by parameter
+    valid_sorts = ["importance", "priority", "name"]
+    if sort_by not in valid_sorts:
+        sort_by = "importance"
+    
+    # Get all critical activities with their impacts
+    activities = await bcp_repo.list_critical_activities(plan["id"], sort_by=sort_by)
+    
+    # Add humanized RTO to each activity
+    for activity in activities:
+        if activity.get("impact") and activity["impact"].get("rto_hours") is not None:
+            activity["impact"]["rto_humanized"] = humanize_hours(activity["impact"]["rto_hours"])
+        else:
+            activity["impact_rto_humanized"] = "-" if not activity.get("impact") else None
     
     templates_config = get_templates_config()
     templates = Jinja2Templates(directory=str(templates_config.template_path))
@@ -272,11 +294,14 @@ async def bcp_bia(request: Request):
         user,
         extra={
             "title": "Business Impact Analysis",
-            "page_type": "bia",
+            "plan": plan,
+            "activities": activities,
+            "sort_by": sort_by,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/stub.html", context)
+    return templates.TemplateResponse("bcp/bia.html", context)
 
 
 @router.get("/incident", response_class=HTMLResponse, include_in_schema=False)
@@ -1060,6 +1085,319 @@ async def export_backups_csv(request: Request):
     
     from datetime import datetime as dt
     filename = f"backup_items_{dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+# ============================================================================
+# Business Impact Analysis (BIA) Pages and Endpoints
+# ============================================================================
+
+
+@router.get("/bia/new", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_bia_new(request: Request):
+    """New critical activity page."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    from app.main import _build_base_context
+    from app.core.config import get_templates_config
+    from fastapi.templating import Jinja2Templates
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    templates_config = get_templates_config()
+    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "Add Critical Activity",
+            "plan": plan,
+            "activity": None,
+            "can_edit": True,
+        },
+    )
+    
+    return templates.TemplateResponse("bcp/bia_edit.html", context)
+
+
+@router.get("/bia/{activity_id}/edit", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_bia_edit(request: Request, activity_id: int):
+    """Edit page for a critical activity."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from app.main import _build_base_context
+    from app.core.config import get_templates_config
+    from fastapi.templating import Jinja2Templates
+    from app.services.time_utils import humanize_hours
+    
+    # Get the activity
+    activity = await bcp_repo.get_critical_activity_by_id(activity_id)
+    if not activity:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    
+    # Verify it belongs to the user's company plan
+    plan = await bcp_repo.get_plan_by_id(activity["plan_id"])
+    if not plan or plan["company_id"] != company_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    
+    templates_config = get_templates_config()
+    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": f"Edit Critical Activity: {activity['name']}",
+            "plan": plan,
+            "activity": activity,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+        },
+    )
+    
+    return templates.TemplateResponse("bcp/bia_edit.html", context)
+
+
+@router.post("/bia", include_in_schema=False)
+async def create_critical_activity(
+    request: Request,
+    name: str = Form(...),
+    description: str = Form(None),
+    priority: str = Form(None),
+    supplier_dependency: str = Form(None),
+    importance: int = Form(None),
+    notes: str = Form(None),
+    # Impact fields
+    losses_financial: str = Form(None),
+    losses_increased_costs: str = Form(None),
+    losses_staffing: str = Form(None),
+    losses_product_service: str = Form(None),
+    losses_reputation: str = Form(None),
+    fines: str = Form(None),
+    legal_liability: str = Form(None),
+    rto_hours: int = Form(None),
+    losses_comments: str = Form(None),
+):
+    """Create a new critical activity with impact data."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    # Validate importance if provided
+    if importance is not None and not (1 <= importance <= 5):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Importance must be between 1 and 5"
+        )
+    
+    # Validate RTO if provided
+    if rto_hours is not None and rto_hours < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="RTO hours must be non-negative"
+        )
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Create the critical activity
+    activity = await bcp_repo.create_critical_activity(
+        plan["id"],
+        name,
+        description if description else None,
+        priority if priority else None,
+        supplier_dependency if supplier_dependency else None,
+        importance,
+        notes if notes else None,
+    )
+    
+    # Create impact data if any impact fields provided
+    has_impact = any([
+        losses_financial, losses_increased_costs, losses_staffing,
+        losses_product_service, losses_reputation, fines, legal_liability,
+        rto_hours is not None, losses_comments
+    ])
+    
+    if has_impact:
+        await bcp_repo.create_or_update_impact(
+            activity["id"],
+            losses_financial if losses_financial else None,
+            losses_increased_costs if losses_increased_costs else None,
+            losses_staffing if losses_staffing else None,
+            losses_product_service if losses_product_service else None,
+            losses_reputation if losses_reputation else None,
+            fines if fines else None,
+            legal_liability if legal_liability else None,
+            rto_hours,
+            losses_comments if losses_comments else None,
+        )
+    
+    return RedirectResponse(
+        url="/bcp/bia?success=" + quote("Critical activity created successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/bia/{activity_id}/update", include_in_schema=False)
+async def update_critical_activity_endpoint(
+    request: Request,
+    activity_id: int,
+    name: str = Form(...),
+    description: str = Form(None),
+    priority: str = Form(None),
+    supplier_dependency: str = Form(None),
+    importance: int = Form(None),
+    notes: str = Form(None),
+    # Impact fields
+    losses_financial: str = Form(None),
+    losses_increased_costs: str = Form(None),
+    losses_staffing: str = Form(None),
+    losses_product_service: str = Form(None),
+    losses_reputation: str = Form(None),
+    fines: str = Form(None),
+    legal_liability: str = Form(None),
+    rto_hours: int = Form(None),
+    losses_comments: str = Form(None),
+):
+    """Update a critical activity with impact data."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    # Validate importance if provided
+    if importance is not None and not (1 <= importance <= 5):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Importance must be between 1 and 5"
+        )
+    
+    # Validate RTO if provided
+    if rto_hours is not None and rto_hours < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="RTO hours must be non-negative"
+        )
+    
+    # Update the activity
+    updated = await bcp_repo.update_critical_activity(
+        activity_id,
+        name=name,
+        description=description if description else None,
+        priority=priority if priority else None,
+        supplier_dependency=supplier_dependency if supplier_dependency else None,
+        importance=importance,
+        notes=notes if notes else None,
+    )
+    
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    
+    # Update impact data
+    await bcp_repo.create_or_update_impact(
+        activity_id,
+        losses_financial if losses_financial else None,
+        losses_increased_costs if losses_increased_costs else None,
+        losses_staffing if losses_staffing else None,
+        losses_product_service if losses_product_service else None,
+        losses_reputation if losses_reputation else None,
+        fines if fines else None,
+        legal_liability if legal_liability else None,
+        rto_hours,
+        losses_comments if losses_comments else None,
+    )
+    
+    return RedirectResponse(
+        url="/bcp/bia?success=" + quote("Critical activity updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/bia/{activity_id}/delete", include_in_schema=False)
+async def delete_critical_activity_endpoint(
+    request: Request,
+    activity_id: int,
+):
+    """Delete a critical activity."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    deleted = await bcp_repo.delete_critical_activity(activity_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    
+    return RedirectResponse(
+        url="/bcp/bia?success=" + quote("Critical activity deleted successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get("/bia/export", include_in_schema=False)
+async def export_bia_csv(request: Request):
+    """Export BIA summary to CSV."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from fastapi.responses import StreamingResponse
+    import csv
+    from io import StringIO
+    from app.services.time_utils import humanize_hours
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    activities = await bcp_repo.list_critical_activities(plan["id"], sort_by="importance")
+    
+    # Create CSV
+    output = StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "Activity",
+            "Description",
+            "Priority",
+            "Importance",
+            "RTO",
+            "Supplier Dependency",
+            "Financial Impact",
+            "Increased Costs",
+            "Staffing Impact",
+            "Product/Service Impact",
+            "Reputation Impact",
+            "Fines/Penalties",
+            "Legal Liability",
+            "Additional Comments",
+        ],
+    )
+    writer.writeheader()
+    
+    for activity in activities:
+        impact = activity.get("impact") or {}
+        rto_humanized = humanize_hours(impact.get("rto_hours"))
+        
+        writer.writerow({
+            "Activity": activity["name"],
+            "Description": activity.get("description") or "",
+            "Priority": activity.get("priority") or "",
+            "Importance": activity.get("importance") or "",
+            "RTO": rto_humanized,
+            "Supplier Dependency": activity.get("supplier_dependency") or "",
+            "Financial Impact": impact.get("losses_financial") or "",
+            "Increased Costs": impact.get("losses_increased_costs") or "",
+            "Staffing Impact": impact.get("losses_staffing") or "",
+            "Product/Service Impact": impact.get("losses_product_service") or "",
+            "Reputation Impact": impact.get("losses_reputation") or "",
+            "Fines/Penalties": impact.get("fines") or "",
+            "Legal Liability": impact.get("legal_liability") or "",
+            "Additional Comments": impact.get("losses_comments") or "",
+        })
+    
+    output.seek(0)
+    
+    from datetime import datetime as dt
+    filename = f"bia_summary_{dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
     
     return StreamingResponse(
         iter([output.getvalue()]),
