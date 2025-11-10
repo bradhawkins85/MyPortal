@@ -1,0 +1,7 @@
+{
+  "guid": "eded3677-ea3d-464a-9a2a-1cab69904741",
+  "occurred_at": "2025-11-10T06:15:21.576224+00:00",
+  "change_type": "feature",
+  "summary": "BC5 API: Comprehensive RESTful endpoints for Business Continuity Planning",
+  "content_hash": "b082070851ebba8f6576d30b65628236df2a57a74449f6fbd2ddffe69cb58dd4"
+}
