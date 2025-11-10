@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-container">
+  <!-- Success/Error Messages -->
+  {% if request.query_params.get('success') %}
+    <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
+  {% endif %}
+  {% if request.query_params.get('error') %}
+    <div class="alert alert-error">{{ request.query_params.get('error') }}</div>
+  {% endif %}
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Insurance Claims</h1>
+      <p class="page-description">Track insurance claims filed during/after incidents</p>
+    </div>
+    <div class="page-actions">
+      <a href="/bcp" class="btn btn-secondary">Back to Overview</a>
+      {% if can_edit %}
+      <button type="button" class="btn btn-primary" onclick="document.getElementById('createClaimModal').showModal()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+        </svg>
+        Add Claim
+      </button>
+      <a href="/bcp/insurance-claims/export" class="btn btn-secondary">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+        </svg>
+        Export CSV
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Help Text -->
+  <section class="card help-card">
+    <div class="card-body">
+      <h3 class="help-title">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z"/>
+        </svg>
+        About Insurance Claims
+      </h3>
+      <p class="help-text">
+        Document all insurance claims filed during or after incidents. Record the insurer, date filed, 
+        detailed claim information, and any follow-up actions needed (such as taking photos, obtaining 
+        estimates, or preserving evidence). This helps track claim progress and ensures nothing is overlooked 
+        during the recovery process.
+      </p>
+    </div>
+  </section>
+
+  <!-- Insurance Claims Table -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Insurance Claims</h2>
+    </div>
+    <div class="card-body">
+      {% if claims %}
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Insurer</th>
+              <th>Date</th>
+              <th>Claim Details</th>
+              <th>Follow-up Actions</th>
+              {% if can_edit %}
+              <th>Actions</th>
+              {% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for claim in claims %}
+            <tr>
+              <td><strong>{{ claim.insurer }}</strong></td>
+              <td>
+                {% if claim.claim_date %}
+                  {{ claim.claim_date.strftime('%Y-%m-%d') }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td class="text-sm">{{ claim.details or '-' }}</td>
+              <td class="text-sm">{{ claim.follow_up_actions or '-' }}</td>
+              {% if can_edit %}
+              <td>
+                <div class="action-buttons">
+                  <button type="button" class="btn btn-sm btn-secondary" onclick="editClaim({{ claim.id }}, '{{ claim.insurer }}', '{{ claim.claim_date.strftime('%Y-%m-%d') if claim.claim_date else '' }}', `{{ claim.details or '' }}`, `{{ claim.follow_up_actions or '' }}`)">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                      <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                    </svg>
+                    Edit
+                  </button>
+                  <form method="post" action="/bcp/insurance-claims/{{ claim.id }}/delete" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this claim?');">
+                    <button type="submit" class="btn btn-sm btn-danger">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                        <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                      </svg>
+                      Delete
+                    </button>
+                  </form>
+                </div>
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor" opacity="0.3">
+          <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+        </svg>
+        <p>No insurance claims recorded yet.</p>
+        {% if can_edit %}
+        <button type="button" class="btn btn-primary" onclick="document.getElementById('createClaimModal').showModal()">
+          Add First Claim
+        </button>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+{% if can_edit %}
+<!-- Create Claim Modal -->
+<dialog id="createClaimModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 class="modal-title">Add Insurance Claim</h2>
+      <button type="button" class="btn-close" onclick="document.getElementById('createClaimModal').close()">&times;</button>
+    </div>
+    <form method="post" action="/bcp/insurance-claims">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="insurer" class="required">Insurer</label>
+          <input type="text" id="insurer" name="insurer" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label for="claim_date">Date</label>
+          <input type="date" id="claim_date" name="claim_date" class="form-control">
+        </div>
+        <div class="form-group">
+          <label for="details">Claim Details</label>
+          <textarea id="details" name="details" class="form-control" rows="4"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="follow_up_actions">Follow-up Actions</label>
+          <textarea id="follow_up_actions" name="follow_up_actions" class="form-control" rows="4" placeholder="e.g., Take photos, get estimates, preserve evidence"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('createClaimModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create Claim</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<!-- Edit Claim Modal -->
+<dialog id="editClaimModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 class="modal-title">Edit Insurance Claim</h2>
+      <button type="button" class="btn-close" onclick="document.getElementById('editClaimModal').close()">&times;</button>
+    </div>
+    <form method="post" id="editClaimForm">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="edit_insurer" class="required">Insurer</label>
+          <input type="text" id="edit_insurer" name="insurer" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label for="edit_claim_date">Date</label>
+          <input type="date" id="edit_claim_date" name="claim_date" class="form-control">
+        </div>
+        <div class="form-group">
+          <label for="edit_details">Claim Details</label>
+          <textarea id="edit_details" name="details" class="form-control" rows="4"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="edit_follow_up_actions">Follow-up Actions</label>
+          <textarea id="edit_follow_up_actions" name="follow_up_actions" class="form-control" rows="4"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('editClaimModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Update Claim</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<script>
+function editClaim(id, insurer, claimDate, details, followUpActions) {
+  document.getElementById('edit_insurer').value = insurer;
+  document.getElementById('edit_claim_date').value = claimDate;
+  document.getElementById('edit_details').value = details;
+  document.getElementById('edit_follow_up_actions').value = followUpActions;
+  document.getElementById('editClaimForm').action = `/bcp/insurance-claims/${id}/update`;
+  document.getElementById('editClaimModal').showModal();
+}
+</script>
+{% endif %}
+
+{% endblock %}

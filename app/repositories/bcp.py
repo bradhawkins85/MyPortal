@@ -2544,3 +2544,395 @@ async def seed_default_crisis_recovery_checklist_items(plan_id: int) -> None:
     
     for index, label in enumerate(crisis_recovery_items):
         await create_checklist_item(plan_id, "CrisisRecovery", label, default_order=index)
+
+
+# ============================================================================
+# Recovery Contacts
+# ============================================================================
+
+
+async def list_recovery_contacts(plan_id: int) -> list[dict[str, Any]]:
+    """List all recovery contacts for a plan."""
+    query = """
+        SELECT id, plan_id, org_name, contact_name, title, phone,
+               created_at, updated_at
+        FROM bcp_recovery_contact
+        WHERE plan_id = %s
+        ORDER BY org_name, contact_name
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id,))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "org_name": row[2],
+                    "contact_name": row[3],
+                    "title": row[4],
+                    "phone": row[5],
+                    "created_at": row[6],
+                    "updated_at": row[7],
+                }
+                for row in rows
+            ]
+
+
+async def get_recovery_contact_by_id(contact_id: int) -> dict[str, Any] | None:
+    """Get a recovery contact by ID."""
+    query = """
+        SELECT id, plan_id, org_name, contact_name, title, phone,
+               created_at, updated_at
+        FROM bcp_recovery_contact
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (contact_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "org_name": row[2],
+                "contact_name": row[3],
+                "title": row[4],
+                "phone": row[5],
+                "created_at": row[6],
+                "updated_at": row[7],
+            }
+
+
+async def create_recovery_contact(
+    plan_id: int,
+    org_name: str,
+    contact_name: str | None = None,
+    title: str | None = None,
+    phone: str | None = None,
+) -> dict[str, Any]:
+    """Create a new recovery contact."""
+    query = """
+        INSERT INTO bcp_recovery_contact
+        (plan_id, org_name, contact_name, title, phone)
+        VALUES (%s, %s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id, org_name, contact_name, title, phone))
+            await conn.commit()
+            contact_id = cursor.lastrowid
+    
+    return await get_recovery_contact_by_id(contact_id)
+
+
+async def update_recovery_contact(
+    contact_id: int,
+    org_name: str | None = None,
+    contact_name: str | None = None,
+    title: str | None = None,
+    phone: str | None = None,
+) -> dict[str, Any] | None:
+    """Update a recovery contact."""
+    updates = []
+    values = []
+    
+    if org_name is not None:
+        updates.append("org_name = %s")
+        values.append(org_name)
+    if contact_name is not None:
+        updates.append("contact_name = %s")
+        values.append(contact_name)
+    if title is not None:
+        updates.append("title = %s")
+        values.append(title)
+    if phone is not None:
+        updates.append("phone = %s")
+        values.append(phone)
+    
+    if not updates:
+        return await get_recovery_contact_by_id(contact_id)
+    
+    values.append(contact_id)
+    query = f"""
+        UPDATE bcp_recovery_contact
+        SET {', '.join(updates)}
+        WHERE id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, values)
+            await conn.commit()
+    
+    return await get_recovery_contact_by_id(contact_id)
+
+
+async def delete_recovery_contact(contact_id: int) -> bool:
+    """Delete a recovery contact."""
+    query = "DELETE FROM bcp_recovery_contact WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (contact_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+
+
+# ============================================================================
+# Insurance Claims
+# ============================================================================
+
+
+async def list_insurance_claims(plan_id: int) -> list[dict[str, Any]]:
+    """List all insurance claims for a plan."""
+    query = """
+        SELECT id, plan_id, insurer, claim_date, details, follow_up_actions,
+               created_at, updated_at
+        FROM bcp_insurance_claim
+        WHERE plan_id = %s
+        ORDER BY claim_date DESC, id DESC
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id,))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "insurer": row[2],
+                    "claim_date": row[3],
+                    "details": row[4],
+                    "follow_up_actions": row[5],
+                    "created_at": row[6],
+                    "updated_at": row[7],
+                }
+                for row in rows
+            ]
+
+
+async def get_insurance_claim_by_id(claim_id: int) -> dict[str, Any] | None:
+    """Get an insurance claim by ID."""
+    query = """
+        SELECT id, plan_id, insurer, claim_date, details, follow_up_actions,
+               created_at, updated_at
+        FROM bcp_insurance_claim
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (claim_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "insurer": row[2],
+                "claim_date": row[3],
+                "details": row[4],
+                "follow_up_actions": row[5],
+                "created_at": row[6],
+                "updated_at": row[7],
+            }
+
+
+async def create_insurance_claim(
+    plan_id: int,
+    insurer: str,
+    claim_date: datetime | None = None,
+    details: str | None = None,
+    follow_up_actions: str | None = None,
+) -> dict[str, Any]:
+    """Create a new insurance claim."""
+    query = """
+        INSERT INTO bcp_insurance_claim
+        (plan_id, insurer, claim_date, details, follow_up_actions)
+        VALUES (%s, %s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id, insurer, claim_date, details, follow_up_actions))
+            await conn.commit()
+            claim_id = cursor.lastrowid
+    
+    return await get_insurance_claim_by_id(claim_id)
+
+
+async def update_insurance_claim(
+    claim_id: int,
+    insurer: str | None = None,
+    claim_date: datetime | None = None,
+    details: str | None = None,
+    follow_up_actions: str | None = None,
+) -> dict[str, Any] | None:
+    """Update an insurance claim."""
+    updates = []
+    values = []
+    
+    if insurer is not None:
+        updates.append("insurer = %s")
+        values.append(insurer)
+    if claim_date is not None:
+        updates.append("claim_date = %s")
+        values.append(claim_date)
+    if details is not None:
+        updates.append("details = %s")
+        values.append(details)
+    if follow_up_actions is not None:
+        updates.append("follow_up_actions = %s")
+        values.append(follow_up_actions)
+    
+    if not updates:
+        return await get_insurance_claim_by_id(claim_id)
+    
+    values.append(claim_id)
+    query = f"""
+        UPDATE bcp_insurance_claim
+        SET {', '.join(updates)}
+        WHERE id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, values)
+            await conn.commit()
+    
+    return await get_insurance_claim_by_id(claim_id)
+
+
+async def delete_insurance_claim(claim_id: int) -> bool:
+    """Delete an insurance claim."""
+    query = "DELETE FROM bcp_insurance_claim WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (claim_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+
+
+# ============================================================================
+# Market Changes
+# ============================================================================
+
+
+async def list_market_changes(plan_id: int) -> list[dict[str, Any]]:
+    """List all market changes for a plan."""
+    query = """
+        SELECT id, plan_id, change, impact, options,
+               created_at, updated_at
+        FROM bcp_market_change
+        WHERE plan_id = %s
+        ORDER BY created_at DESC
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id,))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "change": row[2],
+                    "impact": row[3],
+                    "options": row[4],
+                    "created_at": row[5],
+                    "updated_at": row[6],
+                }
+                for row in rows
+            ]
+
+
+async def get_market_change_by_id(change_id: int) -> dict[str, Any] | None:
+    """Get a market change by ID."""
+    query = """
+        SELECT id, plan_id, change, impact, options,
+               created_at, updated_at
+        FROM bcp_market_change
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (change_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "change": row[2],
+                "impact": row[3],
+                "options": row[4],
+                "created_at": row[5],
+                "updated_at": row[6],
+            }
+
+
+async def create_market_change(
+    plan_id: int,
+    change: str,
+    impact: str | None = None,
+    options: str | None = None,
+) -> dict[str, Any]:
+    """Create a new market change record."""
+    query = """
+        INSERT INTO bcp_market_change
+        (plan_id, change, impact, options)
+        VALUES (%s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id, change, impact, options))
+            await conn.commit()
+            change_id = cursor.lastrowid
+    
+    return await get_market_change_by_id(change_id)
+
+
+async def update_market_change(
+    change_id: int,
+    change: str | None = None,
+    impact: str | None = None,
+    options: str | None = None,
+) -> dict[str, Any] | None:
+    """Update a market change record."""
+    updates = []
+    values = []
+    
+    if change is not None:
+        updates.append("change = %s")
+        values.append(change)
+    if impact is not None:
+        updates.append("impact = %s")
+        values.append(impact)
+    if options is not None:
+        updates.append("options = %s")
+        values.append(options)
+    
+    if not updates:
+        return await get_market_change_by_id(change_id)
+    
+    values.append(change_id)
+    query = f"""
+        UPDATE bcp_market_change
+        SET {', '.join(updates)}
+        WHERE id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, values)
+            await conn.commit()
+    
+    return await get_market_change_by_id(change_id)
+
+
+async def delete_market_change(change_id: int) -> bool:
+    """Delete a market change record."""
+    query = "DELETE FROM bcp_market_change WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (change_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
