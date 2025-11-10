@@ -167,6 +167,66 @@ async def count_call_recordings(
     return int(row["count"]) if row else 0
 
 
+async def summarize_transcription_statuses(
+    *,
+    search: str | None = None,
+    linked_ticket_id: int | None = None,
+) -> dict[str, int]:
+    """Return a breakdown of call recordings by transcription status."""
+
+    conditions: list[str] = []
+    params: list[Any] = []
+
+    if search:
+        conditions.append(
+            "(cr.file_name LIKE %s OR cr.phone_number LIKE %s "
+            "OR cs.first_name LIKE %s OR cs.last_name LIKE %s "
+            "OR ce.first_name LIKE %s OR ce.last_name LIKE %s)"
+        )
+        search_pattern = f"%{search}%"
+        params.extend([search_pattern] * 6)
+
+    if linked_ticket_id is not None:
+        if linked_ticket_id == 0:
+            conditions.append("cr.linked_ticket_id IS NULL")
+        else:
+            conditions.append("cr.linked_ticket_id = %s")
+            params.append(linked_ticket_id)
+
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+    sql = f"""
+        SELECT
+            COALESCE(NULLIF(TRIM(cr.transcription_status), ''), 'unknown') AS status,
+            COUNT(*) AS count
+        FROM call_recordings cr
+        LEFT JOIN staff cs ON cr.caller_staff_id = cs.id
+        LEFT JOIN staff ce ON cr.callee_staff_id = ce.id
+        WHERE {where_clause}
+        GROUP BY COALESCE(NULLIF(TRIM(cr.transcription_status), ''), 'unknown')
+    """
+
+    rows = await db.fetch_all(sql, tuple(params))
+
+    summary: dict[str, int] = {
+        "pending": 0,
+        "processing": 0,
+        "completed": 0,
+        "failed": 0,
+        "unknown": 0,
+    }
+
+    for row in rows:
+        status = (row.get("status") or "unknown").strip().lower()
+        count = int(row.get("count", 0))
+        key = status if status in summary else "unknown"
+        summary[key] += count
+
+    total = sum(summary.values())
+    summary["total"] = total
+    return summary
+
+
 async def get_call_recording_by_id(recording_id: int) -> dict[str, Any] | None:
     """Get a single call recording by ID."""
     sql = """

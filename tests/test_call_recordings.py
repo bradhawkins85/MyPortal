@@ -251,13 +251,39 @@ async def test_list_call_recordings_sorted_by_created_at():
 async def test_count_call_recordings():
     """Test counting call recordings."""
     from app.repositories import call_recordings as repo
-    
+
     with patch.object(repo.db, "fetch_one", new_callable=AsyncMock) as mock_fetch_one:
         mock_fetch_one.return_value = {"count": 42}
-        
+
         result = await repo.count_call_recordings()
-        
+
         assert result == 42
+
+
+@pytest.mark.asyncio
+async def test_summarize_transcription_statuses():
+    """Test summarizing transcription statuses for call recordings."""
+    from app.repositories import call_recordings as repo
+
+    with patch.object(repo.db, "fetch_all", new_callable=AsyncMock) as mock_fetch_all:
+        mock_fetch_all.return_value = [
+            {"status": "completed", "count": 5},
+            {"status": "pending", "count": 2},
+            {"status": None, "count": 1},
+            {"status": "unexpected", "count": 3},
+        ]
+
+        result = await repo.summarize_transcription_statuses()
+
+    assert result == {
+        "pending": 2,
+        "processing": 0,
+        "completed": 5,
+        "failed": 0,
+        "unknown": 4,
+        "total": 11,
+    }
+    mock_fetch_all.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -82,3 +82,12 @@ class LinkRecordingRequest(BaseModel):
 class TranscriptionRequest(BaseModel):
     recording_id: int = Field(validation_alias="recordingId")
     force: bool = False  # Force re-transcription even if already done
+
+
+class CallRecordingStatusSummary(BaseModel):
+    total: int = 0
+    completed: int = 0
+    pending: int = 0
+    processing: int = 0
+    failed: int = 0
+    unknown: int = 0
