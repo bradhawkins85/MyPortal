@@ -1,0 +1,353 @@
+{% extends "base.html" %}
+
+{% block title %}Essential 8 Compliance{% endblock %}
+
+{% block header_actions %}
+  <div class="header-actions">
+    <input type="search" id="compliance-filter" class="input" placeholder="Filter controls" aria-label="Filter controls" />
+  </div>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <header class="panel__header">
+    <div>
+      <h2 class="panel__title">Essential 8 Compliance</h2>
+      <p class="panel__subtitle">Track compliance with Australian Cyber Security Centre Essential 8 framework.</p>
+    </div>
+    {% if company %}
+    <div class="panel__meta">
+      <span class="tag">{{ company.name }}</span>
+    </div>
+    {% endif %}
+  </header>
+  
+  <!-- Compliance Summary -->
+  <div class="panel__body" style="border-bottom: 1px solid #e5e7eb; padding: 1.5rem;">
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+      <div class="stat-card">
+        <div class="stat-card__label">Compliance Rate</div>
+        <div class="stat-card__value">{{ summary.compliance_percentage }}%</div>
+        <div class="stat-card__detail">{{ summary.compliant }} of {{ summary.total_controls }} controls</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card__label">In Progress</div>
+        <div class="stat-card__value">{{ summary.in_progress }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card__label">Not Started</div>
+        <div class="stat-card__value">{{ summary.not_started }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card__label">Avg. Maturity</div>
+        <div class="stat-card__value">ML{{ summary.average_maturity_level }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel__body">
+    <div class="table-responsive">
+      <table class="table" data-compliance-table>
+        <thead>
+          <tr>
+            <th scope="col" style="width: 5%">#</th>
+            <th scope="col" style="width: 25%">Control</th>
+            <th scope="col" style="width: 15%">Status</th>
+            <th scope="col" style="width: 10%">Maturity</th>
+            <th scope="col" style="width: 15%">Last Reviewed</th>
+            <th scope="col" style="width: 15%">Target Date</th>
+            <th scope="col" style="width: 15%">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for record in compliance_records %}
+          <tr data-record-id="{{ record.id }}" data-status="{{ record.status }}">
+            <td>{{ record.control.control_order }}</td>
+            <td>
+              <strong>{{ record.control.name }}</strong>
+              <br>
+              <small style="color: #6b7280;">{{ record.control.description[:100] }}{% if record.control.description|length > 100 %}...{% endif %}</small>
+            </td>
+            <td>
+              <span class="badge badge--{{ record.status }}">
+                {% if record.status == 'not_started' %}Not Started
+                {% elif record.status == 'in_progress' %}In Progress
+                {% elif record.status == 'compliant' %}Compliant
+                {% elif record.status == 'non_compliant' %}Non-Compliant
+                {% endif %}
+              </span>
+            </td>
+            <td>
+              <span class="badge badge--maturity-{{ record.maturity_level }}">
+                {% if record.maturity_level == 'ml0' %}ML0
+                {% elif record.maturity_level == 'ml1' %}ML1
+                {% elif record.maturity_level == 'ml2' %}ML2
+                {% elif record.maturity_level == 'ml3' %}ML3
+                {% endif %}
+              </span>
+            </td>
+            <td>{{ record.last_reviewed_date or '—' }}</td>
+            <td>{{ record.target_compliance_date or '—' }}</td>
+            <td>
+              <button type="button" class="button button--small" data-edit-compliance="{{ record.id }}" data-control-id="{{ record.control_id }}">
+                Update
+              </button>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="7" class="text-center">
+              No compliance records found. 
+              {% if is_super_admin %}
+              <button type="button" class="button button--small" id="initialize-compliance">Initialize Controls</button>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- Update Compliance Dialog -->
+<dialog id="compliance-dialog" class="dialog">
+  <form method="dialog" class="dialog__container" id="compliance-form">
+    <header class="dialog__header">
+      <h3 class="dialog__title">Update Compliance</h3>
+      <button type="submit" class="dialog__close" aria-label="Close">
+        <span aria-hidden="true">&times;</span>
+      </button>
+    </header>
+    <div class="dialog__body">
+      <input type="hidden" id="compliance-id" />
+      <input type="hidden" id="control-id" />
+      
+      <div class="form-group">
+        <label for="compliance-status" class="form-label">Status</label>
+        <select id="compliance-status" class="form-select" required>
+          <option value="not_started">Not Started</option>
+          <option value="in_progress">In Progress</option>
+          <option value="compliant">Compliant</option>
+          <option value="non_compliant">Non-Compliant</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="compliance-maturity" class="form-label">Maturity Level</label>
+        <select id="compliance-maturity" class="form-select" required>
+          <option value="ml0">ML0 - Not Implemented</option>
+          <option value="ml1">ML1 - Maturity Level 1</option>
+          <option value="ml2">ML2 - Maturity Level 2</option>
+          <option value="ml3">ML3 - Maturity Level 3</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="compliance-last-reviewed" class="form-label">Last Reviewed Date</label>
+        <input type="date" id="compliance-last-reviewed" class="form-input" />
+      </div>
+
+      <div class="form-group">
+        <label for="compliance-target-date" class="form-label">Target Compliance Date</label>
+        <input type="date" id="compliance-target-date" class="form-input" />
+      </div>
+
+      <div class="form-group">
+        <label for="compliance-evidence" class="form-label">Evidence</label>
+        <textarea id="compliance-evidence" class="form-textarea" rows="3" placeholder="Links to documentation, screenshots, etc."></textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="compliance-notes" class="form-label">Notes</label>
+        <textarea id="compliance-notes" class="form-textarea" rows="4" placeholder="Implementation details, outstanding items, etc."></textarea>
+      </div>
+    </div>
+    <footer class="dialog__footer">
+      <button type="button" class="button button--secondary" data-close-dialog>Cancel</button>
+      <button type="button" class="button button--primary" id="save-compliance">Save</button>
+    </footer>
+  </form>
+</dialog>
+
+<style>
+.stat-card {
+  background: #f9fafb;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid #e5e7eb;
+}
+.stat-card__label {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin-bottom: 0.25rem;
+}
+.stat-card__value {
+  font-size: 1.875rem;
+  font-weight: 600;
+  color: #111827;
+}
+.stat-card__detail {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-top: 0.25rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.badge--not_started { background: #e5e7eb; color: #4b5563; }
+.badge--in_progress { background: #dbeafe; color: #1e40af; }
+.badge--compliant { background: #d1fae5; color: #065f46; }
+.badge--non_compliant { background: #fee2e2; color: #991b1b; }
+
+.badge--maturity-ml0 { background: #f3f4f6; color: #6b7280; }
+.badge--maturity-ml1 { background: #fef3c7; color: #92400e; }
+.badge--maturity-ml2 { background: #dbeafe; color: #1e40af; }
+.badge--maturity-ml3 { background: #d1fae5; color: #065f46; }
+
+.form-group {
+  margin-bottom: 1rem;
+}
+.form-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  color: #374151;
+}
+.form-select, .form-input, .form-textarea {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+}
+.form-textarea {
+  resize: vertical;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const companyId = {{ company.id }};
+  const csrfToken = getCsrfToken();
+  
+  // Initialize compliance controls
+  const initBtn = document.getElementById('initialize-compliance');
+  if (initBtn) {
+    initBtn.addEventListener('click', async () => {
+      try {
+        const response = await fetch(`/api/essential8/companies/${companyId}/compliance/initialize`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken
+          }
+        });
+        if (response.ok) {
+          window.location.reload();
+        } else {
+          alert('Failed to initialize compliance controls');
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('Failed to initialize compliance controls');
+      }
+    });
+  }
+
+  // Edit compliance
+  document.querySelectorAll('[data-edit-compliance]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const recordId = btn.dataset.editCompliance;
+      const controlId = btn.dataset.controlId;
+      
+      try {
+        const response = await fetch(`/api/essential8/companies/${companyId}/compliance/${controlId}`);
+        const data = await response.json();
+        
+        document.getElementById('compliance-id').value = data.id;
+        document.getElementById('control-id').value = data.control_id;
+        document.getElementById('compliance-status').value = data.status;
+        document.getElementById('compliance-maturity').value = data.maturity_level;
+        document.getElementById('compliance-last-reviewed').value = data.last_reviewed_date || '';
+        document.getElementById('compliance-target-date').value = data.target_compliance_date || '';
+        document.getElementById('compliance-evidence').value = data.evidence || '';
+        document.getElementById('compliance-notes').value = data.notes || '';
+        
+        document.getElementById('compliance-dialog').showModal();
+      } catch (error) {
+        console.error('Error:', error);
+        alert('Failed to load compliance record');
+      }
+    });
+  });
+
+  // Save compliance
+  document.getElementById('save-compliance')?.addEventListener('click', async () => {
+    const controlId = document.getElementById('control-id').value;
+    const formData = {
+      status: document.getElementById('compliance-status').value,
+      maturity_level: document.getElementById('compliance-maturity').value,
+      last_reviewed_date: document.getElementById('compliance-last-reviewed').value || null,
+      target_compliance_date: document.getElementById('compliance-target-date').value || null,
+      evidence: document.getElementById('compliance-evidence').value || null,
+      notes: document.getElementById('compliance-notes').value || null,
+    };
+    
+    try {
+      const response = await fetch(`/api/essential8/companies/${companyId}/compliance/${controlId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        body: JSON.stringify(formData)
+      });
+      
+      if (response.ok) {
+        window.location.reload();
+      } else {
+        alert('Failed to update compliance record');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Failed to update compliance record');
+    }
+  });
+
+  // Close dialog handlers
+  document.querySelectorAll('[data-close-dialog]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('compliance-dialog').close();
+    });
+  });
+
+  // Filter functionality
+  const filterInput = document.getElementById('compliance-filter');
+  if (filterInput) {
+    filterInput.addEventListener('input', (e) => {
+      const filterValue = e.target.value.toLowerCase();
+      const rows = document.querySelectorAll('[data-compliance-table] tbody tr');
+      
+      rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(filterValue) ? '' : 'none';
+      });
+    });
+  }
+
+  function getCsrfToken() {
+    return document.cookie
+      .split('; ')
+      .find(row => row.startsWith('myportal_session_csrf='))
+      ?.split('=')[1] || '';
+  }
+});
+</script>
+{% endblock %}
