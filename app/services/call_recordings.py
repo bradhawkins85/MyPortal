@@ -1034,8 +1034,12 @@ async def create_ticket_from_recording(
         subject=subject,
         description=description,
         requester_id=user_id,
-        created_by=user_id,
+        assigned_user_id=None,
+        priority="normal",
         status="open",
+        category=None,
+        module_slug="call-recordings",
+        external_reference=None,
     )
 
     # Link the recording to the ticket
