@@ -58,7 +58,7 @@ async def test_initialize_company_compliance():
     await db.connect()
     try:
         # Create a test company
-        company_query = "INSERT INTO companies (name) VALUES (:name)"
+        company_query = "INSERT INTO companies (name) VALUES (%(name)s)"
         company_id = await db.execute(company_query, {"name": "Test Company"})
         
         # Initialize compliance records
@@ -77,8 +77,8 @@ async def test_initialize_company_compliance():
             assert record["maturity_level"] == MaturityLevel.ML0.value
         
         # Cleanup
-        await db.execute("DELETE FROM company_essential8_compliance WHERE company_id = :company_id", {"company_id": company_id})
-        await db.execute("DELETE FROM companies WHERE id = :id", {"id": company_id})
+        await db.execute("DELETE FROM company_essential8_compliance WHERE company_id = %(company_id)s", {"company_id": company_id})
+        await db.execute("DELETE FROM companies WHERE id = %(id)s", {"id": company_id})
     finally:
         await db.disconnect()
 
@@ -89,7 +89,7 @@ async def test_initialize_company_compliance_idempotent():
     await db.connect()
     try:
         # Create a test company
-        company_query = "INSERT INTO companies (name) VALUES (:name)"
+        company_query = "INSERT INTO companies (name) VALUES (%(name)s)"
         company_id = await db.execute(company_query, {"name": "Test Company 2"})
         
         # Initialize compliance records twice
@@ -105,8 +105,8 @@ async def test_initialize_company_compliance_idempotent():
         assert len(records) == 8
         
         # Cleanup
-        await db.execute("DELETE FROM company_essential8_compliance WHERE company_id = :company_id", {"company_id": company_id})
-        await db.execute("DELETE FROM companies WHERE id = :id", {"id": company_id})
+        await db.execute("DELETE FROM company_essential8_compliance WHERE company_id = %(company_id)s", {"company_id": company_id})
+        await db.execute("DELETE FROM companies WHERE id = %(id)s", {"id": company_id})
     finally:
         await db.disconnect()
 
@@ -117,7 +117,7 @@ async def test_create_and_get_company_compliance():
     await db.connect()
     try:
         # Create a test company
-        company_query = "INSERT INTO companies (name) VALUES (:name)"
+        company_query = "INSERT INTO companies (name) VALUES (%(name)s)"
         company_id = await db.execute(company_query, {"name": "Test Company 3"})
         
         # Get a control ID
@@ -147,8 +147,8 @@ async def test_create_and_get_company_compliance():
         assert retrieved["status"] == ComplianceStatus.IN_PROGRESS.value
         
         # Cleanup
-        await db.execute("DELETE FROM company_essential8_compliance WHERE company_id = :company_id", {"company_id": company_id})
-        await db.execute("DELETE FROM companies WHERE id = :id", {"id": company_id})
+        await db.execute("DELETE FROM company_essential8_compliance WHERE company_id = %(company_id)s", {"company_id": company_id})
+        await db.execute("DELETE FROM companies WHERE id = %(id)s", {"id": company_id})
     finally:
         await db.disconnect()
 
@@ -159,7 +159,7 @@ async def test_update_company_compliance():
     await db.connect()
     try:
         # Create a test company
-        company_query = "INSERT INTO companies (name) VALUES (:name)"
+        company_query = "INSERT INTO companies (name) VALUES (%(name)s)"
         company_id = await db.execute(company_query, {"name": "Test Company 4"})
         
         # Get a control ID
@@ -190,9 +190,9 @@ async def test_update_company_compliance():
         assert updated["notes"] == "Now compliant"
         
         # Cleanup
-        await db.execute("DELETE FROM company_essential8_audit WHERE company_id = :company_id", {"company_id": company_id})
-        await db.execute("DELETE FROM company_essential8_compliance WHERE company_id = :company_id", {"company_id": company_id})
-        await db.execute("DELETE FROM companies WHERE id = :id", {"id": company_id})
+        await db.execute("DELETE FROM company_essential8_audit WHERE company_id = %(company_id)s", {"company_id": company_id})
+        await db.execute("DELETE FROM company_essential8_compliance WHERE company_id = %(company_id)s", {"company_id": company_id})
+        await db.execute("DELETE FROM companies WHERE id = %(id)s", {"id": company_id})
     finally:
         await db.disconnect()
 
@@ -203,7 +203,7 @@ async def test_get_company_compliance_summary():
     await db.connect()
     try:
         # Create a test company
-        company_query = "INSERT INTO companies (name) VALUES (:name)"
+        company_query = "INSERT INTO companies (name) VALUES (%(name)s)"
         company_id = await db.execute(company_query, {"name": "Test Company 5"})
         
         # Initialize compliance records
@@ -243,9 +243,9 @@ async def test_get_company_compliance_summary():
         assert summary["compliance_percentage"] == 25.0  # 2/8 = 25%
         
         # Cleanup
-        await db.execute("DELETE FROM company_essential8_audit WHERE company_id = :company_id", {"company_id": company_id})
-        await db.execute("DELETE FROM company_essential8_compliance WHERE company_id = :company_id", {"company_id": company_id})
-        await db.execute("DELETE FROM companies WHERE id = :id", {"id": company_id})
+        await db.execute("DELETE FROM company_essential8_audit WHERE company_id = %(company_id)s", {"company_id": company_id})
+        await db.execute("DELETE FROM company_essential8_compliance WHERE company_id = %(company_id)s", {"company_id": company_id})
+        await db.execute("DELETE FROM companies WHERE id = %(id)s", {"id": company_id})
     finally:
         await db.disconnect()
 
@@ -256,7 +256,7 @@ async def test_list_company_compliance_with_filter():
     await db.connect()
     try:
         # Create a test company
-        company_query = "INSERT INTO companies (name) VALUES (:name)"
+        company_query = "INSERT INTO companies (name) VALUES (%(name)s)"
         company_id = await db.execute(company_query, {"name": "Test Company 6"})
         
         # Initialize compliance records
@@ -296,9 +296,9 @@ async def test_list_company_compliance_with_filter():
         assert len(not_started_records) == 6
         
         # Cleanup
-        await db.execute("DELETE FROM company_essential8_audit WHERE company_id = :company_id", {"company_id": company_id})
-        await db.execute("DELETE FROM company_essential8_compliance WHERE company_id = :company_id", {"company_id": company_id})
-        await db.execute("DELETE FROM companies WHERE id = :id", {"id": company_id})
+        await db.execute("DELETE FROM company_essential8_audit WHERE company_id = %(company_id)s", {"company_id": company_id})
+        await db.execute("DELETE FROM company_essential8_compliance WHERE company_id = %(company_id)s", {"company_id": company_id})
+        await db.execute("DELETE FROM companies WHERE id = %(id)s", {"id": company_id})
     finally:
         await db.disconnect()
 
@@ -309,10 +309,10 @@ async def test_compliance_audit_trail():
     await db.connect()
     try:
         # Create a test company and user
-        company_query = "INSERT INTO companies (name) VALUES (:name)"
+        company_query = "INSERT INTO companies (name) VALUES (%(name)s)"
         company_id = await db.execute(company_query, {"name": "Test Company 7"})
         
-        user_query = "INSERT INTO users (email, password_hash, company_id) VALUES (:email, :password_hash, :company_id)"
+        user_query = "INSERT INTO users (email, password_hash, company_id) VALUES (%(email)s, %(password_hash)s, %(company_id)s)"
         user_id = await db.execute(user_query, {
             "email": "test@example.com",
             "password_hash": "hash",
@@ -355,9 +355,9 @@ async def test_compliance_audit_trail():
         assert audit_entry["new_status"] == ComplianceStatus.COMPLIANT.value
         
         # Cleanup
-        await db.execute("DELETE FROM company_essential8_audit WHERE company_id = :company_id", {"company_id": company_id})
-        await db.execute("DELETE FROM company_essential8_compliance WHERE company_id = :company_id", {"company_id": company_id})
-        await db.execute("DELETE FROM users WHERE id = :id", {"id": user_id})
-        await db.execute("DELETE FROM companies WHERE id = :id", {"id": company_id})
+        await db.execute("DELETE FROM company_essential8_audit WHERE company_id = %(company_id)s", {"company_id": company_id})
+        await db.execute("DELETE FROM company_essential8_compliance WHERE company_id = %(company_id)s", {"company_id": company_id})
+        await db.execute("DELETE FROM users WHERE id = %(id)s", {"id": user_id})
+        await db.execute("DELETE FROM companies WHERE id = %(id)s", {"id": company_id})
     finally:
         await db.disconnect()
