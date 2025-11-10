@@ -8,6 +8,7 @@ from app.repositories import call_recordings as call_recordings_repo
 from app.schemas.call_recordings import (
     CallRecordingCreate,
     CallRecordingResponse,
+    CallRecordingStatusSummary,
     CallRecordingUpdate,
     LinkRecordingRequest,
     TranscriptionRequest,
@@ -54,6 +55,21 @@ async def count_call_recordings(
         linked_ticket_id=linked_ticket_id,
     )
     return {"count": count}
+
+
+@router.get("/status-summary", response_model=CallRecordingStatusSummary)
+async def summarize_call_recording_statuses(
+    search: str | None = None,
+    linked_ticket_id: int | None = Query(default=None, alias="linkedTicketId"),
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Return a breakdown of call recordings by transcription status (super admin only)."""
+    summary = await call_recordings_repo.summarize_transcription_statuses(
+        search=search,
+        linked_ticket_id=linked_ticket_id,
+    )
+    return CallRecordingStatusSummary.model_validate(summary)
 
 
 @router.post("/sync", response_model=dict[str, int | str | list[str]])
