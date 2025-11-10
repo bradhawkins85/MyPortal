@@ -1,0 +1,410 @@
+{% extends "base.html" %}
+
+{% block header_actions %}
+  <a class="button button--secondary" href="/admin/business-continuity-plans">
+    <span class="button__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+    </span>
+    <span class="button__label">Back to plans</span>
+  </a>
+{% endblock %}
+
+{% block content %}
+<div class="bc-plan-editor">
+  <form id="bc-plan-form" class="form">
+    <input type="hidden" name="plan_id" id="plan_id" value="{{ plan.id if plan else '' }}">
+    
+    <section class="card card--panel">
+      <header class="card__header">
+        <h2 class="card__title">{{ 'Edit Plan' if plan else 'New Plan' }}</h2>
+        <p class="card__subtitle">{{ 'Update the plan details and content below.' if plan else 'Create a new business continuity plan with versioning and access control.' }}</p>
+      </header>
+      
+      <div class="card__body">
+        <div class="form-grid">
+          <div class="form-group form-group--full">
+            <label class="form-label" for="title">Plan Title *</label>
+            <input
+              type="text"
+              class="form-input"
+              id="title"
+              name="title"
+              required
+              maxlength="255"
+              value="{{ plan.title if plan else '' }}"
+              placeholder="e.g., Primary Data Center Disaster Recovery Plan"
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="plan_type">Plan Type *</label>
+            <select class="form-select" id="plan_type" name="plan_type" required>
+              <option value="">Select type...</option>
+              <option value="disaster_recovery" {% if plan and plan.plan_type == 'disaster_recovery' %}selected{% endif %}>Disaster Recovery</option>
+              <option value="incident_response" {% if plan and plan.plan_type == 'incident_response' %}selected{% endif %}>Incident Response</option>
+              <option value="business_continuity" {% if plan and plan.plan_type == 'business_continuity' %}selected{% endif %}>Business Continuity</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="version">Version</label>
+            <input
+              type="text"
+              class="form-input"
+              id="version"
+              name="version"
+              maxlength="50"
+              value="{{ plan.version if plan else '1.0' }}"
+              placeholder="1.0"
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="status">Status *</label>
+            <select class="form-select" id="status" name="status" required>
+              <option value="draft" {% if not plan or plan.status == 'draft' %}selected{% endif %}>Draft</option>
+              <option value="active" {% if plan and plan.status == 'active' %}selected{% endif %}>Active</option>
+              <option value="archived" {% if plan and plan.status == 'archived' %}selected{% endif %}>Archived</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">
+              <input
+                type="checkbox"
+                id="mark_reviewed"
+                name="mark_reviewed"
+                class="form-checkbox"
+              />
+              Mark as reviewed now
+            </label>
+            <p class="form-help">Check this to update the "last reviewed" timestamp to the current date and time.</p>
+          </div>
+
+          <div class="form-group form-group--full">
+            <label class="form-label" for="content">Plan Content *</label>
+            <textarea
+              class="form-textarea"
+              id="content"
+              name="content"
+              required
+              rows="20"
+              placeholder="Enter the plan content here. Use markdown for formatting if needed."
+            >{{ plan.content if plan else '' }}</textarea>
+            <p class="form-help">Detailed procedures, contact information, recovery steps, and other relevant documentation.</p>
+          </div>
+        </div>
+      </div>
+
+      <footer class="card__footer">
+        <button type="submit" class="button button--primary" id="save-button">
+          <span class="button__label">{{ 'Update Plan' if plan else 'Create Plan' }}</span>
+        </button>
+        {% if plan %}
+        <button type="button" class="button button--danger" id="delete-button">
+          <span class="button__label">Delete Plan</span>
+        </button>
+        {% endif %}
+      </footer>
+    </section>
+
+    {% if plan %}
+    <section class="card card--panel" id="permissions-section">
+      <header class="card__header">
+        <h2 class="card__title">Access Permissions</h2>
+        <p class="card__subtitle">Grant read or edit access to specific users or companies.</p>
+      </header>
+      
+      <div class="card__body">
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label" for="permission_user_id">User</label>
+            <select class="form-select" id="permission_user_id" name="permission_user_id">
+              <option value="">Select user...</option>
+              {% for user in users %}
+              <option value="{{ user.id }}">{{ user.email }} ({{ user.first_name }} {{ user.last_name }})</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="permission_company_id">Company</label>
+            <select class="form-select" id="permission_company_id" name="permission_company_id">
+              <option value="">Select company...</option>
+              {% for company in companies %}
+              <option value="{{ company.id }}">{{ company.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="permission_level">Permission Level</label>
+            <select class="form-select" id="permission_level" name="permission_level">
+              <option value="read">Read Only</option>
+              <option value="edit">Read & Edit</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <button type="button" class="button button--secondary" id="add-permission-button">
+              <span class="button__label">Add Permission</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="table-wrapper table-wrapper--short" id="permissions-table-wrapper" style="margin-top: 1rem;">
+          <table class="table table--compact" id="permissions-table">
+            <thead>
+              <tr>
+                <th scope="col">User/Company</th>
+                <th scope="col">Permission</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="permissions-tbody">
+              <!-- Populated via JavaScript -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+    {% endif %}
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script>
+    (function() {
+      const form = document.getElementById('bc-plan-form');
+      const planId = document.getElementById('plan_id').value;
+      const saveButton = document.getElementById('save-button');
+      const deleteButton = document.getElementById('delete-button');
+      const addPermissionButton = document.getElementById('add-permission-button');
+      let permissions = [];
+
+      // Load existing permissions if editing
+      if (planId) {
+        loadPermissions();
+      }
+
+      // Form submission
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        saveButton.disabled = true;
+        saveButton.textContent = 'Saving...';
+
+        const formData = {
+          title: document.getElementById('title').value,
+          plan_type: document.getElementById('plan_type').value,
+          content: document.getElementById('content').value,
+          version: document.getElementById('version').value,
+          status: document.getElementById('status').value,
+        };
+
+        if (document.getElementById('mark_reviewed').checked) {
+          formData.last_reviewed_at = new Date().toISOString();
+        }
+
+        try {
+          let response;
+          if (planId) {
+            response = await fetch(`/api/business-continuity-plans/${planId}`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': getCsrfToken(),
+              },
+              body: JSON.stringify(formData),
+            });
+          } else {
+            response = await fetch('/api/business-continuity-plans/', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': getCsrfToken(),
+              },
+              body: JSON.stringify(formData),
+            });
+          }
+
+          if (response.ok) {
+            const data = await response.json();
+            window.location.href = `/admin/business-continuity-plans/${data.id}`;
+          } else {
+            const error = await response.json();
+            alert('Error: ' + (error.detail || 'Failed to save plan'));
+            saveButton.disabled = false;
+            saveButton.textContent = planId ? 'Update Plan' : 'Create Plan';
+          }
+        } catch (error) {
+          alert('Error: ' + error.message);
+          saveButton.disabled = false;
+          saveButton.textContent = planId ? 'Update Plan' : 'Create Plan';
+        }
+      });
+
+      // Delete plan
+      if (deleteButton) {
+        deleteButton.addEventListener('click', async () => {
+          if (!confirm('Are you sure you want to delete this plan? This action cannot be undone.')) {
+            return;
+          }
+
+          try {
+            const response = await fetch(`/api/business-continuity-plans/${planId}`, {
+              method: 'DELETE',
+              headers: {
+                'X-CSRF-Token': getCsrfToken(),
+              },
+            });
+
+            if (response.ok) {
+              window.location.href = '/admin/business-continuity-plans';
+            } else {
+              const error = await response.json();
+              alert('Error: ' + (error.detail || 'Failed to delete plan'));
+            }
+          } catch (error) {
+            alert('Error: ' + error.message);
+          }
+        });
+      }
+
+      // Add permission
+      if (addPermissionButton) {
+        addPermissionButton.addEventListener('click', async () => {
+          const userId = document.getElementById('permission_user_id').value;
+          const companyId = document.getElementById('permission_company_id').value;
+          const permissionLevel = document.getElementById('permission_level').value;
+
+          if (!userId && !companyId) {
+            alert('Please select either a user or a company');
+            return;
+          }
+
+          if (userId && companyId) {
+            alert('Please select only one of user or company');
+            return;
+          }
+
+          try {
+            const response = await fetch(`/api/business-continuity-plans/${planId}/permissions`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': getCsrfToken(),
+              },
+              body: JSON.stringify({
+                plan_id: parseInt(planId),
+                user_id: userId ? parseInt(userId) : null,
+                company_id: companyId ? parseInt(companyId) : null,
+                permission_level: permissionLevel,
+              }),
+            });
+
+            if (response.ok) {
+              document.getElementById('permission_user_id').value = '';
+              document.getElementById('permission_company_id').value = '';
+              loadPermissions();
+            } else {
+              const error = await response.json();
+              alert('Error: ' + (error.detail || 'Failed to add permission'));
+            }
+          } catch (error) {
+            alert('Error: ' + error.message);
+          }
+        });
+      }
+
+      async function loadPermissions() {
+        try {
+          const response = await fetch(`/api/business-continuity-plans/${planId}/permissions`);
+          if (response.ok) {
+            permissions = await response.json();
+            renderPermissions();
+          }
+        } catch (error) {
+          console.error('Failed to load permissions:', error);
+        }
+      }
+
+      function renderPermissions() {
+        const tbody = document.getElementById('permissions-tbody');
+        if (!tbody) return;
+
+        if (permissions.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="3" class="table__empty">No permissions set. Super admins have full access.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = permissions.map(perm => {
+          const name = perm.user_id ? getUserName(perm.user_id) : getCompanyName(perm.company_id);
+          const type = perm.user_id ? 'User' : 'Company';
+          return `
+            <tr>
+              <td>${type}: ${name}</td>
+              <td><span class="tag">${perm.permission_level}</span></td>
+              <td>
+                <button type="button" class="button button--small button--danger" onclick="deletePermission(${perm.id})">
+                  Remove
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      function getUserName(userId) {
+        const select = document.getElementById('permission_user_id');
+        const option = select.querySelector(`option[value="${userId}"]`);
+        return option ? option.textContent : `User #${userId}`;
+      }
+
+      function getCompanyName(companyId) {
+        const select = document.getElementById('permission_company_id');
+        const option = select.querySelector(`option[value="${companyId}"]`);
+        return option ? option.textContent : `Company #${companyId}`;
+      }
+
+      window.deletePermission = async function(permId) {
+        if (!confirm('Remove this permission?')) return;
+
+        try {
+          const response = await fetch(`/api/business-continuity-plans/${planId}/permissions/${permId}`, {
+            method: 'DELETE',
+            headers: {
+              'X-CSRF-Token': getCsrfToken(),
+            },
+          });
+
+          if (response.ok) {
+            loadPermissions();
+          } else {
+            const error = await response.json();
+            alert('Error: ' + (error.detail || 'Failed to remove permission'));
+          }
+        } catch (error) {
+          alert('Error: ' + error.message);
+        }
+      };
+
+      function getCsrfToken() {
+        const name = 'myportal_session_csrf=';
+        const decodedCookie = decodeURIComponent(document.cookie);
+        const ca = decodedCookie.split(';');
+        for (let i = 0; i < ca.length; i++) {
+          let c = ca[i];
+          while (c.charAt(0) === ' ') {
+            c = c.substring(1);
+          }
+          if (c.indexOf(name) === 0) {
+            return c.substring(name.length, c.length);
+          }
+        }
+        return '';
+      }
+    })();
+  </script>
+{% endblock %}
