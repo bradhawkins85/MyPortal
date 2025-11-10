@@ -6,7 +6,7 @@ including templates, plans, versions, workflows, sections, attachments, and expo
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -423,3 +423,349 @@ class BCPaginatedResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+# ============================================================================
+# Additional BC6 Schemas
+# ============================================================================
+
+# Template Structure Schemas (aliases for clarity)
+class FieldSchema(BaseModel):
+    """Schema for a field definition within a template section.
+    
+    This schema defines the structure and validation rules for individual fields
+    within a business continuity plan template.
+    """
+    
+    field_id: str = Field(..., min_length=1, max_length=100, description="Unique identifier for the field")
+    label: str = Field(..., min_length=1, max_length=255, description="Display label for the field")
+    field_type: str = Field(..., description="Data type for this field (text, date, select, etc.)")
+    required: bool = Field(default=False, description="Whether this field is required")
+    help_text: Optional[str] = Field(None, description="Help text describing the field")
+    default_value: Optional[Any] = Field(None, description="Default value for the field")
+    validation_rules: Optional[dict[str, Any]] = Field(None, description="Additional validation rules")
+    
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "field_id": "rto_minutes",
+                "label": "Recovery Time Objective (minutes)",
+                "field_type": "integer",
+                "required": True,
+                "help_text": "Target time to recover this process",
+                "validation_rules": {"min": 0, "max": 525600}
+            }
+        }
+
+
+class SectionSchema(BaseModel):
+    """Schema for a section definition within a template.
+    
+    Sections organize related fields within a business continuity plan template.
+    """
+    
+    section_id: str = Field(..., min_length=1, max_length=100, description="Unique identifier for the section")
+    title: str = Field(..., min_length=1, max_length=255, description="Display title for the section")
+    description: Optional[str] = Field(None, description="Description of this section's purpose")
+    order: int = Field(..., ge=0, description="Display order within parent section or template")
+    parent_section_id: Optional[str] = Field(None, description="ID of parent section for nested sections")
+    fields: list[FieldSchema] = Field(default_factory=list, description="Fields contained in this section")
+    
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "section_id": "recovery_objectives",
+                "title": "Recovery Objectives",
+                "description": "Define RTO, RPO, and MTPD for critical processes",
+                "order": 1,
+                "parent_section_id": None,
+                "fields": []
+            }
+        }
+
+
+class TemplateSchema(BaseModel):
+    """Complete template schema definition.
+    
+    This schema represents the full structure of a business continuity plan template,
+    including all sections and field definitions.
+    """
+    
+    template_id: Optional[int] = Field(None, description="Template ID (for existing templates)")
+    name: str = Field(..., min_length=1, max_length=255, description="Template name")
+    version: str = Field(..., max_length=50, description="Template version")
+    description: Optional[str] = Field(None, description="Template description")
+    is_default: bool = Field(default=False, description="Whether this is the default template")
+    sections: list[SectionSchema] = Field(default_factory=list, description="All sections in the template")
+    metadata: Optional[dict[str, Any]] = Field(None, description="Additional template metadata")
+    
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "name": "Government Business Continuity Plan",
+                "version": "2.0",
+                "description": "Standard BCP template for government organizations",
+                "is_default": True,
+                "sections": []
+            }
+        }
+
+
+# Review and Workflow Schemas
+class ReviewCreate(BaseModel):
+    """Schema for creating a review request.
+    
+    Used to submit a plan for review to specified reviewers.
+    """
+    
+    plan_id: int = Field(..., gt=0, description="ID of the plan to review")
+    reviewer_user_ids: list[int] = Field(..., min_length=1, description="List of reviewer user IDs")
+    notes: Optional[str] = Field(None, max_length=2000, description="Notes for reviewers")
+    due_date: Optional[datetime] = Field(None, description="Review due date (ISO 8601 UTC)")
+    
+    @field_validator("due_date")
+    @classmethod
+    def validate_due_date_utc(cls, v):
+        """Ensure due date is in UTC."""
+        if v is not None and v.tzinfo is None:
+            raise ValueError("due_date must include timezone information (ISO 8601 UTC)")
+        return v
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "plan_id": 1,
+                "reviewer_user_ids": [2, 3, 4],
+                "notes": "Please review the updated recovery procedures",
+                "due_date": "2024-12-31T23:59:59+00:00"
+            }
+        }
+
+
+class ReviewDecision(BaseModel):
+    """Schema for recording a review decision.
+    
+    Used when a reviewer approves or requests changes to a plan.
+    """
+    
+    review_id: int = Field(..., gt=0, description="ID of the review")
+    decision: BCReviewDecision = Field(..., description="Review decision (approved or changes_requested)")
+    notes: str = Field(..., min_length=1, max_length=5000, description="Review notes")
+    decided_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Decision timestamp (ISO 8601 UTC)")
+    
+    @field_validator("decided_at")
+    @classmethod
+    def validate_decided_at_utc(cls, v):
+        """Ensure decision timestamp is in UTC."""
+        if v.tzinfo is None:
+            raise ValueError("decided_at must include timezone information (ISO 8601 UTC)")
+        return v
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "review_id": 1,
+                "decision": "approved",
+                "notes": "All recovery procedures are clear and well-documented",
+                "decided_at": "2024-01-15T10:30:00+00:00"
+            }
+        }
+
+
+# Attachment Schemas
+class AttachmentMeta(BaseModel):
+    """Metadata schema for plan attachments.
+    
+    Contains essential information about an attached file without the file content itself.
+    """
+    
+    id: Optional[int] = Field(None, description="Attachment ID (for existing attachments)")
+    plan_id: int = Field(..., gt=0, description="ID of the plan this attachment belongs to")
+    file_name: str = Field(..., min_length=1, max_length=255, description="Original file name")
+    content_type: Optional[str] = Field(None, max_length=100, description="MIME type of the file")
+    size_bytes: Optional[int] = Field(None, ge=0, description="File size in bytes")
+    uploaded_by_user_id: Optional[int] = Field(None, description="ID of user who uploaded the file")
+    uploaded_at_utc: Optional[datetime] = Field(None, description="Upload timestamp (ISO 8601 UTC)")
+    hash: Optional[str] = Field(None, max_length=64, description="SHA256 hash for integrity verification")
+    storage_path: Optional[str] = Field(None, max_length=500, description="Path in storage system")
+    tags: Optional[list[str]] = Field(default_factory=list, description="Tags for categorizing attachments")
+    
+    @field_validator("uploaded_at_utc")
+    @classmethod
+    def validate_uploaded_at_utc(cls, v):
+        """Ensure upload timestamp is in UTC."""
+        if v is not None and v.tzinfo is None:
+            raise ValueError("uploaded_at_utc must include timezone information (ISO 8601 UTC)")
+        return v
+    
+    @field_validator("size_bytes")
+    @classmethod
+    def validate_size_bytes(cls, v):
+        """Ensure file size is non-negative."""
+        if v is not None and v < 0:
+            raise ValueError("size_bytes must be non-negative")
+        return v
+    
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "plan_id": 1,
+                "file_name": "contact_list.pdf",
+                "content_type": "application/pdf",
+                "size_bytes": 245760,
+                "hash": "a1b2c3d4e5f6...",
+                "tags": ["contacts", "emergency"]
+            }
+        }
+
+
+# Process and Recovery Objective Schemas
+class BCProcessBase(BaseModel):
+    """Base schema for business continuity processes with recovery objectives.
+    
+    Includes validation for RTO, RPO, and MTPD to ensure they are non-negative integers.
+    """
+    
+    plan_id: int = Field(..., gt=0, description="ID of the plan this process belongs to")
+    name: str = Field(..., min_length=1, max_length=255, description="Process name")
+    description: Optional[str] = Field(None, description="Process description")
+    rto_minutes: Optional[int] = Field(None, ge=0, description="Recovery Time Objective in minutes (non-negative)")
+    rpo_minutes: Optional[int] = Field(None, ge=0, description="Recovery Point Objective in minutes (non-negative)")
+    mtpd_minutes: Optional[int] = Field(None, ge=0, description="Maximum Tolerable Period of Disruption in minutes (non-negative)")
+    impact_rating: Optional[str] = Field(None, max_length=50, description="Impact rating (critical, high, medium, low)")
+    dependencies_json: Optional[dict[str, Any]] = Field(None, description="Process dependencies as JSON")
+    
+    @field_validator("rto_minutes", "rpo_minutes", "mtpd_minutes")
+    @classmethod
+    def validate_non_negative(cls, v, info):
+        """Ensure recovery objectives are non-negative integers."""
+        if v is not None and v < 0:
+            raise ValueError(f"{info.field_name} must be a non-negative integer")
+        return v
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "plan_id": 1,
+                "name": "Email Service",
+                "description": "Corporate email system",
+                "rto_minutes": 240,
+                "rpo_minutes": 60,
+                "mtpd_minutes": 480,
+                "impact_rating": "critical"
+            }
+        }
+
+
+class BCProcessCreate(BCProcessBase):
+    """Schema for creating a business continuity process."""
+    pass
+
+
+class BCProcessUpdate(BaseModel):
+    """Schema for updating a business continuity process.
+    
+    All fields are optional to support partial updates.
+    """
+    
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    rto_minutes: Optional[int] = Field(None, ge=0, description="Recovery Time Objective in minutes (non-negative)")
+    rpo_minutes: Optional[int] = Field(None, ge=0, description="Recovery Point Objective in minutes (non-negative)")
+    mtpd_minutes: Optional[int] = Field(None, ge=0, description="Maximum Tolerable Period of Disruption in minutes (non-negative)")
+    impact_rating: Optional[str] = Field(None, max_length=50)
+    dependencies_json: Optional[dict[str, Any]] = None
+    
+    @field_validator("rto_minutes", "rpo_minutes", "mtpd_minutes")
+    @classmethod
+    def validate_non_negative(cls, v, info):
+        """Ensure recovery objectives are non-negative integers."""
+        if v is not None and v < 0:
+            raise ValueError(f"{info.field_name} must be a non-negative integer")
+        return v
+
+
+class BCProcessDetail(BCProcessBase):
+    """Detailed schema for business continuity process response."""
+    
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    
+    @field_validator("created_at", "updated_at")
+    @classmethod
+    def validate_datetime_utc(cls, v):
+        """Ensure timestamps are in UTC."""
+        if v.tzinfo is None:
+            raise ValueError("Timestamps must include timezone information (ISO 8601 UTC)")
+        return v
+    
+    class Config:
+        from_attributes = True
+
+
+# Status Transition Validation
+class PlanStatusTransition(BaseModel):
+    """Schema for validating plan status transitions.
+    
+    Ensures status changes follow allowed transitions:
+    - draft -> in_review
+    - in_review -> approved or draft
+    - approved -> archived
+    - archived -> draft (to reactivate)
+    """
+    
+    current_status: BCPlanListStatus = Field(..., description="Current plan status")
+    new_status: BCPlanListStatus = Field(..., description="Desired new status")
+    
+    @field_validator("new_status")
+    @classmethod
+    def validate_status_transition(cls, v, info):
+        """Validate that the status transition is allowed."""
+        if "current_status" not in info.data:
+            return v
+        
+        current = info.data["current_status"]
+        new = v
+        
+        # Define allowed transitions
+        allowed_transitions = {
+            BCPlanListStatus.DRAFT: [BCPlanListStatus.IN_REVIEW],
+            BCPlanListStatus.IN_REVIEW: [BCPlanListStatus.APPROVED, BCPlanListStatus.DRAFT],
+            BCPlanListStatus.APPROVED: [BCPlanListStatus.ARCHIVED],
+            BCPlanListStatus.ARCHIVED: [BCPlanListStatus.DRAFT],
+        }
+        
+        # Check if transition is allowed
+        if current == new:
+            return v  # Same status is always allowed
+        
+        if new not in allowed_transitions.get(current, []):
+            raise ValueError(
+                f"Invalid status transition from {current.value} to {new.value}. "
+                f"Allowed transitions from {current.value}: "
+                f"{[s.value for s in allowed_transitions.get(current, [])]}"
+            )
+        
+        return v
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "current_status": "draft",
+                "new_status": "in_review"
+            }
+        }
+
+
+# Alias exports for backward compatibility and convenience
+PlanCreate = BCPlanCreate
+PlanUpdate = BCPlanUpdate
+PlanDetail = BCPlanDetail
+PlanVersionCreate = BCVersionCreate
+PlanVersionDetail = BCVersionDetail
+ExportRequest = BCExportRequest
