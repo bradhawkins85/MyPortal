@@ -1972,3 +1972,325 @@ async def seed_example_team_leader_role(plan_id: int) -> dict[str, Any]:
 • Keep key staff apprised of situation and actions"""
     
     return await create_role(plan_id, "Team Leader", responsibilities)
+
+
+# ============================================================================
+# Evacuation Plan Management
+# ============================================================================
+
+
+async def get_evacuation_plan(plan_id: int) -> dict[str, Any] | None:
+    """Get evacuation plan for a BCP plan."""
+    query = """
+        SELECT id, plan_id, meeting_point, floorplan_file_id, notes,
+               created_at, updated_at
+        FROM bcp_evacuation_plan
+        WHERE plan_id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "meeting_point": row[2],
+                "floorplan_file_id": row[3],
+                "notes": row[4],
+                "created_at": row[5],
+                "updated_at": row[6],
+            }
+
+
+async def create_evacuation_plan(
+    plan_id: int,
+    meeting_point: str | None = None,
+    floorplan_file_id: int | None = None,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """Create a new evacuation plan."""
+    query = """
+        INSERT INTO bcp_evacuation_plan 
+        (plan_id, meeting_point, floorplan_file_id, notes)
+        VALUES (%s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                query,
+                (plan_id, meeting_point, floorplan_file_id, notes),
+            )
+            await conn.commit()
+            evac_id = cursor.lastrowid
+    
+    return await get_evacuation_plan_by_id(evac_id)
+
+
+async def get_evacuation_plan_by_id(evac_id: int) -> dict[str, Any] | None:
+    """Get evacuation plan by ID."""
+    query = """
+        SELECT id, plan_id, meeting_point, floorplan_file_id, notes,
+               created_at, updated_at
+        FROM bcp_evacuation_plan
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (evac_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "meeting_point": row[2],
+                "floorplan_file_id": row[3],
+                "notes": row[4],
+                "created_at": row[5],
+                "updated_at": row[6],
+            }
+
+
+async def update_evacuation_plan(
+    evac_id: int,
+    meeting_point: str | None = None,
+    floorplan_file_id: int | None = None,
+    notes: str | None = None,
+) -> dict[str, Any] | None:
+    """Update an evacuation plan."""
+    updates = []
+    values = []
+    
+    if meeting_point is not None:
+        updates.append("meeting_point = %s")
+        values.append(meeting_point)
+    if floorplan_file_id is not None:
+        updates.append("floorplan_file_id = %s")
+        values.append(floorplan_file_id)
+    if notes is not None:
+        updates.append("notes = %s")
+        values.append(notes)
+    
+    if not updates:
+        return await get_evacuation_plan_by_id(evac_id)
+    
+    values.append(evac_id)
+    
+    query = f"""
+        UPDATE bcp_evacuation_plan
+        SET {', '.join(updates)}
+        WHERE id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, values)
+            await conn.commit()
+    
+    return await get_evacuation_plan_by_id(evac_id)
+
+
+# ============================================================================
+# Emergency Kit Item Management
+# ============================================================================
+
+
+async def list_emergency_kit_items(
+    plan_id: int,
+    category: str | None = None,
+) -> list[dict[str, Any]]:
+    """Get emergency kit items for a plan, optionally filtered by category."""
+    if category:
+        query = """
+            SELECT id, plan_id, category, name, notes, last_checked_at,
+                   created_at, updated_at
+            FROM bcp_emergency_kit_item
+            WHERE plan_id = %s AND category = %s
+            ORDER BY name
+        """
+        params = (plan_id, category)
+    else:
+        query = """
+            SELECT id, plan_id, category, name, notes, last_checked_at,
+                   created_at, updated_at
+            FROM bcp_emergency_kit_item
+            WHERE plan_id = %s
+            ORDER BY category, name
+        """
+        params = (plan_id,)
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, params)
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "category": row[2],
+                    "name": row[3],
+                    "notes": row[4],
+                    "last_checked_at": row[5],
+                    "created_at": row[6],
+                    "updated_at": row[7],
+                }
+                for row in rows
+            ]
+
+
+async def get_emergency_kit_item_by_id(item_id: int) -> dict[str, Any] | None:
+    """Get an emergency kit item by ID."""
+    query = """
+        SELECT id, plan_id, category, name, notes, last_checked_at,
+               created_at, updated_at
+        FROM bcp_emergency_kit_item
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (item_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "category": row[2],
+                "name": row[3],
+                "notes": row[4],
+                "last_checked_at": row[5],
+                "created_at": row[6],
+                "updated_at": row[7],
+            }
+
+
+async def create_emergency_kit_item(
+    plan_id: int,
+    category: str,
+    name: str,
+    notes: str | None = None,
+    last_checked_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Create a new emergency kit item."""
+    query = """
+        INSERT INTO bcp_emergency_kit_item 
+        (plan_id, category, name, notes, last_checked_at)
+        VALUES (%s, %s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                query,
+                (plan_id, category, name, notes, last_checked_at),
+            )
+            await conn.commit()
+            item_id = cursor.lastrowid
+    
+    return await get_emergency_kit_item_by_id(item_id)
+
+
+async def update_emergency_kit_item(
+    item_id: int,
+    category: str | None = None,
+    name: str | None = None,
+    notes: str | None = None,
+    last_checked_at: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Update an emergency kit item."""
+    updates = []
+    values = []
+    
+    if category is not None:
+        updates.append("category = %s")
+        values.append(category)
+    if name is not None:
+        updates.append("name = %s")
+        values.append(name)
+    if notes is not None:
+        updates.append("notes = %s")
+        values.append(notes)
+    if last_checked_at is not None:
+        updates.append("last_checked_at = %s")
+        values.append(last_checked_at)
+    
+    if not updates:
+        return await get_emergency_kit_item_by_id(item_id)
+    
+    values.append(item_id)
+    
+    query = f"""
+        UPDATE bcp_emergency_kit_item
+        SET {', '.join(updates)}
+        WHERE id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, values)
+            await conn.commit()
+    
+    return await get_emergency_kit_item_by_id(item_id)
+
+
+async def mark_emergency_kit_item_checked(
+    item_id: int,
+    checked_at: datetime,
+) -> dict[str, Any] | None:
+    """Mark an emergency kit item as checked."""
+    return await update_emergency_kit_item(item_id, last_checked_at=checked_at)
+
+
+async def delete_emergency_kit_item(item_id: int) -> bool:
+    """Delete an emergency kit item."""
+    query = "DELETE FROM bcp_emergency_kit_item WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (item_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+
+
+async def seed_default_emergency_kit_items(plan_id: int) -> None:
+    """Seed default emergency kit items (Documents and Equipment)."""
+    
+    # Default document items from the issue
+    document_items = [
+        "BCP copy",
+        "Staff contacts (incl. next-of-kin)",
+        "Customer/supplier lists",
+        "Emergency & utility contacts",
+        "Site plan w/ shut-off points",
+        "Evacuation plan",
+        "Latest stock/equipment inventory",
+        "Insurance details",
+        "Banking info",
+        "Engineering drawings",
+        "Product lists/specs",
+        "Formulas/trade secrets",
+        "Local authority contacts",
+        "Letterhead/stamps/seals",
+    ]
+    
+    # Default equipment items from the issue
+    equipment_items = [
+        "Backup media",
+        "Spare keys/codes",
+        "Torch + batteries",
+        "Hazard/cordon tape",
+        "Message pads + flip chart",
+        "Markers",
+        "Stationery",
+        "Mobile phone + charger",
+        "Dust/fume masks",
+        "Disposable camera",
+    ]
+    
+    # Insert document items
+    for item_name in document_items:
+        await create_emergency_kit_item(plan_id, "Document", item_name)
+    
+    # Insert equipment items
+    for item_name in equipment_items:
+        await create_emergency_kit_item(plan_id, "Equipment", item_name)

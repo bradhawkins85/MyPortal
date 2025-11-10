@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-container">
+  <!-- Success/Error Messages -->
+  {% if request.query_params.get('success') %}
+    <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
+  {% endif %}
+  {% if request.query_params.get('error') %}
+    <div class="alert alert-error">{{ request.query_params.get('error') }}</div>
+  {% endif %}
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Evacuation Procedures</h1>
+      <p class="page-description">Document evacuation procedures, meeting points, and emergency exits</p>
+    </div>
+    <div class="page-actions">
+      <a href="/bcp/incident" class="btn btn-secondary">Back to Incident Console</a>
+    </div>
+  </div>
+
+  <!-- Help Text -->
+  <section class="card help-card">
+    <div class="card-body">
+      <h3 class="help-title">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z"/>
+        </svg>
+        About Evacuation Procedures
+      </h3>
+      <p class="help-text">
+        Document clear evacuation procedures including emergency exits, primary and alternate meeting points,
+        floorplan with exit routes marked, and special assistance notes for disabled staff or visitors.
+        Ensure all staff are familiar with evacuation routes and conduct regular evacuation drills.
+        Test cadence notes should document how often drills are performed and any lessons learned.
+      </p>
+    </div>
+  </section>
+
+  <!-- Evacuation Details Form -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Evacuation Details</h2>
+    </div>
+    <div class="card-body">
+      {% if can_edit %}
+      <form action="/bcp/evacuation" method="post" class="form">
+        <div class="form-group">
+          <label for="meeting_point" class="form-label">
+            Emergency Meeting Point
+            <span class="form-help">Primary location where staff should gather after evacuation</span>
+          </label>
+          <input 
+            type="text" 
+            id="meeting_point" 
+            name="meeting_point" 
+            class="form-input"
+            value="{{ evacuation.meeting_point or '' }}"
+            placeholder="e.g., Car park area on Smith Street, 50m from main entrance"
+          >
+        </div>
+
+        <div class="form-group">
+          <label for="notes" class="form-label">
+            Additional Notes
+            <span class="form-help">Include emergency exits, disability assistance notes, test cadence, and any other relevant information</span>
+          </label>
+          <textarea 
+            id="notes" 
+            name="notes" 
+            class="form-textarea"
+            rows="8"
+            placeholder="Emergency Exits:&#10;- Main entrance (north side)&#10;- Fire exit (east side, near kitchen)&#10;- Rear exit (south loading bay)&#10;&#10;Disability Assistance:&#10;- Wheelchair users: Use lift to ground floor if safe, otherwise await assistance at designated refuge area (Level 2, Room 201)&#10;- Hearing impaired: Visual alarm system installed&#10;&#10;Test Cadence:&#10;- Evacuation drills conducted quarterly&#10;- Last drill: [Date]&#10;- Next scheduled drill: [Date]"
+          >{{ evacuation.notes or '' }}</textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">
+            Floorplan Upload
+            <span class="form-help">Upload a floorplan with emergency exits and meeting points marked (feature coming soon)</span>
+          </label>
+          <div class="upload-placeholder">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor" opacity="0.3">
+              <path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/>
+            </svg>
+            <p style="color: var(--text-muted); margin: 0.5rem 0 0 0;">Floorplan upload functionality will be available in a future update</p>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+              <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+            </svg>
+            Save Changes
+          </button>
+        </div>
+      </form>
+      {% else %}
+      <div class="info-grid">
+        <div class="info-item">
+          <strong>Emergency Meeting Point:</strong>
+          <p>{{ evacuation.meeting_point or 'Not set' }}</p>
+        </div>
+        
+        <div class="info-item">
+          <strong>Additional Notes:</strong>
+          <pre class="info-text">{{ evacuation.notes or 'No notes recorded' }}</pre>
+        </div>
+        
+        <div class="info-item">
+          <strong>Floorplan:</strong>
+          <p>{{ 'Uploaded' if evacuation.floorplan_file_id else 'Not uploaded' }}</p>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- Quick Links -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Related Information</h2>
+    </div>
+    <div class="card-body">
+      <div class="quick-links">
+        <a href="/bcp/emergency-kit" class="quick-link-card">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+            <path d="M20 6h-2.18c.11-.31.18-.65.18-1 0-1.66-1.34-3-3-3-1.05 0-1.96.54-2.5 1.35l-.5.67-.5-.68C10.96 2.54 10.05 2 9 2 7.34 2 6 3.34 6 5c0 .35.07.69.18 1H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-5-2c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zM9 4c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm11 15H4v-2h16v2zm0-5H4V8h5.08L7 10.83 8.62 12 11 8.76l1-1.36 1 1.36L15.38 12 17 10.83 14.92 8H20v6z"/>
+          </svg>
+          <div>
+            <strong>Emergency Kit</strong>
+            <p>Check emergency documents and equipment</p>
+          </div>
+        </a>
+        
+        <a href="/bcp/incident" class="quick-link-card">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+          </svg>
+          <div>
+            <strong>Incident Console</strong>
+            <p>Manage active incidents and response</p>
+          </div>
+        </a>
+        
+        <a href="/bcp/roles" class="quick-link-card">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+          </svg>
+          <div>
+            <strong>Roles & Responsibilities</strong>
+            <p>View emergency response team</p>
+          </div>
+        </a>
+      </div>
+    </div>
+  </section>
+</div>
+
+<style>
+.upload-placeholder {
+  border: 2px dashed var(--border-color);
+  border-radius: 8px;
+  padding: 2rem;
+  text-align: center;
+  background: var(--bg-secondary);
+}
+
+.info-grid {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.info-item strong {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+}
+
+.info-item p, .info-text {
+  margin: 0;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  font-family: inherit;
+}
+
+.quick-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+}
+
+.quick-link-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+
+.quick-link-card:hover {
+  border-color: var(--primary-color);
+  background: var(--bg-secondary);
+  transform: translateY(-2px);
+}
+
+.quick-link-card svg {
+  flex-shrink: 0;
+  color: var(--primary-color);
+}
+
+.quick-link-card strong {
+  display: block;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}
+
+.quick-link-card p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+</style>
+{% endblock %}
