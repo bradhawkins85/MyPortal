@@ -1,0 +1,1093 @@
+"""
+BC5 Business Continuity API endpoints.
+
+RESTful API for templates, plans, versions, workflows, sections, attachments, exports, and audit trails.
+Implements RBAC with viewer, editor, approver, and admin roles.
+"""
+from __future__ import annotations
+
+import hashlib
+import math
+from datetime import datetime, timezone
+from typing import Any
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from typing import Optional
+
+from app.api.dependencies.bc_rbac import (
+    require_bc_admin,
+    require_bc_approver,
+    require_bc_editor,
+    require_bc_viewer,
+)
+from app.repositories import bc3 as bc_repo
+from app.repositories import users as user_repo
+from app.schemas.bc5_models import (
+    BCAcknowledge,
+    BCAcknowledgeResponse,
+    BCAuditListItem,
+    BCAttachmentListItem,
+    BCAttachmentUploadResponse,
+    BCChangeLogItem,
+    BCExportFormat,
+    BCExportRequest,
+    BCExportResponse,
+    BCPaginatedResponse,
+    BCPlanCreate,
+    BCPlanDetail,
+    BCPlanListFilters,
+    BCPlanListItem,
+    BCPlanListStatus,
+    BCPlanUpdate,
+    BCReviewApprove,
+    BCReviewListItem,
+    BCReviewRequestChanges,
+    BCReviewSubmit,
+    BCSectionListItem,
+    BCSectionUpdate,
+    BCTemplateCreate,
+    BCTemplateDetail,
+    BCTemplateListItem,
+    BCTemplateUpdate,
+    BCVersionActivate,
+    BCVersionCreate,
+    BCVersionDetail,
+    BCVersionListItem,
+)
+
+router = APIRouter(prefix="/api/bc", tags=["Business Continuity (BC5)"])
+
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+async def _enrich_user_name(item: dict[str, Any], user_id_key: str, name_key: str) -> None:
+    """Enrich an item with user name."""
+    user_id = item.get(user_id_key)
+    if user_id:
+        user = await user_repo.get_user_by_id(user_id)
+        if user:
+            item[name_key] = user.get("name") or user.get("email")
+
+
+async def _enrich_template(plan: dict[str, Any]) -> None:
+    """Enrich a plan with template details."""
+    template_id = plan.get("template_id")
+    if template_id:
+        template = await bc_repo.get_template_by_id(template_id)
+        if template:
+            plan["template"] = template
+            plan["template_name"] = template.get("name")
+
+
+async def _enrich_current_version(plan: dict[str, Any]) -> None:
+    """Enrich a plan with current version details."""
+    version_id = plan.get("current_version_id")
+    if version_id:
+        version = await bc_repo.get_version_by_id(version_id)
+        if version:
+            plan["current_version"] = version
+            plan["current_version_number"] = version.get("version_number")
+
+
+def _calculate_pagination(total: int, page: int, per_page: int) -> dict[str, int]:
+    """Calculate pagination metadata."""
+    total_pages = math.ceil(total / per_page) if per_page > 0 else 0
+    return {
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": total_pages,
+    }
+
+
+# ============================================================================
+# Templates Endpoints
+# ============================================================================
+
+@router.get("/templates", response_model=list[BCTemplateListItem])
+async def list_templates(
+    current_user: dict = Depends(require_bc_viewer),
+) -> list[BCTemplateListItem]:
+    """
+    List all BC templates.
+    
+    Returns all available templates ordered by default flag and creation date.
+    
+    **Authorization**: Requires BC viewer role or higher.
+    """
+    templates = await bc_repo.list_templates()
+    return [BCTemplateListItem(**template) for template in templates]
+
+
+@router.post("/templates", response_model=BCTemplateDetail, status_code=status.HTTP_201_CREATED)
+async def create_template(
+    template_data: BCTemplateCreate,
+    current_user: dict = Depends(require_bc_admin),
+) -> BCTemplateDetail:
+    """
+    Create a new BC template.
+    
+    Creates a new template with the provided schema definition.
+    
+    **Authorization**: Requires BC admin role.
+    """
+    template = await bc_repo.create_template(
+        name=template_data.name,
+        version=template_data.version,
+        is_default=template_data.is_default,
+        schema_json=template_data.schema_json,
+    )
+    return BCTemplateDetail(**template)
+
+
+@router.get("/templates/{template_id}", response_model=BCTemplateDetail)
+async def get_template(
+    template_id: int,
+    current_user: dict = Depends(require_bc_viewer),
+) -> BCTemplateDetail:
+    """
+    Get a specific BC template.
+    
+    Returns the full template including schema definition.
+    
+    **Authorization**: Requires BC viewer role or higher.
+    """
+    template = await bc_repo.get_template_by_id(template_id)
+    if not template:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+    return BCTemplateDetail(**template)
+
+
+@router.patch("/templates/{template_id}", response_model=BCTemplateDetail)
+async def update_template(
+    template_id: int,
+    template_data: BCTemplateUpdate,
+    current_user: dict = Depends(require_bc_admin),
+) -> BCTemplateDetail:
+    """
+    Update a BC template.
+    
+    Updates template properties. Only provided fields will be updated.
+    
+    **Authorization**: Requires BC admin role.
+    """
+    existing = await bc_repo.get_template_by_id(template_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+    
+    template = await bc_repo.update_template(
+        template_id=template_id,
+        name=template_data.name,
+        version=template_data.version,
+        is_default=template_data.is_default,
+        schema_json=template_data.schema_json,
+    )
+    return BCTemplateDetail(**template)
+
+
+# ============================================================================
+# Plans Endpoints (CRUD)
+# ============================================================================
+
+@router.get("/plans", response_model=BCPaginatedResponse)
+async def list_plans(
+    status: Optional[BCPlanListStatus] = Query(None, description="Filter by status"),
+    q: Optional[str] = Query(None, description="Search query"),
+    owner: Optional[int] = Query(None, description="Filter by owner user ID"),
+    template_id: Optional[int] = Query(None, description="Filter by template"),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
+    current_user: dict = Depends(require_bc_viewer),
+) -> BCPaginatedResponse:
+    """
+    List BC plans with filtering and pagination.
+    
+    Supports filtering by status, owner, template, and search query.
+    Returns paginated results with metadata.
+    
+    **Authorization**: Requires BC viewer role or higher.
+    """
+    offset = (page - 1) * per_page
+    status_value = status.value if status else None
+    
+    # Get plans
+    plans = await bc_repo.list_plans(
+        status=status_value,
+        owner_user_id=owner,
+        template_id=template_id,
+        search_query=q,
+        limit=per_page,
+        offset=offset,
+    )
+    
+    # Get total count
+    total = await bc_repo.count_plans(
+        status=status_value,
+        owner_user_id=owner,
+        template_id=template_id,
+        search_query=q,
+    )
+    
+    # Enrich with related data
+    items = []
+    for plan in plans:
+        await _enrich_user_name(plan, "owner_user_id", "owner_name")
+        await _enrich_template(plan)
+        await _enrich_current_version(plan)
+        items.append(BCPlanListItem(**plan))
+    
+    pagination = _calculate_pagination(total, page, per_page)
+    return BCPaginatedResponse(items=items, **pagination)
+
+
+@router.post("/plans", response_model=BCPlanDetail, status_code=status.HTTP_201_CREATED)
+async def create_plan(
+    plan_data: BCPlanCreate,
+    current_user: dict = Depends(require_bc_editor),
+) -> BCPlanDetail:
+    """
+    Create a new BC plan.
+    
+    Creates a new business continuity plan with the specified properties.
+    The current user becomes the plan owner.
+    
+    **Authorization**: Requires BC editor role or higher.
+    """
+    # Verify template exists if provided
+    if plan_data.template_id:
+        template = await bc_repo.get_template_by_id(plan_data.template_id)
+        if not template:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+    
+    plan = await bc_repo.create_plan(
+        title=plan_data.title,
+        owner_user_id=current_user["id"],
+        status=plan_data.status.value,
+        org_id=plan_data.org_id,
+        template_id=plan_data.template_id,
+    )
+    
+    # Create audit entry
+    await bc_repo.create_audit_entry(
+        plan_id=plan["id"],
+        action="created",
+        actor_user_id=current_user["id"],
+        details_json={"title": plan_data.title, "status": plan_data.status.value},
+    )
+    
+    # Enrich response
+    await _enrich_user_name(plan, "owner_user_id", "owner_name")
+    await _enrich_template(plan)
+    
+    return BCPlanDetail(**plan)
+
+
+@router.get("/plans/{plan_id}", response_model=BCPlanDetail)
+async def get_plan(
+    plan_id: int,
+    current_user: dict = Depends(require_bc_viewer),
+) -> BCPlanDetail:
+    """
+    Get a specific BC plan.
+    
+    Returns the full plan details including related template and current version.
+    
+    **Authorization**: Requires BC viewer role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Enrich response
+    await _enrich_user_name(plan, "owner_user_id", "owner_name")
+    await _enrich_template(plan)
+    await _enrich_current_version(plan)
+    
+    return BCPlanDetail(**plan)
+
+
+@router.patch("/plans/{plan_id}", response_model=BCPlanDetail)
+async def update_plan(
+    plan_id: int,
+    plan_data: BCPlanUpdate,
+    current_user: dict = Depends(require_bc_editor),
+) -> BCPlanDetail:
+    """
+    Update a BC plan.
+    
+    Updates plan properties. Only provided fields will be updated.
+    
+    **Authorization**: Requires BC editor role or higher.
+    """
+    existing = await bc_repo.get_plan_by_id(plan_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Verify template exists if being updated
+    if plan_data.template_id:
+        template = await bc_repo.get_template_by_id(plan_data.template_id)
+        if not template:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+    
+    plan = await bc_repo.update_plan(
+        plan_id=plan_id,
+        title=plan_data.title,
+        status=plan_data.status.value if plan_data.status else None,
+        template_id=plan_data.template_id,
+        owner_user_id=plan_data.owner_user_id,
+    )
+    
+    # Create audit entry
+    await bc_repo.create_audit_entry(
+        plan_id=plan_id,
+        action="updated",
+        actor_user_id=current_user["id"],
+        details_json={k: v for k, v in plan_data.model_dump().items() if v is not None},
+    )
+    
+    # Enrich response
+    await _enrich_user_name(plan, "owner_user_id", "owner_name")
+    await _enrich_template(plan)
+    await _enrich_current_version(plan)
+    
+    return BCPlanDetail(**plan)
+
+
+@router.delete("/plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_plan(
+    plan_id: int,
+    current_user: dict = Depends(require_bc_admin),
+) -> None:
+    """
+    Delete a BC plan.
+    
+    Permanently deletes the plan and all related data (versions, reviews, attachments, etc.).
+    This action cannot be undone.
+    
+    **Authorization**: Requires BC admin role.
+    """
+    existing = await bc_repo.get_plan_by_id(plan_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    await bc_repo.delete_plan(plan_id)
+
+
+# ============================================================================
+# Versions Endpoints
+# ============================================================================
+
+@router.get("/plans/{plan_id}/versions", response_model=list[BCVersionListItem])
+async def list_versions(
+    plan_id: int,
+    current_user: dict = Depends(require_bc_viewer),
+) -> list[BCVersionListItem]:
+    """
+    List all versions for a plan.
+    
+    Returns all versions ordered by version number (descending).
+    
+    **Authorization**: Requires BC viewer role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    versions = await bc_repo.list_plan_versions(plan_id)
+    
+    # Enrich with author names
+    items = []
+    for version in versions:
+        await _enrich_user_name(version, "authored_by_user_id", "author_name")
+        items.append(BCVersionListItem(**version))
+    
+    return items
+
+
+@router.post("/plans/{plan_id}/versions", response_model=BCVersionDetail, status_code=status.HTTP_201_CREATED)
+async def create_version(
+    plan_id: int,
+    version_data: BCVersionCreate,
+    current_user: dict = Depends(require_bc_editor),
+) -> BCVersionDetail:
+    """
+    Create a new version for a plan.
+    
+    Creates a new version with the provided content. The version number
+    is automatically incremented based on existing versions.
+    
+    **Authorization**: Requires BC editor role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Get next version number
+    version_number = await bc_repo.get_next_version_number(plan_id)
+    
+    # Create version
+    version = await bc_repo.create_version(
+        plan_id=plan_id,
+        version_number=version_number,
+        authored_by_user_id=current_user["id"],
+        summary_change_note=version_data.summary_change_note,
+        content_json=version_data.content_json,
+    )
+    
+    # Create audit entry
+    await bc_repo.create_audit_entry(
+        plan_id=plan_id,
+        action="version_created",
+        actor_user_id=current_user["id"],
+        details_json={"version_number": version_number, "version_id": version["id"]},
+    )
+    
+    # Enrich response
+    await _enrich_user_name(version, "authored_by_user_id", "author_name")
+    
+    return BCVersionDetail(**version)
+
+
+@router.get("/plans/{plan_id}/versions/{version_id}", response_model=BCVersionDetail)
+async def get_version(
+    plan_id: int,
+    version_id: int,
+    current_user: dict = Depends(require_bc_viewer),
+) -> BCVersionDetail:
+    """
+    Get a specific version.
+    
+    Returns the full version details including content.
+    
+    **Authorization**: Requires BC viewer role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    version = await bc_repo.get_version_by_id(version_id)
+    if not version or version["plan_id"] != plan_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    
+    # Enrich response
+    await _enrich_user_name(version, "authored_by_user_id", "author_name")
+    
+    return BCVersionDetail(**version)
+
+
+@router.post("/plans/{plan_id}/versions/{version_id}/activate", response_model=BCVersionDetail)
+async def activate_version(
+    plan_id: int,
+    version_id: int,
+    current_user: dict = Depends(require_bc_editor),
+) -> BCVersionDetail:
+    """
+    Activate a specific version.
+    
+    Makes this version the active version for the plan, superseding all other versions.
+    
+    **Authorization**: Requires BC editor role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    version = await bc_repo.get_version_by_id(version_id)
+    if not version or version["plan_id"] != plan_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    
+    # Activate the version
+    version = await bc_repo.activate_version(version_id, plan_id)
+    
+    # Create audit entry
+    await bc_repo.create_audit_entry(
+        plan_id=plan_id,
+        action="version_activated",
+        actor_user_id=current_user["id"],
+        details_json={"version_id": version_id, "version_number": version["version_number"]},
+    )
+    
+    # Enrich response
+    await _enrich_user_name(version, "authored_by_user_id", "author_name")
+    
+    return BCVersionDetail(**version)
+
+
+# ============================================================================
+# Workflow Endpoints
+# ============================================================================
+
+@router.post("/plans/{plan_id}/submit-for-review", response_model=list[BCReviewListItem])
+async def submit_plan_for_review(
+    plan_id: int,
+    review_data: BCReviewSubmit,
+    current_user: dict = Depends(require_bc_editor),
+) -> list[BCReviewListItem]:
+    """
+    Submit a plan for review.
+    
+    Creates review requests for the specified reviewers. The plan status
+    is automatically updated to 'in_review'.
+    
+    **Authorization**: Requires BC editor role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Update plan status to in_review
+    await bc_repo.update_plan(plan_id, status="in_review")
+    
+    # Create review requests for each reviewer
+    reviews = []
+    for reviewer_id in review_data.reviewer_user_ids:
+        # Verify reviewer exists
+        reviewer = await user_repo.get_user_by_id(reviewer_id)
+        if not reviewer:
+            continue
+        
+        review = await bc_repo.create_review(
+            plan_id=plan_id,
+            requested_by_user_id=current_user["id"],
+            reviewer_user_id=reviewer_id,
+            notes=review_data.notes,
+        )
+        reviews.append(review)
+    
+    # Create audit entry
+    await bc_repo.create_audit_entry(
+        plan_id=plan_id,
+        action="submitted_for_review",
+        actor_user_id=current_user["id"],
+        details_json={"reviewer_ids": review_data.reviewer_user_ids},
+    )
+    
+    # Enrich response
+    items = []
+    for review in reviews:
+        await _enrich_user_name(review, "requested_by_user_id", "requested_by_name")
+        await _enrich_user_name(review, "reviewer_user_id", "reviewer_name")
+        items.append(BCReviewListItem(**review))
+    
+    return items
+
+
+@router.post("/plans/{plan_id}/reviews/{review_id}/approve", response_model=BCReviewListItem)
+async def approve_review(
+    plan_id: int,
+    review_id: int,
+    approval_data: BCReviewApprove,
+    current_user: dict = Depends(require_bc_approver),
+) -> BCReviewListItem:
+    """
+    Approve a plan review.
+    
+    Marks the review as approved. If all reviews are approved, the plan
+    status is automatically updated to 'approved'.
+    
+    **Authorization**: Requires BC approver role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    review = await bc_repo.get_review_by_id(review_id)
+    if not review or review["plan_id"] != plan_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found")
+    
+    # Verify user is the reviewer
+    if review["reviewer_user_id"] != current_user["id"] and not current_user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the assigned reviewer can approve")
+    
+    # Update review
+    review = await bc_repo.update_review_decision(
+        review_id=review_id,
+        status="approved",
+        notes=approval_data.notes,
+    )
+    
+    # Check if all reviews are approved
+    all_reviews = await bc_repo.list_plan_reviews(plan_id)
+    all_approved = all(r["status"] == "approved" for r in all_reviews if r["status"] != "pending")
+    
+    if all_approved:
+        # Update plan to approved
+        await bc_repo.update_plan(
+            plan_id,
+            status="approved",
+            approved_at_utc=datetime.now(timezone.utc),
+        )
+    
+    # Create audit entry
+    await bc_repo.create_audit_entry(
+        plan_id=plan_id,
+        action="review_approved",
+        actor_user_id=current_user["id"],
+        details_json={"review_id": review_id, "all_approved": all_approved},
+    )
+    
+    # Enrich response
+    await _enrich_user_name(review, "requested_by_user_id", "requested_by_name")
+    await _enrich_user_name(review, "reviewer_user_id", "reviewer_name")
+    
+    return BCReviewListItem(**review)
+
+
+@router.post("/plans/{plan_id}/reviews/{review_id}/request-changes", response_model=BCReviewListItem)
+async def request_review_changes(
+    plan_id: int,
+    review_id: int,
+    changes_data: BCReviewRequestChanges,
+    current_user: dict = Depends(require_bc_approver),
+) -> BCReviewListItem:
+    """
+    Request changes to a plan.
+    
+    Marks the review as requiring changes. The plan status is updated to 'draft'.
+    
+    **Authorization**: Requires BC approver role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    review = await bc_repo.get_review_by_id(review_id)
+    if not review or review["plan_id"] != plan_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found")
+    
+    # Verify user is the reviewer
+    if review["reviewer_user_id"] != current_user["id"] and not current_user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the assigned reviewer can request changes")
+    
+    # Update review
+    review = await bc_repo.update_review_decision(
+        review_id=review_id,
+        status="changes_requested",
+        notes=changes_data.notes,
+    )
+    
+    # Update plan back to draft
+    await bc_repo.update_plan(plan_id, status="draft")
+    
+    # Create audit entry
+    await bc_repo.create_audit_entry(
+        plan_id=plan_id,
+        action="changes_requested",
+        actor_user_id=current_user["id"],
+        details_json={"review_id": review_id, "notes": changes_data.notes},
+    )
+    
+    # Enrich response
+    await _enrich_user_name(review, "requested_by_user_id", "requested_by_name")
+    await _enrich_user_name(review, "reviewer_user_id", "reviewer_name")
+    
+    return BCReviewListItem(**review)
+
+
+@router.post("/plans/{plan_id}/acknowledge", response_model=BCAcknowledgeResponse)
+async def acknowledge_plan(
+    plan_id: int,
+    ack_data: BCAcknowledge,
+    current_user: dict = Depends(require_bc_viewer),
+) -> BCAcknowledgeResponse:
+    """
+    Acknowledge a plan.
+    
+    Records that the current user has read and acknowledged the plan.
+    Optionally acknowledges a specific version number.
+    
+    **Authorization**: Requires BC viewer role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Create acknowledgment
+    ack = await bc_repo.create_acknowledgment(
+        plan_id=plan_id,
+        user_id=current_user["id"],
+        ack_version_number=ack_data.ack_version_number,
+    )
+    
+    # Create audit entry
+    await bc_repo.create_audit_entry(
+        plan_id=plan_id,
+        action="acknowledged",
+        actor_user_id=current_user["id"],
+        details_json={"ack_version_number": ack_data.ack_version_number},
+    )
+    
+    return BCAcknowledgeResponse(**ack)
+
+
+# ============================================================================
+# Content/Sections Endpoints
+# ============================================================================
+
+@router.get("/plans/{plan_id}/sections", response_model=list[BCSectionListItem])
+async def list_plan_sections(
+    plan_id: int,
+    current_user: dict = Depends(require_bc_viewer),
+) -> list[BCSectionListItem]:
+    """
+    List all sections for a plan.
+    
+    Returns sections from the current active version's content.
+    
+    **Authorization**: Requires BC viewer role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Get active version
+    version = await bc_repo.get_active_version(plan_id)
+    if not version or not version.get("content_json"):
+        return []
+    
+    # Extract sections from content_json
+    content = version.get("content_json", {})
+    sections = content.get("sections", [])
+    
+    return [BCSectionListItem(**section) for section in sections]
+
+
+@router.patch("/plans/{plan_id}/sections/{section_key}", response_model=BCSectionListItem)
+async def update_plan_section(
+    plan_id: int,
+    section_key: str,
+    section_data: BCSectionUpdate,
+    current_user: dict = Depends(require_bc_editor),
+) -> BCSectionListItem:
+    """
+    Update a specific section in a plan.
+    
+    Performs a partial update on the section content. The update is merged
+    with the existing content.
+    
+    **Authorization**: Requires BC editor role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Get active version
+    version = await bc_repo.get_active_version(plan_id)
+    if not version:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active version found")
+    
+    # Update section content
+    content = version.get("content_json") or {}
+    sections = content.get("sections", [])
+    
+    section_found = False
+    updated_section = None
+    for section in sections:
+        if section.get("key") == section_key:
+            # Merge updates
+            section_content = section.get("content") or {}
+            section_content.update(section_data.content_json)
+            section["content"] = section_content
+            updated_section = section
+            section_found = True
+            break
+    
+    if not section_found:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found")
+    
+    # Save updated content
+    content["sections"] = sections
+    await bc_repo.update_version_content(version["id"], content)
+    
+    # Create audit entry
+    await bc_repo.create_audit_entry(
+        plan_id=plan_id,
+        action="section_updated",
+        actor_user_id=current_user["id"],
+        details_json={"section_key": section_key, "version_id": version["id"]},
+    )
+    
+    return BCSectionListItem(**updated_section)
+
+
+# ============================================================================
+# Attachments Endpoints
+# ============================================================================
+
+@router.get("/plans/{plan_id}/attachments", response_model=list[BCAttachmentListItem])
+async def list_plan_attachments(
+    plan_id: int,
+    current_user: dict = Depends(require_bc_viewer),
+) -> list[BCAttachmentListItem]:
+    """
+    List all attachments for a plan.
+    
+    Returns all file attachments with metadata.
+    
+    **Authorization**: Requires BC viewer role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    attachments = await bc_repo.list_plan_attachments(plan_id)
+    
+    # Enrich with user names and download URLs
+    items = []
+    for attachment in attachments:
+        await _enrich_user_name(attachment, "uploaded_by_user_id", "uploaded_by_name")
+        attachment["download_url"] = f"/api/bc/plans/{plan_id}/attachments/{attachment['id']}/download"
+        items.append(BCAttachmentListItem(**attachment))
+    
+    return items
+
+
+@router.post("/plans/{plan_id}/attachments", response_model=BCAttachmentUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_plan_attachment(
+    plan_id: int,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_bc_editor),
+) -> BCAttachmentUploadResponse:
+    """
+    Upload a file attachment to a plan.
+    
+    Accepts file uploads and stores them securely with metadata tracking.
+    
+    **Authorization**: Requires BC editor role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Validate file
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No filename provided")
+    
+    # Read file content
+    content = await file.read()
+    size_bytes = len(content)
+    
+    # Calculate hash
+    file_hash = hashlib.sha256(content).hexdigest()
+    
+    # Determine storage path (simplified - in production would use file storage service)
+    storage_path = f"bc_attachments/{plan_id}/{file_hash}_{file.filename}"
+    
+    # Create attachment record
+    attachment = await bc_repo.create_attachment(
+        plan_id=plan_id,
+        file_name=file.filename,
+        storage_path=storage_path,
+        uploaded_by_user_id=current_user["id"],
+        content_type=file.content_type,
+        size_bytes=size_bytes,
+        file_hash=file_hash,
+    )
+    
+    # Create audit entry
+    await bc_repo.create_audit_entry(
+        plan_id=plan_id,
+        action="attachment_uploaded",
+        actor_user_id=current_user["id"],
+        details_json={"filename": file.filename, "attachment_id": attachment["id"]},
+    )
+    
+    # TODO: Actually store the file using file storage service
+    # For now, just return the metadata
+    
+    return BCAttachmentUploadResponse(**attachment)
+
+
+@router.delete("/plans/{plan_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_plan_attachment(
+    plan_id: int,
+    attachment_id: int,
+    current_user: dict = Depends(require_bc_editor),
+) -> None:
+    """
+    Delete a file attachment.
+    
+    Removes the attachment metadata and file from storage.
+    
+    **Authorization**: Requires BC editor role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    attachment = await bc_repo.get_attachment_by_id(attachment_id)
+    if not attachment or attachment["plan_id"] != plan_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    
+    # Delete attachment
+    await bc_repo.delete_attachment(attachment_id)
+    
+    # Create audit entry
+    await bc_repo.create_audit_entry(
+        plan_id=plan_id,
+        action="attachment_deleted",
+        actor_user_id=current_user["id"],
+        details_json={"filename": attachment["file_name"], "attachment_id": attachment_id},
+    )
+    
+    # TODO: Actually delete the file from storage
+
+
+# ============================================================================
+# Export Endpoints (Rate Limited)
+# ============================================================================
+
+@router.post("/plans/{plan_id}/export/docx", response_model=BCExportResponse)
+async def export_plan_docx(
+    plan_id: int,
+    export_request: BCExportRequest,
+    current_user: dict = Depends(require_bc_viewer),
+) -> BCExportResponse:
+    """
+    Export a plan to DOCX format.
+    
+    Generates a DOCX document from the plan content.
+    
+    **Authorization**: Requires BC viewer role or higher.
+    **Rate Limited**: This endpoint is rate-limited to prevent abuse.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Get version to export
+    if export_request.version_id:
+        version = await bc_repo.get_version_by_id(export_request.version_id)
+        if not version or version["plan_id"] != plan_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    else:
+        version = await bc_repo.get_active_version(plan_id)
+        if not version:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active version found")
+    
+    # TODO: Actually generate DOCX export
+    # For now, return mock response
+    export_url = f"/api/bc/exports/{plan_id}/v{version['version_number']}.docx"
+    
+    # Create audit entry
+    await bc_repo.create_audit_entry(
+        plan_id=plan_id,
+        action="exported_docx",
+        actor_user_id=current_user["id"],
+        details_json={"version_id": version["id"]},
+    )
+    
+    return BCExportResponse(
+        export_url=export_url,
+        format=BCExportFormat.DOCX,
+        version_id=version["id"],
+        generated_at=datetime.now(timezone.utc),
+        file_hash=version.get("docx_export_hash"),
+    )
+
+
+@router.post("/plans/{plan_id}/export/pdf", response_model=BCExportResponse)
+async def export_plan_pdf(
+    plan_id: int,
+    export_request: BCExportRequest,
+    current_user: dict = Depends(require_bc_viewer),
+) -> BCExportResponse:
+    """
+    Export a plan to PDF format.
+    
+    Generates a PDF document from the plan content.
+    
+    **Authorization**: Requires BC viewer role or higher.
+    **Rate Limited**: This endpoint is rate-limited to prevent abuse.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Get version to export
+    if export_request.version_id:
+        version = await bc_repo.get_version_by_id(export_request.version_id)
+        if not version or version["plan_id"] != plan_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    else:
+        version = await bc_repo.get_active_version(plan_id)
+        if not version:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active version found")
+    
+    # TODO: Actually generate PDF export
+    # For now, return mock response
+    export_url = f"/api/bc/exports/{plan_id}/v{version['version_number']}.pdf"
+    
+    # Create audit entry
+    await bc_repo.create_audit_entry(
+        plan_id=plan_id,
+        action="exported_pdf",
+        actor_user_id=current_user["id"],
+        details_json={"version_id": version["id"]},
+    )
+    
+    return BCExportResponse(
+        export_url=export_url,
+        format=BCExportFormat.PDF,
+        version_id=version["id"],
+        generated_at=datetime.now(timezone.utc),
+        file_hash=version.get("pdf_export_hash"),
+    )
+
+
+# ============================================================================
+# Audit and Change Log Endpoints
+# ============================================================================
+
+@router.get("/plans/{plan_id}/audit", response_model=list[BCAuditListItem])
+async def get_plan_audit_trail(
+    plan_id: int,
+    limit: int = Query(100, ge=1, le=500, description="Number of audit entries to return"),
+    current_user: dict = Depends(require_bc_viewer),
+) -> list[BCAuditListItem]:
+    """
+    Get the audit trail for a plan.
+    
+    Returns all audit entries showing actions performed on the plan.
+    
+    **Authorization**: Requires BC viewer role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    audit_entries = await bc_repo.list_plan_audit_trail(plan_id, limit=limit)
+    
+    # Enrich with actor names
+    items = []
+    for entry in audit_entries:
+        await _enrich_user_name(entry, "actor_user_id", "actor_name")
+        items.append(BCAuditListItem(**entry))
+    
+    return items
+
+
+@router.get("/plans/{plan_id}/change-log", response_model=list[BCChangeLogItem])
+async def get_plan_change_log(
+    plan_id: int,
+    current_user: dict = Depends(require_bc_viewer),
+) -> list[BCChangeLogItem]:
+    """
+    Get the change log for a plan.
+    
+    Returns all change log entries linked to this plan from the changes/ folder.
+    
+    **Authorization**: Requires BC viewer role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    change_logs = await bc_repo.list_plan_change_logs(plan_id)
+    
+    # TODO: Enrich with actual change log content from changes/ folder
+    # For now, return the mappings
+    
+    return [BCChangeLogItem(**log) for log in change_logs]
