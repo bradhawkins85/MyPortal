@@ -193,6 +193,36 @@ async def update_template(
     return BCTemplateDetail(**template)
 
 
+@router.post("/templates/bootstrap-default", response_model=BCTemplateDetail, status_code=status.HTTP_201_CREATED)
+async def bootstrap_default_template_endpoint(
+    current_user: dict = Depends(require_bc_admin),
+) -> BCTemplateDetail:
+    """
+    Bootstrap the default government BCP template.
+    
+    Creates the default template in the database if it doesn't already exist.
+    If a default template already exists, returns that template without creating a new one.
+    
+    This endpoint can be used to:
+    - Initialize the default template after system setup
+    - Re-check that the default template exists
+    - Get the database ID of the default template
+    
+    The bootstrapped template includes:
+    - Complete section structure matching government BCP standards
+    - All field definitions with proper types and validation
+    - Table schemas for BIA, Risk Assessment, Contacts, and Vendors
+    - Default placeholders and help text
+    - Proper section ordering
+    
+    **Authorization**: Requires BC admin role.
+    """
+    from app.services.bcp_template import bootstrap_default_template
+    
+    template = await bootstrap_default_template()
+    return BCTemplateDetail(**template)
+
+
 # ============================================================================
 # Plans Endpoints (CRUD)
 # ============================================================================
