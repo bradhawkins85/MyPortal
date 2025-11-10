@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-container">
+  <!-- Success/Error Messages -->
+  {% if request.query_params.get('success') %}
+    <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
+  {% endif %}
+  {% if request.query_params.get('error') %}
+    <div class="alert alert-error">{{ request.query_params.get('error') }}</div>
+  {% endif %}
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Data Backup Strategy</h1>
+      <p class="page-description">Document backup procedures and data protection measures</p>
+    </div>
+    <div class="page-actions">
+      <a href="/bcp" class="btn btn-secondary">Back to Overview</a>
+      {% if can_edit %}
+      <button type="button" class="btn btn-primary" onclick="document.getElementById('createBackupModal').showModal()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+        </svg>
+        Add Backup Item
+      </button>
+      <a href="/bcp/backups/export" class="btn btn-secondary">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+        </svg>
+        Export CSV
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Help Text -->
+  <section class="card help-card">
+    <div class="card-body">
+      <h3 class="help-title">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z"/>
+        </svg>
+        About Data Backup Documentation
+      </h3>
+      <p class="help-text">
+        Document all data backup procedures to ensure business-critical information can be recovered after 
+        a disruption. Include what data is backed up, backup frequency (e.g., Daily, Weekly), the backup 
+        medium or service (e.g., Cloud, Local, Tape), the person or team responsible, and detailed procedure 
+        steps. Regular testing of backup restoration is essential for business continuity.
+      </p>
+    </div>
+  </section>
+
+  <!-- Backup Items Table -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Backup Items</h2>
+    </div>
+    <div class="card-body">
+      {% if backups %}
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Data for Backup</th>
+              <th>Frequency</th>
+              <th>Media/Service</th>
+              <th>Responsible Person</th>
+              <th>Procedure Steps</th>
+              {% if can_edit %}
+              <th>Actions</th>
+              {% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for backup in backups %}
+            <tr>
+              <td><strong>{{ backup.data_scope }}</strong></td>
+              <td>{{ backup.frequency or '-' }}</td>
+              <td>{{ backup.medium or '-' }}</td>
+              <td>{{ backup.owner or '-' }}</td>
+              <td class="text-sm">
+                {% if backup.steps %}
+                  <div class="procedure-steps">{{ backup.steps }}</div>
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              {% if can_edit %}
+              <td>
+                <div class="action-buttons">
+                  <button 
+                    type="button" 
+                    class="btn btn-sm btn-secondary" 
+                    onclick="openEditModal({{ backup.id }}, '{{ backup.data_scope }}', '{{ backup.frequency or '' }}', '{{ backup.medium or '' }}', '{{ backup.owner or '' }}', `{{ backup.steps or '' }}`)"
+                  >
+                    Edit
+                  </button>
+                  <form method="post" action="/bcp/backups/{{ backup.id }}/delete" class="inline">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this backup item?')">
+                      Delete
+                    </button>
+                  </form>
+                </div>
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted">No backup items documented yet.</p>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+<!-- Create Backup Modal -->
+{% if can_edit %}
+<dialog id="createBackupModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Add Backup Item</h3>
+      <button type="button" onclick="document.getElementById('createBackupModal').close()">×</button>
+    </div>
+    <form method="post" action="/bcp/backups">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="data_scope" class="form-label">Data for Backup *</label>
+          <input type="text" id="data_scope" name="data_scope" class="form-input" placeholder="e.g., Customer Database, Financial Records" required>
+        </div>
+
+        <div class="form-group">
+          <label for="frequency" class="form-label">Frequency</label>
+          <input type="text" id="frequency" name="frequency" class="form-input" placeholder="e.g., Daily, Weekly, Hourly">
+        </div>
+
+        <div class="form-group">
+          <label for="medium" class="form-label">Media/Service</label>
+          <input type="text" id="medium" name="medium" class="form-input" placeholder="e.g., AWS S3, Azure Backup, Local NAS">
+        </div>
+
+        <div class="form-group">
+          <label for="owner" class="form-label">Responsible Person</label>
+          <input type="text" id="owner" name="owner" class="form-input" placeholder="Person or team responsible">
+        </div>
+
+        <div class="form-group">
+          <label for="steps" class="form-label">Procedure Steps</label>
+          <textarea id="steps" name="steps" class="form-input" rows="4" placeholder="Detailed backup procedure steps"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('createBackupModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Backup Item</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<!-- Edit Backup Modal -->
+<dialog id="editBackupModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Edit Backup Item</h3>
+      <button type="button" onclick="document.getElementById('editBackupModal').close()">×</button>
+    </div>
+    <form method="post" id="editBackupForm">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="edit_data_scope" class="form-label">Data for Backup *</label>
+          <input type="text" id="edit_data_scope" name="data_scope" class="form-input" required>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_frequency" class="form-label">Frequency</label>
+          <input type="text" id="edit_frequency" name="frequency" class="form-input">
+        </div>
+
+        <div class="form-group">
+          <label for="edit_medium" class="form-label">Media/Service</label>
+          <input type="text" id="edit_medium" name="medium" class="form-input">
+        </div>
+
+        <div class="form-group">
+          <label for="edit_owner" class="form-label">Responsible Person</label>
+          <input type="text" id="edit_owner" name="owner" class="form-input">
+        </div>
+
+        <div class="form-group">
+          <label for="edit_steps" class="form-label">Procedure Steps</label>
+          <textarea id="edit_steps" name="steps" class="form-input" rows="4"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('editBackupModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+{% endif %}
+
+<style>
+.help-card {
+  background: #f0f9ff;
+  border-left: 4px solid #3b82f6;
+}
+
+.help-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #1e40af;
+}
+
+.help-text {
+  margin: 0;
+  color: #1e40af;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.table-responsive {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: top;
+}
+
+.table th {
+  background: #f9fafb;
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.table tbody tr:hover {
+  background: #f9fafb;
+}
+
+.procedure-steps {
+  max-width: 300px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.modal {
+  border: none;
+  border-radius: 0.5rem;
+  padding: 0;
+  max-width: 600px;
+  width: 90%;
+}
+
+.modal::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+  padding: 0;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.modal-header button {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #6b7280;
+}
+
+.modal-body {
+  padding: 1.5rem;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+</style>
+
+<script>
+function openEditModal(id, dataScope, frequency, medium, owner, steps) {
+  document.getElementById('editBackupForm').action = '/bcp/backups/' + id + '/update';
+  document.getElementById('edit_data_scope').value = dataScope;
+  document.getElementById('edit_frequency').value = frequency;
+  document.getElementById('edit_medium').value = medium;
+  document.getElementById('edit_owner').value = owner;
+  document.getElementById('edit_steps').value = steps;
+  document.getElementById('editBackupModal').showModal();
+}
+</script>
+{% endblock %}

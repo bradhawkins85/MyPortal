@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-container">
+  <!-- Success/Error Messages -->
+  {% if request.query_params.get('success') %}
+    <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
+  {% endif %}
+  {% if request.query_params.get('error') %}
+    <div class="alert alert-error">{{ request.query_params.get('error') }}</div>
+  {% endif %}
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Insurance Policies</h1>
+      <p class="page-description">Document insurance coverage relevant to business continuity</p>
+    </div>
+    <div class="page-actions">
+      <a href="/bcp" class="btn btn-secondary">Back to Overview</a>
+      {% if can_edit %}
+      <button type="button" class="btn btn-primary" onclick="document.getElementById('createPolicyModal').showModal()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+        </svg>
+        Add Policy
+      </button>
+      <a href="/bcp/insurance/export" class="btn btn-secondary">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+        </svg>
+        Export CSV
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Help Text -->
+  <section class="card help-card">
+    <div class="card-body">
+      <h3 class="help-title">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z"/>
+        </svg>
+        About Insurance Documentation
+      </h3>
+      <p class="help-text">
+        Document all insurance policies that protect your business against losses and disruptions. 
+        Include policy types (e.g., Property, Liability, Business Interruption), coverage details, 
+        exclusions, insurer contact information, review dates, and payment schedules. Regular 
+        review ensures adequate coverage as your business evolves.
+      </p>
+    </div>
+  </section>
+
+  <!-- Insurance Policies Table -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Insurance Policies</h2>
+    </div>
+    <div class="card-body">
+      {% if policies %}
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Coverage</th>
+              <th>Exclusions</th>
+              <th>Insurer & Contact</th>
+              <th>Last Review Date</th>
+              <th>Payments Due</th>
+              {% if can_edit %}
+              <th>Actions</th>
+              {% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for policy in policies %}
+            <tr>
+              <td><strong>{{ policy.type }}</strong></td>
+              <td class="text-sm">{{ policy.coverage or '-' }}</td>
+              <td class="text-sm">{{ policy.exclusions or '-' }}</td>
+              <td class="text-sm">
+                {% if policy.insurer %}
+                  <div>{{ policy.insurer }}</div>
+                  {% if policy.contact %}
+                    <div class="text-muted">{{ policy.contact }}</div>
+                  {% endif %}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td>
+                {% if policy.last_review_date %}
+                  {{ policy.last_review_date.strftime('%Y-%m-%d') }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td class="text-sm">{{ policy.payment_terms or '-' }}</td>
+              {% if can_edit %}
+              <td>
+                <div class="action-buttons">
+                  <button 
+                    type="button" 
+                    class="btn btn-sm btn-secondary" 
+                    onclick="openEditModal({{ policy.id }}, '{{ policy.type }}', `{{ policy.coverage or '' }}`, `{{ policy.exclusions or '' }}`, '{{ policy.insurer or '' }}', '{{ policy.contact or '' }}', '{{ policy.last_review_date.strftime('%Y-%m-%d') if policy.last_review_date else '' }}', '{{ policy.payment_terms or '' }}')"
+                  >
+                    Edit
+                  </button>
+                  <form method="post" action="/bcp/insurance/{{ policy.id }}/delete" class="inline">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this insurance policy?')">
+                      Delete
+                    </button>
+                  </form>
+                </div>
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted">No insurance policies documented yet.</p>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+<!-- Create Policy Modal -->
+{% if can_edit %}
+<dialog id="createPolicyModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Add Insurance Policy</h3>
+      <button type="button" onclick="document.getElementById('createPolicyModal').close()">×</button>
+    </div>
+    <form method="post" action="/bcp/insurance">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="policy_type" class="form-label">Type *</label>
+          <input type="text" id="policy_type" name="policy_type" class="form-input" placeholder="e.g., Property, Liability, Business Interruption" required>
+        </div>
+
+        <div class="form-group">
+          <label for="coverage" class="form-label">Coverage</label>
+          <textarea id="coverage" name="coverage" class="form-input" rows="2" placeholder="What is covered by this policy"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="exclusions" class="form-label">Exclusions</label>
+          <textarea id="exclusions" name="exclusions" class="form-input" rows="2" placeholder="What is not covered"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="insurer" class="form-label">Insurer</label>
+          <input type="text" id="insurer" name="insurer" class="form-input" placeholder="Insurance company name">
+        </div>
+
+        <div class="form-group">
+          <label for="contact" class="form-label">Contact</label>
+          <input type="text" id="contact" name="contact" class="form-input" placeholder="Phone, email, or policy number">
+        </div>
+
+        <div class="form-group">
+          <label for="last_review_date" class="form-label">Last Review Date</label>
+          <input type="date" id="last_review_date" name="last_review_date" class="form-input">
+        </div>
+
+        <div class="form-group">
+          <label for="payment_terms" class="form-label">Payment Terms</label>
+          <input type="text" id="payment_terms" name="payment_terms" class="form-input" placeholder="e.g., Annual, Monthly, Quarterly">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('createPolicyModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Policy</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<!-- Edit Policy Modal -->
+<dialog id="editPolicyModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Edit Insurance Policy</h3>
+      <button type="button" onclick="document.getElementById('editPolicyModal').close()">×</button>
+    </div>
+    <form method="post" id="editPolicyForm">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="edit_policy_type" class="form-label">Type *</label>
+          <input type="text" id="edit_policy_type" name="policy_type" class="form-input" required>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_coverage" class="form-label">Coverage</label>
+          <textarea id="edit_coverage" name="coverage" class="form-input" rows="2"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_exclusions" class="form-label">Exclusions</label>
+          <textarea id="edit_exclusions" name="exclusions" class="form-input" rows="2"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_insurer" class="form-label">Insurer</label>
+          <input type="text" id="edit_insurer" name="insurer" class="form-input">
+        </div>
+
+        <div class="form-group">
+          <label for="edit_contact" class="form-label">Contact</label>
+          <input type="text" id="edit_contact" name="contact" class="form-input">
+        </div>
+
+        <div class="form-group">
+          <label for="edit_last_review_date" class="form-label">Last Review Date</label>
+          <input type="date" id="edit_last_review_date" name="last_review_date" class="form-input">
+        </div>
+
+        <div class="form-group">
+          <label for="edit_payment_terms" class="form-label">Payment Terms</label>
+          <input type="text" id="edit_payment_terms" name="payment_terms" class="form-input">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('editPolicyModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+{% endif %}
+
+<style>
+.help-card {
+  background: #f0f9ff;
+  border-left: 4px solid #3b82f6;
+}
+
+.help-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #1e40af;
+}
+
+.help-text {
+  margin: 0;
+  color: #1e40af;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.table-responsive {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: top;
+}
+
+.table th {
+  background: #f9fafb;
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.table tbody tr:hover {
+  background: #f9fafb;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.modal {
+  border: none;
+  border-radius: 0.5rem;
+  padding: 0;
+  max-width: 600px;
+  width: 90%;
+}
+
+.modal::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+  padding: 0;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.modal-header button {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #6b7280;
+}
+
+.modal-body {
+  padding: 1.5rem;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+</style>
+
+<script>
+function openEditModal(id, type, coverage, exclusions, insurer, contact, lastReviewDate, paymentTerms) {
+  document.getElementById('editPolicyForm').action = '/bcp/insurance/' + id + '/update';
+  document.getElementById('edit_policy_type').value = type;
+  document.getElementById('edit_coverage').value = coverage;
+  document.getElementById('edit_exclusions').value = exclusions;
+  document.getElementById('edit_insurer').value = insurer;
+  document.getElementById('edit_contact').value = contact;
+  document.getElementById('edit_last_review_date').value = lastReviewDate;
+  document.getElementById('edit_payment_terms').value = paymentTerms;
+  document.getElementById('editPolicyModal').showModal();
+}
+</script>
+{% endblock %}
