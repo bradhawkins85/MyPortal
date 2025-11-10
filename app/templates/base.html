@@ -286,13 +286,30 @@
                   <span class="menu__label">Message Templates</span>
                 </a>
               </li>
-              <li class="menu__item">
-                <a href="/admin/business-continuity-plans" {% if current_path.startswith('/admin/business-continuity-plans') %}aria-current="page"{% endif %}>
+              <li class="menu__item menu__item--expandable {% if current_path.startswith('/business-continuity') %}menu__item--expanded{% endif %}">
+                <button type="button" class="menu__toggle" data-menu-toggle>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm0 2v12h16V6H4zm2 2h12v2H6V8zm0 4h8v2H6v-2z"/></svg>
                   </span>
-                  <span class="menu__label">BC/DR Plans</span>
-                </a>
+                  <span class="menu__label">Business Continuity</span>
+                  <span class="menu__expand-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M7 10l5 5 5-5z"/></svg>
+                  </span>
+                </button>
+                <ul class="menu__submenu {% if current_path.startswith('/business-continuity') %}menu__submenu--expanded{% endif %}">
+                  <li class="menu__subitem">
+                    <a href="/business-continuity/plans" {% if current_path.startswith('/business-continuity/plans') %}aria-current="page"{% endif %}>Plans</a>
+                  </li>
+                  <li class="menu__subitem">
+                    <a href="/business-continuity/templates" {% if current_path.startswith('/business-continuity/templates') %}aria-current="page"{% endif %}>Templates</a>
+                  </li>
+                  <li class="menu__subitem">
+                    <a href="/business-continuity/reviews" {% if current_path.startswith('/business-continuity/reviews') %}aria-current="page"{% endif %}>Reviews</a>
+                  </li>
+                  <li class="menu__subitem">
+                    <a href="/business-continuity/reports" {% if current_path.startswith('/business-continuity/reports') %}aria-current="page"{% endif %}>Reports</a>
+                  </li>
+                </ul>
               </li>
               <li class="menu__item">
                 <a href="/admin/webhooks" {% if current_path.startswith('/admin/webhooks') %}aria-current="page"{% endif %}>
@@ -671,8 +688,105 @@
           mobileMedia.addEventListener('change', handleMediaChange);
           handleMediaChange();
         }
+        
+        // Expandable menu functionality
+        document.querySelectorAll('[data-menu-toggle]').forEach(toggle => {
+          toggle.addEventListener('click', () => {
+            const menuItem = toggle.closest('.menu__item--expandable');
+            const submenu = menuItem.querySelector('.menu__submenu');
+            
+            if (menuItem.classList.contains('menu__item--expanded')) {
+              menuItem.classList.remove('menu__item--expanded');
+              submenu.classList.remove('menu__submenu--expanded');
+            } else {
+              menuItem.classList.add('menu__item--expanded');
+              submenu.classList.add('menu__submenu--expanded');
+            }
+          });
+        });
       })();
     </script>
+    <style>
+      .menu__item--expandable {
+        position: relative;
+      }
+      
+      .menu__toggle {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        padding: 0.75rem 1rem;
+        background: none;
+        border: none;
+        color: #6b7280;
+        text-align: left;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      
+      .menu__toggle:hover {
+        background: #f3f4f6;
+        color: #111827;
+      }
+      
+      .menu__item--expanded .menu__toggle {
+        background: #eff6ff;
+        color: #1d4ed8;
+      }
+      
+      .menu__expand-icon {
+        margin-left: auto;
+        width: 1rem;
+        height: 1rem;
+        transition: transform 0.15s;
+      }
+      
+      .menu__item--expanded .menu__expand-icon {
+        transform: rotate(180deg);
+      }
+      
+      .menu__expand-icon svg {
+        width: 100%;
+        height: 100%;
+        fill: currentColor;
+      }
+      
+      .menu__submenu {
+        display: none;
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        background: #f9fafb;
+      }
+      
+      .menu__submenu--expanded {
+        display: block;
+      }
+      
+      .menu__subitem {
+        margin: 0;
+      }
+      
+      .menu__subitem a {
+        display: block;
+        padding: 0.5rem 1rem 0.5rem 3rem;
+        color: #6b7280;
+        text-decoration: none;
+        font-size: 0.875rem;
+        transition: all 0.15s;
+      }
+      
+      .menu__subitem a:hover {
+        background: #f3f4f6;
+        color: #111827;
+      }
+      
+      .menu__subitem a[aria-current="page"] {
+        background: #eff6ff;
+        color: #1d4ed8;
+        font-weight: 500;
+      }
+    </style>
     {% block scripts %}{% endblock %}
   </body>
 </html>

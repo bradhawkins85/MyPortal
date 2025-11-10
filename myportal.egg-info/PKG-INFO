@@ -30,6 +30,8 @@ Requires-Dist: python-multipart
 Requires-Dist: bleach
 Requires-Dist: mutagen
 Requires-Dist: phonenumbers
+Requires-Dist: python-docx>=1.1.0
+Requires-Dist: weasyprint>=60.0
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
 Requires-Dist: pytest-asyncio; extra == "dev"

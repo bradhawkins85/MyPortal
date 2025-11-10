@@ -160,6 +160,7 @@ app/services/asset_importer.py
 app/services/audit.py
 app/services/automations.py
 app/services/background.py
+app/services/bc_export_service.py
 app/services/bc_services.py
 app/services/bcp_template.py
 app/services/call_recordings.py
@@ -245,6 +246,7 @@ tests/test_bc4_migrations.py
 tests/test_bc5_api.py
 tests/test_bc6_schemas.py
 tests/test_bc7_services.py
+tests/test_bc8_export.py
 tests/test_bcp_template.py
 tests/test_bcp_template_api.py
 tests/test_business_continuity_plans.py
