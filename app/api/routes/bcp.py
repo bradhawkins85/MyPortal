@@ -20,8 +20,19 @@ router = APIRouter(prefix="/bcp", tags=["Business Continuity Planning"])
 settings = get_settings()
 
 
+def _check_bcp_enabled():
+    """Check if BCP module is enabled."""
+    if not settings.bcp_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="BCP module is not enabled"
+        )
+
+
 async def _require_bcp_view(request: Request, session: SessionData = Depends(get_current_session)) -> tuple[dict[str, Any], int | None]:
     """Require BCP view permission."""
+    _check_bcp_enabled()
+    
     from app.repositories import users as user_repo
     
     user = await user_repo.get_user_by_id(session.user_id)
@@ -47,6 +58,8 @@ async def _require_bcp_view(request: Request, session: SessionData = Depends(get
 
 async def _require_bcp_edit(request: Request, session: SessionData = Depends(get_current_session)) -> tuple[dict[str, Any], int]:
     """Require BCP edit permission."""
+    _check_bcp_enabled()
+    
     from app.repositories import users as user_repo
     
     user = await user_repo.get_user_by_id(session.user_id)
