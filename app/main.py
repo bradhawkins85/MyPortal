@@ -3444,6 +3444,45 @@ async def compliance_page(request: Request):
     return await _render_template("compliance/index.html", request, user, extra=extra)
 
 
+@app.get("/compliance/control/{control_id}", response_class=HTMLResponse)
+async def compliance_control_requirements_page(request: Request, control_id: int):
+    """Essential 8 control requirements page."""
+    from app.repositories import essential8 as essential8_repo
+    
+    user, membership, company, company_id, redirect = await _load_license_context(request, require_manage=False)
+    if redirect:
+        return redirect
+    
+    # Get control with requirements
+    control_data = await essential8_repo.get_control_with_requirements(
+        control_id=control_id,
+        company_id=company_id,
+    )
+    
+    if not control_data:
+        raise HTTPException(status_code=404, detail="Control not found")
+    
+    # Build a map of requirement compliance for easier template access
+    requirement_compliance_map = {}
+    for rc in control_data.get("requirement_compliance", []):
+        requirement_compliance_map[rc["requirement_id"]] = rc
+    
+    is_super_admin = bool(user.get("is_super_admin"))
+    
+    extra = {
+        "title": f"{control_data['control']['name']} - Requirements",
+        "control": control_data["control"],
+        "requirements_ml1": control_data["requirements_ml1"],
+        "requirements_ml2": control_data["requirements_ml2"],
+        "requirements_ml3": control_data["requirements_ml3"],
+        "company_compliance": control_data.get("company_compliance"),
+        "requirement_compliance_map": requirement_compliance_map,
+        "company": company,
+        "is_super_admin": is_super_admin,
+    }
+    return await _render_template("compliance/control_requirements.html", request, user, extra=extra)
+
+
 @app.get("/invoices", response_class=HTMLResponse)
 async def invoices_page(request: Request):
     user, membership, company, company_id, redirect = await _load_invoice_context(request)
