@@ -466,3 +466,48 @@ class BCChangeLogMapResponse(BCChangeLogMapBase):
 
     class Config:
         from_attributes = True
+
+
+# BC Vendor Schemas
+class BCVendorBase(BaseModel):
+    """Base schema for BC Vendor."""
+
+    plan_id: int
+    name: str = Field(..., min_length=1, max_length=255)
+    vendor_type: Optional[str] = Field(None, max_length=100, description="e.g., IT Service Provider, Supplier, Cloud Provider")
+    contact_name: Optional[str] = Field(None, max_length=255)
+    contact_email: Optional[str] = Field(None, max_length=255)
+    contact_phone: Optional[str] = Field(None, max_length=50)
+    sla_notes: Optional[str] = Field(None, description="Service Level Agreement details and notes")
+    contract_reference: Optional[str] = Field(None, max_length=255, description="Contract number or reference")
+    criticality: Optional[str] = Field(None, max_length=50, description="e.g., critical, high, medium, low")
+
+
+class BCVendorCreate(BCVendorBase):
+    """Schema for creating a BC Vendor."""
+
+    pass
+
+
+class BCVendorUpdate(BaseModel):
+    """Schema for updating a BC Vendor."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    vendor_type: Optional[str] = Field(None, max_length=100)
+    contact_name: Optional[str] = Field(None, max_length=255)
+    contact_email: Optional[str] = Field(None, max_length=255)
+    contact_phone: Optional[str] = Field(None, max_length=50)
+    sla_notes: Optional[str] = None
+    contract_reference: Optional[str] = Field(None, max_length=255)
+    criticality: Optional[str] = Field(None, max_length=50)
+
+
+class BCVendorResponse(BCVendorBase):
+    """Schema for BC Vendor response."""
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True

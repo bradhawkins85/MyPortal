@@ -16,6 +16,7 @@ app/api/routes/asset_custom_fields.py
 app/api/routes/audit_logs.py
 app/api/routes/auth.py
 app/api/routes/automations.py
+app/api/routes/bc11.py
 app/api/routes/bc5.py
 app/api/routes/business_continuity_plans.py
 app/api/routes/call_recordings.py
@@ -241,6 +242,8 @@ tests/test_automation_trigger_filters.py
 tests/test_automations_repository.py
 tests/test_automations_repository_datetimes.py
 tests/test_automations_service.py
+tests/test_bc10_acknowledgments.py
+tests/test_bc11_supportive_entities.py
 tests/test_bc3_models.py
 tests/test_bc4_migrations.py
 tests/test_bc5_api.py
