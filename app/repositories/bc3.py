@@ -815,3 +815,310 @@ async def delete_risk(risk_id: int) -> None:
     """Delete a risk."""
     query = "DELETE FROM bc_risk WHERE id = %s"
     await db.execute(query, (risk_id,))
+
+
+# ============================================================================
+# BC Contact Repository Functions
+# ============================================================================
+
+async def create_contact(
+    plan_id: int,
+    name: str,
+    role: Optional[str] = None,
+    phone: Optional[str] = None,
+    email: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> dict[str, Any]:
+    """Create a new BC contact."""
+    query = """
+        INSERT INTO bc_contact (plan_id, name, role, phone, email, notes)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """
+    contact_id = await db.execute(query, (plan_id, name, role, phone, email, notes))
+    return await get_contact_by_id(contact_id)
+
+
+async def get_contact_by_id(contact_id: int) -> dict[str, Any] | None:
+    """Get a contact by ID."""
+    query = """
+        SELECT id, plan_id, name, role, phone, email, notes, created_at, updated_at
+        FROM bc_contact
+        WHERE id = %s
+    """
+    return await db.fetch_one(query, (contact_id,))
+
+
+async def list_contacts_by_plan(plan_id: int) -> list[dict[str, Any]]:
+    """List all contacts for a plan."""
+    query = """
+        SELECT id, plan_id, name, role, phone, email, notes, created_at, updated_at
+        FROM bc_contact
+        WHERE plan_id = %s
+        ORDER BY name
+    """
+    return await db.fetch_all(query, (plan_id,))
+
+
+async def update_contact(
+    contact_id: int,
+    name: Optional[str] = None,
+    role: Optional[str] = None,
+    phone: Optional[str] = None,
+    email: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> dict[str, Any] | None:
+    """Update a contact."""
+    updates = []
+    params = []
+    
+    if name is not None:
+        updates.append("name = %s")
+        params.append(name)
+    if role is not None:
+        updates.append("role = %s")
+        params.append(role)
+    if phone is not None:
+        updates.append("phone = %s")
+        params.append(phone)
+    if email is not None:
+        updates.append("email = %s")
+        params.append(email)
+    if notes is not None:
+        updates.append("notes = %s")
+        params.append(notes)
+    
+    if not updates:
+        return await get_contact_by_id(contact_id)
+    
+    params.append(contact_id)
+    query = f"""
+        UPDATE bc_contact
+        SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s
+    """
+    await db.execute(query, tuple(params))
+    return await get_contact_by_id(contact_id)
+
+
+async def delete_contact(contact_id: int) -> None:
+    """Delete a contact."""
+    query = "DELETE FROM bc_contact WHERE id = %s"
+    await db.execute(query, (contact_id,))
+
+
+# ============================================================================
+# BC Process Repository Functions
+# ============================================================================
+
+async def create_process(
+    plan_id: int,
+    name: str,
+    description: Optional[str] = None,
+    rto_minutes: Optional[int] = None,
+    rpo_minutes: Optional[int] = None,
+    mtpd_minutes: Optional[int] = None,
+    impact_rating: Optional[str] = None,
+    dependencies_json: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Create a new BC process."""
+    query = """
+        INSERT INTO bc_process (plan_id, name, description, rto_minutes, rpo_minutes, 
+                                mtpd_minutes, impact_rating, dependencies_json)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    """
+    process_id = await db.execute(
+        query,
+        (plan_id, name, description, rto_minutes, rpo_minutes, mtpd_minutes, impact_rating, dependencies_json),
+    )
+    return await get_process_by_id(process_id)
+
+
+async def get_process_by_id(process_id: int) -> dict[str, Any] | None:
+    """Get a process by ID."""
+    query = """
+        SELECT id, plan_id, name, description, rto_minutes, rpo_minutes, 
+               mtpd_minutes, impact_rating, dependencies_json, created_at, updated_at
+        FROM bc_process
+        WHERE id = %s
+    """
+    return await db.fetch_one(query, (process_id,))
+
+
+async def list_processes_by_plan(plan_id: int) -> list[dict[str, Any]]:
+    """List all processes for a plan."""
+    query = """
+        SELECT id, plan_id, name, description, rto_minutes, rpo_minutes, 
+               mtpd_minutes, impact_rating, dependencies_json, created_at, updated_at
+        FROM bc_process
+        WHERE plan_id = %s
+        ORDER BY name
+    """
+    return await db.fetch_all(query, (plan_id,))
+
+
+async def update_process(
+    process_id: int,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    rto_minutes: Optional[int] = None,
+    rpo_minutes: Optional[int] = None,
+    mtpd_minutes: Optional[int] = None,
+    impact_rating: Optional[str] = None,
+    dependencies_json: Optional[dict[str, Any]] = None,
+) -> dict[str, Any] | None:
+    """Update a process."""
+    updates = []
+    params = []
+    
+    if name is not None:
+        updates.append("name = %s")
+        params.append(name)
+    if description is not None:
+        updates.append("description = %s")
+        params.append(description)
+    if rto_minutes is not None:
+        updates.append("rto_minutes = %s")
+        params.append(rto_minutes)
+    if rpo_minutes is not None:
+        updates.append("rpo_minutes = %s")
+        params.append(rpo_minutes)
+    if mtpd_minutes is not None:
+        updates.append("mtpd_minutes = %s")
+        params.append(mtpd_minutes)
+    if impact_rating is not None:
+        updates.append("impact_rating = %s")
+        params.append(impact_rating)
+    if dependencies_json is not None:
+        updates.append("dependencies_json = %s")
+        params.append(dependencies_json)
+    
+    if not updates:
+        return await get_process_by_id(process_id)
+    
+    params.append(process_id)
+    query = f"""
+        UPDATE bc_process
+        SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s
+    """
+    await db.execute(query, tuple(params))
+    return await get_process_by_id(process_id)
+
+
+async def delete_process(process_id: int) -> None:
+    """Delete a process."""
+    query = "DELETE FROM bc_process WHERE id = %s"
+    await db.execute(query, (process_id,))
+
+
+# ============================================================================
+# BC Vendor Repository Functions
+# ============================================================================
+
+async def create_vendor(
+    plan_id: int,
+    name: str,
+    vendor_type: Optional[str] = None,
+    contact_name: Optional[str] = None,
+    contact_email: Optional[str] = None,
+    contact_phone: Optional[str] = None,
+    sla_notes: Optional[str] = None,
+    contract_reference: Optional[str] = None,
+    criticality: Optional[str] = None,
+) -> dict[str, Any]:
+    """Create a new BC vendor."""
+    query = """
+        INSERT INTO bc_vendor (plan_id, name, vendor_type, contact_name, contact_email,
+                               contact_phone, sla_notes, contract_reference, criticality)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """
+    vendor_id = await db.execute(
+        query,
+        (plan_id, name, vendor_type, contact_name, contact_email, contact_phone, 
+         sla_notes, contract_reference, criticality),
+    )
+    return await get_vendor_by_id(vendor_id)
+
+
+async def get_vendor_by_id(vendor_id: int) -> dict[str, Any] | None:
+    """Get a vendor by ID."""
+    query = """
+        SELECT id, plan_id, name, vendor_type, contact_name, contact_email,
+               contact_phone, sla_notes, contract_reference, criticality,
+               created_at, updated_at
+        FROM bc_vendor
+        WHERE id = %s
+    """
+    return await db.fetch_one(query, (vendor_id,))
+
+
+async def list_vendors_by_plan(plan_id: int) -> list[dict[str, Any]]:
+    """List all vendors for a plan."""
+    query = """
+        SELECT id, plan_id, name, vendor_type, contact_name, contact_email,
+               contact_phone, sla_notes, contract_reference, criticality,
+               created_at, updated_at
+        FROM bc_vendor
+        WHERE plan_id = %s
+        ORDER BY name
+    """
+    return await db.fetch_all(query, (plan_id,))
+
+
+async def update_vendor(
+    vendor_id: int,
+    name: Optional[str] = None,
+    vendor_type: Optional[str] = None,
+    contact_name: Optional[str] = None,
+    contact_email: Optional[str] = None,
+    contact_phone: Optional[str] = None,
+    sla_notes: Optional[str] = None,
+    contract_reference: Optional[str] = None,
+    criticality: Optional[str] = None,
+) -> dict[str, Any] | None:
+    """Update a vendor."""
+    updates = []
+    params = []
+    
+    if name is not None:
+        updates.append("name = %s")
+        params.append(name)
+    if vendor_type is not None:
+        updates.append("vendor_type = %s")
+        params.append(vendor_type)
+    if contact_name is not None:
+        updates.append("contact_name = %s")
+        params.append(contact_name)
+    if contact_email is not None:
+        updates.append("contact_email = %s")
+        params.append(contact_email)
+    if contact_phone is not None:
+        updates.append("contact_phone = %s")
+        params.append(contact_phone)
+    if sla_notes is not None:
+        updates.append("sla_notes = %s")
+        params.append(sla_notes)
+    if contract_reference is not None:
+        updates.append("contract_reference = %s")
+        params.append(contract_reference)
+    if criticality is not None:
+        updates.append("criticality = %s")
+        params.append(criticality)
+    
+    if not updates:
+        return await get_vendor_by_id(vendor_id)
+    
+    params.append(vendor_id)
+    query = f"""
+        UPDATE bc_vendor
+        SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s
+    """
+    await db.execute(query, tuple(params))
+    return await get_vendor_by_id(vendor_id)
+
+
+async def delete_vendor(vendor_id: int) -> None:
+    """Delete a vendor."""
+    query = "DELETE FROM bc_vendor WHERE id = %s"
+    await db.execute(query, (vendor_id,))
