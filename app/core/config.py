@@ -97,6 +97,10 @@ class Settings(BaseSettings):
         validation_alias="AI_TAG_THRESHOLD",
         ge=1,
     )
+    bcp_enabled: bool = Field(
+        default=True,
+        validation_alias="BCP_ENABLED",
+    )
 
     @field_validator(
         "syncro_webhook_url",
