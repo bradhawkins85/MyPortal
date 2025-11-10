@@ -1279,7 +1279,20 @@
     const idField = form.querySelector('#role-id');
     const nameField = form.querySelector('#role-name');
     const descriptionField = form.querySelector('#role-description');
-    const permissionsField = form.querySelector('#role-permissions');
+    const permissionCheckboxes = form.querySelectorAll('[data-permission-checkbox]');
+
+    function getSelectedPermissions() {
+      return Array.from(permissionCheckboxes)
+        .filter((checkbox) => checkbox.checked)
+        .map((checkbox) => checkbox.value);
+    }
+
+    function setSelectedPermissions(permissions) {
+      const permissionSet = new Set(Array.isArray(permissions) ? permissions : []);
+      permissionCheckboxes.forEach((checkbox) => {
+        checkbox.checked = permissionSet.has(checkbox.value);
+      });
+    }
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -1287,7 +1300,7 @@
       const payload = {
         name: nameField.value.trim(),
         description: descriptionField.value.trim() || null,
-        permissions: parsePermissions(permissionsField.value),
+        permissions: getSelectedPermissions(),
       };
       const method = roleId ? 'PATCH' : 'POST';
       const url = roleId ? `/roles/${roleId}` : '/roles';
@@ -1305,7 +1318,7 @@
         idField.value = '';
         nameField.value = '';
         descriptionField.value = '';
-        permissionsField.value = '';
+        setSelectedPermissions([]);
         nameField.focus();
       });
     }
@@ -1321,9 +1334,9 @@
         descriptionField.value = row.dataset.roleDescription || '';
         try {
           const permissions = JSON.parse(row.dataset.rolePermissions || '[]');
-          permissionsField.value = Array.isArray(permissions) ? permissions.join(', ') : '';
+          setSelectedPermissions(permissions);
         } catch (error) {
-          permissionsField.value = '';
+          setSelectedPermissions([]);
         }
         nameField.focus();
       });
