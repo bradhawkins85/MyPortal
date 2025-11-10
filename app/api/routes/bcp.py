@@ -1759,3 +1759,103 @@ async def export_event_log_csv(request: Request):
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+# ============================================================================
+# Webhook Endpoint for External Integrations (e.g., Uptime Kuma)
+# ============================================================================
+
+
+@router.post("/api/webhook/incident/start", include_in_schema=True)
+async def webhook_start_incident(request: Request):
+    """
+    Webhook endpoint to auto-start an incident from external monitoring systems.
+    
+    Expected JSON payload:
+    {
+        "company_id": 1,
+        "source": "UptimeKuma",
+        "message": "Service down alert",
+        "api_key": "your-api-key"
+    }
+    
+    Returns:
+        dict: Incident details and status
+    """
+    import json
+    from datetime import datetime
+    
+    # Parse JSON payload
+    try:
+        body = await request.body()
+        payload = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON payload"
+        )
+    
+    # Validate required fields
+    company_id = payload.get("company_id")
+    source = payload.get("source", "Other")
+    message = payload.get("message", "External alert triggered incident")
+    api_key = payload.get("api_key")
+    
+    if not company_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="company_id is required"
+        )
+    
+    # TODO: Validate API key against stored keys
+    # For now, we'll just check if it's provided
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="api_key is required"
+        )
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No BCP plan found for company_id {company_id}"
+        )
+    
+    # Check if there's already an active incident
+    active_incident = await bcp_repo.get_active_incident(plan["id"])
+    if active_incident:
+        return {
+            "status": "already_active",
+            "incident_id": active_incident["id"],
+            "message": "An incident is already active for this plan"
+        }
+    
+    # Create new incident
+    now = datetime.utcnow()
+    incident = await bcp_repo.create_incident(plan["id"], now, source=source)
+    
+    # Initialize checklist ticks
+    await bcp_repo.initialize_checklist_ticks(plan["id"], incident["id"])
+    
+    # Create initial event log entry
+    await bcp_repo.create_event_log_entry(
+        plan["id"],
+        incident["id"],
+        now,
+        f"Incident auto-started via {source}: {message}",
+        author_id=None,
+        initials="SYS",
+    )
+    
+    # TODO: Send portal alert to distribution list
+    # This would require implementing a notification/alert system
+    
+    return {
+        "status": "started",
+        "incident_id": incident["id"],
+        "plan_id": plan["id"],
+        "started_at": incident["started_at"].isoformat() if incident["started_at"] else None,
+        "message": "Incident started successfully"
+    }
