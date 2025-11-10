@@ -1719,3 +1719,256 @@ async def get_event_log_entry_by_id(entry_id: int) -> dict[str, Any] | None:
                 "created_at": row[7],
                 "updated_at": row[8],
             }
+
+
+# ============================================================================
+# BCP Roles and Assignments
+# ============================================================================
+
+
+async def list_roles(plan_id: int) -> list[dict[str, Any]]:
+    """List all roles for a plan."""
+    query = """
+        SELECT id, plan_id, title, responsibilities, created_at, updated_at
+        FROM bcp_role
+        WHERE plan_id = %s
+        ORDER BY title
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id,))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "title": row[2],
+                    "responsibilities": row[3],
+                    "created_at": row[4],
+                    "updated_at": row[5],
+                }
+                for row in rows
+            ]
+
+
+async def get_role_by_id(role_id: int) -> dict[str, Any] | None:
+    """Get a role by ID."""
+    query = """
+        SELECT id, plan_id, title, responsibilities, created_at, updated_at
+        FROM bcp_role
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (role_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "title": row[2],
+                "responsibilities": row[3],
+                "created_at": row[4],
+                "updated_at": row[5],
+            }
+
+
+async def create_role(
+    plan_id: int,
+    title: str,
+    responsibilities: str | None = None,
+) -> dict[str, Any]:
+    """Create a new role."""
+    query = """
+        INSERT INTO bcp_role (plan_id, title, responsibilities)
+        VALUES (%s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id, title, responsibilities))
+            await conn.commit()
+            role_id = cursor.lastrowid
+    
+    return await get_role_by_id(role_id)
+
+
+async def update_role(
+    role_id: int,
+    title: str | None = None,
+    responsibilities: str | None = None,
+) -> dict[str, Any] | None:
+    """Update a role."""
+    updates = []
+    params = []
+    
+    if title is not None:
+        updates.append("title = %s")
+        params.append(title)
+    
+    if responsibilities is not None:
+        updates.append("responsibilities = %s")
+        params.append(responsibilities)
+    
+    if not updates:
+        return await get_role_by_id(role_id)
+    
+    params.append(role_id)
+    query = f"UPDATE bcp_role SET {', '.join(updates)} WHERE id = %s"
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, tuple(params))
+            await conn.commit()
+    
+    return await get_role_by_id(role_id)
+
+
+async def delete_role(role_id: int) -> bool:
+    """Delete a role."""
+    query = "DELETE FROM bcp_role WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (role_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+
+
+async def list_role_assignments(role_id: int) -> list[dict[str, Any]]:
+    """List all assignments for a role."""
+    query = """
+        SELECT id, role_id, user_id, is_alternate, contact_info, created_at, updated_at
+        FROM bcp_role_assignment
+        WHERE role_id = %s
+        ORDER BY is_alternate, id
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (role_id,))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "role_id": row[1],
+                    "user_id": row[2],
+                    "is_alternate": bool(row[3]),
+                    "contact_info": row[4],
+                    "created_at": row[5],
+                    "updated_at": row[6],
+                }
+                for row in rows
+            ]
+
+
+async def get_role_assignment_by_id(assignment_id: int) -> dict[str, Any] | None:
+    """Get a role assignment by ID."""
+    query = """
+        SELECT id, role_id, user_id, is_alternate, contact_info, created_at, updated_at
+        FROM bcp_role_assignment
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (assignment_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "role_id": row[1],
+                "user_id": row[2],
+                "is_alternate": bool(row[3]),
+                "contact_info": row[4],
+                "created_at": row[5],
+                "updated_at": row[6],
+            }
+
+
+async def create_role_assignment(
+    role_id: int,
+    user_id: int,
+    is_alternate: bool = False,
+    contact_info: str | None = None,
+) -> dict[str, Any]:
+    """Create a new role assignment."""
+    query = """
+        INSERT INTO bcp_role_assignment (role_id, user_id, is_alternate, contact_info)
+        VALUES (%s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (role_id, user_id, is_alternate, contact_info))
+            await conn.commit()
+            assignment_id = cursor.lastrowid
+    
+    return await get_role_assignment_by_id(assignment_id)
+
+
+async def update_role_assignment(
+    assignment_id: int,
+    user_id: int | None = None,
+    is_alternate: bool | None = None,
+    contact_info: str | None = None,
+) -> dict[str, Any] | None:
+    """Update a role assignment."""
+    updates = []
+    params = []
+    
+    if user_id is not None:
+        updates.append("user_id = %s")
+        params.append(user_id)
+    
+    if is_alternate is not None:
+        updates.append("is_alternate = %s")
+        params.append(is_alternate)
+    
+    if contact_info is not None:
+        updates.append("contact_info = %s")
+        params.append(contact_info)
+    
+    if not updates:
+        return await get_role_assignment_by_id(assignment_id)
+    
+    params.append(assignment_id)
+    query = f"UPDATE bcp_role_assignment SET {', '.join(updates)} WHERE id = %s"
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, tuple(params))
+            await conn.commit()
+    
+    return await get_role_assignment_by_id(assignment_id)
+
+
+async def delete_role_assignment(assignment_id: int) -> bool:
+    """Delete a role assignment."""
+    query = "DELETE FROM bcp_role_assignment WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (assignment_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+
+
+async def list_roles_with_assignments(plan_id: int) -> list[dict[str, Any]]:
+    """List all roles with their assignments for a plan."""
+    roles = await list_roles(plan_id)
+    
+    # Fetch all assignments for these roles
+    for role in roles:
+        assignments = await list_role_assignments(role["id"])
+        role["assignments"] = assignments
+    
+    return roles
+
+
+async def seed_example_team_leader_role(plan_id: int) -> dict[str, Any]:
+    """Seed an example Team Leader role with responsibilities."""
+    responsibilities = """• Activate the business continuity plan
+• Oversee response and recovery operations
+• Decide on alternate site activation if needed
+• Communicate with key stakeholders
+• Brief the communications team on incident status
+• Keep key staff apprised of situation and actions"""
+    
+    return await create_role(plan_id, "Team Leader", responsibilities)

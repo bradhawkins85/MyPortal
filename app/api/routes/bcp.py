@@ -351,6 +351,15 @@ async def bcp_incident(request: Request, tab: str = Query("checklist")):
     internal_contacts = [c for c in contacts if c["kind"] == "Internal"]
     external_contacts = [c for c in contacts if c["kind"] == "External"]
     
+    # Get roles with assignments for contacts tab
+    from app.repositories import users as user_repo
+    roles = await bcp_repo.list_roles_with_assignments(plan["id"])
+    # Enrich assignments with user details
+    for role in roles:
+        for assignment in role["assignments"]:
+            user_data = await user_repo.get_user_by_id(assignment["user_id"])
+            assignment["user"] = user_data
+    
     # Get event log entries
     event_log = []
     if active_incident:
@@ -369,6 +378,7 @@ async def bcp_incident(request: Request, tab: str = Query("checklist")):
             "checklist_items": checklist_with_ticks,
             "internal_contacts": internal_contacts,
             "external_contacts": external_contacts,
+            "roles": roles,
             "event_log": event_log,
             "active_tab": tab,
             "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
@@ -448,6 +458,186 @@ async def bcp_schedules(request: Request):
     )
     
     return templates.TemplateResponse("bcp/stub.html", context)
+
+
+@router.get("/roles", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_roles(request: Request):
+    """BCP Roles & Responsibilities page."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from app.main import _build_base_context
+    from app.core.config import get_templates_config
+    from fastapi.templating import Jinja2Templates
+    from app.repositories import users as user_repo
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    # Get roles with assignments
+    roles = await bcp_repo.list_roles_with_assignments(plan["id"])
+    
+    # Enrich assignments with user details
+    for role in roles:
+        for assignment in role["assignments"]:
+            user_data = await user_repo.get_user_by_id(assignment["user_id"])
+            assignment["user"] = user_data
+    
+    # Get all users for assignment dropdown
+    all_users = await user_repo.list_users()
+    
+    templates_config = get_templates_config()
+    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "Roles & Responsibilities",
+            "plan": plan,
+            "roles": roles,
+            "all_users": all_users,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+        },
+    )
+    
+    return templates.TemplateResponse("bcp/roles.html", context)
+
+
+@router.post("/roles", include_in_schema=False)
+async def create_bcp_role(
+    request: Request,
+    title: str = Form(...),
+    responsibilities: str = Form(None),
+):
+    """Create a new BCP role."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    await bcp_repo.create_role(plan["id"], title, responsibilities)
+    
+    return RedirectResponse(
+        url="/bcp/roles?success=" + quote("Role created successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/roles/{role_id}/update", include_in_schema=False)
+async def update_bcp_role(
+    request: Request,
+    role_id: int,
+    title: str = Form(...),
+    responsibilities: str = Form(None),
+):
+    """Update a BCP role."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    updated = await bcp_repo.update_role(role_id, title=title, responsibilities=responsibilities)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+    
+    return RedirectResponse(
+        url="/bcp/roles?success=" + quote("Role updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/roles/{role_id}/delete", include_in_schema=False)
+async def delete_bcp_role(
+    request: Request,
+    role_id: int,
+):
+    """Delete a BCP role."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    deleted = await bcp_repo.delete_role(role_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+    
+    return RedirectResponse(
+        url="/bcp/roles?success=" + quote("Role deleted successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/roles/{role_id}/assign", include_in_schema=False)
+async def assign_user_to_role(
+    request: Request,
+    role_id: int,
+    user_id: int = Form(...),
+    is_alternate: bool = Form(False),
+    contact_info: str = Form(None),
+):
+    """Assign a user to a BCP role."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    await bcp_repo.create_role_assignment(role_id, user_id, is_alternate, contact_info)
+    
+    return RedirectResponse(
+        url="/bcp/roles?success=" + quote("User assigned to role successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/roles/assignments/{assignment_id}/update", include_in_schema=False)
+async def update_role_assignment_endpoint(
+    request: Request,
+    assignment_id: int,
+    user_id: int = Form(...),
+    is_alternate: bool = Form(False),
+    contact_info: str = Form(None),
+):
+    """Update a role assignment."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    updated = await bcp_repo.update_role_assignment(assignment_id, user_id=user_id, is_alternate=is_alternate, contact_info=contact_info)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+    
+    return RedirectResponse(
+        url="/bcp/roles?success=" + quote("Assignment updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/roles/assignments/{assignment_id}/delete", include_in_schema=False)
+async def delete_role_assignment_endpoint(
+    request: Request,
+    assignment_id: int,
+):
+    """Delete a role assignment."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    deleted = await bcp_repo.delete_role_assignment(assignment_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+    
+    return RedirectResponse(
+        url="/bcp/roles?success=" + quote("Assignment removed successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/roles/seed", include_in_schema=False)
+async def seed_example_role(request: Request):
+    """Seed the example Team Leader role."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    await bcp_repo.seed_example_team_leader_role(plan["id"])
+    
+    return RedirectResponse(
+        url="/bcp/roles?success=" + quote("Example Team Leader role added"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @router.get("/export", response_class=HTMLResponse, include_in_schema=False)
