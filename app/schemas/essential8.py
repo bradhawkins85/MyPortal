@@ -12,6 +12,7 @@ class ComplianceStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     COMPLIANT = "compliant"
     NON_COMPLIANT = "non_compliant"
+    NOT_APPLICABLE = "not_applicable"
 
 
 class MaturityLevel(str, Enum):
@@ -94,3 +95,62 @@ class CompanyEssential8AuditResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class Essential8RequirementResponse(BaseModel):
+    """Response model for Essential 8 requirements"""
+    id: int
+    control_id: int
+    maturity_level: MaturityLevel
+    requirement_order: int
+    description: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CompanyEssential8RequirementComplianceBase(BaseModel):
+    """Base model for requirement compliance tracking"""
+    status: ComplianceStatus = ComplianceStatus.NOT_STARTED
+    evidence: Optional[str] = None
+    notes: Optional[str] = None
+    last_reviewed_date: Optional[date] = None
+
+
+class CompanyEssential8RequirementComplianceCreate(CompanyEssential8RequirementComplianceBase):
+    """Create model for requirement compliance"""
+    company_id: int
+    requirement_id: int
+
+
+class CompanyEssential8RequirementComplianceUpdate(BaseModel):
+    """Update model for requirement compliance"""
+    status: Optional[ComplianceStatus] = None
+    evidence: Optional[str] = None
+    notes: Optional[str] = None
+    last_reviewed_date: Optional[date] = None
+
+
+class CompanyEssential8RequirementComplianceResponse(CompanyEssential8RequirementComplianceBase):
+    """Response model for requirement compliance"""
+    id: int
+    company_id: int
+    requirement_id: int
+    requirement: Optional[Essential8RequirementResponse] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class Essential8ControlWithRequirementsResponse(BaseModel):
+    """Control with all its requirements grouped by maturity level"""
+    control: Essential8ControlResponse
+    requirements_ml1: list[Essential8RequirementResponse] = []
+    requirements_ml2: list[Essential8RequirementResponse] = []
+    requirements_ml3: list[Essential8RequirementResponse] = []
+    company_compliance: Optional[CompanyEssential8ComplianceResponse] = None
+    requirement_compliance: list[CompanyEssential8RequirementComplianceResponse] = []
