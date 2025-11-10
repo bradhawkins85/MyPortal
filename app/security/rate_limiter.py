@@ -9,6 +9,8 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from app.core.logging import log_warning
+
 
 class SimpleRateLimiter:
     def __init__(self, limit: int, window_seconds: int) -> None:
@@ -56,6 +58,12 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
 
         allowed, retry_after = await self.rate_limiter.check(client_ip or "anonymous")
         if not allowed:
+            log_warning(
+                "Rate limit exceeded",
+                client_ip=client_ip,
+                path=path,
+                retry_after=retry_after,
+            )
             return JSONResponse(
                 status_code=429,
                 content={"detail": "Rate limit exceeded", "retry_after": retry_after},

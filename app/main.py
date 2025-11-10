@@ -121,6 +121,7 @@ from app.security.cache_control import CacheControlMiddleware
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import encrypt_secret
 from app.security.rate_limiter import RateLimiterMiddleware, SimpleRateLimiter
+from app.security.request_logger import RequestLoggingMiddleware
 from app.security.session import SessionData, session_manager
 from app.api.dependencies.auth import get_current_session
 from app.services.scheduler import scheduler_service
@@ -335,6 +336,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Add request logging middleware
+app.add_middleware(
+    RequestLoggingMiddleware,
+    exempt_paths=("/static", "/health", "/manifest.webmanifest", "/service-worker.js"),
 )
 
 general_rate_limiter = SimpleRateLimiter(limit=300, window_seconds=900)
