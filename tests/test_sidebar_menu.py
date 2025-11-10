@@ -107,3 +107,30 @@ def test_company_admin_sees_authorised_menu_items(company_admin_context):
     assert 'href="/orders"' not in html
     assert 'href="/licenses"' not in html
     assert 'href="/assets"' not in html
+
+
+def test_business_continuity_appears_after_compliance(company_admin_context):
+    """Test that Business Continuity menu appears after Compliance in the sidebar."""
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    html = response.text
+    
+    # Both Compliance and Business Continuity should be present
+    assert 'href="/compliance"' in html
+    assert 'href="/business-continuity/plans"' in html
+    
+    # Business Continuity should appear after Compliance
+    compliance_pos = html.find('href="/compliance"')
+    bc_pos = html.find('href="/business-continuity/plans"')
+    
+    assert compliance_pos > 0, "Compliance menu not found"
+    assert bc_pos > 0, "Business Continuity menu not found"
+    assert bc_pos > compliance_pos, "Business Continuity should appear after Compliance in the menu"
+    
+    # Business Continuity should NOT appear in the Administration section
+    admin_section_start = html.find('<li class="menu__heading" role="presentation">Administration</li>')
+    if admin_section_start > 0:
+        # Verify BC menu appears before the Administration section
+        assert bc_pos < admin_section_start, "Business Continuity should not be in Administration section"
