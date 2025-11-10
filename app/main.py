@@ -48,6 +48,7 @@ from app.api.routes import (
     audit_logs,
     auth,
     automations as automations_api,
+    bc5,
     business_continuity_plans as bc_plans_api,
     call_recordings as call_recordings_api,
     companies,
@@ -250,6 +251,10 @@ tags_metadata = [
     {
         "name": "Automations",
         "description": "Workflow automations combining scheduling, event triggers, and module actions.",
+    },
+    {
+        "name": "Business Continuity (BC5)",
+        "description": "Comprehensive BC planning API with templates, plans, versions, workflows, attachments, and exports. Implements RBAC with viewer, editor, approver, and admin roles.",
     },
     {
         "name": "ChatGPT MCP",
@@ -526,6 +531,7 @@ app.include_router(licenses_api.router)
 app.include_router(forms_api.router)
 app.include_router(knowledge_base_api.router)
 app.include_router(bc_plans_api.router)
+app.include_router(bc5.router)
 app.include_router(roles.router)
 app.include_router(memberships.router)
 app.include_router(m365_api.router)
