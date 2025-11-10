@@ -102,38 +102,29 @@
         <div class="compliance-requirements__list">
           {% for req in requirements_ml1 %}
           {% set req_compliance = requirement_compliance_map.get(req.id) %}
-          <article class="requirement-item" data-requirement-id="{{ req.id }}">
-            <div class="requirement-item__header">
+          <details class="requirement-item card-collapsible" data-requirement-id="{{ req.id }}">
+            <summary class="card__header card__header--collapsible requirement-item__header">
               <div class="requirement-item__number">{{ req.requirement_order }}</div>
               <p class="requirement-item__description">{{ req.description }}</p>
-              <div class="requirement-item__status">
-                {% if req_compliance %}
-                <span class="badge badge--status-{{ req_compliance.status }}" data-requirement-status>
-                  {% if req_compliance.status == 'not_started' %}Not started
-                  {% elif req_compliance.status == 'in_progress' %}In progress
-                  {% elif req_compliance.status == 'compliant' %}✓ Compliant
-                  {% elif req_compliance.status == 'non_compliant' %}✗ Non-compliant
-                  {% elif req_compliance.status == 'not_applicable' %}N/A
+              <div class="card__collapsible-meta">
+                <div class="requirement-item__status">
+                  {% if req_compliance %}
+                  <span class="badge badge--status-{{ req_compliance.status }}" data-requirement-status>
+                    {% if req_compliance.status == 'not_started' %}Not started
+                    {% elif req_compliance.status == 'in_progress' %}In progress
+                    {% elif req_compliance.status == 'compliant' %}✓ Compliant
+                    {% elif req_compliance.status == 'non_compliant' %}✗ Non-compliant
+                    {% elif req_compliance.status == 'not_applicable' %}N/A
+                    {% endif %}
+                  </span>
+                  {% else %}
+                  <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
                   {% endif %}
-                </span>
-                {% else %}
-                <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
-                {% endif %}
+                </div>
+                <span class="card__toggle-icon" aria-hidden="true"></span>
               </div>
-              <button
-                type="button"
-                class="requirement-item__toggle"
-                data-toggle-requirement="{{ req.id }}"
-                aria-expanded="false"
-                aria-controls="requirement-details-{{ req.id }}"
-              >
-                <span class="sr-only">Toggle requirement details</span>
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <polyline points="6 9 12 15 18 9"></polyline>
-                </svg>
-              </button>
-            </div>
-            <div class="requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details hidden>
+            </summary>
+            <div class="card-collapsible__content requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details>
               <form class="compliance-form" data-requirement-form="{{ req.id }}">
                 <div class="form-field">
                   <label for="req-status-{{ req.id }}" class="form-label">Status</label>
@@ -162,7 +153,7 @@
                 </div>
               </form>
             </div>
-          </article>
+          </details>
           {% endfor %}
         </div>
       </section>
@@ -175,38 +166,29 @@
         <div class="compliance-requirements__list">
           {% for req in requirements_ml2 %}
           {% set req_compliance = requirement_compliance_map.get(req.id) %}
-          <article class="requirement-item" data-requirement-id="{{ req.id }}">
-            <div class="requirement-item__header">
+          <details class="requirement-item card-collapsible" data-requirement-id="{{ req.id }}">
+            <summary class="card__header card__header--collapsible requirement-item__header">
               <div class="requirement-item__number">{{ req.requirement_order }}</div>
               <p class="requirement-item__description">{{ req.description }}</p>
-              <div class="requirement-item__status">
-                {% if req_compliance %}
-                <span class="badge badge--status-{{ req_compliance.status }}" data-requirement-status>
-                  {% if req_compliance.status == 'not_started' %}Not started
-                  {% elif req_compliance.status == 'in_progress' %}In progress
-                  {% elif req_compliance.status == 'compliant' %}✓ Compliant
-                  {% elif req_compliance.status == 'non_compliant' %}✗ Non-compliant
-                  {% elif req_compliance.status == 'not_applicable' %}N/A
+              <div class="card__collapsible-meta">
+                <div class="requirement-item__status">
+                  {% if req_compliance %}
+                  <span class="badge badge--status-{{ req_compliance.status }}" data-requirement-status>
+                    {% if req_compliance.status == 'not_started' %}Not started
+                    {% elif req_compliance.status == 'in_progress' %}In progress
+                    {% elif req_compliance.status == 'compliant' %}✓ Compliant
+                    {% elif req_compliance.status == 'non_compliant' %}✗ Non-compliant
+                    {% elif req_compliance.status == 'not_applicable' %}N/A
+                    {% endif %}
+                  </span>
+                  {% else %}
+                  <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
                   {% endif %}
-                </span>
-                {% else %}
-                <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
-                {% endif %}
+                </div>
+                <span class="card__toggle-icon" aria-hidden="true"></span>
               </div>
-              <button
-                type="button"
-                class="requirement-item__toggle"
-                data-toggle-requirement="{{ req.id }}"
-                aria-expanded="false"
-                aria-controls="requirement-details-{{ req.id }}"
-              >
-                <span class="sr-only">Toggle requirement details</span>
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <polyline points="6 9 12 15 18 9"></polyline>
-                </svg>
-              </button>
-            </div>
-            <div class="requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details hidden>
+            </summary>
+            <div class="card-collapsible__content requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details>
               <form class="compliance-form" data-requirement-form="{{ req.id }}">
                 <div class="form-field">
                   <label for="req-status-{{ req.id }}" class="form-label">Status</label>
@@ -235,7 +217,7 @@
                 </div>
               </form>
             </div>
-          </article>
+          </details>
           {% endfor %}
         </div>
       </section>
@@ -248,38 +230,29 @@
         <div class="compliance-requirements__list">
           {% for req in requirements_ml3 %}
           {% set req_compliance = requirement_compliance_map.get(req.id) %}
-          <article class="requirement-item" data-requirement-id="{{ req.id }}">
-            <div class="requirement-item__header">
+          <details class="requirement-item card-collapsible" data-requirement-id="{{ req.id }}">
+            <summary class="card__header card__header--collapsible requirement-item__header">
               <div class="requirement-item__number">{{ req.requirement_order }}</div>
               <p class="requirement-item__description">{{ req.description }}</p>
-              <div class="requirement-item__status">
-                {% if req_compliance %}
-                <span class="badge badge--status-{{ req_compliance.status }}" data-requirement-status>
-                  {% if req_compliance.status == 'not_started' %}Not started
-                  {% elif req_compliance.status == 'in_progress' %}In progress
-                  {% elif req_compliance.status == 'compliant' %}✓ Compliant
-                  {% elif req_compliance.status == 'non_compliant' %}✗ Non-compliant
-                  {% elif req_compliance.status == 'not_applicable' %}N/A
+              <div class="card__collapsible-meta">
+                <div class="requirement-item__status">
+                  {% if req_compliance %}
+                  <span class="badge badge--status-{{ req_compliance.status }}" data-requirement-status>
+                    {% if req_compliance.status == 'not_started' %}Not started
+                    {% elif req_compliance.status == 'in_progress' %}In progress
+                    {% elif req_compliance.status == 'compliant' %}✓ Compliant
+                    {% elif req_compliance.status == 'non_compliant' %}✗ Non-compliant
+                    {% elif req_compliance.status == 'not_applicable' %}N/A
+                    {% endif %}
+                  </span>
+                  {% else %}
+                  <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
                   {% endif %}
-                </span>
-                {% else %}
-                <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
-                {% endif %}
+                </div>
+                <span class="card__toggle-icon" aria-hidden="true"></span>
               </div>
-              <button
-                type="button"
-                class="requirement-item__toggle"
-                data-toggle-requirement="{{ req.id }}"
-                aria-expanded="false"
-                aria-controls="requirement-details-{{ req.id }}"
-              >
-                <span class="sr-only">Toggle requirement details</span>
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <polyline points="6 9 12 15 18 9"></polyline>
-                </svg>
-              </button>
-            </div>
-            <div class="requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details hidden>
+            </summary>
+            <div class="card-collapsible__content requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details>
               <form class="compliance-form" data-requirement-form="{{ req.id }}">
                 <div class="form-field">
                   <label for="req-status-{{ req.id }}" class="form-label">Status</label>
@@ -308,7 +281,7 @@
                 </div>
               </form>
             </div>
-          </article>
+          </details>
           {% endfor %}
         </div>
       </section>
@@ -321,41 +294,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const companyId = {{ (company.id if company else None) | tojson }};
   const csrfToken = getCsrfToken();
 
-  // Toggle requirement details
-  document.querySelectorAll('[data-toggle-requirement]').forEach(btn => {
-    btn.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const requirementId = btn.dataset.toggleRequirement;
-      toggleRequirement(requirementId, btn);
+  const requirementItems = document.querySelectorAll('.requirement-item');
+
+  requirementItems.forEach(item => {
+    item.addEventListener('toggle', () => {
+      item.classList.toggle('is-expanded', item.open);
     });
+
+    item.classList.toggle('is-expanded', item.open);
   });
-
-  // Also toggle on header click
-  document.querySelectorAll('.requirement-item__header').forEach(header => {
-    header.addEventListener('click', (event) => {
-      if (event.target.closest('[data-toggle-requirement]')) return;
-      const item = header.closest('.requirement-item');
-      const toggle = item.querySelector('[data-toggle-requirement]');
-      toggleRequirement(toggle.dataset.toggleRequirement, toggle);
-    });
-  });
-
-  function toggleRequirement(requirementId, toggleButton) {
-    const item = document.querySelector(`[data-requirement-id="${requirementId}"]`);
-    const details = item?.querySelector('[data-requirement-details]');
-    if (!details) return;
-
-    const isHidden = details.hasAttribute('hidden');
-    if (isHidden) {
-      details.removeAttribute('hidden');
-      item.classList.add('is-expanded');
-      toggleButton?.setAttribute('aria-expanded', 'true');
-    } else {
-      details.setAttribute('hidden', '');
-      item.classList.remove('is-expanded');
-      toggleButton?.setAttribute('aria-expanded', 'false');
-    }
-  }
 
   // Expand all buttons
   document.querySelectorAll('[data-expand-all]').forEach(btn => {
@@ -363,21 +310,16 @@ document.addEventListener('DOMContentLoaded', () => {
       const section = btn.closest('.compliance-requirements__group');
       if (!section) return;
       const isExpanding = btn.getAttribute('data-expanded') !== 'true';
+      const items = section.querySelectorAll('.requirement-item');
 
-      section.querySelectorAll('.requirement-item').forEach(item => {
-        const details = item.querySelector('[data-requirement-details]');
-        const toggle = item.querySelector('[data-toggle-requirement]');
-        if (!details) return;
-
+      items.forEach(item => {
         if (isExpanding) {
-          details.removeAttribute('hidden');
-          item.classList.add('is-expanded');
-          toggle?.setAttribute('aria-expanded', 'true');
+          item.setAttribute('open', '');
         } else {
-          details.setAttribute('hidden', '');
-          item.classList.remove('is-expanded');
-          toggle?.setAttribute('aria-expanded', 'false');
+          item.removeAttribute('open');
         }
+
+        item.classList.toggle('is-expanded', item.hasAttribute('open'));
       });
 
       btn.setAttribute('data-expanded', isExpanding ? 'true' : 'false');
