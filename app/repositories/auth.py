@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from app.core.database import db
+from app.core.logging import log_debug, log_info
 from app.security.encryption import decrypt_secret, encrypt_secret
 
 
@@ -23,6 +24,13 @@ async def create_session(
     impersonator_session_id: int | None = None,
     impersonation_started_at: datetime | None = None,
 ) -> dict[str, Any]:
+    log_info(
+        "Creating user session",
+        user_id=user_id,
+        active_company_id=active_company_id,
+        ip_address=ip_address,
+        impersonator_user_id=impersonator_user_id,
+    )
     await db.execute(
         """
         INSERT INTO user_sessions (
@@ -57,6 +65,7 @@ async def create_session(
             impersonation_started_at,
         ),
     )
+    log_info("User session created successfully", user_id=user_id)
     return await get_session_by_token(session_token)
 
 
