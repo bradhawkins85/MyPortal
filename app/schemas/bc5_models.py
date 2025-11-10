@@ -278,6 +278,36 @@ class BCAcknowledgeResponse(BaseModel):
         from_attributes = True
 
 
+class BCAcknowledgmentSummary(BaseModel):
+    """Schema for acknowledgment summary statistics."""
+    
+    total_users: int = Field(..., description="Total users with BC access")
+    acknowledged_users: int = Field(..., description="Users who have acknowledged")
+    pending_users: int = Field(..., description="Users who have not acknowledged")
+    version_number: int = Field(..., description="Version number for this summary")
+    
+    class Config:
+        from_attributes = True
+
+
+class BCPendingUser(BaseModel):
+    """Schema for users pending acknowledgment."""
+    
+    id: int
+    email: str
+    name: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class BCNotifyAcknowledgment(BaseModel):
+    """Schema for notifying users about plan acknowledgment."""
+    
+    user_ids: list[int] = Field(..., min_length=1, description="List of user IDs to notify")
+    message: Optional[str] = Field(None, description="Optional custom notification message")
+
+
 # Section Schemas
 class BCSectionListItem(BaseModel):
     """Schema for section list items."""

@@ -512,6 +512,83 @@ async def get_user_acknowledgment(plan_id: int, user_id: int) -> dict[str, Any] 
     return await db.fetch_one(query, (plan_id, user_id))
 
 
+async def get_users_pending_acknowledgment(
+    plan_id: int,
+    version_number: int,
+) -> list[dict[str, Any]]:
+    """
+    Get users who have not acknowledged a specific version.
+    
+    Returns users with BC viewer permission or higher who have not acknowledged
+    the specified version yet. Super admins are excluded from the list as they
+    typically don't need to acknowledge plans.
+    """
+    query = """
+        SELECT DISTINCT u.id, u.email, u.name
+        FROM users u
+        INNER JOIN company_memberships cm ON cm.user_id = u.id
+        INNER JOIN permissions p ON (
+            (p.company_id = cm.company_id AND p.user_id IS NULL) OR
+            (p.user_id = u.id AND p.company_id IS NULL)
+        )
+        WHERE p.permission_key IN ('bc.viewer', 'bc.editor', 'bc.approver', 'bc.admin')
+        AND u.is_super_admin = FALSE
+        AND u.id NOT IN (
+            -- Exclude users who already acknowledged this version or later
+            SELECT user_id
+            FROM bc_ack
+            WHERE plan_id = %s
+            AND (ack_version_number IS NULL OR ack_version_number >= %s)
+        )
+        ORDER BY u.name, u.email
+    """
+    return await db.fetch_all(query, (plan_id, version_number))
+
+
+async def get_acknowledgment_summary(plan_id: int, version_number: int) -> dict[str, Any]:
+    """
+    Get acknowledgment summary for a plan version.
+    
+    Returns counts of total users with BC access, acknowledged users, and pending users.
+    Super admins are excluded from counts.
+    """
+    # Get total users with BC access (excluding super admins)
+    total_query = """
+        SELECT COUNT(DISTINCT u.id) as total_users
+        FROM users u
+        INNER JOIN company_memberships cm ON cm.user_id = u.id
+        INNER JOIN permissions p ON (
+            (p.company_id = cm.company_id AND p.user_id IS NULL) OR
+            (p.user_id = u.id AND p.company_id IS NULL)
+        )
+        WHERE p.permission_key IN ('bc.viewer', 'bc.editor', 'bc.approver', 'bc.admin')
+        AND u.is_super_admin = FALSE
+    """
+    total_result = await db.fetch_one(total_query)
+    total_users = total_result["total_users"] if total_result else 0
+    
+    # Get users who acknowledged this version or later
+    ack_query = """
+        SELECT COUNT(DISTINCT ba.user_id) as acknowledged_users
+        FROM bc_ack ba
+        INNER JOIN users u ON u.id = ba.user_id
+        WHERE ba.plan_id = %s
+        AND (ba.ack_version_number IS NULL OR ba.ack_version_number >= %s)
+        AND u.is_super_admin = FALSE
+    """
+    ack_result = await db.fetch_one(ack_query, (plan_id, version_number))
+    acknowledged_users = ack_result["acknowledged_users"] if ack_result else 0
+    
+    pending_users = total_users - acknowledged_users
+    
+    return {
+        "total_users": total_users,
+        "acknowledged_users": acknowledged_users,
+        "pending_users": pending_users,
+        "version_number": version_number,
+    }
+
+
 # ============================================================================
 # BC Attachment Repository Functions
 # ============================================================================
