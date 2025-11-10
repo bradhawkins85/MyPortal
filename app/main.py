@@ -2996,6 +2996,15 @@ async def on_startup() -> None:
     await change_log_service.sync_change_log_sources()
     await modules_service.ensure_default_modules()
     await automations_service.refresh_all_schedules()
+    
+    # Bootstrap default BCP template if it doesn't exist
+    try:
+        from app.services.bcp_template import bootstrap_default_template
+        await bootstrap_default_template()
+        log_info("BCP default template bootstrapped")
+    except Exception as exc:
+        log_error("Failed to bootstrap default BCP template", error=str(exc))
+    
     await scheduler_service.start()
     log_info("Application started", environment=settings.environment)
 
