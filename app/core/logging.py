@@ -50,6 +50,20 @@ def log_info(message: str, **meta) -> None:
         logger.info(message)
 
 
+def log_warning(message: str, **meta) -> None:
+    if meta:
+        logger.bind(**meta).warning(f"{message} | {_format_meta(meta)}")
+    else:
+        logger.warning(message)
+
+
+def log_debug(message: str, **meta) -> None:
+    if meta:
+        logger.bind(**meta).debug(f"{message} | {_format_meta(meta)}")
+    else:
+        logger.debug(message)
+
+
 def _ensure_log_path(path: Path) -> bool:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

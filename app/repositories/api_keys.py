@@ -7,6 +7,7 @@ from typing import Any
 PermissionMapping = Sequence[dict[str, Any]]
 
 from app.core.database import db
+from app.core.logging import log_info, log_warning
 from app.security.api_keys import GeneratedApiKey, generate_api_key, hash_api_key
 
 
@@ -42,6 +43,7 @@ async def create_api_key(
     ip_restrictions: Sequence[str] | None = None,
     is_enabled: bool = True,
 ) -> tuple[str, dict[str, Any]]:
+    log_info("Creating API key", description=description, is_enabled=is_enabled)
     generated: GeneratedApiKey = generate_api_key()
     await db.execute(
         """
@@ -72,6 +74,7 @@ async def create_api_key(
     )
     row["permissions"] = stored_permissions
     row["ip_restrictions"] = stored_ip_restrictions
+    log_info("API key created successfully", api_key_id=row["id"], prefix=generated.prefix)
     return generated.value, row
 
 
@@ -197,7 +200,9 @@ async def get_api_key_with_usage(api_key_id: int) -> dict[str, Any] | None:
 
 
 async def delete_api_key(api_key_id: int) -> None:
+    log_info("Deleting API key", api_key_id=api_key_id)
     await db.execute("DELETE FROM api_keys WHERE id = %s", (api_key_id,))
+    log_info("API key deleted successfully", api_key_id=api_key_id)
 
 
 async def update_api_key_expiry(api_key_id: int, expiry_date: date | None) -> None:
@@ -262,6 +267,7 @@ async def get_api_key_record(api_key_value: str) -> dict[str, Any] | None:
 
 
 async def record_api_key_usage(api_key_id: int, ip_address: str) -> None:
+    log_info("Recording API key usage", api_key_id=api_key_id, ip_address=ip_address)
     await db.execute(
         """
         INSERT INTO api_key_usage (api_key_id, ip_address, usage_count, last_used_at)

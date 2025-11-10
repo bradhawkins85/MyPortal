@@ -4,6 +4,7 @@ from collections import defaultdict
 from typing import Any, Iterable, List, Optional, Sequence
 
 from app.core.database import db
+from app.core.logging import log_info
 from app.services.company_domains import normalise_email_domains
 
 
@@ -139,6 +140,7 @@ async def list_companies(include_archived: bool = False) -> List[dict[str, Any]]
 
 
 async def create_company(**data: Any) -> dict[str, Any]:
+    log_info("Creating company", name=data.get("name"))
     email_domains = data.pop("email_domains", None) or []
     email_domains = normalise_email_domains(email_domains)
     columns = ", ".join(data.keys())
@@ -153,6 +155,7 @@ async def create_company(**data: Any) -> dict[str, Any]:
     if not row:
         raise RuntimeError("Failed to create company")
     company = _normalise_company(row)
+    log_info("Company created successfully", company_id=company["id"], name=company.get("name"))
     if email_domains:
         await replace_company_email_domains(company["id"], email_domains)
         company["email_domains"] = email_domains
@@ -162,6 +165,7 @@ async def create_company(**data: Any) -> dict[str, Any]:
 
 
 async def update_company(company_id: int, **updates: Any) -> dict[str, Any]:
+    log_info("Updating company", company_id=company_id, fields=list(updates.keys()))
     email_domains: Iterable[str] | None = updates.pop("email_domains", None)
     if not updates:
         company = await get_company_by_id(company_id)
@@ -183,11 +187,14 @@ async def update_company(company_id: int, **updates: Any) -> dict[str, Any]:
         normalised = normalise_email_domains(email_domains)
         await replace_company_email_domains(company_id, normalised)
         updated["email_domains"] = normalised
+    log_info("Company updated successfully", company_id=company_id)
     return updated
 
 
 async def delete_company(company_id: int) -> None:
+    log_info("Deleting company", company_id=company_id)
     await db.execute("DELETE FROM companies WHERE id = %s", (company_id,))
+    log_info("Company deleted successfully", company_id=company_id)
 
 
 async def archive_company(company_id: int) -> dict[str, Any]:

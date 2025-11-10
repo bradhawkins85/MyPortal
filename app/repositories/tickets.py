@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Sequence
 
 from app.core.database import db
+from app.core.logging import log_debug, log_error, log_info
 
 TicketRecord = dict[str, Any]
 
@@ -123,6 +124,15 @@ async def create_ticket(
     external_reference: str | None,
     ticket_number: str | None = None,
 ) -> TicketRecord:
+    log_info(
+        "Creating ticket",
+        subject=subject,
+        company_id=company_id,
+        requester_id=requester_id,
+        assigned_user_id=assigned_user_id,
+        status=status,
+        priority=priority,
+    )
     ticket_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO tickets
@@ -144,6 +154,7 @@ async def create_ticket(
         ),
     )
     if ticket_id:
+        log_info("Ticket created successfully", ticket_id=ticket_id)
         row = await db.fetch_one("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
         if row:
             return _normalise_ticket(row)
@@ -187,6 +198,16 @@ async def list_tickets(
     offset: int = 0,
     requester_id: int | None = None,
 ) -> list[TicketRecord]:
+    log_debug(
+        "Listing tickets",
+        status=status,
+        module_slug=module_slug,
+        company_id=company_id,
+        assigned_user_id=assigned_user_id,
+        requester_id=requester_id,
+        limit=limit,
+        offset=offset,
+    )
     where: list[str] = []
     params: list[Any] = []
     if status:
@@ -222,6 +243,7 @@ async def list_tickets(
         """,
         tuple(params),
     )
+    log_debug("Tickets query returned", count=len(rows))
     return [_normalise_ticket(row) for row in rows]
 
 
@@ -506,6 +528,7 @@ async def replace_ticket_assets(ticket_id: int, asset_ids: Iterable[int]) -> lis
 async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     if not fields:
         return await get_ticket(ticket_id)
+    log_info("Updating ticket", ticket_id=ticket_id, fields=list(fields.keys()))
     assignments: list[str] = []
     params: list[Any] = []
     override_updated_at = None
@@ -526,6 +549,7 @@ async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     query = f"UPDATE tickets SET {', '.join(assignments)} WHERE id = %s"
     params.append(ticket_id)
     await db.execute(query, tuple(params))
+    log_info("Ticket updated successfully", ticket_id=ticket_id)
     return await get_ticket(ticket_id)
 
 
@@ -544,7 +568,9 @@ async def set_ticket_status(
 
 
 async def delete_ticket(ticket_id: int) -> None:
+    log_info("Deleting ticket", ticket_id=ticket_id)
     await db.execute("DELETE FROM tickets WHERE id = %s", (ticket_id,))
+    log_info("Ticket deleted successfully", ticket_id=ticket_id)
 
 
 async def delete_tickets(ticket_ids: Iterable[int]) -> int:
@@ -600,6 +626,14 @@ async def create_reply(
     created_at: datetime | None = None,
     labour_type_id: int | None = None,
 ) -> TicketRecord:
+    log_info(
+        "Creating ticket reply",
+        ticket_id=ticket_id,
+        author_id=author_id,
+        is_internal=is_internal,
+        minutes_spent=minutes_spent,
+        is_billable=is_billable,
+    )
     columns = ["ticket_id", "author_id", "body", "is_internal", "is_billable"]
     params: list[Any] = [
         ticket_id,
@@ -629,6 +663,7 @@ async def create_reply(
         tuple(params),
     )
     if reply_id:
+        log_info("Ticket reply created successfully", reply_id=reply_id, ticket_id=ticket_id)
         row = await db.fetch_one(
             """
             SELECT tr.*, lt.name AS labour_type_name, lt.code AS labour_type_code
