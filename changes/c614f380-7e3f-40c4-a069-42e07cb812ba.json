@@ -1,0 +1,7 @@
+{
+  "guid": "c614f380-7e3f-40c4-a069-42e07cb812ba",
+  "occurred_at": "2025-11-10T11:07Z",
+  "change_type": "Feature",
+  "summary": "BC Plan module upgraded to template-driven system with versioning, workflow, and export",
+  "content_hash": "1ed21dc4f2bac0064d26ed6b5b23d2c47b5fce532d5ab081c924f07a3fa8398d"
+}
