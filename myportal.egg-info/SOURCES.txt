@@ -49,6 +49,8 @@ app/core/database.py
 app/core/logging.py
 app/core/notifications.py
 app/core/phone_utils.py
+app/models/__init__.py
+app/models/bc_models.py
 app/repositories/__init__.py
 app/repositories/api_keys.py
 app/repositories/apps.py
@@ -111,6 +113,7 @@ app/schemas/assets.py
 app/schemas/audit_logs.py
 app/schemas/auth.py
 app/schemas/automations.py
+app/schemas/bc3_models.py
 app/schemas/bcp_template.py
 app/schemas/business_continuity_plans.py
 app/schemas/call_recordings.py
@@ -232,6 +235,8 @@ tests/test_automation_trigger_filters.py
 tests/test_automations_repository.py
 tests/test_automations_repository_datetimes.py
 tests/test_automations_service.py
+tests/test_bc3_models.py
+tests/test_bc4_migrations.py
 tests/test_bcp_template.py
 tests/test_bcp_template_api.py
 tests/test_business_continuity_plans.py
