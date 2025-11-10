@@ -8699,6 +8699,76 @@ async def bc_plan_edit_page(request: Request, plan_id: int):
     return await _render_template("business_continuity/plan_editor.html", request, current_user, extra=extra)
 
 
+@app.get("/business-continuity/templates/new", response_class=HTMLResponse)
+async def bc_new_template_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    default_sections = [
+        {
+            "key": "overview",
+            "name": "Overview",
+            "description": "Capture the high-level purpose and scope of this template.",
+            "fields": [
+                {
+                    "key": "summary",
+                    "label": "Template Summary",
+                    "type": "rich_text",
+                    "required": True,
+                    "placeholder": "Provide an overview of when this template should be used.",
+                },
+                {
+                    "key": "applicability",
+                    "label": "Applicability",
+                    "type": "rich_text",
+                    "required": False,
+                    "placeholder": "List the teams or scenarios where this template applies.",
+                },
+            ],
+        },
+        {
+            "key": "roles",
+            "name": "Roles & Responsibilities",
+            "description": "Define the core roles that plans built from this template should include.",
+            "fields": [
+                {
+                    "key": "roles_table",
+                    "label": "Default Roles",
+                    "type": "table",
+                    "columns": [
+                        {"key": "role", "label": "Role"},
+                        {"key": "responsibility", "label": "Responsibility"},
+                        {"key": "contact", "label": "Contact"},
+                    ],
+                }
+            ],
+        },
+        {
+            "key": "procedures",
+            "name": "Response Procedures",
+            "description": "Outline the key response steps to include for plans derived from this template.",
+            "fields": [
+                {
+                    "key": "checklist",
+                    "label": "Procedure Checklist",
+                    "type": "rich_text",
+                    "required": True,
+                    "placeholder": "Document the major steps that every plan should follow.",
+                }
+            ],
+        },
+    ]
+
+    extra = {
+        "title": "New Template",
+        "template": None,
+        "default_sections": default_sections,
+    }
+
+    return await _render_template("business_continuity/template_editor.html", request, current_user, extra=extra)
+
+
 @app.get("/business-continuity/templates", response_class=HTMLResponse)
 async def bc_templates_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
