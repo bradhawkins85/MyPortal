@@ -521,3 +521,305 @@ async def seed_example_risks(plan_id: int) -> None:
             preventative_actions=risk_data["preventative_actions"],
             contingency_plans=risk_data["contingency_plans"]
         )
+
+
+# ============================================================================
+# Insurance Management
+# ============================================================================
+
+
+async def list_insurance_policies(plan_id: int) -> list[dict[str, Any]]:
+    """Get all insurance policies for a plan."""
+    query = """
+        SELECT id, plan_id, type, coverage, exclusions, insurer, contact,
+               last_review_date, payment_terms, created_at, updated_at
+        FROM bcp_insurance_policy
+        WHERE plan_id = %s
+        ORDER BY type, id
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id,))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "type": row[2],
+                    "coverage": row[3],
+                    "exclusions": row[4],
+                    "insurer": row[5],
+                    "contact": row[6],
+                    "last_review_date": row[7],
+                    "payment_terms": row[8],
+                    "created_at": row[9],
+                    "updated_at": row[10],
+                }
+                for row in rows
+            ]
+
+
+async def get_insurance_policy_by_id(policy_id: int) -> dict[str, Any] | None:
+    """Get an insurance policy by ID."""
+    query = """
+        SELECT id, plan_id, type, coverage, exclusions, insurer, contact,
+               last_review_date, payment_terms, created_at, updated_at
+        FROM bcp_insurance_policy
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (policy_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "type": row[2],
+                "coverage": row[3],
+                "exclusions": row[4],
+                "insurer": row[5],
+                "contact": row[6],
+                "last_review_date": row[7],
+                "payment_terms": row[8],
+                "created_at": row[9],
+                "updated_at": row[10],
+            }
+
+
+async def create_insurance_policy(
+    plan_id: int,
+    policy_type: str,
+    coverage: str | None = None,
+    exclusions: str | None = None,
+    insurer: str | None = None,
+    contact: str | None = None,
+    last_review_date: datetime | None = None,
+    payment_terms: str | None = None,
+) -> dict[str, Any]:
+    """Create a new insurance policy."""
+    query = """
+        INSERT INTO bcp_insurance_policy 
+        (plan_id, type, coverage, exclusions, insurer, contact, 
+         last_review_date, payment_terms)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                query,
+                (plan_id, policy_type, coverage, exclusions, insurer, contact,
+                 last_review_date, payment_terms),
+            )
+            await conn.commit()
+            policy_id = cursor.lastrowid
+    
+    return await get_insurance_policy_by_id(policy_id)
+
+
+async def update_insurance_policy(
+    policy_id: int,
+    policy_type: str | None = None,
+    coverage: str | None = None,
+    exclusions: str | None = None,
+    insurer: str | None = None,
+    contact: str | None = None,
+    last_review_date: datetime | None = None,
+    payment_terms: str | None = None,
+) -> dict[str, Any] | None:
+    """Update an insurance policy."""
+    updates = []
+    values = []
+    
+    if policy_type is not None:
+        updates.append("type = %s")
+        values.append(policy_type)
+    if coverage is not None:
+        updates.append("coverage = %s")
+        values.append(coverage)
+    if exclusions is not None:
+        updates.append("exclusions = %s")
+        values.append(exclusions)
+    if insurer is not None:
+        updates.append("insurer = %s")
+        values.append(insurer)
+    if contact is not None:
+        updates.append("contact = %s")
+        values.append(contact)
+    if last_review_date is not None:
+        updates.append("last_review_date = %s")
+        values.append(last_review_date)
+    if payment_terms is not None:
+        updates.append("payment_terms = %s")
+        values.append(payment_terms)
+    
+    if not updates:
+        return await get_insurance_policy_by_id(policy_id)
+    
+    values.append(policy_id)
+    query = f"""
+        UPDATE bcp_insurance_policy
+        SET {', '.join(updates)}
+        WHERE id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, values)
+            await conn.commit()
+    
+    return await get_insurance_policy_by_id(policy_id)
+
+
+async def delete_insurance_policy(policy_id: int) -> bool:
+    """Delete an insurance policy."""
+    query = "DELETE FROM bcp_insurance_policy WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (policy_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+
+
+# ============================================================================
+# Backup Management
+# ============================================================================
+
+
+async def list_backup_items(plan_id: int) -> list[dict[str, Any]]:
+    """Get all backup items for a plan."""
+    query = """
+        SELECT id, plan_id, data_scope, frequency, medium, owner, steps,
+               created_at, updated_at
+        FROM bcp_backup_item
+        WHERE plan_id = %s
+        ORDER BY data_scope, id
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id,))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "data_scope": row[2],
+                    "frequency": row[3],
+                    "medium": row[4],
+                    "owner": row[5],
+                    "steps": row[6],
+                    "created_at": row[7],
+                    "updated_at": row[8],
+                }
+                for row in rows
+            ]
+
+
+async def get_backup_item_by_id(backup_id: int) -> dict[str, Any] | None:
+    """Get a backup item by ID."""
+    query = """
+        SELECT id, plan_id, data_scope, frequency, medium, owner, steps,
+               created_at, updated_at
+        FROM bcp_backup_item
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (backup_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "data_scope": row[2],
+                "frequency": row[3],
+                "medium": row[4],
+                "owner": row[5],
+                "steps": row[6],
+                "created_at": row[7],
+                "updated_at": row[8],
+            }
+
+
+async def create_backup_item(
+    plan_id: int,
+    data_scope: str,
+    frequency: str | None = None,
+    medium: str | None = None,
+    owner: str | None = None,
+    steps: str | None = None,
+) -> dict[str, Any]:
+    """Create a new backup item."""
+    query = """
+        INSERT INTO bcp_backup_item 
+        (plan_id, data_scope, frequency, medium, owner, steps)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                query,
+                (plan_id, data_scope, frequency, medium, owner, steps),
+            )
+            await conn.commit()
+            backup_id = cursor.lastrowid
+    
+    return await get_backup_item_by_id(backup_id)
+
+
+async def update_backup_item(
+    backup_id: int,
+    data_scope: str | None = None,
+    frequency: str | None = None,
+    medium: str | None = None,
+    owner: str | None = None,
+    steps: str | None = None,
+) -> dict[str, Any] | None:
+    """Update a backup item."""
+    updates = []
+    values = []
+    
+    if data_scope is not None:
+        updates.append("data_scope = %s")
+        values.append(data_scope)
+    if frequency is not None:
+        updates.append("frequency = %s")
+        values.append(frequency)
+    if medium is not None:
+        updates.append("medium = %s")
+        values.append(medium)
+    if owner is not None:
+        updates.append("owner = %s")
+        values.append(owner)
+    if steps is not None:
+        updates.append("steps = %s")
+        values.append(steps)
+    
+    if not updates:
+        return await get_backup_item_by_id(backup_id)
+    
+    values.append(backup_id)
+    query = f"""
+        UPDATE bcp_backup_item
+        SET {', '.join(updates)}
+        WHERE id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, values)
+            await conn.commit()
+    
+    return await get_backup_item_by_id(backup_id)
+
+
+async def delete_backup_item(backup_id: int) -> bool:
+    """Delete a backup item."""
+    query = "DELETE FROM bcp_backup_item WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (backup_id,))
+            await conn.commit()
+            return cursor.rowcount > 0

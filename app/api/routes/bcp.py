@@ -686,3 +686,383 @@ async def delete_distribution_entry(
         url="/bcp?success=" + quote("Distribution entry deleted"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+# ============================================================================
+# Insurance Pages and Endpoints
+# ============================================================================
+
+
+@router.get("/insurance", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_insurance(request: Request):
+    """BCP Insurance page with policies table."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from app.main import _build_base_context
+    from app.core.config import get_templates_config
+    from fastapi.templating import Jinja2Templates
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    # Get all insurance policies
+    policies = await bcp_repo.list_insurance_policies(plan["id"])
+    
+    templates_config = get_templates_config()
+    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "Insurance Policies",
+            "plan": plan,
+            "policies": policies,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+        },
+    )
+    
+    return templates.TemplateResponse("bcp/insurance.html", context)
+
+
+@router.post("/insurance", include_in_schema=False)
+async def create_insurance_policy(
+    request: Request,
+    policy_type: str = Form(...),
+    coverage: str = Form(None),
+    exclusions: str = Form(None),
+    insurer: str = Form(None),
+    contact: str = Form(None),
+    last_review_date: str = Form(None),
+    payment_terms: str = Form(None),
+):
+    """Create a new insurance policy."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Parse date if provided
+    review_date = None
+    if last_review_date:
+        try:
+            from datetime import datetime
+            review_date = datetime.fromisoformat(last_review_date)
+        except ValueError:
+            pass
+    
+    await bcp_repo.create_insurance_policy(
+        plan["id"],
+        policy_type,
+        coverage if coverage else None,
+        exclusions if exclusions else None,
+        insurer if insurer else None,
+        contact if contact else None,
+        review_date,
+        payment_terms if payment_terms else None,
+    )
+    
+    return RedirectResponse(
+        url="/bcp/insurance?success=" + quote("Insurance policy created successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/insurance/{policy_id}/update", include_in_schema=False)
+async def update_insurance_policy(
+    request: Request,
+    policy_id: int,
+    policy_type: str = Form(...),
+    coverage: str = Form(None),
+    exclusions: str = Form(None),
+    insurer: str = Form(None),
+    contact: str = Form(None),
+    last_review_date: str = Form(None),
+    payment_terms: str = Form(None),
+):
+    """Update an insurance policy."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    # Parse date if provided
+    review_date = None
+    if last_review_date:
+        try:
+            from datetime import datetime
+            review_date = datetime.fromisoformat(last_review_date)
+        except ValueError:
+            pass
+    
+    updated = await bcp_repo.update_insurance_policy(
+        policy_id,
+        policy_type=policy_type,
+        coverage=coverage if coverage else None,
+        exclusions=exclusions if exclusions else None,
+        insurer=insurer if insurer else None,
+        contact=contact if contact else None,
+        last_review_date=review_date,
+        payment_terms=payment_terms if payment_terms else None,
+    )
+    
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy not found")
+    
+    return RedirectResponse(
+        url="/bcp/insurance?success=" + quote("Insurance policy updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/insurance/{policy_id}/delete", include_in_schema=False)
+async def delete_insurance_policy(
+    request: Request,
+    policy_id: int,
+):
+    """Delete an insurance policy."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    deleted = await bcp_repo.delete_insurance_policy(policy_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy not found")
+    
+    return RedirectResponse(
+        url="/bcp/insurance?success=" + quote("Insurance policy deleted successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get("/insurance/export", include_in_schema=False)
+async def export_insurance_csv(request: Request):
+    """Export insurance policies to CSV."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from fastapi.responses import StreamingResponse
+    import csv
+    from io import StringIO
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    policies = await bcp_repo.list_insurance_policies(plan["id"])
+    
+    # Create CSV
+    output = StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "ID",
+            "Type",
+            "Coverage",
+            "Exclusions",
+            "Insurer & Contact",
+            "Last Review Date",
+            "Payment Terms",
+            "Created At",
+            "Updated At",
+        ],
+    )
+    writer.writeheader()
+    
+    for policy in policies:
+        writer.writerow({
+            "ID": policy["id"],
+            "Type": policy["type"],
+            "Coverage": policy.get("coverage") or "",
+            "Exclusions": policy.get("exclusions") or "",
+            "Insurer & Contact": f"{policy.get('insurer') or ''} - {policy.get('contact') or ''}",
+            "Last Review Date": policy.get("last_review_date", ""),
+            "Payment Terms": policy.get("payment_terms") or "",
+            "Created At": policy.get("created_at", ""),
+            "Updated At": policy.get("updated_at", ""),
+        })
+    
+    output.seek(0)
+    
+    from datetime import datetime as dt
+    filename = f"insurance_policies_{dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+# ============================================================================
+# Backup Pages and Endpoints
+# ============================================================================
+
+
+@router.get("/backups", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_backups(request: Request):
+    """BCP Backups page with backup items table."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from app.main import _build_base_context
+    from app.core.config import get_templates_config
+    from fastapi.templating import Jinja2Templates
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    # Get all backup items
+    backups = await bcp_repo.list_backup_items(plan["id"])
+    
+    templates_config = get_templates_config()
+    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "Data Backup Strategy",
+            "plan": plan,
+            "backups": backups,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+        },
+    )
+    
+    return templates.TemplateResponse("bcp/backups.html", context)
+
+
+@router.post("/backups", include_in_schema=False)
+async def create_backup_item(
+    request: Request,
+    data_scope: str = Form(...),
+    frequency: str = Form(None),
+    medium: str = Form(None),
+    owner: str = Form(None),
+    steps: str = Form(None),
+):
+    """Create a new backup item."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    await bcp_repo.create_backup_item(
+        plan["id"],
+        data_scope,
+        frequency if frequency else None,
+        medium if medium else None,
+        owner if owner else None,
+        steps if steps else None,
+    )
+    
+    return RedirectResponse(
+        url="/bcp/backups?success=" + quote("Backup item created successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/backups/{backup_id}/update", include_in_schema=False)
+async def update_backup_item(
+    request: Request,
+    backup_id: int,
+    data_scope: str = Form(...),
+    frequency: str = Form(None),
+    medium: str = Form(None),
+    owner: str = Form(None),
+    steps: str = Form(None),
+):
+    """Update a backup item."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    updated = await bcp_repo.update_backup_item(
+        backup_id,
+        data_scope=data_scope,
+        frequency=frequency if frequency else None,
+        medium=medium if medium else None,
+        owner=owner if owner else None,
+        steps=steps if steps else None,
+    )
+    
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup item not found")
+    
+    return RedirectResponse(
+        url="/bcp/backups?success=" + quote("Backup item updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/backups/{backup_id}/delete", include_in_schema=False)
+async def delete_backup_item(
+    request: Request,
+    backup_id: int,
+):
+    """Delete a backup item."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    deleted = await bcp_repo.delete_backup_item(backup_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup item not found")
+    
+    return RedirectResponse(
+        url="/bcp/backups?success=" + quote("Backup item deleted successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get("/backups/export", include_in_schema=False)
+async def export_backups_csv(request: Request):
+    """Export backup items to CSV."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from fastapi.responses import StreamingResponse
+    import csv
+    from io import StringIO
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    backups = await bcp_repo.list_backup_items(plan["id"])
+    
+    # Create CSV
+    output = StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "ID",
+            "Data for Backup",
+            "Frequency",
+            "Media/Service",
+            "Responsible Person",
+            "Procedure Steps",
+            "Created At",
+            "Updated At",
+        ],
+    )
+    writer.writeheader()
+    
+    for backup in backups:
+        writer.writerow({
+            "ID": backup["id"],
+            "Data for Backup": backup["data_scope"],
+            "Frequency": backup.get("frequency") or "",
+            "Media/Service": backup.get("medium") or "",
+            "Responsible Person": backup.get("owner") or "",
+            "Procedure Steps": backup.get("steps") or "",
+            "Created At": backup.get("created_at", ""),
+            "Updated At": backup.get("updated_at", ""),
+        })
+    
+    output.seek(0)
+    
+    from datetime import datetime as dt
+    filename = f"backup_items_{dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
