@@ -20,9 +20,11 @@ from app.api.dependencies.bc_rbac import (
     require_bc_editor,
     require_bc_viewer,
 )
+from app.core.config import get_settings
 from app.repositories import bc3 as bc_repo
 from app.repositories import users as user_repo
 from app.services import bc_export_service
+from app.services import bc_file_validation
 from app.schemas.bc5_models import (
     BCAcknowledge,
     BCAcknowledgeResponse,
@@ -212,9 +214,21 @@ async def list_plans(
     Returns paginated results with metadata.
     
     **Authorization**: Requires BC viewer role or higher.
+    **Access Control**: Viewers without edit permission only see approved plans.
     """
+    # Check if user has editor role or higher
+    from app.api.dependencies.bc_rbac import _get_user_bc_role
+    from app.schemas.bc5_models import BCUserRole
+    
+    user_role = await _get_user_bc_role(current_user)
+    
+    # Viewers can only list approved plans
+    if user_role == BCUserRole.VIEWER:
+        status_value = "approved"  # Force approved status for viewers
+    else:
+        status_value = status.value if status else None
+    
     offset = (page - 1) * per_page
-    status_value = status.value if status else None
     
     # Get plans
     plans = await bc_repo.list_plans(
@@ -299,10 +313,36 @@ async def get_plan(
     Returns the full plan details including related template and current version.
     
     **Authorization**: Requires BC viewer role or higher.
+    **Access Control**: Viewers without edit permission can only access approved plans.
     """
     plan = await bc_repo.get_plan_by_id(plan_id)
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Check if user has editor role or higher
+    from app.api.dependencies.bc_rbac import _get_user_bc_role
+    from app.schemas.bc5_models import BCUserRole
+    
+    user_role = await _get_user_bc_role(current_user)
+    
+    # Viewers can only access approved plans
+    if user_role == BCUserRole.VIEWER and plan.get("status") != "approved":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Plan must be approved for viewing."
+        )
+    
+    # Log access to approved plans for audit compliance
+    if plan.get("status") == "approved":
+        await bc_repo.create_audit_entry(
+            plan_id=plan_id,
+            action="approved_plan_accessed",
+            actor_user_id=current_user["id"],
+            details_json={
+                "user_role": user_role.value if user_role else "unknown",
+                "plan_title": plan.get("title"),
+            },
+        )
     
     # Enrich response
     await _enrich_user_name(plan, "owner_user_id", "owner_name")
@@ -466,14 +506,41 @@ async def get_version(
     Returns the full version details including content.
     
     **Authorization**: Requires BC viewer role or higher.
+    **Access Control**: Viewers without edit permission can only access versions of approved plans.
     """
     plan = await bc_repo.get_plan_by_id(plan_id)
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
     
+    # Check if user has editor role or higher
+    from app.api.dependencies.bc_rbac import _get_user_bc_role
+    from app.schemas.bc5_models import BCUserRole
+    
+    user_role = await _get_user_bc_role(current_user)
+    
+    # Viewers can only access versions of approved plans
+    if user_role == BCUserRole.VIEWER and plan.get("status") != "approved":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Plan must be approved for viewing versions."
+        )
+    
     version = await bc_repo.get_version_by_id(version_id)
     if not version or version["plan_id"] != plan_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    
+    # Log access to approved plan versions for audit compliance
+    if plan.get("status") == "approved":
+        await bc_repo.create_audit_entry(
+            plan_id=plan_id,
+            action="approved_plan_version_accessed",
+            actor_user_id=current_user["id"],
+            details_json={
+                "user_role": user_role.value if user_role else "unknown",
+                "version_id": version_id,
+                "version_number": version.get("version_number"),
+            },
+        )
     
     # Enrich response
     await _enrich_user_name(version, "authored_by_user_id", "author_name")
@@ -987,7 +1054,12 @@ async def upload_plan_attachment(
     """
     Upload a file attachment to a plan.
     
-    Accepts file uploads and stores them securely with metadata tracking.
+    Accepts file uploads and stores them securely with comprehensive validation:
+    - Validates file size (max 50 MB)
+    - Checks file type against allowed extensions
+    - Rejects executable files for security
+    - Optionally scans with antivirus if available
+    - Tracks upload metadata in audit log
     
     **Authorization**: Requires BC editor role or higher.
     """
@@ -995,24 +1067,28 @@ async def upload_plan_attachment(
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
     
-    # Validate file
-    if not file.filename:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No filename provided")
+    # Get settings for AV scanning
+    settings = get_settings()
+    enable_av_scan = getattr(settings, "enable_av_scan", False)
     
-    # Read file content
-    content = await file.read()
-    size_bytes = len(content)
+    # Validate file with comprehensive security checks
+    content, sanitized_filename, size_bytes = await bc_file_validation.validate_upload_file(
+        upload=file,
+        max_size=bc_file_validation.MAX_FILE_SIZE,
+        allow_executables=False,
+        scan_with_av=enable_av_scan,
+    )
     
     # Calculate hash
-    file_hash = hashlib.sha256(content).hexdigest()
+    file_hash = bc_file_validation.calculate_file_hash(content)
     
     # Determine storage path (simplified - in production would use file storage service)
-    storage_path = f"bc_attachments/{plan_id}/{file_hash}_{file.filename}"
+    storage_path = f"bc_attachments/{plan_id}/{file_hash}_{sanitized_filename}"
     
     # Create attachment record
     attachment = await bc_repo.create_attachment(
         plan_id=plan_id,
-        file_name=file.filename,
+        file_name=sanitized_filename,
         storage_path=storage_path,
         uploaded_by_user_id=current_user["id"],
         content_type=file.content_type,
@@ -1025,7 +1101,13 @@ async def upload_plan_attachment(
         plan_id=plan_id,
         action="attachment_uploaded",
         actor_user_id=current_user["id"],
-        details_json={"filename": file.filename, "attachment_id": attachment["id"]},
+        details_json={
+            "filename": sanitized_filename,
+            "original_filename": file.filename,
+            "attachment_id": attachment["id"],
+            "size_bytes": size_bytes,
+            "content_type": file.content_type,
+        },
     )
     
     # TODO: Actually store the file using file storage service
