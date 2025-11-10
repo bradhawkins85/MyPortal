@@ -1,0 +1,411 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-container">
+  <!-- Success/Error Messages -->
+  {% if success_message %}
+    <div class="alert alert-success">{{ success_message }}</div>
+  {% endif %}
+  {% if error_message %}
+    <div class="alert alert-error">{{ error_message }}</div>
+  {% endif %}
+
+  <!-- Plan Overview Section -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Plan Overview</h2>
+      {% if can_edit %}
+      <button type="button" class="btn btn-primary" onclick="document.getElementById('editPlanModal').showModal()">
+        Edit Plan Details
+      </button>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <div class="form-group">
+        <label class="form-label">Title</label>
+        <p class="form-value">{{ plan.title }}</p>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Executive Summary</label>
+        <p class="form-value">{{ plan.executive_summary or 'No executive summary provided yet.' }}</p>
+      </div>
+
+      <div class="grid grid-cols-3 gap-4">
+        <div class="form-group">
+          <label class="form-label">Version</label>
+          <p class="form-value">{{ plan.version }}</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Last Reviewed</label>
+          <p class="form-value">{{ plan.last_reviewed.strftime('%Y-%m-%d') if plan.last_reviewed else 'Not reviewed yet' }}</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Next Review</label>
+          <p class="form-value">{{ plan.next_review.strftime('%Y-%m-%d') if plan.next_review else 'Not scheduled' }}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Objectives Section -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Plan Objectives</h2>
+      {% if can_edit %}
+      <button type="button" class="btn btn-primary" onclick="document.getElementById('addObjectiveModal').showModal()">
+        Add Objective
+      </button>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      {% if objectives %}
+      <ul class="list-disc list-inside space-y-2">
+        {% for objective in objectives %}
+        <li class="flex items-center justify-between">
+          <span>{{ objective.objective_text }}</span>
+          {% if can_edit %}
+          <form method="post" action="/bcp/objectives/{{ objective.id }}/delete" class="inline">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this objective?')">
+              Delete
+            </button>
+          </form>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-muted">No objectives defined yet.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- Distribution List Section -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Distribution List</h2>
+      {% if can_edit %}
+      <button type="button" class="btn btn-primary" onclick="document.getElementById('addDistributionModal').showModal()">
+        Add Entry
+      </button>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      {% if distribution_list %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Copy #</th>
+            <th>Name</th>
+            <th>Location</th>
+            {% if can_edit %}
+            <th>Actions</th>
+            {% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in distribution_list %}
+          <tr>
+            <td>{{ entry.copy_number }}</td>
+            <td>{{ entry.name }}</td>
+            <td>{{ entry.location or '-' }}</td>
+            {% if can_edit %}
+            <td>
+              <form method="post" action="/bcp/distribution/{{ entry.id }}/delete" class="inline">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this entry?')">
+                  Delete
+                </button>
+              </form>
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="text-muted">No distribution list entries yet.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- PPRR Cards -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Business Continuity Framework (PPRR)</h2>
+    </div>
+    <div class="card-body">
+      <div class="grid grid-cols-2 gap-4">
+        <!-- Prevention -->
+        <a href="/bcp/risks" class="pprr-card">
+          <div class="pprr-card-icon" style="background: #3b82f6;">
+            <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor">
+              <path d="M12 2L4 6v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V6l-8-4zm0 10a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/>
+            </svg>
+          </div>
+          <h3 class="pprr-card-title">Prevention</h3>
+          <p class="pprr-card-description">Risk Assessment & Mitigation</p>
+        </a>
+
+        <!-- Preparedness -->
+        <a href="/bcp/bia" class="pprr-card">
+          <div class="pprr-card-icon" style="background: #10b981;">
+            <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor">
+              <path d="M9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm2-7h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"/>
+            </svg>
+          </div>
+          <h3 class="pprr-card-title">Preparedness</h3>
+          <p class="pprr-card-description">Business Impact Analysis</p>
+        </a>
+
+        <!-- Response -->
+        <a href="/bcp/incident" class="pprr-card">
+          <div class="pprr-card-icon" style="background: #f59e0b;">
+            <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor">
+              <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+            </svg>
+          </div>
+          <h3 class="pprr-card-title">Response</h3>
+          <p class="pprr-card-description">Incident Response Procedures</p>
+        </a>
+
+        <!-- Recovery -->
+        <a href="/bcp/recovery" class="pprr-card">
+          <div class="pprr-card-icon" style="background: #8b5cf6;">
+            <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+            </svg>
+          </div>
+          <h3 class="pprr-card-title">Recovery</h3>
+          <p class="pprr-card-description">Recovery Strategies & Actions</p>
+        </a>
+      </div>
+
+      <!-- Additional Links -->
+      <div class="grid grid-cols-3 gap-4 mt-4">
+        <a href="/bcp/contacts" class="link-card">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+          </svg>
+          <span>Contacts & Claims</span>
+        </a>
+
+        <a href="/bcp/schedules" class="link-card">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/>
+          </svg>
+          <span>Review Schedules</span>
+        </a>
+
+        <a href="/bcp/export" class="link-card">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2z"/>
+          </svg>
+          <span>Export Plan</span>
+        </a>
+      </div>
+
+      <div class="mt-4 text-center">
+        <a href="/bcp/glossary" class="btn btn-secondary">View Glossary</a>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- Edit Plan Modal -->
+{% if can_edit %}
+<dialog id="editPlanModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Edit Plan Details</h3>
+      <button type="button" onclick="document.getElementById('editPlanModal').close()">×</button>
+    </div>
+    <form method="post" action="/bcp/update">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="title" class="form-label">Title</label>
+          <input type="text" id="title" name="title" class="form-input" value="{{ plan.title }}" required>
+        </div>
+
+        <div class="form-group">
+          <label for="executive_summary" class="form-label">Executive Summary</label>
+          <textarea id="executive_summary" name="executive_summary" class="form-input" rows="4">{{ plan.executive_summary or '' }}</textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="version" class="form-label">Version</label>
+          <input type="text" id="version" name="version" class="form-input" value="{{ plan.version }}">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('editPlanModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<!-- Add Objective Modal -->
+<dialog id="addObjectiveModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Add Objective</h3>
+      <button type="button" onclick="document.getElementById('addObjectiveModal').close()">×</button>
+    </div>
+    <form method="post" action="/bcp/objectives">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="objective_text" class="form-label">Objective</label>
+          <textarea id="objective_text" name="objective_text" class="form-input" rows="3" required></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('addObjectiveModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Objective</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<!-- Add Distribution Entry Modal -->
+<dialog id="addDistributionModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Add Distribution Entry</h3>
+      <button type="button" onclick="document.getElementById('addDistributionModal').close()">×</button>
+    </div>
+    <form method="post" action="/bcp/distribution">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="copy_number" class="form-label">Copy #</label>
+          <input type="text" id="copy_number" name="copy_number" class="form-input" required>
+        </div>
+
+        <div class="form-group">
+          <label for="name" class="form-label">Name</label>
+          <input type="text" id="name" name="name" class="form-input" required>
+        </div>
+
+        <div class="form-group">
+          <label for="location" class="form-label">Location</label>
+          <input type="text" id="location" name="location" class="form-input">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('addDistributionModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Entry</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+{% endif %}
+
+<style>
+.pprr-card {
+  display: block;
+  padding: 1.5rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.2s;
+}
+
+.pprr-card:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.pprr-card-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  margin-bottom: 1rem;
+}
+
+.pprr-card-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.pprr-card-description {
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.link-card {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.2s;
+}
+
+.link-card:hover {
+  background: #f9fafb;
+}
+
+.modal {
+  border: none;
+  border-radius: 0.5rem;
+  padding: 0;
+  max-width: 500px;
+  width: 90%;
+}
+
+.modal::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+  padding: 0;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.modal-header button {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #6b7280;
+}
+
+.modal-body {
+  padding: 1.5rem;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+</style>
+{% endblock %}
