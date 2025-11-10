@@ -1,0 +1,418 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-container">
+  <!-- Success/Error Messages -->
+  {% if request.query_params.get('success') %}
+    <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
+  {% endif %}
+  {% if request.query_params.get('error') %}
+    <div class="alert alert-error">{{ request.query_params.get('error') }}</div>
+  {% endif %}
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Roles & Responsibilities</h1>
+      <p class="page-description">Define incident response roles, responsibilities, and assign primary/alternate staff</p>
+    </div>
+    <div class="page-actions">
+      <a href="/bcp" class="btn btn-secondary">Back to Overview</a>
+      {% if can_edit %}
+        <button class="btn btn-primary" onclick="showAddRoleModal()">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+            <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+          </svg>
+          Add Role
+        </button>
+        {% if not roles %}
+        <form action="/bcp/roles/seed" method="post" style="display: inline;">
+          <button type="submit" class="btn btn-secondary">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+            </svg>
+            Seed Example Role
+          </button>
+        </form>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Roles List -->
+  {% if roles %}
+    {% for role in roles %}
+    <section class="card">
+      <div class="card-header">
+        <h2 class="card-title">{{ role.title }}</h2>
+        {% if can_edit %}
+        <div class="card-actions">
+          <button class="btn btn-sm btn-secondary" onclick="showEditRoleModal({{ role.id }}, '{{ role.title|replace("'", "\\'") }}', {{ role.responsibilities|tojson|safe if role.responsibilities else 'null' }})">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+              <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+            </svg>
+            Edit Role
+          </button>
+          <button class="btn btn-sm btn-primary" onclick="showAssignUserModal({{ role.id }}, '{{ role.title|replace("'", "\\'") }}')">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+              <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+            </svg>
+            Assign User
+          </button>
+          <form action="/bcp/roles/{{ role.id }}/delete" method="post" style="display: inline;">
+            <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this role? All assignments will also be deleted.')">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+              </svg>
+              Delete
+            </button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        {% if role.responsibilities %}
+        <div class="form-group">
+          <label class="form-label">Responsibilities</label>
+          <div class="responsibilities-text">{{ role.responsibilities|replace('\n', '<br>')|safe }}</div>
+        </div>
+        {% endif %}
+
+        <!-- Assignments -->
+        <div class="form-group">
+          <label class="form-label">Assigned Staff</label>
+          {% if role.assignments %}
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role Type</th>
+                <th>Contact Info</th>
+                {% if can_edit %}
+                <th>Actions</th>
+                {% endif %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for assignment in role.assignments %}
+              <tr>
+                <td>
+                  {{ assignment.user.first_name if assignment.user.first_name else '' }} 
+                  {{ assignment.user.last_name if assignment.user.last_name else '' }}
+                  {% if not assignment.user.first_name and not assignment.user.last_name %}
+                    {{ assignment.user.email }}
+                  {% endif %}
+                </td>
+                <td>{{ assignment.user.email }}</td>
+                <td>
+                  {% if assignment.is_alternate %}
+                    <span class="badge badge-secondary">Alternate</span>
+                  {% else %}
+                    <span class="badge badge-primary">Primary</span>
+                  {% endif %}
+                </td>
+                <td>{{ assignment.contact_info or '-' }}</td>
+                {% if can_edit %}
+                <td>
+                  <button class="btn-icon" onclick="showEditAssignmentModal({{ assignment.id }}, {{ assignment.user_id }}, {{ assignment.is_alternate|tojson }}, {{ assignment.contact_info|tojson|safe if assignment.contact_info else 'null' }})" title="Edit">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                      <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                    </svg>
+                  </button>
+                  <form action="/bcp/roles/assignments/{{ assignment.id }}/delete" method="post" style="display: inline;">
+                    <button type="submit" class="btn-icon btn-danger" onclick="return confirm('Remove this assignment?')" title="Remove">
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                        <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                      </svg>
+                    </button>
+                  </form>
+                </td>
+                {% endif %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          <p class="text-muted">No staff assigned yet.</p>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+    {% endfor %}
+  {% else %}
+    <section class="card">
+      <div class="card-body">
+        <p class="text-muted">No roles defined yet. Add a role to get started, or seed an example Team Leader role.</p>
+      </div>
+    </section>
+  {% endif %}
+</div>
+
+<!-- Add Role Modal -->
+<div id="addRoleModal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Add Role</h2>
+      <button class="modal-close" onclick="closeAddRoleModal()">&times;</button>
+    </div>
+    <form action="/bcp/roles" method="post">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="role_title">Title *</label>
+          <input type="text" id="role_title" name="title" required class="form-control" placeholder="e.g., Team Leader, Communications Officer">
+        </div>
+        
+        <div class="form-group">
+          <label for="role_responsibilities">Responsibilities</label>
+          <textarea id="role_responsibilities" name="responsibilities" class="form-control" rows="8" placeholder="Enter responsibilities, one per line"></textarea>
+          <p class="help-text">Use bullet points (•) or list each responsibility on a new line</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeAddRoleModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Role</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit Role Modal -->
+<div id="editRoleModal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Edit Role</h2>
+      <button class="modal-close" onclick="closeEditRoleModal()">&times;</button>
+    </div>
+    <form id="editRoleForm" method="post">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="edit_role_title">Title *</label>
+          <input type="text" id="edit_role_title" name="title" required class="form-control">
+        </div>
+        
+        <div class="form-group">
+          <label for="edit_role_responsibilities">Responsibilities</label>
+          <textarea id="edit_role_responsibilities" name="responsibilities" class="form-control" rows="8"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeEditRoleModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Update Role</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Assign User Modal -->
+<div id="assignUserModal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="assignUserModalTitle">Assign User</h2>
+      <button class="modal-close" onclick="closeAssignUserModal()">&times;</button>
+    </div>
+    <form id="assignUserForm" method="post">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="assign_user_id">User *</label>
+          <select id="assign_user_id" name="user_id" required class="form-control">
+            <option value="">Select a user...</option>
+            {% for user in all_users %}
+            <option value="{{ user.id }}">
+              {% if user.first_name or user.last_name %}
+                {{ user.first_name }} {{ user.last_name }} ({{ user.email }})
+              {% else %}
+                {{ user.email }}
+              {% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label>
+            <input type="checkbox" name="is_alternate" value="true">
+            This is an alternate/backup assignment
+          </label>
+        </div>
+        
+        <div class="form-group">
+          <label for="assign_contact_info">Emergency Contact Info</label>
+          <input type="text" id="assign_contact_info" name="contact_info" class="form-control" placeholder="e.g., Mobile: +1-555-0100">
+          <p class="help-text">Additional contact information for emergency situations</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeAssignUserModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Assign User</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit Assignment Modal -->
+<div id="editAssignmentModal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Edit Assignment</h2>
+      <button class="modal-close" onclick="closeEditAssignmentModal()">&times;</button>
+    </div>
+    <form id="editAssignmentForm" method="post">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="edit_assign_user_id">User *</label>
+          <select id="edit_assign_user_id" name="user_id" required class="form-control">
+            {% for user in all_users %}
+            <option value="{{ user.id }}">
+              {% if user.first_name or user.last_name %}
+                {{ user.first_name }} {{ user.last_name }} ({{ user.email }})
+              {% else %}
+                {{ user.email }}
+              {% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="edit_is_alternate" name="is_alternate" value="true">
+            This is an alternate/backup assignment
+          </label>
+        </div>
+        
+        <div class="form-group">
+          <label for="edit_assign_contact_info">Emergency Contact Info</label>
+          <input type="text" id="edit_assign_contact_info" name="contact_info" class="form-control">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeEditAssignmentModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Update Assignment</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+.responsibilities-text {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  padding: 0.75rem;
+  background: #f8f9fa;
+  border-radius: 0.25rem;
+  border: 1px solid #e9ecef;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 0.25rem;
+}
+
+.badge-primary {
+  background: #0066cc;
+  color: white;
+}
+
+.badge-secondary {
+  background: #6c757d;
+  color: white;
+}
+
+.btn-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  color: #6c757d;
+  transition: color 0.2s;
+}
+
+.btn-icon:hover {
+  color: #0066cc;
+}
+
+.btn-icon.btn-danger:hover {
+  color: #dc3545;
+}
+
+.help-text {
+  font-size: 0.875rem;
+  color: #6c757d;
+  margin-top: 0.25rem;
+}
+
+.card-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+</style>
+
+<script>
+function showAddRoleModal() {
+  document.getElementById('addRoleModal').style.display = 'flex';
+}
+
+function closeAddRoleModal() {
+  document.getElementById('addRoleModal').style.display = 'none';
+  document.getElementById('role_title').value = '';
+  document.getElementById('role_responsibilities').value = '';
+}
+
+function showEditRoleModal(roleId, title, responsibilities) {
+  const modal = document.getElementById('editRoleModal');
+  const form = document.getElementById('editRoleForm');
+  form.action = '/bcp/roles/' + roleId + '/update';
+  document.getElementById('edit_role_title').value = title;
+  document.getElementById('edit_role_responsibilities').value = responsibilities || '';
+  modal.style.display = 'flex';
+}
+
+function closeEditRoleModal() {
+  document.getElementById('editRoleModal').style.display = 'none';
+}
+
+function showAssignUserModal(roleId, roleTitle) {
+  const modal = document.getElementById('assignUserModal');
+  const form = document.getElementById('assignUserForm');
+  form.action = '/bcp/roles/' + roleId + '/assign';
+  document.getElementById('assignUserModalTitle').textContent = 'Assign User to ' + roleTitle;
+  document.getElementById('assign_user_id').value = '';
+  document.querySelector('#assignUserForm input[name="is_alternate"]').checked = false;
+  document.getElementById('assign_contact_info').value = '';
+  modal.style.display = 'flex';
+}
+
+function closeAssignUserModal() {
+  document.getElementById('assignUserModal').style.display = 'none';
+}
+
+function showEditAssignmentModal(assignmentId, userId, isAlternate, contactInfo) {
+  const modal = document.getElementById('editAssignmentModal');
+  const form = document.getElementById('editAssignmentForm');
+  form.action = '/bcp/roles/assignments/' + assignmentId + '/update';
+  document.getElementById('edit_assign_user_id').value = userId;
+  document.getElementById('edit_is_alternate').checked = isAlternate;
+  document.getElementById('edit_assign_contact_info').value = contactInfo || '';
+  modal.style.display = 'flex';
+}
+
+function closeEditAssignmentModal() {
+  document.getElementById('editAssignmentModal').style.display = 'none';
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+  const modals = ['addRoleModal', 'editRoleModal', 'assignUserModal', 'editAssignmentModal'];
+  modals.forEach(modalId => {
+    const modal = document.getElementById(modalId);
+    if (event.target === modal) {
+      modal.style.display = 'none';
+    }
+  });
+}
+</script>
+{% endblock %}
