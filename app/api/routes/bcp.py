@@ -193,15 +193,44 @@ async def bcp_glossary(request: Request):
     return templates.TemplateResponse("bcp/glossary.html", context)
 
 
-# Stub pages for downstream features
+# Risk Assessment pages and endpoints
 @router.get("/risks", response_class=HTMLResponse, include_in_schema=False)
-async def bcp_risks(request: Request):
-    """BCP Risks page (stub)."""
+async def bcp_risks(request: Request, severity: str = Query(None), heatmap_filter: str = Query(None)):
+    """BCP Risks page with list, heatmap, and legend."""
     user, company_id = await _require_bcp_view(request)
     
     from app.main import _build_base_context
     from app.core.config import get_templates_config
     from fastapi.templating import Jinja2Templates
+    from app.services.risk_calculator import (
+        get_severity_band_info,
+        get_likelihood_scale,
+        get_impact_scale,
+    )
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    # Get all risks
+    all_risks = await bcp_repo.list_risks(plan["id"])
+    
+    # Apply filters
+    risks = all_risks
+    if severity:
+        risks = [r for r in risks if r.get("severity") == severity]
+    if heatmap_filter:
+        # Format is "likelihood,impact"
+        try:
+            likelihood, impact = map(int, heatmap_filter.split(","))
+            risks = [r for r in risks if r.get("likelihood") == likelihood and r.get("impact") == impact]
+        except (ValueError, AttributeError):
+            pass
+    
+    # Get heatmap data
+    heatmap_data = await bcp_repo.get_risk_heatmap_data(plan["id"])
     
     templates_config = get_templates_config()
     templates = Jinja2Templates(directory=str(templates_config.template_path))
@@ -211,11 +240,19 @@ async def bcp_risks(request: Request):
         user,
         extra={
             "title": "Risk Assessment",
-            "page_type": "risks",
+            "plan": plan,
+            "risks": risks,
+            "heatmap_data": heatmap_data,
+            "severity_bands": get_severity_band_info(),
+            "likelihood_scale": get_likelihood_scale(),
+            "impact_scale": get_impact_scale(),
+            "active_severity_filter": severity,
+            "active_heatmap_filter": heatmap_filter,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/stub.html", context)
+    return templates.TemplateResponse("bcp/risks.html", context)
 
 
 @router.get("/bia", response_class=HTMLResponse, include_in_schema=False)
@@ -424,6 +461,189 @@ async def delete_objective(
     
     return RedirectResponse(
         url="/bcp?success=" + quote("Objective deleted"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/risks", include_in_schema=False)
+async def create_risk(
+    request: Request,
+    description: str = Form(...),
+    likelihood: int = Form(...),
+    impact: int = Form(...),
+    preventative_actions: str = Form(None),
+    contingency_plans: str = Form(None),
+):
+    """Create a new risk."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    from app.services.risk_calculator import calculate_risk
+    
+    # Validate likelihood and impact
+    if not (1 <= likelihood <= 4):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Likelihood must be between 1 and 4")
+    if not (1 <= impact <= 4):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Impact must be between 1 and 4")
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Calculate risk rating and severity
+    rating, severity = calculate_risk(likelihood, impact)
+    
+    await bcp_repo.create_risk(
+        plan["id"],
+        description,
+        likelihood,
+        impact,
+        rating,
+        severity,
+        preventative_actions if preventative_actions else None,
+        contingency_plans if contingency_plans else None,
+    )
+    
+    return RedirectResponse(
+        url="/bcp/risks?success=" + quote("Risk created successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/risks/{risk_id}/update", include_in_schema=False)
+async def update_risk(
+    request: Request,
+    risk_id: int,
+    description: str = Form(...),
+    likelihood: int = Form(...),
+    impact: int = Form(...),
+    preventative_actions: str = Form(None),
+    contingency_plans: str = Form(None),
+):
+    """Update a risk."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    from app.services.risk_calculator import calculate_risk
+    
+    # Validate likelihood and impact
+    if not (1 <= likelihood <= 4):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Likelihood must be between 1 and 4")
+    if not (1 <= impact <= 4):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Impact must be between 1 and 4")
+    
+    # Calculate risk rating and severity
+    rating, severity = calculate_risk(likelihood, impact)
+    
+    updated = await bcp_repo.update_risk(
+        risk_id,
+        description=description,
+        likelihood=likelihood,
+        impact=impact,
+        rating=rating,
+        severity=severity,
+        preventative_actions=preventative_actions if preventative_actions else None,
+        contingency_plans=contingency_plans if contingency_plans else None,
+    )
+    
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Risk not found")
+    
+    return RedirectResponse(
+        url="/bcp/risks?success=" + quote("Risk updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/risks/{risk_id}/delete", include_in_schema=False)
+async def delete_risk(
+    request: Request,
+    risk_id: int,
+):
+    """Delete a risk."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    deleted = await bcp_repo.delete_risk(risk_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Risk not found")
+    
+    return RedirectResponse(
+        url="/bcp/risks?success=" + quote("Risk deleted successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get("/risks/export", include_in_schema=False)
+async def export_risks_csv(request: Request):
+    """Export risks to CSV."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from fastapi.responses import StreamingResponse
+    import csv
+    from io import StringIO
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    risks = await bcp_repo.list_risks(plan["id"])
+    
+    # Create CSV
+    output = StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "ID",
+            "Description",
+            "Likelihood",
+            "Impact",
+            "Rating",
+            "Severity",
+            "Preventative Actions",
+            "Contingency Plans",
+            "Created At",
+            "Updated At",
+        ],
+    )
+    writer.writeheader()
+    
+    for risk in risks:
+        writer.writerow({
+            "ID": risk["id"],
+            "Description": risk["description"],
+            "Likelihood": risk.get("likelihood", ""),
+            "Impact": risk.get("impact", ""),
+            "Rating": risk.get("rating", ""),
+            "Severity": risk.get("severity", ""),
+            "Preventative Actions": risk.get("preventative_actions") or "",
+            "Contingency Plans": risk.get("contingency_plans") or "",
+            "Created At": risk.get("created_at", ""),
+            "Updated At": risk.get("updated_at", ""),
+        })
+    
+    output.seek(0)
+    
+    from datetime import datetime as dt
+    filename = f"risk_register_{dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@router.post("/risks/seed", include_in_schema=False)
+async def seed_risks(request: Request):
+    """Seed example risks."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    await bcp_repo.seed_example_risks(plan["id"])
+    
+    return RedirectResponse(
+        url="/bcp/risks?success=" + quote("Example risks added successfully"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
