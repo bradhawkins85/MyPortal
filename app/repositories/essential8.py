@@ -676,3 +676,117 @@ async def update_company_requirement_compliance(
     
     # Return updated record
     return await get_company_requirement_compliance(company_id, requirement_id)
+
+
+async def calculate_control_compliance_from_requirements(
+    company_id: int,
+    control_id: int,
+) -> dict[str, Any]:
+    """
+    Calculate if a control is compliant based on its requirements.
+    A control is considered compliant if ALL its requirements are either
+    'compliant' or 'not_applicable'.
+    
+    Returns a dict with:
+    - is_compliant: bool
+    - total_requirements: int
+    - compliant_count: int
+    - not_applicable_count: int
+    - in_progress_count: int
+    - non_compliant_count: int
+    - not_started_count: int
+    """
+    # Get all requirements for this control
+    all_requirements = await list_essential8_requirements(control_id=control_id)
+    total_requirements = len(all_requirements)
+    
+    if total_requirements == 0:
+        return {
+            "is_compliant": False,
+            "total_requirements": 0,
+            "compliant_count": 0,
+            "not_applicable_count": 0,
+            "in_progress_count": 0,
+            "non_compliant_count": 0,
+            "not_started_count": 0,
+        }
+    
+    # Get all requirement compliance records for this control
+    requirement_compliance = await list_company_requirement_compliance(
+        company_id=company_id,
+        control_id=control_id,
+    )
+    
+    # Count statuses
+    status_counts = {
+        "compliant": 0,
+        "not_applicable": 0,
+        "in_progress": 0,
+        "non_compliant": 0,
+        "not_started": 0,
+    }
+    
+    # Build a map of requirement compliance
+    compliance_map = {rc["requirement_id"]: rc for rc in requirement_compliance}
+    
+    for requirement in all_requirements:
+        req_id = requirement["id"]
+        if req_id in compliance_map:
+            status = compliance_map[req_id]["status"]
+        else:
+            status = "not_started"
+        
+        if status in status_counts:
+            status_counts[status] += 1
+    
+    # A control is compliant if all requirements are either compliant or not_applicable
+    is_compliant = (
+        status_counts["compliant"] + status_counts["not_applicable"]
+    ) == total_requirements
+    
+    return {
+        "is_compliant": is_compliant,
+        "total_requirements": total_requirements,
+        "compliant_count": status_counts["compliant"],
+        "not_applicable_count": status_counts["not_applicable"],
+        "in_progress_count": status_counts["in_progress"],
+        "non_compliant_count": status_counts["non_compliant"],
+        "not_started_count": status_counts["not_started"],
+    }
+
+
+async def auto_update_control_compliance_from_requirements(
+    company_id: int,
+    control_id: int,
+) -> Optional[dict[str, Any]]:
+    """
+    Automatically update a control's compliance status based on its requirements.
+    
+    This should be called after updating requirement compliance to keep the
+    control status in sync.
+    """
+    # Calculate compliance from requirements
+    compliance_calc = await calculate_control_compliance_from_requirements(
+        company_id=company_id,
+        control_id=control_id,
+    )
+    
+    # Determine the appropriate status
+    if compliance_calc["is_compliant"]:
+        new_status = ComplianceStatus.COMPLIANT
+    elif compliance_calc["non_compliant_count"] > 0:
+        new_status = ComplianceStatus.NON_COMPLIANT
+    elif compliance_calc["in_progress_count"] > 0:
+        new_status = ComplianceStatus.IN_PROGRESS
+    elif compliance_calc["not_started_count"] > 0:
+        new_status = ComplianceStatus.NOT_STARTED
+    else:
+        # All are not_applicable
+        new_status = ComplianceStatus.NOT_APPLICABLE
+    
+    # Update the control compliance
+    return await update_company_compliance(
+        company_id=company_id,
+        control_id=control_id,
+        status=new_status,
+    )
