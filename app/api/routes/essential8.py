@@ -462,6 +462,14 @@ async def update_company_requirement_compliance(
             detail="Requirement compliance record not found",
         )
     
+    # Get the requirement to find its control_id
+    requirement = await essential8_repo.get_essential8_requirement(requirement_id)
+    if not requirement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Requirement not found",
+        )
+    
     # Update the record
     updates = payload.model_dump(exclude_unset=True)
     updated = await essential8_repo.update_company_requirement_compliance(
@@ -475,5 +483,11 @@ async def update_company_requirement_compliance(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update requirement compliance record",
         )
+    
+    # Auto-update the control compliance based on requirement statuses
+    await essential8_repo.auto_update_control_compliance_from_requirements(
+        company_id=company_id,
+        control_id=requirement["control_id"],
+    )
     
     return updated
