@@ -403,6 +403,7 @@ async def bcp_recovery(
     from fastapi.templating import Jinja2Templates
     from app.repositories import users as user_repo
     from app.services.time_utils import humanize_hours
+    from datetime import datetime
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -458,6 +459,7 @@ async def bcp_recovery(
             "status_filter": status_filter,
             "activity_filter": activity_filter,
             "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "now": datetime.utcnow(),
         },
     )
     
