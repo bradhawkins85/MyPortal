@@ -11,7 +11,7 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from typing import Optional
 
 from app.api.dependencies.bc_rbac import (
@@ -22,6 +22,7 @@ from app.api.dependencies.bc_rbac import (
 )
 from app.repositories import bc3 as bc_repo
 from app.repositories import users as user_repo
+from app.services import bc_export_service
 from app.schemas.bc5_models import (
     BCAcknowledge,
     BCAcknowledgeResponse,
@@ -948,44 +949,68 @@ async def export_plan_docx(
     """
     Export a plan to DOCX format.
     
-    Generates a DOCX document from the plan content.
+    Generates a DOCX document from the plan content using python-docx.
+    Preserves government template structure and styling.
+    Embeds revision metadata (title, version, date, author).
+    Includes tables for BIA, risk register, contacts, and vendors.
     
     **Authorization**: Requires BC viewer role or higher.
-    **Rate Limited**: This endpoint is rate-limited to prevent abuse.
+    **Rate Limited**: This endpoint is rate-limited to prevent abuse (configurable via EXPORT_MAX_PER_MINUTE).
     """
     plan = await bc_repo.get_plan_by_id(plan_id)
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
     
     # Get version to export
-    if export_request.version_id:
-        version = await bc_repo.get_version_by_id(export_request.version_id)
+    version_id = export_request.version_id
+    if version_id:
+        version = await bc_repo.get_version_by_id(version_id)
         if not version or version["plan_id"] != plan_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
     else:
         version = await bc_repo.get_active_version(plan_id)
         if not version:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active version found")
+        version_id = version["id"]
     
-    # TODO: Actually generate DOCX export
-    # For now, return mock response
-    export_url = f"/api/bc/exports/{plan_id}/v{version['version_number']}.docx"
-    
-    # Create audit entry
-    await bc_repo.create_audit_entry(
-        plan_id=plan_id,
-        action="exported_docx",
-        actor_user_id=current_user["id"],
-        details_json={"version_id": version["id"]},
-    )
-    
-    return BCExportResponse(
-        export_url=export_url,
-        format=BCExportFormat.DOCX,
-        version_id=version["id"],
-        generated_at=datetime.now(timezone.utc),
-        file_hash=version.get("docx_export_hash"),
-    )
+    try:
+        # Generate DOCX export
+        docx_buffer, content_hash = await bc_export_service.export_to_docx(
+            plan_id=plan_id,
+            version_id=version_id,
+        )
+        
+        # Update version with export hash
+        await bc_repo.update_version_export_hash(
+            version_id=version_id,
+            docx_hash=content_hash,
+        )
+        
+        # Create audit entry
+        await bc_repo.create_audit_entry(
+            plan_id=plan_id,
+            action="exported_docx",
+            actor_user_id=current_user["id"],
+            details_json={"version_id": version_id, "content_hash": content_hash},
+        )
+        
+        # For now, return the metadata (actual file download would be a separate endpoint)
+        export_url = f"/api/bc/exports/{plan_id}/v{version['version_number']}.docx"
+        
+        return BCExportResponse(
+            export_url=export_url,
+            format=BCExportFormat.DOCX,
+            version_id=version_id,
+            generated_at=datetime.now(timezone.utc),
+            file_hash=content_hash,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate DOCX export: {str(e)}",
+        )
 
 
 @router.post("/plans/{plan_id}/export/pdf", response_model=BCExportResponse)
@@ -997,44 +1022,67 @@ async def export_plan_pdf(
     """
     Export a plan to PDF format.
     
-    Generates a PDF document from the plan content.
+    Generates a PDF document from the plan content using WeasyPrint.
+    Converts rendered HTML (Jinja2 template) to PDF with professional government styling.
+    Preserves template structure and includes all metadata.
     
     **Authorization**: Requires BC viewer role or higher.
-    **Rate Limited**: This endpoint is rate-limited to prevent abuse.
+    **Rate Limited**: This endpoint is rate-limited to prevent abuse (configurable via EXPORT_MAX_PER_MINUTE).
     """
     plan = await bc_repo.get_plan_by_id(plan_id)
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
     
     # Get version to export
-    if export_request.version_id:
-        version = await bc_repo.get_version_by_id(export_request.version_id)
+    version_id = export_request.version_id
+    if version_id:
+        version = await bc_repo.get_version_by_id(version_id)
         if not version or version["plan_id"] != plan_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
     else:
         version = await bc_repo.get_active_version(plan_id)
         if not version:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active version found")
+        version_id = version["id"]
     
-    # TODO: Actually generate PDF export
-    # For now, return mock response
-    export_url = f"/api/bc/exports/{plan_id}/v{version['version_number']}.pdf"
-    
-    # Create audit entry
-    await bc_repo.create_audit_entry(
-        plan_id=plan_id,
-        action="exported_pdf",
-        actor_user_id=current_user["id"],
-        details_json={"version_id": version["id"]},
-    )
-    
-    return BCExportResponse(
-        export_url=export_url,
-        format=BCExportFormat.PDF,
-        version_id=version["id"],
-        generated_at=datetime.now(timezone.utc),
-        file_hash=version.get("pdf_export_hash"),
-    )
+    try:
+        # Generate PDF export
+        pdf_buffer, content_hash = await bc_export_service.export_to_pdf(
+            plan_id=plan_id,
+            version_id=version_id,
+        )
+        
+        # Update version with export hash
+        await bc_repo.update_version_export_hash(
+            version_id=version_id,
+            pdf_hash=content_hash,
+        )
+        
+        # Create audit entry
+        await bc_repo.create_audit_entry(
+            plan_id=plan_id,
+            action="exported_pdf",
+            actor_user_id=current_user["id"],
+            details_json={"version_id": version_id, "content_hash": content_hash},
+        )
+        
+        # For now, return the metadata (actual file download would be a separate endpoint)
+        export_url = f"/api/bc/exports/{plan_id}/v{version['version_number']}.pdf"
+        
+        return BCExportResponse(
+            export_url=export_url,
+            format=BCExportFormat.PDF,
+            version_id=version_id,
+            generated_at=datetime.now(timezone.utc),
+            file_hash=content_hash,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate PDF export: {str(e)}",
+        )
 
 
 # ============================================================================
