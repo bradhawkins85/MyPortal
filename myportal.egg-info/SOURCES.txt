@@ -55,6 +55,7 @@ app/core/notifications.py
 app/core/phone_utils.py
 app/models/__init__.py
 app/models/bc_models.py
+app/models/bcp_models.py
 app/repositories/__init__.py
 app/repositories/api_keys.py
 app/repositories/apps.py
@@ -121,6 +122,7 @@ app/schemas/auth.py
 app/schemas/automations.py
 app/schemas/bc3_models.py
 app/schemas/bc5_models.py
+app/schemas/bcp_models.py
 app/schemas/bcp_template.py
 app/schemas/business_continuity_plans.py
 app/schemas/call_recordings.py
@@ -260,6 +262,7 @@ tests/test_bc5_api.py
 tests/test_bc6_schemas.py
 tests/test_bc7_services.py
 tests/test_bc8_export.py
+tests/test_bcp02_models.py
 tests/test_bcp_template.py
 tests/test_bcp_template_api.py
 tests/test_bcp_template_bootstrap.py
