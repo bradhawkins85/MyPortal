@@ -276,7 +276,14 @@ gracefully fall back to an empty string.
 ## Setup
 
 1. Ensure Python 3.10+ is available.
-2. Create a project-local virtual environment so `pip install -e .` does not conflict with externally managed Python installations:
+2. Install the native libraries required by WeasyPrint (Debian/Ubuntu example shown):
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0
+   ```
+   Adjust the command for your distribution by following the upstream guidance at
+   [WeasyPrint's installation docs](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation).
+3. Create a project-local virtual environment so `pip install -e .` does not conflict with externally managed Python installations:
    ```bash
    python -m venv .venv
    source .venv/bin/activate  # On Windows use: .\.venv\\Scripts\\activate
@@ -285,13 +292,13 @@ gracefully fall back to an empty string.
    ```bash
    python scripts/bootstrap_venv.py
    ```
-3. If you did not run the bootstrap script, upgrade pip inside the virtual environment and install dependencies:
+4. If you did not run the bootstrap script, upgrade pip inside the virtual environment and install dependencies:
    ```bash
    python -m pip install --upgrade pip
    pip install -e .
    ```
-4. Copy `.env.example` to `.env` and update the MySQL credentials. Define strong values for `SESSION_SECRET` and `TOTP_ENCRYPTION_KEY`. Optional settings such as Redis, SMTP, and Azure Graph credentials mirror the legacy environment variables. Configure `SMS_ENDPOINT` and `SMS_AUTH` when enabling outbound SMS notifications so the portal can relay messages to your gateway securely.
-5. Start the development server:
+5. Copy `.env.example` to `.env` and update the MySQL credentials. Define strong values for `SESSION_SECRET` and `TOTP_ENCRYPTION_KEY`. Optional settings such as Redis, SMTP, and Azure Graph credentials mirror the legacy environment variables. Configure `SMS_ENDPOINT` and `SMS_AUTH` when enabling outbound SMS notifications so the portal can relay messages to your gateway securely.
+6. Start the development server:
    ```bash
    uvicorn app.main:app --reload
    ```
@@ -335,8 +342,8 @@ SQL again. The helper acquires the same advisory lock used during startup, so
 other workers wait rather than applying migrations concurrently. Adjust the
 lock timeout with the `MIGRATION_LOCK_TIMEOUT` environment variable if your
 production servers need a longer window.
-6. Access `http://localhost:8000` for the responsive portal UI. After signing in, visit `http://localhost:8000/docs` for the interactive Swagger UI covering every API endpoint.
-7. The first visit will redirect the login flow to the registration page if no users exist, ensuring the first account becomes the super administrator.
+7. Access `http://localhost:8000` for the responsive portal UI. After signing in, visit `http://localhost:8000/docs` for the interactive Swagger UI covering every API endpoint.
+8. The first visit will redirect the login flow to the registration page if no users exist, ensuring the first account becomes the super administrator.
 
 ## Fail2ban Support
 
