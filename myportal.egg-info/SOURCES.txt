@@ -250,6 +250,8 @@ tests/test_automation_trigger_filters.py
 tests/test_automations_repository.py
 tests/test_automations_repository_datetimes.py
 tests/test_automations_service.py
+tests/test_bc06_incident_console.py
+tests/test_bc07_roles.py
 tests/test_bc10_acknowledgments.py
 tests/test_bc11_supportive_entities.py
 tests/test_bc12_security.py
