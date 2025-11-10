@@ -120,8 +120,23 @@ async def list_templates(
     List all BC templates.
     
     Returns all available templates ordered by default flag and creation date.
+    Templates define the structure and sections for BC plans.
     
     **Authorization**: Requires BC viewer role or higher.
+    
+    **Example Response:**
+    ```json
+    [
+      {
+        "id": 1,
+        "name": "Government BCP Template",
+        "version": "1.0",
+        "is_default": true,
+        "created_at": "2024-01-10T09:00:00Z",
+        "updated_at": "2024-01-10T09:00:00Z"
+      }
+    ]
+    ```
     """
     templates = await bc_repo.list_templates()
     return [BCTemplateListItem(**template) for template in templates]
@@ -136,8 +151,47 @@ async def create_template(
     Create a new BC template.
     
     Creates a new template with the provided schema definition.
+    Templates define the structure, sections, and fields for BC plans.
     
     **Authorization**: Requires BC admin role.
+    
+    **Request Body Example:**
+    ```json
+    {
+      "name": "Custom IT DR Template",
+      "version": "1.0",
+      "is_default": false,
+      "schema_json": {
+        "sections": [
+          {
+            "key": "overview",
+            "title": "Overview",
+            "fields": [
+              {
+                "key": "purpose",
+                "label": "Purpose",
+                "type": "rich_text",
+                "required": true
+              }
+            ]
+          }
+        ]
+      }
+    }
+    ```
+    
+    **Response Example:**
+    ```json
+    {
+      "id": 2,
+      "name": "Custom IT DR Template",
+      "version": "1.0",
+      "is_default": false,
+      "schema_json": {...},
+      "created_at": "2024-01-15T14:30:00Z",
+      "updated_at": "2024-01-15T14:30:00Z"
+    }
+    ```
     """
     template = await bc_repo.create_template(
         name=template_data.name,
@@ -651,9 +705,35 @@ async def submit_plan_for_review(
     Submit a plan for review.
     
     Creates review requests for the specified reviewers. The plan status
-    is automatically updated to 'in_review'.
+    is automatically updated to 'in_review'. Each reviewer will be able to
+    approve or request changes to the plan.
     
     **Authorization**: Requires BC editor role or higher.
+    
+    **Request Body Example:**
+    ```json
+    {
+      "reviewer_user_ids": [5, 7, 12],
+      "notes": "Please review the updated recovery procedures in section 6."
+    }
+    ```
+    
+    **Response Example:**
+    ```json
+    [
+      {
+        "id": 1,
+        "plan_id": 15,
+        "requested_by_user_id": 3,
+        "requested_by_name": "John Smith",
+        "reviewer_user_id": 5,
+        "reviewer_name": "Jane Doe",
+        "status": "pending",
+        "notes": "Please review the updated recovery procedures in section 6.",
+        "created_at": "2024-03-20T10:30:00Z"
+      }
+    ]
+    ```
     """
     plan = await bc_repo.get_plan_by_id(plan_id)
     if not plan:
@@ -707,9 +787,33 @@ async def approve_review(
     Approve a plan review.
     
     Marks the review as approved. If all reviews are approved, the plan
-    status is automatically updated to 'approved'.
+    status is automatically updated to 'approved'. Only the assigned reviewer
+    can approve their review (unless user is super admin).
     
     **Authorization**: Requires BC approver role or higher.
+    
+    **Request Body Example:**
+    ```json
+    {
+      "notes": "Plan looks comprehensive. All sections are complete and meet requirements."
+    }
+    ```
+    
+    **Response Example:**
+    ```json
+    {
+      "id": 1,
+      "plan_id": 15,
+      "requested_by_user_id": 3,
+      "requested_by_name": "John Smith",
+      "reviewer_user_id": 5,
+      "reviewer_name": "Jane Doe",
+      "status": "approved",
+      "notes": "Plan looks comprehensive. All sections are complete and meet requirements.",
+      "created_at": "2024-03-20T10:30:00Z",
+      "reviewed_at": "2024-03-21T15:45:00Z"
+    }
+    ```
     """
     plan = await bc_repo.get_plan_by_id(plan_id)
     if not plan:

@@ -53,6 +53,32 @@ async def get_default_template(
     
     Field types include: text, rich_text (HTML), date, datetime, select, multiselect,
     integer, decimal, boolean, table, file, contact_ref, user_ref, url.
+    
+    **Example Response:**
+    ```json
+    {
+      "name": "Government BCP Template",
+      "version": "1.0",
+      "sections": [
+        {
+          "key": "plan_overview",
+          "title": "Plan Overview",
+          "description": "High-level purpose and scope of the plan",
+          "fields": [
+            {
+              "key": "purpose",
+              "label": "Purpose",
+              "type": "rich_text",
+              "required": true,
+              "placeholder": "Describe the purpose of this plan..."
+            }
+          ]
+        }
+      ]
+    }
+    ```
+    
+    **Authorization:** Requires authenticated user (any role).
     """
     return get_default_government_bcp_template()
 
@@ -72,6 +98,30 @@ async def list_plans(
     
     Plans can be filtered by type (disaster_recovery, incident_response, business_continuity)
     and status (draft, active, archived).
+    
+    **Query Parameters:**
+    - `plan_type`: Filter by type (disaster_recovery, incident_response, business_continuity)
+    - `status`: Filter by status (draft, active, archived)
+    
+    **Example Response:**
+    ```json
+    [
+      {
+        "id": 1,
+        "title": "IT Disaster Recovery Plan",
+        "plan_type": "disaster_recovery",
+        "version": "2.1",
+        "status": "active",
+        "created_at": "2024-01-15T10:30:00Z",
+        "updated_at": "2024-03-20T14:45:00Z",
+        "last_reviewed_at": "2024-03-20T14:45:00Z",
+        "created_by": 5,
+        "user_permission": "edit"
+      }
+    ]
+    ```
+    
+    **Authorization:** Requires authenticated user.
     """
     user_id = current_user["id"]
     is_super_admin = current_user.get("is_super_admin", False)
@@ -131,6 +181,36 @@ async def create_plan(
     - disaster_recovery: Plans for recovering from catastrophic failures
     - incident_response: Plans for responding to security incidents
     - business_continuity: Plans for maintaining business operations during disruptions
+    
+    **Request Body Example:**
+    ```json
+    {
+      "title": "IT Disaster Recovery Plan",
+      "plan_type": "disaster_recovery",
+      "content": "# Disaster Recovery Plan\\n\\n## Purpose\\nThis plan outlines...",
+      "version": "1.0",
+      "status": "draft"
+    }
+    ```
+    
+    **Response Example:**
+    ```json
+    {
+      "id": 1,
+      "title": "IT Disaster Recovery Plan",
+      "plan_type": "disaster_recovery",
+      "content": "# Disaster Recovery Plan\\n\\n## Purpose\\nThis plan outlines...",
+      "version": "1.0",
+      "status": "draft",
+      "created_by": 5,
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T10:30:00Z",
+      "last_reviewed_at": null,
+      "last_reviewed_by": null
+    }
+    ```
+    
+    **Authorization:** Requires super admin privileges.
     """
     plan = await bc_plans_repo.create_plan(
         title=plan_data.title,
