@@ -66,7 +66,8 @@
             <td>
               <strong>{{ record.control.name }}</strong>
               <br>
-              <small style="color: #6b7280;">{{ record.control.description[:100] }}{% if record.control.description|length > 100 %}...{% endif %}</small>
+              {% set control_description = record.control.description or '' %}
+              <small style="color: #6b7280;">{{ control_description[:100] }}{% if control_description|length > 100 %}...{% endif %}</small>
             </td>
             <td>
               <span class="badge badge--{{ record.status }}">

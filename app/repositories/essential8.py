@@ -62,7 +62,7 @@ async def list_company_compliance(
         item["control"] = {
             "id": row["control_id"],
             "name": row["control_name"],
-            "description": row["control_description"],
+            "description": row["control_description"] or "",
             "control_order": row["control_order"],
         }
         # Remove the flattened control fields
@@ -99,7 +99,7 @@ async def get_company_compliance(
     item["control"] = {
         "id": row["control_id"],
         "name": row["control_name"],
-        "description": row["control_description"],
+        "description": row["control_description"] or "",
         "control_order": row["control_order"],
     }
     # Remove the flattened control fields
