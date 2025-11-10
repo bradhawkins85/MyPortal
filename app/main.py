@@ -50,6 +50,7 @@ from app.api.routes import (
     automations as automations_api,
     call_recordings as call_recordings_api,
     companies,
+    essential8 as essential8_api,
     forms as forms_api,
     invoices as invoices_api,
     issues as issues_api,
@@ -511,6 +512,7 @@ app.include_router(agent.router)
 app.include_router(users.router)
 app.include_router(call_recordings_api.router)
 app.include_router(companies.router)
+app.include_router(essential8_api.router)
 app.include_router(licenses_api.router)
 app.include_router(forms_api.router)
 app.include_router(knowledge_base_api.router)
