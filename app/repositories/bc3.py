@@ -644,3 +644,97 @@ async def list_plan_change_logs(plan_id: int) -> list[dict[str, Any]]:
         ORDER BY imported_at_utc DESC
     """
     return await db.fetch_all(query, (plan_id,))
+
+
+# ============================================================================
+# BC Risk Repository Functions
+# ============================================================================
+
+async def create_risk(
+    plan_id: int,
+    threat: str,
+    likelihood: Optional[str] = None,
+    impact: Optional[str] = None,
+    rating: Optional[str] = None,
+    mitigation: Optional[str] = None,
+    owner_user_id: Optional[int] = None,
+) -> dict[str, Any]:
+    """Create a new risk assessment for a plan."""
+    query = """
+        INSERT INTO bc_risk (plan_id, threat, likelihood, impact, rating, mitigation, owner_user_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """
+    risk_id = await db.execute(query, (plan_id, threat, likelihood, impact, rating, mitigation, owner_user_id))
+    return await get_risk_by_id(risk_id)
+
+
+async def get_risk_by_id(risk_id: int) -> dict[str, Any] | None:
+    """Get a risk by ID."""
+    query = """
+        SELECT id, plan_id, threat, likelihood, impact, rating, mitigation, owner_user_id, created_at, updated_at
+        FROM bc_risk
+        WHERE id = %s
+    """
+    return await db.fetch_one(query, (risk_id,))
+
+
+async def list_risks_by_plan(plan_id: int) -> list[dict[str, Any]]:
+    """List all risks for a plan."""
+    query = """
+        SELECT id, plan_id, threat, likelihood, impact, rating, mitigation, owner_user_id, created_at, updated_at
+        FROM bc_risk
+        WHERE plan_id = %s
+        ORDER BY rating DESC, created_at DESC
+    """
+    return await db.fetch_all(query, (plan_id,))
+
+
+async def update_risk(
+    risk_id: int,
+    threat: Optional[str] = None,
+    likelihood: Optional[str] = None,
+    impact: Optional[str] = None,
+    rating: Optional[str] = None,
+    mitigation: Optional[str] = None,
+    owner_user_id: Optional[int] = None,
+) -> dict[str, Any] | None:
+    """Update a risk."""
+    updates = []
+    params = []
+    
+    if threat is not None:
+        updates.append("threat = %s")
+        params.append(threat)
+    if likelihood is not None:
+        updates.append("likelihood = %s")
+        params.append(likelihood)
+    if impact is not None:
+        updates.append("impact = %s")
+        params.append(impact)
+    if rating is not None:
+        updates.append("rating = %s")
+        params.append(rating)
+    if mitigation is not None:
+        updates.append("mitigation = %s")
+        params.append(mitigation)
+    if owner_user_id is not None:
+        updates.append("owner_user_id = %s")
+        params.append(owner_user_id)
+    
+    if not updates:
+        return await get_risk_by_id(risk_id)
+    
+    params.append(risk_id)
+    query = f"""
+        UPDATE bc_risk
+        SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s
+    """
+    await db.execute(query, tuple(params))
+    return await get_risk_by_id(risk_id)
+
+
+async def delete_risk(risk_id: int) -> None:
+    """Delete a risk."""
+    query = "DELETE FROM bc_risk WHERE id = %s"
+    await db.execute(query, (risk_id,))
