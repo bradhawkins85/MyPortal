@@ -19,10 +19,10 @@ class Settings(BaseSettings):
     environment: str = "development"
     secret_key: str = Field(validation_alias=AliasChoices("SESSION_SECRET", "SECRET_KEY"))
     totp_encryption_key: str = Field(validation_alias="TOTP_ENCRYPTION_KEY")
-    database_host: str = Field(validation_alias="DB_HOST")
-    database_user: str = Field(validation_alias="DB_USER")
-    database_password: str = Field(validation_alias="DB_PASSWORD")
-    database_name: str = Field(validation_alias="DB_NAME")
+    database_host: str | None = Field(default=None, validation_alias="DB_HOST")
+    database_user: str | None = Field(default=None, validation_alias="DB_USER")
+    database_password: str | None = Field(default=None, validation_alias="DB_PASSWORD")
+    database_name: str | None = Field(default=None, validation_alias="DB_NAME")
     migration_lock_timeout: int = Field(
         default=60, validation_alias="MIGRATION_LOCK_TIMEOUT"
     )
