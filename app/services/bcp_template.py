@@ -1,5 +1,7 @@
 """Service for generating BCP template schemas."""
 
+from typing import Any
+
 from app.schemas.bcp_template import (
     BCPTemplateSchema,
     FieldChoice,
@@ -925,3 +927,39 @@ def get_default_government_bcp_template() -> BCPTemplateSchema:
     ]
     
     return BCPTemplateSchema(metadata=metadata, sections=sections)
+
+
+async def bootstrap_default_template() -> dict[str, Any]:
+    """
+    Bootstrap the default government BCP template into the database.
+    
+    This function loads the default template schema and stores it in the database
+    if it doesn't already exist. It ensures that the template instance matches
+    the discovered/mapped schema with proper section order, field labels,
+    default placeholders, and table schemas.
+    
+    Returns:
+        dict: The created or existing template record from the database
+    """
+    from app.repositories import bc3 as bc_repo
+    
+    # Check if default template already exists
+    existing_template = await bc_repo.get_default_template()
+    if existing_template:
+        return existing_template
+    
+    # Get the default template schema
+    template_schema = get_default_government_bcp_template()
+    
+    # Convert the Pydantic model to JSON for storage
+    schema_json = template_schema.model_dump(mode='json')
+    
+    # Create the template in the database
+    template = await bc_repo.create_template(
+        name=template_schema.metadata.template_name,
+        version=template_schema.metadata.template_version,
+        is_default=True,
+        schema_json=schema_json,
+    )
+    
+    return template
