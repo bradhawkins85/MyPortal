@@ -123,6 +123,7 @@ app/schemas/automations.py
 app/schemas/bc3_models.py
 app/schemas/bc5_models.py
 app/schemas/bcp_models.py
+app/schemas/bcp_risk.py
 app/schemas/bcp_template.py
 app/schemas/business_continuity_plans.py
 app/schemas/call_recordings.py
@@ -193,6 +194,7 @@ app/services/notifications.py
 app/services/opnform.py
 app/services/products.py
 app/services/realtime.py
+app/services/risk_calculator.py
 app/services/sanitization.py
 app/services/scheduler.py
 app/services/shop.py
@@ -262,7 +264,12 @@ tests/test_bc5_api.py
 tests/test_bc6_schemas.py
 tests/test_bc7_services.py
 tests/test_bc8_export.py
+tests/test_bcp02_migration.py
 tests/test_bcp02_models.py
+tests/test_bcp_insurance_backup.py
+tests/test_bcp_repository.py
+tests/test_bcp_risk_repository.py
+tests/test_bcp_risk_routes.py
 tests/test_bcp_template.py
 tests/test_bcp_template_api.py
 tests/test_bcp_template_bootstrap.py
@@ -327,6 +334,7 @@ tests/test_products_service_subcategories.py
 tests/test_pwa.py
 tests/test_refresh_events.py
 tests/test_relevant_kb_articles.py
+tests/test_risk_calculator.py
 tests/test_role_permission_enrichment.py
 tests/test_sanitization.py
 tests/test_scheduled_ticket_creation.py
