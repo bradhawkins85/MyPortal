@@ -823,3 +823,309 @@ async def delete_backup_item(backup_id: int) -> bool:
             await cursor.execute(query, (backup_id,))
             await conn.commit()
             return cursor.rowcount > 0
+
+
+# ============================================================================
+# Business Impact Analysis (BIA) - Critical Activities
+# ============================================================================
+
+
+async def list_critical_activities(plan_id: int, sort_by: str = "importance") -> list[dict[str, Any]]:
+    """
+    Get all critical activities for a plan with their impact data.
+    
+    Args:
+        plan_id: The BCP plan ID
+        sort_by: Sort field - "importance", "priority", or "name"
+    
+    Returns:
+        List of critical activities with nested impact data
+    """
+    # Determine sort order
+    order_clause = "ORDER BY "
+    if sort_by == "importance":
+        order_clause += "ca.importance ASC NULLS LAST, ca.name"
+    elif sort_by == "priority":
+        order_clause += "FIELD(ca.priority, 'High', 'Medium', 'Low'), ca.name"
+    else:  # name
+        order_clause += "ca.name"
+    
+    query = f"""
+        SELECT 
+            ca.id, ca.plan_id, ca.name, ca.description, ca.priority, 
+            ca.supplier_dependency, ca.importance, ca.notes,
+            ca.created_at, ca.updated_at,
+            i.id as impact_id, i.losses_financial, i.losses_increased_costs,
+            i.losses_staffing, i.losses_product_service, i.losses_reputation,
+            i.fines, i.legal_liability, i.rto_hours, i.losses_comments
+        FROM bcp_critical_activity ca
+        LEFT JOIN bcp_impact i ON i.critical_activity_id = ca.id
+        WHERE ca.plan_id = %s
+        {order_clause}
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id,))
+            rows = await cursor.fetchall()
+            
+            activities = []
+            for row in rows:
+                activity = {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "name": row[2],
+                    "description": row[3],
+                    "priority": row[4],
+                    "supplier_dependency": row[5],
+                    "importance": row[6],
+                    "notes": row[7],
+                    "created_at": row[8],
+                    "updated_at": row[9],
+                    "impact": {
+                        "id": row[10],
+                        "losses_financial": row[11],
+                        "losses_increased_costs": row[12],
+                        "losses_staffing": row[13],
+                        "losses_product_service": row[14],
+                        "losses_reputation": row[15],
+                        "fines": row[16],
+                        "legal_liability": row[17],
+                        "rto_hours": row[18],
+                        "losses_comments": row[19],
+                    } if row[10] else None
+                }
+                activities.append(activity)
+            
+            return activities
+
+
+async def get_critical_activity_by_id(activity_id: int) -> dict[str, Any] | None:
+    """Get a critical activity by ID with its impact data."""
+    query = """
+        SELECT 
+            ca.id, ca.plan_id, ca.name, ca.description, ca.priority, 
+            ca.supplier_dependency, ca.importance, ca.notes,
+            ca.created_at, ca.updated_at,
+            i.id as impact_id, i.losses_financial, i.losses_increased_costs,
+            i.losses_staffing, i.losses_product_service, i.losses_reputation,
+            i.fines, i.legal_liability, i.rto_hours, i.losses_comments
+        FROM bcp_critical_activity ca
+        LEFT JOIN bcp_impact i ON i.critical_activity_id = ca.id
+        WHERE ca.id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (activity_id,))
+            row = await cursor.fetchone()
+            
+            if not row:
+                return None
+            
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "name": row[2],
+                "description": row[3],
+                "priority": row[4],
+                "supplier_dependency": row[5],
+                "importance": row[6],
+                "notes": row[7],
+                "created_at": row[8],
+                "updated_at": row[9],
+                "impact": {
+                    "id": row[10],
+                    "losses_financial": row[11],
+                    "losses_increased_costs": row[12],
+                    "losses_staffing": row[13],
+                    "losses_product_service": row[14],
+                    "losses_reputation": row[15],
+                    "fines": row[16],
+                    "legal_liability": row[17],
+                    "rto_hours": row[18],
+                    "losses_comments": row[19],
+                } if row[10] else None
+            }
+
+
+async def create_critical_activity(
+    plan_id: int,
+    name: str,
+    description: str | None = None,
+    priority: str | None = None,
+    supplier_dependency: str | None = None,
+    importance: int | None = None,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """Create a new critical activity."""
+    query = """
+        INSERT INTO bcp_critical_activity 
+        (plan_id, name, description, priority, supplier_dependency, importance, notes)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                query,
+                (plan_id, name, description, priority, supplier_dependency, importance, notes),
+            )
+            await conn.commit()
+            activity_id = cursor.lastrowid
+    
+    return await get_critical_activity_by_id(activity_id)
+
+
+async def update_critical_activity(
+    activity_id: int,
+    name: str | None = None,
+    description: str | None = None,
+    priority: str | None = None,
+    supplier_dependency: str | None = None,
+    importance: int | None = None,
+    notes: str | None = None,
+) -> dict[str, Any] | None:
+    """Update a critical activity."""
+    updates = []
+    values = []
+    
+    if name is not None:
+        updates.append("name = %s")
+        values.append(name)
+    if description is not None:
+        updates.append("description = %s")
+        values.append(description)
+    if priority is not None:
+        updates.append("priority = %s")
+        values.append(priority)
+    if supplier_dependency is not None:
+        updates.append("supplier_dependency = %s")
+        values.append(supplier_dependency)
+    if importance is not None:
+        updates.append("importance = %s")
+        values.append(importance)
+    if notes is not None:
+        updates.append("notes = %s")
+        values.append(notes)
+    
+    if not updates:
+        return await get_critical_activity_by_id(activity_id)
+    
+    values.append(activity_id)
+    query = f"""
+        UPDATE bcp_critical_activity
+        SET {', '.join(updates)}
+        WHERE id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, values)
+            await conn.commit()
+    
+    return await get_critical_activity_by_id(activity_id)
+
+
+async def delete_critical_activity(activity_id: int) -> bool:
+    """Delete a critical activity (and its associated impact via CASCADE)."""
+    query = "DELETE FROM bcp_critical_activity WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (activity_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+
+
+# ============================================================================
+# Business Impact Analysis (BIA) - Impact Data
+# ============================================================================
+
+
+async def create_or_update_impact(
+    critical_activity_id: int,
+    losses_financial: str | None = None,
+    losses_increased_costs: str | None = None,
+    losses_staffing: str | None = None,
+    losses_product_service: str | None = None,
+    losses_reputation: str | None = None,
+    fines: str | None = None,
+    legal_liability: str | None = None,
+    rto_hours: int | None = None,
+    losses_comments: str | None = None,
+) -> dict[str, Any]:
+    """
+    Create or update impact data for a critical activity.
+    If impact record exists, update it; otherwise create new.
+    """
+    # Check if impact record exists
+    check_query = "SELECT id FROM bcp_impact WHERE critical_activity_id = %s"
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(check_query, (critical_activity_id,))
+            existing = await cursor.fetchone()
+            
+            if existing:
+                # Update existing record
+                impact_id = existing[0]
+                updates = []
+                values = []
+                
+                if losses_financial is not None:
+                    updates.append("losses_financial = %s")
+                    values.append(losses_financial)
+                if losses_increased_costs is not None:
+                    updates.append("losses_increased_costs = %s")
+                    values.append(losses_increased_costs)
+                if losses_staffing is not None:
+                    updates.append("losses_staffing = %s")
+                    values.append(losses_staffing)
+                if losses_product_service is not None:
+                    updates.append("losses_product_service = %s")
+                    values.append(losses_product_service)
+                if losses_reputation is not None:
+                    updates.append("losses_reputation = %s")
+                    values.append(losses_reputation)
+                if fines is not None:
+                    updates.append("fines = %s")
+                    values.append(fines)
+                if legal_liability is not None:
+                    updates.append("legal_liability = %s")
+                    values.append(legal_liability)
+                if rto_hours is not None:
+                    updates.append("rto_hours = %s")
+                    values.append(rto_hours)
+                if losses_comments is not None:
+                    updates.append("losses_comments = %s")
+                    values.append(losses_comments)
+                
+                if updates:
+                    values.append(impact_id)
+                    update_query = f"""
+                        UPDATE bcp_impact
+                        SET {', '.join(updates)}
+                        WHERE id = %s
+                    """
+                    await cursor.execute(update_query, values)
+                    await conn.commit()
+            else:
+                # Create new record
+                insert_query = """
+                    INSERT INTO bcp_impact
+                    (critical_activity_id, losses_financial, losses_increased_costs,
+                     losses_staffing, losses_product_service, losses_reputation,
+                     fines, legal_liability, rto_hours, losses_comments)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                await cursor.execute(
+                    insert_query,
+                    (critical_activity_id, losses_financial, losses_increased_costs,
+                     losses_staffing, losses_product_service, losses_reputation,
+                     fines, legal_liability, rto_hours, losses_comments),
+                )
+                await conn.commit()
+                impact_id = cursor.lastrowid
+    
+    # Return the updated activity with impact
+    return await get_critical_activity_by_id(critical_activity_id)
