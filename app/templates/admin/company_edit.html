@@ -448,40 +448,6 @@
                 {% endfor %}
               </select>
             </div>
-            <div class="form-field form-field--checkbox">
-              <label class="checkbox" for="assign-manage-staff">
-                <input
-                  id="assign-manage-staff"
-                  type="checkbox"
-                  name="can_manage_staff"
-                  value="1"
-                  {% if assign_form.can_manage_staff %}checked{% endif %}
-                />
-                <span>Allow manual staff management</span>
-              </label>
-              <p class="form-help">
-                Enable to give management controls without requiring an elevated staff access tier.
-              </p>
-            </div>
-            <div class="form-field form-field--wide">
-              <span class="form-label">Company permissions</span>
-              <div class="form-grid">
-                {% for column in permission_columns %}
-                  <div class="form-field form-field--checkbox">
-                    <label class="checkbox" for="assign-{{ column.field }}">
-                      <input
-                        id="assign-{{ column.field }}"
-                        type="checkbox"
-                        name="{{ column.field }}"
-                        value="1"
-                        {% if assign_form.permissions.get(column.field) %}checked{% endif %}
-                      />
-                      <span>{{ column.label }}</span>
-                    </label>
-                  </div>
-                {% endfor %}
-              </div>
-            </div>
             <div class="form-actions form-field--wide">
               <button type="submit" class="button">Save access</button>
             </div>
@@ -516,9 +482,6 @@
                 <th scope="col" data-sort="string">User</th>
                 <th scope="col" data-sort="string">Role</th>
                 <th scope="col" data-sort="string">Staff</th>
-                {% for column in permission_columns %}
-                  <th scope="col" data-sort="string">{{ column.label }}</th>
-                {% endfor %}
                 <th scope="col" class="table__actions">Actions</th>
               </tr>
             </thead>
@@ -586,25 +549,6 @@
                         </select>
                       {% endif %}
                     </td>
-                    {% for column in permission_columns %}
-                      {% set field = column.field %}
-                      <td data-label="{{ column.label }}">
-                        <label class="checkbox">
-                          <input
-                            type="checkbox"
-                            {% if not assignment.is_pending %}
-                              data-company-permission
-                              data-company-id="{{ assignment.company_id }}"
-                              data-user-id="{{ assignment.user_id }}"
-                              data-field="{{ field }}"
-                            {% endif %}
-                            {% if assignment.is_pending %}disabled{% endif %}
-                            {% if assignment[field] %}checked{% endif %}
-                          />
-                          <span class="visually-hidden">Toggle {{ column.label }}</span>
-                        </label>
-                      </td>
-                    {% endfor %}
                     <td class="table__actions">
                       {% if assignment.is_pending %}
                         <div class="stacked">
@@ -637,8 +581,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  {% set empty_columns = 4 + permission_columns|length %}
-                  <td colspan="{{ empty_columns }}" class="table__empty">
+                  <td colspan="4" class="table__empty">
                     No memberships are assigned to this company yet.
                   </td>
                 </tr>

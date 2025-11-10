@@ -1472,27 +1472,6 @@
   }
 
   function bindCompanyAssignmentControls() {
-    document.querySelectorAll('[data-company-permission]').forEach((input) => {
-      input.addEventListener('change', async () => {
-        const { companyId, userId, field } = input.dataset;
-        if (!companyId || !userId || !field) {
-          return;
-        }
-        const formData = new FormData();
-        formData.append('field', field);
-        formData.append('value', input.checked ? '1' : '0');
-        input.disabled = true;
-        try {
-          await requestForm(`/admin/companies/assignment/${companyId}/${userId}/permission`, formData);
-        } catch (error) {
-          input.checked = !input.checked;
-          alert(`Unable to update permission: ${error.message}`);
-        } finally {
-          input.disabled = false;
-        }
-      });
-    });
-
     document.querySelectorAll('[data-staff-permission]').forEach((select) => {
       select.addEventListener('change', async () => {
         const { companyId, userId } = select.dataset;
