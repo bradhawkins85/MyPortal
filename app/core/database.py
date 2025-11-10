@@ -110,9 +110,11 @@ class Database:
     async def disconnect(self) -> None:
         if not self._pool:
             return
+        logger.info("Disconnecting from database")
         self._pool.close()
         await self._pool.wait_closed()
         self._pool = None
+        logger.info("Database disconnected successfully")
 
     def is_connected(self) -> bool:
         return self._pool is not None

@@ -8,6 +8,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from app.core.config import get_settings
+from app.core.logging import log_warning
 from app.security.session import SessionManager, session_manager
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -67,12 +68,25 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
         session = await self._session_manager.load_session(request, allow_inactive=False)
         if not session:
+            log_warning("CSRF validation failed - no session", path=path, method=request.method)
             return JSONResponse(status_code=403, content={"detail": "CSRF validation failed"})
 
         if not header_token:
+            log_warning(
+                "CSRF validation failed - missing token",
+                path=path,
+                method=request.method,
+                user_id=session.user_id if session else None,
+            )
             return JSONResponse(status_code=403, content={"detail": "CSRF token missing"})
 
         if not secrets.compare_digest(header_token, session.csrf_token):
+            log_warning(
+                "CSRF validation failed - token mismatch",
+                path=path,
+                method=request.method,
+                user_id=session.user_id if session else None,
+            )
             return JSONResponse(status_code=403, content={"detail": "CSRF token mismatch"})
 
         return await call_next(request)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, List, Optional
 
 from app.core.database import db
+from app.core.logging import log_debug, log_error, log_info
 from app.security.passwords import hash_password
 
 
@@ -49,6 +50,12 @@ async def create_user(
     company_id: int | None = None,
     is_super_admin: bool = False,
 ) -> dict[str, Any]:
+    log_info(
+        "Creating user",
+        email=email,
+        company_id=company_id,
+        is_super_admin=is_super_admin,
+    )
     password_hash = hash_password(password)
     await db.execute(
         """
@@ -67,7 +74,9 @@ async def create_user(
     )
     row = await get_user_by_email(email)
     if not row:
+        log_error("Failed to create user - user not found after insert", email=email)
         raise RuntimeError("Failed to create user")
+    log_info("User created successfully", user_id=row.get("id"), email=email)
     return row
 
 
@@ -78,22 +87,29 @@ async def update_user(user_id: int, **updates: Any) -> dict[str, Any]:
             raise ValueError("User not found")
         return user
 
+    log_info("Updating user", user_id=user_id, fields=list(updates.keys()))
     columns = ", ".join(f"{column} = %s" for column in updates.keys())
     params = list(updates.values()) + [user_id]
     await db.execute(f"UPDATE users SET {columns} WHERE id = %s", tuple(params))
     updated = await get_user_by_id(user_id)
     if not updated:
+        log_error("User not found after update", user_id=user_id)
         raise ValueError("User not found after update")
+    log_info("User updated successfully", user_id=user_id)
     return updated
 
 
 async def delete_user(user_id: int) -> None:
+    log_info("Deleting user", user_id=user_id)
     await db.execute("DELETE FROM users WHERE id = %s", (user_id,))
+    log_info("User deleted successfully", user_id=user_id)
 
 
 async def set_user_password(user_id: int, password: str) -> None:
+    log_info("Setting user password", user_id=user_id)
     password_hash = hash_password(password)
     await db.execute(
         "UPDATE users SET password_hash = %s, force_password_change = 0 WHERE id = %s",
         (password_hash, user_id),
     )
+    log_info("User password updated successfully", user_id=user_id)
