@@ -305,13 +305,56 @@ async def bcp_bia(request: Request, sort_by: str = Query("importance")):
 
 
 @router.get("/incident", response_class=HTMLResponse, include_in_schema=False)
-async def bcp_incident(request: Request):
-    """BCP Incident Response page (stub)."""
+async def bcp_incident(request: Request, tab: str = Query("checklist")):
+    """BCP Incident Console with tabs for Checklist, Contacts, and Event Log."""
     user, company_id = await _require_bcp_view(request)
     
     from app.main import _build_base_context
     from app.core.config import get_templates_config
     from fastapi.templating import Jinja2Templates
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+        await bcp_repo.seed_default_checklist_items(plan["id"])
+    
+    # Check if there are checklist items; if not, seed them
+    checklist_items = await bcp_repo.list_checklist_items(plan["id"], phase="Immediate")
+    if not checklist_items:
+        await bcp_repo.seed_default_checklist_items(plan["id"])
+        checklist_items = await bcp_repo.list_checklist_items(plan["id"], phase="Immediate")
+    
+    # Get active incident if any
+    active_incident = await bcp_repo.get_active_incident(plan["id"])
+    
+    # Get checklist ticks if there's an active incident
+    checklist_with_ticks = []
+    if active_incident:
+        ticks = await bcp_repo.get_checklist_ticks_for_incident(active_incident["id"])
+        # Map ticks by checklist_item_id for easy lookup
+        tick_map = {tick["checklist_item_id"]: tick for tick in ticks}
+        
+        for item in checklist_items:
+            tick = tick_map.get(item["id"])
+            checklist_with_ticks.append({
+                **item,
+                "tick": tick,
+            })
+    else:
+        # No active incident, just show items without ticks
+        checklist_with_ticks = [{**item, "tick": None} for item in checklist_items]
+    
+    # Get contacts
+    contacts = await bcp_repo.list_contacts(plan["id"])
+    internal_contacts = [c for c in contacts if c["kind"] == "Internal"]
+    external_contacts = [c for c in contacts if c["kind"] == "External"]
+    
+    # Get event log entries
+    event_log = []
+    if active_incident:
+        event_log = await bcp_repo.list_event_log_entries(plan["id"], incident_id=active_incident["id"])
     
     templates_config = get_templates_config()
     templates = Jinja2Templates(directory=str(templates_config.template_path))
@@ -320,12 +363,19 @@ async def bcp_incident(request: Request):
         request,
         user,
         extra={
-            "title": "Incident Response",
-            "page_type": "incident",
+            "title": "Incident Console",
+            "plan": plan,
+            "active_incident": active_incident,
+            "checklist_items": checklist_with_ticks,
+            "internal_contacts": internal_contacts,
+            "external_contacts": external_contacts,
+            "event_log": event_log,
+            "active_tab": tab,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/stub.html", context)
+    return templates.TemplateResponse("bcp/incident.html", context)
 
 
 @router.get("/recovery", response_class=HTMLResponse, include_in_schema=False)
@@ -1404,3 +1454,408 @@ async def export_bia_csv(request: Request):
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+# ============================================================================
+# Incident Console Endpoints
+# ============================================================================
+
+
+@router.post("/incident/start", include_in_schema=False)
+async def start_incident(request: Request):
+    """Start a new incident."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    from datetime import datetime
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Check if there's already an active incident
+    active_incident = await bcp_repo.get_active_incident(plan["id"])
+    if active_incident:
+        return RedirectResponse(
+            url="/bcp/incident?error=" + quote("An incident is already active"),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    
+    # Create new incident
+    now = datetime.utcnow()
+    incident = await bcp_repo.create_incident(plan["id"], now, source="Manual")
+    
+    # Initialize checklist ticks
+    await bcp_repo.initialize_checklist_ticks(plan["id"], incident["id"])
+    
+    # Create initial event log entry
+    # Get user initials
+    user_name = user.get("name", "")
+    initials = "".join([part[0].upper() for part in user_name.split()[:2]]) if user_name else "SYS"
+    
+    await bcp_repo.create_event_log_entry(
+        plan["id"],
+        incident["id"],
+        now,
+        "Activate business continuity plan",
+        author_id=user["id"],
+        initials=initials,
+    )
+    
+    # TODO: Send portal alert to distribution list
+    # This would require implementing a notification/alert system
+    
+    return RedirectResponse(
+        url="/bcp/incident?success=" + quote("Incident started successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/incident/close", include_in_schema=False)
+async def close_incident_endpoint(request: Request):
+    """Close the active incident."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    from datetime import datetime
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Get active incident
+    active_incident = await bcp_repo.get_active_incident(plan["id"])
+    if not active_incident:
+        return RedirectResponse(
+            url="/bcp/incident?error=" + quote("No active incident found"),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    
+    # Close the incident
+    await bcp_repo.close_incident(active_incident["id"])
+    
+    # Add event log entry
+    now = datetime.utcnow()
+    user_name = user.get("name", "")
+    initials = "".join([part[0].upper() for part in user_name.split()[:2]]) if user_name else "SYS"
+    
+    await bcp_repo.create_event_log_entry(
+        plan["id"],
+        active_incident["id"],
+        now,
+        "Incident closed",
+        author_id=user["id"],
+        initials=initials,
+    )
+    
+    return RedirectResponse(
+        url="/bcp/incident?success=" + quote("Incident closed successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/incident/checklist/{tick_id}/toggle", include_in_schema=False)
+async def toggle_checklist_item(
+    request: Request,
+    tick_id: int,
+):
+    """Toggle a checklist item."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    from datetime import datetime
+    
+    # Get the tick
+    tick = await bcp_repo.get_checklist_tick_by_id(tick_id)
+    if not tick:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist item not found")
+    
+    # Toggle the tick
+    new_state = not tick["is_done"]
+    now = datetime.utcnow()
+    
+    await bcp_repo.toggle_checklist_tick(tick_id, new_state, user["id"], now)
+    
+    return RedirectResponse(
+        url="/bcp/incident?tab=checklist",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/incident/contacts", include_in_schema=False)
+async def create_contact_endpoint(
+    request: Request,
+    kind: str = Form(...),
+    person_or_org: str = Form(...),
+    phones: str = Form(None),
+    email: str = Form(None),
+    responsibility_or_agency: str = Form(None),
+):
+    """Create a new contact."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    await bcp_repo.create_contact(
+        plan["id"],
+        kind,
+        person_or_org,
+        phones if phones else None,
+        email if email else None,
+        responsibility_or_agency if responsibility_or_agency else None,
+    )
+    
+    return RedirectResponse(
+        url="/bcp/incident?tab=contacts&success=" + quote("Contact added successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/incident/contacts/{contact_id}/update", include_in_schema=False)
+async def update_contact_endpoint(
+    request: Request,
+    contact_id: int,
+    kind: str = Form(...),
+    person_or_org: str = Form(...),
+    phones: str = Form(None),
+    email: str = Form(None),
+    responsibility_or_agency: str = Form(None),
+):
+    """Update a contact."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    updated = await bcp_repo.update_contact(
+        contact_id,
+        kind=kind,
+        person_or_org=person_or_org,
+        phones=phones if phones else None,
+        email=email if email else None,
+        responsibility_or_agency=responsibility_or_agency if responsibility_or_agency else None,
+    )
+    
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+    
+    return RedirectResponse(
+        url="/bcp/incident?tab=contacts&success=" + quote("Contact updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/incident/contacts/{contact_id}/delete", include_in_schema=False)
+async def delete_contact_endpoint(
+    request: Request,
+    contact_id: int,
+):
+    """Delete a contact."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    deleted = await bcp_repo.delete_contact(contact_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+    
+    return RedirectResponse(
+        url="/bcp/incident?tab=contacts&success=" + quote("Contact deleted successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/incident/event-log", include_in_schema=False)
+async def create_event_log_entry_endpoint(
+    request: Request,
+    notes: str = Form(...),
+    happened_at: str = Form(None),
+):
+    """Create a new event log entry."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    from datetime import datetime
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Get active incident
+    active_incident = await bcp_repo.get_active_incident(plan["id"])
+    if not active_incident:
+        return RedirectResponse(
+            url="/bcp/incident?tab=event-log&error=" + quote("No active incident"),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    
+    # Parse timestamp or use current time
+    if happened_at:
+        try:
+            event_time = datetime.fromisoformat(happened_at.replace('Z', '+00:00'))
+        except ValueError:
+            event_time = datetime.utcnow()
+    else:
+        event_time = datetime.utcnow()
+    
+    # Get user initials
+    user_name = user.get("name", "")
+    initials = "".join([part[0].upper() for part in user_name.split()[:2]]) if user_name else "USR"
+    
+    await bcp_repo.create_event_log_entry(
+        plan["id"],
+        active_incident["id"],
+        event_time,
+        notes,
+        author_id=user["id"],
+        initials=initials,
+    )
+    
+    return RedirectResponse(
+        url="/bcp/incident?tab=event-log&success=" + quote("Event logged successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get("/incident/event-log/export", include_in_schema=False)
+async def export_event_log_csv(request: Request):
+    """Export event log to CSV."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from fastapi.responses import StreamingResponse
+    import csv
+    from io import StringIO
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Get active incident
+    active_incident = await bcp_repo.get_active_incident(plan["id"])
+    if not active_incident:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active incident")
+    
+    event_log = await bcp_repo.list_event_log_entries(plan["id"], incident_id=active_incident["id"])
+    
+    # Create CSV
+    output = StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "Timestamp",
+            "Initials",
+            "Notes",
+        ],
+    )
+    writer.writeheader()
+    
+    for entry in reversed(event_log):  # Reverse to show chronological order
+        writer.writerow({
+            "Timestamp": entry.get("happened_at", ""),
+            "Initials": entry.get("initials") or "",
+            "Notes": entry.get("notes", ""),
+        })
+    
+    output.seek(0)
+    
+    from datetime import datetime as dt
+    filename = f"event_log_incident_{active_incident['id']}_{dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+# ============================================================================
+# Webhook Endpoint for External Integrations (e.g., Uptime Kuma)
+# ============================================================================
+
+
+@router.post("/api/webhook/incident/start", include_in_schema=True)
+async def webhook_start_incident(request: Request):
+    """
+    Webhook endpoint to auto-start an incident from external monitoring systems.
+    
+    Expected JSON payload:
+    {
+        "company_id": 1,
+        "source": "UptimeKuma",
+        "message": "Service down alert",
+        "api_key": "your-api-key"
+    }
+    
+    Returns:
+        dict: Incident details and status
+    """
+    import json
+    from datetime import datetime
+    
+    # Parse JSON payload
+    try:
+        body = await request.body()
+        payload = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON payload"
+        )
+    
+    # Validate required fields
+    company_id = payload.get("company_id")
+    source = payload.get("source", "Other")
+    message = payload.get("message", "External alert triggered incident")
+    api_key = payload.get("api_key")
+    
+    if not company_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="company_id is required"
+        )
+    
+    # TODO: Validate API key against stored keys
+    # For now, we'll just check if it's provided
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="api_key is required"
+        )
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No BCP plan found for company_id {company_id}"
+        )
+    
+    # Check if there's already an active incident
+    active_incident = await bcp_repo.get_active_incident(plan["id"])
+    if active_incident:
+        return {
+            "status": "already_active",
+            "incident_id": active_incident["id"],
+            "message": "An incident is already active for this plan"
+        }
+    
+    # Create new incident
+    now = datetime.utcnow()
+    incident = await bcp_repo.create_incident(plan["id"], now, source=source)
+    
+    # Initialize checklist ticks
+    await bcp_repo.initialize_checklist_ticks(plan["id"], incident["id"])
+    
+    # Create initial event log entry
+    await bcp_repo.create_event_log_entry(
+        plan["id"],
+        incident["id"],
+        now,
+        f"Incident auto-started via {source}: {message}",
+        author_id=None,
+        initials="SYS",
+    )
+    
+    # TODO: Send portal alert to distribution list
+    # This would require implementing a notification/alert system
+    
+    return {
+        "status": "started",
+        "incident_id": incident["id"],
+        "plan_id": plan["id"],
+        "started_at": incident["started_at"].isoformat() if incident["started_at"] else None,
+        "message": "Incident started successfully"
+    }
