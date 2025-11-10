@@ -1,0 +1,73 @@
+{% extends "business_continuity/base.html" %}
+{% set current_page = 'templates' %}
+{% set page_title = 'Templates' %}
+
+{% block bc_header_actions %}
+  <button type="button" class="button button--secondary" onclick="location.href='/business-continuity/templates/new'">
+    <span class="button__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+    </span>
+    <span class="button__label">New Template</span>
+  </button>
+{% endblock %}
+
+{% block bc_content %}
+<section class="card">
+  <header class="card__header">
+    <div>
+      <h2 class="card__title">Plan Templates</h2>
+      <p class="card__subtitle">Manage reusable templates for business continuity plans.</p>
+    </div>
+  </header>
+  
+  <div class="table-wrapper">
+    <table class="table table--hover">
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Description</th>
+          <th scope="col">Sections</th>
+          <th scope="col">Created</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for template in templates %}
+        <tr>
+          <td data-label="Name">
+            <strong>{{ template.name }}</strong>
+          </td>
+          <td data-label="Description">
+            {{ template.description|default('—') }}
+          </td>
+          <td data-label="Sections">
+            <span class="badge badge--neutral">{{ template.sections_count|default(0) }} sections</span>
+          </td>
+          <td data-label="Created">
+            <time datetime="{{ template.created_at }}">{{ template.created_at }}</time>
+          </td>
+          <td data-label="Actions">
+            <div class="button-group">
+              <a href="/business-continuity/templates/{{ template.id }}" class="button button--small button--secondary">View</a>
+              <a href="/business-continuity/templates/{{ template.id }}/edit" class="button button--small">Edit</a>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" class="table__empty">
+            <div class="empty-state">
+              <svg class="empty-state__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+              <p class="empty-state__text">No templates found</p>
+              <button type="button" class="button" onclick="location.href='/business-continuity/templates/new'">Create Your First Template</button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -8558,6 +8558,201 @@ async def admin_edit_business_continuity_plan_page(request: Request, plan_id: in
     return await _render_template("admin/business_continuity_plan_editor.html", request, current_user, extra=extra)
 
 
+# New BC UI Routes with 3-part layout
+@app.get("/business-continuity/plans", response_class=HTMLResponse)
+async def bc_plans_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    
+    # Fetch plans from BC repo
+    plans = await bc_plans_repo.list_plans()
+    users = await user_repo.list_users()
+    
+    # Enrich plans with owner names
+    user_map = {u["id"]: u for u in users}
+    for plan in plans:
+        if plan.get("owner_id"):
+            owner = user_map.get(plan["owner_id"])
+            plan["owner_name"] = owner.get("email") if owner else None
+    
+    extra = {
+        "title": "Business Continuity Plans",
+        "plans": jsonable_encoder(plans),
+        "users": jsonable_encoder(users),
+        "pagination": None,
+    }
+    return await _render_template("business_continuity/plans.html", request, current_user, extra=extra)
+
+
+@app.get("/business-continuity/plans/new", response_class=HTMLResponse)
+async def bc_plan_new_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    
+    users = await user_repo.list_users()
+    
+    # Default sections for new plans
+    default_sections = [
+        {"key": "overview", "name": "Overview", "fields": [
+            {"key": "purpose", "label": "Purpose", "type": "rich_text", "required": True},
+            {"key": "scope", "label": "Scope", "type": "rich_text", "required": True},
+        ]},
+        {"key": "roles", "name": "Roles & Responsibilities", "fields": [
+            {"key": "roles_table", "label": "Roles", "type": "table", "columns": [
+                {"key": "role", "label": "Role"},
+                {"key": "responsibility", "label": "Responsibility"},
+                {"key": "contact", "label": "Contact"},
+            ]},
+        ]},
+        {"key": "procedures", "name": "Procedures", "fields": [
+            {"key": "procedures", "label": "Procedures", "type": "rich_text", "required": True},
+        ]},
+    ]
+    
+    extra = {
+        "title": "New Plan",
+        "plan": None,
+        "users": jsonable_encoder(users),
+        "templates": [],
+        "template_sections": None,
+        "default_sections": default_sections,
+    }
+    return await _render_template("business_continuity/plan_editor.html", request, current_user, extra=extra)
+
+
+@app.get("/business-continuity/plans/{plan_id}", response_class=HTMLResponse)
+async def bc_plan_detail_page(request: Request, plan_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    
+    plan = await bc_plans_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Get versions, reviews, acknowledgments (stub for now)
+    versions = []
+    reviews = []
+    acknowledgments = []
+    attachments = []
+    
+    # Get owner name
+    if plan.get("owner_id"):
+        owner = await user_repo.get_user_by_id(plan["owner_id"])
+        plan["owner_name"] = owner.get("email") if owner else None
+    
+    extra = {
+        "title": f"Plan: {plan.get('title')}",
+        "plan": jsonable_encoder(plan),
+        "versions": versions,
+        "reviews": reviews,
+        "acknowledgments": acknowledgments,
+        "attachments": attachments,
+        "can_edit": True,
+        "can_approve": True,
+    }
+    return await _render_template("business_continuity/plan_detail.html", request, current_user, extra=extra)
+
+
+@app.get("/business-continuity/plans/{plan_id}/edit", response_class=HTMLResponse)
+async def bc_plan_edit_page(request: Request, plan_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    
+    plan = await bc_plans_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    users = await user_repo.list_users()
+    
+    # Default sections
+    default_sections = [
+        {"key": "overview", "name": "Overview", "fields": [
+            {"key": "purpose", "label": "Purpose", "type": "rich_text", "required": True},
+            {"key": "scope", "label": "Scope", "type": "rich_text", "required": True},
+        ]},
+        {"key": "roles", "name": "Roles & Responsibilities", "fields": [
+            {"key": "roles_table", "label": "Roles", "type": "table", "columns": [
+                {"key": "role", "label": "Role"},
+                {"key": "responsibility", "label": "Responsibility"},
+                {"key": "contact", "label": "Contact"},
+            ]},
+        ]},
+        {"key": "procedures", "name": "Procedures", "fields": [
+            {"key": "procedures", "label": "Procedures", "type": "rich_text", "required": True},
+        ]},
+    ]
+    
+    extra = {
+        "title": f"Edit Plan: {plan.get('title')}",
+        "plan": jsonable_encoder(plan),
+        "users": jsonable_encoder(users),
+        "templates": [],
+        "template_sections": None,
+        "default_sections": default_sections,
+    }
+    return await _render_template("business_continuity/plan_editor.html", request, current_user, extra=extra)
+
+
+@app.get("/business-continuity/templates", response_class=HTMLResponse)
+async def bc_templates_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    
+    # Stub for templates list
+    templates = []
+    
+    extra = {
+        "title": "Plan Templates",
+        "templates": templates,
+    }
+    return await _render_template("business_continuity/templates.html", request, current_user, extra=extra)
+
+
+@app.get("/business-continuity/reviews", response_class=HTMLResponse)
+async def bc_reviews_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    
+    # Stub for reviews list
+    reviews = []
+    
+    extra = {
+        "title": "Plan Reviews",
+        "reviews": reviews,
+        "can_review": True,
+    }
+    return await _render_template("business_continuity/reviews.html", request, current_user, extra=extra)
+
+
+@app.get("/business-continuity/reports", response_class=HTMLResponse)
+async def bc_reports_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    
+    # Stub for reports stats
+    stats = {
+        "total_plans": 0,
+        "active_plans": 0,
+        "plans_in_review": 0,
+        "draft_plans": 0,
+    }
+    recent_reports = []
+    
+    extra = {
+        "title": "Reports",
+        "stats": stats,
+        "recent_reports": recent_reports,
+    }
+    return await _render_template("business_continuity/reports.html", request, current_user, extra=extra)
+
+
 @app.post("/myforms/admin")
 async def admin_create_form(
     request: Request,
