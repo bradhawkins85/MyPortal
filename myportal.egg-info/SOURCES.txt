@@ -7,6 +7,7 @@ app/api/__init__.py
 app/api/dependencies/__init__.py
 app/api/dependencies/api_keys.py
 app/api/dependencies/auth.py
+app/api/dependencies/bc_rbac.py
 app/api/dependencies/database.py
 app/api/routes/__init__.py
 app/api/routes/agent.py
@@ -15,6 +16,7 @@ app/api/routes/asset_custom_fields.py
 app/api/routes/audit_logs.py
 app/api/routes/auth.py
 app/api/routes/automations.py
+app/api/routes/bc5.py
 app/api/routes/business_continuity_plans.py
 app/api/routes/call_recordings.py
 app/api/routes/companies.py
@@ -59,6 +61,7 @@ app/repositories/assets.py
 app/repositories/audit_logs.py
 app/repositories/auth.py
 app/repositories/automations.py
+app/repositories/bc3.py
 app/repositories/billing_contacts.py
 app/repositories/business_continuity_plans.py
 app/repositories/call_recordings.py
@@ -114,6 +117,7 @@ app/schemas/audit_logs.py
 app/schemas/auth.py
 app/schemas/automations.py
 app/schemas/bc3_models.py
+app/schemas/bc5_models.py
 app/schemas/bcp_template.py
 app/schemas/business_continuity_plans.py
 app/schemas/call_recordings.py
@@ -355,6 +359,7 @@ tests/test_tickets_dashboard_api.py
 tests/test_tickets_repository.py
 tests/test_tickets_service_create.py
 tests/test_transcription_logging.py
+tests/test_transcription_logging_fix.py
 tests/test_trigger_action_modules.py
 tests/test_upgrade_script.py
 tests/test_upload_route.py
