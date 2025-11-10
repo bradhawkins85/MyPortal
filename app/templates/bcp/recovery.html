@@ -1,0 +1,417 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-container">
+  <!-- Success/Error Messages -->
+  {% if request.query_params.get('success') %}
+    <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
+  {% endif %}
+  {% if request.query_params.get('error') %}
+    <div class="alert alert-error">{{ request.query_params.get('error') }}</div>
+  {% endif %}
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Recovery Actions</h1>
+      <p class="page-description">Define recovery actions for critical business activities</p>
+    </div>
+    <div class="page-actions">
+      <a href="/bcp" class="btn btn-secondary">Back to Overview</a>
+      <a href="/bcp/recovery/checklist" class="btn btn-secondary">Crisis & Recovery Checklist</a>
+      {% if can_edit %}
+      <button onclick="showAddModal()" class="btn btn-primary">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+        </svg>
+        Add Recovery Action
+      </button>
+      <a href="/bcp/recovery/export" class="btn btn-secondary">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+        </svg>
+        Export CSV
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Help Text -->
+  <section class="card help-card">
+    <div class="card-body">
+      <h3 class="help-title">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z"/>
+        </svg>
+        About Recovery Actions
+      </h3>
+      <p class="help-text">
+        Recovery actions define the specific steps needed to restore critical activities after a disruption.
+        Each action should specify the resources needed, time objective (RTO), responsible person, and target completion date.
+        Track actions by owner, identify overdue items, and mark them complete as recovery progresses.
+      </p>
+    </div>
+  </section>
+
+  <!-- Filters -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Filters</h2>
+    </div>
+    <div class="card-body">
+      <form method="get" action="/bcp/recovery" class="filter-form">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="activity_filter">Critical Activity</label>
+            <select id="activity_filter" name="activity_filter" class="form-control">
+              <option value="">All Activities</option>
+              {% for activity in activities %}
+                <option value="{{ activity.id }}" {% if activity_filter == activity.id %}selected{% endif %}>
+                  {{ activity.name }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          
+          <div class="form-group">
+            <label for="owner_filter">Owner</label>
+            <select id="owner_filter" name="owner_filter" class="form-control">
+              <option value="">All Owners</option>
+              {% for user in all_users %}
+                <option value="{{ user.id }}" {% if owner_filter == user.id %}selected{% endif %}>
+                  {{ user.name }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          
+          <div class="form-group">
+            <label for="status_filter">Status</label>
+            <select id="status_filter" name="status_filter" class="form-control">
+              <option value="">All Actions</option>
+              <option value="overdue" {% if status_filter == 'overdue' %}selected{% endif %}>Overdue Only</option>
+              <option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>Completed Only</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="align-self: flex-end;">
+            <button type="submit" class="btn btn-primary">Apply Filters</button>
+            <a href="/bcp/recovery" class="btn btn-secondary">Clear</a>
+          </div>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- Recovery Actions Table -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Recovery Actions ({{ actions|length }})</h2>
+    </div>
+    <div class="card-body">
+      {% if actions %}
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width: 35%;">Action</th>
+                <th style="width: 15%;">Critical Activity</th>
+                <th style="width: 15%;">Resources/Outcomes</th>
+                <th style="width: 8%;">RTO</th>
+                <th style="width: 10%;">Owner</th>
+                <th style="width: 10%;">Due Date</th>
+                <th style="width: 7%;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for action in actions %}
+                <tr class="{% if action.completed_at %}completed-row{% elif action.due_date and action.due_date < now() %}overdue-row{% endif %}">
+                  <td>
+                    <div style="font-weight: 500;">{{ action.action }}</div>
+                    {% if can_edit %}
+                      <div class="action-buttons" style="margin-top: 0.5rem;">
+                        <button onclick="showEditModal({{ action.id }}, '{{ action.action|e }}', '{{ action.resources|e if action.resources else '' }}', {{ action.owner_id if action.owner_id else 'null' }}, {{ action.rto_hours if action.rto_hours else 'null' }}, '{{ action.due_date.strftime('%Y-%m-%d') if action.due_date else '' }}', {{ action.critical_activity_id if action.critical_activity_id else 'null' }})" class="btn btn-sm btn-secondary">Edit</button>
+                        {% if not action.completed_at %}
+                          <form method="post" action="/bcp/recovery/{{ action.id }}/complete" style="display:inline;">
+                            <button type="submit" class="btn btn-sm btn-success">Mark Complete</button>
+                          </form>
+                        {% endif %}
+                        <form method="post" action="/bcp/recovery/{{ action.id }}/delete" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete this recovery action?');">
+                          <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                        </form>
+                      </div>
+                    {% endif %}
+                  </td>
+                  <td>{{ action.activity_name if action.activity_name else '-' }}</td>
+                  <td style="font-size: 0.875rem;">{{ action.resources if action.resources else '-' }}</td>
+                  <td>{{ action.rto_humanized }}</td>
+                  <td>{{ action.owner.name if action.owner else '-' }}</td>
+                  <td>
+                    {% if action.due_date %}
+                      {{ action.due_date.strftime('%Y-%m-%d') }}
+                      {% if not action.completed_at and action.due_date < now() %}
+                        <span class="badge badge-danger">Overdue</span>
+                      {% endif %}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if action.completed_at %}
+                      <span class="badge badge-success">✓ {{ action.completed_at.strftime('%Y-%m-%d') }}</span>
+                    {% else %}
+                      <span class="badge badge-warning">Pending</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor" style="opacity: 0.3;">
+            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14z"/>
+            <path d="M7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/>
+          </svg>
+          <h3>No Recovery Actions</h3>
+          <p>No recovery actions match the selected filters. {% if can_edit %}Add your first action to get started.{% endif %}</p>
+          {% if can_edit %}
+            <button onclick="showAddModal()" class="btn btn-primary">Add Recovery Action</button>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+<!-- Add/Edit Modal -->
+{% if can_edit %}
+<div id="actionModal" class="modal" style="display:none;">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="modalTitle">Add Recovery Action</h2>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <form id="actionForm" method="post" action="/bcp/recovery">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="action">Action <span class="required">*</span></label>
+          <textarea id="action" name="action" class="form-control" rows="3" required></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="critical_activity_id">Critical Activity</label>
+          <select id="critical_activity_id" name="critical_activity_id" class="form-control">
+            <option value="">None</option>
+            {% for activity in activities %}
+              <option value="{{ activity.id }}">{{ activity.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="resources">Resources/Outcomes</label>
+          <textarea id="resources" name="resources" class="form-control" rows="3"></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="rto_hours">RTO (hours)</label>
+            <input type="number" id="rto_hours" name="rto_hours" class="form-control" min="0">
+          </div>
+
+          <div class="form-group">
+            <label for="due_date">Due Date</label>
+            <input type="date" id="due_date" name="due_date" class="form-control">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="owner_id">Owner</label>
+          <select id="owner_id" name="owner_id" class="form-control">
+            <option value="">Unassigned</option>
+            {% for user in all_users %}
+              <option value="{{ user.id }}">{{ user.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" onclick="closeModal()" class="btn btn-secondary">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function showAddModal() {
+  document.getElementById('modalTitle').textContent = 'Add Recovery Action';
+  document.getElementById('actionForm').action = '/bcp/recovery';
+  document.getElementById('actionForm').reset();
+  document.getElementById('actionModal').style.display = 'flex';
+}
+
+function showEditModal(id, action, resources, ownerId, rtoHours, dueDate, activityId) {
+  document.getElementById('modalTitle').textContent = 'Edit Recovery Action';
+  document.getElementById('actionForm').action = '/bcp/recovery/' + id + '/update';
+  document.getElementById('action').value = action;
+  document.getElementById('resources').value = resources;
+  document.getElementById('owner_id').value = ownerId || '';
+  document.getElementById('rto_hours').value = rtoHours || '';
+  document.getElementById('due_date').value = dueDate;
+  document.getElementById('critical_activity_id').value = activityId || '';
+  document.getElementById('actionModal').style.display = 'flex';
+}
+
+function closeModal() {
+  document.getElementById('actionModal').style.display = 'none';
+}
+
+// Close modal on outside click
+window.onclick = function(event) {
+  const modal = document.getElementById('actionModal');
+  if (event.target === modal) {
+    closeModal();
+  }
+}
+</script>
+{% endif %}
+
+<style>
+.filter-form .form-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.filter-form .form-group {
+  flex: 1;
+  min-width: 200px;
+}
+
+.completed-row {
+  opacity: 0.7;
+  background-color: #f0fdf4;
+}
+
+.overdue-row {
+  background-color: #fef2f2;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.action-buttons .btn-sm {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 0.25rem;
+}
+
+.badge-success {
+  background-color: #10b981;
+  color: white;
+}
+
+.badge-warning {
+  background-color: #f59e0b;
+  color: white;
+}
+
+.badge-danger {
+  background-color: #ef4444;
+  color: white;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.empty-state h3 {
+  margin-top: 1rem;
+  color: #6b7280;
+}
+
+.empty-state p {
+  color: #9ca3af;
+  margin-bottom: 1.5rem;
+}
+
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-content {
+  background-color: white;
+  border-radius: 0.5rem;
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #6b7280;
+}
+
+.modal-close:hover {
+  color: #111827;
+}
+
+.modal-body {
+  padding: 1.5rem;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.required {
+  color: #ef4444;
+}
+</style>
+{% endblock %}
