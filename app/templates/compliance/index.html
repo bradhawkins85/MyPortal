@@ -4,122 +4,140 @@
 
 {% block header_actions %}
   <div class="header-actions">
-    <input type="search" id="compliance-filter" class="input" placeholder="Filter controls" aria-label="Filter controls" />
+    <input
+      type="search"
+      id="compliance-filter"
+      class="form-input"
+      placeholder="Filter controls"
+      aria-label="Filter controls"
+    />
   </div>
 {% endblock %}
 
 {% block content %}
-<section class="panel">
-  <header class="panel__header">
-    <div>
-      <h2 class="panel__title">Essential 8 Compliance</h2>
-      <p class="panel__subtitle">Track compliance with Australian Cyber Security Centre Essential 8 framework.</p>
-    </div>
-    {% if company %}
-    <div class="panel__meta">
-      <span class="tag">{{ company.name }}</span>
-    </div>
-    {% endif %}
-  </header>
-  
-  <!-- Compliance Summary -->
-  <div class="panel__body" style="border-bottom: 1px solid #e5e7eb; padding: 1.5rem;">
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-      <div class="stat-card">
-        <div class="stat-card__label">Compliance Rate</div>
-        <div class="stat-card__value">{{ summary.compliance_percentage }}%</div>
-        <div class="stat-card__detail">{{ summary.compliant }} of {{ summary.total_controls }} controls</div>
+<div class="management management--single compliance" data-layout>
+  <section class="management__content">
+    <header class="management__header compliance__header">
+      <div>
+        <h1 class="management__title">Essential 8 compliance</h1>
+        <p class="management__subtitle">Track compliance with Australian Cyber Security Centre Essential 8 framework.</p>
       </div>
-      <div class="stat-card">
-        <div class="stat-card__label">In Progress</div>
-        <div class="stat-card__value">{{ summary.in_progress }}</div>
+      {% if company %}
+      <div class="management__header-actions compliance__header-actions">
+        <span class="tag tag--muted">{{ company.name }}</span>
       </div>
-      <div class="stat-card">
-        <div class="stat-card__label">Not Started</div>
-        <div class="stat-card__value">{{ summary.not_started }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card__label">Avg. Maturity</div>
-        <div class="stat-card__value">ML{{ summary.average_maturity_level }}</div>
-      </div>
-    </div>
-  </div>
+      {% endif %}
+    </header>
 
-  <div class="panel__body">
-    <div class="table-responsive">
-      <table class="table" data-compliance-table>
-        <thead>
-          <tr>
-            <th scope="col" style="width: 5%">#</th>
-            <th scope="col" style="width: 25%">Control</th>
-            <th scope="col" style="width: 15%">Status</th>
-            <th scope="col" style="width: 10%">Maturity</th>
-            <th scope="col" style="width: 15%">Last Reviewed</th>
-            <th scope="col" style="width: 15%">Target Date</th>
-            <th scope="col" style="width: 15%">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for record in compliance_records %}
-          <tr data-record-id="{{ record.id }}" data-status="{{ record.status }}">
-            <td>{{ record.control.control_order }}</td>
-            <td>
-              <strong>{{ record.control.name }}</strong>
-              <br>
-              {% set control_description = record.control.description or '' %}
-              <small style="color: #6b7280;">{{ control_description[:100] }}{% if control_description|length > 100 %}...{% endif %}</small>
-            </td>
-            <td>
-              <span class="badge badge--{{ record.status }}">
-                {% if record.status == 'not_started' %}Not Started
-                {% elif record.status == 'in_progress' %}In Progress
-                {% elif record.status == 'compliant' %}Compliant
-                {% elif record.status == 'non_compliant' %}Non-Compliant
-                {% elif record.status == 'not_applicable' %}Not Applicable
-                {% endif %}
-              </span>
-            </td>
-            <td>
-              <span class="badge badge--maturity-{{ record.maturity_level }}">
-                {% if record.maturity_level == 'ml0' %}ML0
-                {% elif record.maturity_level == 'ml1' %}ML1
-                {% elif record.maturity_level == 'ml2' %}ML2
-                {% elif record.maturity_level == 'ml3' %}ML3
-                {% endif %}
-              </span>
-            </td>
-            <td>{{ record.last_reviewed_date or '—' }}</td>
-            <td>{{ record.target_compliance_date or '—' }}</td>
-            <td>
-              <a href="/compliance/control/{{ record.control_id }}" class="button button--small">
-                View Requirements
-              </a>
-              <button type="button" class="button button--small" data-edit-compliance="{{ record.id }}" data-control-id="{{ record.control_id }}">
-                Update
-              </button>
-            </td>
-          </tr>
-          {% else %}
-          <tr>
-            <td colspan="7" class="text-center">
-              No compliance records found. 
-              {% if is_super_admin %}
-              <button type="button" class="button button--small" id="initialize-compliance">Initialize Controls</button>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="card card--panel compliance-summary-card">
+      <div class="compliance-summary__grid">
+        <div class="compliance-summary__item compliance-summary__item--accent">
+          <span class="compliance-summary__label">Compliance rate</span>
+          <span class="compliance-summary__value">{{ summary.compliance_percentage }}%</span>
+          <span class="compliance-summary__hint">{{ summary.compliant }} of {{ summary.total_controls }} controls</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">In progress</span>
+          <span class="compliance-summary__value">{{ summary.in_progress }}</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">Not started</span>
+          <span class="compliance-summary__value">{{ summary.not_started }}</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">Avg. maturity</span>
+          <span class="compliance-summary__value">ML{{ summary.average_maturity_level }}</span>
+        </div>
+      </div>
     </div>
-  </div>
-</section>
 
-<!-- Update Compliance Dialog -->
+    <div class="card card--panel compliance-table-card">
+      <div class="table-wrapper">
+        <table class="table compliance-table" data-compliance-table>
+          <thead>
+            <tr>
+              <th scope="col" style="width: 5%">#</th>
+              <th scope="col" style="width: 25%">Control</th>
+              <th scope="col" style="width: 15%">Status</th>
+              <th scope="col" style="width: 10%">Maturity</th>
+              <th scope="col" style="width: 15%">Last reviewed</th>
+              <th scope="col" style="width: 15%">Target date</th>
+              <th scope="col" style="width: 15%">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for record in compliance_records %}
+            <tr data-record-id="{{ record.id }}" data-status="{{ record.status }}">
+              <td>{{ record.control.control_order }}</td>
+              <td>
+                <div class="compliance-table__control">
+                  <span class="compliance-table__control-title">{{ record.control.name }}</span>
+                  {% set control_description = record.control.description or '' %}
+                  {% if control_description %}
+                  <p class="compliance-table__description">
+                    {{ control_description[:100] }}{% if control_description|length > 100 %}…{% endif %}
+                  </p>
+                  {% endif %}
+                </div>
+              </td>
+              <td>
+                <span class="badge badge--status-{{ record.status }}">
+                  {% if record.status == 'not_started' %}Not started
+                  {% elif record.status == 'in_progress' %}In progress
+                  {% elif record.status == 'compliant' %}Compliant
+                  {% elif record.status == 'non_compliant' %}Non-compliant
+                  {% elif record.status == 'not_applicable' %}Not applicable
+                  {% endif %}
+                </span>
+              </td>
+              <td>
+                <span class="badge badge--maturity-{{ record.maturity_level }}">
+                  {% if record.maturity_level == 'ml0' %}ML0
+                  {% elif record.maturity_level == 'ml1' %}ML1
+                  {% elif record.maturity_level == 'ml2' %}ML2
+                  {% elif record.maturity_level == 'ml3' %}ML3
+                  {% endif %}
+                </span>
+              </td>
+              <td>{{ record.last_reviewed_date or '—' }}</td>
+              <td>{{ record.target_compliance_date or '—' }}</td>
+              <td>
+                <div class="compliance-table__actions">
+                  <a href="/compliance/control/{{ record.control_id }}" class="button button--ghost button--small">
+                    View requirements
+                  </a>
+                  <button
+                    type="button"
+                    class="button button--secondary button--small"
+                    data-edit-compliance="{{ record.id }}"
+                    data-control-id="{{ record.control_id }}"
+                  >
+                    Update
+                  </button>
+                </div>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="7" class="table__empty">
+                No compliance records found.
+                {% if is_super_admin %}
+                <button type="button" class="button button--ghost button--small" id="initialize-compliance">Initialize controls</button>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
 <dialog id="compliance-dialog" class="dialog">
   <form method="dialog" class="dialog__container" id="compliance-form">
     <header class="dialog__header">
-      <h3 class="dialog__title">Update Compliance</h3>
+      <h3 class="dialog__title">Update compliance</h3>
       <button type="submit" class="dialog__close" aria-label="Close">
         <span aria-hidden="true">&times;</span>
       </button>
@@ -127,126 +145,63 @@
     <div class="dialog__body">
       <input type="hidden" id="compliance-id" />
       <input type="hidden" id="control-id" />
-      
-      <div class="form-group">
+
+      <div class="form-field">
         <label for="compliance-status" class="form-label">Status</label>
-        <select id="compliance-status" class="form-select" required>
-          <option value="not_started">Not Started</option>
-          <option value="in_progress">In Progress</option>
+        <select id="compliance-status" class="form-input" required>
+          <option value="not_started">Not started</option>
+          <option value="in_progress">In progress</option>
           <option value="compliant">Compliant</option>
-          <option value="non_compliant">Non-Compliant</option>
-          <option value="not_applicable">Not Applicable</option>
+          <option value="non_compliant">Non-compliant</option>
+          <option value="not_applicable">Not applicable</option>
         </select>
       </div>
 
-      <div class="form-group">
-        <label for="compliance-maturity" class="form-label">Maturity Level</label>
-        <select id="compliance-maturity" class="form-select" required>
-          <option value="ml0">ML0 - Not Implemented</option>
-          <option value="ml1">ML1 - Maturity Level 1</option>
-          <option value="ml2">ML2 - Maturity Level 2</option>
-          <option value="ml3">ML3 - Maturity Level 3</option>
+      <div class="form-field">
+        <label for="compliance-maturity" class="form-label">Maturity level</label>
+        <select id="compliance-maturity" class="form-input" required>
+          <option value="ml0">ML0 - Not implemented</option>
+          <option value="ml1">ML1 - Maturity level 1</option>
+          <option value="ml2">ML2 - Maturity level 2</option>
+          <option value="ml3">ML3 - Maturity level 3</option>
         </select>
       </div>
 
-      <div class="form-group">
-        <label for="compliance-last-reviewed" class="form-label">Last Reviewed Date</label>
+      <div class="form-field">
+        <label for="compliance-last-reviewed" class="form-label">Last reviewed date</label>
         <input type="date" id="compliance-last-reviewed" class="form-input" />
       </div>
 
-      <div class="form-group">
-        <label for="compliance-target-date" class="form-label">Target Compliance Date</label>
+      <div class="form-field">
+        <label for="compliance-target-date" class="form-label">Target compliance date</label>
         <input type="date" id="compliance-target-date" class="form-input" />
       </div>
 
-      <div class="form-group">
+      <div class="form-field">
         <label for="compliance-evidence" class="form-label">Evidence</label>
-        <textarea id="compliance-evidence" class="form-textarea" rows="3" placeholder="Links to documentation, screenshots, etc."></textarea>
+        <textarea id="compliance-evidence" class="form-input form-input--textarea" rows="3" placeholder="Links to documentation, screenshots, etc."></textarea>
       </div>
 
-      <div class="form-group">
+      <div class="form-field">
         <label for="compliance-notes" class="form-label">Notes</label>
-        <textarea id="compliance-notes" class="form-textarea" rows="4" placeholder="Implementation details, outstanding items, etc."></textarea>
+        <textarea id="compliance-notes" class="form-input form-input--textarea" rows="4" placeholder="Implementation details, outstanding items, etc."></textarea>
       </div>
     </div>
     <footer class="dialog__footer">
-      <button type="button" class="button button--secondary" data-close-dialog>Cancel</button>
+      <button type="button" class="button button--ghost" data-close-dialog>Cancel</button>
       <button type="button" class="button button--primary" id="save-compliance">Save</button>
     </footer>
   </form>
 </dialog>
 
-<style>
-.stat-card {
-  background: #f9fafb;
-  padding: 1rem;
-  border-radius: 0.5rem;
-  border: 1px solid #e5e7eb;
-}
-.stat-card__label {
-  font-size: 0.875rem;
-  color: #6b7280;
-  margin-bottom: 0.25rem;
-}
-.stat-card__value {
-  font-size: 1.875rem;
-  font-weight: 600;
-  color: #111827;
-}
-.stat-card__detail {
-  font-size: 0.75rem;
-  color: #9ca3af;
-  margin-top: 0.25rem;
-}
-
-.badge {
-  display: inline-block;
-  padding: 0.25rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 500;
-}
-.badge--not_started { background: #e5e7eb; color: #4b5563; }
-.badge--in_progress { background: #dbeafe; color: #1e40af; }
-.badge--compliant { background: #d1fae5; color: #065f46; }
-.badge--non_compliant { background: #fee2e2; color: #991b1b; }
-.badge--not_applicable { background: #f3f4f6; color: #6b7280; }
-
-.badge--maturity-ml0 { background: #f3f4f6; color: #6b7280; }
-.badge--maturity-ml1 { background: #fef3c7; color: #92400e; }
-.badge--maturity-ml2 { background: #dbeafe; color: #1e40af; }
-.badge--maturity-ml3 { background: #d1fae5; color: #065f46; }
-
-.form-group {
-  margin-bottom: 1rem;
-}
-.form-label {
-  display: block;
-  font-size: 0.875rem;
-  font-weight: 500;
-  margin-bottom: 0.5rem;
-  color: #374151;
-}
-.form-select, .form-input, .form-textarea {
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #d1d5db;
-  border-radius: 0.375rem;
-  font-size: 0.875rem;
-}
-.form-textarea {
-  resize: vertical;
-}
-</style>
-
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-  const companyId = {{ company.id }};
+  const companyId = {{ (company.id if company else None) | tojson }};
   const csrfToken = getCsrfToken();
-  
-  // Initialize compliance controls
+
+  // Initialise compliance controls when no records exist
   const initBtn = document.getElementById('initialize-compliance');
-  if (initBtn) {
+  if (initBtn && companyId) {
     initBtn.addEventListener('click', async () => {
       try {
         const response = await fetch(`/api/essential8/companies/${companyId}/compliance/initialize`, {
@@ -270,14 +225,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Edit compliance
   document.querySelectorAll('[data-edit-compliance]').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      const recordId = btn.dataset.editCompliance;
+    btn.addEventListener('click', async () => {
+      if (!companyId) return;
       const controlId = btn.dataset.controlId;
-      
+
       try {
         const response = await fetch(`/api/essential8/companies/${companyId}/compliance/${controlId}`);
+        if (!response.ok) {
+          throw new Error('Unable to load compliance record');
+        }
         const data = await response.json();
-        
+
         document.getElementById('compliance-id').value = data.id;
         document.getElementById('control-id').value = data.control_id;
         document.getElementById('compliance-status').value = data.status;
@@ -286,7 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('compliance-target-date').value = data.target_compliance_date || '';
         document.getElementById('compliance-evidence').value = data.evidence || '';
         document.getElementById('compliance-notes').value = data.notes || '';
-        
+
         document.getElementById('compliance-dialog').showModal();
       } catch (error) {
         console.error('Error:', error);
@@ -297,6 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Save compliance
   document.getElementById('save-compliance')?.addEventListener('click', async () => {
+    if (!companyId) return;
     const controlId = document.getElementById('control-id').value;
     const formData = {
       status: document.getElementById('compliance-status').value,
@@ -306,7 +265,7 @@ document.addEventListener('DOMContentLoaded', () => {
       evidence: document.getElementById('compliance-evidence').value || null,
       notes: document.getElementById('compliance-notes').value || null,
     };
-    
+
     try {
       const response = await fetch(`/api/essential8/companies/${companyId}/compliance/${controlId}`, {
         method: 'PATCH',
@@ -316,7 +275,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         body: JSON.stringify(formData)
       });
-      
+
       if (response.ok) {
         window.location.reload();
       } else {
@@ -341,7 +300,7 @@ document.addEventListener('DOMContentLoaded', () => {
     filterInput.addEventListener('input', (e) => {
       const filterValue = e.target.value.toLowerCase();
       const rows = document.querySelectorAll('[data-compliance-table] tbody tr');
-      
+
       rows.forEach(row => {
         const text = row.textContent.toLowerCase();
         row.style.display = text.includes(filterValue) ? '' : 'none';
