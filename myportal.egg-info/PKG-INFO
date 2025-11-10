@@ -10,6 +10,7 @@ Requires-Dist: fastapi
 Requires-Dist: uvicorn[standard]
 Requires-Dist: sqlalchemy>=2.0
 Requires-Dist: aiomysql
+Requires-Dist: aiosqlite
 Requires-Dist: pydantic>=2.6
 Requires-Dist: pydantic-settings
 Requires-Dist: passlib[bcrypt]

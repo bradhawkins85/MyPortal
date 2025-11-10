@@ -162,6 +162,7 @@ app/services/audit.py
 app/services/automations.py
 app/services/background.py
 app/services/bc_export_service.py
+app/services/bc_file_validation.py
 app/services/bc_services.py
 app/services/bcp_template.py
 app/services/call_recordings.py
@@ -244,6 +245,7 @@ tests/test_automations_repository_datetimes.py
 tests/test_automations_service.py
 tests/test_bc10_acknowledgments.py
 tests/test_bc11_supportive_entities.py
+tests/test_bc12_security.py
 tests/test_bc3_models.py
 tests/test_bc4_migrations.py
 tests/test_bc5_api.py
