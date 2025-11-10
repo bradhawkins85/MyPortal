@@ -75,6 +75,7 @@
                 {% elif record.status == 'in_progress' %}In Progress
                 {% elif record.status == 'compliant' %}Compliant
                 {% elif record.status == 'non_compliant' %}Non-Compliant
+                {% elif record.status == 'not_applicable' %}Not Applicable
                 {% endif %}
               </span>
             </td>
@@ -90,6 +91,9 @@
             <td>{{ record.last_reviewed_date or '—' }}</td>
             <td>{{ record.target_compliance_date or '—' }}</td>
             <td>
+              <a href="/compliance/control/{{ record.control_id }}" class="button button--small">
+                View Requirements
+              </a>
               <button type="button" class="button button--small" data-edit-compliance="{{ record.id }}" data-control-id="{{ record.control_id }}">
                 Update
               </button>
@@ -131,6 +135,7 @@
           <option value="in_progress">In Progress</option>
           <option value="compliant">Compliant</option>
           <option value="non_compliant">Non-Compliant</option>
+          <option value="not_applicable">Not Applicable</option>
         </select>
       </div>
 
@@ -205,6 +210,7 @@
 .badge--in_progress { background: #dbeafe; color: #1e40af; }
 .badge--compliant { background: #d1fae5; color: #065f46; }
 .badge--non_compliant { background: #fee2e2; color: #991b1b; }
+.badge--not_applicable { background: #f3f4f6; color: #6b7280; }
 
 .badge--maturity-ml0 { background: #f3f4f6; color: #6b7280; }
 .badge--maturity-ml1 { background: #fef3c7; color: #92400e; }
