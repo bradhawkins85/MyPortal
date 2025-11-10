@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from typing import Any
 
 import httpx
@@ -13,6 +15,58 @@ from app.services import syncro, tacticalrmm
 
 # Xero API returns 100 contacts per page by default
 XERO_CONTACTS_PER_PAGE = 100
+
+
+def _normalize_company_name(name: str | None) -> str:
+    """
+    Normalize a company name for robust matching.
+    
+    This function handles various edge cases that can cause name matching to fail:
+    - Case variations (ACME vs Acme vs acme)
+    - Leading/trailing whitespace
+    - Multiple consecutive spaces
+    - Non-breaking spaces and other Unicode whitespace variants
+    - Tabs and other whitespace characters
+    - Zero-width spaces and other invisible Unicode characters
+    - Unicode normalization (NFKC form)
+    
+    Args:
+        name: The company name to normalize
+        
+    Returns:
+        Normalized company name suitable for comparison
+        
+    Example:
+        >>> _normalize_company_name("Acme  Corporation")
+        'acme corporation'
+        >>> _normalize_company_name("ACME\\xa0Corporation")
+        'acme corporation'
+        >>> _normalize_company_name("Test\\tCompany")
+        'test company'
+    """
+    if not name:
+        return ""
+    
+    # Convert to string
+    text = str(name)
+    
+    # Unicode normalize to NFKC form (canonical decomposition followed by canonical composition)
+    # This handles compatibility characters like non-breaking spaces
+    text = unicodedata.normalize('NFKC', text)
+    
+    # Replace all whitespace characters (including tabs, non-breaking spaces, etc.) with regular spaces
+    # Do this BEFORE removing other control characters
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Remove zero-width and other format characters
+    # Category 'Cf' is "Other, Format" which includes zero-width spaces
+    # Category 'Mn' is "Mark, Nonspacing" which includes combining diacritical marks
+    text = ''.join(char for char in text if unicodedata.category(char) not in ('Cf', 'Mn'))
+    
+    # Strip leading/trailing whitespace and convert to lowercase
+    text = text.strip().lower()
+    
+    return text
 
 
 async def lookup_missing_company_ids(company_id: int) -> dict[str, Any]:
@@ -147,8 +201,8 @@ async def _lookup_syncro_company_id(company_name: str) -> str | None:
                     ""
                 )
                 
-                # Case-insensitive name comparison
-                if customer_name.strip().lower() == company_name.strip().lower():
+                # Robust name comparison using normalization
+                if _normalize_company_name(customer_name) == _normalize_company_name(company_name):
                     customer_id = customer.get("id")
                     if customer_id:
                         return str(customer_id)
@@ -187,8 +241,8 @@ async def _lookup_tactical_client_id(company_name: str) -> str | None:
         # Fetch all clients from the /beta/v1/client/ endpoint
         clients = await tacticalrmm.fetch_clients()
         
-        # Search for a matching client name
-        search_key = company_name.strip().lower()
+        # Search for a matching client name using robust normalization
+        search_key = _normalize_company_name(company_name)
         for client in clients:
             if not isinstance(client, dict):
                 continue
@@ -197,8 +251,8 @@ async def _lookup_tactical_client_id(company_name: str) -> str | None:
             if not client_name:
                 continue
             
-            # Case-insensitive name comparison
-            if str(client_name).strip().lower() == search_key:
+            # Robust name comparison using normalization
+            if _normalize_company_name(client_name) == search_key:
                 client_id = client.get("id")
                 if client_id:
                     return str(client_id)
@@ -273,11 +327,11 @@ async def _lookup_xero_contact_id(company_name: str) -> str | None:
                     # No more contacts to check
                     break
                 
-                # Search for an exact match (case-insensitive)
-                search_name = company_name.strip().lower()
+                # Search for an exact match using robust normalization
+                search_name = _normalize_company_name(company_name)
                 for contact in contacts:
-                    contact_name = str(contact.get("Name", "")).strip().lower()
-                    if contact_name == search_name:
+                    contact_name = contact.get("Name", "")
+                    if _normalize_company_name(contact_name) == search_name:
                         contact_id = contact.get("ContactID")
                         if contact_id:
                             log_info(
