@@ -21,7 +21,7 @@ async def get_essential8_control(control_id: int) -> Optional[dict[str, Any]]:
     query = """
         SELECT id, name, description, control_order, created_at, updated_at
         FROM essential8_controls
-        WHERE id = :control_id
+        WHERE id = %(control_id)s
     """
     return await db.fetch_one(query, {"control_id": control_id})
 
@@ -32,10 +32,10 @@ async def list_company_compliance(
 ) -> list[dict[str, Any]]:
     """List compliance records for a company"""
     params: dict[str, Any] = {"company_id": company_id}
-    
-    where_clauses = ["cec.company_id = :company_id"]
+
+    where_clauses = ["cec.company_id = %(company_id)s"]
     if status:
-        where_clauses.append("cec.status = :status")
+        where_clauses.append("cec.status = %(status)s")
         params["status"] = status.value
     
     where_clause = " AND ".join(where_clauses)
@@ -79,16 +79,16 @@ async def get_company_compliance(
 ) -> Optional[dict[str, Any]]:
     """Get a specific compliance record for a company and control"""
     query = """
-        SELECT 
-            cec.id, cec.company_id, cec.control_id, cec.status, 
+        SELECT
+            cec.id, cec.company_id, cec.control_id, cec.status,
             cec.maturity_level, cec.evidence, cec.notes,
             cec.last_reviewed_date, cec.target_compliance_date,
             cec.created_at, cec.updated_at,
-            ec.id as control_id, ec.name as control_name, 
+            ec.id as control_id, ec.name as control_name,
             ec.description as control_description, ec.control_order
         FROM company_essential8_compliance cec
         INNER JOIN essential8_controls ec ON cec.control_id = ec.id
-        WHERE cec.company_id = :company_id AND cec.control_id = :control_id
+        WHERE cec.company_id = %(company_id)s AND cec.control_id = %(control_id)s
     """
     row = await db.fetch_one(query, {"company_id": company_id, "control_id": control_id})
     
@@ -121,11 +121,11 @@ async def create_company_compliance(
 ) -> dict[str, Any]:
     """Create a compliance record for a company"""
     query = """
-        INSERT INTO company_essential8_compliance 
-        (company_id, control_id, status, maturity_level, evidence, notes, 
+        INSERT INTO company_essential8_compliance
+        (company_id, control_id, status, maturity_level, evidence, notes,
          last_reviewed_date, target_compliance_date)
-        VALUES (:company_id, :control_id, :status, :maturity_level, :evidence, 
-                :notes, :last_reviewed_date, :target_compliance_date)
+        VALUES (%(company_id)s, %(control_id)s, %(status)s, %(maturity_level)s, %(evidence)s,
+                %(notes)s, %(last_reviewed_date)s, %(target_compliance_date)s)
     """
     params = {
         "company_id": company_id,
@@ -166,7 +166,7 @@ async def update_company_compliance(
     
     for key, value in updates.items():
         if value is not None:
-            set_clauses.append(f"{key} = :{key}")
+            set_clauses.append(f"{key} = %({key})s")
             # Handle enum values
             if isinstance(value, (ComplianceStatus, MaturityLevel)):
                 params[key] = value.value
@@ -180,7 +180,7 @@ async def update_company_compliance(
     query = f"""
         UPDATE company_essential8_compliance
         SET {set_clause}
-        WHERE company_id = :company_id AND control_id = :control_id
+        WHERE company_id = %(company_id)s AND control_id = %(control_id)s
     """
     
     await db.execute(query, params)
@@ -224,7 +224,7 @@ async def initialize_company_compliance(company_id: int) -> int:
 async def get_company_compliance_summary(company_id: int) -> dict[str, Any]:
     """Get a summary of compliance status for a company"""
     query = """
-        SELECT 
+        SELECT
             COUNT(*) as total_controls,
             SUM(CASE WHEN status = 'not_started' THEN 1 ELSE 0 END) as not_started,
             SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
@@ -240,7 +240,7 @@ async def get_company_compliance_summary(company_id: int) -> dict[str, Any]:
                 END
             ) as avg_maturity
         FROM company_essential8_compliance
-        WHERE company_id = :company_id
+        WHERE company_id = %(company_id)s
     """
     row = await db.fetch_one(query, {"company_id": company_id})
     
@@ -287,10 +287,10 @@ async def create_compliance_audit(
     """Create an audit trail entry for compliance changes"""
     query = """
         INSERT INTO company_essential8_audit
-        (compliance_id, company_id, control_id, user_id, action, 
+        (compliance_id, company_id, control_id, user_id, action,
          old_status, new_status, old_maturity_level, new_maturity_level, notes)
-        VALUES (:compliance_id, :company_id, :control_id, :user_id, :action,
-                :old_status, :new_status, :old_maturity_level, :new_maturity_level, :notes)
+        VALUES (%(compliance_id)s, %(company_id)s, %(control_id)s, %(user_id)s, %(action)s,
+                %(old_status)s, %(new_status)s, %(old_maturity_level)s, %(new_maturity_level)s, %(notes)s)
     """
     params = {
         "compliance_id": compliance_id,
@@ -315,10 +315,10 @@ async def list_compliance_audit(
 ) -> list[dict[str, Any]]:
     """List audit trail for compliance changes"""
     params: dict[str, Any] = {"company_id": company_id, "limit": limit}
-    
-    where_clauses = ["company_id = :company_id"]
+
+    where_clauses = ["company_id = %(company_id)s"]
     if control_id:
-        where_clauses.append("control_id = :control_id")
+        where_clauses.append("control_id = %(control_id)s")
         params["control_id"] = control_id
     
     where_clause = " AND ".join(where_clauses)
@@ -331,7 +331,7 @@ async def list_compliance_audit(
         FROM company_essential8_audit
         WHERE {where_clause}
         ORDER BY created_at DESC
-        LIMIT :limit
+        LIMIT %(limit)s
     """
     
     return await db.fetch_all(query, params)
