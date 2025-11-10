@@ -1,9 +1,46 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.core.database import db
 from app.schemas.essential8 import ComplianceStatus, MaturityLevel
+
+
+def _format_datetime(value: Any) -> Optional[str]:
+    """Convert datetime values to ISO formatted strings."""
+
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        # Ensure timezone aware values are normalised to UTC
+        if value.tzinfo is None:
+            return value.isoformat()
+        return value.astimezone(timezone.utc).isoformat()
+
+    return value  # type: ignore[return-value]
+
+
+def _build_compliance_record(row: Any) -> dict[str, Any]:
+    """Normalise a compliance record row returned from the database."""
+
+    item = dict(row)
+
+    item["control"] = {
+        "id": row["control_id"],
+        "name": row["control_name"],
+        "description": row["control_description"] or "",
+        "control_order": row["control_order"],
+    }
+
+    for key in ["control_name", "control_description"]:
+        item.pop(key, None)
+
+    for key in ("created_at", "updated_at"):
+        item[key] = _format_datetime(item.get(key))
+
+    return item
 
 
 async def list_essential8_controls() -> list[dict[str, Any]]:
@@ -56,21 +93,7 @@ async def list_company_compliance(
     rows = await db.fetch_all(query, params)
     
     # Transform the flat rows into nested structure
-    result = []
-    for row in rows:
-        item = dict(row)
-        item["control"] = {
-            "id": row["control_id"],
-            "name": row["control_name"],
-            "description": row["control_description"] or "",
-            "control_order": row["control_order"],
-        }
-        # Remove the flattened control fields
-        for key in ["control_name", "control_description"]:
-            item.pop(key, None)
-        result.append(item)
-    
-    return result
+    return [_build_compliance_record(row) for row in rows]
 
 
 async def get_company_compliance(
@@ -95,18 +118,7 @@ async def get_company_compliance(
     if not row:
         return None
     
-    item = dict(row)
-    item["control"] = {
-        "id": row["control_id"],
-        "name": row["control_name"],
-        "description": row["control_description"] or "",
-        "control_order": row["control_order"],
-    }
-    # Remove the flattened control fields
-    for key in ["control_name", "control_description"]:
-        item.pop(key, None)
-    
-    return item
+    return _build_compliance_record(row)
 
 
 async def create_company_compliance(
@@ -334,4 +346,12 @@ async def list_compliance_audit(
         LIMIT %(limit)s
     """
     
-    return await db.fetch_all(query, params)
+    rows = await db.fetch_all(query, params)
+
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["created_at"] = _format_datetime(item.get("created_at"))
+        result.append(item)
+
+    return result
