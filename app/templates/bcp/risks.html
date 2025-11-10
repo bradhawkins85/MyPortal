@@ -1,0 +1,628 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-container">
+  <!-- Success/Error Messages -->
+  {% if request.query_params.get('success') %}
+    <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
+  {% endif %}
+  {% if request.query_params.get('error') %}
+    <div class="alert alert-error">{{ request.query_params.get('error') }}</div>
+  {% endif %}
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Risk Assessment</h1>
+      <p class="page-description">Identify, assess, and manage risks to business continuity</p>
+    </div>
+    <div class="page-actions">
+      <a href="/bcp" class="btn btn-secondary">Back to Overview</a>
+      {% if can_edit %}
+      <button type="button" class="btn btn-primary" onclick="document.getElementById('createRiskModal').showModal()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+        </svg>
+        Add Risk
+      </button>
+      <a href="/bcp/risks/export" class="btn btn-secondary">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+        </svg>
+        Export CSV
+      </a>
+      {% if risks|length == 0 %}
+      <form method="post" action="/bcp/risks/seed" style="display: inline;">
+        <button type="submit" class="btn btn-secondary">Seed Example Risks</button>
+      </form>
+      {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Risk Legend -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Risk Assessment Guide</h2>
+    </div>
+    <div class="card-body">
+      <div class="legend-grid">
+        <!-- Likelihood Scale -->
+        <div class="legend-section">
+          <h3 class="legend-heading">Likelihood (1-4)</h3>
+          <div class="legend-items">
+            {% for item in likelihood_scale %}
+            <div class="legend-item">
+              <span class="legend-badge">{{ item.value }}</span>
+              <div>
+                <strong>{{ item.label }}</strong>
+                <p class="text-sm text-muted">{{ item.description }}</p>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Impact Scale -->
+        <div class="legend-section">
+          <h3 class="legend-heading">Impact (1-4)</h3>
+          <div class="legend-items">
+            {% for item in impact_scale %}
+            <div class="legend-item">
+              <span class="legend-badge">{{ item.value }}</span>
+              <div>
+                <strong>{{ item.label }}</strong>
+                <p class="text-sm text-muted">{{ item.description }}</p>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Severity Bands -->
+        <div class="legend-section">
+          <h3 class="legend-heading">Severity Bands (Rating = Likelihood × Impact)</h3>
+          <div class="legend-items">
+            {% for key, band in severity_bands.items() %}
+            <div class="legend-item">
+              <span class="severity-badge" style="background-color: {{ band.color }}; color: white;">{{ band.range }}</span>
+              <div>
+                <strong>{{ key }}</strong>
+                <p class="text-sm text-muted">{{ band.action }}</p>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Risk Heatmap -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Risk Heatmap (4×4)</h2>
+      {% if active_heatmap_filter %}
+      <a href="/bcp/risks" class="btn btn-secondary">Clear Filter</a>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <div class="heatmap-container">
+        <div class="heatmap-labels-y">
+          <div class="heatmap-label">4 - Very High</div>
+          <div class="heatmap-label">3 - High</div>
+          <div class="heatmap-label">2 - Medium</div>
+          <div class="heatmap-label">1 - Low</div>
+        </div>
+        <div>
+          <div class="heatmap-grid">
+            {% for likelihood in [4, 3, 2, 1] %}
+              {% for impact in [1, 2, 3, 4] %}
+                {% set cell_key = likelihood|string + "," + impact|string %}
+                {% set count = heatmap_data.cells.get(cell_key, 0) %}
+                {% set rating = likelihood * impact %}
+                {% if rating <= 4 %}
+                  {% set severity = "Low" %}
+                {% elif rating <= 8 %}
+                  {% set severity = "Moderate" %}
+                {% elif rating <= 12 %}
+                  {% set severity = "High" %}
+                {% else %}
+                  {% set severity = "Severe" %}
+                {% endif %}
+                {% set bg_color = severity_bands[severity].color %}
+                <a href="/bcp/risks?heatmap_filter={{ cell_key }}" 
+                   class="heatmap-cell {% if active_heatmap_filter == cell_key %}heatmap-cell-active{% endif %}"
+                   style="background-color: {{ bg_color }};"
+                   title="Likelihood {{ likelihood }}, Impact {{ impact }}: {{ count }} risk(s), Severity: {{ severity }}">
+                  <div class="heatmap-cell-count">{{ count }}</div>
+                  <div class="heatmap-cell-rating">R: {{ rating }}</div>
+                </a>
+              {% endfor %}
+            {% endfor %}
+          </div>
+          <div class="heatmap-labels-x">
+            <div class="heatmap-label">1 - Low</div>
+            <div class="heatmap-label">2 - Moderate</div>
+            <div class="heatmap-label">3 - High</div>
+            <div class="heatmap-label">4 - Severe</div>
+          </div>
+          <div class="heatmap-axis-label">Impact →</div>
+        </div>
+      </div>
+      <div class="heatmap-axis-label-y">← Likelihood</div>
+    </div>
+  </section>
+
+  <!-- Risk List -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">
+        Risk Register
+        {% if active_heatmap_filter %}
+          <span class="filter-badge">Filtered by cell</span>
+        {% endif %}
+      </h2>
+      <div class="severity-filters">
+        <a href="/bcp/risks" class="severity-filter {% if not active_severity_filter %}severity-filter-active{% endif %}">All</a>
+        {% for key in ['Low', 'Moderate', 'High', 'Severe'] %}
+        <a href="/bcp/risks?severity={{ key }}" 
+           class="severity-filter {% if active_severity_filter == key %}severity-filter-active{% endif %}"
+           style="border-color: {{ severity_bands[key].color }};">
+          {{ key }}
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="card-body">
+      {% if risks|length == 0 %}
+        <div class="empty-state">
+          <p>No risks found. Add your first risk to begin risk assessment.</p>
+          {% if can_edit %}
+          <button type="button" class="btn btn-primary" onclick="document.getElementById('createRiskModal').showModal()">
+            Add Risk
+          </button>
+          {% endif %}
+        </div>
+      {% else %}
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 40%;">Risk Description</th>
+              <th style="width: 10%; text-align: center;">L</th>
+              <th style="width: 10%; text-align: center;">I</th>
+              <th style="width: 10%; text-align: center;">Rating</th>
+              <th style="width: 15%;">Severity</th>
+              <th style="width: 15%;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for risk in risks %}
+            <tr>
+              <td>
+                <div class="risk-description">{{ risk.description }}</div>
+                {% if risk.preventative_actions %}
+                <details class="risk-details">
+                  <summary>Preventative Actions</summary>
+                  <p>{{ risk.preventative_actions }}</p>
+                </details>
+                {% endif %}
+                {% if risk.contingency_plans %}
+                <details class="risk-details">
+                  <summary>Contingency Plans</summary>
+                  <p>{{ risk.contingency_plans }}</p>
+                </details>
+                {% endif %}
+              </td>
+              <td style="text-align: center;">{{ risk.likelihood or '-' }}</td>
+              <td style="text-align: center;">{{ risk.impact or '-' }}</td>
+              <td style="text-align: center;"><strong>{{ risk.rating or '-' }}</strong></td>
+              <td>
+                <span class="severity-badge" style="background-color: {{ severity_bands[risk.severity].color }}; color: white;">
+                  {{ risk.severity }}
+                </span>
+              </td>
+              <td>
+                {% if can_edit %}
+                <div class="action-buttons">
+                  <button type="button" class="btn btn-sm btn-secondary" onclick="editRisk({{ risk.id }}, '{{ risk.description|replace("'", "\\'") }}', {{ risk.likelihood }}, {{ risk.impact }}, '{{ (risk.preventative_actions or '')|replace("'", "\\'") }}', '{{ (risk.contingency_plans or '')|replace("'", "\\'") }}')">
+                    Edit
+                  </button>
+                  <form method="post" action="/bcp/risks/{{ risk.id }}/delete" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this risk?');">
+                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                  </form>
+                </div>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+<!-- Create Risk Modal -->
+{% if can_edit %}
+<dialog id="createRiskModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Add New Risk</h2>
+      <button type="button" class="modal-close" onclick="document.getElementById('createRiskModal').close()">×</button>
+    </div>
+    <form method="post" action="/bcp/risks">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="description" class="form-label required">Risk Description</label>
+          <textarea id="description" name="description" class="form-input" rows="3" required></textarea>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div class="form-group">
+            <label for="likelihood" class="form-label required">Likelihood (1-4)</label>
+            <select id="likelihood" name="likelihood" class="form-input" required>
+              <option value="">Select...</option>
+              {% for item in likelihood_scale %}
+              <option value="{{ item.value }}">{{ item.value }} - {{ item.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="impact" class="form-label required">Impact (1-4)</label>
+            <select id="impact" name="impact" class="form-input" required>
+              <option value="">Select...</option>
+              {% for item in impact_scale %}
+              <option value="{{ item.value }}">{{ item.value }} - {{ item.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="preventative_actions" class="form-label">Preventative Actions</label>
+          <textarea id="preventative_actions" name="preventative_actions" class="form-input" rows="3"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="contingency_plans" class="form-label">Contingency Plans</label>
+          <textarea id="contingency_plans" name="contingency_plans" class="form-input" rows="3"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('createRiskModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create Risk</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<!-- Edit Risk Modal -->
+<dialog id="editRiskModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Edit Risk</h2>
+      <button type="button" class="modal-close" onclick="document.getElementById('editRiskModal').close()">×</button>
+    </div>
+    <form id="editRiskForm" method="post" action="">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="edit_description" class="form-label required">Risk Description</label>
+          <textarea id="edit_description" name="description" class="form-input" rows="3" required></textarea>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div class="form-group">
+            <label for="edit_likelihood" class="form-label required">Likelihood (1-4)</label>
+            <select id="edit_likelihood" name="likelihood" class="form-input" required>
+              <option value="">Select...</option>
+              {% for item in likelihood_scale %}
+              <option value="{{ item.value }}">{{ item.value }} - {{ item.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="edit_impact" class="form-label required">Impact (1-4)</label>
+            <select id="edit_impact" name="impact" class="form-input" required>
+              <option value="">Select...</option>
+              {% for item in impact_scale %}
+              <option value="{{ item.value }}">{{ item.value }} - {{ item.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_preventative_actions" class="form-label">Preventative Actions</label>
+          <textarea id="edit_preventative_actions" name="preventative_actions" class="form-input" rows="3"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_contingency_plans" class="form-label">Contingency Plans</label>
+          <textarea id="edit_contingency_plans" name="contingency_plans" class="form-input" rows="3"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('editRiskModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Update Risk</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<script>
+function editRisk(id, description, likelihood, impact, preventative_actions, contingency_plans) {
+  document.getElementById('editRiskForm').action = '/bcp/risks/' + id + '/update';
+  document.getElementById('edit_description').value = description;
+  document.getElementById('edit_likelihood').value = likelihood;
+  document.getElementById('edit_impact').value = impact;
+  document.getElementById('edit_preventative_actions').value = preventative_actions;
+  document.getElementById('edit_contingency_plans').value = contingency_plans;
+  document.getElementById('editRiskModal').showModal();
+}
+</script>
+
+<style>
+/* Page Layout */
+.page-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 2rem;
+}
+
+.page-title {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0;
+}
+
+.page-description {
+  color: #6b7280;
+  margin: 0.5rem 0 0 0;
+}
+
+.page-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+/* Legend */
+.legend-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2rem;
+}
+
+.legend-section {
+  padding: 1rem;
+  background: #f9fafb;
+  border-radius: 0.5rem;
+}
+
+.legend-heading {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0 0 1rem 0;
+}
+
+.legend-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.legend-item {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.legend-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  background: #3b82f6;
+  color: white;
+  border-radius: 0.375rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.severity-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.375rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+/* Heatmap */
+.heatmap-container {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.heatmap-labels-y {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.heatmap-cell {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  color: white;
+  font-weight: 600;
+  text-decoration: none;
+  transition: transform 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+  min-width: 80px;
+}
+
+.heatmap-cell:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.heatmap-cell-active {
+  box-shadow: 0 0 0 3px #3b82f6;
+  transform: scale(1.05);
+}
+
+.heatmap-cell-count {
+  font-size: 1.5rem;
+}
+
+.heatmap-cell-rating {
+  font-size: 0.75rem;
+  opacity: 0.9;
+}
+
+.heatmap-labels-x {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+  text-align: center;
+}
+
+.heatmap-label {
+  font-size: 0.875rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.heatmap-axis-label {
+  text-align: center;
+  font-weight: 600;
+  color: #4b5563;
+  margin-top: 0.5rem;
+}
+
+.heatmap-axis-label-y {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-weight: 600;
+  color: #4b5563;
+  margin-left: 0.5rem;
+}
+
+/* Risk List */
+.severity-filters {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.severity-filter {
+  padding: 0.5rem 1rem;
+  border: 2px solid #e5e7eb;
+  border-radius: 0.375rem;
+  text-decoration: none;
+  color: #374151;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.severity-filter:hover {
+  background: #f3f4f6;
+}
+
+.severity-filter-active {
+  background: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+}
+
+.filter-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background: #3b82f6;
+  color: white;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-left: 0.5rem;
+}
+
+.risk-description {
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+.risk-details {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background: #f9fafb;
+  border-radius: 0.375rem;
+}
+
+.risk-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #3b82f6;
+  margin-bottom: 0.5rem;
+}
+
+.risk-details p {
+  margin: 0;
+  color: #4b5563;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: #6b7280;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .legend-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .heatmap-container {
+    flex-direction: column;
+  }
+
+  .page-header {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .page-actions {
+    flex-wrap: wrap;
+  }
+}
+</style>
+{% endif %}
+{% endblock %}

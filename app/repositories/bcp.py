@@ -295,3 +295,229 @@ async def seed_default_objectives(plan_id: int) -> None:
     
     for index, objective in enumerate(default_objectives):
         await create_objective(plan_id, objective, display_order=index)
+
+
+# ============================================================================
+# Risk Management
+# ============================================================================
+
+
+async def list_risks(plan_id: int) -> list[dict[str, Any]]:
+    """Get all risks for a plan."""
+    query = """
+        SELECT id, plan_id, description, likelihood, impact, rating, severity,
+               preventative_actions, contingency_plans, created_at, updated_at
+        FROM bcp_risk
+        WHERE plan_id = %s
+        ORDER BY rating DESC, id
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id,))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "description": row[2],
+                    "likelihood": row[3],
+                    "impact": row[4],
+                    "rating": row[5],
+                    "severity": row[6],
+                    "preventative_actions": row[7],
+                    "contingency_plans": row[8],
+                    "created_at": row[9],
+                    "updated_at": row[10],
+                }
+                for row in rows
+            ]
+
+
+async def get_risk_by_id(risk_id: int) -> dict[str, Any] | None:
+    """Get a risk by ID."""
+    query = """
+        SELECT id, plan_id, description, likelihood, impact, rating, severity,
+               preventative_actions, contingency_plans, created_at, updated_at
+        FROM bcp_risk
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (risk_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "description": row[2],
+                "likelihood": row[3],
+                "impact": row[4],
+                "rating": row[5],
+                "severity": row[6],
+                "preventative_actions": row[7],
+                "contingency_plans": row[8],
+                "created_at": row[9],
+                "updated_at": row[10],
+            }
+
+
+async def create_risk(
+    plan_id: int,
+    description: str,
+    likelihood: int,
+    impact: int,
+    rating: int,
+    severity: str,
+    preventative_actions: str | None = None,
+    contingency_plans: str | None = None,
+) -> dict[str, Any]:
+    """Create a new risk."""
+    query = """
+        INSERT INTO bcp_risk 
+        (plan_id, description, likelihood, impact, rating, severity, 
+         preventative_actions, contingency_plans)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                query,
+                (plan_id, description, likelihood, impact, rating, severity,
+                 preventative_actions, contingency_plans),
+            )
+            await conn.commit()
+            risk_id = cursor.lastrowid
+    
+    return await get_risk_by_id(risk_id)
+
+
+async def update_risk(
+    risk_id: int,
+    description: str | None = None,
+    likelihood: int | None = None,
+    impact: int | None = None,
+    rating: int | None = None,
+    severity: str | None = None,
+    preventative_actions: str | None = None,
+    contingency_plans: str | None = None,
+) -> dict[str, Any] | None:
+    """Update a risk."""
+    updates = []
+    values = []
+    
+    if description is not None:
+        updates.append("description = %s")
+        values.append(description)
+    if likelihood is not None:
+        updates.append("likelihood = %s")
+        values.append(likelihood)
+    if impact is not None:
+        updates.append("impact = %s")
+        values.append(impact)
+    if rating is not None:
+        updates.append("rating = %s")
+        values.append(rating)
+    if severity is not None:
+        updates.append("severity = %s")
+        values.append(severity)
+    if preventative_actions is not None:
+        updates.append("preventative_actions = %s")
+        values.append(preventative_actions)
+    if contingency_plans is not None:
+        updates.append("contingency_plans = %s")
+        values.append(contingency_plans)
+    
+    if not updates:
+        return await get_risk_by_id(risk_id)
+    
+    values.append(risk_id)
+    query = f"""
+        UPDATE bcp_risk
+        SET {', '.join(updates)}
+        WHERE id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, values)
+            await conn.commit()
+    
+    return await get_risk_by_id(risk_id)
+
+
+async def delete_risk(risk_id: int) -> bool:
+    """Delete a risk."""
+    query = "DELETE FROM bcp_risk WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (risk_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+
+
+async def get_risk_heatmap_data(plan_id: int) -> dict[str, Any]:
+    """
+    Get risk heatmap data showing count of risks in each cell.
+    
+    Returns a dictionary with:
+    - cells: dict mapping (likelihood, impact) to count
+    - total: total number of risks
+    """
+    query = """
+        SELECT likelihood, impact, COUNT(*) as count
+        FROM bcp_risk
+        WHERE plan_id = %s AND likelihood IS NOT NULL AND impact IS NOT NULL
+        GROUP BY likelihood, impact
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id,))
+            rows = await cursor.fetchall()
+            
+            cells = {}
+            total = 0
+            for row in rows:
+                likelihood, impact, count = row[0], row[1], row[2]
+                cells[f"{likelihood},{impact}"] = count
+                total += count
+            
+            return {
+                "cells": cells,
+                "total": total
+            }
+
+
+async def seed_example_risks(plan_id: int) -> None:
+    """Seed example risks for a new plan."""
+    from app.services.risk_calculator import calculate_risk
+    
+    example_risks = [
+        {
+            "description": "Interruption to production processes (e.g., key equipment breakdown or fire)",
+            "likelihood": 2,
+            "impact": 4,
+            "preventative_actions": "Maintain appropriate insurance coverage; establish 24-hour repair supplier contract; identify alternate production site",
+            "contingency_plans": "Implement temporary workarounds; arrange bridging cash flow until insurance claim is paid; activate alternate site if needed"
+        },
+        {
+            "description": "Burglary",
+            "likelihood": 3,
+            "impact": 3,
+            "preventative_actions": "Insurance including theft coverage; install and maintain alarm system and CCTV; secure premises",
+            "contingency_plans": "Contact insurance provider; maintain supplier list for fast replacement of stolen items; implement security review"
+        }
+    ]
+    
+    for risk_data in example_risks:
+        rating, severity = calculate_risk(risk_data["likelihood"], risk_data["impact"])
+        await create_risk(
+            plan_id=plan_id,
+            description=risk_data["description"],
+            likelihood=risk_data["likelihood"],
+            impact=risk_data["impact"],
+            rating=rating,
+            severity=severity,
+            preventative_actions=risk_data["preventative_actions"],
+            contingency_plans=risk_data["contingency_plans"]
+        )
