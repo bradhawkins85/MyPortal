@@ -973,6 +973,7 @@ async def _build_base_context(
             or staff_permission_level > 0
         ),
         "can_manage_issues": has_issue_tracker_access,
+        "can_view_compliance": is_super_admin or (active_company_id is not None),
     }
 
     module_lookup = getattr(request.state, "module_lookup", None)
@@ -1091,6 +1092,7 @@ async def _build_public_context(
         "can_manage_licenses": False,
         "can_manage_invoices": False,
         "can_manage_staff": False,
+        "can_view_compliance": False,
         "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
         "notification_unread_count": 0,
         "enable_auto_refresh": bool(settings.enable_auto_refresh),
@@ -3393,7 +3395,7 @@ async def compliance_page(request: Request):
     """Essential 8 compliance tracking page."""
     from app.repositories import essential8 as essential8_repo
     
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_license_context(request, require_manage=False)
     if redirect:
         return redirect
     
