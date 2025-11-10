@@ -246,6 +246,8 @@ tests/test_automations_service.py
 tests/test_bc10_acknowledgments.py
 tests/test_bc11_supportive_entities.py
 tests/test_bc12_security.py
+tests/test_bc13_automatic_migrations.py
+tests/test_bc13_sqlite_fallback.py
 tests/test_bc3_models.py
 tests/test_bc4_migrations.py
 tests/test_bc5_api.py
@@ -282,6 +284,7 @@ tests/test_dashboard_agent_section.py
 tests/test_email_service.py
 tests/test_env_flag_defaults.py
 tests/test_essential8_compliance.py
+tests/test_essential8_requirements.py
 tests/test_file_storage.py
 tests/test_imap_service.py
 tests/test_impersonation_service.py
