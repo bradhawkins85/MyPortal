@@ -355,9 +355,13 @@ async def create_plan(
     Creates a new business continuity plan with the specified properties.
     The current user becomes the plan owner.
     
+    When created from a template, automatically creates an initial version (version 1)
+    with editable sections pre-populated based on the template schema.
+    
     **Authorization**: Requires BC editor role or higher.
     """
     # Verify template exists if provided
+    template = None
     if plan_data.template_id:
         template = await bc_repo.get_template_by_id(plan_data.template_id)
         if not template:
@@ -371,17 +375,45 @@ async def create_plan(
         template_id=plan_data.template_id,
     )
     
+    # If created from a template, automatically create an initial version
+    # with editable sections matching the template structure
+    if template and template.get("schema_json"):
+        from app.services.bc_services import _create_empty_content_from_schema
+        
+        # Create empty content structure from template schema
+        initial_content = _create_empty_content_from_schema(template["schema_json"])
+        
+        # Create version 1
+        version = await bc_repo.create_version(
+            plan_id=plan["id"],
+            version_number=1,
+            status="active",
+            authored_by_user_id=current_user["id"],
+            summary_change_note="Initial version created from template",
+            content_json=initial_content,
+        )
+        
+        # Set this version as the current version
+        await bc_repo.update_plan(
+            plan_id=plan["id"],
+            current_version_id=version["id"],
+        )
+        
+        # Re-fetch plan to get updated current_version_id
+        plan = await bc_repo.get_plan_by_id(plan["id"])
+    
     # Create audit entry
     await bc_repo.create_audit_entry(
         plan_id=plan["id"],
         action="created",
         actor_user_id=current_user["id"],
-        details_json={"title": plan_data.title, "status": plan_data.status.value},
+        details_json={"title": plan_data.title, "status": plan_data.status.value, "from_template": template is not None},
     )
     
     # Enrich response
     await _enrich_user_name(plan, "owner_user_id", "owner_name")
     await _enrich_template(plan)
+    await _enrich_current_version(plan)
     
     return BCPlanDetail(**plan)
 
