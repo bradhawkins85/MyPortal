@@ -62,6 +62,34 @@
       </header>
 
       <div class="management__body">
+        <!-- Transcription Status Summary -->
+        <div class="status-summary" id="status-summary" aria-live="polite">
+          <div class="status-summary__item status-summary__item--total">
+            <span class="status-summary__label">Total Recordings</span>
+            <span class="status-summary__value" data-status="total">—</span>
+          </div>
+          <div class="status-summary__item status-summary__item--completed">
+            <span class="status-summary__label">Completed</span>
+            <span class="status-summary__value" data-status="completed">—</span>
+          </div>
+          <div class="status-summary__item status-summary__item--pending">
+            <span class="status-summary__label">Pending</span>
+            <span class="status-summary__value" data-status="pending">—</span>
+          </div>
+          <div class="status-summary__item status-summary__item--processing">
+            <span class="status-summary__label">Processing</span>
+            <span class="status-summary__value" data-status="processing">—</span>
+          </div>
+          <div class="status-summary__item status-summary__item--failed">
+            <span class="status-summary__label">Failed</span>
+            <span class="status-summary__value" data-status="failed">—</span>
+          </div>
+          <div class="status-summary__item status-summary__item--unknown">
+            <span class="status-summary__label">Unknown</span>
+            <span class="status-summary__value" data-status="unknown">—</span>
+          </div>
+        </div>
+
         <!-- Filters -->
         <div class="filters-bar">
           <label class="form-label">
@@ -202,6 +230,64 @@
     let currentSearch = '';
     let currentStatusFilter = '';
     let currentLinkedFilter = '';
+    let statusSummaryRequestId = 0;
+
+    const STATUS_SUMMARY_KEYS = ['total', 'completed', 'pending', 'processing', 'failed', 'unknown'];
+
+    function renderStatusSummary(summary, { loading = false } = {}) {
+      const container = document.getElementById('status-summary');
+      if (!container) return;
+
+      STATUS_SUMMARY_KEYS.forEach((key) => {
+        const el = container.querySelector(`[data-status="${key}"]`);
+        if (!el) return;
+
+        if (loading) {
+          el.textContent = '—';
+          el.setAttribute('aria-busy', 'true');
+          return;
+        }
+
+        const value = summary && typeof summary[key] === 'number' ? summary[key] : null;
+        if (value === null) {
+          el.textContent = '—';
+          el.removeAttribute('aria-busy');
+        } else {
+          el.textContent = value.toLocaleString();
+          el.removeAttribute('aria-busy');
+        }
+      });
+    }
+
+    async function loadStatusSummary() {
+      const container = document.getElementById('status-summary');
+      if (!container) return;
+
+      const requestId = ++statusSummaryRequestId;
+      renderStatusSummary(null, { loading: true });
+
+      try {
+        const params = new URLSearchParams();
+        if (currentSearch) params.append('search', currentSearch);
+        if (currentLinkedFilter) params.append('linkedTicketId', currentLinkedFilter);
+
+        const queryString = params.toString();
+        const response = await fetch(queryString ? `/api/call-recordings/status-summary?${queryString}` : '/api/call-recordings/status-summary');
+        if (!response.ok) {
+          throw new Error(`Failed to load status summary: ${response.status}`);
+        }
+
+        const summary = await response.json();
+        if (requestId === statusSummaryRequestId) {
+          renderStatusSummary(summary);
+        }
+      } catch (error) {
+        console.error('Error loading status summary:', error);
+        if (requestId === statusSummaryRequestId) {
+          renderStatusSummary(null);
+        }
+      }
+    }
 
     // Format date as yyyy-mm-dd hh:MM
     function formatDateTime(dateString) {
@@ -222,6 +308,8 @@
     async function loadRecordings() {
       const tbody = document.getElementById('recordings-tbody');
       tbody.innerHTML = '<tr><td colspan="6" class="data-table__loading">Loading...</td></tr>';
+
+      loadStatusSummary();
 
       try {
         const params = new URLSearchParams({
@@ -585,6 +673,85 @@
   </script>
 
   <style>
+    .status-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .status-summary__item {
+      position: relative;
+      padding: 1rem 1.25rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--color-border);
+      background: rgba(15, 23, 42, 0.65);
+      box-shadow: 0 12px 20px rgba(15, 23, 42, 0.25);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .status-summary__item::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      opacity: 0.25;
+    }
+
+    .status-summary__item--total::before {
+      background: linear-gradient(135deg, rgba(14, 165, 233, 0.7), rgba(37, 99, 235, 0.6));
+    }
+
+    .status-summary__item--completed::before {
+      background: linear-gradient(135deg, rgba(34, 197, 94, 0.7), rgba(22, 163, 74, 0.6));
+    }
+
+    .status-summary__item--pending::before {
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.7), rgba(217, 119, 6, 0.6));
+    }
+
+    .status-summary__item--processing::before {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.7), rgba(14, 116, 144, 0.6));
+    }
+
+    .status-summary__item--failed::before {
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.7), rgba(220, 38, 38, 0.6));
+    }
+
+    .status-summary__item--unknown::before {
+      background: linear-gradient(135deg, rgba(148, 163, 184, 0.6), rgba(100, 116, 139, 0.6));
+    }
+
+    .status-summary__item:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 14px 24px rgba(15, 23, 42, 0.3);
+    }
+
+    .status-summary__label {
+      position: relative;
+      display: block;
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--color-text-muted);
+      margin-bottom: 0.35rem;
+      z-index: 1;
+    }
+
+    .status-summary__value {
+      position: relative;
+      font-size: 2rem;
+      font-weight: 700;
+      color: #f9fafb;
+      line-height: 1;
+      z-index: 1;
+    }
+
+    .status-summary__value[aria-busy="true"] {
+      opacity: 0.6;
+    }
+
     .filters-bar {
       display: flex;
       gap: 1rem;
