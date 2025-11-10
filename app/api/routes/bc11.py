@@ -43,6 +43,23 @@ async def list_contacts(
     Contacts can be imported from an address book or stored locally.
     
     Requires: BC Viewer role or higher
+    
+    **Example Response:**
+    ```json
+    [
+      {
+        "id": 1,
+        "plan_id": 15,
+        "name": "John Smith",
+        "role": "Emergency Coordinator",
+        "phone": "+1-555-0123",
+        "email": "john.smith@company.com",
+        "notes": "Primary contact for disaster response",
+        "created_at": "2024-01-15T10:30:00Z",
+        "updated_at": "2024-01-15T10:30:00Z"
+      }
+    ]
+    ```
     """
     # Verify plan exists
     plan = await bc_repo.get_plan_by_id(plan_id)
@@ -69,6 +86,33 @@ async def create_contact(
     Can be imported from an address book or created locally.
     
     Requires: BC Editor role or higher
+    
+    **Request Body Example:**
+    ```json
+    {
+      "plan_id": 15,
+      "name": "John Smith",
+      "role": "Emergency Coordinator",
+      "phone": "+1-555-0123",
+      "email": "john.smith@company.com",
+      "notes": "Primary contact for disaster response. Available 24/7."
+    }
+    ```
+    
+    **Response Example:**
+    ```json
+    {
+      "id": 1,
+      "plan_id": 15,
+      "name": "John Smith",
+      "role": "Emergency Coordinator",
+      "phone": "+1-555-0123",
+      "email": "john.smith@company.com",
+      "notes": "Primary contact for disaster response. Available 24/7.",
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T10:30:00Z"
+    }
+    ```
     """
     # Verify plan exists
     plan = await bc_repo.get_plan_by_id(plan_id)
@@ -376,6 +420,51 @@ async def create_process(
     ```
     
     Requires: BC Editor role or higher
+    
+    **Request Body Example:**
+    ```json
+    {
+      "plan_id": 15,
+      "name": "Customer Order Processing",
+      "description": "Critical process for receiving and processing customer orders",
+      "rto_minutes": 240,
+      "rpo_minutes": 60,
+      "mtpd_minutes": 480,
+      "impact_rating": "critical",
+      "dependencies_json": {
+        "systems": [
+          {"type": "system", "id": 1, "name": "Order Management System"},
+          {"type": "system", "id": 2, "name": "Payment Gateway"}
+        ],
+        "sites": [
+          {"type": "site", "id": 1, "name": "Primary Data Center"}
+        ]
+      }
+    }
+    ```
+    
+    **Response Example:**
+    ```json
+    {
+      "id": 1,
+      "plan_id": 15,
+      "name": "Customer Order Processing",
+      "description": "Critical process for receiving and processing customer orders",
+      "rto_minutes": 240,
+      "rpo_minutes": 60,
+      "mtpd_minutes": 480,
+      "impact_rating": "critical",
+      "dependencies_json": {...},
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T10:30:00Z"
+    }
+    ```
+    
+    **Recovery Time Objective (RTO):** Maximum acceptable time to restore the process after disruption
+    
+    **Recovery Point Objective (RPO):** Maximum acceptable data loss measured in time
+    
+    **Maximum Tolerable Period of Disruption (MTPD):** Longest time a process can be down before causing unacceptable harm
     """
     # Verify plan exists
     plan = await bc_repo.get_plan_by_id(plan_id)
