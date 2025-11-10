@@ -97,62 +97,51 @@ async def test_migrations_run_with_sqlite():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         
-        # Clear MySQL config to force SQLite
-        original_env = {}
-        for key in ["DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME"]:
-            original_env[key] = os.environ.get(key)
-            if key in os.environ:
-                del os.environ[key]
+        # Create a fresh database instance with SQLite config
+        from app.core.config import Settings
         
-        try:
-            # Force reload settings
-            from importlib import reload
-            import app.core.config as config_module
-            reload(config_module)
-            
-            # Create database instance
-            test_db = Database()
-            
-            # Mock the SQLite path to use our temp directory
-            test_db._get_sqlite_path = lambda: db_path
-            
-            # Run migrations
-            await test_db.run_migrations()
-            
-            # Verify the database file was created
-            assert db_path.exists(), "SQLite database file should be created"
-            
-            # Verify migrations table exists
-            await test_db.connect()
-            migrations = await test_db.fetch_all("SELECT name FROM migrations ORDER BY name")
-            
-            # Should have applied some migrations
-            assert len(migrations) > 0, "Migrations should have been applied"
-            assert migrations[0]["name"].endswith(".sql"), "Migration names should end with .sql"
-            
-            # Check that critical tables exist
-            # Test a few core tables from early migrations
-            tables_to_check = ["users", "migrations", "companies"]
-            
-            for table in tables_to_check:
-                # SQLite uses sqlite_master to check for tables
-                result = await test_db.fetch_one(
-                    f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'"
-                )
-                assert result is not None, f"Table '{table}' should exist after migrations"
-            
-            await test_db.disconnect()
-            
-        finally:
-            # Restore env vars
-            for key, value in original_env.items():
-                if value is not None:
-                    os.environ[key] = value
-            
-            # Reload config
-            import app.core.config as config_module
-            from importlib import reload
-            reload(config_module)
+        test_settings = Settings(
+            SESSION_SECRET="test-secret",
+            TOTP_ENCRYPTION_KEY="A" * 64,
+            DB_HOST=None,
+            DB_USER=None,
+            DB_PASSWORD=None,
+            DB_NAME=None,
+        )
+        
+        test_db = Database()
+        test_db._settings = test_settings
+        test_db._use_sqlite = True
+        
+        # Mock the SQLite path to use our temp directory
+        test_db._get_sqlite_path = lambda: db_path
+        
+        # Run migrations
+        await test_db.run_migrations()
+        
+        # Verify the database file was created
+        assert db_path.exists(), "SQLite database file should be created"
+        
+        # Verify migrations table exists
+        await test_db.connect()
+        migrations = await test_db.fetch_all("SELECT name FROM migrations ORDER BY name")
+        
+        # Should have applied some migrations
+        assert len(migrations) > 0, "Migrations should have been applied"
+        assert migrations[0]["name"].endswith(".sql"), "Migration names should end with .sql"
+        
+        # Check that critical tables exist
+        # Test a few core tables from early migrations
+        tables_to_check = ["users", "migrations", "companies"]
+        
+        for table in tables_to_check:
+            # SQLite uses sqlite_master to check for tables
+            result = await test_db.fetch_one(
+                f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'"
+            )
+            assert result is not None, f"Table '{table}' should exist after migrations"
+        
+        await test_db.disconnect()
 
 
 @pytest.mark.anyio
