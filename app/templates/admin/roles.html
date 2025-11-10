@@ -87,15 +87,40 @@
         <textarea class="form-input form-input--textarea" id="role-description" name="description" rows="3"></textarea>
       </div>
       <div class="form-field">
-        <label class="form-label" for="role-permissions">Permissions</label>
-        <input
-          class="form-input"
-          id="role-permissions"
-          name="permissions"
-          placeholder="membership.manage, audit.view"
-          aria-describedby="role-permissions-help"
-        />
-        <p class="form-help" id="role-permissions-help">Provide a comma separated list of permission keys.</p>
+        <label class="form-label">Permissions</label>
+        <div class="form-checkboxes" id="role-permissions-group" role="group" aria-describedby="role-permissions-help">
+          <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="company.manage" data-permission-checkbox />
+            <span>Company Management</span>
+            <span class="form-help">Configure company profiles, contact details, and operational settings</span>
+          </label>
+          <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="membership.manage" data-permission-checkbox />
+            <span>Membership Management</span>
+            <span class="form-help">Invite, approve, suspend, or reassign company members</span>
+          </label>
+          <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="billing.manage" data-permission-checkbox />
+            <span>Billing Management</span>
+            <span class="form-help">Access subscription, invoicing, and payment methods</span>
+          </label>
+          <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="audit.view" data-permission-checkbox />
+            <span>Audit View</span>
+            <span class="form-help">Read-only visibility into security and activity audit trails</span>
+          </label>
+          <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="portal.access" data-permission-checkbox />
+            <span>Portal Access</span>
+            <span class="form-help">Sign in and use the general portal experience</span>
+          </label>
+          <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="helpdesk.technician" data-permission-checkbox />
+            <span>Helpdesk Technician</span>
+            <span class="form-help">Access the global ticketing workspace to triage, assign, and update tickets</span>
+          </label>
+        </div>
+        <p class="form-help" id="role-permissions-help">Select the permissions to assign to this role.</p>
       </div>
       <div class="form-actions">
         <button type="submit" class="button">Save role</button>
