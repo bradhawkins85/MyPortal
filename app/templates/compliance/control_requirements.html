@@ -4,541 +4,393 @@
 
 {% block header_actions %}
   <div class="header-actions">
-    <a href="/compliance" class="button button--secondary">
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 0.25rem;">
-        <path d="M19 12H5M12 19l-7-7 7-7"/>
+    <a href="/compliance" class="button button--ghost button--small">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M19 12H5M12 19l-7-7 7-7" />
       </svg>
-      Back to Controls
+      Back to controls
     </a>
   </div>
 {% endblock %}
 
 {% block content %}
-<section class="panel">
-  <header class="panel__header">
-    <div>
-      <h2 class="panel__title">{{ control.name }}</h2>
-      <p class="panel__subtitle">{{ control.description }}</p>
-    </div>
-    {% if company %}
-    <div class="panel__meta">
-      <span class="tag">{{ company.name }}</span>
-      {% if company_compliance %}
-      <span class="badge badge--{{ company_compliance.status }}">
-        {% if company_compliance.status == 'not_started' %}Not Started
-        {% elif company_compliance.status == 'in_progress' %}In Progress
-        {% elif company_compliance.status == 'compliant' %}Compliant
-        {% elif company_compliance.status == 'non_compliant' %}Non-Compliant
-        {% elif company_compliance.status == 'not_applicable' %}Not Applicable
+<div class="management management--single compliance" data-layout>
+  <section class="management__content">
+    <header class="management__header compliance__header">
+      <div>
+        <h1 class="management__title">{{ control.name }}</h1>
+        <p class="management__subtitle">{{ control.description }}</p>
+      </div>
+      {% if company %}
+      <div class="management__header-actions compliance__header-actions">
+        <span class="tag tag--muted">{{ company.name }}</span>
+        {% if company_compliance %}
+        <span class="badge badge--status-{{ company_compliance.status }}">
+          {% if company_compliance.status == 'not_started' %}Not started
+          {% elif company_compliance.status == 'in_progress' %}In progress
+          {% elif company_compliance.status == 'compliant' %}Compliant
+          {% elif company_compliance.status == 'non_compliant' %}Non-compliant
+          {% elif company_compliance.status == 'not_applicable' %}Not applicable
+          {% endif %}
+        </span>
+        <span class="badge badge--maturity-{{ company_compliance.maturity_level }}">
+          {% if company_compliance.maturity_level == 'ml0' %}ML0
+          {% elif company_compliance.maturity_level == 'ml1' %}ML1
+          {% elif company_compliance.maturity_level == 'ml2' %}ML2
+          {% elif company_compliance.maturity_level == 'ml3' %}ML3
+          {% endif %}
+        </span>
         {% endif %}
-      </span>
-      <span class="badge badge--maturity-{{ company_compliance.maturity_level }}">
-        {% if company_compliance.maturity_level == 'ml0' %}ML0
-        {% elif company_compliance.maturity_level == 'ml1' %}ML1
-        {% elif company_compliance.maturity_level == 'ml2' %}ML2
-        {% elif company_compliance.maturity_level == 'ml3' %}ML3
-        {% endif %}
-      </span>
+      </div>
       {% endif %}
-    </div>
-    {% endif %}
-  </header>
+    </header>
 
-  <!-- Requirements Compliance Summary -->
-  <div class="panel__body" style="border-bottom: 1px solid #e5e7eb; padding: 1.5rem;">
-    <div class="requirements-summary">
-      <div class="summary-item">
-        <div class="summary-item__label">Total Requirements</div>
-        <div class="summary-item__value">{{ requirements_ml1|length + requirements_ml2|length + requirements_ml3|length }}</div>
-      </div>
-      <div class="summary-item">
-        <div class="summary-item__label">Compliant</div>
-        <div class="summary-item__value summary-item__value--success">
-          {% set compliant_count = requirement_compliance_map.values()|selectattr('status', 'equalto', 'compliant')|list|length %}
-          {{ compliant_count }}
+    <div class="card card--panel compliance-summary-card">
+      <div class="compliance-summary__grid">
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">Total requirements</span>
+          <span class="compliance-summary__value">{{ requirements_ml1|length + requirements_ml2|length + requirements_ml3|length }}</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">Compliant</span>
+          <span class="compliance-summary__value">{% set compliant_count = requirement_compliance_map.values()|selectattr('status', 'equalto', 'compliant')|list|length %}{{ compliant_count }}</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">In progress</span>
+          <span class="compliance-summary__value">{% set in_progress_count = requirement_compliance_map.values()|selectattr('status', 'equalto', 'in_progress')|list|length %}{{ in_progress_count }}</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">Non-compliant</span>
+          <span class="compliance-summary__value">{% set non_compliant_count = requirement_compliance_map.values()|selectattr('status', 'equalto', 'non_compliant')|list|length %}{{ non_compliant_count }}</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">Not applicable</span>
+          <span class="compliance-summary__value">{% set not_applicable_count = requirement_compliance_map.values()|selectattr('status', 'equalto', 'not_applicable')|list|length %}{{ not_applicable_count }}</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">Not started</span>
+          <span class="compliance-summary__value">
+            {% set total_reqs = requirements_ml1|length + requirements_ml2|length + requirements_ml3|length %}
+            {% set tracked_count = requirement_compliance_map|length %}
+            {% set not_started_count = requirement_compliance_map.values()|selectattr('status', 'equalto', 'not_started')|list|length + (total_reqs - tracked_count) %}
+            {{ not_started_count }}
+          </span>
         </div>
       </div>
-      <div class="summary-item">
-        <div class="summary-item__label">In Progress</div>
-        <div class="summary-item__value summary-item__value--info">
-          {% set in_progress_count = requirement_compliance_map.values()|selectattr('status', 'equalto', 'in_progress')|list|length %}
-          {{ in_progress_count }}
-        </div>
-      </div>
-      <div class="summary-item">
-        <div class="summary-item__label">Non-Compliant</div>
-        <div class="summary-item__value summary-item__value--danger">
-          {% set non_compliant_count = requirement_compliance_map.values()|selectattr('status', 'equalto', 'non_compliant')|list|length %}
-          {{ non_compliant_count }}
-        </div>
-      </div>
-      <div class="summary-item">
-        <div class="summary-item__label">Not Applicable</div>
-        <div class="summary-item__value">
-          {% set not_applicable_count = requirement_compliance_map.values()|selectattr('status', 'equalto', 'not_applicable')|list|length %}
-          {{ not_applicable_count }}
-        </div>
-      </div>
-      <div class="summary-item">
-        <div class="summary-item__label">Not Started</div>
-        <div class="summary-item__value">
-          {% set total_reqs = requirements_ml1|length + requirements_ml2|length + requirements_ml3|length %}
-          {% set tracked_count = requirement_compliance_map|length %}
-          {% set not_started_count = requirement_compliance_map.values()|selectattr('status', 'equalto', 'not_started')|list|length + (total_reqs - tracked_count) %}
-          {{ not_started_count }}
-        </div>
+      <div class="alert alert--info compliance__note">
+        <strong>Note:</strong> The control is considered <strong>Compliant</strong> when all requirements are either <strong>Compliant</strong> or <strong>Not applicable</strong>.
       </div>
     </div>
-    <div style="margin-top: 1rem; padding: 0.75rem; background: #f0f9ff; border-left: 4px solid #0284c7; color: #0c4a6e; font-size: 0.875rem;">
-      <strong>Note:</strong> The control is considered <strong>Compliant</strong> when all requirements are either <strong>Compliant</strong> or <strong>Not Applicable</strong>.
-    </div>
-  </div>
 
-  <!-- Maturity Level 1 Requirements -->
-  <div class="requirements-section">
-    <div class="requirements-section__header">
-      <h3 class="requirements-section__title">Maturity Level 1 (ML1)</h3>
-      <button type="button" class="button button--small button--secondary" data-expand-all="ml1">Expand All</button>
-    </div>
-    <div class="requirements-list">
-      {% for req in requirements_ml1 %}
-      <div class="requirement-item" data-requirement-id="{{ req.id }}">
-        <div class="requirement-item__header">
-          <div class="requirement-item__number">{{ req.requirement_order }}</div>
-          <div class="requirement-item__description">{{ req.description }}</div>
-          <div class="requirement-item__status">
-            {% set req_compliance = requirement_compliance_map.get(req.id) %}
-            {% if req_compliance %}
-            <span class="badge badge--{{ req_compliance.status }}">
-              {% if req_compliance.status == 'not_started' %}Not Started
-              {% elif req_compliance.status == 'in_progress' %}In Progress
-              {% elif req_compliance.status == 'compliant' %}✓ Compliant
-              {% elif req_compliance.status == 'non_compliant' %}✗ Non-Compliant
-              {% elif req_compliance.status == 'not_applicable' %}N/A
-              {% endif %}
-            </span>
-            {% else %}
-            <span class="badge badge--not_started">Not Started</span>
-            {% endif %}
-          </div>
-          <button type="button" class="requirement-item__toggle" data-toggle-requirement="{{ req.id }}">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </button>
+    <div class="compliance-requirements">
+      <section class="card card--panel compliance-requirements__group" data-level="ml1">
+        <div class="compliance-requirements__header">
+          <h2 class="compliance-requirements__title">Maturity level 1 (ML1)</h2>
+          <button type="button" class="button button--ghost button--small" data-expand-all="ml1" data-expanded="false">Expand all</button>
         </div>
-        <div class="requirement-item__details" style="display: none;">
-          <form class="requirement-form" data-requirement-form="{{ req.id }}">
-            <div class="form-group">
-              <label for="req-status-{{ req.id }}" class="form-label">Status</label>
-              <select id="req-status-{{ req.id }}" class="form-select" required>
-                <option value="not_started" {% if req_compliance and req_compliance.status == 'not_started' %}selected{% endif %}>Not Started</option>
-                <option value="in_progress" {% if req_compliance and req_compliance.status == 'in_progress' %}selected{% endif %}>In Progress</option>
-                <option value="compliant" {% if req_compliance and req_compliance.status == 'compliant' %}selected{% endif %}>Compliant</option>
-                <option value="non_compliant" {% if req_compliance and req_compliance.status == 'non_compliant' %}selected{% endif %}>Non-Compliant</option>
-                <option value="not_applicable" {% if req_compliance and req_compliance.status == 'not_applicable' %}selected{% endif %}>Not Applicable</option>
-              </select>
+        <div class="compliance-requirements__list">
+          {% for req in requirements_ml1 %}
+          {% set req_compliance = requirement_compliance_map.get(req.id) %}
+          <article class="requirement-item" data-requirement-id="{{ req.id }}">
+            <div class="requirement-item__header">
+              <div class="requirement-item__number">{{ req.requirement_order }}</div>
+              <p class="requirement-item__description">{{ req.description }}</p>
+              <div class="requirement-item__status">
+                {% if req_compliance %}
+                <span class="badge badge--status-{{ req_compliance.status }}" data-requirement-status>
+                  {% if req_compliance.status == 'not_started' %}Not started
+                  {% elif req_compliance.status == 'in_progress' %}In progress
+                  {% elif req_compliance.status == 'compliant' %}✓ Compliant
+                  {% elif req_compliance.status == 'non_compliant' %}✗ Non-compliant
+                  {% elif req_compliance.status == 'not_applicable' %}N/A
+                  {% endif %}
+                </span>
+                {% else %}
+                <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
+                {% endif %}
+              </div>
+              <button
+                type="button"
+                class="requirement-item__toggle"
+                data-toggle-requirement="{{ req.id }}"
+                aria-expanded="false"
+                aria-controls="requirement-details-{{ req.id }}"
+              >
+                <span class="sr-only">Toggle requirement details</span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </button>
             </div>
-            <div class="form-group">
-              <label for="req-evidence-{{ req.id }}" class="form-label">Evidence</label>
-              <textarea id="req-evidence-{{ req.id }}" class="form-textarea" rows="2" placeholder="Links to documentation, screenshots, etc.">{% if req_compliance %}{{ req_compliance.evidence or '' }}{% endif %}</textarea>
+            <div class="requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details hidden>
+              <form class="compliance-form" data-requirement-form="{{ req.id }}">
+                <div class="form-field">
+                  <label for="req-status-{{ req.id }}" class="form-label">Status</label>
+                  <select id="req-status-{{ req.id }}" class="form-input" required>
+                    <option value="not_started" {% if req_compliance and req_compliance.status == 'not_started' %}selected{% endif %}>Not started</option>
+                    <option value="in_progress" {% if req_compliance and req_compliance.status == 'in_progress' %}selected{% endif %}>In progress</option>
+                    <option value="compliant" {% if req_compliance and req_compliance.status == 'compliant' %}selected{% endif %}>Compliant</option>
+                    <option value="non_compliant" {% if req_compliance and req_compliance.status == 'non_compliant' %}selected{% endif %}>Non-compliant</option>
+                    <option value="not_applicable" {% if req_compliance and req_compliance.status == 'not_applicable' %}selected{% endif %}>Not applicable</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="req-evidence-{{ req.id }}" class="form-label">Evidence</label>
+                  <textarea id="req-evidence-{{ req.id }}" class="form-input form-input--textarea" rows="2" placeholder="Links to documentation, screenshots, etc.">{% if req_compliance %}{{ req_compliance.evidence or '' }}{% endif %}</textarea>
+                </div>
+                <div class="form-field">
+                  <label for="req-notes-{{ req.id }}" class="form-label">Notes</label>
+                  <textarea id="req-notes-{{ req.id }}" class="form-input form-input--textarea" rows="2" placeholder="Implementation details, outstanding items, etc.">{% if req_compliance %}{{ req_compliance.notes or '' }}{% endif %}</textarea>
+                </div>
+                <div class="form-field">
+                  <label for="req-reviewed-{{ req.id }}" class="form-label">Last reviewed date</label>
+                  <input type="date" id="req-reviewed-{{ req.id }}" class="form-input" value="{% if req_compliance and req_compliance.last_reviewed_date %}{{ req_compliance.last_reviewed_date }}{% endif %}" />
+                </div>
+                <div class="compliance-form__actions">
+                  <button type="button" class="button button--primary button--small" data-save-requirement="{{ req.id }}">Save</button>
+                </div>
+              </form>
             </div>
-            <div class="form-group">
-              <label for="req-notes-{{ req.id }}" class="form-label">Notes</label>
-              <textarea id="req-notes-{{ req.id }}" class="form-textarea" rows="2" placeholder="Implementation details, outstanding items, etc.">{% if req_compliance %}{{ req_compliance.notes or '' }}{% endif %}</textarea>
-            </div>
-            <div class="form-group">
-              <label for="req-reviewed-{{ req.id }}" class="form-label">Last Reviewed Date</label>
-              <input type="date" id="req-reviewed-{{ req.id }}" class="form-input" value="{% if req_compliance and req_compliance.last_reviewed_date %}{{ req_compliance.last_reviewed_date }}{% endif %}" />
-            </div>
-            <div class="form-actions">
-              <button type="button" class="button button--primary button--small" data-save-requirement="{{ req.id }}">Save</button>
-            </div>
-          </form>
+          </article>
+          {% endfor %}
         </div>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
+      </section>
 
-  <!-- Maturity Level 2 Requirements -->
-  <div class="requirements-section">
-    <div class="requirements-section__header">
-      <h3 class="requirements-section__title">Maturity Level 2 (ML2)</h3>
-      <button type="button" class="button button--small button--secondary" data-expand-all="ml2">Expand All</button>
-    </div>
-    <div class="requirements-list">
-      {% for req in requirements_ml2 %}
-      <div class="requirement-item" data-requirement-id="{{ req.id }}">
-        <div class="requirement-item__header">
-          <div class="requirement-item__number">{{ req.requirement_order }}</div>
-          <div class="requirement-item__description">{{ req.description }}</div>
-          <div class="requirement-item__status">
-            {% set req_compliance = requirement_compliance_map.get(req.id) %}
-            {% if req_compliance %}
-            <span class="badge badge--{{ req_compliance.status }}">
-              {% if req_compliance.status == 'not_started' %}Not Started
-              {% elif req_compliance.status == 'in_progress' %}In Progress
-              {% elif req_compliance.status == 'compliant' %}✓ Compliant
-              {% elif req_compliance.status == 'non_compliant' %}✗ Non-Compliant
-              {% elif req_compliance.status == 'not_applicable' %}N/A
-              {% endif %}
-            </span>
-            {% else %}
-            <span class="badge badge--not_started">Not Started</span>
-            {% endif %}
-          </div>
-          <button type="button" class="requirement-item__toggle" data-toggle-requirement="{{ req.id }}">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </button>
+      <section class="card card--panel compliance-requirements__group" data-level="ml2">
+        <div class="compliance-requirements__header">
+          <h2 class="compliance-requirements__title">Maturity level 2 (ML2)</h2>
+          <button type="button" class="button button--ghost button--small" data-expand-all="ml2" data-expanded="false">Expand all</button>
         </div>
-        <div class="requirement-item__details" style="display: none;">
-          <form class="requirement-form" data-requirement-form="{{ req.id }}">
-            <div class="form-group">
-              <label for="req-status-{{ req.id }}" class="form-label">Status</label>
-              <select id="req-status-{{ req.id }}" class="form-select" required>
-                <option value="not_started" {% if req_compliance and req_compliance.status == 'not_started' %}selected{% endif %}>Not Started</option>
-                <option value="in_progress" {% if req_compliance and req_compliance.status == 'in_progress' %}selected{% endif %}>In Progress</option>
-                <option value="compliant" {% if req_compliance and req_compliance.status == 'compliant' %}selected{% endif %}>Compliant</option>
-                <option value="non_compliant" {% if req_compliance and req_compliance.status == 'non_compliant' %}selected{% endif %}>Non-Compliant</option>
-                <option value="not_applicable" {% if req_compliance and req_compliance.status == 'not_applicable' %}selected{% endif %}>Not Applicable</option>
-              </select>
+        <div class="compliance-requirements__list">
+          {% for req in requirements_ml2 %}
+          {% set req_compliance = requirement_compliance_map.get(req.id) %}
+          <article class="requirement-item" data-requirement-id="{{ req.id }}">
+            <div class="requirement-item__header">
+              <div class="requirement-item__number">{{ req.requirement_order }}</div>
+              <p class="requirement-item__description">{{ req.description }}</p>
+              <div class="requirement-item__status">
+                {% if req_compliance %}
+                <span class="badge badge--status-{{ req_compliance.status }}" data-requirement-status>
+                  {% if req_compliance.status == 'not_started' %}Not started
+                  {% elif req_compliance.status == 'in_progress' %}In progress
+                  {% elif req_compliance.status == 'compliant' %}✓ Compliant
+                  {% elif req_compliance.status == 'non_compliant' %}✗ Non-compliant
+                  {% elif req_compliance.status == 'not_applicable' %}N/A
+                  {% endif %}
+                </span>
+                {% else %}
+                <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
+                {% endif %}
+              </div>
+              <button
+                type="button"
+                class="requirement-item__toggle"
+                data-toggle-requirement="{{ req.id }}"
+                aria-expanded="false"
+                aria-controls="requirement-details-{{ req.id }}"
+              >
+                <span class="sr-only">Toggle requirement details</span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </button>
             </div>
-            <div class="form-group">
-              <label for="req-evidence-{{ req.id }}" class="form-label">Evidence</label>
-              <textarea id="req-evidence-{{ req.id }}" class="form-textarea" rows="2" placeholder="Links to documentation, screenshots, etc.">{% if req_compliance %}{{ req_compliance.evidence or '' }}{% endif %}</textarea>
+            <div class="requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details hidden>
+              <form class="compliance-form" data-requirement-form="{{ req.id }}">
+                <div class="form-field">
+                  <label for="req-status-{{ req.id }}" class="form-label">Status</label>
+                  <select id="req-status-{{ req.id }}" class="form-input" required>
+                    <option value="not_started" {% if req_compliance and req_compliance.status == 'not_started' %}selected{% endif %}>Not started</option>
+                    <option value="in_progress" {% if req_compliance and req_compliance.status == 'in_progress' %}selected{% endif %}>In progress</option>
+                    <option value="compliant" {% if req_compliance and req_compliance.status == 'compliant' %}selected{% endif %}>Compliant</option>
+                    <option value="non_compliant" {% if req_compliance and req_compliance.status == 'non_compliant' %}selected{% endif %}>Non-compliant</option>
+                    <option value="not_applicable" {% if req_compliance and req_compliance.status == 'not_applicable' %}selected{% endif %}>Not applicable</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="req-evidence-{{ req.id }}" class="form-label">Evidence</label>
+                  <textarea id="req-evidence-{{ req.id }}" class="form-input form-input--textarea" rows="2" placeholder="Links to documentation, screenshots, etc.">{% if req_compliance %}{{ req_compliance.evidence or '' }}{% endif %}</textarea>
+                </div>
+                <div class="form-field">
+                  <label for="req-notes-{{ req.id }}" class="form-label">Notes</label>
+                  <textarea id="req-notes-{{ req.id }}" class="form-input form-input--textarea" rows="2" placeholder="Implementation details, outstanding items, etc.">{% if req_compliance %}{{ req_compliance.notes or '' }}{% endif %}</textarea>
+                </div>
+                <div class="form-field">
+                  <label for="req-reviewed-{{ req.id }}" class="form-label">Last reviewed date</label>
+                  <input type="date" id="req-reviewed-{{ req.id }}" class="form-input" value="{% if req_compliance and req_compliance.last_reviewed_date %}{{ req_compliance.last_reviewed_date }}{% endif %}" />
+                </div>
+                <div class="compliance-form__actions">
+                  <button type="button" class="button button--primary button--small" data-save-requirement="{{ req.id }}">Save</button>
+                </div>
+              </form>
             </div>
-            <div class="form-group">
-              <label for="req-notes-{{ req.id }}" class="form-label">Notes</label>
-              <textarea id="req-notes-{{ req.id }}" class="form-textarea" rows="2" placeholder="Implementation details, outstanding items, etc.">{% if req_compliance %}{{ req_compliance.notes or '' }}{% endif %}</textarea>
-            </div>
-            <div class="form-group">
-              <label for="req-reviewed-{{ req.id }}" class="form-label">Last Reviewed Date</label>
-              <input type="date" id="req-reviewed-{{ req.id }}" class="form-input" value="{% if req_compliance and req_compliance.last_reviewed_date %}{{ req_compliance.last_reviewed_date }}{% endif %}" />
-            </div>
-            <div class="form-actions">
-              <button type="button" class="button button--primary button--small" data-save-requirement="{{ req.id }}">Save</button>
-            </div>
-          </form>
+          </article>
+          {% endfor %}
         </div>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
+      </section>
 
-  <!-- Maturity Level 3 Requirements -->
-  <div class="requirements-section">
-    <div class="requirements-section__header">
-      <h3 class="requirements-section__title">Maturity Level 3 (ML3)</h3>
-      <button type="button" class="button button--small button--secondary" data-expand-all="ml3">Expand All</button>
-    </div>
-    <div class="requirements-list">
-      {% for req in requirements_ml3 %}
-      <div class="requirement-item" data-requirement-id="{{ req.id }}">
-        <div class="requirement-item__header">
-          <div class="requirement-item__number">{{ req.requirement_order }}</div>
-          <div class="requirement-item__description">{{ req.description }}</div>
-          <div class="requirement-item__status">
-            {% set req_compliance = requirement_compliance_map.get(req.id) %}
-            {% if req_compliance %}
-            <span class="badge badge--{{ req_compliance.status }}">
-              {% if req_compliance.status == 'not_started' %}Not Started
-              {% elif req_compliance.status == 'in_progress' %}In Progress
-              {% elif req_compliance.status == 'compliant' %}✓ Compliant
-              {% elif req_compliance.status == 'non_compliant' %}✗ Non-Compliant
-              {% elif req_compliance.status == 'not_applicable' %}N/A
-              {% endif %}
-            </span>
-            {% else %}
-            <span class="badge badge--not_started">Not Started</span>
-            {% endif %}
-          </div>
-          <button type="button" class="requirement-item__toggle" data-toggle-requirement="{{ req.id }}">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </button>
+      <section class="card card--panel compliance-requirements__group" data-level="ml3">
+        <div class="compliance-requirements__header">
+          <h2 class="compliance-requirements__title">Maturity level 3 (ML3)</h2>
+          <button type="button" class="button button--ghost button--small" data-expand-all="ml3" data-expanded="false">Expand all</button>
         </div>
-        <div class="requirement-item__details" style="display: none;">
-          <form class="requirement-form" data-requirement-form="{{ req.id }}">
-            <div class="form-group">
-              <label for="req-status-{{ req.id }}" class="form-label">Status</label>
-              <select id="req-status-{{ req.id }}" class="form-select" required>
-                <option value="not_started" {% if req_compliance and req_compliance.status == 'not_started' %}selected{% endif %}>Not Started</option>
-                <option value="in_progress" {% if req_compliance and req_compliance.status == 'in_progress' %}selected{% endif %}>In Progress</option>
-                <option value="compliant" {% if req_compliance and req_compliance.status == 'compliant' %}selected{% endif %}>Compliant</option>
-                <option value="non_compliant" {% if req_compliance and req_compliance.status == 'non_compliant' %}selected{% endif %}>Non-Compliant</option>
-                <option value="not_applicable" {% if req_compliance and req_compliance.status == 'not_applicable' %}selected{% endif %}>Not Applicable</option>
-              </select>
+        <div class="compliance-requirements__list">
+          {% for req in requirements_ml3 %}
+          {% set req_compliance = requirement_compliance_map.get(req.id) %}
+          <article class="requirement-item" data-requirement-id="{{ req.id }}">
+            <div class="requirement-item__header">
+              <div class="requirement-item__number">{{ req.requirement_order }}</div>
+              <p class="requirement-item__description">{{ req.description }}</p>
+              <div class="requirement-item__status">
+                {% if req_compliance %}
+                <span class="badge badge--status-{{ req_compliance.status }}" data-requirement-status>
+                  {% if req_compliance.status == 'not_started' %}Not started
+                  {% elif req_compliance.status == 'in_progress' %}In progress
+                  {% elif req_compliance.status == 'compliant' %}✓ Compliant
+                  {% elif req_compliance.status == 'non_compliant' %}✗ Non-compliant
+                  {% elif req_compliance.status == 'not_applicable' %}N/A
+                  {% endif %}
+                </span>
+                {% else %}
+                <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
+                {% endif %}
+              </div>
+              <button
+                type="button"
+                class="requirement-item__toggle"
+                data-toggle-requirement="{{ req.id }}"
+                aria-expanded="false"
+                aria-controls="requirement-details-{{ req.id }}"
+              >
+                <span class="sr-only">Toggle requirement details</span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </button>
             </div>
-            <div class="form-group">
-              <label for="req-evidence-{{ req.id }}" class="form-label">Evidence</label>
-              <textarea id="req-evidence-{{ req.id }}" class="form-textarea" rows="2" placeholder="Links to documentation, screenshots, etc.">{% if req_compliance %}{{ req_compliance.evidence or '' }}{% endif %}</textarea>
+            <div class="requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details hidden>
+              <form class="compliance-form" data-requirement-form="{{ req.id }}">
+                <div class="form-field">
+                  <label for="req-status-{{ req.id }}" class="form-label">Status</label>
+                  <select id="req-status-{{ req.id }}" class="form-input" required>
+                    <option value="not_started" {% if req_compliance and req_compliance.status == 'not_started' %}selected{% endif %}>Not started</option>
+                    <option value="in_progress" {% if req_compliance and req_compliance.status == 'in_progress' %}selected{% endif %}>In progress</option>
+                    <option value="compliant" {% if req_compliance and req_compliance.status == 'compliant' %}selected{% endif %}>Compliant</option>
+                    <option value="non_compliant" {% if req_compliance and req_compliance.status == 'non_compliant' %}selected{% endif %}>Non-compliant</option>
+                    <option value="not_applicable" {% if req_compliance and req_compliance.status == 'not_applicable' %}selected{% endif %}>Not applicable</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="req-evidence-{{ req.id }}" class="form-label">Evidence</label>
+                  <textarea id="req-evidence-{{ req.id }}" class="form-input form-input--textarea" rows="2" placeholder="Links to documentation, screenshots, etc.">{% if req_compliance %}{{ req_compliance.evidence or '' }}{% endif %}</textarea>
+                </div>
+                <div class="form-field">
+                  <label for="req-notes-{{ req.id }}" class="form-label">Notes</label>
+                  <textarea id="req-notes-{{ req.id }}" class="form-input form-input--textarea" rows="2" placeholder="Implementation details, outstanding items, etc.">{% if req_compliance %}{{ req_compliance.notes or '' }}{% endif %}</textarea>
+                </div>
+                <div class="form-field">
+                  <label for="req-reviewed-{{ req.id }}" class="form-label">Last reviewed date</label>
+                  <input type="date" id="req-reviewed-{{ req.id }}" class="form-input" value="{% if req_compliance and req_compliance.last_reviewed_date %}{{ req_compliance.last_reviewed_date }}{% endif %}" />
+                </div>
+                <div class="compliance-form__actions">
+                  <button type="button" class="button button--primary button--small" data-save-requirement="{{ req.id }}">Save</button>
+                </div>
+              </form>
             </div>
-            <div class="form-group">
-              <label for="req-notes-{{ req.id }}" class="form-label">Notes</label>
-              <textarea id="req-notes-{{ req.id }}" class="form-textarea" rows="2" placeholder="Implementation details, outstanding items, etc.">{% if req_compliance %}{{ req_compliance.notes or '' }}{% endif %}</textarea>
-            </div>
-            <div class="form-group">
-              <label for="req-reviewed-{{ req.id }}" class="form-label">Last Reviewed Date</label>
-              <input type="date" id="req-reviewed-{{ req.id }}" class="form-input" value="{% if req_compliance and req_compliance.last_reviewed_date %}{{ req_compliance.last_reviewed_date }}{% endif %}" />
-            </div>
-            <div class="form-actions">
-              <button type="button" class="button button--primary button--small" data-save-requirement="{{ req.id }}">Save</button>
-            </div>
-          </form>
+          </article>
+          {% endfor %}
         </div>
-      </div>
-      {% endfor %}
+      </section>
     </div>
-  </div>
-</section>
-
-<style>
-.requirements-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-.summary-item {
-  text-align: center;
-  padding: 1rem;
-  background: #f9fafb;
-  border-radius: 0.5rem;
-  border: 1px solid #e5e7eb;
-}
-
-.summary-item__label {
-  font-size: 0.875rem;
-  color: #6b7280;
-  margin-bottom: 0.5rem;
-}
-
-.summary-item__value {
-  font-size: 1.875rem;
-  font-weight: 600;
-  color: #111827;
-}
-
-.summary-item__value--success {
-  color: #065f46;
-}
-
-.summary-item__value--info {
-  color: #1e40af;
-}
-
-.summary-item__value--danger {
-  color: #991b1b;
-}
-
-.requirements-section {
-  margin-bottom: 2rem;
-}
-
-.requirements-section__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.5rem;
-  background: #f9fafb;
-  border-bottom: 2px solid #e5e7eb;
-}
-
-.requirements-section__title {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: #111827;
-  margin: 0;
-}
-
-.requirements-list {
-  padding: 0;
-}
-
-.requirement-item {
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.requirement-item__header {
-  display: grid;
-  grid-template-columns: 40px 1fr auto 40px;
-  gap: 1rem;
-  padding: 1rem 1.5rem;
-  align-items: center;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.requirement-item__header:hover {
-  background-color: #f9fafb;
-}
-
-.requirement-item__number {
-  font-weight: 600;
-  color: #6b7280;
-  text-align: center;
-}
-
-.requirement-item__description {
-  color: rgba(226, 232, 240, 0.92);
-  line-height: 1.5;
-  transition: color 0.2s ease;
-}
-
-.requirement-item__header:hover .requirement-item__description,
-.requirement-item__header:focus-within .requirement-item__description {
-  color: #1f2937;
-}
-
-.requirement-item__status {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.requirement-item__toggle {
-  background: none;
-  border: none;
-  padding: 0.25rem;
-  cursor: pointer;
-  color: #6b7280;
-  transition: transform 0.2s;
-}
-
-.requirement-item__toggle svg {
-  display: block;
-}
-
-.requirement-item.expanded .requirement-item__toggle svg {
-  transform: rotate(180deg);
-}
-
-.requirement-item__details {
-  padding: 1.5rem;
-  background: #f9fafb;
-  border-top: 1px solid #e5e7eb;
-}
-
-.requirement-form {
-  max-width: 800px;
-}
-
-.form-group {
-  margin-bottom: 1rem;
-}
-
-.form-label {
-  display: block;
-  font-size: 0.875rem;
-  font-weight: 500;
-  margin-bottom: 0.5rem;
-  color: #374151;
-}
-
-.form-select, .form-input, .form-textarea {
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #d1d5db;
-  border-radius: 0.375rem;
-  font-size: 0.875rem;
-}
-
-.form-textarea {
-  resize: vertical;
-}
-
-.form-actions {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-
-.badge {
-  display: inline-block;
-  padding: 0.25rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.badge--not_started { background: #e5e7eb; color: #4b5563; }
-.badge--in_progress { background: #dbeafe; color: #1e40af; }
-.badge--compliant { background: #d1fae5; color: #065f46; }
-.badge--non_compliant { background: #fee2e2; color: #991b1b; }
-.badge--not_applicable { background: #f3f4f6; color: #6b7280; }
-
-.badge--maturity-ml0 { background: #f3f4f6; color: #6b7280; }
-.badge--maturity-ml1 { background: #fef3c7; color: #92400e; }
-.badge--maturity-ml2 { background: #dbeafe; color: #1e40af; }
-.badge--maturity-ml3 { background: #d1fae5; color: #065f46; }
-</style>
+  </section>
+</div>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-  const companyId = {{ company.id }};
-  const controlId = {{ control.id }};
+  const companyId = {{ (company.id if company else None) | tojson }};
   const csrfToken = getCsrfToken();
 
   // Toggle requirement details
   document.querySelectorAll('[data-toggle-requirement]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
+    btn.addEventListener('click', (event) => {
+      event.stopPropagation();
       const requirementId = btn.dataset.toggleRequirement;
-      const item = document.querySelector(`[data-requirement-id="${requirementId}"]`);
-      const details = item.querySelector('.requirement-item__details');
-      
-      if (details.style.display === 'none') {
-        details.style.display = 'block';
-        item.classList.add('expanded');
-      } else {
-        details.style.display = 'none';
-        item.classList.remove('expanded');
-      }
+      toggleRequirement(requirementId, btn);
     });
   });
 
   // Also toggle on header click
   document.querySelectorAll('.requirement-item__header').forEach(header => {
-    header.addEventListener('click', (e) => {
-      if (e.target.closest('[data-toggle-requirement]')) return;
+    header.addEventListener('click', (event) => {
+      if (event.target.closest('[data-toggle-requirement]')) return;
       const item = header.closest('.requirement-item');
-      const btn = item.querySelector('[data-toggle-requirement]');
-      btn.click();
+      const toggle = item.querySelector('[data-toggle-requirement]');
+      toggleRequirement(toggle.dataset.toggleRequirement, toggle);
     });
   });
+
+  function toggleRequirement(requirementId, toggleButton) {
+    const item = document.querySelector(`[data-requirement-id="${requirementId}"]`);
+    const details = item?.querySelector('[data-requirement-details]');
+    if (!details) return;
+
+    const isHidden = details.hasAttribute('hidden');
+    if (isHidden) {
+      details.removeAttribute('hidden');
+      item.classList.add('is-expanded');
+      toggleButton?.setAttribute('aria-expanded', 'true');
+    } else {
+      details.setAttribute('hidden', '');
+      item.classList.remove('is-expanded');
+      toggleButton?.setAttribute('aria-expanded', 'false');
+    }
+  }
 
   // Expand all buttons
   document.querySelectorAll('[data-expand-all]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const section = btn.closest('.requirements-section');
-      const items = section.querySelectorAll('.requirement-item');
-      const isExpanding = btn.textContent.includes('Expand');
-      
-      items.forEach(item => {
-        const details = item.querySelector('.requirement-item__details');
+      const section = btn.closest('.compliance-requirements__group');
+      if (!section) return;
+      const isExpanding = btn.getAttribute('data-expanded') !== 'true';
+
+      section.querySelectorAll('.requirement-item').forEach(item => {
+        const details = item.querySelector('[data-requirement-details]');
+        const toggle = item.querySelector('[data-toggle-requirement]');
+        if (!details) return;
+
         if (isExpanding) {
-          details.style.display = 'block';
-          item.classList.add('expanded');
+          details.removeAttribute('hidden');
+          item.classList.add('is-expanded');
+          toggle?.setAttribute('aria-expanded', 'true');
         } else {
-          details.style.display = 'none';
-          item.classList.remove('expanded');
+          details.setAttribute('hidden', '');
+          item.classList.remove('is-expanded');
+          toggle?.setAttribute('aria-expanded', 'false');
         }
       });
-      
-      btn.textContent = isExpanding ? 'Collapse All' : 'Expand All';
+
+      btn.setAttribute('data-expanded', isExpanding ? 'true' : 'false');
+      btn.textContent = isExpanding ? 'Collapse all' : 'Expand all';
     });
   });
 
   // Save requirement
   document.querySelectorAll('[data-save-requirement]').forEach(btn => {
     btn.addEventListener('click', async () => {
+      if (!companyId) return;
       const requirementId = btn.dataset.saveRequirement;
-      
+
       const formData = {
         status: document.getElementById(`req-status-${requirementId}`).value,
         evidence: document.getElementById(`req-evidence-${requirementId}`).value || null,
@@ -547,14 +399,12 @@ document.addEventListener('DOMContentLoaded', () => {
       };
 
       try {
-        // Check if record exists first
         let response = await fetch(`/api/essential8/companies/${companyId}/requirements/${requirementId}/compliance`);
-        
+
         let method = 'PATCH';
         let url = `/api/essential8/companies/${companyId}/requirements/${requirementId}/compliance`;
-        
+
         if (response.status === 404) {
-          // Create new record
           method = 'POST';
           url = `/api/essential8/companies/${companyId}/requirements/compliance`;
           formData.company_id = companyId;
@@ -562,7 +412,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         response = await fetch(url, {
-          method: method,
+          method,
           headers: {
             'Content-Type': 'application/json',
             'X-CSRF-Token': csrfToken
@@ -571,22 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (response.ok) {
-          // Update the badge in the UI
-          const item = document.querySelector(`[data-requirement-id="${requirementId}"]`);
-          const statusBadge = item.querySelector('.requirement-item__status .badge');
-          const status = formData.status;
-          
-          statusBadge.className = `badge badge--${status}`;
-          
-          let statusText = 'Not Started';
-          if (status === 'in_progress') statusText = 'In Progress';
-          else if (status === 'compliant') statusText = '✓ Compliant';
-          else if (status === 'non_compliant') statusText = '✗ Non-Compliant';
-          else if (status === 'not_applicable') statusText = 'N/A';
-          
-          statusBadge.textContent = statusText;
-          
-          // Show success message
+          updateRequirementStatus(requirementId, formData.status);
           showNotification('Requirement updated successfully', 'success');
         } else {
           showNotification('Failed to update requirement', 'error');
@@ -598,6 +433,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  function updateRequirementStatus(requirementId, status) {
+    const item = document.querySelector(`[data-requirement-id="${requirementId}"]`);
+    if (!item) return;
+    const statusBadge = item.querySelector('[data-requirement-status]');
+    if (!statusBadge) return;
+
+    statusBadge.className = `badge badge--status-${status}`;
+
+    let statusText = 'Not started';
+    if (status === 'in_progress') statusText = 'In progress';
+    else if (status === 'compliant') statusText = '✓ Compliant';
+    else if (status === 'non_compliant') statusText = '✗ Non-compliant';
+    else if (status === 'not_applicable') statusText = 'N/A';
+
+    statusBadge.textContent = statusText;
+  }
+
   function getCsrfToken() {
     return document.cookie
       .split('; ')
@@ -606,22 +458,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function showNotification(message, type) {
-    // Simple notification - could be enhanced
     const notification = document.createElement('div');
+    notification.className = `compliance-toast compliance-toast--${type}`;
     notification.textContent = message;
-    notification.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      padding: 1rem 1.5rem;
-      border-radius: 0.5rem;
-      background: ${type === 'success' ? '#d1fae5' : '#fee2e2'};
-      color: ${type === 'success' ? '#065f46' : '#991b1b'};
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-      z-index: 1000;
-    `;
     document.body.appendChild(notification);
-    
+
     setTimeout(() => {
       notification.remove();
     }, 3000);
