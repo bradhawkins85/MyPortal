@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.repositories import business_continuity_plans as bc_plans_repo
+from app.schemas.bcp_template import BCPTemplateSchema
 from app.schemas.business_continuity_plans import (
     BusinessContinuityPlanCreate,
     BusinessContinuityPlanListItem,
@@ -19,8 +20,41 @@ from app.schemas.business_continuity_plans import (
     PlanStatus,
     PlanType,
 )
+from app.services.bcp_template import get_default_government_bcp_template
 
 router = APIRouter(prefix="/api/business-continuity-plans", tags=["Business Continuity Plans"])
+
+
+@router.get("/template/default", response_model=BCPTemplateSchema)
+async def get_default_template(
+    current_user: dict = Depends(get_current_user),
+) -> BCPTemplateSchema:
+    """
+    Get the default government BCP template schema.
+    
+    Returns a comprehensive template schema for government business continuity plans,
+    including all standard sections, fields, and metadata. This schema can be used
+    to understand the structure of a BCP or to generate forms and data collection
+    interfaces.
+    
+    The template includes:
+    - Plan Overview: purpose, scope, objectives, assumptions
+    - Governance & Roles: roles, responsibilities, escalation matrix, approvals
+    - Business Impact Analysis (BIA): critical processes, impact categories, RTO, RPO, MTPD, dependencies
+    - Risk Assessment: threats, likelihood, impact, risk rating, mitigations
+    - Recovery Strategies: process-level strategies, workarounds, resource needs
+    - Incident Response: activation criteria, notification tree, step-by-step procedures
+    - Communications Plan: internal, external, regulators, media, templates
+    - IT/Systems Recovery: apps, infra, DR runbooks, backup/restore, test cadence
+    - Testing & Exercises: schedule, scenarios, evidence, outcomes
+    - Maintenance & Review: review cadence, owners, change process
+    - Appendices: contact lists, vendor SLAs, site info, inventories, floor plans
+    - Revision History: version, author, date, summary
+    
+    Field types include: text, rich_text (HTML), date, datetime, select, multiselect,
+    integer, decimal, boolean, table, file, contact_ref, user_ref, url.
+    """
+    return get_default_government_bcp_template()
 
 
 @router.get("/", response_model=list[BusinessContinuityPlanListItem])

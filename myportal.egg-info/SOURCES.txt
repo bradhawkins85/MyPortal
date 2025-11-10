@@ -111,6 +111,7 @@ app/schemas/assets.py
 app/schemas/audit_logs.py
 app/schemas/auth.py
 app/schemas/automations.py
+app/schemas/bcp_template.py
 app/schemas/business_continuity_plans.py
 app/schemas/call_recordings.py
 app/schemas/companies.py
@@ -152,6 +153,7 @@ app/services/asset_importer.py
 app/services/audit.py
 app/services/automations.py
 app/services/background.py
+app/services/bcp_template.py
 app/services/call_recordings.py
 app/services/change_log.py
 app/services/company_access.py
@@ -230,6 +232,8 @@ tests/test_automation_trigger_filters.py
 tests/test_automations_repository.py
 tests/test_automations_repository_datetimes.py
 tests/test_automations_service.py
+tests/test_bcp_template.py
+tests/test_bcp_template_api.py
 tests/test_business_continuity_plans.py
 tests/test_cache_control_middleware.py
 tests/test_call_recordings.py
