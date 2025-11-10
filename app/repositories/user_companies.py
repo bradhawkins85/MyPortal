@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import suppress
 from typing import Any, List, Optional
 
@@ -35,6 +36,42 @@ _PERMISSION_FIELDS = {
     "can_access_forms",
     "is_admin",
 }
+
+# Map role-based permissions to legacy boolean field names
+_PERMISSION_MAPPING = {
+    "licenses.manage": "can_manage_licenses",
+    "licenses.order": "can_order_licenses",
+    "staff.manage": "can_manage_staff",
+    "shop.access": "can_access_shop",
+    "cart.access": "can_access_cart",
+    "orders.access": "can_access_orders",
+    "forms.access": "can_access_forms",
+    "assets.manage": "can_manage_assets",
+    "invoices.manage": "can_manage_invoices",
+    "office_groups.manage": "can_manage_office_groups",
+    "issues.manage": "can_manage_issues",
+    "company.admin": "is_admin",
+}
+
+
+def _enrich_with_role_permissions(data: dict[str, Any], role_permissions_raw: Any) -> None:
+    """Enrich user_company data with permissions from their role.
+    
+    This function updates the boolean permission fields based on the role's permissions,
+    enabling backward compatibility while migrating to the role-based permission system.
+    """
+    if not role_permissions_raw:
+        return
+    
+    try:
+        role_permissions = json.loads(role_permissions_raw) if isinstance(role_permissions_raw, str) else role_permissions_raw or []
+    except json.JSONDecodeError:
+        role_permissions = []
+    
+    # Update boolean fields based on role permissions
+    for role_perm, field_name in _PERMISSION_MAPPING.items():
+        if role_perm in role_permissions:
+            data[field_name] = True
 
 
 def _normalise(row: dict[str, Any]) -> dict[str, Any]:
@@ -94,18 +131,39 @@ async def _suspend_company_membership(company_id: int, user_id: int) -> None:
 
 async def get_user_company(user_id: int, company_id: int) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
-        "SELECT * FROM user_companies WHERE user_id = %s AND company_id = %s",
+        """
+        SELECT 
+            uc.*,
+            r.permissions AS role_permissions
+        FROM user_companies AS uc
+        LEFT JOIN company_memberships AS m 
+            ON m.company_id = uc.company_id AND m.user_id = uc.user_id AND m.status = 'active'
+        LEFT JOIN roles AS r ON r.id = m.role_id
+        WHERE uc.user_id = %s AND uc.company_id = %s
+        """,
         (user_id, company_id),
     )
-    return _normalise(row) if row else None
+    if not row:
+        return None
+    
+    normalised = _normalise(row)
+    _enrich_with_role_permissions(normalised, row.get("role_permissions"))
+    return normalised
 
 
 async def list_companies_for_user(user_id: int) -> List[dict[str, Any]]:
     rows = await db.fetch_all(
         """
-        SELECT uc.*, c.name AS company_name, c.syncro_company_id
+        SELECT 
+            uc.*, 
+            c.name AS company_name, 
+            c.syncro_company_id,
+            r.permissions AS role_permissions
         FROM user_companies AS uc
         INNER JOIN companies AS c ON c.id = uc.company_id
+        LEFT JOIN company_memberships AS m 
+            ON m.company_id = uc.company_id AND m.user_id = uc.user_id AND m.status = 'active'
+        LEFT JOIN roles AS r ON r.id = m.role_id
         WHERE uc.user_id = %s
         ORDER BY c.name
         """,
@@ -117,6 +175,7 @@ async def list_companies_for_user(user_id: int) -> List[dict[str, Any]]:
         normalised["company_name"] = row.get("company_name")
         if "syncro_company_id" in row:
             normalised["syncro_company_id"] = row.get("syncro_company_id")
+        _enrich_with_role_permissions(normalised, row.get("role_permissions"))
         companies.append(normalised)
     return companies
 
@@ -226,7 +285,8 @@ async def list_assignments(company_id: int | None = None) -> List[dict[str, Any]
             c.is_vip,
             m.id AS membership_id,
             m.role_id AS membership_role_id,
-            r.name AS membership_role_name
+            r.name AS membership_role_name,
+            r.permissions AS role_permissions
         FROM user_companies AS uc
         INNER JOIN users AS u ON u.id = uc.user_id
         INNER JOIN companies AS c ON c.id = uc.company_id
@@ -263,6 +323,7 @@ async def list_assignments(company_id: int | None = None) -> List[dict[str, Any]
                 normalised["is_vip"] = bool(int(row.get("is_vip")))
             except (TypeError, ValueError):
                 normalised["is_vip"] = False
+        _enrich_with_role_permissions(normalised, row.get("role_permissions"))
         assignments.append(normalised)
     return assignments
 
