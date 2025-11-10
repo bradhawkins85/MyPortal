@@ -385,8 +385,14 @@
 }
 
 .requirement-item__description {
-  color: #374151;
+  color: rgba(226, 232, 240, 0.92);
   line-height: 1.5;
+  transition: color 0.2s ease;
+}
+
+.requirement-item__header:hover .requirement-item__description,
+.requirement-item__header:focus-within .requirement-item__description {
+  color: #1f2937;
 }
 
 .requirement-item__status {
