@@ -90,7 +90,7 @@
           {% set can_manage_staff = (can_manage_staff | default(false)) or is_super_admin or membership.get('can_manage_staff') or (staff_permission > 0) %}
           {% set can_manage_issues = has_issue_tracker_access | default(is_super_admin or (is_helpdesk_technician | default(false))) %}
           {% set can_view_compliance = (can_view_compliance | default(false)) or is_super_admin or (active_company_id is not none) %}
-          {% set has_company_section = can_access_tickets or can_manage_issues or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_subscriptions or can_manage_invoices or can_manage_staff or can_view_compliance %}
+          {% set has_company_section = can_access_tickets or can_manage_issues or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_subscriptions or can_manage_invoices or can_manage_staff or can_view_compliance or can_view_bcp %}
           {% set is_company_admin = membership.get('is_admin') %}
           {% set has_admin_access = is_super_admin or is_company_admin %}
           <li class="menu__item">
@@ -240,6 +240,16 @@
                   <svg viewBox="0 0 24 24" focusable="false"><path d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
                 </span>
                 <span class="menu__label">Compliance</span>
+              </a>
+            </li>
+          {% endif %}
+          {% if can_view_bcp %}
+            <li class="menu__item">
+              <a href="/bcp" {% if current_path.startswith('/bcp') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2L4 6v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V6l-8-4zm0 10a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>
+                </span>
+                <span class="menu__label">Continuity</span>
               </a>
             </li>
           {% endif %}

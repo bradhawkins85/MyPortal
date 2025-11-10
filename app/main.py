@@ -50,6 +50,7 @@ from app.api.routes import (
     automations as automations_api,
     bc5,
     bc11,
+    bcp,
     business_continuity_plans as bc_plans_api,
     call_recordings as call_recordings_api,
     companies,
@@ -534,6 +535,7 @@ app.include_router(knowledge_base_api.router)
 app.include_router(bc_plans_api.router)
 app.include_router(bc5.router)
 app.include_router(bc11.router)
+app.include_router(bcp.router)
 app.include_router(roles.router)
 app.include_router(memberships.router)
 app.include_router(m365_api.router)
@@ -969,6 +971,20 @@ async def _build_base_context(
 
     def _has_permission(flag: str) -> bool:
         return bool(membership_data.get(flag))
+    
+    # Check BCP permissions
+    can_view_bcp = is_super_admin
+    can_edit_bcp = is_super_admin
+    if not is_super_admin and active_company_id is not None:
+        user_id = user.get("id")
+        if user_id:
+            try:
+                can_view_bcp = await membership_repo.user_has_permission(int(user_id), "bcp:view")
+                can_edit_bcp = await membership_repo.user_has_permission(int(user_id), "bcp:edit")
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                log_error("Failed to check BCP permissions", error=str(exc))
+                can_view_bcp = False
+                can_edit_bcp = False
 
     permission_flags = {
         "can_access_shop": is_super_admin or _has_permission("can_access_shop"),
@@ -985,6 +1001,8 @@ async def _build_base_context(
         ),
         "can_manage_issues": has_issue_tracker_access,
         "can_view_compliance": is_super_admin or (active_company_id is not None),
+        "can_view_bcp": can_view_bcp,
+        "can_edit_bcp": can_edit_bcp,
     }
 
     module_lookup = getattr(request.state, "module_lookup", None)
