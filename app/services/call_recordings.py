@@ -549,7 +549,7 @@ async def process_queued_transcriptions() -> dict[str, Any]:
             return {
                 "status": "ok",
                 "processed": 0,
-                "message": "No recordings to process",
+                "details": "No recordings to process",
             }
         
         recording = failed_recordings[0]
