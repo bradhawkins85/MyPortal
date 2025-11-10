@@ -2049,3 +2049,234 @@ async def webhook_start_incident(request: Request):
         "started_at": incident["started_at"].isoformat() if incident["started_at"] else None,
         "message": "Incident started successfully"
     }
+
+
+# ============================================================================
+# Evacuation Procedures Pages and Endpoints
+# ============================================================================
+
+
+@router.get("/evacuation", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_evacuation(request: Request):
+    """BCP Evacuation Procedures page."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from app.main import _build_base_context
+    from app.core.config import get_templates_config
+    from fastapi.templating import Jinja2Templates
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    # Get or create evacuation plan
+    evacuation = await bcp_repo.get_evacuation_plan(plan["id"])
+    if not evacuation:
+        evacuation = await bcp_repo.create_evacuation_plan(plan["id"])
+    
+    templates_config = get_templates_config()
+    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "Evacuation Procedures",
+            "plan": plan,
+            "evacuation": evacuation,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+        },
+    )
+    
+    return templates.TemplateResponse("bcp/evacuation.html", context)
+
+
+@router.post("/evacuation", include_in_schema=False)
+async def update_evacuation(
+    request: Request,
+    meeting_point: str = Form(None),
+    notes: str = Form(None),
+):
+    """Update evacuation plan."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Get or create evacuation plan
+    evacuation = await bcp_repo.get_evacuation_plan(plan["id"])
+    if not evacuation:
+        evacuation = await bcp_repo.create_evacuation_plan(plan["id"])
+    
+    # Update evacuation plan
+    await bcp_repo.update_evacuation_plan(
+        evacuation["id"],
+        meeting_point=meeting_point if meeting_point else None,
+        notes=notes if notes else None,
+    )
+    
+    return RedirectResponse(
+        url="/bcp/evacuation?success=" + quote("Evacuation plan updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+# ============================================================================
+# Emergency Kit Pages and Endpoints
+# ============================================================================
+
+
+@router.get("/emergency-kit", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_emergency_kit(request: Request, tab: str = Query("documents")):
+    """BCP Emergency Kit page with Documents and Equipment tabs."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from app.main import _build_base_context
+    from app.core.config import get_templates_config
+    from fastapi.templating import Jinja2Templates
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    # Check if items exist; if not, seed them
+    all_items = await bcp_repo.list_emergency_kit_items(plan["id"])
+    if not all_items:
+        await bcp_repo.seed_default_emergency_kit_items(plan["id"])
+        all_items = await bcp_repo.list_emergency_kit_items(plan["id"])
+    
+    # Filter items by category
+    document_items = [item for item in all_items if item["category"] == "Document"]
+    equipment_items = [item for item in all_items if item["category"] == "Equipment"]
+    
+    templates_config = get_templates_config()
+    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "Emergency Kit",
+            "plan": plan,
+            "document_items": document_items,
+            "equipment_items": equipment_items,
+            "active_tab": tab,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+        },
+    )
+    
+    return templates.TemplateResponse("bcp/emergency_kit.html", context)
+
+
+@router.post("/emergency-kit", include_in_schema=False)
+async def create_emergency_kit_item_endpoint(
+    request: Request,
+    category: str = Form(...),
+    name: str = Form(...),
+    notes: str = Form(None),
+):
+    """Create a new emergency kit item."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    await bcp_repo.create_emergency_kit_item(
+        plan["id"],
+        category,
+        name,
+        notes if notes else None,
+    )
+    
+    # Redirect to the appropriate tab
+    tab = "documents" if category == "Document" else "equipment"
+    return RedirectResponse(
+        url=f"/bcp/emergency-kit?tab={tab}&success=" + quote("Item added successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/emergency-kit/{item_id}/update", include_in_schema=False)
+async def update_emergency_kit_item_endpoint(
+    request: Request,
+    item_id: int,
+    category: str = Form(...),
+    name: str = Form(...),
+    notes: str = Form(None),
+):
+    """Update an emergency kit item."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    updated = await bcp_repo.update_emergency_kit_item(
+        item_id,
+        category=category,
+        name=name,
+        notes=notes if notes else None,
+    )
+    
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    
+    # Redirect to the appropriate tab
+    tab = "documents" if category == "Document" else "equipment"
+    return RedirectResponse(
+        url=f"/bcp/emergency-kit?tab={tab}&success=" + quote("Item updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/emergency-kit/{item_id}/check", include_in_schema=False)
+async def mark_emergency_kit_item_checked_endpoint(
+    request: Request,
+    item_id: int,
+):
+    """Mark an emergency kit item as checked today."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    from datetime import datetime
+    
+    # Get the item to determine its category for redirect
+    item = await bcp_repo.get_emergency_kit_item_by_id(item_id)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    
+    # Mark as checked
+    await bcp_repo.mark_emergency_kit_item_checked(item_id, datetime.utcnow())
+    
+    # Redirect to the appropriate tab
+    tab = "documents" if item["category"] == "Document" else "equipment"
+    return RedirectResponse(
+        url=f"/bcp/emergency-kit?tab={tab}&success=" + quote("Item marked as checked"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/emergency-kit/{item_id}/delete", include_in_schema=False)
+async def delete_emergency_kit_item_endpoint(
+    request: Request,
+    item_id: int,
+):
+    """Delete an emergency kit item."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    # Get the item to determine its category for redirect
+    item = await bcp_repo.get_emergency_kit_item_by_id(item_id)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    
+    tab = "documents" if item["category"] == "Document" else "equipment"
+    
+    deleted = await bcp_repo.delete_emergency_kit_item(item_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    
+    return RedirectResponse(
+        url=f"/bcp/emergency-kit?tab={tab}&success=" + quote("Item deleted successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
