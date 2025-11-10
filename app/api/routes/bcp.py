@@ -389,13 +389,59 @@ async def bcp_incident(request: Request, tab: str = Query("checklist")):
 
 
 @router.get("/recovery", response_class=HTMLResponse, include_in_schema=False)
-async def bcp_recovery(request: Request):
-    """BCP Recovery Strategies page (stub)."""
+async def bcp_recovery(
+    request: Request,
+    owner_filter: int = Query(None),
+    status_filter: str = Query(None),
+    activity_filter: int = Query(None),
+):
+    """BCP Recovery Actions page with filters."""
     user, company_id = await _require_bcp_view(request)
     
     from app.main import _build_base_context
     from app.core.config import get_templates_config
     from fastapi.templating import Jinja2Templates
+    from app.repositories import users as user_repo
+    from app.services.time_utils import humanize_hours
+    from datetime import datetime
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    # Apply filters
+    overdue_only = status_filter == "overdue"
+    completed_only = status_filter == "completed"
+    
+    # Get recovery actions
+    actions = await bcp_repo.list_recovery_actions(
+        plan["id"],
+        owner_id=owner_filter,
+        overdue_only=overdue_only,
+        completed_only=completed_only,
+        critical_activity_id=activity_filter,
+    )
+    
+    # Enrich actions with user details and humanized RTO
+    for action in actions:
+        if action["owner_id"]:
+            owner = await user_repo.get_user_by_id(action["owner_id"])
+            action["owner"] = owner
+        else:
+            action["owner"] = None
+        
+        if action["rto_hours"] is not None:
+            action["rto_humanized"] = humanize_hours(action["rto_hours"])
+        else:
+            action["rto_humanized"] = "-"
+    
+    # Get all users for owner filter dropdown
+    all_users = await user_repo.list_users()
+    
+    # Get all critical activities for activity filter
+    activities = await bcp_repo.list_critical_activities(plan["id"], sort_by="name")
     
     templates_config = get_templates_config()
     templates = Jinja2Templates(directory=str(templates_config.template_path))
@@ -404,12 +450,20 @@ async def bcp_recovery(request: Request):
         request,
         user,
         extra={
-            "title": "Recovery Strategies",
-            "page_type": "recovery",
+            "title": "Recovery Actions",
+            "plan": plan,
+            "actions": actions,
+            "all_users": all_users,
+            "activities": activities,
+            "owner_filter": owner_filter,
+            "status_filter": status_filter,
+            "activity_filter": activity_filter,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "now": datetime.utcnow(),
         },
     )
     
-    return templates.TemplateResponse("bcp/stub.html", context)
+    return templates.TemplateResponse("bcp/recovery.html", context)
 
 
 @router.get("/contacts", response_class=HTMLResponse, include_in_schema=False)
@@ -2280,3 +2334,299 @@ async def delete_emergency_kit_item_endpoint(
         url=f"/bcp/emergency-kit?tab={tab}&success=" + quote("Item deleted successfully"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+# ============================================================================
+# Recovery Actions Endpoints
+# ============================================================================
+
+
+@router.post("/recovery", include_in_schema=False)
+async def create_recovery_action_endpoint(
+    request: Request,
+    action: str = Form(...),
+    resources: str = Form(None),
+    owner_id: int = Form(None),
+    rto_hours: int = Form(None),
+    due_date: str = Form(None),
+    critical_activity_id: int = Form(None),
+):
+    """Create a new recovery action."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Parse due date if provided
+    due_date_obj = None
+    if due_date:
+        try:
+            from datetime import datetime
+            due_date_obj = datetime.fromisoformat(due_date)
+        except ValueError:
+            pass
+    
+    # Validate RTO if provided
+    if rto_hours is not None and rto_hours < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="RTO hours must be non-negative"
+        )
+    
+    await bcp_repo.create_recovery_action(
+        plan["id"],
+        action,
+        resources if resources else None,
+        owner_id if owner_id else None,
+        rto_hours if rto_hours else None,
+        due_date_obj,
+        critical_activity_id if critical_activity_id else None,
+    )
+    
+    return RedirectResponse(
+        url="/bcp/recovery?success=" + quote("Recovery action created successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/recovery/{action_id}/update", include_in_schema=False)
+async def update_recovery_action_endpoint(
+    request: Request,
+    action_id: int,
+    action: str = Form(...),
+    resources: str = Form(None),
+    owner_id: int = Form(None),
+    rto_hours: int = Form(None),
+    due_date: str = Form(None),
+    critical_activity_id: int = Form(None),
+):
+    """Update a recovery action."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    # Parse due date if provided
+    due_date_obj = None
+    if due_date:
+        try:
+            from datetime import datetime
+            due_date_obj = datetime.fromisoformat(due_date)
+        except ValueError:
+            pass
+    
+    # Validate RTO if provided
+    if rto_hours is not None and rto_hours < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="RTO hours must be non-negative"
+        )
+    
+    updated = await bcp_repo.update_recovery_action(
+        action_id,
+        action=action,
+        resources=resources if resources else None,
+        owner_id=owner_id if owner_id else None,
+        rto_hours=rto_hours if rto_hours else None,
+        due_date=due_date_obj,
+        critical_activity_id=critical_activity_id if critical_activity_id else None,
+    )
+    
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recovery action not found")
+    
+    return RedirectResponse(
+        url="/bcp/recovery?success=" + quote("Recovery action updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/recovery/{action_id}/complete", include_in_schema=False)
+async def mark_recovery_action_complete_endpoint(
+    request: Request,
+    action_id: int,
+):
+    """Mark a recovery action as completed."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    from datetime import datetime
+    
+    updated = await bcp_repo.mark_recovery_action_complete(action_id, datetime.utcnow())
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recovery action not found")
+    
+    return RedirectResponse(
+        url="/bcp/recovery?success=" + quote("Recovery action marked as complete"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/recovery/{action_id}/delete", include_in_schema=False)
+async def delete_recovery_action_endpoint(
+    request: Request,
+    action_id: int,
+):
+    """Delete a recovery action."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    deleted = await bcp_repo.delete_recovery_action(action_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recovery action not found")
+    
+    return RedirectResponse(
+        url="/bcp/recovery?success=" + quote("Recovery action deleted successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get("/recovery/export", include_in_schema=False)
+async def export_recovery_actions_csv(request: Request):
+    """Export recovery actions to CSV."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from fastapi.responses import StreamingResponse
+    import csv
+    from io import StringIO
+    from app.repositories import users as user_repo
+    from app.services.time_utils import humanize_hours
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    actions = await bcp_repo.list_recovery_actions(plan["id"])
+    
+    # Create CSV
+    output = StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "ID",
+            "Action",
+            "Critical Activity",
+            "Resources/Outcomes",
+            "RTO",
+            "Owner",
+            "Due Date",
+            "Completed At",
+            "Created At",
+            "Updated At",
+        ],
+    )
+    writer.writeheader()
+    
+    for action in actions:
+        # Get owner name if exists
+        owner_name = ""
+        if action["owner_id"]:
+            owner = await user_repo.get_user_by_id(action["owner_id"])
+            if owner:
+                owner_name = owner.get("name", "")
+        
+        # Humanize RTO
+        rto_humanized = humanize_hours(action["rto_hours"]) if action["rto_hours"] is not None else ""
+        
+        writer.writerow({
+            "ID": action["id"],
+            "Action": action["action"],
+            "Critical Activity": action.get("activity_name") or "",
+            "Resources/Outcomes": action.get("resources") or "",
+            "RTO": rto_humanized,
+            "Owner": owner_name,
+            "Due Date": action.get("due_date", ""),
+            "Completed At": action.get("completed_at", ""),
+            "Created At": action.get("created_at", ""),
+            "Updated At": action.get("updated_at", ""),
+        })
+    
+    output.seek(0)
+    
+    from datetime import datetime as dt
+    filename = f"recovery_actions_{dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+# ============================================================================
+# Recovery Checklist Page and Endpoints
+# ============================================================================
+
+
+@router.get("/recovery/checklist", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_recovery_checklist(request: Request):
+    """BCP Recovery Checklist page for Crisis & Recovery phase."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from app.main import _build_base_context
+    from app.core.config import get_templates_config
+    from fastapi.templating import Jinja2Templates
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    # Check if there are Crisis/Recovery checklist items; if not, seed them
+    checklist_items = await bcp_repo.list_checklist_items(plan["id"], phase="CrisisRecovery")
+    if not checklist_items:
+        await bcp_repo.seed_default_crisis_recovery_checklist_items(plan["id"])
+        checklist_items = await bcp_repo.list_checklist_items(plan["id"], phase="CrisisRecovery")
+    
+    # Get active incident if any
+    active_incident = await bcp_repo.get_active_incident(plan["id"])
+    
+    # Get checklist ticks if there's an active incident
+    checklist_with_ticks = []
+    if active_incident:
+        ticks = await bcp_repo.get_checklist_ticks_for_incident(active_incident["id"])
+        # Map ticks by checklist_item_id for easy lookup
+        tick_map = {tick["checklist_item_id"]: tick for tick in ticks}
+        
+        # Create ticks for any items that don't have them yet
+        for item in checklist_items:
+            if item["id"] not in tick_map:
+                # Create a new tick for this item
+                query = """
+                    INSERT INTO bcp_checklist_tick 
+                    (plan_id, checklist_item_id, incident_id, is_done)
+                    VALUES (%s, %s, %s, FALSE)
+                """
+                from app.core.database import db
+                async with db.connection() as conn:
+                    async with conn.cursor() as cursor:
+                        await cursor.execute(query, (plan["id"], item["id"], active_incident["id"]))
+                        await conn.commit()
+        
+        # Re-fetch ticks to include newly created ones
+        ticks = await bcp_repo.get_checklist_ticks_for_incident(active_incident["id"])
+        tick_map = {tick["checklist_item_id"]: tick for tick in ticks}
+        
+        for item in checklist_items:
+            tick = tick_map.get(item["id"])
+            checklist_with_ticks.append({
+                **item,
+                "tick": tick,
+            })
+    else:
+        # No active incident, just show items without ticks
+        checklist_with_ticks = [{**item, "tick": None} for item in checklist_items]
+    
+    templates_config = get_templates_config()
+    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "Crisis & Recovery Checklist",
+            "plan": plan,
+            "active_incident": active_incident,
+            "checklist_items": checklist_with_ticks,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+        },
+    )
+    
+    return templates.TemplateResponse("bcp/recovery_checklist.html", context)

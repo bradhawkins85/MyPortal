@@ -2294,3 +2294,253 @@ async def seed_default_emergency_kit_items(plan_id: int) -> None:
     # Insert equipment items
     for item_name in equipment_items:
         await create_emergency_kit_item(plan_id, "Equipment", item_name)
+
+
+# ============================================================================
+# Recovery Action Management
+# ============================================================================
+
+
+async def list_recovery_actions(
+    plan_id: int,
+    owner_id: int | None = None,
+    overdue_only: bool = False,
+    completed_only: bool = False,
+    critical_activity_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Get recovery actions for a plan with optional filters.
+    
+    Args:
+        plan_id: The BCP plan ID
+        owner_id: Filter by owner user ID
+        overdue_only: Show only overdue actions (due_date < now and not completed)
+        completed_only: Show only completed actions
+        critical_activity_id: Filter by critical activity
+    
+    Returns:
+        List of recovery actions with enriched data
+    """
+    conditions = ["ra.plan_id = %s"]
+    params = [plan_id]
+    
+    if owner_id is not None:
+        conditions.append("ra.owner_id = %s")
+        params.append(owner_id)
+    
+    if critical_activity_id is not None:
+        conditions.append("ra.critical_activity_id = %s")
+        params.append(critical_activity_id)
+    
+    if completed_only:
+        conditions.append("ra.completed_at IS NOT NULL")
+    
+    if overdue_only:
+        from datetime import datetime
+        conditions.append("ra.due_date < %s")
+        conditions.append("ra.completed_at IS NULL")
+        params.append(datetime.utcnow())
+    
+    where_clause = " AND ".join(conditions)
+    
+    query = f"""
+        SELECT 
+            ra.id, ra.plan_id, ra.critical_activity_id, ra.action, ra.resources,
+            ra.owner_id, ra.rto_hours, ra.due_date, ra.completed_at,
+            ra.created_at, ra.updated_at,
+            ca.name as activity_name
+        FROM bcp_recovery_action ra
+        LEFT JOIN bcp_critical_activity ca ON ca.id = ra.critical_activity_id
+        WHERE {where_clause}
+        ORDER BY ra.due_date ASC NULLS LAST, ra.id
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, tuple(params))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "critical_activity_id": row[2],
+                    "action": row[3],
+                    "resources": row[4],
+                    "owner_id": row[5],
+                    "rto_hours": row[6],
+                    "due_date": row[7],
+                    "completed_at": row[8],
+                    "created_at": row[9],
+                    "updated_at": row[10],
+                    "activity_name": row[11],
+                }
+                for row in rows
+            ]
+
+
+async def get_recovery_action_by_id(action_id: int) -> dict[str, Any] | None:
+    """Get a recovery action by ID."""
+    query = """
+        SELECT 
+            ra.id, ra.plan_id, ra.critical_activity_id, ra.action, ra.resources,
+            ra.owner_id, ra.rto_hours, ra.due_date, ra.completed_at,
+            ra.created_at, ra.updated_at,
+            ca.name as activity_name
+        FROM bcp_recovery_action ra
+        LEFT JOIN bcp_critical_activity ca ON ca.id = ra.critical_activity_id
+        WHERE ra.id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (action_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "critical_activity_id": row[2],
+                "action": row[3],
+                "resources": row[4],
+                "owner_id": row[5],
+                "rto_hours": row[6],
+                "due_date": row[7],
+                "completed_at": row[8],
+                "created_at": row[9],
+                "updated_at": row[10],
+                "activity_name": row[11],
+            }
+
+
+async def create_recovery_action(
+    plan_id: int,
+    action: str,
+    resources: str | None = None,
+    owner_id: int | None = None,
+    rto_hours: int | None = None,
+    due_date: datetime | None = None,
+    critical_activity_id: int | None = None,
+) -> dict[str, Any]:
+    """Create a new recovery action."""
+    query = """
+        INSERT INTO bcp_recovery_action 
+        (plan_id, action, resources, owner_id, rto_hours, due_date, critical_activity_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                query,
+                (plan_id, action, resources, owner_id, rto_hours, due_date, critical_activity_id),
+            )
+            await conn.commit()
+            action_id = cursor.lastrowid
+    
+    return await get_recovery_action_by_id(action_id)
+
+
+async def update_recovery_action(
+    action_id: int,
+    action: str | None = None,
+    resources: str | None = None,
+    owner_id: int | None = None,
+    rto_hours: int | None = None,
+    due_date: datetime | None = None,
+    completed_at: datetime | None = None,
+    critical_activity_id: int | None = None,
+) -> dict[str, Any] | None:
+    """Update a recovery action."""
+    updates = []
+    values = []
+    
+    if action is not None:
+        updates.append("action = %s")
+        values.append(action)
+    if resources is not None:
+        updates.append("resources = %s")
+        values.append(resources)
+    if owner_id is not None:
+        updates.append("owner_id = %s")
+        values.append(owner_id)
+    if rto_hours is not None:
+        updates.append("rto_hours = %s")
+        values.append(rto_hours)
+    if due_date is not None:
+        updates.append("due_date = %s")
+        values.append(due_date)
+    if completed_at is not None:
+        updates.append("completed_at = %s")
+        values.append(completed_at)
+    if critical_activity_id is not None:
+        updates.append("critical_activity_id = %s")
+        values.append(critical_activity_id)
+    
+    if not updates:
+        return await get_recovery_action_by_id(action_id)
+    
+    values.append(action_id)
+    query = f"""
+        UPDATE bcp_recovery_action
+        SET {', '.join(updates)}
+        WHERE id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, values)
+            await conn.commit()
+    
+    return await get_recovery_action_by_id(action_id)
+
+
+async def delete_recovery_action(action_id: int) -> bool:
+    """Delete a recovery action."""
+    query = "DELETE FROM bcp_recovery_action WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (action_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+
+
+async def mark_recovery_action_complete(
+    action_id: int,
+    completed_at: datetime,
+) -> dict[str, Any] | None:
+    """Mark a recovery action as completed."""
+    return await update_recovery_action(action_id, completed_at=completed_at)
+
+
+async def seed_default_crisis_recovery_checklist_items(plan_id: int) -> None:
+    """Seed default Crisis & Recovery checklist items."""
+    
+    # Crisis & Recovery checklist items from issue requirements
+    crisis_recovery_items = [
+        "Record injuries: identify and document any injuries to staff or visitors",
+        "Photograph damage: capture evidence of damage to premises, equipment, vehicles, and stock",
+        "Record business impact: document the impact on business functions and reputation",
+        "Staff debrief: conduct debriefing within 24-48 hours to assess reactions and support needs",
+        "Staff meeting: hold meeting to surface reactions, assess support needs, and gather feedback",
+        "Publish updates: issue regular updates to keep staff informed of situation and progress",
+        "Advise on injuries: inform staff about injured colleagues' status and recovery",
+        "Set expectations: communicate next day attendance and work arrangements",
+        "Job security reassurance: provide reassurance about employment and business continuity",
+        "Contact insurer: notify insurance company and submit claim before cleanup begins",
+        "Capture evidence: take photos and preserve evidence for insurance claims",
+        "Seek government support: explore available government assistance programs",
+        "Contact banks: discuss bridging finance and payment arrangements if needed",
+        "Contact suppliers: negotiate extended payment terms if cash flow affected",
+        "Tax office contact: reach out to tax office for assistance",
+        "Fast-track arrangements: request expedited processing where available",
+        "Payment extensions: negotiate time to pay or lodge tax obligations",
+        "List support services: compile list of reputable emotional and crisis support services",
+        "Link to wellbeing: provide access to employee wellbeing resources and programs",
+        "Conduct lessons learned: review what worked and what didn't during response",
+        "Update recovery plan: incorporate lessons learned into recovery documentation",
+        "Update BCP: revise overall business continuity plan based on experience",
+        "Implement improvements: action identified improvements to processes and procedures",
+    ]
+    
+    for index, label in enumerate(crisis_recovery_items):
+        await create_checklist_item(plan_id, "CrisisRecovery", label, default_order=index)

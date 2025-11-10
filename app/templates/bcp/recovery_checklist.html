@@ -1,0 +1,345 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-container">
+  <!-- Success/Error Messages -->
+  {% if request.query_params.get('success') %}
+    <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
+  {% endif %}
+  {% if request.query_params.get('error') %}
+    <div class="alert alert-error">{{ request.query_params.get('error') }}</div>
+  {% endif %}
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Crisis & Recovery Checklist</h1>
+      <p class="page-description">Post-incident recovery tasks and crisis management activities</p>
+    </div>
+    <div class="page-actions">
+      <a href="/bcp/recovery" class="btn btn-secondary">Recovery Actions</a>
+      <a href="/bcp" class="btn btn-secondary">Back to Overview</a>
+    </div>
+  </div>
+
+  <!-- Help Text -->
+  <section class="card help-card">
+    <div class="card-body">
+      <h3 class="help-title">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z"/>
+        </svg>
+        About Crisis & Recovery
+      </h3>
+      <p class="help-text">
+        After the immediate response phase, use this checklist to guide your crisis management and recovery activities.
+        Key areas include: documenting crisis details, updating staff, contacting insurers, seeking support,
+        managing tax obligations, providing emotional support, and conducting lessons learned reviews.
+        {% if not active_incident %}
+        <br><br>
+        <strong>Note:</strong> This checklist is most effective during an active incident. Start an incident from the
+        <a href="/bcp/incident" class="text-link">Incident Console</a> to track completion timestamps.
+        {% endif %}
+      </p>
+    </div>
+  </section>
+
+  <!-- Checklist Section -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Crisis & Recovery Checklist ({{ checklist_items|length }} items)</h2>
+      {% if active_incident %}
+      <p class="text-sm text-muted">Incident started: {{ active_incident.started_at.strftime('%Y-%m-%d %H:%M UTC') if active_incident.started_at else 'Unknown' }}</p>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      {% if checklist_items %}
+      <div class="checklist">
+        {% for item in checklist_items %}
+        <div class="checklist-item {% if item.tick and item.tick.is_done %}completed{% endif %}">
+          <div class="checklist-content">
+            {% if active_incident and can_edit %}
+            <form method="post" action="/bcp/incident/checklist/{{ item.tick.id }}/toggle" class="checklist-checkbox">
+              <input 
+                type="checkbox" 
+                {% if item.tick and item.tick.is_done %}checked{% endif %}
+                onchange="this.form.submit()"
+              >
+            </form>
+            {% else %}
+            <div class="checklist-checkbox-static">
+              <input 
+                type="checkbox" 
+                {% if item.tick and item.tick.is_done %}checked{% endif %}
+                disabled
+              >
+            </div>
+            {% endif %}
+            
+            <div class="checklist-text">
+              <div class="checklist-label">
+                {{ item.label }}
+              </div>
+              {% if item.tick and item.tick.is_done and item.tick.done_at %}
+              <div class="checklist-timestamp">
+                ✓ Completed {{ item.tick.done_at.strftime('%Y-%m-%d %H:%M UTC') if item.tick.done_at else 'Unknown' }}
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor" style="opacity: 0.3;">
+          <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+        </svg>
+        <h3>No Checklist Items</h3>
+        <p>The crisis & recovery checklist is not yet configured for this plan.</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- Guidance Sections -->
+  <div class="guidance-grid">
+    <!-- Crisis Details -->
+    <section class="card">
+      <div class="card-header">
+        <h3 class="card-title">📋 Crisis Details</h3>
+      </div>
+      <div class="card-body">
+        <ul class="guidance-list">
+          <li>Record all injuries to staff, visitors, or contractors</li>
+          <li>Photograph damage to premises, equipment, vehicles, and stock</li>
+          <li>Document impact on business functions and operations</li>
+          <li>Assess reputational impact and stakeholder concerns</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Update Staff -->
+    <section class="card">
+      <div class="card-header">
+        <h3 class="card-title">👥 Update Staff</h3>
+      </div>
+      <div class="card-body">
+        <ul class="guidance-list">
+          <li>Conduct debrief within 24-48 hours of incident</li>
+          <li>Hold staff meetings to surface reactions and support needs</li>
+          <li>Publish regular updates on situation and progress</li>
+          <li>Advise staff on status of injured colleagues</li>
+          <li>Set clear expectations for next-day attendance</li>
+          <li>Provide job security reassurance</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Contact Insurer -->
+    <section class="card">
+      <div class="card-header">
+        <h3 class="card-title">🛡️ Contact Insurer</h3>
+      </div>
+      <div class="card-body">
+        <ul class="guidance-list">
+          <li>Submit insurance claim before beginning cleanup</li>
+          <li>Take comprehensive photos for evidence</li>
+          <li>Preserve damaged items as required</li>
+          <li>Document all costs and expenses incurred</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Seek Support -->
+    <section class="card">
+      <div class="card-header">
+        <h3 class="card-title">🤝 Seek Support</h3>
+      </div>
+      <div class="card-body">
+        <ul class="guidance-list">
+          <li>Explore government assistance programs</li>
+          <li>Contact bank for bridging finance options</li>
+          <li>Negotiate payment terms with suppliers</li>
+          <li>Contact business support organizations</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Tax Assistance -->
+    <section class="card">
+      <div class="card-header">
+        <h3 class="card-title">💰 Tax Assistance</h3>
+      </div>
+      <div class="card-body">
+        <ul class="guidance-list">
+          <li>Contact tax office for assistance options</li>
+          <li>Request expedited processing where available</li>
+          <li>Negotiate time to pay or lodge obligations</li>
+          <li>Document all financial impacts for relief claims</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Emotional Support -->
+    <section class="card">
+      <div class="card-header">
+        <h3 class="card-title">💚 Emotional & Crisis Support</h3>
+      </div>
+      <div class="card-body">
+        <ul class="guidance-list">
+          <li>Compile list of reputable support services</li>
+          <li>Link to employee wellbeing programs</li>
+          <li>Provide access to counseling services</li>
+          <li>Monitor staff wellbeing regularly</li>
+          <li>Create safe space for concerns and questions</li>
+        </ul>
+        <p class="text-sm text-muted" style="margin-top: 1rem;">
+          See also: <a href="/wellbeing" class="text-link">Employee Wellbeing Resources</a>
+        </p>
+      </div>
+    </section>
+
+    <!-- Review Recovery -->
+    <section class="card">
+      <div class="card-header">
+        <h3 class="card-title">🔄 Review Recovery</h3>
+      </div>
+      <div class="card-body">
+        <ul class="guidance-list">
+          <li>Conduct lessons learned session</li>
+          <li>Document what worked well during response</li>
+          <li>Identify areas for improvement</li>
+          <li>Update recovery plan based on experience</li>
+          <li>Revise overall BCP with new insights</li>
+          <li>Implement identified improvements</li>
+        </ul>
+      </div>
+    </section>
+  </div>
+</div>
+
+<style>
+.checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.checklist-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  transition: all 0.2s;
+}
+
+.checklist-item:hover {
+  background-color: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.checklist-item.completed {
+  background-color: #f0fdf4;
+  border-color: #86efac;
+}
+
+.checklist-content {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.checklist-checkbox {
+  flex-shrink: 0;
+}
+
+.checklist-checkbox-static {
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.checklist-checkbox input[type="checkbox"],
+.checklist-checkbox-static input[type="checkbox"] {
+  width: 1.25rem;
+  height: 1.25rem;
+  cursor: pointer;
+  margin-top: 0.125rem;
+}
+
+.checklist-checkbox-static input[type="checkbox"] {
+  cursor: not-allowed;
+}
+
+.checklist-text {
+  flex: 1;
+}
+
+.checklist-label {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: #111827;
+}
+
+.checklist-item.completed .checklist-label {
+  color: #059669;
+}
+
+.checklist-timestamp {
+  font-size: 0.75rem;
+  color: #059669;
+  margin-top: 0.5rem;
+  font-weight: 500;
+}
+
+.guidance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+.guidance-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.guidance-list li {
+  padding: 0.5rem 0;
+  padding-left: 1.5rem;
+  position: relative;
+  line-height: 1.5;
+}
+
+.guidance-list li:before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: #6b7280;
+  font-weight: bold;
+}
+
+.text-link {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.text-link:hover {
+  color: #1d4ed8;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.empty-state h3 {
+  margin-top: 1rem;
+  color: #6b7280;
+}
+
+.empty-state p {
+  color: #9ca3af;
+}
+</style>
+{% endblock %}
