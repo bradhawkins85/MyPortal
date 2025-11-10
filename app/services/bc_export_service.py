@@ -15,7 +15,7 @@ from typing import Any, Optional
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt, RGBColor
-from jinja2 import Template
+from jinja2 import Environment, BaseLoader
 from weasyprint import HTML
 
 from app.repositories import bc3 as bc_repo
@@ -637,9 +637,10 @@ def _render_plan_html(
                 return value
         return value
     
-    # Render template
-    jinja_template = Template(html_template)
-    jinja_template.globals["format_datetime"] = format_datetime
+    # Render template using Environment with custom filter
+    env = Environment(loader=BaseLoader())
+    env.filters["format_datetime"] = format_datetime
+    jinja_template = env.from_string(html_template)
     
     return jinja_template.render(
         plan=plan,
