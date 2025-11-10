@@ -1,0 +1,822 @@
+{% extends "business_continuity/base.html" %}
+{% set current_page = 'plans' %}
+{% set page_title = 'Edit Plan' if plan else 'New Plan' %}
+
+{% block bc_header_actions %}
+  <button type="button" class="button button--secondary" onclick="saveDraft()" id="save-draft-btn">
+    <span class="button__label">Save Draft</span>
+  </button>
+  <button type="button" class="button" onclick="submitPlan()" id="submit-btn">
+    <span class="button__label">{{ 'Update Plan' if plan else 'Create Plan' }}</span>
+  </button>
+{% endblock %}
+
+{% block bc_content %}
+<form id="plan-form" class="plan-editor">
+  <input type="hidden" id="plan-id" value="{{ plan.id if plan else '' }}">
+  
+  <!-- Basic Info Card -->
+  <section class="card">
+    <header class="card__header">
+      <h2 class="card__title">Plan Information</h2>
+    </header>
+    <div class="card__body">
+      <div class="form-grid">
+        <div class="form-group form-group--full">
+          <label for="title" class="form-label">Plan Title *</label>
+          <input
+            type="text"
+            id="title"
+            name="title"
+            class="form-input"
+            value="{{ plan.title if plan else '' }}"
+            required
+            placeholder="e.g., Primary Data Center Disaster Recovery Plan"
+          />
+        </div>
+        
+        <div class="form-group">
+          <label for="plan_type" class="form-label">Plan Type *</label>
+          <select id="plan_type" name="plan_type" class="form-select" required>
+            <option value="">Select type...</option>
+            <option value="disaster_recovery" {% if plan and plan.plan_type == 'disaster_recovery' %}selected{% endif %}>Disaster Recovery</option>
+            <option value="incident_response" {% if plan and plan.plan_type == 'incident_response' %}selected{% endif %}>Incident Response</option>
+            <option value="business_continuity" {% if plan and plan.plan_type == 'business_continuity' %}selected{% endif %}>Business Continuity</option>
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label for="template_id" class="form-label">Template</label>
+          <select id="template_id" name="template_id" class="form-select">
+            <option value="">None</option>
+            {% for template in templates %}
+            <option value="{{ template.id }}" {% if plan and plan.template_id == template.id %}selected{% endif %}>
+              {{ template.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label for="owner_id" class="form-label">Owner *</label>
+          <select id="owner_id" name="owner_id" class="form-select" required>
+            <option value="">Select owner...</option>
+            {% for user in users %}
+            <option value="{{ user.id }}" {% if plan and plan.owner_id == user.id %}selected{% endif %}>
+              {{ user.email }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label for="status" class="form-label">Status *</label>
+          <select id="status" name="status" class="form-select" required>
+            <option value="draft" {% if not plan or plan.status == 'draft' %}selected{% endif %}>Draft</option>
+            <option value="in_review" {% if plan and plan.status == 'in_review' %}selected{% endif %}>In Review</option>
+            <option value="active" {% if plan and plan.status == 'active' %}selected{% endif %}>Active</option>
+            <option value="archived" {% if plan and plan.status == 'archived' %}selected{% endif %}>Archived</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </section>
+  
+  <!-- Tabbed Content Editor -->
+  <section class="card">
+    <header class="card__header">
+      <h2 class="card__title">Plan Content</h2>
+      <div class="autosave-indicator" id="autosave-status"></div>
+    </header>
+    
+    <!-- Section Tabs -->
+    <div class="editor-tabs" role="tablist">
+      {% set sections = template_sections if template_sections else default_sections %}
+      {% for section in sections %}
+      <button
+        type="button"
+        class="editor-tabs__tab {% if loop.first %}editor-tabs__tab--active{% endif %}"
+        role="tab"
+        data-section="{{ section.key }}"
+        aria-selected="{% if loop.first %}true{% else %}false{% endif %}"
+      >
+        {{ section.name }}
+      </button>
+      {% endfor %}
+    </div>
+    
+    <!-- Section Panels -->
+    <div class="editor-panels">
+      {% for section in sections %}
+      <div
+        class="editor-panel {% if loop.first %}editor-panel--active{% endif %}"
+        id="panel-{{ section.key }}"
+        role="tabpanel"
+        {% if not loop.first %}hidden{% endif %}
+      >
+        <div class="card__body">
+          <h3 class="section-title">{{ section.name }}</h3>
+          {% if section.description %}
+          <p class="section-description">{{ section.description }}</p>
+          {% endif %}
+          
+          {% for field in section.fields %}
+          <div class="form-group {% if field.type == 'rich_text' %}form-group--full{% endif %}">
+            <label for="field-{{ section.key }}-{{ field.key }}" class="form-label">
+              {{ field.label }}
+              {% if field.required %}*{% endif %}
+            </label>
+            
+            {% if field.type == 'text' %}
+              <input
+                type="text"
+                id="field-{{ section.key }}-{{ field.key }}"
+                name="content[{{ section.key }}][{{ field.key }}]"
+                class="form-input"
+                data-autosave
+                {% if field.required %}required{% endif %}
+                placeholder="{{ field.placeholder|default('') }}"
+                value="{{ plan.content_json[section.key][field.key] if plan and plan.content_json and plan.content_json[section.key] else '' }}"
+              />
+            
+            {% elif field.type == 'rich_text' %}
+              <div
+                id="field-{{ section.key }}-{{ field.key }}"
+                class="rich-text-editor"
+                data-section="{{ section.key }}"
+                data-field="{{ field.key }}"
+                data-autosave
+                contenteditable="true"
+                placeholder="{{ field.placeholder|default('Enter text here...') }}"
+              >{{ plan.content_json[section.key][field.key] if plan and plan.content_json and plan.content_json[section.key] else '' }}</div>
+            
+            {% elif field.type == 'date' %}
+              <input
+                type="date"
+                id="field-{{ section.key }}-{{ field.key }}"
+                name="content[{{ section.key }}][{{ field.key }}]"
+                class="form-input"
+                data-autosave
+                {% if field.required %}required{% endif %}
+                value="{{ plan.content_json[section.key][field.key] if plan and plan.content_json and plan.content_json[section.key] else '' }}"
+              />
+            
+            {% elif field.type == 'select' %}
+              <select
+                id="field-{{ section.key }}-{{ field.key }}"
+                name="content[{{ section.key }}][{{ field.key }}]"
+                class="form-select"
+                data-autosave
+                {% if field.required %}required{% endif %}
+              >
+                <option value="">Select option...</option>
+                {% for option in field.options %}
+                <option value="{{ option.value }}" {% if plan and plan.content_json and plan.content_json[section.key] and plan.content_json[section.key][field.key] == option.value %}selected{% endif %}>
+                  {{ option.label }}
+                </option>
+                {% endfor %}
+              </select>
+            
+            {% elif field.type == 'table' %}
+              <div class="table-editor" id="field-{{ section.key }}-{{ field.key }}" data-section="{{ section.key }}" data-field="{{ field.key }}">
+                <table class="table table--editable">
+                  <thead>
+                    <tr>
+                      {% for column in field.columns %}
+                      <th scope="col">{{ column.label }}</th>
+                      {% endfor %}
+                      <th scope="col" style="width: 60px;">
+                        <button type="button" class="button button--small" onclick="addTableRow('{{ section.key }}', '{{ field.key }}')">+</button>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-{{ section.key }}-{{ field.key }}">
+                    {% set table_data = plan.content_json[section.key][field.key] if plan and plan.content_json and plan.content_json[section.key] else [] %}
+                    {% if table_data %}
+                      {% for row in table_data %}
+                      <tr data-row-index="{{ loop.index0 }}">
+                        {% for column in field.columns %}
+                        <td>
+                          <input
+                            type="text"
+                            class="form-input form-input--inline"
+                            name="content[{{ section.key }}][{{ field.key }}][{{ loop.parent.index0 }}][{{ column.key }}]"
+                            value="{{ row[column.key]|default('') }}"
+                            data-autosave
+                          />
+                        </td>
+                        {% endfor %}
+                        <td>
+                          <button type="button" class="button button--small button--danger" onclick="removeTableRow(this)">×</button>
+                        </td>
+                      </tr>
+                      {% endfor %}
+                    {% else %}
+                      <tr data-row-index="0">
+                        {% for column in field.columns %}
+                        <td>
+                          <input
+                            type="text"
+                            class="form-input form-input--inline"
+                            name="content[{{ section.key }}][{{ field.key }}][0][{{ column.key }}]"
+                            data-autosave
+                          />
+                        </td>
+                        {% endfor %}
+                        <td>
+                          <button type="button" class="button button--small button--danger" onclick="removeTableRow(this)">×</button>
+                        </td>
+                      </tr>
+                    {% endif %}
+                  </tbody>
+                </table>
+              </div>
+            
+            {% elif field.type == 'file' %}
+              <div class="file-upload">
+                <input
+                  type="file"
+                  id="field-{{ section.key }}-{{ field.key }}"
+                  name="files[{{ section.key }}][{{ field.key }}]"
+                  class="file-upload__input"
+                  {% if field.accept %}accept="{{ field.accept }}"{% endif %}
+                  {% if field.multiple %}multiple{% endif %}
+                />
+                <label for="field-{{ section.key }}-{{ field.key }}" class="file-upload__label">
+                  <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
+                  Choose file(s)
+                </label>
+                <div class="file-upload__files" id="files-{{ section.key }}-{{ field.key }}"></div>
+              </div>
+            
+            {% else %}
+              <textarea
+                id="field-{{ section.key }}-{{ field.key }}"
+                name="content[{{ section.key }}][{{ field.key }}]"
+                class="form-textarea"
+                rows="4"
+                data-autosave
+                {% if field.required %}required{% endif %}
+                placeholder="{{ field.placeholder|default('') }}"
+              >{{ plan.content_json[section.key][field.key] if plan and plan.content_json and plan.content_json[section.key] else '' }}</textarea>
+            {% endif %}
+            
+            {% if field.help %}
+            <p class="form-help">{{ field.help }}</p>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</form>
+
+<style>
+.plan-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+}
+
+.form-group--full {
+  grid-column: 1 / -1;
+}
+
+.form-group {
+  margin-bottom: 0;
+}
+
+.form-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+  margin-bottom: 0.5rem;
+}
+
+.form-input,
+.form-select,
+.form-textarea {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  transition: border-color 0.15s;
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+  outline: none;
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.1);
+}
+
+.form-textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+
+.form-help {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.autosave-indicator {
+  font-size: 0.75rem;
+  color: #6b7280;
+  padding: 0.25rem 0.5rem;
+}
+
+.autosave-indicator--saving {
+  color: #1d4ed8;
+}
+
+.autosave-indicator--saved {
+  color: #059669;
+}
+
+.editor-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid #e5e7eb;
+  overflow-x: auto;
+}
+
+.editor-tabs__tab {
+  padding: 0.75rem 1.5rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  color: #6b7280;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.editor-tabs__tab:hover {
+  color: #111827;
+  background: #f9fafb;
+}
+
+.editor-tabs__tab--active {
+  color: #1d4ed8;
+  border-bottom-color: #1d4ed8;
+}
+
+.editor-panels {
+  background: white;
+}
+
+.editor-panel {
+  display: none;
+}
+
+.editor-panel--active {
+  display: block;
+}
+
+.section-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 0.5rem;
+}
+
+.section-description {
+  color: #6b7280;
+  margin-bottom: 1.5rem;
+}
+
+.rich-text-editor {
+  min-height: 200px;
+  max-height: 500px;
+  overflow-y: auto;
+  padding: 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  background: white;
+  line-height: 1.6;
+}
+
+.rich-text-editor:focus {
+  outline: none;
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.1);
+}
+
+.rich-text-editor[contenteditable]:empty::before {
+  content: attr(placeholder);
+  color: #9ca3af;
+}
+
+.table-editor {
+  overflow-x: auto;
+}
+
+.table--editable {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.table--editable th {
+  background: #f9fafb;
+  padding: 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  border: 1px solid #e5e7eb;
+}
+
+.table--editable td {
+  padding: 0.5rem;
+  border: 1px solid #e5e7eb;
+}
+
+.form-input--inline {
+  min-width: 150px;
+  margin: 0;
+}
+
+.file-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.file-upload__input {
+  display: none;
+}
+
+.file-upload__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: #f9fafb;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: #374151;
+  transition: all 0.15s;
+  width: fit-content;
+}
+
+.file-upload__label:hover {
+  background: #f3f4f6;
+}
+
+.file-upload__files {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem;
+  background: #f9fafb;
+  border-radius: 0.375rem;
+}
+
+.file-item__name {
+  font-size: 0.875rem;
+  color: #374151;
+}
+</style>
+{% endblock %}
+
+{% block bc_scripts %}
+<script>
+(function() {
+  const planId = document.getElementById('plan-id').value;
+  let autosaveTimeout;
+  let isDirty = false;
+  
+  // Tab functionality
+  const tabs = document.querySelectorAll('.editor-tabs__tab');
+  const panels = document.querySelectorAll('.editor-panel');
+  
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const sectionKey = tab.dataset.section;
+      
+      // Update tabs
+      tabs.forEach(t => {
+        t.classList.remove('editor-tabs__tab--active');
+        t.setAttribute('aria-selected', 'false');
+      });
+      tab.classList.add('editor-tabs__tab--active');
+      tab.setAttribute('aria-selected', 'true');
+      
+      // Update panels
+      panels.forEach(panel => {
+        panel.classList.remove('editor-panel--active');
+        panel.hidden = true;
+      });
+      const panel = document.getElementById(`panel-${sectionKey}`);
+      if (panel) {
+        panel.classList.add('editor-panel--active');
+        panel.hidden = false;
+      }
+    });
+  });
+  
+  // Autosave functionality
+  document.querySelectorAll('[data-autosave]').forEach(field => {
+    field.addEventListener('input', () => {
+      isDirty = true;
+      clearTimeout(autosaveTimeout);
+      updateAutosaveStatus('typing');
+      
+      autosaveTimeout = setTimeout(() => {
+        if (planId && isDirty) {
+          saveDraft(true);
+        }
+      }, 2000);
+    });
+  });
+  
+  // Rich text editor basic formatting
+  document.querySelectorAll('.rich-text-editor').forEach(editor => {
+    editor.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const text = e.clipboardData.getData('text/plain');
+      document.execCommand('insertText', false, text);
+    });
+  });
+  
+  function updateAutosaveStatus(status) {
+    const indicator = document.getElementById('autosave-status');
+    indicator.className = 'autosave-indicator';
+    
+    if (status === 'typing') {
+      indicator.textContent = 'Typing...';
+      indicator.classList.add('autosave-indicator--saving');
+    } else if (status === 'saving') {
+      indicator.textContent = 'Saving...';
+      indicator.classList.add('autosave-indicator--saving');
+    } else if (status === 'saved') {
+      indicator.textContent = 'Saved';
+      indicator.classList.add('autosave-indicator--saved');
+      setTimeout(() => {
+        indicator.textContent = '';
+      }, 2000);
+    }
+  }
+  
+  window.saveDraft = async function(isAutosave = false) {
+    if (!isAutosave) {
+      document.getElementById('save-draft-btn').disabled = true;
+      document.getElementById('save-draft-btn').textContent = 'Saving...';
+    } else {
+      updateAutosaveStatus('saving');
+    }
+    
+    const formData = collectFormData();
+    formData.status = 'draft';
+    
+    try {
+      const url = planId ? `/api/bc/plans/${planId}` : '/api/bc/plans';
+      const method = planId ? 'PATCH' : 'POST';
+      
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (!planId) {
+          document.getElementById('plan-id').value = data.id;
+          window.history.pushState({}, '', `/business-continuity/plans/${data.id}/edit`);
+        }
+        isDirty = false;
+        if (isAutosave) {
+          updateAutosaveStatus('saved');
+        } else {
+          alert('Draft saved successfully');
+        }
+      } else {
+        throw new Error('Save failed');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      if (!isAutosave) {
+        alert('Failed to save draft');
+      }
+    } finally {
+      if (!isAutosave) {
+        document.getElementById('save-draft-btn').disabled = false;
+        document.getElementById('save-draft-btn').textContent = 'Save Draft';
+      }
+    }
+  };
+  
+  window.submitPlan = async function() {
+    document.getElementById('submit-btn').disabled = true;
+    document.getElementById('submit-btn').textContent = 'Saving...';
+    
+    const formData = collectFormData();
+    
+    try {
+      const url = planId ? `/api/bc/plans/${planId}` : '/api/bc/plans';
+      const method = planId ? 'PATCH' : 'POST';
+      
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        window.location.href = `/business-continuity/plans/${data.id}`;
+      } else {
+        throw new Error('Submit failed');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Failed to save plan');
+      document.getElementById('submit-btn').disabled = false;
+      document.getElementById('submit-btn').textContent = planId ? 'Update Plan' : 'Create Plan';
+    }
+  };
+  
+  function collectFormData() {
+    const data = {
+      title: document.getElementById('title').value,
+      plan_type: document.getElementById('plan_type').value,
+      template_id: document.getElementById('template_id').value || null,
+      owner_id: parseInt(document.getElementById('owner_id').value),
+      status: document.getElementById('status').value,
+      content_json: {}
+    };
+    
+    // Collect content from all sections
+    document.querySelectorAll('.editor-panel').forEach(panel => {
+      const sectionKey = panel.id.replace('panel-', '');
+      data.content_json[sectionKey] = {};
+      
+      // Text inputs
+      panel.querySelectorAll('input[type="text"], input[type="date"], select, textarea').forEach(field => {
+        const match = field.name.match(/content\[([^\]]+)\]\[([^\]]+)\]/);
+        if (match) {
+          const [_, section, key] = match;
+          if (section === sectionKey) {
+            data.content_json[sectionKey][key] = field.value;
+          }
+        }
+      });
+      
+      // Rich text editors
+      panel.querySelectorAll('.rich-text-editor').forEach(editor => {
+        const sectionKey = editor.dataset.section;
+        const fieldKey = editor.dataset.field;
+        if (!data.content_json[sectionKey]) {
+          data.content_json[sectionKey] = {};
+        }
+        data.content_json[sectionKey][fieldKey] = editor.innerHTML;
+      });
+      
+      // Tables
+      panel.querySelectorAll('.table-editor').forEach(table => {
+        const sectionKey = table.dataset.section;
+        const fieldKey = table.dataset.field;
+        const rows = [];
+        
+        table.querySelectorAll('tbody tr').forEach(row => {
+          const rowData = {};
+          row.querySelectorAll('input').forEach(input => {
+            const match = input.name.match(/\[([^\]]+)\]$/);
+            if (match) {
+              rowData[match[1]] = input.value;
+            }
+          });
+          if (Object.keys(rowData).length > 0) {
+            rows.push(rowData);
+          }
+        });
+        
+        if (!data.content_json[sectionKey]) {
+          data.content_json[sectionKey] = {};
+        }
+        data.content_json[sectionKey][fieldKey] = rows;
+      });
+    });
+    
+    return data;
+  }
+  
+  window.addTableRow = function(sectionKey, fieldKey) {
+    const tbody = document.getElementById(`tbody-${sectionKey}-${fieldKey}`);
+    const lastRow = tbody.querySelector('tr:last-child');
+    const newIndex = parseInt(lastRow?.dataset.rowIndex || 0) + 1;
+    
+    const columns = Array.from(lastRow.querySelectorAll('td:not(:last-child)')).map(td => {
+      return td.querySelector('input').name.match(/\[([^\]]+)\]$/)[1];
+    });
+    
+    const newRow = document.createElement('tr');
+    newRow.dataset.rowIndex = newIndex;
+    newRow.innerHTML = columns.map(col => `
+      <td>
+        <input
+          type="text"
+          class="form-input form-input--inline"
+          name="content[${sectionKey}][${fieldKey}][${newIndex}][${col}]"
+          data-autosave
+        />
+      </td>
+    `).join('') + `
+      <td>
+        <button type="button" class="button button--small button--danger" onclick="removeTableRow(this)">×</button>
+      </td>
+    `;
+    
+    tbody.appendChild(newRow);
+    
+    // Re-attach autosave listeners
+    newRow.querySelectorAll('[data-autosave]').forEach(field => {
+      field.addEventListener('input', () => {
+        isDirty = true;
+        clearTimeout(autosaveTimeout);
+        updateAutosaveStatus('typing');
+        
+        autosaveTimeout = setTimeout(() => {
+          if (planId && isDirty) {
+            saveDraft(true);
+          }
+        }, 2000);
+      });
+    });
+  };
+  
+  window.removeTableRow = function(button) {
+    const row = button.closest('tr');
+    const tbody = row.closest('tbody');
+    
+    if (tbody.querySelectorAll('tr').length > 1) {
+      row.remove();
+      isDirty = true;
+    }
+  };
+  
+  // File upload preview
+  document.querySelectorAll('.file-upload__input').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const filesContainer = document.getElementById(input.id.replace('field-', 'files-'));
+      filesContainer.innerHTML = '';
+      
+      Array.from(e.target.files).forEach((file, index) => {
+        const fileItem = document.createElement('div');
+        fileItem.className = 'file-item';
+        fileItem.innerHTML = `
+          <span class="file-item__name">${file.name} (${(file.size / 1024).toFixed(1)} KB)</span>
+          <button type="button" class="button button--small button--danger" onclick="removeFile(this, '${input.id}', ${index})">Remove</button>
+        `;
+        filesContainer.appendChild(fileItem);
+      });
+    });
+  });
+  
+  window.removeFile = function(button, inputId, index) {
+    const input = document.getElementById(inputId);
+    const dt = new DataTransfer();
+    const files = Array.from(input.files);
+    
+    files.forEach((file, i) => {
+      if (i !== index) {
+        dt.items.add(file);
+      }
+    });
+    
+    input.files = dt.files;
+    button.closest('.file-item').remove();
+  };
+  
+  // Warn on unsaved changes
+  window.addEventListener('beforeunload', (e) => {
+    if (isDirty) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+})();
+</script>
+{% endblock %}
