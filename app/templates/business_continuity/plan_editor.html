@@ -14,6 +14,7 @@
 {% block bc_content %}
 <form id="plan-form" class="plan-editor">
   <input type="hidden" id="plan-id" value="{{ plan.id if plan else '' }}">
+  <input type="hidden" id="csrf-token" value="{{ csrf_token }}">
   
   <!-- Basic Info Card -->
   <section class="card">
@@ -504,6 +505,7 @@
 <script>
 (function() {
   const planId = document.getElementById('plan-id').value;
+  const csrfToken = document.getElementById('csrf-token').value;
   let autosaveTimeout;
   let isDirty = false;
   
@@ -596,7 +598,10 @@
       
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
         body: JSON.stringify(formData)
       });
       
@@ -640,7 +645,10 @@
       
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
         body: JSON.stringify(formData)
       });
       
