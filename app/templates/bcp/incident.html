@@ -142,6 +142,63 @@
   {% if active_tab == 'contacts' %}
   <section class="card">
     <div class="card-header">
+      <h2 class="card-title">Roles & Assignments</h2>
+      <a href="/bcp/roles" class="btn btn-secondary btn-sm">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+          <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+        </svg>
+        Manage Roles
+      </a>
+    </div>
+    <div class="card-body">
+      {% if roles %}
+      <div class="roles-list">
+        {% for role in roles %}
+        <div class="role-section">
+          <h3 class="role-title">{{ role.title }}</h3>
+          {% if role.responsibilities %}
+          <div class="role-responsibilities">{{ role.responsibilities|replace('\n', '<br>')|safe }}</div>
+          {% endif %}
+          {% if role.assignments %}
+          <div class="role-assignments">
+            <strong>Assigned:</strong>
+            {% for assignment in role.assignments %}
+            <div class="assignment-item">
+              <span class="assignment-name">
+                {% if assignment.user.first_name or assignment.user.last_name %}
+                  {{ assignment.user.first_name }} {{ assignment.user.last_name }}
+                {% else %}
+                  {{ assignment.user.email }}
+                {% endif %}
+                {% if assignment.is_alternate %}
+                  <span class="assignment-badge">Alternate</span>
+                {% else %}
+                  <span class="assignment-badge primary">Primary</span>
+                {% endif %}
+              </span>
+              {% if assignment.contact_info %}
+              <span class="assignment-contact">{{ assignment.contact_info }}</span>
+              {% endif %}
+              {% if assignment.user.email %}
+              <a href="mailto:{{ assignment.user.email }}" class="assignment-email">{{ assignment.user.email }}</a>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="text-muted" style="font-size: 0.875rem;">No assignments yet</p>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-muted">No roles defined yet. <a href="/bcp/roles">Add roles</a> to manage incident response assignments.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
       <h2 class="card-title">Internal Contacts</h2>
       {% if can_edit %}
       <button class="btn btn-primary btn-sm" onclick="showAddContactModal('Internal')">
@@ -706,6 +763,86 @@
 
 .btn-icon.btn-danger:hover {
   color: #dc2626;
+}
+
+/* Roles Section */
+.roles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.role-section {
+  padding: 1rem;
+  background: #f9fafb;
+  border-radius: 0.5rem;
+  border: 1px solid #e5e7eb;
+}
+
+.role-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 0.5rem;
+}
+
+.role-responsibilities {
+  font-size: 0.875rem;
+  color: #4b5563;
+  line-height: 1.6;
+  margin-bottom: 0.75rem;
+  padding-left: 0.5rem;
+}
+
+.role-assignments {
+  font-size: 0.875rem;
+  margin-top: 0.75rem;
+}
+
+.assignment-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  margin-top: 0.25rem;
+  background: white;
+  border-radius: 0.25rem;
+  border: 1px solid #e5e7eb;
+}
+
+.assignment-name {
+  font-weight: 500;
+  color: #1f2937;
+}
+
+.assignment-badge {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 0.25rem;
+  background: #e5e7eb;
+  color: #4b5563;
+}
+
+.assignment-badge.primary {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.assignment-contact {
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.assignment-email {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.assignment-email:hover {
+  text-decoration: underline;
 }
 </style>
 
