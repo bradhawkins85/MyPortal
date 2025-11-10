@@ -8611,7 +8611,7 @@ async def admin_edit_business_continuity_plan_page(request: Request, plan_id: in
 # New BC UI Routes with 3-part layout
 @app.get("/business-continuity/plans", response_class=HTMLResponse)
 async def bc_plans_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    user, membership, company, company_id, redirect = await _load_license_context(request, require_manage=False)
     if redirect:
         return redirect
     
@@ -8632,12 +8632,12 @@ async def bc_plans_page(request: Request):
         "users": jsonable_encoder(users),
         "pagination": None,
     }
-    return await _render_template("business_continuity/plans.html", request, current_user, extra=extra)
+    return await _render_template("business_continuity/plans.html", request, user, extra=extra)
 
 
 @app.get("/business-continuity/plans/new", response_class=HTMLResponse)
 async def bc_plan_new_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    user, membership, company, company_id, redirect = await _load_license_context(request, require_manage=False)
     if redirect:
         return redirect
     
@@ -8669,12 +8669,12 @@ async def bc_plan_new_page(request: Request):
         "template_sections": None,
         "default_sections": default_sections,
     }
-    return await _render_template("business_continuity/plan_editor.html", request, current_user, extra=extra)
+    return await _render_template("business_continuity/plan_editor.html", request, user, extra=extra)
 
 
 @app.get("/business-continuity/plans/{plan_id}", response_class=HTMLResponse)
 async def bc_plan_detail_page(request: Request, plan_id: int):
-    current_user, redirect = await _require_super_admin_page(request)
+    user, membership, company, company_id, redirect = await _load_license_context(request, require_manage=False)
     if redirect:
         return redirect
     
@@ -8703,12 +8703,12 @@ async def bc_plan_detail_page(request: Request, plan_id: int):
         "can_edit": True,
         "can_approve": True,
     }
-    return await _render_template("business_continuity/plan_detail.html", request, current_user, extra=extra)
+    return await _render_template("business_continuity/plan_detail.html", request, user, extra=extra)
 
 
 @app.get("/business-continuity/plans/{plan_id}/edit", response_class=HTMLResponse)
 async def bc_plan_edit_page(request: Request, plan_id: int):
-    current_user, redirect = await _require_super_admin_page(request)
+    user, membership, company, company_id, redirect = await _load_license_context(request, require_manage=False)
     if redirect:
         return redirect
     
@@ -8744,12 +8744,12 @@ async def bc_plan_edit_page(request: Request, plan_id: int):
         "template_sections": None,
         "default_sections": default_sections,
     }
-    return await _render_template("business_continuity/plan_editor.html", request, current_user, extra=extra)
+    return await _render_template("business_continuity/plan_editor.html", request, user, extra=extra)
 
 
 @app.get("/business-continuity/templates/new", response_class=HTMLResponse)
 async def bc_new_template_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    user, membership, company, company_id, redirect = await _load_license_context(request, require_manage=False)
     if redirect:
         return redirect
 
@@ -8814,12 +8814,12 @@ async def bc_new_template_page(request: Request):
         "default_sections": default_sections,
     }
 
-    return await _render_template("business_continuity/template_editor.html", request, current_user, extra=extra)
+    return await _render_template("business_continuity/template_editor.html", request, user, extra=extra)
 
 
 @app.get("/business-continuity/templates", response_class=HTMLResponse)
 async def bc_templates_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    user, membership, company, company_id, redirect = await _load_license_context(request, require_manage=False)
     if redirect:
         return redirect
     
@@ -8830,12 +8830,12 @@ async def bc_templates_page(request: Request):
         "title": "Plan Templates",
         "templates": templates,
     }
-    return await _render_template("business_continuity/templates.html", request, current_user, extra=extra)
+    return await _render_template("business_continuity/templates.html", request, user, extra=extra)
 
 
 @app.get("/business-continuity/reviews", response_class=HTMLResponse)
 async def bc_reviews_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    user, membership, company, company_id, redirect = await _load_license_context(request, require_manage=False)
     if redirect:
         return redirect
     
@@ -8847,12 +8847,12 @@ async def bc_reviews_page(request: Request):
         "reviews": reviews,
         "can_review": True,
     }
-    return await _render_template("business_continuity/reviews.html", request, current_user, extra=extra)
+    return await _render_template("business_continuity/reviews.html", request, user, extra=extra)
 
 
 @app.get("/business-continuity/reports", response_class=HTMLResponse)
 async def bc_reports_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
+    user, membership, company, company_id, redirect = await _load_license_context(request, require_manage=False)
     if redirect:
         return redirect
     
@@ -8870,20 +8870,20 @@ async def bc_reports_page(request: Request):
         "stats": stats,
         "recent_reports": recent_reports,
     }
-    return await _render_template("business_continuity/reports.html", request, current_user, extra=extra)
+    return await _render_template("business_continuity/reports.html", request, user, extra=extra)
 
 
 @app.get("/business-continuity/help", response_class=HTMLResponse)
 async def bc_help_page(request: Request):
     """Business Continuity help and documentation page."""
-    current_user = await _get_current_user(request)
-    if not current_user:
-        return RedirectResponse(url="/auth/login", status_code=status.HTTP_303_SEE_OTHER)
+    user, membership, company, company_id, redirect = await _load_license_context(request, require_manage=False)
+    if redirect:
+        return redirect
     
     extra = {
         "title": "Business Continuity Help",
     }
-    return await _render_template("business_continuity/help.html", request, current_user, extra=extra)
+    return await _render_template("business_continuity/help.html", request, user, extra=extra)
 
 
 @app.post("/myforms/admin")
