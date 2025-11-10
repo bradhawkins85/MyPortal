@@ -29,7 +29,16 @@ async def list_plans(
     status: PlanStatus | None = Query(None, description="Filter by status"),
     current_user: dict = Depends(get_current_user),
 ) -> list[BusinessContinuityPlanListItem]:
-    """List all business continuity plans accessible to the current user."""
+    """
+    List all business continuity plans accessible to the current user.
+    
+    Returns plans based on user permissions:
+    - Super admins can view all plans
+    - Regular users can only view plans they have explicit access to
+    
+    Plans can be filtered by type (disaster_recovery, incident_response, business_continuity)
+    and status (draft, active, archived).
+    """
     user_id = current_user["id"]
     is_super_admin = current_user.get("is_super_admin", False)
     
@@ -78,7 +87,17 @@ async def create_plan(
     plan_data: BusinessContinuityPlanCreate,
     current_user: dict = Depends(require_super_admin),
 ) -> BusinessContinuityPlanResponse:
-    """Create a new business continuity plan (super admin only)."""
+    """
+    Create a new business continuity plan (super admin only).
+    
+    Creates a new DR/IR/BC plan with the specified type, content, and status.
+    All timestamps are stored in UTC. The plan creator is automatically recorded.
+    
+    Plan types:
+    - disaster_recovery: Plans for recovering from catastrophic failures
+    - incident_response: Plans for responding to security incidents
+    - business_continuity: Plans for maintaining business operations during disruptions
+    """
     plan = await bc_plans_repo.create_plan(
         title=plan_data.title,
         plan_type=plan_data.plan_type.value,
@@ -108,7 +127,13 @@ async def get_plan(
     plan_id: int,
     current_user: dict = Depends(get_current_user),
 ) -> BusinessContinuityPlanResponse:
-    """Get a specific business continuity plan."""
+    """
+    Get a specific business continuity plan.
+    
+    Returns the full plan details including content, version history, and review status.
+    Access is controlled by permissions - users must have read or edit access to view a plan.
+    Super admins can view any plan.
+    """
     is_super_admin = current_user.get("is_super_admin", False)
     user_id = current_user["id"]
     
@@ -142,7 +167,15 @@ async def update_plan(
     plan_data: BusinessContinuityPlanUpdate,
     current_user: dict = Depends(get_current_user),
 ) -> BusinessContinuityPlanResponse:
-    """Update a business continuity plan."""
+    """
+    Update a business continuity plan.
+    
+    Allows updating plan details including title, content, version, status, and review timestamp.
+    Users must have edit permissions on the plan. Super admins can edit any plan.
+    
+    When last_reviewed_at is updated, the current user is automatically recorded as the reviewer.
+    All partial updates are supported - only provided fields will be updated.
+    """
     is_super_admin = current_user.get("is_super_admin", False)
     user_id = current_user["id"]
     
@@ -194,7 +227,12 @@ async def delete_plan(
     plan_id: int,
     current_user: dict = Depends(require_super_admin),
 ) -> None:
-    """Delete a business continuity plan (super admin only)."""
+    """
+    Delete a business continuity plan (super admin only).
+    
+    Permanently removes a plan and all its associated permissions.
+    This action cannot be undone. Use archive status instead if you want to preserve the plan.
+    """
     plan = await bc_plans_repo.get_plan_by_id(plan_id)
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
@@ -207,7 +245,13 @@ async def list_plan_permissions(
     plan_id: int,
     current_user: dict = Depends(require_super_admin),
 ) -> list[PlanPermissionResponse]:
-    """List all permissions for a plan (super admin only)."""
+    """
+    List all permissions for a plan (super admin only).
+    
+    Returns all user and company-level permissions configured for the plan.
+    Permissions can be at read or edit level. Super admins always have full access
+    regardless of explicit permissions.
+    """
     plan = await bc_plans_repo.get_plan_by_id(plan_id)
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
@@ -232,7 +276,16 @@ async def add_plan_permission(
     permission_data: PlanPermissionCreate,
     current_user: dict = Depends(require_super_admin),
 ) -> PlanPermissionResponse:
-    """Add a permission for a plan (super admin only)."""
+    """
+    Add a permission for a plan (super admin only).
+    
+    Grants read or edit access to a specific user or all users in a company.
+    Either user_id or company_id must be provided, but not both.
+    
+    Permission levels:
+    - read: View plan content only
+    - edit: View and modify plan content
+    """
     plan = await bc_plans_repo.get_plan_by_id(plan_id)
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
@@ -282,7 +335,12 @@ async def update_plan_permission(
     permission_data: PlanPermissionUpdate,
     current_user: dict = Depends(require_super_admin),
 ) -> PlanPermissionResponse:
-    """Update a plan permission (super admin only)."""
+    """
+    Update a plan permission (super admin only).
+    
+    Changes the permission level for an existing user or company permission.
+    Cannot change the user/company assignment - delete and recreate the permission instead.
+    """
     perm = await bc_plans_repo.get_plan_permission_by_id(perm_id)
     if not perm or perm["plan_id"] != plan_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Permission not found")
@@ -314,7 +372,12 @@ async def delete_plan_permission(
     perm_id: int,
     current_user: dict = Depends(require_super_admin),
 ) -> None:
-    """Delete a plan permission (super admin only)."""
+    """
+    Delete a plan permission (super admin only).
+    
+    Removes access for a user or company to a specific plan.
+    Users will no longer be able to view or edit the plan unless they are super admins.
+    """
     perm = await bc_plans_repo.get_plan_permission_by_id(perm_id)
     if not perm or perm["plan_id"] != plan_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Permission not found")
