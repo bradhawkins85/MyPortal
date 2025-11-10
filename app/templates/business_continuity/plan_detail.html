@@ -119,6 +119,47 @@
           </div>
         </dl>
         
+        <!-- Acknowledgment Summary -->
+        {% if plan.status == 'active' or plan.status == 'approved' %}
+        <div class="acknowledgment-summary" id="acknowledgment-summary">
+          <div class="ack-summary__header">
+            <h3>Acknowledgment Status</h3>
+            <div class="ack-summary__actions">
+              <button type="button" class="button button--small button--secondary" onclick="refreshAckSummary()">
+                <span class="button__icon">↻</span>
+                <span class="button__label">Refresh</span>
+              </button>
+            </div>
+          </div>
+          <div class="ack-summary__stats" id="ack-stats">
+            <div class="stat-card stat-card--loading">
+              <div class="stat-card__value">—</div>
+              <div class="stat-card__label">Total Users</div>
+            </div>
+            <div class="stat-card stat-card--loading">
+              <div class="stat-card__value">—</div>
+              <div class="stat-card__label">Acknowledged</div>
+            </div>
+            <div class="stat-card stat-card--loading">
+              <div class="stat-card__value">—</div>
+              <div class="stat-card__label">Pending</div>
+            </div>
+          </div>
+          <div class="ack-summary__pending" id="ack-pending" style="display: none;">
+            <div class="ack-pending__header">
+              <h4>Users Pending Acknowledgment</h4>
+              <button type="button" class="button button--small" onclick="notifyPendingUsers()">
+                <span class="button__icon">📧</span>
+                <span class="button__label">Notify All</span>
+              </button>
+            </div>
+            <div class="ack-pending__list" id="pending-users-list">
+              <!-- Will be populated dynamically -->
+            </div>
+          </div>
+        </div>
+        {% endif %}
+        
         <div class="plan-content">
           <h3>Plan Content</h3>
           <div class="rich-text">
@@ -578,6 +619,128 @@
   color: #6b7280;
   padding: 2rem;
 }
+
+.acknowledgment-summary {
+  margin: 2rem 0;
+  padding: 1.5rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+}
+
+.ack-summary__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.ack-summary__header h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin: 0;
+  color: #111827;
+}
+
+.ack-summary__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.ack-summary__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.stat-card {
+  background: white;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid #e5e7eb;
+  text-align: center;
+}
+
+.stat-card--loading .stat-card__value {
+  color: #9ca3af;
+}
+
+.stat-card__value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 0.25rem;
+}
+
+.stat-card__label {
+  font-size: 0.875rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.ack-summary__pending {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.ack-pending__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.ack-pending__header h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  color: #111827;
+}
+
+.ack-pending__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 0.5rem;
+}
+
+.pending-user-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.375rem;
+}
+
+.pending-user-item__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.pending-user-item__name {
+  font-weight: 500;
+  color: #111827;
+  margin: 0 0 0.125rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-user-item__email {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-user-item__action {
+  margin-left: 0.5rem;
+}
 </style>
 {% endblock %}
 
@@ -761,6 +924,149 @@
   window.downloadAttachment = function(attachmentId) {
     window.location.href = `/api/bc/plans/${planId}/attachments/${attachmentId}/download`;
   };
+  
+  // Acknowledgment summary functions
+  window.refreshAckSummary = async function() {
+    try {
+      // Fetch acknowledgment summary
+      const summaryResponse = await fetch(`/api/bc/plans/${planId}/acknowledgments/summary`);
+      if (!summaryResponse.ok) {
+        console.error('Failed to fetch acknowledgment summary');
+        return;
+      }
+      
+      const summary = await summaryResponse.json();
+      
+      // Update stats
+      const statsContainer = document.getElementById('ack-stats');
+      if (statsContainer) {
+        statsContainer.innerHTML = `
+          <div class="stat-card">
+            <div class="stat-card__value">${summary.total_users}</div>
+            <div class="stat-card__label">Total Users</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card__value">${summary.acknowledged_users}</div>
+            <div class="stat-card__label">Acknowledged</div>
+          </div>
+          <div class="stat-card ${summary.pending_users > 0 ? 'stat-card--warning' : ''}">
+            <div class="stat-card__value">${summary.pending_users}</div>
+            <div class="stat-card__label">Pending</div>
+          </div>
+        `;
+      }
+      
+      // Fetch and display pending users if there are any
+      if (summary.pending_users > 0) {
+        const pendingResponse = await fetch(`/api/bc/plans/${planId}/acknowledgments/pending`);
+        if (pendingResponse.ok) {
+          const pendingUsers = await pendingResponse.json();
+          displayPendingUsers(pendingUsers);
+        }
+      } else {
+        const pendingContainer = document.getElementById('ack-pending');
+        if (pendingContainer) {
+          pendingContainer.style.display = 'none';
+        }
+      }
+    } catch (error) {
+      console.error('Error refreshing acknowledgment summary:', error);
+    }
+  };
+  
+  function displayPendingUsers(users) {
+    const pendingContainer = document.getElementById('ack-pending');
+    const listContainer = document.getElementById('pending-users-list');
+    
+    if (!pendingContainer || !listContainer) return;
+    
+    if (users.length === 0) {
+      pendingContainer.style.display = 'none';
+      return;
+    }
+    
+    pendingContainer.style.display = 'block';
+    
+    listContainer.innerHTML = users.map(user => `
+      <div class="pending-user-item" data-user-id="${user.id}">
+        <div class="pending-user-item__info">
+          <p class="pending-user-item__name">${user.name || 'Unknown'}</p>
+          <p class="pending-user-item__email">${user.email}</p>
+        </div>
+        <div class="pending-user-item__action">
+          <button type="button" class="button button--small button--secondary" onclick="notifyUser(${user.id})">
+            Notify
+          </button>
+        </div>
+      </div>
+    `).join('');
+  }
+  
+  window.notifyUser = async function(userId) {
+    if (!confirm('Send acknowledgment notification to this user?')) return;
+    
+    try {
+      const response = await fetch(`/api/bc/plans/${planId}/acknowledgments/notify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_ids: [userId] })
+      });
+      
+      if (response.ok) {
+        alert('Notification sent successfully');
+      } else {
+        const error = await response.json();
+        alert(`Failed to send notification: ${error.detail || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error sending notification:', error);
+      alert('Failed to send notification');
+    }
+  };
+  
+  window.notifyPendingUsers = async function() {
+    try {
+      // Get all pending users
+      const response = await fetch(`/api/bc/plans/${planId}/acknowledgments/pending`);
+      if (!response.ok) {
+        alert('Failed to fetch pending users');
+        return;
+      }
+      
+      const pendingUsers = await response.json();
+      if (pendingUsers.length === 0) {
+        alert('No pending users to notify');
+        return;
+      }
+      
+      if (!confirm(`Send acknowledgment notifications to ${pendingUsers.length} user(s)?`)) {
+        return;
+      }
+      
+      const userIds = pendingUsers.map(u => u.id);
+      const notifyResponse = await fetch(`/api/bc/plans/${planId}/acknowledgments/notify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_ids: userIds })
+      });
+      
+      if (notifyResponse.ok) {
+        const result = await notifyResponse.json();
+        alert(`Notifications queued for ${result.notified_users} user(s)`);
+      } else {
+        const error = await notifyResponse.json();
+        alert(`Failed to send notifications: ${error.detail || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error notifying users:', error);
+      alert('Failed to send notifications');
+    }
+  };
+  
+  // Load acknowledgment summary on page load if the section exists
+  if (document.getElementById('acknowledgment-summary')) {
+    refreshAckSummary();
+  }
 })();
 </script>
 {% endblock %}

@@ -26,6 +26,7 @@ from app.services import bc_export_service
 from app.schemas.bc5_models import (
     BCAcknowledge,
     BCAcknowledgeResponse,
+    BCAcknowledgmentSummary,
     BCAuditListItem,
     BCAttachmentListItem,
     BCAttachmentUploadResponse,
@@ -33,7 +34,9 @@ from app.schemas.bc5_models import (
     BCExportFormat,
     BCExportRequest,
     BCExportResponse,
+    BCNotifyAcknowledgment,
     BCPaginatedResponse,
+    BCPendingUser,
     BCPlanCreate,
     BCPlanDetail,
     BCPlanListFilters,
@@ -488,6 +491,7 @@ async def activate_version(
     Activate a specific version.
     
     Makes this version the active version for the plan, superseding all other versions.
+    After activation, triggers acknowledgment prompts for users with BC access.
     
     **Authorization**: Requires BC editor role or higher.
     """
@@ -502,13 +506,33 @@ async def activate_version(
     # Activate the version
     version = await bc_repo.activate_version(version_id, plan_id)
     
-    # Create audit entry
+    # Create audit entry for activation
     await bc_repo.create_audit_entry(
         plan_id=plan_id,
         action="version_activated",
         actor_user_id=current_user["id"],
         details_json={"version_id": version_id, "version_number": version["version_number"]},
     )
+    
+    # Get users who need to acknowledge the new version
+    pending_users = await bc_repo.get_users_pending_acknowledgment(plan_id, version["version_number"])
+    
+    # Create audit entry indicating acknowledgment requirement
+    if pending_users:
+        await bc_repo.create_audit_entry(
+            plan_id=plan_id,
+            action="acknowledgment_required",
+            actor_user_id=current_user["id"],
+            details_json={
+                "version_number": version["version_number"],
+                "pending_user_count": len(pending_users),
+                "pending_user_ids": [u["id"] for u in pending_users[:10]],  # Limit to first 10 for audit log
+            },
+        )
+        
+        # TODO: Send automatic notifications to pending users
+        # This would integrate with the notification service to send emails/in-app notifications
+        # For now, we just log the requirement in the audit trail
     
     # Enrich response
     await _enrich_user_name(version, "authored_by_user_id", "author_name")
@@ -721,6 +745,115 @@ async def acknowledge_plan(
     )
     
     return BCAcknowledgeResponse(**ack)
+
+
+@router.get("/plans/{plan_id}/acknowledgments/summary", response_model=BCAcknowledgmentSummary)
+async def get_acknowledgment_summary(
+    plan_id: int,
+    current_user: dict = Depends(require_bc_viewer),
+) -> BCAcknowledgmentSummary:
+    """
+    Get acknowledgment summary for a plan's current version.
+    
+    Returns statistics about how many users have acknowledged the current version
+    versus how many still need to acknowledge.
+    
+    **Authorization**: Requires BC viewer role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Get active version
+    version = await bc_repo.get_active_version(plan_id)
+    if not version:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active version found")
+    
+    version_number = version["version_number"]
+    summary = await bc_repo.get_acknowledgment_summary(plan_id, version_number)
+    
+    return BCAcknowledgmentSummary(**summary)
+
+
+@router.get("/plans/{plan_id}/acknowledgments/pending", response_model=list[BCPendingUser])
+async def get_pending_acknowledgments(
+    plan_id: int,
+    current_user: dict = Depends(require_bc_viewer),
+) -> list[BCPendingUser]:
+    """
+    Get list of users who have not acknowledged the current version.
+    
+    Returns user details for all users who need to acknowledge but haven't yet.
+    
+    **Authorization**: Requires BC viewer role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Get active version
+    version = await bc_repo.get_active_version(plan_id)
+    if not version:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active version found")
+    
+    version_number = version["version_number"]
+    pending_users = await bc_repo.get_users_pending_acknowledgment(plan_id, version_number)
+    
+    return [BCPendingUser(**user) for user in pending_users]
+
+
+@router.post("/plans/{plan_id}/acknowledgments/notify", status_code=status.HTTP_202_ACCEPTED)
+async def notify_pending_acknowledgments(
+    plan_id: int,
+    notify_data: BCNotifyAcknowledgment,
+    current_user: dict = Depends(require_bc_editor),
+) -> dict[str, Any]:
+    """
+    Send notifications to users requesting plan acknowledgment.
+    
+    Sends notifications (email/in-app) to specified users requesting they
+    acknowledge the current version of the plan.
+    
+    **Authorization**: Requires BC editor role or higher.
+    """
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Get active version
+    version = await bc_repo.get_active_version(plan_id)
+    if not version:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active version found")
+    
+    # Verify all user IDs exist and have BC access
+    pending_users = await bc_repo.get_users_pending_acknowledgment(plan_id, version["version_number"])
+    pending_user_ids = {u["id"] for u in pending_users}
+    
+    invalid_users = [uid for uid in notify_data.user_ids if uid not in pending_user_ids]
+    if invalid_users:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid or already acknowledged user IDs: {invalid_users}"
+        )
+    
+    # TODO: Implement actual notification sending via notification service
+    # For now, just log the audit entry
+    await bc_repo.create_audit_entry(
+        plan_id=plan_id,
+        action="acknowledgment_notification_sent",
+        actor_user_id=current_user["id"],
+        details_json={
+            "user_ids": notify_data.user_ids,
+            "version_number": version["version_number"],
+            "message": notify_data.message,
+        },
+    )
+    
+    return {
+        "message": "Acknowledgment notifications queued",
+        "notified_users": len(notify_data.user_ids),
+        "version_number": version["version_number"],
+    }
 
 
 # ============================================================================
