@@ -1,6 +1,13 @@
--- BC3 Business Continuity Planning Data Model
+-- BC3/BC4 Business Continuity Planning Data Model
 -- SQLAlchemy 2.0 async models implemented via SQL migration
 -- Supports template-driven, versioned BCP with review/approval workflow and attachments
+--
+-- COMPATIBILITY: This migration is designed for MySQL/MariaDB
+-- Features used: AUTO_INCREMENT, ENUM, JSON, ON UPDATE CURRENT_TIMESTAMP, ENGINE=InnoDB
+-- For SQLite compatibility notes, see migrations/README_BC4_COMPATIBILITY.md
+--
+-- IDEMPOTENCY: Safe to run multiple times - uses CREATE TABLE IF NOT EXISTS
+-- DATA PRESERVATION: No DROP or TRUNCATE statements - existing data is retained
 
 -- BC Template: Defines structure for business continuity plans
 CREATE TABLE IF NOT EXISTS bc_template (
