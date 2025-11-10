@@ -232,7 +232,7 @@ async def test_process_queued_transcriptions_handles_no_queued_recordings(monkey
     # Verify results
     assert result["status"] == "ok"
     assert result["processed"] == 0
-    assert result["message"] == "No recordings to process"
+    assert result["details"] == "No recordings to process"
 
 
 @pytest.mark.anyio
