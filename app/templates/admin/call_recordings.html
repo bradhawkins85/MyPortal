@@ -168,6 +168,32 @@
     </div>
   </dialog>
 
+  <!-- Create Ticket Modal -->
+  <dialog id="create-ticket-modal" class="modal" aria-labelledby="create-ticket-modal-title">
+    <div class="modal__content">
+      <header class="modal__header">
+        <h2 class="modal__title" id="create-ticket-modal-title">Create Ticket from Recording</h2>
+        <button type="button" class="modal__close" data-close-modal aria-label="Close">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+          </svg>
+        </button>
+      </header>
+      <div class="modal__body">
+        <div class="form-field">
+          <label class="form-label" for="company-select">Select Company</label>
+          <select id="company-select" class="form-input">
+            <option value="">Loading companies...</option>
+          </select>
+        </div>
+      </div>
+      <footer class="modal__footer">
+        <button type="button" class="button button--ghost" data-close-modal>Cancel</button>
+        <button type="button" class="button button--primary" id="create-ticket-btn">Create Ticket</button>
+      </footer>
+    </div>
+  </dialog>
+
   <script>
     // State
     let currentPage = 1;
@@ -335,27 +361,33 @@
     }
 
     async function createTicket(recordingId) {
-      if (!confirm('Create a ticket from this call recording?')) return;
+      currentRecordingId = recordingId;
       
-      const companyId = prompt('Enter company ID for the ticket:');
-      if (!companyId) return;
-      
+      // Load active companies for the dropdown
       try {
-        const response = await fetch(`/api/call-recordings/${recordingId}/create-ticket?companyId=${companyId}`, {
-          method: 'POST',
-          headers: {
-            'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content,
-          },
-        });
+        const response = await fetch('/api/companies?include_archived=false');
+        if (!response.ok) {
+          throw new Error('Failed to load companies');
+        }
         
-        if (!response.ok) throw new Error('Failed to create ticket');
+        const companies = await response.json();
+        const companySelect = document.getElementById('company-select');
         
-        const result = await response.json();
-        alert(`Ticket #${result.ticket_number} created successfully!`);
-        loadRecordings();
+        if (companies.length === 0) {
+          companySelect.innerHTML = '<option value="">No companies available</option>';
+        } else {
+          companySelect.innerHTML = '<option value="">Select a company...</option>' +
+            companies.map(company => 
+              `<option value="${company.id}">${company.name}</option>`
+            ).join('');
+        }
+        
+        // Show the modal
+        const modal = document.getElementById('create-ticket-modal');
+        modal.showModal();
       } catch (error) {
-        console.error('Error creating ticket:', error);
-        alert('Failed to create ticket');
+        console.error('Error loading companies:', error);
+        alert('Failed to load companies');
       }
     }
 
@@ -514,6 +546,33 @@
       }
     });
 
+    document.getElementById('create-ticket-btn').addEventListener('click', async () => {
+      const companyId = document.getElementById('company-select').value;
+      if (!companyId) {
+        alert('Please select a company');
+        return;
+      }
+      
+      try {
+        const response = await fetch(`/api/call-recordings/${currentRecordingId}/create-ticket?companyId=${companyId}`, {
+          method: 'POST',
+          headers: {
+            'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content,
+          },
+        });
+        
+        if (!response.ok) throw new Error('Failed to create ticket');
+        
+        const result = await response.json();
+        alert(`Ticket #${result.ticket_number} created successfully!`);
+        document.getElementById('create-ticket-modal').close();
+        loadRecordings();
+      } catch (error) {
+        console.error('Error creating ticket:', error);
+        alert('Failed to create ticket');
+      }
+    });
+
     // Close modal handlers
     document.querySelectorAll('[data-close-modal]').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -605,23 +664,27 @@
 
     /* Ensure modal header elements are white */
     #transcript-modal .modal__title,
-    #link-ticket-modal .modal__title {
+    #link-ticket-modal .modal__title,
+    #create-ticket-modal .modal__title {
       color: #ffffff;
     }
 
     #transcript-modal .modal__close,
-    #link-ticket-modal .modal__close {
+    #link-ticket-modal .modal__close,
+    #create-ticket-modal .modal__close {
       color: #ffffff;
     }
 
     #transcript-modal .modal__close:hover,
-    #link-ticket-modal .modal__close:hover {
+    #link-ticket-modal .modal__close:hover,
+    #create-ticket-modal .modal__close:hover {
       color: #e5e7eb;
       opacity: 0.8;
     }
 
     #transcript-modal .modal__close svg,
-    #link-ticket-modal .modal__close svg {
+    #link-ticket-modal .modal__close svg,
+    #create-ticket-modal .modal__close svg {
       fill: currentColor;
     }
 
