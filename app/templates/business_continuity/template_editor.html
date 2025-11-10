@@ -1,0 +1,470 @@
+{% extends "business_continuity/base.html" %}
+{% set current_page = 'templates' %}
+{% set page_title = 'New Template' if not template else 'Edit Template' %}
+
+{% block bc_header_actions %}
+  <button type="button" class="button button--secondary" id="preview-template-btn">
+    <span class="button__label">Preview</span>
+  </button>
+  <button type="button" class="button" id="save-template-btn">
+    <span class="button__label">{{ 'Update Template' if template else 'Create Template' }}</span>
+  </button>
+{% endblock %}
+
+{% block bc_content %}
+<form id="template-form" class="template-editor">
+  <input type="hidden" id="template-id" value="{{ template.id if template else '' }}">
+  <input type="hidden" id="csrf-token" value="{{ csrf_token }}">
+
+  <!-- Template Meta Information -->
+  <section class="card">
+    <header class="card__header">
+      <h2 class="card__title">Template Information</h2>
+      <p class="card__subtitle">Define the name, version, and default status of this template.</p>
+    </header>
+    <div class="card__body">
+      <div class="form-grid">
+        <div class="form-group form-group--full">
+          <label for="template-name" class="form-label">Template Name *</label>
+          <input
+            type="text"
+            id="template-name"
+            name="name"
+            class="form-input"
+            required
+            placeholder="e.g., Government BCP Template"
+            value="{{ template.name if template else '' }}"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="template-version" class="form-label">Version *</label>
+          <input
+            type="text"
+            id="template-version"
+            name="version"
+            class="form-input"
+            required
+            placeholder="e.g., 1.0"
+            value="{{ template.version if template else '1.0' }}"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="template-default" class="form-label">Default Template</label>
+          <div class="switch">
+            <input type="checkbox" id="template-default" name="is_default" {% if template and template.is_default %}checked{% endif %}>
+            <label for="template-default">Mark as default for new plans</label>
+          </div>
+        </div>
+
+        <div class="form-group form-group--full">
+          <label for="template-description" class="form-label">Description</label>
+          <textarea
+            id="template-description"
+            name="description"
+            class="form-textarea"
+            rows="3"
+            placeholder="Summarise the purpose of this template and what plans it should be used for."
+          >{{ template.description if template and template.description else '' }}</textarea>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section Builder -->
+  <section class="card">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Section Builder</h2>
+        <p class="card__subtitle">Design the structure that plans will inherit from this template. Click a section to edit its default fields and guidance.</p>
+      </div>
+      <div class="button-group">
+        <button type="button" class="button button--secondary" id="add-section-btn">Add Section</button>
+      </div>
+    </header>
+
+    {% set sections = template.schema_json.sections if template and template.schema_json and template.schema_json.sections else default_sections %}
+
+    <div class="section-builder">
+      <aside class="section-builder__sidebar" aria-label="Template sections">
+        <ul class="section-list" id="section-list">
+          {% for section in sections %}
+          <li>
+            <button
+              type="button"
+              class="section-list__item {% if loop.first %}section-list__item--active{% endif %}"
+              data-section-key="{{ section.key }}"
+            >
+              <span class="section-list__name">{{ section.name }}</span>
+              <span class="section-list__meta">{{ section.fields|length }} fields</span>
+            </button>
+          </li>
+          {% endfor %}
+        </ul>
+      </aside>
+
+      <div class="section-builder__content">
+        {% for section in sections %}
+        <div
+          class="builder-panel {% if loop.first %}builder-panel--active{% endif %}"
+          id="builder-panel-{{ section.key }}"
+          data-section-key="{{ section.key }}"
+        >
+          <div class="builder-panel__header">
+            <div>
+              <h3 class="builder-panel__title">{{ section.name }}</h3>
+              {% if section.description %}
+              <p class="builder-panel__description">{{ section.description }}</p>
+              {% endif %}
+            </div>
+            <div class="button-group">
+              <button type="button" class="button button--icon" title="Move up" aria-label="Move section up">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M7 14l5-5 5 5H7z"/></svg>
+              </button>
+              <button type="button" class="button button--icon" title="Move down" aria-label="Move section down">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M7 10l5 5 5-5H7z"/></svg>
+              </button>
+              <button type="button" class="button button--icon" title="Duplicate" aria-label="Duplicate section">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M8 7a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2V7zm-3 4h2v7h7v2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z"/></svg>
+              </button>
+              <button type="button" class="button button--icon button--danger" title="Remove" aria-label="Remove section">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M7 7h10v12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V7zm10-3h-3.5l-1-1h-3l-1 1H5v2h14V4z"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="builder-panel__body">
+            {% if section.fields %}
+            <ul class="field-list">
+              {% for field in section.fields %}
+              <li class="field-card">
+                <div class="field-card__heading">
+                  <span class="field-card__name">{{ field.label }}</span>
+                  <span class="field-card__meta">{{ field.type|replace('_', ' ')|title }}</span>
+                </div>
+                <p class="field-card__description">
+                  {{ field.placeholder if field.placeholder else 'Provide guidance for this field in the template schema.' }}
+                </p>
+                <div class="field-card__actions">
+                  {% if field.required %}
+                  <span class="badge badge--success">Required</span>
+                  {% else %}
+                  <span class="badge badge--neutral">Optional</span>
+                  {% endif %}
+                  <div class="button-group">
+                    <button type="button" class="button button--icon" title="Move up" aria-label="Move field up">
+                      <svg viewBox="0 0 24 24" focusable="false"><path d="M7 14l5-5 5 5H7z"/></svg>
+                    </button>
+                    <button type="button" class="button button--icon" title="Move down" aria-label="Move field down">
+                      <svg viewBox="0 0 24 24" focusable="false"><path d="M7 10l5 5 5-5H7z"/></svg>
+                    </button>
+                    <button type="button" class="button button--icon" title="Edit field" aria-label="Edit field">
+                      <svg viewBox="0 0 24 24" focusable="false"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    </button>
+                    <button type="button" class="button button--icon button--danger" title="Remove field" aria-label="Remove field">
+                      <svg viewBox="0 0 24 24" focusable="false"><path d="M7 7h10v12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V7zm10-3h-3.5l-1-1h-3l-1 1H5v2h14V4z"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </li>
+              {% else %}
+              <li class="field-card field-card--empty">
+                <p>No fields configured yet. Use the buttons above to add inputs to this section.</p>
+                <button type="button" class="button button--secondary">Add Field</button>
+              </li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <div class="empty-state">
+              <p class="empty-state__text">No fields configured for this section.</p>
+              <button type="button" class="button button--secondary">Add Field</button>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+</form>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    const sectionButtons = document.querySelectorAll(".section-list__item");
+    const panels = document.querySelectorAll(".builder-panel");
+
+    sectionButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const key = button.dataset.sectionKey;
+
+        sectionButtons.forEach((btn) => btn.classList.remove("section-list__item--active"));
+        panels.forEach((panel) => panel.classList.remove("builder-panel--active"));
+
+        button.classList.add("section-list__item--active");
+        const activePanel = document.querySelector(`#builder-panel-${key}`);
+        if (activePanel) {
+          activePanel.classList.add("builder-panel--active");
+        }
+      });
+    });
+
+    const saveButton = document.getElementById("save-template-btn");
+    if (saveButton) {
+      saveButton.addEventListener("click", () => {
+        saveButton.disabled = true;
+        saveButton.classList.add("button--loading");
+        setTimeout(() => {
+          saveButton.disabled = false;
+          saveButton.classList.remove("button--loading");
+          const toast = document.createElement("div");
+          toast.className = "toast toast--success";
+          toast.textContent = "Template saving is coming soon.";
+          document.body.appendChild(toast);
+          setTimeout(() => toast.remove(), 3000);
+        }, 800);
+      });
+    }
+  });
+</script>
+{% endblock %}
+
+{% block styles %}
+{{ super() }}
+<style>
+.template-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.section-builder {
+  display: grid;
+  grid-template-columns: 18rem 1fr;
+  gap: 1.5rem;
+  min-height: 28rem;
+}
+
+.section-builder__sidebar {
+  background: #f3f4f6;
+  border-radius: 0.75rem;
+  padding: 1rem;
+  border: 1px solid #e5e7eb;
+}
+
+.section-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.section-list__item {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: white;
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  color: #111827;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  border: 1px solid transparent;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.section-list__item:hover,
+.section-list__item:focus-visible {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+  outline: none;
+}
+
+.section-list__item--active {
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.25);
+}
+
+.section-list__name {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.section-list__meta {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.section-builder__content {
+  background: white;
+  border-radius: 0.75rem;
+  border: 1px solid #e5e7eb;
+  padding: 1.5rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.builder-panel {
+  display: none;
+  flex-direction: column;
+  height: 100%;
+}
+
+.builder-panel--active {
+  display: flex;
+}
+
+.builder-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.builder-panel__title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+}
+
+.builder-panel__description {
+  margin: 0;
+  color: #6b7280;
+}
+
+.field-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.field-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  background: #f9fafb;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.field-card__heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.field-card__name {
+  font-weight: 600;
+}
+
+.field-card__meta {
+  font-size: 0.75rem;
+  color: #1d4ed8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.field-card__description {
+  margin: 0;
+  color: #4b5563;
+  font-size: 0.875rem;
+}
+
+.field-card__actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.button--icon {
+  padding: 0.35rem;
+  min-width: 0;
+}
+
+.button--icon svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+}
+
+.button--danger {
+  color: #b91c1c;
+}
+
+.button--loading {
+  position: relative;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.button--loading::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -2.25rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  border: 2px solid rgba(59, 130, 246, 0.3);
+  border-top-color: #1d4ed8;
+  transform: translateY(-50%);
+  animation: button-spin 0.8s linear infinite;
+}
+
+@keyframes button-spin {
+  to {
+    transform: translateY(-50%) rotate(360deg);
+  }
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.switch input[type="checkbox"] {
+  width: 2.5rem;
+  height: 1.25rem;
+}
+
+.toast {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  color: white;
+  font-weight: 600;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  z-index: 2000;
+}
+
+.toast--success {
+  background: #16a34a;
+}
+
+@media (max-width: 1024px) {
+  .section-builder {
+    grid-template-columns: 1fr;
+  }
+
+  .section-builder__content {
+    margin-top: 1.5rem;
+  }
+}
+</style>
+{% endblock %}
