@@ -7,6 +7,9 @@ These models support comprehensive BCP functionality including:
 - Business Impact Analysis (BIA)
 - Incident response and management
 - Recovery planning and execution
+
+All models follow the SQLAlchemy 2.0 async pattern and include proper
+foreign key relationships with CASCADE deletes for data integrity.
 """
 from __future__ import annotations
 
