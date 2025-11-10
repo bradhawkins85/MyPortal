@@ -16,7 +16,13 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt, RGBColor
 from jinja2 import Environment, BaseLoader
-from weasyprint import HTML
+try:  # pragma: no cover - import guard for optional dependency
+    from weasyprint import HTML
+except (ImportError, OSError) as exc:  # pragma: no cover - executed only when missing deps
+    HTML = None  # type: ignore[assignment]
+    _WEASYPRINT_IMPORT_ERROR = exc
+else:
+    _WEASYPRINT_IMPORT_ERROR = None
 
 from app.repositories import bc3 as bc_repo
 from app.repositories import users as user_repo
@@ -345,6 +351,13 @@ async def export_to_pdf(
     Raises:
         ValueError: If plan or version not found
     """
+    if HTML is None:  # pragma: no cover - depends on system configuration
+        raise RuntimeError(
+            "PDF export requires WeasyPrint and its native dependencies (libpango and libpangocairo). "
+            "Install the system packages documented at "
+            "https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation"
+        ) from _WEASYPRINT_IMPORT_ERROR
+
     # Fetch plan and version data
     plan = await bc_repo.get_plan_by_id(plan_id)
     if not plan:
