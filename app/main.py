@@ -8873,6 +8873,19 @@ async def bc_reports_page(request: Request):
     return await _render_template("business_continuity/reports.html", request, current_user, extra=extra)
 
 
+@app.get("/business-continuity/help", response_class=HTMLResponse)
+async def bc_help_page(request: Request):
+    """Business Continuity help and documentation page."""
+    current_user = await _get_current_user(request)
+    if not current_user:
+        return RedirectResponse(url="/auth/login", status_code=status.HTTP_303_SEE_OTHER)
+    
+    extra = {
+        "title": "Business Continuity Help",
+    }
+    return await _render_template("business_continuity/help.html", request, current_user, extra=extra)
+
+
 @app.post("/myforms/admin")
 async def admin_create_form(
     request: Request,
