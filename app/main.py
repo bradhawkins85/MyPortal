@@ -50,6 +50,7 @@ from app.api.routes import (
     automations as automations_api,
     call_recordings as call_recordings_api,
     companies,
+    essential8 as essential8_api,
     forms as forms_api,
     invoices as invoices_api,
     issues as issues_api,
@@ -511,6 +512,7 @@ app.include_router(agent.router)
 app.include_router(users.router)
 app.include_router(call_recordings_api.router)
 app.include_router(companies.router)
+app.include_router(essential8_api.router)
 app.include_router(licenses_api.router)
 app.include_router(forms_api.router)
 app.include_router(knowledge_base_api.router)
@@ -3377,6 +3379,33 @@ async def licenses_page(request: Request):
         "has_m365_credentials": bool(credentials),
     }
     return await _render_template("licenses/index.html", request, user, extra=extra)
+
+
+@app.get("/compliance", response_class=HTMLResponse)
+async def compliance_page(request: Request):
+    """Essential 8 compliance tracking page."""
+    from app.repositories import essential8 as essential8_repo
+    
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    
+    # Get compliance records
+    compliance_records = await essential8_repo.list_company_compliance(company_id)
+    
+    # Get compliance summary
+    summary = await essential8_repo.get_company_compliance_summary(company_id)
+    
+    is_super_admin = bool(user.get("is_super_admin"))
+    
+    extra = {
+        "title": "Essential 8 Compliance",
+        "compliance_records": compliance_records,
+        "summary": summary,
+        "company": company,
+        "is_super_admin": is_super_admin,
+    }
+    return await _render_template("compliance/index.html", request, user, extra=extra)
 
 
 @app.get("/invoices", response_class=HTMLResponse)
