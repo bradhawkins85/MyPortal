@@ -49,6 +49,7 @@ from app.api.routes import (
     auth,
     automations as automations_api,
     bc5,
+    bc11,
     business_continuity_plans as bc_plans_api,
     call_recordings as call_recordings_api,
     companies,
@@ -532,6 +533,7 @@ app.include_router(forms_api.router)
 app.include_router(knowledge_base_api.router)
 app.include_router(bc_plans_api.router)
 app.include_router(bc5.router)
+app.include_router(bc11.router)
 app.include_router(roles.router)
 app.include_router(memberships.router)
 app.include_router(m365_api.router)

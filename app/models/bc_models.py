@@ -475,3 +475,53 @@ class BCChangeLogMap(Base):
 
     # Relationships
     # plan: Mapped["BCPlan"] = relationship("BCPlan", back_populates="change_logs")
+
+
+class BCVendor(Base, TimestampMixin):
+    """
+    Vendor information for business continuity plans.
+    
+    Tracks service providers, suppliers, and other external parties
+    with SLA details and contact information.
+    """
+
+    __tablename__ = "bc_vendor"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plan_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("bc_plan.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    vendor_type: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="e.g., IT Service Provider, Supplier, Cloud Provider",
+    )
+    contact_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    contact_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    contact_phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    sla_notes: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Service Level Agreement details and notes",
+    )
+    contract_reference: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Contract number or reference",
+    )
+    criticality: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="e.g., critical, high, medium, low",
+    )
+
+    __table_args__ = (
+        Index("idx_bc_vendor_plan", "plan_id"),
+        Index("idx_bc_vendor_criticality", "criticality"),
+    )
+
+    # Relationships
+    # plan: Mapped["BCPlan"] = relationship("BCPlan", back_populates="vendors")
