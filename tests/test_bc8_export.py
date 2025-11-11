@@ -9,11 +9,14 @@ Tests:
 - Table rendering
 - Error handling
 """
+import hashlib
 import io
 import json
-import pytest
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.services.bc_export_service import (
     compute_content_hash,
@@ -61,14 +64,41 @@ def test_compute_content_hash_different_metadata():
 def test_compute_content_hash_order_independent():
     """Test that field order doesn't affect hash (due to sort_keys)."""
     metadata = {"plan_title": "Test"}
-    
+
     content1 = {"a": 1, "b": 2, "c": 3}
     content2 = {"c": 3, "a": 1, "b": 2}
-    
+
     hash1 = compute_content_hash(content1, metadata)
     hash2 = compute_content_hash(content2, metadata)
-    
+
     assert hash1 == hash2
+
+
+def test_compute_content_hash_handles_non_json_types():
+    """Ensure datetimes and decimals are serialized deterministically."""
+    timestamp = datetime(2024, 5, 1, 9, 30, tzinfo=timezone.utc)
+    review_date = date(2024, 5, 2)
+    review_time = time(14, 45)
+    amount = Decimal("123.45")
+
+    content = {"last_reviewed_at": timestamp, "budget": amount}
+    metadata = {"next_review_date": review_date, "meeting_time": review_time}
+
+    digest = compute_content_hash(content, metadata)
+
+    normalized = {
+        "content": {
+            "last_reviewed_at": timestamp.isoformat(),
+            "budget": str(amount),
+        },
+        "metadata": {
+            "next_review_date": review_date.isoformat(),
+            "meeting_time": review_time.isoformat(),
+        },
+    }
+    expected = hashlib.sha256(json.dumps(normalized, sort_keys=True).encode("utf-8")).hexdigest()
+
+    assert digest == expected
 
 
 # ============================================================================
