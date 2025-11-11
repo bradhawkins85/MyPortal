@@ -1224,8 +1224,9 @@ async def create_risk(
 ):
     """Create a new risk."""
     user, company_id = await _require_bcp_edit(request)
-    
+
     from app.services.risk_calculator import calculate_risk
+    from app.services import audit
     
     # Validate likelihood and impact
     if not (1 <= likelihood <= 4):
