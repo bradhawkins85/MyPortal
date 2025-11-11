@@ -419,6 +419,110 @@ class SchedulerService:
                     if result.get("status") == "error":
                         status = "failed"
                     log_info("Transcription processed", **result)
+                elif command == "bcp_notify_upcoming_training":
+                    # Notify about upcoming BCP training sessions
+                    from app.repositories import bcp as bcp_repo
+                    from app.repositories import notifications as notifications_repo
+                    
+                    # Get training items in the next 7 days (configurable via task description)
+                    task_description = task.get("description") or ""
+                    try:
+                        config = json.loads(task_description) if task_description else {}
+                        days_ahead = config.get("days_ahead", 7)
+                    except json.JSONDecodeError:
+                        days_ahead = 7
+                    
+                    upcoming = await bcp_repo.get_upcoming_training_items(days_ahead=days_ahead)
+                    
+                    if upcoming:
+                        for item in upcoming:
+                            plan = item.get("plan", {})
+                            plan_id = plan.get("id")
+                            
+                            if plan_id:
+                                # Get distribution list for the plan
+                                distribution_list = await bcp_repo.list_distribution_list(plan_id)
+                                
+                                # Create notification for each distribution list member
+                                message = f"Upcoming BCP training scheduled for {item['training_date'].strftime('%Y-%m-%d %H:%M')}"
+                                if item.get("training_type"):
+                                    message += f" - {item['training_type']}"
+                                
+                                # Create notification for all users (could be refined to specific users)
+                                await notifications_repo.create_notification(
+                                    event_type="bcp_training_reminder",
+                                    message=message,
+                                    user_id=None,  # Broadcast to all users
+                                    metadata={
+                                        "plan_id": plan_id,
+                                        "plan_title": plan.get("title"),
+                                        "training_id": item["id"],
+                                        "training_date": item["training_date"].isoformat(),
+                                        "training_type": item.get("training_type"),
+                                    }
+                                )
+                        
+                        details = json.dumps(
+                            {"upcoming_training_count": len(upcoming), "days_ahead": days_ahead},
+                            default=str
+                        )
+                        log_info("BCP training reminders sent", count=len(upcoming))
+                    else:
+                        status = "skipped"
+                        details = f"No upcoming training in next {days_ahead} days"
+                        log_info("No upcoming BCP training to notify", days_ahead=days_ahead)
+                elif command == "bcp_notify_upcoming_review":
+                    # Notify about upcoming BCP plan reviews
+                    from app.repositories import bcp as bcp_repo
+                    from app.repositories import notifications as notifications_repo
+                    
+                    # Get review items in the next 7 days (configurable via task description)
+                    task_description = task.get("description") or ""
+                    try:
+                        config = json.loads(task_description) if task_description else {}
+                        days_ahead = config.get("days_ahead", 7)
+                    except json.JSONDecodeError:
+                        days_ahead = 7
+                    
+                    upcoming = await bcp_repo.get_upcoming_review_items(days_ahead=days_ahead)
+                    
+                    if upcoming:
+                        for item in upcoming:
+                            plan = item.get("plan", {})
+                            plan_id = plan.get("id")
+                            
+                            if plan_id:
+                                # Get distribution list for the plan
+                                distribution_list = await bcp_repo.list_distribution_list(plan_id)
+                                
+                                # Create notification
+                                message = f"Upcoming BCP plan review scheduled for {item['review_date'].strftime('%Y-%m-%d %H:%M')}"
+                                if item.get("reason"):
+                                    message += f" - {item['reason']}"
+                                
+                                # Create notification for all users (could be refined to specific users)
+                                await notifications_repo.create_notification(
+                                    event_type="bcp_review_reminder",
+                                    message=message,
+                                    user_id=None,  # Broadcast to all users
+                                    metadata={
+                                        "plan_id": plan_id,
+                                        "plan_title": plan.get("title"),
+                                        "review_id": item["id"],
+                                        "review_date": item["review_date"].isoformat(),
+                                        "reason": item.get("reason"),
+                                    }
+                                )
+                        
+                        details = json.dumps(
+                            {"upcoming_review_count": len(upcoming), "days_ahead": days_ahead},
+                            default=str
+                        )
+                        log_info("BCP review reminders sent", count=len(upcoming))
+                    else:
+                        status = "skipped"
+                        details = f"No upcoming reviews in next {days_ahead} days"
+                        log_info("No upcoming BCP reviews to notify", days_ahead=days_ahead)
                 else:
                     status = "skipped"
                     details = "No handler registered for command"
