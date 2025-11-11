@@ -251,7 +251,7 @@
     </div>
     <form action="/bcp/emergency-kit" method="post" class="modal-body">
       <div class="form-group">
-        <label for="create_category" class="form-label">Category *</label>
+        <label for="create_category" class="form-label required">Category</label>
         <select id="create_category" name="category" class="form-select" required>
           <option value="Document" {% if active_tab == 'documents' %}selected{% endif %}>Document</option>
           <option value="Equipment" {% if active_tab == 'equipment' %}selected{% endif %}>Equipment</option>
@@ -259,7 +259,7 @@
       </div>
 
       <div class="form-group">
-        <label for="create_name" class="form-label">Name *</label>
+        <label for="create_name" class="form-label required">Name</label>
         <input type="text" id="create_name" name="name" class="form-input" required>
       </div>
 
@@ -289,7 +289,7 @@
     </div>
     <form id="editItemForm" method="post" class="modal-body">
       <div class="form-group">
-        <label for="edit_category" class="form-label">Category *</label>
+        <label for="edit_category" class="form-label required">Category</label>
         <select id="edit_category" name="category" class="form-select" required>
           <option value="Document">Document</option>
           <option value="Equipment">Equipment</option>
@@ -297,7 +297,7 @@
       </div>
 
       <div class="form-group">
-        <label for="edit_name" class="form-label">Name *</label>
+        <label for="edit_name" class="form-label required">Name</label>
         <input type="text" id="edit_name" name="name" class="form-input" required>
       </div>
 

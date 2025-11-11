@@ -13,6 +13,13 @@
     {% if csrf_token %}
     <meta name="csrf-token" content="{{ csrf_token }}" />
     {% endif %}
+    <style>
+      .form-label.required::after,
+      label.required::after {
+        content: ' *';
+        color: #dc2626;
+      }
+    </style>
     {% block styles %}{% endblock %}
     {% block extra_head %}{% endblock %}
   </head>

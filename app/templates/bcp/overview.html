@@ -246,7 +246,7 @@
       <input type="hidden" name="_csrf" value="{{ csrf_token }}">
       <div class="modal-body">
         <div class="form-group">
-          <label for="title" class="form-label">Title</label>
+          <label for="title" class="form-label required">Title</label>
           <input type="text" id="title" name="title" class="form-input" value="{{ plan.title }}" required>
         </div>
 
@@ -279,7 +279,7 @@
       <input type="hidden" name="_csrf" value="{{ csrf_token }}">
       <div class="modal-body">
         <div class="form-group">
-          <label for="objective_text" class="form-label">Objective</label>
+          <label for="objective_text" class="form-label required">Objective</label>
           <textarea id="objective_text" name="objective_text" class="form-input" rows="3" required></textarea>
         </div>
       </div>
@@ -302,12 +302,12 @@
       <input type="hidden" name="_csrf" value="{{ csrf_token }}">
       <div class="modal-body">
         <div class="form-group">
-          <label for="copy_number" class="form-label">Copy #</label>
+          <label for="copy_number" class="form-label required">Copy #</label>
           <input type="text" id="copy_number" name="copy_number" class="form-input" required>
         </div>
 
         <div class="form-group">
-          <label for="name" class="form-label">Name</label>
+          <label for="name" class="form-label required">Name</label>
           <input type="text" id="name" name="name" class="form-input" required>
         </div>
 
