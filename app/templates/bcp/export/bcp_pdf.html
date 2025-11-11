@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ plan.title }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2.5cm 2cm 3cm 2cm;
+            @bottom-center {
+                content: "Adapted from the Business Queensland Business continuity plan – Template (CC BY 4.0)";
+                font-size: 8pt;
+                color: #666;
+                font-style: italic;
+            }
+            @bottom-right {
+                content: "Page " counter(page);
+                font-size: 9pt;
+                color: #666;
+            }
+        }
+        body {
+            font-family: "Calibri", "Arial", sans-serif;
+            font-size: 11pt;
+            line-height: 1.5;
+            color: #000;
+        }
+        h1 {
+            font-size: 18pt;
+            font-weight: bold;
+            color: #003366;
+            border-bottom: 2px solid #003366;
+            padding-bottom: 0.3em;
+            margin-top: 1.2em;
+            margin-bottom: 0.8em;
+            page-break-after: avoid;
+        }
+        h2 {
+            font-size: 14pt;
+            font-weight: bold;
+            color: #0066cc;
+            margin-top: 1em;
+            margin-bottom: 0.5em;
+            page-break-after: avoid;
+        }
+        h3 {
+            font-size: 12pt;
+            font-weight: bold;
+            color: #0066cc;
+            margin-top: 0.8em;
+            margin-bottom: 0.4em;
+            page-break-after: avoid;
+        }
+        .title-page {
+            text-align: center;
+            margin-top: 8cm;
+            page-break-after: always;
+        }
+        .title-page h1 {
+            font-size: 24pt;
+            border: none;
+            margin-bottom: 1.5em;
+        }
+        .title-page .subtitle {
+            font-size: 14pt;
+            color: #666;
+            margin-bottom: 0.5em;
+        }
+        .title-page .meta {
+            font-size: 12pt;
+            margin-top: 3em;
+            line-height: 1.8;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1em 0;
+            page-break-inside: avoid;
+        }
+        table, th, td {
+            border: 1px solid #ccc;
+        }
+        th {
+            background-color: #003366;
+            color: white;
+            padding: 8px;
+            text-align: left;
+            font-weight: bold;
+        }
+        td {
+            padding: 6px 8px;
+            vertical-align: top;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .section {
+            page-break-inside: avoid;
+            margin-bottom: 1.5em;
+        }
+        .legend {
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            padding: 1em;
+            margin: 1em 0;
+        }
+        .legend-grid {
+            display: table;
+            width: 100%;
+            margin-top: 0.5em;
+        }
+        .legend-row {
+            display: table-row;
+        }
+        .legend-cell {
+            display: table-cell;
+            padding: 0.3em 0.5em;
+            border: 1px solid #ddd;
+        }
+        .legend-header {
+            font-weight: bold;
+            background-color: #e0e0e0;
+        }
+        .severity-low {
+            background-color: #90EE90;
+        }
+        .severity-medium {
+            background-color: #FFD700;
+        }
+        .severity-high {
+            background-color: #FFA500;
+        }
+        .severity-critical {
+            background-color: #FF6347;
+        }
+        ul, ol {
+            margin: 0.5em 0;
+            padding-left: 2em;
+        }
+        li {
+            margin: 0.3em 0;
+        }
+        .event-log {
+            font-family: "Courier New", monospace;
+            font-size: 10pt;
+        }
+        .footer-note {
+            font-size: 9pt;
+            font-style: italic;
+            color: #666;
+            margin-top: 2em;
+            padding-top: 1em;
+            border-top: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <!-- Title Page -->
+    <div class="title-page">
+        <h1>{{ plan.title }}</h1>
+        <div class="subtitle">Business Continuity Plan</div>
+        {% if plan.version %}
+        <div class="subtitle">Version {{ plan.version }}</div>
+        {% endif %}
+        <div class="meta">
+            {% if plan.executive_summary %}
+            <p><strong>Executive Summary</strong></p>
+            <p>{{ plan.executive_summary }}</p>
+            {% endif %}
+            <p><strong>Last Updated:</strong> {{ plan.updated_at.strftime('%d %B %Y') if plan.updated_at else 'N/A' }}</p>
+            {% if plan.last_reviewed %}
+            <p><strong>Last Reviewed:</strong> {{ plan.last_reviewed.strftime('%d %B %Y') }}</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Section 1: Plan Overview -->
+    <h1>1. Plan Overview</h1>
+    
+    {% if plan.executive_summary %}
+    <div class="section">
+        <h2>Executive Summary</h2>
+        <p>{{ plan.executive_summary }}</p>
+    </div>
+    {% endif %}
+    
+    {% if objectives %}
+    <div class="section">
+        <h2>Objectives</h2>
+        <ol>
+        {% for obj in objectives %}
+            <li>{{ obj.objective_text }}</li>
+        {% endfor %}
+        </ol>
+    </div>
+    {% endif %}
+    
+    {% if distribution_list %}
+    <div class="section">
+        <h2>Distribution List</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Copy Number</th>
+                    <th>Name</th>
+                    <th>Location</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for entry in distribution_list %}
+                <tr>
+                    <td>{{ entry.copy_number }}</td>
+                    <td>{{ entry.name }}</td>
+                    <td>{{ entry.location or '-' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Section 2: Risk Management -->
+    <h1>2. Risk Management</h1>
+    
+    <div class="section">
+        <h2>Risk Assessment Legend</h2>
+        <div class="legend">
+            <h3>Likelihood Scale</h3>
+            <table>
+                <tr>
+                    <th>Rating</th>
+                    <th>Description</th>
+                </tr>
+                <tr><td>1 - Rare</td><td>May occur only in exceptional circumstances</td></tr>
+                <tr><td>2 - Unlikely</td><td>Could occur at some time</td></tr>
+                <tr><td>3 - Possible</td><td>Might occur at some time</td></tr>
+                <tr><td>4 - Likely</td><td>Will probably occur in most circumstances</td></tr>
+            </table>
+            
+            <h3>Impact Scale</h3>
+            <table>
+                <tr>
+                    <th>Rating</th>
+                    <th>Description</th>
+                </tr>
+                <tr><td>1 - Insignificant</td><td>Minor disruption, minimal impact</td></tr>
+                <tr><td>2 - Minor</td><td>Some disruption, manageable impact</td></tr>
+                <tr><td>3 - Moderate</td><td>Significant disruption, recovery required</td></tr>
+                <tr><td>4 - Major</td><td>Severe disruption, extensive recovery needed</td></tr>
+            </table>
+            
+            <h3>Risk Rating Matrix</h3>
+            <table>
+                <tr>
+                    <th>Likelihood ↓ / Impact →</th>
+                    <th>Insignificant (1)</th>
+                    <th>Minor (2)</th>
+                    <th>Moderate (3)</th>
+                    <th>Major (4)</th>
+                </tr>
+                <tr>
+                    <th>Likely (4)</th>
+                    <td class="severity-medium">Medium</td>
+                    <td class="severity-high">High</td>
+                    <td class="severity-high">High</td>
+                    <td class="severity-critical">Critical</td>
+                </tr>
+                <tr>
+                    <th>Possible (3)</th>
+                    <td class="severity-low">Low</td>
+                    <td class="severity-medium">Medium</td>
+                    <td class="severity-high">High</td>
+                    <td class="severity-critical">Critical</td>
+                </tr>
+                <tr>
+                    <th>Unlikely (2)</th>
+                    <td class="severity-low">Low</td>
+                    <td class="severity-low">Low</td>
+                    <td class="severity-medium">Medium</td>
+                    <td class="severity-high">High</td>
+                </tr>
+                <tr>
+                    <th>Rare (1)</th>
+                    <td class="severity-low">Low</td>
+                    <td class="severity-low">Low</td>
+                    <td class="severity-low">Low</td>
+                    <td class="severity-medium">Medium</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+    
+    {% if risks %}
+    <div class="section">
+        <h2>Risk Register</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Risk Description</th>
+                    <th>Likelihood</th>
+                    <th>Impact</th>
+                    <th>Rating</th>
+                    <th>Severity</th>
+                    <th>Preventative Actions</th>
+                    <th>Contingency Plans</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for risk in risks %}
+                <tr>
+                    <td>{{ risk.description }}</td>
+                    <td>{{ risk.likelihood }}</td>
+                    <td>{{ risk.impact }}</td>
+                    <td>{{ risk.rating }}</td>
+                    <td class="severity-{{ risk.severity.lower() }}">{{ risk.severity }}</td>
+                    <td>{{ risk.preventative_actions or '-' }}</td>
+                    <td>{{ risk.contingency_plans or '-' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    {% if insurance_policies %}
+    <div class="section">
+        <h2>Insurance Coverage</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Policy Type</th>
+                    <th>Coverage</th>
+                    <th>Exclusions</th>
+                    <th>Insurer & Contact</th>
+                    <th>Last Review</th>
+                    <th>Payment Terms</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for policy in insurance_policies %}
+                <tr>
+                    <td>{{ policy.type }}</td>
+                    <td>{{ policy.coverage or '-' }}</td>
+                    <td>{{ policy.exclusions or '-' }}</td>
+                    <td>{{ policy.insurer or '-' }}{% if policy.contact %}<br>{{ policy.contact }}{% endif %}</td>
+                    <td>{{ policy.last_review_date.strftime('%d/%m/%Y') if policy.last_review_date else '-' }}</td>
+                    <td>{{ policy.payment_terms or '-' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    {% if backup_items %}
+    <div class="section">
+        <h2>Data Backup Strategy</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Data for Backup</th>
+                    <th>Frequency</th>
+                    <th>Media/Service</th>
+                    <th>Responsible Person</th>
+                    <th>Procedure Steps</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for backup in backup_items %}
+                <tr>
+                    <td>{{ backup.data_scope }}</td>
+                    <td>{{ backup.frequency or '-' }}</td>
+                    <td>{{ backup.medium or '-' }}</td>
+                    <td>{{ backup.owner or '-' }}</td>
+                    <td>{{ backup.steps or '-' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Section 3: Business Impact Analysis -->
+    <h1>3. Business Impact Analysis (BIA)</h1>
+    
+    {% if critical_activities %}
+    <div class="section">
+        <h2>Critical Activity Details</h2>
+        {% for activity in critical_activities %}
+        <h3>{{ activity.name }}</h3>
+        {% if activity.description %}
+        <p><strong>Description:</strong> {{ activity.description }}</p>
+        {% endif %}
+        <p><strong>Priority:</strong> {{ activity.priority or 'Not specified' }} | <strong>Importance:</strong> {{ activity.importance or 'Not specified' }}</p>
+        {% if activity.impact %}
+        <p><strong>Recovery Time Objective (RTO):</strong> {{ activity.impact.rto_humanized if activity.impact.rto_humanized else (activity.impact.rto_hours|string + ' hours' if activity.impact.rto_hours is not none else 'Not specified') }}</p>
+        {% if activity.supplier_dependency %}
+        <p><strong>Supplier Dependency:</strong> {{ activity.supplier_dependency }}</p>
+        {% endif %}
+        
+        {% if activity.impact.losses_financial or activity.impact.losses_increased_costs or activity.impact.losses_staffing or activity.impact.losses_product_service or activity.impact.losses_reputation or activity.impact.fines or activity.impact.legal_liability %}
+        <p><strong>Impact Assessment:</strong></p>
+        <ul>
+        {% if activity.impact.losses_financial %}<li><strong>Financial Impact:</strong> {{ activity.impact.losses_financial }}</li>{% endif %}
+        {% if activity.impact.losses_increased_costs %}<li><strong>Increased Costs:</strong> {{ activity.impact.losses_increased_costs }}</li>{% endif %}
+        {% if activity.impact.losses_staffing %}<li><strong>Staffing Impact:</strong> {{ activity.impact.losses_staffing }}</li>{% endif %}
+        {% if activity.impact.losses_product_service %}<li><strong>Product/Service Impact:</strong> {{ activity.impact.losses_product_service }}</li>{% endif %}
+        {% if activity.impact.losses_reputation %}<li><strong>Reputation Impact:</strong> {{ activity.impact.losses_reputation }}</li>{% endif %}
+        {% if activity.impact.fines %}<li><strong>Fines/Penalties:</strong> {{ activity.impact.fines }}</li>{% endif %}
+        {% if activity.impact.legal_liability %}<li><strong>Legal Liability:</strong> {{ activity.impact.legal_liability }}</li>{% endif %}
+        </ul>
+        {% endif %}
+        
+        {% if activity.impact.losses_comments %}
+        <p><strong>Additional Comments:</strong> {{ activity.impact.losses_comments }}</p>
+        {% endif %}
+        {% endif %}
+        {% endfor %}
+    </div>
+    
+    <div class="section">
+        <h2>BIA Summary</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Critical Activity</th>
+                    <th>Priority</th>
+                    <th>Importance</th>
+                    <th>RTO</th>
+                    <th>Key Impacts</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for activity in critical_activities %}
+                <tr>
+                    <td>{{ activity.name }}</td>
+                    <td>{{ activity.priority or '-' }}</td>
+                    <td>{{ activity.importance or '-' }}</td>
+                    <td>{{ activity.impact.rto_humanized if activity.impact and activity.impact.rto_humanized else (activity.impact.rto_hours|string + ' hours' if activity.impact and activity.impact.rto_hours is not none else '-') }}</td>
+                    <td>
+                        {% if activity.impact %}
+                        {% if activity.impact.losses_financial %}Financial, {% endif %}
+                        {% if activity.impact.losses_reputation %}Reputation, {% endif %}
+                        {% if activity.impact.losses_product_service %}Service, {% endif %}
+                        {% if activity.impact.losses_staffing %}Staffing{% endif %}
+                        {% else %}-{% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Section 4: Incident Response -->
+    <h1>4. Incident Response</h1>
+    
+    {% if checklist_items %}
+    <div class="section">
+        <h2>Immediate Response Checklist</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">#</th>
+                    <th>Action</th>
+                    <th style="width: 20%;">Responsible</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for item in checklist_items %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ item.action }}</td>
+                    <td>{{ item.responsible or '-' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    {% if evacuation %}
+    <div class="section">
+        <h2>Evacuation Procedures</h2>
+        {% if evacuation.meeting_point %}
+        <p><strong>Assembly Point:</strong> {{ evacuation.meeting_point }}</p>
+        {% endif %}
+        {% if evacuation.notes %}
+        <p>{{ evacuation.notes }}</p>
+        {% endif %}
+        {% if not evacuation.meeting_point and not evacuation.notes %}
+        <p>Evacuation procedures should be documented here.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+    
+    {% if emergency_kit_documents or emergency_kit_equipment %}
+    <div class="section">
+        <h2>Emergency Kit</h2>
+        {% if emergency_kit_documents %}
+        <h3>Essential Documents</h3>
+        <ul>
+        {% for item in emergency_kit_documents %}
+            <li>{{ item.name }}{% if item.notes %} - {{ item.notes }}{% endif %}</li>
+        {% endfor %}
+        </ul>
+        {% endif %}
+        
+        {% if emergency_kit_equipment %}
+        <h3>Equipment & Supplies</h3>
+        <ul>
+        {% for item in emergency_kit_equipment %}
+            <li>{{ item.name }}{% if item.notes %} - {{ item.notes }}{% endif %}</li>
+        {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+    {% endif %}
+    
+    {% if roles %}
+    <div class="section">
+        <h2>Roles & Responsibilities</h2>
+        {% for role in roles %}
+        <h3>{{ role.title }}</h3>
+        {% if role.responsibilities %}
+        <p>{{ role.responsibilities }}</p>
+        {% endif %}
+        {% if role.assignments %}
+        <p><strong>Assigned to:</strong></p>
+        <ul>
+        {% for assignment in role.assignments %}
+            <li>{{ assignment.user_name }}{% if assignment.is_alternate %} (Alternate){% endif %}{% if assignment.contact_info %} - {{ assignment.contact_info }}{% endif %}</li>
+        {% endfor %}
+        </ul>
+        {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+    
+    {% if contacts %}
+    <div class="section">
+        <h2>Emergency Contacts</h2>
+        <h3>Internal Contacts</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Person/Organisation</th>
+                    <th>Responsibility</th>
+                    <th>Phone(s)</th>
+                    <th>Email</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for contact in contacts %}
+            {% if contact.kind == 'Internal' %}
+                <tr>
+                    <td>{{ contact.person_or_org }}</td>
+                    <td>{{ contact.responsibility_or_agency or '-' }}</td>
+                    <td>{{ contact.phones or '-' }}</td>
+                    <td>{{ contact.email or '-' }}</td>
+                </tr>
+            {% endif %}
+            {% endfor %}
+            </tbody>
+        </table>
+        
+        <h3>External Contacts & Agencies</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Organisation/Agency</th>
+                    <th>Service</th>
+                    <th>Phone(s)</th>
+                    <th>Email</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for contact in contacts %}
+            {% if contact.kind == 'External' %}
+                <tr>
+                    <td>{{ contact.person_or_org }}</td>
+                    <td>{{ contact.responsibility_or_agency or '-' }}</td>
+                    <td>{{ contact.phones or '-' }}</td>
+                    <td>{{ contact.email or '-' }}</td>
+                </tr>
+            {% endif %}
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    {% if event_log %}
+    <div class="section">
+        <h2>Event Log</h2>
+        <p><em>Last {{ event_log|length }} entries (most recent first)</em></p>
+        <table class="event-log">
+            <thead>
+                <tr>
+                    <th style="width: 18%;">Date/Time</th>
+                    <th style="width: 8%;">Initials</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for entry in event_log %}
+                <tr>
+                    <td>{{ entry.happened_at.strftime('%Y-%m-%d %H:%M') if entry.happened_at else '-' }}</td>
+                    <td>{{ entry.initials or '-' }}</td>
+                    <td>{{ entry.notes }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Section 5: Recovery -->
+    <h1>5. Recovery</h1>
+    
+    {% if recovery_actions %}
+    <div class="section">
+        <h2>Recovery Actions</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Action</th>
+                    <th>Critical Activity</th>
+                    <th>Resources/Outcomes</th>
+                    <th>RTO</th>
+                    <th>Owner</th>
+                    <th>Due Date</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for action in recovery_actions %}
+                <tr>
+                    <td>{{ action.action }}</td>
+                    <td>{{ action.activity_name or '-' }}</td>
+                    <td>{{ action.resources or '-' }}</td>
+                    <td>{{ action.rto_humanized or '-' }}</td>
+                    <td>{{ action.owner_name or '-' }}</td>
+                    <td>{{ action.due_date.strftime('%d/%m/%Y') if action.due_date else '-' }}</td>
+                    <td>{{ 'Complete' if action.completed_at else 'Pending' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    {% if crisis_recovery_checklist %}
+    <div class="section">
+        <h2>Crisis & Recovery Checklist</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">#</th>
+                    <th>Action</th>
+                    <th style="width: 20%;">Responsible</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for item in crisis_recovery_checklist %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ item.action }}</td>
+                    <td>{{ item.responsible or '-' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    {% if recovery_contacts %}
+    <div class="section">
+        <h2>Recovery Contacts</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Organisation</th>
+                    <th>Contact Person</th>
+                    <th>Title</th>
+                    <th>Phone/Mobile</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for contact in recovery_contacts %}
+                <tr>
+                    <td>{{ contact.org_name }}</td>
+                    <td>{{ contact.contact_name or '-' }}</td>
+                    <td>{{ contact.title or '-' }}</td>
+                    <td>{{ contact.phone or '-' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    {% if insurance_claims %}
+    <div class="section">
+        <h2>Insurance Claims</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Insurer</th>
+                    <th>Date</th>
+                    <th>Claim Details</th>
+                    <th>Follow-up Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for claim in insurance_claims %}
+                <tr>
+                    <td>{{ claim.insurer }}</td>
+                    <td>{{ claim.claim_date.strftime('%d/%m/%Y') if claim.claim_date else '-' }}</td>
+                    <td>{{ claim.details or '-' }}</td>
+                    <td>{{ claim.follow_up_actions or '-' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    {% if market_changes %}
+    <div class="section">
+        <h2>Market Assessment</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Market Change</th>
+                    <th>Impact to Business</th>
+                    <th>Business Options</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for change in market_changes %}
+                <tr>
+                    <td>{{ change.change }}</td>
+                    <td>{{ change.impact or '-' }}</td>
+                    <td>{{ change.options or '-' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    <div class="section">
+        <h2>Staff Wellbeing Support</h2>
+        <p>During and after a business disruption, staff wellbeing is a priority. The following resources are available:</p>
+        <ul>
+            <li><strong>Employee Assistance Program (EAP):</strong> Confidential counseling services</li>
+            <li><strong>Beyond Blue:</strong> 1300 22 4636 - 24/7 support for anxiety and depression</li>
+            <li><strong>Lifeline:</strong> 13 11 14 - 24-hour crisis support</li>
+            <li><strong>1800RESPECT:</strong> 1800 737 732 - Family violence counselling service</li>
+        </ul>
+        <p>Managers should regularly check in with team members and facilitate access to support services as needed.</p>
+    </div>
+
+    <!-- Section 6: Rehearse, Maintain & Review -->
+    <h1>6. Rehearse, Maintain & Review</h1>
+    
+    {% if training_items %}
+    <div class="section">
+        <h2>Training Schedule</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Training Date</th>
+                    <th>Training Type</th>
+                    <th>Comments</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for item in training_items %}
+                <tr>
+                    <td>{{ item.training_date.strftime('%d/%m/%Y') if item.training_date else '-' }}</td>
+                    <td>{{ item.training_type or '-' }}</td>
+                    <td>{{ item.comments or '-' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    {% if review_items %}
+    <div class="section">
+        <h2>Review Schedule</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Review Date</th>
+                    <th>Reason</th>
+                    <th>Changes Made</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for item in review_items %}
+                <tr>
+                    <td>{{ item.review_date.strftime('%d/%m/%Y') if item.review_date else '-' }}</td>
+                    <td>{{ item.reason or '-' }}</td>
+                    <td>{{ item.changes_made or '-' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    <div class="section">
+        <p><strong>Review Frequency:</strong> This Business Continuity Plan should be reviewed at least annually or following any significant incident or business change.</p>
+        <p><strong>Testing & Rehearsal:</strong> Regular testing and rehearsal exercises should be conducted to ensure all staff are familiar with procedures and that the plan remains effective.</p>
+    </div>
+
+    <!-- Footer Note -->
+    <div class="footer-note">
+        <p>Adapted from the Business Queensland <em>Business continuity plan – Template</em> (CC BY 4.0).</p>
+        <p>This document is for business continuity planning purposes. It should be regularly reviewed and updated to reflect current business operations and risks.</p>
+    </div>
+</body>
+</html>
