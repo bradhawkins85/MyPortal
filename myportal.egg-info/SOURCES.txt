@@ -169,6 +169,7 @@ app/services/background.py
 app/services/bc_export_service.py
 app/services/bc_file_validation.py
 app/services/bc_services.py
+app/services/bcp_seeding.py
 app/services/bcp_template.py
 app/services/call_recordings.py
 app/services/change_log.py
@@ -281,6 +282,7 @@ tests/test_bcp_risk_routes.py
 tests/test_bcp_template.py
 tests/test_bcp_template_api.py
 tests/test_bcp_template_bootstrap.py
+tests/test_bcp_ui_accessibility.py
 tests/test_business_continuity_plans.py
 tests/test_cache_control_middleware.py
 tests/test_call_recordings.py
