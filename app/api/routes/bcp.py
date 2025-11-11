@@ -2840,6 +2840,17 @@ async def create_recovery_action_endpoint(
         critical_activity_id if critical_activity_id else None,
     )
     
+    
+    # Audit logging
+    await audit.log_action(
+        action="bcp.recovery_action.create",
+        user_id=user["id"],
+        entity_type="recovery_action",
+        entity_id=None,
+        metadata={"company_id": company_id},
+        request=request,
+    )
+    
     return RedirectResponse(
         url="/bcp/recovery?success=" + quote("Recovery action created successfully"),
         status_code=status.HTTP_303_SEE_OTHER,
@@ -2889,6 +2900,17 @@ async def update_recovery_action_endpoint(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recovery action not found")
     
+    
+    # Audit logging
+    await audit.log_action(
+        action="bcp.recovery_action.update",
+        user_id=user["id"],
+        entity_type="recovery_action",
+        entity_id=action_id,
+        metadata={"company_id": company_id},
+        request=request,
+    )
+    
     return RedirectResponse(
         url="/bcp/recovery?success=" + quote("Recovery action updated successfully"),
         status_code=status.HTTP_303_SEE_OTHER,
@@ -2909,6 +2931,17 @@ async def mark_recovery_action_complete_endpoint(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recovery action not found")
     
+    
+    # Audit logging
+    await audit.log_action(
+        action="bcp.recovery_action.complete",
+        user_id=user["id"],
+        entity_type="recovery_action",
+        entity_id=action_id,
+        metadata={"company_id": company_id},
+        request=request,
+    )
+    
     return RedirectResponse(
         url="/bcp/recovery?success=" + quote("Recovery action marked as complete"),
         status_code=status.HTTP_303_SEE_OTHER,
@@ -2926,6 +2959,17 @@ async def delete_recovery_action_endpoint(
     deleted = await bcp_repo.delete_recovery_action(action_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recovery action not found")
+    
+    
+    # Audit logging
+    await audit.log_action(
+        action="bcp.recovery_action.delete",
+        user_id=user["id"],
+        entity_type="recovery_action",
+        entity_id=action_id,
+        metadata={"company_id": company_id},
+        request=request,
+    )
     
     return RedirectResponse(
         url="/bcp/recovery?success=" + quote("Recovery action deleted successfully"),
