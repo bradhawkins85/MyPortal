@@ -115,7 +115,10 @@
           <div class="heatmap-label">1 - Low</div>
         </div>
         <div>
-          <div class="heatmap-grid">
+          <div class="heatmap-grid" id="risk-heatmap" 
+               hx-get="/bcp/risks/heatmap" 
+               hx-trigger="riskUpdated from:body"
+               hx-swap="innerHTML">
             {% for likelihood in [4, 3, 2, 1] %}
               {% for impact in [1, 2, 3, 4] %}
                 {% set cell_key = likelihood|string + "," + impact|string %}
@@ -624,5 +627,27 @@ function editRisk(id, description, likelihood, impact, preventative_actions, con
   }
 }
 </style>
+
+<script>
+// Trigger heatmap update on page load if success message is present
+document.addEventListener('DOMContentLoaded', function() {
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.has('success')) {
+    // Trigger HTMX update event for heatmap
+    document.body.dispatchEvent(new CustomEvent('riskUpdated'));
+  }
+});
+
+// Function to edit a risk
+function editRisk(id, description, likelihood, impact, preventativeActions, contingencyPlans) {
+  document.getElementById('editRiskForm').action = '/bcp/risks/' + id + '/update';
+  document.getElementById('edit_description').value = description;
+  document.getElementById('edit_likelihood').value = likelihood;
+  document.getElementById('edit_impact').value = impact;
+  document.getElementById('edit_preventative_actions').value = preventativeActions || '';
+  document.getElementById('edit_contingency_plans').value = contingencyPlans || '';
+  document.getElementById('editRiskModal').showModal();
+}
+</script>
 {% endif %}
 {% endblock %}
