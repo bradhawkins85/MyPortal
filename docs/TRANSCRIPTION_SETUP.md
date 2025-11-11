@@ -54,7 +54,7 @@ Recordings progress through these statuses:
 ```
 pending → queued → processing → completed
                               ↓
-                           failed (can be retried)
+                           failed (manual retry required)
 ```
 
 ### Workflow
@@ -74,14 +74,14 @@ pending → queued → processing → completed
    - Updates status to "processing"
    - Calls WhisperX API with the audio file
    - Updates status to "completed" or "failed" based on result
-   - If no queued recordings exist, checks for "failed" recordings to retry
+   - Failed recordings remain in "failed" status and require manual retry
 
 ### Key Features
 
 - **No Duplicates**: Once queued, a recording won't be re-queued
 - **One at a Time**: Only one transcription is processed per scheduled run
 - **Completed Protection**: Recordings with status "completed" are never re-sent
-- **Automatic Retries**: Failed recordings are automatically retried
+- **Manual Retry for Failures**: Failed recordings must be manually reset to "queued" or "pending" to retry
 - **Concurrent Safety**: "processing" status prevents multiple workers from processing the same file
 
 ## Configuration Example
@@ -149,7 +149,7 @@ GROUP BY transcription_status;
 
 ### Failed Transcriptions
 
-Failed recordings will be automatically retried on the next process run. To manually retry:
+Failed recordings will NOT be automatically retried. To manually retry:
 
 1. Update the recording status back to "queued" or "pending"
 2. Wait for the next scheduled run
@@ -161,6 +161,14 @@ curl -X PUT "http://your-portal/api/call-recordings/{recording_id}" \
   -H "Content-Type: application/json" \
   -d '{"transcriptionStatus": "queued"}'
 ```
+
+**Why Manual Retry?** Automatic retries could cause repeated failures if there's an issue with:
+- The audio file format
+- Network connectivity
+- WhisperX service availability
+- API authentication
+
+Manual retry allows you to investigate and fix the underlying issue before retrying.
 
 ## Performance Tuning
 

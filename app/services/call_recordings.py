@@ -525,8 +525,9 @@ async def process_queued_transcriptions() -> dict[str, Any]:
     3. Updates the status based on success or failure
     4. Returns immediately after processing one recording
     
-    Failed recordings are marked as 'failed' and can be retried by
-    manually updating their status back to 'pending' or 'queued'.
+    Failed recordings are marked as 'failed' and will NOT be retried
+    automatically. They can be retried by manually updating their status
+    back to 'pending' or 'queued'.
     
     Returns:
         Dictionary with processing results
@@ -538,25 +539,14 @@ async def process_queued_transcriptions() -> dict[str, Any]:
     )
     
     if not queued_recordings:
-        # Also check for failed recordings that should be retried
-        failed_recordings = await call_recordings_repo.list_call_recordings(
-            transcription_status="failed",
-            limit=1,
-        )
-        
-        if not failed_recordings:
-            logger.debug("No queued or failed recordings to process")
-            return {
-                "status": "ok",
-                "processed": 0,
-                "details": "No recordings to process",
-            }
-        
-        recording = failed_recordings[0]
-        logger.info(f"Retrying failed recording {recording['id']}")
-    else:
-        recording = queued_recordings[0]
+        logger.debug("No queued recordings to process")
+        return {
+            "status": "ok",
+            "processed": 0,
+            "details": "No recordings to process",
+        }
     
+    recording = queued_recordings[0]
     recording_id = recording["id"]
     
     try:
