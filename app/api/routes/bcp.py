@@ -1011,26 +1011,83 @@ async def seed_example_role(request: Request):
 
 @router.get("/export", response_class=HTMLResponse, include_in_schema=False)
 async def bcp_export(request: Request):
-    """BCP Export page (stub)."""
-    user, company_id = await _require_bcp_view(request)
-    
+    """BCP Export landing page with download options."""
+    user, company_id = await _require_bcp_export(request)
+
     from app.main import _build_base_context
     from app.core.config import get_templates_config
     from fastapi.templating import Jinja2Templates
-    
+
     templates_config = get_templates_config()
     templates = Jinja2Templates(directory=str(templates_config.template_path))
-    
+
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+
+    default_event_log_limit = 100
+    export_links: list[dict[str, Any]] = [
+        {
+            "title": "Risk Register (CSV)",
+            "description": "Download all identified risks with likelihood, impact and mitigation details.",
+            "href": "/bcp/risks/export",
+        },
+        {
+            "title": "Insurance Policies (CSV)",
+            "description": "Export insurance coverage details including policy numbers and renewal dates.",
+            "href": "/bcp/insurance/export",
+        },
+        {
+            "title": "Data Backups (CSV)",
+            "description": "Review off-site storage locations, frequency and retention of data backups.",
+            "href": "/bcp/backups/export",
+        },
+        {
+            "title": "Business Impact Analysis (CSV)",
+            "description": "Download critical activity rankings, recovery objectives and resource requirements.",
+            "href": "/bcp/bia/export",
+        },
+        {
+            "title": "Incident Event Log (CSV)",
+            "description": "Capture a timeline of incident actions for auditing and retrospectives.",
+            "href": "/bcp/incident/event-log/export",
+        },
+        {
+            "title": "Recovery Actions (CSV)",
+            "description": "Export task lists that guide restoration of services following an incident.",
+            "href": "/bcp/recovery/export",
+        },
+        {
+            "title": "Recovery Contacts (CSV)",
+            "description": "Download key supplier and partner contacts for recovery coordination.",
+            "href": "/bcp/recovery-contacts/export",
+        },
+        {
+            "title": "Insurance Claims (CSV)",
+            "description": "Track claim status, excess amounts and insurer contact information.",
+            "href": "/bcp/insurance-claims/export",
+        },
+        {
+            "title": "Market Changes (CSV)",
+            "description": "Review market intelligence gathered during incidents to inform decision making.",
+            "href": "/bcp/market-changes/export",
+        },
+    ]
+
     context = await _build_base_context(
         request,
         user,
         extra={
             "title": "Export Plan",
             "page_type": "export",
+            "plan": plan,
+            "default_event_log_limit": default_event_log_limit,
+            "max_event_log_limit": 500,
+            "export_links": export_links,
         },
     )
-    
-    return templates.TemplateResponse("bcp/stub.html", context)
+
+    return templates.TemplateResponse("bcp/export.html", context)
 
 
 @router.get("/export/pdf", include_in_schema=True)
