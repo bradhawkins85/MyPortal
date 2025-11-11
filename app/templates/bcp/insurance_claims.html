@@ -1,7 +1,7 @@
-{% extends "base.html" %}
+{% extends "bcp/layout.html" %}
 
-{% block content %}
-<div class="page-container">
+{% block bcp_content %}
+<div class="bcp-page page-container">
   <!-- Success/Error Messages -->
   {% if request.query_params.get('success') %}
     <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
