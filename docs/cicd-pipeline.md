@@ -90,16 +90,14 @@ None - CI workflow runs without secrets
 - Switches traffic back to previous version
 - Notifies team of rollback
 
-### Deployment Secrets
-
-**Note:** The deployment steps in the workflow are currently placeholders. The workflow will run successfully even if these secrets are not configured, but will display warnings. Configure these secrets when implementing actual deployment infrastructure.
+### Required Secrets
 
 #### Staging Environment
-- `STAGING_DB_HOST` - Database host for staging (optional until deployment is implemented)
+- `STAGING_DB_HOST` - Database host for staging
 - `STAGING_URL` - Staging environment URL (optional, for smoke tests)
 
 #### Production Environment
-- `PRODUCTION_DB_HOST` - Database host for production (optional until deployment is implemented)
+- `PRODUCTION_DB_HOST` - Database host for production
 - `PRODUCTION_URL` - Production environment URL (optional, for smoke tests)
 
 ### Environment Protection Rules
