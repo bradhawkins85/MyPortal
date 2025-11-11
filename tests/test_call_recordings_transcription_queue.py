@@ -236,47 +236,29 @@ async def test_process_queued_transcriptions_handles_no_queued_recordings(monkey
 
 
 @pytest.mark.anyio
-async def test_process_queued_transcriptions_retries_failed_recordings(monkeypatch):
-    """Test that failed recordings are retried."""
+async def test_process_queued_transcriptions_does_not_retry_failed_recordings(monkeypatch):
+    """Test that failed recordings are NOT automatically retried during scheduled tasks."""
     repo = _RecordingsRepositoryStub()
-    modules_repo = _ModulesRepositoryStub()
     
     # Add a failed recording (and no queued ones)
     failed_recording = repo.add_recording(transcription_status="failed")
     
-    # Add WhisperX module
-    modules_repo.add_module("whisperx", enabled=True, settings={
-        "base_url": "http://whisperx.test",
-    })
-    
-    # Mock the transcription service call
-    async def mock_transcribe(recording_id, *, force=False):
-        recording = repo.recordings[recording_id]
-        recording["transcription"] = "Successful retry"
-        recording["transcription_status"] = "completed"
-        return recording
-    
-    # Patch the repositories and transcribe function
+    # Patch the repository
     monkeypatch.setattr(
         "app.services.call_recordings.call_recordings_repo",
         repo,
-    )
-    monkeypatch.setattr(
-        "app.services.call_recordings.modules_repo",
-        modules_repo,
-    )
-    monkeypatch.setattr(
-        "app.services.call_recordings.transcribe_recording",
-        mock_transcribe,
     )
     
     # Run the processing function
     result = await call_recordings_service.process_queued_transcriptions()
     
-    # Verify the failed recording was retried
+    # Verify the failed recording was NOT retried
     assert result["status"] == "ok"
-    assert result["processed"] == 1
-    assert result["recording_id"] == failed_recording["id"]
+    assert result["processed"] == 0
+    assert result["details"] == "No recordings to process"
+    
+    # Verify the failed recording is still in failed status
+    assert failed_recording["transcription_status"] == "failed"
 
 
 @pytest.mark.anyio
