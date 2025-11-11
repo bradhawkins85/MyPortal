@@ -935,7 +935,7 @@ async def list_critical_activities(plan_id: int, sort_by: str = "importance") ->
     # Determine sort order
     order_clause = "ORDER BY "
     if sort_by == "importance":
-        order_clause += "ca.importance ASC NULLS LAST, ca.name"
+        order_clause += "ca.importance IS NULL, ca.importance ASC, ca.name"
     elif sort_by == "priority":
         order_clause += "FIELD(ca.priority, 'High', 'Medium', 'Low'), ca.name"
     else:  # name
@@ -2443,7 +2443,7 @@ async def list_recovery_actions(
         FROM bcp_recovery_action ra
         LEFT JOIN bcp_critical_activity ca ON ca.id = ra.critical_activity_id
         WHERE {where_clause}
-        ORDER BY ra.due_date ASC NULLS LAST, ra.id
+        ORDER BY ra.due_date IS NULL, ra.due_date ASC, ra.id
     """
     
     async with db.connection() as conn:
