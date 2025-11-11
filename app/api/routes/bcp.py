@@ -492,12 +492,22 @@ async def bcp_contacts(request: Request):
 
 @router.get("/schedules", response_class=HTMLResponse, include_in_schema=False)
 async def bcp_schedules(request: Request):
-    """BCP Schedules page (stub)."""
+    """BCP Training & Review Schedules page."""
     user, company_id = await _require_bcp_view(request)
     
     from app.main import _build_base_context
     from app.core.config import get_templates_config
     from fastapi.templating import Jinja2Templates
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    # Get training and review items
+    training_items = await bcp_repo.list_training_items(plan["id"])
+    review_items = await bcp_repo.list_review_items(plan["id"])
     
     templates_config = get_templates_config()
     templates = Jinja2Templates(directory=str(templates_config.template_path))
@@ -506,12 +516,199 @@ async def bcp_schedules(request: Request):
         request,
         user,
         extra={
-            "title": "Review Schedules",
-            "page_type": "schedules",
+            "title": "Training & Review Schedules",
+            "plan": plan,
+            "training_items": training_items,
+            "review_items": review_items,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
         },
     )
     
-    return templates.TemplateResponse("bcp/stub.html", context)
+    return templates.TemplateResponse("bcp/schedules.html", context)
+
+
+@router.post("/training", include_in_schema=False)
+async def create_training_item_endpoint(
+    request: Request,
+    training_date: str = Form(...),
+    training_type: str = Form(None),
+    comments: str = Form(None),
+):
+    """Create a new training item."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Parse training date
+    try:
+        from datetime import datetime
+        training_date_obj = datetime.fromisoformat(training_date)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid training date format"
+        )
+    
+    await bcp_repo.create_training_item(
+        plan["id"],
+        training_date_obj,
+        training_type if training_type else None,
+        comments if comments else None,
+    )
+    
+    return RedirectResponse(
+        url="/bcp/schedules?success=" + quote("Training scheduled successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/training/{training_id}/update", include_in_schema=False)
+async def update_training_item_endpoint(
+    request: Request,
+    training_id: int,
+    training_date: str = Form(...),
+    training_type: str = Form(None),
+    comments: str = Form(None),
+):
+    """Update a training item."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    # Parse training date
+    try:
+        from datetime import datetime
+        training_date_obj = datetime.fromisoformat(training_date)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid training date format"
+        )
+    
+    updated = await bcp_repo.update_training_item(
+        training_id,
+        training_date=training_date_obj,
+        training_type=training_type if training_type else None,
+        comments=comments if comments else None,
+    )
+    
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training item not found")
+    
+    return RedirectResponse(
+        url="/bcp/schedules?success=" + quote("Training updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/training/{training_id}/delete", include_in_schema=False)
+async def delete_training_item_endpoint(
+    request: Request,
+    training_id: int,
+):
+    """Delete a training item."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    deleted = await bcp_repo.delete_training_item(training_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training item not found")
+    
+    return RedirectResponse(
+        url="/bcp/schedules?success=" + quote("Training deleted successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/review", include_in_schema=False)
+async def create_review_item_endpoint(
+    request: Request,
+    review_date: str = Form(...),
+    reason: str = Form(None),
+    changes_made: str = Form(None),
+):
+    """Create a new review item."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Parse review date
+    try:
+        from datetime import datetime
+        review_date_obj = datetime.fromisoformat(review_date)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid review date format"
+        )
+    
+    await bcp_repo.create_review_item(
+        plan["id"],
+        review_date_obj,
+        reason if reason else None,
+        changes_made if changes_made else None,
+    )
+    
+    return RedirectResponse(
+        url="/bcp/schedules?success=" + quote("Review scheduled successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/review/{review_id}/update", include_in_schema=False)
+async def update_review_item_endpoint(
+    request: Request,
+    review_id: int,
+    review_date: str = Form(...),
+    reason: str = Form(None),
+    changes_made: str = Form(None),
+):
+    """Update a review item."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    # Parse review date
+    try:
+        from datetime import datetime
+        review_date_obj = datetime.fromisoformat(review_date)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid review date format"
+        )
+    
+    updated = await bcp_repo.update_review_item(
+        review_id,
+        review_date=review_date_obj,
+        reason=reason if reason else None,
+        changes_made=changes_made if changes_made else None,
+    )
+    
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review item not found")
+    
+    return RedirectResponse(
+        url="/bcp/schedules?success=" + quote("Review updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/review/{review_id}/delete", include_in_schema=False)
+async def delete_review_item_endpoint(
+    request: Request,
+    review_id: int,
+):
+    """Delete a review item."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    deleted = await bcp_repo.delete_review_item(review_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review item not found")
+    
+    return RedirectResponse(
+        url="/bcp/schedules?success=" + quote("Review deleted successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @router.get("/roles", response_class=HTMLResponse, include_in_schema=False)
