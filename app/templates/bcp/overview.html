@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 
+{% block styles %}
+<link rel="stylesheet" href="/static/css/bcp.css">
+{% endblock %}
+
 {% block content %}
 <div class="page-container">
   <!-- Success/Error Messages -->
@@ -324,109 +328,4 @@
   </div>
 </dialog>
 {% endif %}
-
-<style>
-.pprr-card {
-  display: block;
-  padding: 1.5rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 0.5rem;
-  text-decoration: none;
-  color: inherit;
-  transition: all 0.2s;
-}
-
-.pprr-card:hover {
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  transform: translateY(-2px);
-}
-
-.pprr-card-icon {
-  width: 64px;
-  height: 64px;
-  border-radius: 0.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  margin-bottom: 1rem;
-}
-
-.pprr-card-title {
-  font-size: 1.25rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-}
-
-.pprr-card-description {
-  color: #374151;
-  font-size: 0.875rem;
-}
-
-.link-card {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 1rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 0.5rem;
-  text-decoration: none;
-  color: inherit;
-  transition: all 0.2s;
-}
-
-.link-card:hover {
-  background: #f9fafb;
-}
-
-.modal {
-  border: none;
-  border-radius: 0.5rem;
-  padding: 0;
-  max-width: 500px;
-  width: 90%;
-}
-
-.modal::backdrop {
-  background: rgba(0, 0, 0, 0.5);
-}
-
-.modal-content {
-  padding: 0;
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.modal-header h3 {
-  margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-}
-
-.modal-header button {
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  cursor: pointer;
-  color: #374151;
-}
-
-.modal-body {
-  padding: 1.5rem;
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  padding: 1rem 1.5rem;
-  border-top: 1px solid #e5e7eb;
-}
-</style>
 {% endblock %}

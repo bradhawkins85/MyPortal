@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 
+{% block styles %}
+<link rel="stylesheet" href="/static/css/bcp.css">
+{% endblock %}
+
 {% block content %}
 <div class="page-container">
   <!-- Success/Error Messages -->
@@ -293,64 +297,6 @@
     </form>
   </div>
 </div>
-
-<style>
-.responsibilities-text {
-  white-space: pre-wrap;
-  line-height: 1.6;
-  padding: 0.75rem;
-  background: #f8f9fa;
-  border-radius: 0.25rem;
-  border: 1px solid #e9ecef;
-}
-
-.badge {
-  display: inline-block;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  border-radius: 0.25rem;
-}
-
-.badge-primary {
-  background: #0066cc;
-  color: white;
-}
-
-.badge-secondary {
-  background: #6c757d;
-  color: white;
-}
-
-.btn-icon {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0.25rem;
-  color: #6c757d;
-  transition: color 0.2s;
-}
-
-.btn-icon:hover {
-  color: #0066cc;
-}
-
-.btn-icon.btn-danger:hover {
-  color: #dc3545;
-}
-
-.help-text {
-  font-size: 0.875rem;
-  color: #6c757d;
-  margin-top: 0.25rem;
-}
-
-.card-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-</style>
-
 <script>
 function showAddRoleModal() {
   document.getElementById('addRoleModal').style.display = 'flex';

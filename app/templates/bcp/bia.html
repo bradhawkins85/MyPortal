@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 
+{% block styles %}
+<link rel="stylesheet" href="/static/css/bcp.css">
+{% endblock %}
+
 {% block content %}
 <div class="page-container">
   <!-- Success/Error Messages -->
@@ -174,96 +178,4 @@
     </div>
   </section>
 </div>
-
-<style>
-.sort-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.sort-controls label {
-  font-weight: 600;
-}
-
-.sort-controls select {
-  padding: 0.375rem 0.75rem;
-  border: 1px solid #ddd;
-  border-radius: 0.25rem;
-  background-color: white;
-}
-
-.badge {
-  display: inline-block;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  line-height: 1;
-  text-align: center;
-  white-space: nowrap;
-  vertical-align: baseline;
-  border-radius: 0.25rem;
-}
-
-.badge-high {
-  background-color: #dc3545;
-  color: white;
-}
-
-.badge-medium {
-  background-color: #ffc107;
-  color: #000;
-}
-
-.badge-low {
-  background-color: #28a745;
-  color: white;
-}
-
-.importance-badge {
-  display: inline-block;
-  width: 2rem;
-  height: 2rem;
-  line-height: 2rem;
-  border-radius: 50%;
-  text-align: center;
-  font-weight: 700;
-  font-size: 0.875rem;
-}
-
-.importance-1 {
-  background-color: #dc3545;
-  color: white;
-}
-
-.importance-2 {
-  background-color: #fd7e14;
-  color: white;
-}
-
-.importance-3 {
-  background-color: #ffc107;
-  color: #000;
-}
-
-.importance-4 {
-  background-color: #20c997;
-  color: white;
-}
-
-.importance-5 {
-  background-color: #28a745;
-  color: white;
-}
-
-.action-buttons {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.inline {
-  display: inline;
-}
-</style>
-
 {% endblock %}

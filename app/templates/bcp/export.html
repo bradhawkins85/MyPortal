@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 
+{% block styles %}
+<link rel="stylesheet" href="/static/css/bcp.css">
+{% endblock %}
+
 {% block content %}
 <div class="page-container">
   <section class="card">
@@ -78,132 +82,4 @@
   </section>
   {% endif %}
 </div>
-
-<style>
-.export-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 2rem;
-}
-
-@media (min-width: 900px) {
-  .export-layout {
-    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-    align-items: start;
-  }
-}
-
-.section-heading {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: 1rem;
-  color: #111827;
-}
-
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 1rem 2rem;
-  margin-bottom: 1.5rem;
-}
-
-.summary-grid dt {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #6b7280;
-  margin-bottom: 0.25rem;
-}
-
-.summary-grid dd {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: #111827;
-  margin: 0;
-}
-
-.export-form {
-  border: 1px solid #e5e7eb;
-  border-radius: 0.75rem;
-  padding: 1.5rem;
-  background-color: #f9fafb;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.export-form .form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.form-label {
-  font-weight: 600;
-  color: #374151;
-}
-
-.form-input {
-  border: 1px solid #d1d5db;
-  border-radius: 0.5rem;
-  padding: 0.65rem 0.75rem;
-  font-size: 1rem;
-}
-
-.form-input:focus {
-  outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
-
-.form-hint {
-  font-size: 0.85rem;
-  color: #6b7280;
-  margin: 0;
-}
-
-.attribution {
-  font-size: 0.75rem;
-  color: #9ca3af;
-  margin: 0;
-}
-
-.export-option {
-  border: 1px solid #e5e7eb;
-  border-radius: 0.75rem;
-  padding: 1.25rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  background-color: #ffffff;
-}
-
-.export-option h4 {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #111827;
-  margin: 0;
-}
-
-.export-option p {
-  font-size: 0.9rem;
-  color: #4b5563;
-  flex-grow: 1;
-  margin: 0;
-}
-
-.export-option .btn {
-  align-self: flex-start;
-}
-
-.btn-light {
-  background-color: #eef2ff;
-  color: #3730a3;
-  border: none;
-}
-
-.btn-light:hover {
-  background-color: #e0e7ff;
-}
-</style>
 {% endblock %}

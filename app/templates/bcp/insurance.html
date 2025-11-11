@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 
+{% block styles %}
+<link rel="stylesheet" href="/static/css/bcp.css">
+{% endblock %}
+
 {% block content %}
 <div class="page-container">
   <!-- Success/Error Messages -->
@@ -237,117 +241,6 @@
   </div>
 </dialog>
 {% endif %}
-
-<style>
-.help-card {
-  background: #f0f9ff;
-  border-left: 4px solid #3b82f6;
-}
-
-.help-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 1rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-  color: #1e40af;
-}
-
-.help-text {
-  margin: 0;
-  color: #1e40af;
-  font-size: 0.875rem;
-  line-height: 1.6;
-}
-
-.table-responsive {
-  overflow-x: auto;
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.table th,
-.table td {
-  padding: 0.75rem;
-  text-align: left;
-  border-bottom: 1px solid #e5e7eb;
-  vertical-align: top;
-}
-
-.table th {
-  background: #f9fafb;
-  font-weight: 600;
-  font-size: 0.875rem;
-  text-transform: uppercase;
-  color: #374151;
-}
-
-.table tbody tr:hover {
-  background: #f9fafb;
-}
-
-.action-buttons {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.modal {
-  border: none;
-  border-radius: 0.5rem;
-  padding: 0;
-  max-width: 600px;
-  width: 90%;
-}
-
-.modal::backdrop {
-  background: rgba(0, 0, 0, 0.5);
-}
-
-.modal-content {
-  padding: 0;
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.modal-header h3 {
-  margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-}
-
-.modal-header button {
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  cursor: pointer;
-  color: #374151;
-}
-
-.modal-body {
-  padding: 1.5rem;
-  max-height: 70vh;
-  overflow-y: auto;
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  padding: 1rem 1.5rem;
-  border-top: 1px solid #e5e7eb;
-}
-</style>
-
 <script>
 function openEditModal(id, type, coverage, exclusions, insurer, contact, lastReviewDate, paymentTerms) {
   document.getElementById('editPolicyForm').action = '/bcp/insurance/' + id + '/update';

@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 
+{% block styles %}
+<link rel="stylesheet" href="/static/css/bcp.css">
+{% endblock %}
+
 {% block content %}
 <div class="page-container">
   <section class="card">
@@ -35,32 +39,4 @@
     </div>
   </section>
 </div>
-
-<style>
-.placeholder-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 4rem 2rem;
-  text-align: center;
-}
-
-.placeholder-content svg {
-  margin-bottom: 1.5rem;
-}
-
-.placeholder-content h3 {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: #1f2937;
-  margin-bottom: 0.75rem;
-}
-
-.placeholder-content p {
-  color: #374151;
-  max-width: 600px;
-  margin-bottom: 0.5rem;
-}
-</style>
 {% endblock %}
