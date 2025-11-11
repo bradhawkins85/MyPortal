@@ -272,6 +272,7 @@ tests/test_bcp02_migration.py
 tests/test_bcp02_models.py
 tests/test_bcp_bia_repository.py
 tests/test_bcp_insurance_backup.py
+tests/test_bcp_pdf_export.py
 tests/test_bcp_repository.py
 tests/test_bcp_risk_repository.py
 tests/test_bcp_risk_routes.py
