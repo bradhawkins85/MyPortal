@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
+from fastapi import APIRouter, Form, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.api.dependencies.auth import get_current_session
@@ -29,12 +29,29 @@ def _check_bcp_enabled():
         )
 
 
-async def _require_bcp_view(request: Request, session: SessionData = Depends(get_current_session)) -> tuple[dict[str, Any], int | None]:
+async def _resolve_session(request: Request, session: SessionData | None) -> SessionData:
+    """Resolve the active session for the current request."""
+    if session is not None:
+        return session
+
+    cached: SessionData | None = getattr(request.state, "session", None)
+    if cached is not None:
+        return cached
+
+    return await get_current_session(request)
+
+
+async def _require_bcp_view(
+    request: Request,
+    session: SessionData | None = None,
+) -> tuple[dict[str, Any], int | None]:
     """Require BCP view permission."""
     _check_bcp_enabled()
-    
+
     from app.repositories import users as user_repo
-    
+
+    session = await _resolve_session(request, session)
+
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
@@ -56,12 +73,17 @@ async def _require_bcp_view(request: Request, session: SessionData = Depends(get
     return user, active_company_id
 
 
-async def _require_bcp_edit(request: Request, session: SessionData = Depends(get_current_session)) -> tuple[dict[str, Any], int]:
+async def _require_bcp_edit(
+    request: Request,
+    session: SessionData | None = None,
+) -> tuple[dict[str, Any], int]:
     """Require BCP edit permission."""
     _check_bcp_enabled()
-    
+
     from app.repositories import users as user_repo
-    
+
+    session = await _resolve_session(request, session)
+
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
@@ -85,12 +107,17 @@ async def _require_bcp_edit(request: Request, session: SessionData = Depends(get
     return user, active_company_id
 
 
-async def _require_bcp_incident_run(request: Request, session: SessionData = Depends(get_current_session)) -> tuple[dict[str, Any], int]:
+async def _require_bcp_incident_run(
+    request: Request,
+    session: SessionData | None = None,
+) -> tuple[dict[str, Any], int]:
     """Require BCP incident:run permission for incident operations."""
     _check_bcp_enabled()
-    
+
     from app.repositories import users as user_repo
-    
+
+    session = await _resolve_session(request, session)
+
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
@@ -114,12 +141,17 @@ async def _require_bcp_incident_run(request: Request, session: SessionData = Dep
     return user, active_company_id
 
 
-async def _require_bcp_export(request: Request, session: SessionData = Depends(get_current_session)) -> tuple[dict[str, Any], int | None]:
+async def _require_bcp_export(
+    request: Request,
+    session: SessionData | None = None,
+) -> tuple[dict[str, Any], int | None]:
     """Require BCP export permission."""
     _check_bcp_enabled()
-    
+
     from app.repositories import users as user_repo
-    
+
+    session = await _resolve_session(request, session)
+
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
