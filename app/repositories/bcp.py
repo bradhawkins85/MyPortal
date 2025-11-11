@@ -9,6 +9,34 @@ from typing import Any
 from app.core.database import db
 
 
+async def _ensure_core_plan_record(conn, plan: dict[str, Any]) -> None:
+    """Ensure a corresponding row exists in the legacy bcp_plan table."""
+    async with conn.cursor() as cursor:
+        await cursor.execute("SELECT 1 FROM bcp_plan WHERE id = %s", (plan["id"],))
+        exists = await cursor.fetchone()
+        if exists:
+            return
+
+        await cursor.execute(
+            """
+                INSERT INTO bcp_plan
+                (id, company_id, title, executive_summary, version, last_reviewed_at, next_review_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                plan["id"],
+                plan["company_id"],
+                plan["title"],
+                plan.get("executive_summary"),
+                plan.get("version"),
+                plan.get("last_reviewed"),
+                plan.get("next_review"),
+            ),
+        )
+
+    await conn.commit()
+
+
 async def get_plan_by_company(company_id: int) -> dict[str, Any] | None:
     """Get BCP plan overview for a company."""
     query = """
@@ -21,19 +49,23 @@ async def get_plan_by_company(company_id: int) -> dict[str, Any] | None:
         async with conn.cursor() as cursor:
             await cursor.execute(query, (company_id,))
             row = await cursor.fetchone()
-            if not row:
-                return None
-            return {
-                "id": row[0],
-                "company_id": row[1],
-                "title": row[2],
-                "executive_summary": row[3],
-                "version": row[4],
-                "last_reviewed": row[5],
-                "next_review": row[6],
-                "created_at": row[7],
-                "updated_at": row[8],
-            }
+        if not row:
+            return None
+
+        plan = {
+            "id": row[0],
+            "company_id": row[1],
+            "title": row[2],
+            "executive_summary": row[3],
+            "version": row[4],
+            "last_reviewed": row[5],
+            "next_review": row[6],
+            "created_at": row[7],
+            "updated_at": row[8],
+        }
+
+        await _ensure_core_plan_record(conn, plan)
+        return plan
 
 
 async def create_plan(
@@ -44,21 +76,50 @@ async def create_plan(
     last_reviewed: datetime | None = None,
     next_review: datetime | None = None,
 ) -> dict[str, Any]:
-    """Create a new BCP plan overview."""
-    query = """
-        INSERT INTO bcp_plan_overview 
-        (company_id, title, executive_summary, version, last_reviewed, next_review)
+    """Create a new BCP plan with matching overview metadata."""
+
+    plan_query = """
+        INSERT INTO bcp_plan
+        (company_id, title, executive_summary, version, last_reviewed_at, next_review_at)
         VALUES (%s, %s, %s, %s, %s, %s)
     """
+
+    overview_query = """
+        INSERT INTO bcp_plan_overview
+        (id, company_id, title, executive_summary, version, last_reviewed, next_review)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """
+
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
-                query,
-                (company_id, title, executive_summary, version, last_reviewed, next_review),
+                plan_query,
+                (
+                    company_id,
+                    title,
+                    executive_summary,
+                    version,
+                    last_reviewed,
+                    next_review,
+                ),
             )
-            await conn.commit()
             plan_id = cursor.lastrowid
-            
+
+            await cursor.execute(
+                overview_query,
+                (
+                    plan_id,
+                    company_id,
+                    title,
+                    executive_summary,
+                    version,
+                    last_reviewed,
+                    next_review,
+                ),
+            )
+
+            await conn.commit()
+
     # Fetch and return the created plan
     return await get_plan_by_id(plan_id)
 
@@ -75,19 +136,23 @@ async def get_plan_by_id(plan_id: int) -> dict[str, Any] | None:
         async with conn.cursor() as cursor:
             await cursor.execute(query, (plan_id,))
             row = await cursor.fetchone()
-            if not row:
-                return None
-            return {
-                "id": row[0],
-                "company_id": row[1],
-                "title": row[2],
-                "executive_summary": row[3],
-                "version": row[4],
-                "last_reviewed": row[5],
-                "next_review": row[6],
-                "created_at": row[7],
-                "updated_at": row[8],
-            }
+        if not row:
+            return None
+
+        plan = {
+            "id": row[0],
+            "company_id": row[1],
+            "title": row[2],
+            "executive_summary": row[3],
+            "version": row[4],
+            "last_reviewed": row[5],
+            "next_review": row[6],
+            "created_at": row[7],
+            "updated_at": row[8],
+        }
+
+        await _ensure_core_plan_record(conn, plan)
+        return plan
 
 
 async def update_plan(
@@ -99,40 +164,66 @@ async def update_plan(
     next_review: datetime | None = None,
 ) -> dict[str, Any] | None:
     """Update BCP plan overview."""
-    updates = []
-    values = []
-    
+    overview_updates = []
+    overview_values = []
+    plan_updates = []
+    plan_values = []
+
     if title is not None:
-        updates.append("title = %s")
-        values.append(title)
+        overview_updates.append("title = %s")
+        overview_values.append(title)
+        plan_updates.append("title = %s")
+        plan_values.append(title)
     if executive_summary is not None:
-        updates.append("executive_summary = %s")
-        values.append(executive_summary)
+        overview_updates.append("executive_summary = %s")
+        overview_values.append(executive_summary)
+        plan_updates.append("executive_summary = %s")
+        plan_values.append(executive_summary)
     if version is not None:
-        updates.append("version = %s")
-        values.append(version)
+        overview_updates.append("version = %s")
+        overview_values.append(version)
+        plan_updates.append("version = %s")
+        plan_values.append(version)
     if last_reviewed is not None:
-        updates.append("last_reviewed = %s")
-        values.append(last_reviewed)
+        overview_updates.append("last_reviewed = %s")
+        overview_values.append(last_reviewed)
+        plan_updates.append("last_reviewed_at = %s")
+        plan_values.append(last_reviewed)
     if next_review is not None:
-        updates.append("next_review = %s")
-        values.append(next_review)
-    
-    if not updates:
+        overview_updates.append("next_review = %s")
+        overview_values.append(next_review)
+        plan_updates.append("next_review_at = %s")
+        plan_values.append(next_review)
+
+    if not overview_updates and not plan_updates:
         return await get_plan_by_id(plan_id)
-    
-    values.append(plan_id)
-    query = f"""
-        UPDATE bcp_plan_overview
-        SET {', '.join(updates)}
-        WHERE id = %s
-    """
-    
+
+    overview_query = None
+    if overview_updates:
+        overview_query = f"""
+            UPDATE bcp_plan_overview
+            SET {', '.join(overview_updates)}
+            WHERE id = %s
+        """
+        overview_values.append(plan_id)
+
+    plan_query = None
+    if plan_updates:
+        plan_query = f"""
+            UPDATE bcp_plan
+            SET {', '.join(plan_updates)}
+            WHERE id = %s
+        """
+        plan_values.append(plan_id)
+
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query, values)
+            if plan_query is not None:
+                await cursor.execute(plan_query, tuple(plan_values))
+            if overview_query is not None:
+                await cursor.execute(overview_query, tuple(overview_values))
             await conn.commit()
-    
+
     return await get_plan_by_id(plan_id)
 
 
