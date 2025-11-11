@@ -149,10 +149,10 @@ async def bcp_overview(request: Request):
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
-        # Create default plan
+        # Create default plan with all seed data
+        from app.services.bcp_seeding import seed_new_plan_defaults
         plan = await bcp_repo.create_plan(company_id)
-        # Seed default objectives
-        await bcp_repo.seed_default_objectives(plan["id"])
+        await seed_new_plan_defaults(plan["id"])
     
     # Get objectives and distribution list
     objectives = await bcp_repo.list_objectives(plan["id"])
@@ -3759,3 +3759,111 @@ async def bcp_wellbeing(request: Request):
     )
     
     return templates.TemplateResponse("bcp/wellbeing.html", context)
+
+
+# ============================================================================
+# Admin: Seeding and Documentation
+# ============================================================================
+
+
+@router.get("/admin/seed-info", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_seed_info(request: Request):
+    """BCP Seeding Info page - shows what defaults are seeded and how to manage them."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from app.main import _build_base_context
+    from app.core.config import get_templates_config
+    from fastapi.templating import Jinja2Templates
+    from app.services.bcp_seeding import get_seeding_documentation
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        from app.services.bcp_seeding import seed_new_plan_defaults
+        plan = await bcp_repo.create_plan(company_id)
+        await seed_new_plan_defaults(plan["id"])
+    
+    # Get seeding documentation
+    seed_docs = get_seeding_documentation()
+    
+    templates_config = get_templates_config()
+    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "BCP Seed Data Information",
+            "plan": plan,
+            "seed_docs": seed_docs,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+        },
+    )
+    
+    return templates.TemplateResponse("bcp/seed_info.html", context)
+
+
+@router.post("/admin/reseed", include_in_schema=False)
+async def reseed_bcp_defaults(
+    request: Request,
+    categories: list[str] = Form(default=None),
+):
+    """Re-seed BCP defaults. Idempotent - only adds missing items."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    from app.services.bcp_seeding import reseed_plan_defaults
+    from app.services import audit
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Parse categories if provided as a single comma-separated string
+    category_list = None
+    if categories:
+        if isinstance(categories, str):
+            category_list = [c.strip() for c in categories.split(",") if c.strip()]
+        elif isinstance(categories, list):
+            category_list = categories
+    
+    # Re-seed defaults
+    stats = await reseed_plan_defaults(plan["id"], category_list)
+    
+    # Audit log the re-seeding action
+    await audit.log_action(
+        action="bcp.admin.reseed",
+        user_id=user["id"],
+        entity_type="bcp_plan",
+        entity_id=plan["id"],
+        metadata={
+            "company_id": company_id,
+            "categories": category_list or "all",
+            "items_added": stats,
+        },
+        request=request,
+    )
+    
+    # Build success message
+    total_added = sum(stats.values())
+    if total_added == 0:
+        message = "No items were added - all requested defaults already exist"
+    else:
+        parts = []
+        if stats.get("objectives"):
+            parts.append(f"{stats['objectives']} objectives")
+        if stats.get("immediate_checklist"):
+            parts.append(f"{stats['immediate_checklist']} immediate checklist items")
+        if stats.get("crisis_recovery_checklist"):
+            parts.append(f"{stats['crisis_recovery_checklist']} crisis/recovery checklist items")
+        if stats.get("emergency_kit_documents") or stats.get("emergency_kit_equipment"):
+            kit_total = stats.get("emergency_kit_documents", 0) + stats.get("emergency_kit_equipment", 0)
+            parts.append(f"{kit_total} emergency kit items")
+        if stats.get("example_risks"):
+            parts.append(f"{stats['example_risks']} example risks")
+        
+        message = f"Successfully added: {', '.join(parts)}"
+    
+    return RedirectResponse(
+        url="/bcp/admin/seed-info?success=" + quote(message),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
