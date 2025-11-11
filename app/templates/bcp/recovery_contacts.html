@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-container">
+  <!-- Success/Error Messages -->
+  {% if request.query_params.get('success') %}
+    <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
+  {% endif %}
+  {% if request.query_params.get('error') %}
+    <div class="alert alert-error">{{ request.query_params.get('error') }}</div>
+  {% endif %}
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Recovery Contacts</h1>
+      <p class="page-description">External contacts for recovery assistance and support</p>
+    </div>
+    <div class="page-actions">
+      <a href="/bcp" class="btn btn-secondary">Back to Overview</a>
+      {% if can_edit %}
+      <button type="button" class="btn btn-primary" onclick="document.getElementById('createContactModal').showModal()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+        </svg>
+        Add Contact
+      </button>
+      <a href="/bcp/recovery-contacts/export" class="btn btn-secondary">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+        </svg>
+        Export CSV
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Help Text -->
+  <section class="card help-card">
+    <div class="card-body">
+      <h3 class="help-title">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z"/>
+        </svg>
+        About Recovery Contacts
+      </h3>
+      <p class="help-text">
+        Maintain a list of external organizations and contacts that can provide assistance during recovery operations.
+        This may include contractors, suppliers, specialist recovery services, equipment rental companies, and other
+        service providers who can help restore business operations after a disruption.
+      </p>
+    </div>
+  </section>
+
+  <!-- Recovery Contacts Table -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Recovery Contacts</h2>
+    </div>
+    <div class="card-body">
+      {% if contacts %}
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Organisation</th>
+              <th>Contact</th>
+              <th>Title</th>
+              <th>Phone/Mobile</th>
+              {% if can_edit %}
+              <th>Actions</th>
+              {% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for contact in contacts %}
+            <tr>
+              <td><strong>{{ contact.org_name }}</strong></td>
+              <td>{{ contact.contact_name or '-' }}</td>
+              <td>{{ contact.title or '-' }}</td>
+              <td>{{ contact.phone or '-' }}</td>
+              {% if can_edit %}
+              <td>
+                <div class="action-buttons">
+                  <button type="button" class="btn btn-sm btn-secondary" onclick="editContact({{ contact.id }}, '{{ contact.org_name }}', '{{ contact.contact_name or '' }}', '{{ contact.title or '' }}', '{{ contact.phone or '' }}')">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                      <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                    </svg>
+                    Edit
+                  </button>
+                  <form method="post" action="/bcp/recovery-contacts/{{ contact.id }}/delete" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this contact?');">
+                    <button type="submit" class="btn btn-sm btn-danger">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                        <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                      </svg>
+                      Delete
+                    </button>
+                  </form>
+                </div>
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor" opacity="0.3">
+          <path d="M20 6h-2.18c.11-.31.18-.65.18-1a2.996 2.996 0 0 0-5.5-1.65l-.5.67-.5-.68C10.96 2.54 10.05 2 9 2 7.34 2 6 3.34 6 5c0 .35.07.69.18 1H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-5-2c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zM9 4c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm11 15H4v-2h16v2zm0-5H4V8h5.08L7 10.83 8.62 12 11 8.76l1-1.36 1 1.36L15.38 12 17 10.83 14.92 8H20v6z"/>
+        </svg>
+        <p>No recovery contacts defined yet.</p>
+        {% if can_edit %}
+        <button type="button" class="btn btn-primary" onclick="document.getElementById('createContactModal').showModal()">
+          Add First Contact
+        </button>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+{% if can_edit %}
+<!-- Create Contact Modal -->
+<dialog id="createContactModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 class="modal-title">Add Recovery Contact</h2>
+      <button type="button" class="btn-close" onclick="document.getElementById('createContactModal').close()">&times;</button>
+    </div>
+    <form method="post" action="/bcp/recovery-contacts">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="org_name" class="required">Organisation</label>
+          <input type="text" id="org_name" name="org_name" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label for="contact_name">Contact</label>
+          <input type="text" id="contact_name" name="contact_name" class="form-control">
+        </div>
+        <div class="form-group">
+          <label for="title">Title</label>
+          <input type="text" id="title" name="title" class="form-control">
+        </div>
+        <div class="form-group">
+          <label for="phone">Phone/Mobile</label>
+          <input type="text" id="phone" name="phone" class="form-control">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('createContactModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create Contact</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<!-- Edit Contact Modal -->
+<dialog id="editContactModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 class="modal-title">Edit Recovery Contact</h2>
+      <button type="button" class="btn-close" onclick="document.getElementById('editContactModal').close()">&times;</button>
+    </div>
+    <form method="post" id="editContactForm">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="edit_org_name" class="required">Organisation</label>
+          <input type="text" id="edit_org_name" name="org_name" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label for="edit_contact_name">Contact</label>
+          <input type="text" id="edit_contact_name" name="contact_name" class="form-control">
+        </div>
+        <div class="form-group">
+          <label for="edit_title">Title</label>
+          <input type="text" id="edit_title" name="title" class="form-control">
+        </div>
+        <div class="form-group">
+          <label for="edit_phone">Phone/Mobile</label>
+          <input type="text" id="edit_phone" name="phone" class="form-control">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('editContactModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Update Contact</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<script>
+function editContact(id, orgName, contactName, title, phone) {
+  document.getElementById('edit_org_name').value = orgName;
+  document.getElementById('edit_contact_name').value = contactName;
+  document.getElementById('edit_title').value = title;
+  document.getElementById('edit_phone').value = phone;
+  document.getElementById('editContactForm').action = `/bcp/recovery-contacts/${id}/update`;
+  document.getElementById('editContactModal').showModal();
+}
+</script>
+{% endif %}
+
+{% endblock %}
