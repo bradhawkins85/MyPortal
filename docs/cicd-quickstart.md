@@ -31,9 +31,11 @@ This guide walks you through setting up the CI/CD pipeline for MyPortal.
    - Add rule: `main`
 7. Save
 
-## Step 2: Add Required Secrets
+## Step 2: Add Deployment Secrets (Optional)
 
-### For Staging
+**Note:** The deployment workflow currently contains placeholder steps and will run successfully without these secrets. You can skip this step during initial setup and add these secrets later when implementing actual deployment infrastructure. The workflow will display warnings if secrets are missing.
+
+### For Staging (Optional)
 1. Go to **Settings** → **Secrets and variables** → **Actions**
 2. Click **New repository secret**
 3. Add:
@@ -43,7 +45,7 @@ This guide walks you through setting up the CI/CD pipeline for MyPortal.
    - Name: `STAGING_URL`
    - Value: https://staging.yourapp.com
 
-### For Production
+### For Production (Optional)
 1. Add:
    - Name: `PRODUCTION_DB_HOST`
    - Value: Your production database host

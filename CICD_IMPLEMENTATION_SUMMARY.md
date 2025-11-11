@@ -134,10 +134,11 @@ To activate the CI/CD pipeline:
    - Create `staging` environment (no protection)
    - Create `production` environment with 1-2 required reviewers
 
-2. **Add Secrets** (Settings → Secrets and variables → Actions)
-   - `STAGING_DB_HOST` - Staging database host
+2. **Add Deployment Secrets (Optional)** (Settings → Secrets and variables → Actions)
+   - Note: These are optional during initial setup. The workflow will run with warnings if not configured.
+   - `STAGING_DB_HOST` - Staging database host (optional until deployment is implemented)
    - `STAGING_URL` - Staging URL (optional)
-   - `PRODUCTION_DB_HOST` - Production database host
+   - `PRODUCTION_DB_HOST` - Production database host (optional until deployment is implemented)
    - `PRODUCTION_URL` - Production URL (optional)
 
 3. **Test the Pipeline**
