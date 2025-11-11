@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+test_venv/
+.venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Documentation and summaries
+*.md
+!README.md
+BC*.md
+BCP*.md
+
+# Testing
+tests/
+coverage/
+.coverage
+htmlcov/
+
+# Build artifacts
+dist/
+build/
+node_modules/
+
+# Application data
+var/
+uploads/
+private_uploads/
+stock_feed.xml
+changes/*.json
+
+# CI/CD
+.github/
+
+# Deployment
+deploy/
+scripts/
