@@ -10,10 +10,18 @@ on:
       - main
       - develop
 
+permissions:
+  contents: read
+  issues: write
+  security-events: write
+
 jobs:
   dependency-scan:
     name: Scan Dependencies for Vulnerabilities
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     
     steps:
       - name: Checkout code
@@ -70,6 +78,8 @@ jobs:
   code-security:
     name: Code Security Analysis
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout code
@@ -103,6 +113,9 @@ jobs:
   docker-security:
     name: Docker Image Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     
     steps:
       - name: Checkout code
