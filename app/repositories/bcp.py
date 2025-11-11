@@ -2911,7 +2911,7 @@ async def delete_insurance_claim(claim_id: int) -> bool:
 async def list_market_changes(plan_id: int) -> list[dict[str, Any]]:
     """List all market changes for a plan."""
     query = """
-        SELECT id, plan_id, change, impact, options,
+        SELECT id, plan_id, `change`, `impact`, `options`,
                created_at, updated_at
         FROM bcp_market_change
         WHERE plan_id = %s
@@ -2938,7 +2938,7 @@ async def list_market_changes(plan_id: int) -> list[dict[str, Any]]:
 async def get_market_change_by_id(change_id: int) -> dict[str, Any] | None:
     """Get a market change by ID."""
     query = """
-        SELECT id, plan_id, change, impact, options,
+        SELECT id, plan_id, `change`, `impact`, `options`,
                created_at, updated_at
         FROM bcp_market_change
         WHERE id = %s
@@ -2969,7 +2969,7 @@ async def create_market_change(
     """Create a new market change record."""
     query = """
         INSERT INTO bcp_market_change
-        (plan_id, change, impact, options)
+        (plan_id, `change`, `impact`, `options`)
         VALUES (%s, %s, %s, %s)
     """
     async with db.connection() as conn:
@@ -2992,13 +2992,13 @@ async def update_market_change(
     values = []
     
     if change is not None:
-        updates.append("change = %s")
+        updates.append("`change` = %s")
         values.append(change)
     if impact is not None:
-        updates.append("impact = %s")
+        updates.append("`impact` = %s")
         values.append(impact)
     if options is not None:
-        updates.append("options = %s")
+        updates.append("`options` = %s")
         values.append(options)
     
     if not updates:
