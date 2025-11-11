@@ -2936,3 +2936,325 @@ async def delete_market_change(change_id: int) -> bool:
             await cursor.execute(query, (change_id,))
             await conn.commit()
             return cursor.rowcount > 0
+
+
+# ============================================================================
+# Training Schedule Operations
+# ============================================================================
+
+
+async def list_training_items(plan_id: int) -> list[dict[str, Any]]:
+    """Get all training items for a plan."""
+    query = """
+        SELECT id, plan_id, training_date, training_type, comments,
+               created_at, updated_at
+        FROM bcp_training_item
+        WHERE plan_id = %s
+        ORDER BY training_date DESC
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id,))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "training_date": row[2],
+                    "training_type": row[3],
+                    "comments": row[4],
+                    "created_at": row[5],
+                    "updated_at": row[6],
+                }
+                for row in rows
+            ]
+
+
+async def get_training_item_by_id(training_id: int) -> dict[str, Any] | None:
+    """Get a training item by ID."""
+    query = """
+        SELECT id, plan_id, training_date, training_type, comments,
+               created_at, updated_at
+        FROM bcp_training_item
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (training_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "training_date": row[2],
+                "training_type": row[3],
+                "comments": row[4],
+                "created_at": row[5],
+                "updated_at": row[6],
+            }
+
+
+async def create_training_item(
+    plan_id: int,
+    training_date: datetime,
+    training_type: str | None = None,
+    comments: str | None = None,
+) -> dict[str, Any]:
+    """Create a new training item."""
+    query = """
+        INSERT INTO bcp_training_item
+        (plan_id, training_date, training_type, comments)
+        VALUES (%s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id, training_date, training_type, comments))
+            await conn.commit()
+            training_id = cursor.lastrowid
+    
+    return await get_training_item_by_id(training_id)
+
+
+async def update_training_item(
+    training_id: int,
+    training_date: datetime | None = None,
+    training_type: str | None = None,
+    comments: str | None = None,
+) -> dict[str, Any] | None:
+    """Update a training item."""
+    updates = []
+    values = []
+    
+    if training_date is not None:
+        updates.append("training_date = %s")
+        values.append(training_date)
+    if training_type is not None:
+        updates.append("training_type = %s")
+        values.append(training_type)
+    if comments is not None:
+        updates.append("comments = %s")
+        values.append(comments)
+    
+    if not updates:
+        return await get_training_item_by_id(training_id)
+    
+    values.append(training_id)
+    query = f"""
+        UPDATE bcp_training_item
+        SET {', '.join(updates)}
+        WHERE id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, values)
+            await conn.commit()
+    
+    return await get_training_item_by_id(training_id)
+
+
+async def delete_training_item(training_id: int) -> bool:
+    """Delete a training item."""
+    query = "DELETE FROM bcp_training_item WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (training_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+
+
+async def get_upcoming_training_items(days_ahead: int = 7) -> list[dict[str, Any]]:
+    """Get upcoming training items across all plans within the specified days."""
+    query = """
+        SELECT t.id, t.plan_id, t.training_date, t.training_type, t.comments,
+               t.created_at, t.updated_at,
+               p.id as plan_id, p.company_id, p.title as plan_title
+        FROM bcp_training_item t
+        JOIN bcp_plan p ON t.plan_id = p.id
+        WHERE t.training_date >= NOW()
+          AND t.training_date <= DATE_ADD(NOW(), INTERVAL %s DAY)
+        ORDER BY t.training_date ASC
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (days_ahead,))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "training_date": row[2],
+                    "training_type": row[3],
+                    "comments": row[4],
+                    "created_at": row[5],
+                    "updated_at": row[6],
+                    "plan": {
+                        "id": row[7],
+                        "company_id": row[8],
+                        "title": row[9],
+                    }
+                }
+                for row in rows
+            ]
+
+
+# ============================================================================
+# Review Schedule Operations
+# ============================================================================
+
+
+async def list_review_items(plan_id: int) -> list[dict[str, Any]]:
+    """Get all review items for a plan."""
+    query = """
+        SELECT id, plan_id, review_date, reason, changes_made,
+               created_at, updated_at
+        FROM bcp_review_item
+        WHERE plan_id = %s
+        ORDER BY review_date DESC
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id,))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "review_date": row[2],
+                    "reason": row[3],
+                    "changes_made": row[4],
+                    "created_at": row[5],
+                    "updated_at": row[6],
+                }
+                for row in rows
+            ]
+
+
+async def get_review_item_by_id(review_id: int) -> dict[str, Any] | None:
+    """Get a review item by ID."""
+    query = """
+        SELECT id, plan_id, review_date, reason, changes_made,
+               created_at, updated_at
+        FROM bcp_review_item
+        WHERE id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (review_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "review_date": row[2],
+                "reason": row[3],
+                "changes_made": row[4],
+                "created_at": row[5],
+                "updated_at": row[6],
+            }
+
+
+async def create_review_item(
+    plan_id: int,
+    review_date: datetime,
+    reason: str | None = None,
+    changes_made: str | None = None,
+) -> dict[str, Any]:
+    """Create a new review item."""
+    query = """
+        INSERT INTO bcp_review_item
+        (plan_id, review_date, reason, changes_made)
+        VALUES (%s, %s, %s, %s)
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id, review_date, reason, changes_made))
+            await conn.commit()
+            review_id = cursor.lastrowid
+    
+    return await get_review_item_by_id(review_id)
+
+
+async def update_review_item(
+    review_id: int,
+    review_date: datetime | None = None,
+    reason: str | None = None,
+    changes_made: str | None = None,
+) -> dict[str, Any] | None:
+    """Update a review item."""
+    updates = []
+    values = []
+    
+    if review_date is not None:
+        updates.append("review_date = %s")
+        values.append(review_date)
+    if reason is not None:
+        updates.append("reason = %s")
+        values.append(reason)
+    if changes_made is not None:
+        updates.append("changes_made = %s")
+        values.append(changes_made)
+    
+    if not updates:
+        return await get_review_item_by_id(review_id)
+    
+    values.append(review_id)
+    query = f"""
+        UPDATE bcp_review_item
+        SET {', '.join(updates)}
+        WHERE id = %s
+    """
+    
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, values)
+            await conn.commit()
+    
+    return await get_review_item_by_id(review_id)
+
+
+async def delete_review_item(review_id: int) -> bool:
+    """Delete a review item."""
+    query = "DELETE FROM bcp_review_item WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (review_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+
+
+async def get_upcoming_review_items(days_ahead: int = 7) -> list[dict[str, Any]]:
+    """Get upcoming review items across all plans within the specified days."""
+    query = """
+        SELECT r.id, r.plan_id, r.review_date, r.reason, r.changes_made,
+               r.created_at, r.updated_at,
+               p.id as plan_id, p.company_id, p.title as plan_title
+        FROM bcp_review_item r
+        JOIN bcp_plan p ON r.plan_id = p.id
+        WHERE r.review_date >= NOW()
+          AND r.review_date <= DATE_ADD(NOW(), INTERVAL %s DAY)
+        ORDER BY r.review_date ASC
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (days_ahead,))
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "plan_id": row[1],
+                    "review_date": row[2],
+                    "reason": row[3],
+                    "changes_made": row[4],
+                    "created_at": row[5],
+                    "updated_at": row[6],
+                    "plan": {
+                        "id": row[7],
+                        "company_id": row[8],
+                        "title": row[9],
+                    }
+                }
+                for row in rows
+            ]
