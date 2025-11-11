@@ -40,18 +40,16 @@ Daily security scans and vulnerability checks.
 
 ## Configuration
 
-### Deployment Secrets (Optional)
-
-**Note:** These secrets are optional during initial setup. The deployment workflow will run successfully without them but will display warnings. Configure these when implementing actual deployment infrastructure.
+### Required Secrets
 
 Set these in GitHub Settings → Secrets and variables → Actions:
 
 **Staging:**
-- `STAGING_DB_HOST` - Database host (optional until deployment is implemented)
+- `STAGING_DB_HOST` - Database host
 - `STAGING_URL` - Application URL (optional, for smoke tests)
 
 **Production:**
-- `PRODUCTION_DB_HOST` - Database host (optional until deployment is implemented)
+- `PRODUCTION_DB_HOST` - Database host
 - `PRODUCTION_URL` - Application URL (optional, for smoke tests)
 
 ### Environment Protection
