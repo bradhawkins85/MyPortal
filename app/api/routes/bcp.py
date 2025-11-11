@@ -915,6 +915,79 @@ async def bcp_export(request: Request):
     return templates.TemplateResponse("bcp/stub.html", context)
 
 
+@router.get("/export/pdf", include_in_schema=True)
+async def export_bcp_pdf(
+    request: Request,
+    event_log_limit: int = Query(100, ge=1, le=500, description="Maximum number of event log entries to include"),
+):
+    """
+    Export BCP to template-faithful PDF format.
+    
+    Generates a comprehensive PDF export that mirrors the BCP template structure
+    with all required sections in the prescribed order. Includes configurable
+    event log entries (default 100, max 500).
+    
+    The PDF includes:
+    - Plan Overview (Executive summary, Objectives, Distribution list)
+    - Risk Management (Legend, risk register, Insurance, Data backup)
+    - Business Impact Analysis (Critical activities, BIA summary with RTO)
+    - Incident Response (Checklist, Evacuation, Emergency kit, Roles, Contacts, Event log)
+    - Recovery (Actions, Crisis checklist, Contacts, Insurance claims, Market assessment, Wellbeing)
+    - Rehearse/Maintain/Review (Training & Review schedules)
+    
+    Footer includes attribution: "Adapted from the Business Queensland Business continuity plan – Template (CC BY 4.0)"
+    
+    Args:
+        request: FastAPI request object
+        event_log_limit: Number of event log entries to include (default 100, max 500)
+        
+    Returns:
+        StreamingResponse with PDF file download
+        
+    Raises:
+        HTTPException: If plan not found or export fails
+    """
+    from fastapi.responses import StreamingResponse
+    from datetime import datetime as dt
+    from app.services.bc_export_service import export_bcp_to_pdf
+    
+    user, company_id = await _require_bcp_view(request)
+    
+    # Get plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No BCP plan found for this company"
+        )
+    
+    try:
+        # Generate PDF
+        pdf_buffer, content_hash = await export_bcp_to_pdf(plan["id"], event_log_limit=event_log_limit)
+        
+        # Create filename
+        timestamp = dt.now().strftime("%Y%m%d_%H%M%S")
+        safe_title = "".join(c for c in plan["title"] if c.isalnum() or c in (' ', '-', '_')).strip()
+        safe_title = safe_title.replace(' ', '_')
+        filename = f"BCP_{safe_title}_{timestamp}.pdf"
+        
+        # Return as streaming response
+        pdf_buffer.seek(0)
+        return StreamingResponse(
+            iter([pdf_buffer.getvalue()]),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "X-Content-Hash": content_hash,
+            }
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate PDF export: {str(e)}"
+        )
+
+
 # API endpoints for updating plan data
 @router.post("/update", include_in_schema=False)
 async def update_plan(
