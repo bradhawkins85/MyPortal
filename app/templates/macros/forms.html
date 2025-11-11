@@ -1,0 +1,116 @@
+{# Form input macros for consistent styling and accessibility #}
+
+{% macro text_input(name, label, value="", placeholder="", help_text="", required=false, type="text", autocomplete="") %}
+<div class="form-group">
+  <label for="{{ name }}" class="form-label{% if required %} required{% endif %}">
+    {{ label }}
+    {% if help_text %}
+    <span class="form-help" role="tooltip">{{ help_text }}</span>
+    {% endif %}
+  </label>
+  <input 
+    type="{{ type }}" 
+    id="{{ name }}" 
+    name="{{ name }}" 
+    class="form-input"
+    value="{{ value }}"
+    {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
+    {% if required %}required{% endif %}
+    {% if autocomplete %}autocomplete="{{ autocomplete }}"{% endif %}
+    aria-describedby="{% if help_text %}{{ name }}-help{% endif %}"
+  >
+  {% if help_text %}
+  <small id="{{ name }}-help" class="form-help-text">{{ help_text }}</small>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro textarea(name, label, value="", placeholder="", help_text="", required=false, rows=3) %}
+<div class="form-group">
+  <label for="{{ name }}" class="form-label{% if required %} required{% endif %}">
+    {{ label }}
+    {% if help_text %}
+    <span class="form-help" role="tooltip">{{ help_text }}</span>
+    {% endif %}
+  </label>
+  <textarea 
+    id="{{ name }}" 
+    name="{{ name }}" 
+    class="form-textarea"
+    rows="{{ rows }}"
+    {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
+    {% if required %}required{% endif %}
+    aria-describedby="{% if help_text %}{{ name }}-help{% endif %}"
+  >{{ value }}</textarea>
+  {% if help_text %}
+  <small id="{{ name }}-help" class="form-help-text">{{ help_text }}</small>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro select(name, label, options, value="", help_text="", required=false) %}
+<div class="form-group">
+  <label for="{{ name }}" class="form-label{% if required %} required{% endif %}">
+    {{ label }}
+    {% if help_text %}
+    <span class="form-help" role="tooltip">{{ help_text }}</span>
+    {% endif %}
+  </label>
+  <select 
+    id="{{ name }}" 
+    name="{{ name }}" 
+    class="form-input"
+    {% if required %}required{% endif %}
+    aria-describedby="{% if help_text %}{{ name }}-help{% endif %}"
+  >
+    <option value="">Select...</option>
+    {% for option in options %}
+    <option value="{{ option.value }}" {% if option.value == value %}selected{% endif %}>
+      {{ option.label }}
+    </option>
+    {% endfor %}
+  </select>
+  {% if help_text %}
+  <small id="{{ name }}-help" class="form-help-text">{{ help_text }}</small>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro checkbox(name, label, checked=false, help_text="") %}
+<div class="form-group form-group-checkbox">
+  <label class="form-checkbox-label">
+    <input 
+      type="checkbox" 
+      id="{{ name }}" 
+      name="{{ name }}" 
+      class="form-checkbox"
+      {% if checked %}checked{% endif %}
+      aria-describedby="{% if help_text %}{{ name }}-help{% endif %}"
+    >
+    <span class="form-checkbox-text">{{ label }}</span>
+  </label>
+  {% if help_text %}
+  <small id="{{ name }}-help" class="form-help-text">{{ help_text }}</small>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro help_card(title, content, icon="info") %}
+<section class="card help-card" role="region" aria-label="{{ title }}">
+  <div class="card-body">
+    <h3 class="help-title">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false">
+        {% if icon == "info" %}
+        <path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z"/>
+        {% elif icon == "warning" %}
+        <path d="M12 2L1 21h22L12 2zm0 3.99L19.53 19H4.47L12 5.99zM11 16h2v2h-2zm0-6h2v4h-2z"/>
+        {% endif %}
+      </svg>
+      {{ title }}
+    </h3>
+    <div class="help-text">
+      {{ content | safe }}
+    </div>
+  </div>
+</section>
+{% endmacro %}

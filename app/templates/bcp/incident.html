@@ -41,11 +41,11 @@
   </div>
 
   <!-- Help Text -->
-  {% if not active_incident %}
-  <section class="card help-card">
+  <section class="card help-card" role="region" aria-label="Incident Console Help">
     <div class="card-body">
+      {% if not active_incident %}
       <h3 class="help-title">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false">
           <path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z"/>
         </svg>
         No Active Incident
@@ -60,26 +60,59 @@
         </ul>
         Once started, you can use the tabs below to track progress, contact key personnel, and log important events.
       </p>
+      {% else %}
+      <h3 class="help-title">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false">
+          <path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z"/>
+        </svg>
+        Incident Management Guide
+      </h3>
+      <div class="help-text">
+        <p><strong>Checklist:</strong> Track completion of immediate response tasks. Check off items as they're completed to monitor progress.</p>
+        <p><strong>Contacts:</strong> Access key personnel and emergency contacts. Use this tab to quickly reach decision-makers and specialists during the incident.</p>
+        <p><strong>Event Log:</strong> Document significant events during the incident. Record:
+          <ul>
+            <li>Decision points and who made them</li>
+            <li>Status updates and situation changes</li>
+            <li>Communications sent (internal and external)</li>
+            <li>Resource deployments or activations</li>
+            <li>Problems encountered and resolutions</li>
+          </ul>
+        </p>
+        <p><em>Tip: Log events in real-time with your initials. This creates an audit trail for post-incident review.</em></p>
+      </div>
+      {% endif %}
     </div>
   </section>
-  {% endif %}
 
   <!-- Tab Navigation -->
-  <div class="tabs">
-    <a href="/bcp/incident?tab=checklist" class="tab {% if active_tab == 'checklist' %}active{% endif %}">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+  <div class="tabs" role="tablist" aria-label="Incident Console Tabs">
+    <a href="/bcp/incident?tab=checklist" 
+       class="tab {% if active_tab == 'checklist' %}active{% endif %}" 
+       role="tab" 
+       aria-selected="{% if active_tab == 'checklist' %}true{% else %}false{% endif %}"
+       aria-controls="checklist-panel">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true" focusable="false">
         <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
       </svg>
       Checklist
     </a>
-    <a href="/bcp/incident?tab=contacts" class="tab {% if active_tab == 'contacts' %}active{% endif %}">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+    <a href="/bcp/incident?tab=contacts" 
+       class="tab {% if active_tab == 'contacts' %}active{% endif %}" 
+       role="tab" 
+       aria-selected="{% if active_tab == 'contacts' %}true{% else %}false{% endif %}"
+       aria-controls="contacts-panel">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true" focusable="false">
         <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
       </svg>
       Contacts
     </a>
-    <a href="/bcp/incident?tab=event-log" class="tab {% if active_tab == 'event-log' %}active{% endif %}">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+    <a href="/bcp/incident?tab=event-log" 
+       class="tab {% if active_tab == 'event-log' %}active{% endif %}" 
+       role="tab" 
+       aria-selected="{% if active_tab == 'event-log' %}true{% else %}false{% endif %}"
+       aria-controls="event-log-panel">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true" focusable="false">
         <path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/>
       </svg>
       Event Log
@@ -88,7 +121,10 @@
 
   <!-- Checklist Tab -->
   {% if active_tab == 'checklist' %}
-  <section class="card">
+  <section class="card mobile-tab-content {% if active_tab == 'checklist' %}active{% endif %}" 
+           id="checklist-panel" 
+           role="tabpanel" 
+           aria-labelledby="checklist-tab">
     <div class="card-header">
       <h2 class="card-title">Immediate Response Checklist</h2>
       {% if active_incident %}
@@ -102,10 +138,13 @@
         <div class="checklist-item {% if item.tick and item.tick.is_done %}completed{% endif %}">
           {% if active_incident and can_edit %}
           <form action="/bcp/incident/checklist/{{ item.tick.id if item.tick else 0 }}/toggle" method="post" style="display: inline;">
-            <button type="submit" class="checkbox {% if item.tick and item.tick.is_done %}checked{% endif %}" 
-                    {% if not item.tick %}disabled{% endif %}>
+            <button type="submit" 
+                    class="checkbox {% if item.tick and item.tick.is_done %}checked{% endif %}" 
+                    {% if not item.tick %}disabled{% endif %}
+                    aria-label="{% if item.tick and item.tick.is_done %}Mark as incomplete{% else %}Mark as complete{% endif %}: {{ item.label }}"
+                    aria-pressed="{% if item.tick and item.tick.is_done %}true{% else %}false{% endif %}">
               {% if item.tick and item.tick.is_done %}
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true" focusable="false">
                 <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
               </svg>
               {% endif %}
@@ -140,7 +179,10 @@
 
   <!-- Contacts Tab -->
   {% if active_tab == 'contacts' %}
-  <section class="card">
+  <section class="card mobile-tab-content {% if active_tab == 'contacts' %}active{% endif %}" 
+           id="contacts-panel" 
+           role="tabpanel" 
+           aria-labelledby="contacts-tab">
     <div class="card-header">
       <h2 class="card-title">Roles & Assignments</h2>
       <a href="/bcp/roles" class="btn btn-secondary btn-sm">
@@ -332,7 +374,10 @@
 
   <!-- Event Log Tab -->
   {% if active_tab == 'event-log' %}
-  <section class="card">
+  <section class="card mobile-tab-content {% if active_tab == 'event-log' %}active{% endif %}" 
+           id="event-log-panel" 
+           role="tabpanel" 
+           aria-labelledby="event-log-tab">
     <div class="card-header">
       <h2 class="card-title">Event Log</h2>
       {% if active_incident %}

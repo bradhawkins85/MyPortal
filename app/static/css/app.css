@@ -6875,3 +6875,459 @@ dialog.dialog::backdrop {
     justify-content: space-between;
   }
 }
+
+/* ============================================
+   BCP UI/UX Polish & Accessibility Styles
+   ============================================ */
+
+/* Form Components - Consistent Styling */
+.form-group {
+  margin-bottom: 1.25rem;
+}
+
+.form-label {
+  display: block;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.form-label.required::after {
+  content: " *";
+  color: #ef4444;
+}
+
+.form-help {
+  display: inline-block;
+  margin-left: 0.375rem;
+  color: #94a3b8;
+  font-weight: 400;
+  font-size: 0.8125rem;
+}
+
+.form-help-text {
+  display: block;
+  margin-top: 0.375rem;
+  color: #94a3b8;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.form-input,
+.form-textarea {
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.375rem;
+  background: rgba(30, 41, 59, 0.5);
+  color: #f1f5f9;
+  font-size: 0.9375rem;
+  transition: all 0.2s;
+}
+
+.form-input:focus,
+.form-textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  background: rgba(30, 41, 59, 0.7);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.form-input:disabled,
+.form-textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.form-textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+.form-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.form-checkbox {
+  width: 1.25rem;
+  height: 1.25rem;
+  cursor: pointer;
+  accent-color: #3b82f6;
+}
+
+.form-checkbox-text {
+  color: #e2e8f0;
+  font-size: 0.9375rem;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 1.5rem;
+}
+
+/* Table Components - Sticky Headers & Consistent Styling */
+.table-container {
+  overflow-x: auto;
+  position: relative;
+  -webkit-overflow-scrolling: touch;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.data-table--sticky thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(8px);
+}
+
+.data-table th {
+  padding: 0.875rem;
+  text-align: left;
+  font-weight: 600;
+  color: #cbd5e1;
+  border-bottom: 2px solid rgba(148, 163, 184, 0.2);
+  white-space: nowrap;
+}
+
+.data-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  padding-right: 2rem;
+}
+
+.data-table th.sortable:hover {
+  color: #e2e8f0;
+  background: rgba(148, 163, 184, 0.05);
+}
+
+.data-table th.sortable:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+}
+
+.sort-indicator {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  opacity: 0.3;
+}
+
+.data-table th.sortable:hover .sort-indicator {
+  opacity: 0.6;
+}
+
+.data-table th.sorted-asc .sort-indicator {
+  border-bottom: 6px solid currentColor;
+  opacity: 1;
+}
+
+.data-table th.sorted-desc .sort-indicator {
+  border-top: 6px solid currentColor;
+  opacity: 1;
+}
+
+.data-table td {
+  padding: 0.875rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  color: #e2e8f0;
+}
+
+.data-table tbody tr:hover {
+  background: rgba(148, 163, 184, 0.05);
+}
+
+/* Action Buttons */
+.action-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* CSV Export Button */
+.csv-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 3rem 1.5rem;
+  color: #94a3b8;
+}
+
+.empty-state-icon {
+  margin-bottom: 1rem;
+}
+
+.empty-state-message {
+  font-size: 1rem;
+  margin: 0 0 1.5rem 0;
+  color: #cbd5e1;
+}
+
+/* Badge Component */
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.625rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.badge-default {
+  background: rgba(148, 163, 184, 0.2);
+  color: #cbd5e1;
+}
+
+.badge-primary {
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+
+.badge-success {
+  background: rgba(34, 197, 94, 0.2);
+  color: #86efac;
+}
+
+.badge-warning {
+  background: rgba(251, 146, 60, 0.2);
+  color: #fdba74;
+}
+
+.badge-danger {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+
+.badge-high {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+
+.badge-medium {
+  background: rgba(251, 146, 60, 0.2);
+  color: #fdba74;
+}
+
+.badge-low {
+  background: rgba(34, 197, 94, 0.2);
+  color: #86efac;
+}
+
+/* Loading Spinner */
+.loading-spinner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1.5rem;
+  gap: 1rem;
+}
+
+.spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 3px solid rgba(148, 163, 184, 0.2);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-message {
+  color: #94a3b8;
+  font-size: 0.9375rem;
+}
+
+/* Help Card Component */
+.help-card {
+  background: rgba(59, 130, 246, 0.05);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.help-title {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #93c5fd;
+  margin: 0 0 0.75rem 0;
+}
+
+.help-text {
+  color: #cbd5e1;
+  line-height: 1.6;
+  font-size: 0.9375rem;
+}
+
+.help-text ul {
+  margin: 0.75rem 0;
+  padding-left: 1.5rem;
+}
+
+.help-text li {
+  margin: 0.375rem 0;
+}
+
+/* Responsive Mobile-First BCP Pages */
+@media (max-width: 768px) {
+  /* Mobile: Stack tabs vertically */
+  .tabs {
+    flex-direction: column;
+    gap: 0.25rem;
+    border-bottom: none;
+  }
+  
+  .tab {
+    justify-content: flex-start;
+    border-bottom: none;
+    border-left: 3px solid transparent;
+    margin-bottom: 0;
+  }
+  
+  .tab.active {
+    border-left-color: #2563eb;
+    border-bottom-color: transparent;
+  }
+  
+  /* Mobile: Show checklist first, hide others by default */
+  .mobile-tab-content {
+    display: none;
+  }
+  
+  .mobile-tab-content.active {
+    display: block;
+  }
+  
+  /* Make heatmap cells larger on mobile for touch */
+  .heatmap-cell {
+    min-width: 60px;
+    min-height: 60px;
+  }
+  
+  /* Stack form actions vertically on mobile */
+  .form-actions {
+    flex-direction: column;
+  }
+  
+  .form-actions > * {
+    width: 100%;
+  }
+  
+  /* Stack page actions on mobile */
+  .page-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .page-actions > * {
+    width: 100%;
+  }
+}
+
+/* Keyboard Navigation & Focus States */
+.checklist-item {
+  position: relative;
+}
+
+.checklist-item:focus-within {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  border-radius: 0.375rem;
+}
+
+.checkbox:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+.heatmap-cell:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+}
+
+/* Skip Link for Accessibility */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: #3b82f6;
+  color: white;
+  padding: 0.5rem 1rem;
+  text-decoration: none;
+  border-radius: 0 0 0.375rem 0;
+  z-index: 100;
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
+/* Ensure all interactive elements have visible focus */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .form-input,
+  .form-textarea {
+    border-width: 2px;
+  }
+  
+  .data-table th,
+  .data-table td {
+    border-width: 2px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  
+  .spinner {
+    animation: none;
+    border-top-color: transparent;
+  }
+}
