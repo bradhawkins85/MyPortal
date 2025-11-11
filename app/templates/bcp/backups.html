@@ -131,7 +131,7 @@
       <input type="hidden" name="_csrf" value="{{ csrf_token }}">
       <div class="modal-body">
         <div class="form-group">
-          <label for="data_scope" class="form-label">Data for Backup *</label>
+          <label for="data_scope" class="form-label required">Data for Backup</label>
           <input type="text" id="data_scope" name="data_scope" class="form-input" placeholder="e.g., Customer Database, Financial Records" required>
         </div>
 
@@ -174,7 +174,7 @@
       <input type="hidden" name="_csrf" value="{{ csrf_token }}">
       <div class="modal-body">
         <div class="form-group">
-          <label for="edit_data_scope" class="form-label">Data for Backup *</label>
+          <label for="edit_data_scope" class="form-label required">Data for Backup</label>
           <input type="text" id="edit_data_scope" name="data_scope" class="form-input" required>
         </div>
 

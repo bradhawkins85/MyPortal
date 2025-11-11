@@ -159,7 +159,7 @@
     <form action="/bcp/roles" method="post">
       <div class="modal-body">
         <div class="form-group">
-          <label for="role_title">Title *</label>
+          <label for="role_title" class="form-label required">Title</label>
           <input type="text" id="role_title" name="title" required class="form-control" placeholder="e.g., Team Leader, Communications Officer">
         </div>
         
@@ -187,7 +187,7 @@
     <form id="editRoleForm" method="post">
       <div class="modal-body">
         <div class="form-group">
-          <label for="edit_role_title">Title *</label>
+          <label for="edit_role_title" class="form-label required">Title</label>
           <input type="text" id="edit_role_title" name="title" required class="form-control">
         </div>
         
@@ -214,7 +214,7 @@
     <form id="assignUserForm" method="post">
       <div class="modal-body">
         <div class="form-group">
-          <label for="assign_user_id">User *</label>
+          <label for="assign_user_id" class="form-label required">User</label>
           <select id="assign_user_id" name="user_id" required class="form-control">
             <option value="">Select a user...</option>
             {% for user in all_users %}
@@ -260,7 +260,7 @@
     <form id="editAssignmentForm" method="post">
       <div class="modal-body">
         <div class="form-group">
-          <label for="edit_assign_user_id">User *</label>
+          <label for="edit_assign_user_id" class="form-label required">User</label>
           <select id="edit_assign_user_id" name="user_id" required class="form-control">
             {% for user in all_users %}
             <option value="{{ user.id }}">

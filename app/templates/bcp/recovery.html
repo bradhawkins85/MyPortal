@@ -196,7 +196,7 @@
     <form id="actionForm" method="post" action="/bcp/recovery">
       <div class="modal-body">
         <div class="form-group">
-          <label for="action">Action <span class="required">*</span></label>
+          <label for="action" class="form-label required">Action</label>
           <textarea id="action" name="action" class="form-control" rows="3" required></textarea>
         </div>
 
@@ -410,8 +410,5 @@ window.onclick = function(event) {
   border-top: 1px solid #e5e7eb;
 }
 
-.required {
-  color: #ef4444;
-}
 </style>
 {% endblock %}
