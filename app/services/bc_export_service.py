@@ -25,6 +25,7 @@ else:
     _WEASYPRINT_IMPORT_ERROR = None
 
 from app.repositories import bc3 as bc_repo
+from app.repositories import bcp as bcp_repo
 from app.repositories import users as user_repo
 
 
@@ -453,7 +454,7 @@ async def export_bcp_to_pdf(
         ) from _WEASYPRINT_IMPORT_ERROR
 
     # Fetch plan data
-    plan = await bc_repo.get_plan_by_id(plan_id)
+    plan = await bcp_repo.get_plan_by_id(plan_id)
     if not plan:
         raise ValueError(f"Plan {plan_id} not found")
     
@@ -488,47 +489,47 @@ async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[st
     from app.services.time_utils import humanize_hours
     
     # Section 1: Plan Overview
-    objectives = await bc_repo.list_objectives(plan_id)
-    distribution_list = await bc_repo.list_distribution_list(plan_id)
+    objectives = await bcp_repo.list_objectives(plan_id)
+    distribution_list = await bcp_repo.list_distribution_list(plan_id)
     
     # Section 2: Risk Management
-    risks = await bc_repo.list_risks(plan_id)
-    insurance_policies = await bc_repo.list_insurance_policies(plan_id)
-    backup_items = await bc_repo.list_backup_items(plan_id)
+    risks = await bcp_repo.list_risks(plan_id)
+    insurance_policies = await bcp_repo.list_insurance_policies(plan_id)
+    backup_items = await bcp_repo.list_backup_items(plan_id)
     
     # Section 3: Business Impact Analysis
-    critical_activities = await bc_repo.list_critical_activities(plan_id, sort_by="importance")
+    critical_activities = await bcp_repo.list_critical_activities(plan_id, sort_by="importance")
     # Add humanized RTO to each activity
     for activity in critical_activities:
         if activity.get("impact") and activity["impact"].get("rto_hours") is not None:
             activity["impact"]["rto_humanized"] = humanize_hours(activity["impact"]["rto_hours"])
     
     # Section 4: Incident Response
-    checklist_items = await bc_repo.list_checklist_items(plan_id, phase="Immediate")
-    evacuation = await bc_repo.get_evacuation_plan(plan_id)
-    emergency_kit_items = await bc_repo.list_emergency_kit_items(plan_id)
+    checklist_items = await bcp_repo.list_checklist_items(plan_id, phase="Immediate")
+    evacuation = await bcp_repo.get_evacuation_plan(plan_id)
+    emergency_kit_items = await bcp_repo.list_emergency_kit_items(plan_id)
     emergency_kit_documents = [item for item in emergency_kit_items if item["category"] == "Document"]
     emergency_kit_equipment = [item for item in emergency_kit_items if item["category"] == "Equipment"]
-    roles = await bc_repo.list_roles_with_assignments(plan_id)
-    contacts = await bc_repo.list_contacts(plan_id)
+    roles = await bcp_repo.list_roles_with_assignments(plan_id)
+    contacts = await bcp_repo.list_contacts(plan_id)
     
     # Get event log - last N entries
     # First try to get from active incident, otherwise get all
-    active_incident = await bc_repo.get_active_incident(plan_id)
+    active_incident = await bcp_repo.get_active_incident(plan_id)
     if active_incident:
-        all_event_log = await bc_repo.list_event_log_entries(
+        all_event_log = await bcp_repo.list_event_log_entries(
             plan_id, 
             incident_id=active_incident["id"]
         )
     else:
         # Get latest entries across all incidents
-        all_event_log = await bc_repo.list_event_log_entries(plan_id)
+        all_event_log = await bcp_repo.list_event_log_entries(plan_id)
     
     # Limit to the specified number of entries (already ordered by happened_at DESC)
     event_log = all_event_log[:event_log_limit] if len(all_event_log) > event_log_limit else all_event_log
     
     # Section 5: Recovery
-    recovery_actions = await bc_repo.list_recovery_actions(plan_id)
+    recovery_actions = await bcp_repo.list_recovery_actions(plan_id)
     # Enrich recovery actions with humanized RTO and owner names
     for action in recovery_actions:
         if action.get("rto_hours") is not None:
@@ -537,14 +538,14 @@ async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[st
             owner = await user_repo.get_user_by_id(action["owner_id"])
             action["owner_name"] = owner.get("name") if owner else None
     
-    crisis_recovery_checklist = await bc_repo.list_checklist_items(plan_id, phase="CrisisRecovery")
-    recovery_contacts = await bc_repo.list_recovery_contacts(plan_id)
-    insurance_claims = await bc_repo.list_insurance_claims(plan_id)
-    market_changes = await bc_repo.list_market_changes(plan_id)
+    crisis_recovery_checklist = await bcp_repo.list_checklist_items(plan_id, phase="CrisisRecovery")
+    recovery_contacts = await bcp_repo.list_recovery_contacts(plan_id)
+    insurance_claims = await bcp_repo.list_insurance_claims(plan_id)
+    market_changes = await bcp_repo.list_market_changes(plan_id)
     
     # Section 6: Rehearse/Maintain/Review
-    training_items = await bc_repo.list_training_items(plan_id)
-    review_items = await bc_repo.list_review_items(plan_id)
+    training_items = await bcp_repo.list_training_items(plan_id)
+    review_items = await bcp_repo.list_review_items(plan_id)
     
     # Enrich roles with user names for assignments
     for role in roles:
