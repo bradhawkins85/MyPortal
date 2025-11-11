@@ -1,0 +1,117 @@
+{# Table macros for consistent styling and accessibility with sticky headers #}
+
+{% macro data_table(headers, sortable=true, sticky_header=true, aria_label="Data table") %}
+<div class="table-container">
+  <table class="data-table{% if sticky_header %} data-table--sticky{% endif %}" role="table" aria-label="{{ aria_label }}">
+    <thead>
+      <tr role="row">
+        {% for header in headers %}
+        <th role="columnheader" 
+            {% if header.width %}style="width: {{ header.width }};"{% endif %}
+            {% if header.align %}style="text-align: {{ header.align }};"{% endif %}
+            scope="col"
+            {% if sortable and header.sortable|default(true) %}
+            class="sortable"
+            tabindex="0"
+            {% endif %}>
+          {{ header.label }}
+          {% if sortable and header.sortable|default(true) %}
+          <span class="sort-indicator" aria-hidden="true"></span>
+          {% endif %}
+        </th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {{ caller() }}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% macro action_buttons(buttons, align="left") %}
+<div class="action-buttons" style="justify-content: {{ 'flex-start' if align == 'left' else 'flex-end' if align == 'right' else 'center' }};">
+  {% for button in buttons %}
+  {% if button.type == 'link' %}
+  <a href="{{ button.href }}" 
+     class="btn btn-{{ button.variant|default('secondary') }} btn-{{ button.size|default('sm') }}"
+     {% if button.title %}title="{{ button.title }}"{% endif %}
+     {% if button.target %}target="{{ button.target }}"{% endif %}>
+    {% if button.icon %}
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true" focusable="false">
+      {{ button.icon | safe }}
+    </svg>
+    {% endif %}
+    {{ button.label }}
+  </a>
+  {% elif button.type == 'button' %}
+  <button type="button" 
+          class="btn btn-{{ button.variant|default('secondary') }} btn-{{ button.size|default('sm') }}"
+          {% if button.onclick %}onclick="{{ button.onclick }}"{% endif %}
+          {% if button.title %}title="{{ button.title }}"{% endif %}>
+    {% if button.icon %}
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true" focusable="false">
+      {{ button.icon | safe }}
+    </svg>
+    {% endif %}
+    {{ button.label }}
+  </button>
+  {% elif button.type == 'form' %}
+  <form method="{{ button.method|default('post') }}" 
+        action="{{ button.action }}" 
+        style="display: inline;"
+        {% if button.confirm %}onsubmit="return confirm('{{ button.confirm }}')"{% endif %}>
+    {% if csrf_token %}
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    {% endif %}
+    <button type="submit" 
+            class="btn btn-{{ button.variant|default('danger') }} btn-{{ button.size|default('sm') }}"
+            {% if button.title %}title="{{ button.title }}"{% endif %}>
+      {% if button.icon %}
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true" focusable="false">
+        {{ button.icon | safe }}
+      </svg>
+      {% endif %}
+      {{ button.label }}
+    </button>
+  </form>
+  {% endif %}
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{% macro csv_export_button(href, label="Export CSV", variant="secondary", size="sm") %}
+<a href="{{ href }}" class="btn btn-{{ variant }} btn-{{ size }} csv-export-btn" aria-label="{{ label }}">
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true" focusable="false">
+    <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+  </svg>
+  <span>{{ label }}</span>
+</a>
+{% endmacro %}
+
+{% macro empty_state(message, action_label="", action_href="", icon="") %}
+<div class="empty-state" role="status">
+  {% if icon %}
+  <div class="empty-state-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="64" height="64" fill="currentColor" opacity="0.3">
+      {{ icon | safe }}
+    </svg>
+  </div>
+  {% endif %}
+  <p class="empty-state-message">{{ message }}</p>
+  {% if action_label and action_href %}
+  <a href="{{ action_href }}" class="btn btn-primary">{{ action_label }}</a>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro badge(text, variant="default") %}
+<span class="badge badge-{{ variant }}" role="status">{{ text }}</span>
+{% endmacro %}
+
+{% macro loading_spinner(message="Loading...") %}
+<div class="loading-spinner" role="status" aria-live="polite">
+  <div class="spinner" aria-hidden="true"></div>
+  <span class="loading-message">{{ message }}</span>
+</div>
+{% endmacro %}

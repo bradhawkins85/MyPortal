@@ -40,6 +40,26 @@
     </div>
   </div>
 
+  <!-- Help Text -->
+  <section class="card help-card" role="region" aria-label="Risk Assessment Help">
+    <div class="card-body">
+      <h3 class="help-title">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false">
+          <path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z"/>
+        </svg>
+        How to Assess Risks
+      </h3>
+      <div class="help-text">
+        <p>For each risk, evaluate two dimensions:</p>
+        <ul>
+          <li><strong>Likelihood (1-4):</strong> How probable is this risk to occur? Consider historical data, expert opinion, and current conditions.</li>
+          <li><strong>Impact (1-4):</strong> If this risk occurs, how severe would the consequences be? Consider financial loss, operational disruption, and reputational damage.</li>
+        </ul>
+        <p>The <strong>Risk Rating</strong> (Likelihood × Impact) determines priority. Higher ratings require more urgent attention and resource allocation. Use the heatmap below to visualize risk distribution and identify areas requiring immediate action.</p>
+      </div>
+    </div>
+  </section>
+
   <!-- Risk Legend -->
   <section class="card">
     <div class="card-header">
@@ -137,9 +157,12 @@
                 <a href="/bcp/risks?heatmap_filter={{ cell_key }}" 
                    class="heatmap-cell {% if active_heatmap_filter == cell_key %}heatmap-cell-active{% endif %}"
                    style="background-color: {{ bg_color }};"
-                   title="Likelihood {{ likelihood }}, Impact {{ impact }}: {{ count }} risk(s), Severity: {{ severity }}">
-                  <div class="heatmap-cell-count">{{ count }}</div>
-                  <div class="heatmap-cell-rating">R: {{ rating }}</div>
+                   role="button"
+                   aria-label="Filter risks by Likelihood {{ likelihood }}, Impact {{ impact }}: {{ count }} risk(s), Severity {{ severity }}, Rating {{ rating }}"
+                   title="Likelihood {{ likelihood }}, Impact {{ impact }}: {{ count }} risk(s), Severity: {{ severity }}"
+                   tabindex="0">
+                  <div class="heatmap-cell-count" aria-hidden="true">{{ count }}</div>
+                  <div class="heatmap-cell-rating" aria-hidden="true">R: {{ rating }}</div>
                 </a>
               {% endfor %}
             {% endfor %}
@@ -636,6 +659,51 @@ document.addEventListener('DOMContentLoaded', function() {
     // Trigger HTMX update event for heatmap
     document.body.dispatchEvent(new CustomEvent('riskUpdated'));
   }
+  
+  // Add keyboard navigation support for heatmap
+  const heatmapCells = document.querySelectorAll('.heatmap-cell');
+  heatmapCells.forEach((cell, index) => {
+    cell.addEventListener('keydown', function(e) {
+      let targetIndex = index;
+      const cols = 4; // 4x4 grid
+      
+      switch(e.key) {
+        case 'ArrowRight':
+          e.preventDefault();
+          targetIndex = index + 1;
+          if (targetIndex % cols !== 0 && targetIndex < heatmapCells.length) {
+            heatmapCells[targetIndex].focus();
+          }
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          targetIndex = index - 1;
+          if (index % cols !== 0 && targetIndex >= 0) {
+            heatmapCells[targetIndex].focus();
+          }
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          targetIndex = index + cols;
+          if (targetIndex < heatmapCells.length) {
+            heatmapCells[targetIndex].focus();
+          }
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          targetIndex = index - cols;
+          if (targetIndex >= 0) {
+            heatmapCells[targetIndex].focus();
+          }
+          break;
+        case 'Enter':
+        case ' ':
+          e.preventDefault();
+          cell.click();
+          break;
+      }
+    });
+  });
 });
 
 // Function to edit a risk
