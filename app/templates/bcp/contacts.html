@@ -1,0 +1,745 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-container">
+  {% if request.query_params.get('success') %}
+    <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
+  {% endif %}
+  {% if request.query_params.get('error') %}
+    <div class="alert alert-error">{{ request.query_params.get('error') }}</div>
+  {% endif %}
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Contacts &amp; Claims</h1>
+      <p class="page-description">Centralise key personnel, emergency contacts, and insurance claims for rapid response.</p>
+    </div>
+    <div class="page-actions">
+      <a href="/bcp" class="btn btn-secondary">Back to Overview</a>
+      <a href="/bcp/recovery-contacts" class="btn btn-secondary">Recovery Contacts</a>
+      <a href="/bcp/insurance-claims" class="btn btn-secondary">Insurance Claims</a>
+      {% if can_edit %}
+      <div class="btn-group">
+        <button type="button" class="btn btn-primary" onclick="showAddContactModal('Internal')">Add Internal Contact</button>
+        <button type="button" class="btn btn-primary" onclick="showAddContactModal('External')">Add External Contact</button>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="card help-card">
+    <div class="card-body">
+      <h3 class="help-title">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z"/>
+        </svg>
+        About Contacts &amp; Claims
+      </h3>
+      <p class="help-text">
+        Maintain a single source of truth for internal and external contacts, insurance claim status, and recovery partners.
+        Use this hub to prepare call trees, confirm responsibilities, and keep track of insurer follow-up actions during an incident.
+      </p>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-body">
+      <div class="summary-grid">
+        <div class="summary-card">
+          <div class="summary-icon" style="background: #2563eb10; color: #2563eb;">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zM8 11c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+            </svg>
+          </div>
+          <div>
+            <div class="summary-value">{{ total_contacts }}</div>
+            <div class="summary-label">BCP Contacts</div>
+          </div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-icon" style="background: #10b98110; color: #047857;">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M5 3v18l7-3 7 3V3H5zm12 13-5-2.18L7 16V5h10v11z"/>
+            </svg>
+          </div>
+          <div>
+            <div class="summary-value">{{ recovery_contacts_count }}</div>
+            <div class="summary-label">Recovery Contacts</div>
+          </div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-icon" style="background: #f59e0b10; color: #b45309;">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M7 6V4h10v2h3v2H4V6h3zm0 4h10l-1 10H8L7 10zm2 2v6h2v-6H9zm4 0v6h2v-6h-2z"/>
+            </svg>
+          </div>
+          <div>
+            <div class="summary-value">{{ claims_count }}</div>
+            <div class="summary-label">Insurance Claims</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Quick Actions</h2>
+    </div>
+    <div class="card-body">
+      <div class="quick-actions">
+        <a href="/bcp/incident?tab=contacts" class="quick-action">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+            <path d="M20 4H4c-1.1 0-2 .9-2 2v3c0 .55.45 1 1 1h1v10c0 .55.45 1 1 1h6v-2H7v-9h10v5h2V6c0-1.1-.9-2-2-2zm-9 9c0-1.66 1.34-3 3-3s3 1.34 3 3-1.34 3-3 3v4h-2v-4c-1.66 0-3-1.34-3-3z"/>
+          </svg>
+          <div>
+            <strong>Incident Contacts</strong>
+            <p>Prepare your call tree from the incident console.</p>
+          </div>
+        </a>
+        <a href="/bcp/recovery-contacts" class="quick-action">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+            <path d="M17 3H7c-1.1 0-2 .9-2 2v14l7-3 7 3V5c0-1.1-.9-2-2-2z"/>
+          </svg>
+          <div>
+            <strong>Recovery Partners</strong>
+            <p>Keep suppliers and crisis partners ready to assist.</p>
+          </div>
+        </a>
+        <a href="/bcp/insurance-claims" class="quick-action">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+            <path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm3.55 14.54L11 13.87V7h2v5.13l3.45 1.9-1.9 1.51z"/>
+          </svg>
+          <div>
+            <strong>Insurance Follow-up</strong>
+            <p>Track claims and outstanding insurer actions.</p>
+          </div>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Internal Contacts</h2>
+      {% if can_edit %}
+      <button class="btn btn-primary btn-sm" onclick="showAddContactModal('Internal')">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+        </svg>
+        Add Contact
+      </button>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      {% if internal_contacts %}
+      <div class="contacts-grid">
+        {% for contact in internal_contacts %}
+        <div class="contact-card">
+          <div class="contact-header">
+            <h3 class="contact-name">{{ contact.person_or_org }}</h3>
+            {% if can_edit %}
+            <div class="contact-actions">
+              <button class="btn-icon" onclick="editContact({{ contact.id }}, '{{ contact.kind|escapejs }}', '{{ contact.person_or_org|escapejs }}', '{{ (contact.phones or '')|escapejs }}', '{{ (contact.email or '')|escapejs }}', '{{ (contact.responsibility_or_agency or '')|escapejs }}')" title="Edit">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                  <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                </svg>
+              </button>
+              <form action="/bcp/contacts/{{ contact.id }}/delete" method="post" style="display: inline;">
+                <button type="submit" class="btn-icon btn-danger" onclick="return confirm('Delete this contact?')" title="Delete">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                  </svg>
+                </button>
+              </form>
+            </div>
+            {% endif %}
+          </div>
+          {% if contact.responsibility_or_agency %}
+          <p class="contact-role">{{ contact.responsibility_or_agency }}</p>
+          {% endif %}
+          <div class="contact-details">
+            {% if contact.phones %}
+            <div class="contact-detail">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
+              </svg>
+              <a href="tel:{{ contact.phones }}">{{ contact.phones }}</a>
+            </div>
+            {% endif %}
+            {% if contact.email %}
+            <div class="contact-detail">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4-8 5-8-5V6l8 5 8-5v2z"/>
+              </svg>
+              <a href="mailto:{{ contact.email }}">{{ contact.email }}</a>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-muted">No internal contacts recorded yet.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">External Contacts</h2>
+      {% if can_edit %}
+      <button class="btn btn-primary btn-sm" onclick="showAddContactModal('External')">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+        </svg>
+        Add Contact
+      </button>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      {% if external_contacts %}
+      <div class="contacts-grid">
+        {% for contact in external_contacts %}
+        <div class="contact-card">
+          <div class="contact-header">
+            <h3 class="contact-name">{{ contact.person_or_org }}</h3>
+            {% if can_edit %}
+            <div class="contact-actions">
+              <button class="btn-icon" onclick="editContact({{ contact.id }}, '{{ contact.kind|escapejs }}', '{{ contact.person_or_org|escapejs }}', '{{ (contact.phones or '')|escapejs }}', '{{ (contact.email or '')|escapejs }}', '{{ (contact.responsibility_or_agency or '')|escapejs }}')" title="Edit">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                  <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                </svg>
+              </button>
+              <form action="/bcp/contacts/{{ contact.id }}/delete" method="post" style="display: inline;">
+                <button type="submit" class="btn-icon btn-danger" onclick="return confirm('Delete this contact?')" title="Delete">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                  </svg>
+                </button>
+              </form>
+            </div>
+            {% endif %}
+          </div>
+          {% if contact.responsibility_or_agency %}
+          <p class="contact-role">{{ contact.responsibility_or_agency }}</p>
+          {% endif %}
+          <div class="contact-details">
+            {% if contact.phones %}
+            <div class="contact-detail">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
+              </svg>
+              <a href="tel:{{ contact.phones }}">{{ contact.phones }}</a>
+            </div>
+            {% endif %}
+            {% if contact.email %}
+            <div class="contact-detail">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4-8 5-8-5V6l8 5 8-5v2z"/>
+              </svg>
+              <a href="mailto:{{ contact.email }}">{{ contact.email }}</a>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-muted">No external contacts recorded yet.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if other_contacts %}
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Other Contacts</h2>
+    </div>
+    <div class="card-body">
+      <div class="contacts-grid">
+        {% for contact in other_contacts %}
+        <div class="contact-card">
+          <div class="contact-header">
+            <h3 class="contact-name">{{ contact.person_or_org }}</h3>
+            {% if can_edit %}
+            <div class="contact-actions">
+              <button class="btn-icon" onclick="editContact({{ contact.id }}, '{{ contact.kind|escapejs }}', '{{ contact.person_or_org|escapejs }}', '{{ (contact.phones or '')|escapejs }}', '{{ (contact.email or '')|escapejs }}', '{{ (contact.responsibility_or_agency or '')|escapejs }}')" title="Edit">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                  <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                </svg>
+              </button>
+              <form action="/bcp/contacts/{{ contact.id }}/delete" method="post" style="display: inline;">
+                <button type="submit" class="btn-icon btn-danger" onclick="return confirm('Delete this contact?')" title="Delete">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                  </svg>
+                </button>
+              </form>
+            </div>
+            {% endif %}
+          </div>
+          <p class="contact-role">{{ contact.kind }}</p>
+          <div class="contact-details">
+            {% if contact.phones %}
+            <div class="contact-detail">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
+              </svg>
+              <a href="tel:{{ contact.phones }}">{{ contact.phones }}</a>
+            </div>
+            {% endif %}
+            {% if contact.email %}
+            <div class="contact-detail">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4-8 5-8-5V6l8 5 8-5v2z"/>
+              </svg>
+              <a href="mailto:{{ contact.email }}">{{ contact.email }}</a>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Insurance Claims Snapshot</h2>
+      <a href="/bcp/insurance-claims" class="btn btn-secondary btn-sm">View All</a>
+    </div>
+    <div class="card-body">
+      {% if recent_claims %}
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width: 20%;">Insurer</th>
+              <th style="width: 15%;">Date Filed</th>
+              <th>Claim Details</th>
+              <th style="width: 25%;">Follow-up Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for claim in recent_claims %}
+            <tr>
+              <td><strong>{{ claim.insurer }}</strong></td>
+              <td>
+                {% if claim.claim_date %}
+                  {{ claim.claim_date.strftime('%Y-%m-%d') }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+              <td class="text-sm">{{ claim.details or '-' }}</td>
+              <td class="text-sm">{{ claim.follow_up_actions or '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor" opacity="0.3">
+          <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+        </svg>
+        <p>No insurance claims recorded yet.</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Recovery Contacts Snapshot</h2>
+      <a href="/bcp/recovery-contacts" class="btn btn-secondary btn-sm">Manage Recovery Contacts</a>
+    </div>
+    <div class="card-body">
+      {% if recovery_contacts_preview %}
+      <div class="recovery-grid">
+        {% for contact in recovery_contacts_preview %}
+        <div class="recovery-card">
+          <h3>{{ contact.org_name }}</h3>
+          {% if contact.contact_name %}
+          <p><strong>{{ contact.contact_name }}</strong>{% if contact.title %} • {{ contact.title }}{% endif %}</p>
+          {% elif contact.title %}
+          <p>{{ contact.title }}</p>
+          {% endif %}
+          {% if contact.phone %}
+          <p class="recovery-phone">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+              <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
+            </svg>
+            <a href="tel:{{ contact.phone }}">{{ contact.phone }}</a>
+          </p>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor" opacity="0.3">
+          <path d="M12 2 4 5v6c0 4.97 3.23 9.55 8 11 4.77-1.45 8-6.03 8-11V5l-8-3zm0 15c-1.66 0-3-1.34-3-3 0-1.31.84-2.42 2-2.83V7h2v4.17c1.16.41 2 1.52 2 2.83 0 1.66-1.34 3-3 3z"/>
+        </svg>
+        <p>No recovery contacts captured yet.</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+{% if can_edit %}
+<div id="contactModal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="contactModalTitle">Add Contact</h2>
+      <button class="modal-close" onclick="closeContactModal()">&times;</button>
+    </div>
+    <form id="contactForm" method="post" action="/bcp/contacts">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="contact_kind" class="form-label required">Type</label>
+          <select id="contact_kind" name="kind" class="form-control" required>
+            <option value="Internal">Internal</option>
+            <option value="External">External</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="contact_person_or_org" class="form-label required">Person / Organisation</label>
+          <input type="text" id="contact_person_or_org" name="person_or_org" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label for="contact_responsibility_or_agency" class="form-label">Responsibility / Agency</label>
+          <input type="text" id="contact_responsibility_or_agency" name="responsibility_or_agency" class="form-control" placeholder="e.g., Incident Commander, Local Fire Service">
+        </div>
+        <div class="form-group">
+          <label for="contact_phones" class="form-label">Phone</label>
+          <input type="text" id="contact_phones" name="phones" class="form-control" placeholder="e.g., +61 400 000 000">
+        </div>
+        <div class="form-group">
+          <label for="contact_email" class="form-label">Email</label>
+          <input type="email" id="contact_email" name="email" class="form-control" placeholder="name@example.com">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeContactModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Contact</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<style>
+.summary-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.summary-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.summary-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+}
+
+.summary-value {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.summary-label {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.btn-group {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.quick-actions {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.quick-action {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  text-decoration: none;
+  transition: all 0.2s ease-in-out;
+  background: #fff;
+}
+
+.quick-action:hover {
+  border-color: #2563eb;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.12);
+}
+
+.quick-action strong {
+  color: #1f2937;
+}
+
+.quick-action p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.contacts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.contact-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 1rem;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.contact-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.contact-name {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.contact-role {
+  margin: 0;
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.contact-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.contact-detail {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #1f2937;
+}
+
+.contact-detail a {
+  color: inherit;
+}
+
+.contact-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.btn-icon {
+  border: none;
+  background: #f3f4f6;
+  color: #374151;
+  padding: 0.4rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s ease-in-out;
+}
+
+.btn-icon:hover {
+  background: #e5e7eb;
+}
+
+.btn-icon.btn-danger {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.btn-icon.btn-danger:hover {
+  background: #fecaca;
+}
+
+.recovery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.recovery-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 1rem;
+  background: #fff;
+}
+
+.recovery-card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  color: #111827;
+}
+
+.recovery-card p {
+  margin: 0 0 0.25rem;
+  color: #4b5563;
+  font-size: 0.9rem;
+}
+
+.recovery-phone {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.recovery-phone a {
+  color: inherit;
+}
+
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(17, 24, 39, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: #fff;
+  border-radius: 12px;
+  width: min(600px, 100%);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
+  overflow: hidden;
+}
+
+.modal-header, .modal-footer {
+  padding: 1rem 1.5rem;
+  background: #f9fafb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.modal-body {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.modal-close {
+  border: none;
+  background: transparent;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #6b7280;
+}
+
+@media (max-width: 768px) {
+  .page-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .btn-group {
+    width: 100%;
+  }
+
+  .btn-group .btn {
+    width: 100%;
+  }
+}
+</style>
+
+{% if can_edit %}
+<script>
+function showAddContactModal(kind) {
+  const modal = document.getElementById('contactModal');
+  const form = document.getElementById('contactForm');
+  const title = document.getElementById('contactModalTitle');
+
+  form.action = '/bcp/contacts';
+  title.textContent = `Add ${kind} Contact`;
+  document.getElementById('contact_kind').value = kind;
+
+  document.getElementById('contact_person_or_org').value = '';
+  document.getElementById('contact_phones').value = '';
+  document.getElementById('contact_email').value = '';
+  document.getElementById('contact_responsibility_or_agency').value = '';
+
+  modal.style.display = 'flex';
+}
+
+function editContact(id, kind, name, phones, email, responsibility) {
+  const modal = document.getElementById('contactModal');
+  const form = document.getElementById('contactForm');
+  const title = document.getElementById('contactModalTitle');
+
+  form.action = `/bcp/contacts/${id}/update`;
+  title.textContent = 'Edit Contact';
+  document.getElementById('contact_kind').value = kind;
+  document.getElementById('contact_person_or_org').value = name;
+  document.getElementById('contact_phones').value = phones;
+  document.getElementById('contact_email').value = email;
+  document.getElementById('contact_responsibility_or_agency').value = responsibility;
+
+  modal.style.display = 'flex';
+}
+
+function closeContactModal() {
+  document.getElementById('contactModal').style.display = 'none';
+}
+
+window.addEventListener('click', (event) => {
+  const modal = document.getElementById('contactModal');
+  if (event.target === modal) {
+    closeContactModal();
+  }
+});
+</script>
+{% endif %}
+{% endblock %}

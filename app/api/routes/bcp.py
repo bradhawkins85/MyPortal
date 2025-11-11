@@ -586,26 +586,129 @@ async def bcp_recovery(
 
 @router.get("/contacts", response_class=HTMLResponse, include_in_schema=False)
 async def bcp_contacts(request: Request):
-    """BCP Contacts & Claims page (stub)."""
+    """BCP Contacts & Claims page."""
     user, company_id = await _require_bcp_view(request)
-    
+
     from app.main import _build_base_context
     from app.core.config import get_templates_config
     from fastapi.templating import Jinja2Templates
-    
+
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+
+    # Gather contacts grouped by kind
+    contacts = await bcp_repo.list_contacts(plan["id"])
+    internal_contacts = [c for c in contacts if c["kind"] == "Internal"]
+    external_contacts = [c for c in contacts if c["kind"] == "External"]
+    other_contacts = [c for c in contacts if c["kind"] not in ("Internal", "External")]
+
+    # Recovery contacts and insurance claims previews
+    recovery_contacts = await bcp_repo.list_recovery_contacts(plan["id"])
+    insurance_claims = await bcp_repo.list_insurance_claims(plan["id"])
+
     templates_config = get_templates_config()
     templates = Jinja2Templates(directory=str(templates_config.template_path))
-    
+
     context = await _build_base_context(
         request,
         user,
         extra={
             "title": "Contacts & Claims",
-            "page_type": "contacts",
+            "plan": plan,
+            "internal_contacts": internal_contacts,
+            "external_contacts": external_contacts,
+            "other_contacts": other_contacts,
+            "total_contacts": len(contacts),
+            "recent_claims": insurance_claims[:5],
+            "claims_count": len(insurance_claims),
+            "recovery_contacts_preview": recovery_contacts[:6],
+            "recovery_contacts_count": len(recovery_contacts),
+            "can_edit": user.get("is_super_admin")
+            or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
         },
     )
-    
-    return templates.TemplateResponse("bcp/stub.html", context)
+
+    return templates.TemplateResponse("bcp/contacts.html", context)
+
+
+@router.post("/contacts", include_in_schema=False)
+async def create_contact_page(
+    request: Request,
+    kind: str = Form(...),
+    person_or_org: str = Form(...),
+    phones: str = Form(None),
+    email: str = Form(None),
+    responsibility_or_agency: str = Form(None),
+):
+    """Create a contact from the Contacts & Claims page."""
+    user, company_id = await _require_bcp_edit(request)
+
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+
+    await bcp_repo.create_contact(
+        plan["id"],
+        kind,
+        person_or_org,
+        phones if phones else None,
+        email if email else None,
+        responsibility_or_agency if responsibility_or_agency else None,
+    )
+
+    return RedirectResponse(
+        url="/bcp/contacts?success=" + quote("Contact added successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/contacts/{contact_id}/update", include_in_schema=False)
+async def update_contact_page(
+    request: Request,
+    contact_id: int,
+    kind: str = Form(...),
+    person_or_org: str = Form(...),
+    phones: str = Form(None),
+    email: str = Form(None),
+    responsibility_or_agency: str = Form(None),
+):
+    """Update a contact from the Contacts & Claims page."""
+    user, company_id = await _require_bcp_edit(request)
+
+    updated = await bcp_repo.update_contact(
+        contact_id,
+        kind=kind,
+        person_or_org=person_or_org,
+        phones=phones if phones else None,
+        email=email if email else None,
+        responsibility_or_agency=responsibility_or_agency if responsibility_or_agency else None,
+    )
+
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+
+    return RedirectResponse(
+        url="/bcp/contacts?success=" + quote("Contact updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/contacts/{contact_id}/delete", include_in_schema=False)
+async def delete_contact_page(request: Request, contact_id: int):
+    """Delete a contact from the Contacts & Claims page."""
+    user, company_id = await _require_bcp_edit(request)
+
+    deleted = await bcp_repo.delete_contact(contact_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+
+    return RedirectResponse(
+        url="/bcp/contacts?success=" + quote("Contact deleted successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @router.get("/schedules", response_class=HTMLResponse, include_in_schema=False)
