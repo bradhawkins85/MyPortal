@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for MyPortal
-FROM python:3.10-slim as base
+FROM python:3.10-slim AS base
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -17,15 +17,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy dependency files
+# Copy dependency files and app code
 COPY pyproject.toml ./
+COPY app/ ./app/
 
 # Install Python dependencies
 RUN pip install --upgrade pip setuptools wheel && \
     pip install .
 
-# Copy application code
-COPY app/ ./app/
+# Copy migrations
 COPY migrations/ ./migrations/
 
 # Create non-root user
