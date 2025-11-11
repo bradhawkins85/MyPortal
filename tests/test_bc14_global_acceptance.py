@@ -183,6 +183,27 @@ class TestRiskHeatmapUpdates:
         """Verify heatmap filtering by cell."""
         # This tests the filter logic in the route
         assert True  # The route already implements filtering via heatmap_filter query param
+    
+    async def test_htmx_heatmap_endpoint_exists(self):
+        """Verify HTMX heatmap partial endpoint exists."""
+        from app.api.routes import bcp
+        
+        router = bcp.router
+        routes = [r.path for r in router.routes]
+        # Check for heatmap partial endpoint
+        assert any("/risks/heatmap" in r for r in routes)
+    
+    async def test_htmx_included_in_base_template(self):
+        """Verify HTMX is loaded in base template."""
+        with open('/home/runner/work/MyPortal/MyPortal/app/templates/base.html', 'r') as f:
+            content = f.read()
+            assert 'htmx' in content.lower()
+    
+    async def test_heatmap_partial_template_exists(self):
+        """Verify heatmap partial template exists."""
+        import os
+        partial_path = '/home/runner/work/MyPortal/MyPortal/app/templates/bcp/heatmap_partial.html'
+        assert os.path.exists(partial_path)
 
 
 class TestRTOStorageAndRendering:
