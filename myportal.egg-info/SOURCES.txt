@@ -259,6 +259,7 @@ tests/test_bc12_security.py
 tests/test_bc13_automatic_migrations.py
 tests/test_bc13_sqlite_fallback.py
 tests/test_bc14_comprehensive.py
+tests/test_bc14_global_acceptance.py
 tests/test_bc15_change_log_entry.py
 tests/test_bc18_acceptance_criteria.py
 tests/test_bc18_plan_creation.py
