@@ -30,6 +30,3 @@ weasyprint>=60.0
 pytest
 pytest-asyncio
 httpx
-ruff
-mypy
-pytest-cov
