@@ -75,7 +75,11 @@ class BCTemplateDetail(BaseModel):
     name: str
     version: str
     is_default: bool
-    schema_json: Optional[dict[str, Any]] = None
+    template_schema: Optional[dict[str, Any]] = Field(
+        None, 
+        validation_alias="schema_json",
+        serialization_alias="schema_json"
+    )
     created_at: datetime
     updated_at: datetime
     
@@ -89,7 +93,12 @@ class BCTemplateCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255, description="Template name")
     version: str = Field(..., max_length=50, description="Template version")
     is_default: bool = Field(default=False, description="Whether this is the default template")
-    schema_json: Optional[dict[str, Any]] = Field(None, description="Template schema definition")
+    template_schema: Optional[dict[str, Any]] = Field(
+        None, 
+        validation_alias="schema_json",
+        serialization_alias="schema_json",
+        description="Template schema definition"
+    )
 
 
 class BCTemplateUpdate(BaseModel):
@@ -98,7 +107,12 @@ class BCTemplateUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255, description="Template name")
     version: Optional[str] = Field(None, max_length=50, description="Template version")
     is_default: Optional[bool] = Field(None, description="Whether this is the default template")
-    schema_json: Optional[dict[str, Any]] = Field(None, description="Template schema definition")
+    template_schema: Optional[dict[str, Any]] = Field(
+        None, 
+        validation_alias="schema_json",
+        serialization_alias="schema_json",
+        description="Template schema definition"
+    )
 
 
 # Plan Schemas

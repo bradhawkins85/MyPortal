@@ -197,7 +197,7 @@ async def create_template(
         name=template_data.name,
         version=template_data.version,
         is_default=template_data.is_default,
-        schema_json=template_data.schema_json,
+        schema_json=template_data.template_schema,
     )
     return BCTemplateDetail(**template)
 
@@ -242,7 +242,7 @@ async def update_template(
         name=template_data.name,
         version=template_data.version,
         is_default=template_data.is_default,
-        schema_json=template_data.schema_json,
+        schema_json=template_data.template_schema,
     )
     return BCTemplateDetail(**template)
 

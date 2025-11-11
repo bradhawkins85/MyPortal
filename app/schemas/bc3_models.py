@@ -125,7 +125,12 @@ class BCTemplateBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     version: str = Field(..., max_length=50)
     is_default: bool = Field(default=False)
-    schema_json: Optional[dict[str, Any]] = Field(None, description="Section and field definitions")
+    template_schema: Optional[dict[str, Any]] = Field(
+        None, 
+        validation_alias="schema_json",
+        serialization_alias="schema_json",
+        description="Section and field definitions"
+    )
 
 
 class BCTemplateCreate(BCTemplateBase):
@@ -140,7 +145,11 @@ class BCTemplateUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     version: Optional[str] = Field(None, max_length=50)
     is_default: Optional[bool] = None
-    schema_json: Optional[dict[str, Any]] = None
+    template_schema: Optional[dict[str, Any]] = Field(
+        None,
+        validation_alias="schema_json",
+        serialization_alias="schema_json"
+    )
 
 
 class BCTemplateResponse(BCTemplateBase):
@@ -162,7 +171,12 @@ class BCSectionDefinitionBase(BaseModel):
     key: str = Field(..., min_length=1, max_length=100, description="Unique section key")
     title: str = Field(..., min_length=1, max_length=255)
     order_index: int = Field(default=0)
-    schema_json: Optional[dict[str, Any]] = Field(None, description="Field definitions")
+    section_schema: Optional[dict[str, Any]] = Field(
+        None, 
+        validation_alias="schema_json",
+        serialization_alias="schema_json",
+        description="Field definitions"
+    )
 
 
 class BCSectionDefinitionCreate(BCSectionDefinitionBase):
@@ -177,7 +191,11 @@ class BCSectionDefinitionUpdate(BaseModel):
     key: Optional[str] = Field(None, min_length=1, max_length=100)
     title: Optional[str] = Field(None, min_length=1, max_length=255)
     order_index: Optional[int] = None
-    schema_json: Optional[dict[str, Any]] = None
+    section_schema: Optional[dict[str, Any]] = Field(
+        None,
+        validation_alias="schema_json",
+        serialization_alias="schema_json"
+    )
 
 
 class BCSectionDefinitionResponse(BCSectionDefinitionBase):
