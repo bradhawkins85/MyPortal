@@ -556,5 +556,4 @@ class Database:
 
 
 db = Database()
-
-db = Database()
+db.connection = db.acquire  # Alias for backward compatibility
