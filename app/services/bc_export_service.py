@@ -9,7 +9,8 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-from datetime import datetime
+from datetime import date, datetime, time
+from decimal import Decimal
 from typing import Any, Optional
 
 from docx import Document
@@ -33,6 +34,16 @@ from app.repositories import users as user_repo
 # Content Hash Generation
 # ============================================================================
 
+def _json_serializer(value: Any) -> str:
+    """Serialize additional Python types for deterministic JSON encoding."""
+
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 def compute_content_hash(content: dict[str, Any], metadata: dict[str, Any]) -> str:
     """
     Compute deterministic SHA256 hash of plan content and metadata.
@@ -50,7 +61,7 @@ def compute_content_hash(content: dict[str, Any], metadata: dict[str, Any]) -> s
         "metadata": metadata,
     }
     # Use sort_keys to ensure deterministic ordering
-    json_bytes = json.dumps(combined, sort_keys=True).encode("utf-8")
+    json_bytes = json.dumps(combined, sort_keys=True, default=_json_serializer).encode("utf-8")
     return hashlib.sha256(json_bytes).hexdigest()
 
 
