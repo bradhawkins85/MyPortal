@@ -85,6 +85,62 @@ async def _require_bcp_edit(request: Request, session: SessionData = Depends(get
     return user, active_company_id
 
 
+async def _require_bcp_incident_run(request: Request, session: SessionData = Depends(get_current_session)) -> tuple[dict[str, Any], int]:
+    """Require BCP incident:run permission for incident operations."""
+    _check_bcp_enabled()
+    
+    from app.repositories import users as user_repo
+    
+    user = await user_repo.get_user_by_id(session.user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    
+    # Super admin has access
+    if user.get("is_super_admin"):
+        active_company_id = getattr(request.state, "active_company_id", None)
+        if active_company_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
+        return user, active_company_id
+    
+    # Check BCP incident:run permission
+    has_permission = await membership_repo.user_has_permission(session.user_id, "bcp:incident:run")
+    if not has_permission:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP incident:run permission required")
+    
+    active_company_id = getattr(request.state, "active_company_id", None)
+    if active_company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
+    
+    return user, active_company_id
+
+
+async def _require_bcp_export(request: Request, session: SessionData = Depends(get_current_session)) -> tuple[dict[str, Any], int | None]:
+    """Require BCP export permission."""
+    _check_bcp_enabled()
+    
+    from app.repositories import users as user_repo
+    
+    user = await user_repo.get_user_by_id(session.user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    
+    # Super admin has access
+    if user.get("is_super_admin"):
+        active_company_id = getattr(request.state, "active_company_id", None)
+        return user, active_company_id
+    
+    # Check BCP export permission
+    has_permission = await membership_repo.user_has_permission(session.user_id, "bcp:export")
+    if not has_permission:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP export permission required")
+    
+    active_company_id = getattr(request.state, "active_company_id", None)
+    if active_company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
+    
+    return user, active_company_id
+
+
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def bcp_overview(request: Request):
     """BCP Overview page with PPRR cards."""
@@ -950,8 +1006,9 @@ async def export_bcp_pdf(
     from fastapi.responses import StreamingResponse
     from datetime import datetime as dt
     from app.services.bc_export_service import export_bcp_to_pdf
+    from app.services import audit
     
-    user, company_id = await _require_bcp_view(request)
+    user, company_id = await _require_bcp_export(request)
     
     # Get plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -970,6 +1027,16 @@ async def export_bcp_pdf(
         safe_title = "".join(c for c in plan["title"] if c.isalnum() or c in (' ', '-', '_')).strip()
         safe_title = safe_title.replace(' ', '_')
         filename = f"BCP_{safe_title}_{timestamp}.pdf"
+        
+        # Audit log the PDF export
+        await audit.log_action(
+            action="bcp.export.pdf",
+            user_id=user["id"],
+            entity_type="bcp_plan",
+            entity_id=plan["id"],
+            metadata={"company_id": company_id, "event_log_limit": event_log_limit, "filename": filename},
+            request=request,
+        )
         
         # Return as streaming response
         pdf_buffer.seek(0)
@@ -1010,6 +1077,16 @@ async def update_plan(
         version=version if version else None,
     )
     
+    
+    # Audit log
+    await audit.log_action(
+        action="bcp.plan.update",
+        user_id=user["id"],
+        entity_type="plan",
+        metadata={"company_id": company_id},
+        request=request,
+    )
+    
     return RedirectResponse(
         url="/bcp?success=" + quote("Plan updated successfully"),
         status_code=status.HTTP_303_SEE_OTHER,
@@ -1030,6 +1107,16 @@ async def add_objective(
     
     await bcp_repo.create_objective(plan["id"], objective_text)
     
+    
+    # Audit log
+    await audit.log_action(
+        action="bcp.objective.create",
+        user_id=user["id"],
+        entity_type="objective",
+        metadata={"company_id": company_id},
+        request=request,
+    )
+    
     return RedirectResponse(
         url="/bcp?success=" + quote("Objective added"),
         status_code=status.HTTP_303_SEE_OTHER,
@@ -1047,6 +1134,16 @@ async def delete_objective(
     deleted = await bcp_repo.delete_objective(objective_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Objective not found")
+    
+    
+    # Audit log
+    await audit.log_action(
+        action="bcp.objective.delete",
+        user_id=user["id"],
+        entity_type="objective",
+        metadata={"company_id": company_id},
+        request=request,
+    )
     
     return RedirectResponse(
         url="/bcp?success=" + quote("Objective deleted"),
@@ -1090,6 +1187,16 @@ async def create_risk(
         severity,
         preventative_actions if preventative_actions else None,
         contingency_plans if contingency_plans else None,
+    )
+    
+    
+    # Audit log
+    await audit.log_action(
+        action="bcp.risk.create",
+        user_id=user["id"],
+        entity_type="risk",
+        metadata={"company_id": company_id},
+        request=request,
     )
     
     return RedirectResponse(
@@ -1136,6 +1243,16 @@ async def update_risk(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Risk not found")
     
+    
+    # Audit log
+    await audit.log_action(
+        action="bcp.risk.update",
+        user_id=user["id"],
+        entity_type="risk",
+        metadata={"company_id": company_id},
+        request=request,
+    )
+    
     return RedirectResponse(
         url="/bcp/risks?success=" + quote("Risk updated successfully"),
         status_code=status.HTTP_303_SEE_OTHER,
@@ -1154,6 +1271,16 @@ async def delete_risk(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Risk not found")
     
+    
+    # Audit log
+    await audit.log_action(
+        action="bcp.risk.delete",
+        user_id=user["id"],
+        entity_type="risk",
+        metadata={"company_id": company_id},
+        request=request,
+    )
+    
     return RedirectResponse(
         url="/bcp/risks?success=" + quote("Risk deleted successfully"),
         status_code=status.HTTP_303_SEE_OTHER,
@@ -1163,11 +1290,12 @@ async def delete_risk(
 @router.get("/risks/export", include_in_schema=False)
 async def export_risks_csv(request: Request):
     """Export risks to CSV."""
-    user, company_id = await _require_bcp_view(request)
+    user, company_id = await _require_bcp_export(request)
     
     from fastapi.responses import StreamingResponse
     import csv
     from io import StringIO
+    from app.services import audit
     
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
@@ -1212,6 +1340,16 @@ async def export_risks_csv(request: Request):
     
     from datetime import datetime as dt
     filename = f"risk_register_{dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    # Audit log the CSV export
+    await audit.log_action(
+        action="bcp.export.risks_csv",
+        user_id=user["id"],
+        entity_type="bcp_plan",
+        entity_id=plan["id"],
+        metadata={"company_id": company_id, "filename": filename, "record_count": len(risks)},
+        request=request,
+    )
     
     return StreamingResponse(
         iter([output.getvalue()]),
@@ -1426,7 +1564,7 @@ async def delete_insurance_policy(
 @router.get("/insurance/export", include_in_schema=False)
 async def export_insurance_csv(request: Request):
     """Export insurance policies to CSV."""
-    user, company_id = await _require_bcp_view(request)
+    user, company_id = await _require_bcp_export(request)
     
     from fastapi.responses import StreamingResponse
     import csv
@@ -1604,7 +1742,7 @@ async def delete_backup_item(
 @router.get("/backups/export", include_in_schema=False)
 async def export_backups_csv(request: Request):
     """Export backup items to CSV."""
-    user, company_id = await _require_bcp_view(request)
+    user, company_id = await _require_bcp_export(request)
     
     from fastapi.responses import StreamingResponse
     import csv
@@ -1901,7 +2039,7 @@ async def delete_critical_activity_endpoint(
 @router.get("/bia/export", include_in_schema=False)
 async def export_bia_csv(request: Request):
     """Export BIA summary to CSV."""
-    user, company_id = await _require_bcp_view(request)
+    user, company_id = await _require_bcp_export(request)
     
     from fastapi.responses import StreamingResponse
     import csv
@@ -1978,9 +2116,10 @@ async def export_bia_csv(request: Request):
 @router.post("/incident/start", include_in_schema=False)
 async def start_incident(request: Request):
     """Start a new incident."""
-    user, company_id = await _require_bcp_edit(request)
+    user, company_id = await _require_bcp_incident_run(request)
     
     from datetime import datetime
+    from app.services import audit
     
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
@@ -2015,6 +2154,17 @@ async def start_incident(request: Request):
         initials=initials,
     )
     
+    # Audit log the incident start
+    await audit.log_action(
+        action="bcp.incident.start",
+        user_id=user["id"],
+        entity_type="bcp_incident",
+        entity_id=incident["id"],
+        new_value={"plan_id": plan["id"], "source": "Manual"},
+        metadata={"company_id": company_id},
+        request=request,
+    )
+    
     # TODO: Send portal alert to distribution list
     # This would require implementing a notification/alert system
     
@@ -2027,9 +2177,10 @@ async def start_incident(request: Request):
 @router.post("/incident/close", include_in_schema=False)
 async def close_incident_endpoint(request: Request):
     """Close the active incident."""
-    user, company_id = await _require_bcp_edit(request)
+    user, company_id = await _require_bcp_incident_run(request)
     
     from datetime import datetime
+    from app.services import audit
     
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
@@ -2060,6 +2211,16 @@ async def close_incident_endpoint(request: Request):
         initials=initials,
     )
     
+    # Audit log the incident closure
+    await audit.log_action(
+        action="bcp.incident.close",
+        user_id=user["id"],
+        entity_type="bcp_incident",
+        entity_id=active_incident["id"],
+        metadata={"plan_id": plan["id"], "company_id": company_id},
+        request=request,
+    )
+    
     return RedirectResponse(
         url="/bcp/incident?success=" + quote("Incident closed successfully"),
         status_code=status.HTTP_303_SEE_OTHER,
@@ -2072,9 +2233,10 @@ async def toggle_checklist_item(
     tick_id: int,
 ):
     """Toggle a checklist item."""
-    user, company_id = await _require_bcp_edit(request)
+    user, company_id = await _require_bcp_incident_run(request)
     
     from datetime import datetime
+    from app.services import audit
     
     # Get the tick
     tick = await bcp_repo.get_checklist_tick_by_id(tick_id)
@@ -2086,6 +2248,18 @@ async def toggle_checklist_item(
     now = datetime.utcnow()
     
     await bcp_repo.toggle_checklist_tick(tick_id, new_state, user["id"], now)
+    
+    # Audit log the checklist toggle
+    await audit.log_action(
+        action="bcp.checklist.toggle",
+        user_id=user["id"],
+        entity_type="bcp_checklist_tick",
+        entity_id=tick_id,
+        previous_value={"is_done": tick["is_done"]},
+        new_value={"is_done": new_state},
+        metadata={"company_id": company_id, "incident_id": tick.get("incident_id")},
+        request=request,
+    )
     
     return RedirectResponse(
         url="/bcp/incident?tab=checklist",
@@ -2180,9 +2354,10 @@ async def create_event_log_entry_endpoint(
     happened_at: str = Form(None),
 ):
     """Create a new event log entry."""
-    user, company_id = await _require_bcp_edit(request)
+    user, company_id = await _require_bcp_incident_run(request)
     
     from datetime import datetime
+    from app.services import audit
     
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
@@ -2218,6 +2393,17 @@ async def create_event_log_entry_endpoint(
         initials=initials,
     )
     
+    # Audit log the event log entry
+    await audit.log_action(
+        action="bcp.event_log.create",
+        user_id=user["id"],
+        entity_type="bcp_event_log",
+        entity_id=active_incident["id"],
+        new_value={"notes": notes, "happened_at": event_time.isoformat()},
+        metadata={"plan_id": plan["id"], "company_id": company_id, "incident_id": active_incident["id"]},
+        request=request,
+    )
+    
     return RedirectResponse(
         url="/bcp/incident?tab=event-log&success=" + quote("Event logged successfully"),
         status_code=status.HTTP_303_SEE_OTHER,
@@ -2227,7 +2413,7 @@ async def create_event_log_entry_endpoint(
 @router.get("/incident/event-log/export", include_in_schema=False)
 async def export_event_log_csv(request: Request):
     """Export event log to CSV."""
-    user, company_id = await _require_bcp_view(request)
+    user, company_id = await _require_bcp_export(request)
     
     from fastapi.responses import StreamingResponse
     import csv
@@ -2750,7 +2936,7 @@ async def delete_recovery_action_endpoint(
 @router.get("/recovery/export", include_in_schema=False)
 async def export_recovery_actions_csv(request: Request):
     """Export recovery actions to CSV."""
-    user, company_id = await _require_bcp_view(request)
+    user, company_id = await _require_bcp_export(request)
     
     from fastapi.responses import StreamingResponse
     import csv
@@ -3021,7 +3207,7 @@ async def delete_recovery_contact_endpoint(
 @router.get("/recovery-contacts/export", include_in_schema=False)
 async def export_recovery_contacts_csv(request: Request):
     """Export recovery contacts to CSV."""
-    user, company_id = await _require_bcp_view(request)
+    user, company_id = await _require_bcp_export(request)
     
     from fastapi.responses import StreamingResponse
     import csv
@@ -3209,7 +3395,7 @@ async def delete_insurance_claim_endpoint(
 @router.get("/insurance-claims/export", include_in_schema=False)
 async def export_insurance_claims_csv(request: Request):
     """Export insurance claims to CSV."""
-    user, company_id = await _require_bcp_view(request)
+    user, company_id = await _require_bcp_export(request)
     
     from fastapi.responses import StreamingResponse
     import csv
@@ -3375,7 +3561,7 @@ async def delete_market_change_endpoint(
 @router.get("/market-changes/export", include_in_schema=False)
 async def export_market_changes_csv(request: Request):
     """Export market changes to CSV."""
-    user, company_id = await _require_bcp_view(request)
+    user, company_id = await _require_bcp_export(request)
     
     from fastapi.responses import StreamingResponse
     import csv
