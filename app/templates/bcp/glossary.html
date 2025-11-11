@@ -1,7 +1,7 @@
-{% extends "base.html" %}
+{% extends "bcp/layout.html" %}
 
-{% block content %}
-<div class="page-container">
+{% block bcp_content %}
+<div class="bcp-page page-container">
   <section class="card">
     <div class="card-header">
       <h2 class="card-title">BCP Glossary</h2>
@@ -23,34 +23,4 @@
     </div>
   </section>
 </div>
-
-<style>
-.glossary-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.glossary-item {
-  padding-bottom: 1.5rem;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.glossary-item:last-child {
-  border-bottom: none;
-}
-
-.glossary-term {
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: #1f2937;
-  margin-bottom: 0.5rem;
-}
-
-.glossary-definition {
-  color: #4b5563;
-  line-height: 1.6;
-  margin: 0;
-}
-</style>
 {% endblock %}

@@ -1,7 +1,7 @@
-{% extends "base.html" %}
+{% extends "bcp/layout.html" %}
 
-{% block content %}
-<div class="page-container">
+{% block bcp_content %}
+<div class="bcp-page page-container">
   <!-- Success/Error Messages -->
   {% if request.query_params.get('success') %}
     <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
@@ -164,72 +164,4 @@
     </div>
   </section>
 </div>
-
-<style>
-.upload-placeholder {
-  border: 2px dashed var(--border-color);
-  border-radius: 8px;
-  padding: 2rem;
-  text-align: center;
-  background: var(--bg-secondary);
-}
-
-.info-grid {
-  display: grid;
-  gap: 1.5rem;
-}
-
-.info-item strong {
-  display: block;
-  margin-bottom: 0.5rem;
-  color: var(--text-primary);
-}
-
-.info-item p, .info-text {
-  margin: 0;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-  font-family: inherit;
-}
-
-.quick-links {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 1rem;
-}
-
-.quick-link-card {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 1rem;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  text-decoration: none;
-  transition: all 0.2s;
-}
-
-.quick-link-card:hover {
-  border-color: var(--primary-color);
-  background: var(--bg-secondary);
-  transform: translateY(-2px);
-}
-
-.quick-link-card svg {
-  flex-shrink: 0;
-  color: var(--primary-color);
-}
-
-.quick-link-card strong {
-  display: block;
-  color: var(--text-primary);
-  margin-bottom: 0.25rem;
-}
-
-.quick-link-card p {
-  margin: 0;
-  font-size: 0.875rem;
-  color: var(--text-muted);
-}
-</style>
 {% endblock %}
