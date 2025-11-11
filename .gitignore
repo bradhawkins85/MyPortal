@@ -14,3 +14,15 @@ venv/
 test_venv/
 changes/*.json
 myportal.egg-info/
+
+# CI/CD artifacts
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+*.sarif
+bandit-report.json
+safety-report.json
+pip-audit-report.json
+
