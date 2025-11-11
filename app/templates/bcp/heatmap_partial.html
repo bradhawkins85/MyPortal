@@ -1,0 +1,27 @@
+<!-- Heatmap Grid Partial for HTMX Updates -->
+<div class="heatmap-grid">
+  {% for likelihood in [4, 3, 2, 1] %}
+    {% for impact in [1, 2, 3, 4] %}
+      {% set cell_key = likelihood|string + "," + impact|string %}
+      {% set count = heatmap_data.cells.get(cell_key, 0) %}
+      {% set rating = likelihood * impact %}
+      {% if rating <= 4 %}
+        {% set severity = "Low" %}
+      {% elif rating <= 8 %}
+        {% set severity = "Moderate" %}
+      {% elif rating <= 12 %}
+        {% set severity = "High" %}
+      {% else %}
+        {% set severity = "Severe" %}
+      {% endif %}
+      {% set bg_color = severity_bands[severity].color %}
+      <a href="/bcp/risks?heatmap_filter={{ cell_key }}" 
+         class="heatmap-cell"
+         style="background-color: {{ bg_color }};"
+         title="Likelihood {{ likelihood }}, Impact {{ impact }}: {{ count }} risk(s), Severity: {{ severity }}">
+        <div class="heatmap-cell-count">{{ count }}</div>
+        <div class="heatmap-cell-rating">R: {{ rating }}</div>
+      </a>
+    {% endfor %}
+  {% endfor %}
+</div>
