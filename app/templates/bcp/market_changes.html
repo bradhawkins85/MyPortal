@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-container">
+  <!-- Success/Error Messages -->
+  {% if request.query_params.get('success') %}
+    <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
+  {% endif %}
+  {% if request.query_params.get('error') %}
+    <div class="alert alert-error">{{ request.query_params.get('error') }}</div>
+  {% endif %}
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Market Assessment</h1>
+      <p class="page-description">Track market changes and their impact on business continuity</p>
+    </div>
+    <div class="page-actions">
+      <a href="/bcp" class="btn btn-secondary">Back to Overview</a>
+      {% if can_edit %}
+      <button type="button" class="btn btn-primary" onclick="document.getElementById('createChangeModal').showModal()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+        </svg>
+        Add Market Change
+      </button>
+      <a href="/bcp/market-changes/export" class="btn btn-secondary">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
+          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+        </svg>
+        Export CSV
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Help Text -->
+  <section class="card help-card">
+    <div class="card-body">
+      <h3 class="help-title">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z"/>
+        </svg>
+        About Market Assessment
+      </h3>
+      <p class="help-text">
+        Document significant market changes that could impact business continuity. This includes shifts in 
+        customer behavior, regulatory changes, competitive landscape changes, supply chain disruptions, 
+        technological advances, or economic conditions. For each change, assess the impact on your business 
+        and identify strategic options for response.
+      </p>
+    </div>
+  </section>
+
+  <!-- Market Changes Table -->
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Market Changes</h2>
+    </div>
+    <div class="card-body">
+      {% if changes %}
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width: 30%;">Market Change</th>
+              <th style="width: 30%;">Impact to Business</th>
+              <th style="width: 30%;">Business Options</th>
+              {% if can_edit %}
+              <th style="width: 10%;">Actions</th>
+              {% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for change in changes %}
+            <tr>
+              <td class="text-sm">{{ change.change }}</td>
+              <td class="text-sm">{{ change.impact or '-' }}</td>
+              <td class="text-sm">{{ change.options or '-' }}</td>
+              {% if can_edit %}
+              <td>
+                <div class="action-buttons">
+                  <button type="button" class="btn btn-sm btn-secondary" onclick="editChange({{ change.id }}, `{{ change.change }}`, `{{ change.impact or '' }}`, `{{ change.options or '' }}`)">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                      <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                    </svg>
+                    Edit
+                  </button>
+                  <form method="post" action="/bcp/market-changes/{{ change.id }}/delete" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this market change?');">
+                    <button type="submit" class="btn btn-sm btn-danger">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                        <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                      </svg>
+                      Delete
+                    </button>
+                  </form>
+                </div>
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor" opacity="0.3">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+        </svg>
+        <p>No market changes recorded yet.</p>
+        {% if can_edit %}
+        <button type="button" class="btn btn-primary" onclick="document.getElementById('createChangeModal').showModal()">
+          Add First Market Change
+        </button>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+{% if can_edit %}
+<!-- Create Market Change Modal -->
+<dialog id="createChangeModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 class="modal-title">Add Market Change</h2>
+      <button type="button" class="btn-close" onclick="document.getElementById('createChangeModal').close()">&times;</button>
+    </div>
+    <form method="post" action="/bcp/market-changes">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="change" class="required">Market Change</label>
+          <textarea id="change" name="change" class="form-control" rows="3" required placeholder="Describe the market change"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="impact">Impact to Business</label>
+          <textarea id="impact" name="impact" class="form-control" rows="3" placeholder="How does this change affect business continuity?"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="options">Business Options</label>
+          <textarea id="options" name="options" class="form-control" rows="3" placeholder="What strategic options are available to respond?"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('createChangeModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create Market Change</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<!-- Edit Market Change Modal -->
+<dialog id="editChangeModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 class="modal-title">Edit Market Change</h2>
+      <button type="button" class="btn-close" onclick="document.getElementById('editChangeModal').close()">&times;</button>
+    </div>
+    <form method="post" id="editChangeForm">
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="edit_change" class="required">Market Change</label>
+          <textarea id="edit_change" name="change" class="form-control" rows="3" required></textarea>
+        </div>
+        <div class="form-group">
+          <label for="edit_impact">Impact to Business</label>
+          <textarea id="edit_impact" name="impact" class="form-control" rows="3"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="edit_options">Business Options</label>
+          <textarea id="edit_options" name="options" class="form-control" rows="3"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('editChangeModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Update Market Change</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<script>
+function editChange(id, change, impact, options) {
+  document.getElementById('edit_change').value = change;
+  document.getElementById('edit_impact').value = impact;
+  document.getElementById('edit_options').value = options;
+  document.getElementById('editChangeForm').action = `/bcp/market-changes/${id}/update`;
+  document.getElementById('editChangeModal').showModal();
+}
+</script>
+{% endif %}
+
+{% endblock %}

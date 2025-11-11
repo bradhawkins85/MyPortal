@@ -2630,3 +2630,602 @@ async def bcp_recovery_checklist(request: Request):
     )
     
     return templates.TemplateResponse("bcp/recovery_checklist.html", context)
+
+
+# ============================================================================
+# Recovery Contacts Page and Endpoints
+# ============================================================================
+
+
+@router.get("/recovery-contacts", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_recovery_contacts(request: Request):
+    """BCP Recovery Contacts page with contact type, organisation, contact, title, phone/mobile."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from app.main import _build_base_context
+    from app.core.config import get_templates_config
+    from fastapi.templating import Jinja2Templates
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    # Get all recovery contacts
+    contacts = await bcp_repo.list_recovery_contacts(plan["id"])
+    
+    templates_config = get_templates_config()
+    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "Recovery Contacts",
+            "plan": plan,
+            "contacts": contacts,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+        },
+    )
+    
+    return templates.TemplateResponse("bcp/recovery_contacts.html", context)
+
+
+@router.post("/recovery-contacts", include_in_schema=False)
+async def create_recovery_contact_endpoint(
+    request: Request,
+    org_name: str = Form(...),
+    contact_name: str = Form(None),
+    title: str = Form(None),
+    phone: str = Form(None),
+):
+    """Create a new recovery contact."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    await bcp_repo.create_recovery_contact(
+        plan["id"],
+        org_name,
+        contact_name if contact_name else None,
+        title if title else None,
+        phone if phone else None,
+    )
+    
+    return RedirectResponse(
+        url="/bcp/recovery-contacts?success=" + quote("Recovery contact created successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/recovery-contacts/{contact_id}/update", include_in_schema=False)
+async def update_recovery_contact_endpoint(
+    request: Request,
+    contact_id: int,
+    org_name: str = Form(...),
+    contact_name: str = Form(None),
+    title: str = Form(None),
+    phone: str = Form(None),
+):
+    """Update a recovery contact."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    updated = await bcp_repo.update_recovery_contact(
+        contact_id,
+        org_name=org_name,
+        contact_name=contact_name if contact_name else None,
+        title=title if title else None,
+        phone=phone if phone else None,
+    )
+    
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+    
+    return RedirectResponse(
+        url="/bcp/recovery-contacts?success=" + quote("Recovery contact updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/recovery-contacts/{contact_id}/delete", include_in_schema=False)
+async def delete_recovery_contact_endpoint(
+    request: Request,
+    contact_id: int,
+):
+    """Delete a recovery contact."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    deleted = await bcp_repo.delete_recovery_contact(contact_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+    
+    return RedirectResponse(
+        url="/bcp/recovery-contacts?success=" + quote("Recovery contact deleted successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get("/recovery-contacts/export", include_in_schema=False)
+async def export_recovery_contacts_csv(request: Request):
+    """Export recovery contacts to CSV."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from fastapi.responses import StreamingResponse
+    import csv
+    from io import StringIO
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    contacts = await bcp_repo.list_recovery_contacts(plan["id"])
+    
+    # Create CSV
+    output = StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "ID",
+            "Organisation",
+            "Contact",
+            "Title",
+            "Phone/Mobile",
+            "Created At",
+            "Updated At",
+        ],
+    )
+    writer.writeheader()
+    
+    for contact in contacts:
+        writer.writerow({
+            "ID": contact["id"],
+            "Organisation": contact["org_name"],
+            "Contact": contact.get("contact_name") or "",
+            "Title": contact.get("title") or "",
+            "Phone/Mobile": contact.get("phone") or "",
+            "Created At": contact.get("created_at", ""),
+            "Updated At": contact.get("updated_at", ""),
+        })
+    
+    output.seek(0)
+    
+    from datetime import datetime as dt
+    filename = f"recovery_contacts_{dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+# ============================================================================
+# Insurance Claims Page and Endpoints
+# ============================================================================
+
+
+@router.get("/insurance-claims", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_insurance_claims(request: Request):
+    """BCP Insurance Claims page with insurer, date, claim details, follow-up actions."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from app.main import _build_base_context
+    from app.core.config import get_templates_config
+    from fastapi.templating import Jinja2Templates
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    # Get all insurance claims
+    claims = await bcp_repo.list_insurance_claims(plan["id"])
+    
+    templates_config = get_templates_config()
+    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "Insurance Claims",
+            "plan": plan,
+            "claims": claims,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+        },
+    )
+    
+    return templates.TemplateResponse("bcp/insurance_claims.html", context)
+
+
+@router.post("/insurance-claims", include_in_schema=False)
+async def create_insurance_claim_endpoint(
+    request: Request,
+    insurer: str = Form(...),
+    claim_date: str = Form(None),
+    details: str = Form(None),
+    follow_up_actions: str = Form(None),
+):
+    """Create a new insurance claim."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    # Parse date if provided
+    claim_date_obj = None
+    if claim_date:
+        try:
+            from datetime import datetime
+            claim_date_obj = datetime.fromisoformat(claim_date)
+        except ValueError:
+            pass
+    
+    await bcp_repo.create_insurance_claim(
+        plan["id"],
+        insurer,
+        claim_date_obj,
+        details if details else None,
+        follow_up_actions if follow_up_actions else None,
+    )
+    
+    return RedirectResponse(
+        url="/bcp/insurance-claims?success=" + quote("Insurance claim created successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/insurance-claims/{claim_id}/update", include_in_schema=False)
+async def update_insurance_claim_endpoint(
+    request: Request,
+    claim_id: int,
+    insurer: str = Form(...),
+    claim_date: str = Form(None),
+    details: str = Form(None),
+    follow_up_actions: str = Form(None),
+):
+    """Update an insurance claim."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    # Parse date if provided
+    claim_date_obj = None
+    if claim_date:
+        try:
+            from datetime import datetime
+            claim_date_obj = datetime.fromisoformat(claim_date)
+        except ValueError:
+            pass
+    
+    updated = await bcp_repo.update_insurance_claim(
+        claim_id,
+        insurer=insurer,
+        claim_date=claim_date_obj,
+        details=details if details else None,
+        follow_up_actions=follow_up_actions if follow_up_actions else None,
+    )
+    
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Claim not found")
+    
+    return RedirectResponse(
+        url="/bcp/insurance-claims?success=" + quote("Insurance claim updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/insurance-claims/{claim_id}/delete", include_in_schema=False)
+async def delete_insurance_claim_endpoint(
+    request: Request,
+    claim_id: int,
+):
+    """Delete an insurance claim."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    deleted = await bcp_repo.delete_insurance_claim(claim_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Claim not found")
+    
+    return RedirectResponse(
+        url="/bcp/insurance-claims?success=" + quote("Insurance claim deleted successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get("/insurance-claims/export", include_in_schema=False)
+async def export_insurance_claims_csv(request: Request):
+    """Export insurance claims to CSV."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from fastapi.responses import StreamingResponse
+    import csv
+    from io import StringIO
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    claims = await bcp_repo.list_insurance_claims(plan["id"])
+    
+    # Create CSV
+    output = StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "ID",
+            "Insurer",
+            "Date",
+            "Claim Details",
+            "Follow-up Actions",
+            "Created At",
+            "Updated At",
+        ],
+    )
+    writer.writeheader()
+    
+    for claim in claims:
+        writer.writerow({
+            "ID": claim["id"],
+            "Insurer": claim["insurer"],
+            "Date": claim.get("claim_date", ""),
+            "Claim Details": claim.get("details") or "",
+            "Follow-up Actions": claim.get("follow_up_actions") or "",
+            "Created At": claim.get("created_at", ""),
+            "Updated At": claim.get("updated_at", ""),
+        })
+    
+    output.seek(0)
+    
+    from datetime import datetime as dt
+    filename = f"insurance_claims_{dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+# ============================================================================
+# Market Changes Page and Endpoints
+# ============================================================================
+
+
+@router.get("/market-changes", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_market_changes(request: Request):
+    """BCP Market Changes page with market change, impact to business, business options."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from app.main import _build_base_context
+    from app.core.config import get_templates_config
+    from fastapi.templating import Jinja2Templates
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    # Get all market changes
+    changes = await bcp_repo.list_market_changes(plan["id"])
+    
+    templates_config = get_templates_config()
+    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "Market Assessment",
+            "plan": plan,
+            "changes": changes,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+        },
+    )
+    
+    return templates.TemplateResponse("bcp/market_changes.html", context)
+
+
+@router.post("/market-changes", include_in_schema=False)
+async def create_market_change_endpoint(
+    request: Request,
+    change: str = Form(...),
+    impact: str = Form(None),
+    options: str = Form(None),
+):
+    """Create a new market change record."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    await bcp_repo.create_market_change(
+        plan["id"],
+        change,
+        impact if impact else None,
+        options if options else None,
+    )
+    
+    return RedirectResponse(
+        url="/bcp/market-changes?success=" + quote("Market change created successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/market-changes/{change_id}/update", include_in_schema=False)
+async def update_market_change_endpoint(
+    request: Request,
+    change_id: int,
+    change: str = Form(...),
+    impact: str = Form(None),
+    options: str = Form(None),
+):
+    """Update a market change record."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    updated = await bcp_repo.update_market_change(
+        change_id,
+        change=change,
+        impact=impact if impact else None,
+        options=options if options else None,
+    )
+    
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Market change not found")
+    
+    return RedirectResponse(
+        url="/bcp/market-changes?success=" + quote("Market change updated successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/market-changes/{change_id}/delete", include_in_schema=False)
+async def delete_market_change_endpoint(
+    request: Request,
+    change_id: int,
+):
+    """Delete a market change record."""
+    user, company_id = await _require_bcp_edit(request)
+    
+    deleted = await bcp_repo.delete_market_change(change_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Market change not found")
+    
+    return RedirectResponse(
+        url="/bcp/market-changes?success=" + quote("Market change deleted successfully"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get("/market-changes/export", include_in_schema=False)
+async def export_market_changes_csv(request: Request):
+    """Export market changes to CSV."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from fastapi.responses import StreamingResponse
+    import csv
+    from io import StringIO
+    
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    
+    changes = await bcp_repo.list_market_changes(plan["id"])
+    
+    # Create CSV
+    output = StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "ID",
+            "Market Change",
+            "Impact to Business",
+            "Business Options",
+            "Created At",
+            "Updated At",
+        ],
+    )
+    writer.writeheader()
+    
+    for change in changes:
+        writer.writerow({
+            "ID": change["id"],
+            "Market Change": change["change"],
+            "Impact to Business": change.get("impact") or "",
+            "Business Options": change.get("options") or "",
+            "Created At": change.get("created_at", ""),
+            "Updated At": change.get("updated_at", ""),
+        })
+    
+    output.seek(0)
+    
+    from datetime import datetime as dt
+    filename = f"market_changes_{dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+# ============================================================================
+# Wellbeing Page (Informational)
+# ============================================================================
+
+
+@router.get("/wellbeing", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_wellbeing(request: Request):
+    """BCP Staff Wellbeing informational page with admin-editable links/phone numbers."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from app.main import _build_base_context
+    from app.core.config import get_templates_config
+    from fastapi.templating import Jinja2Templates
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    templates_config = get_templates_config()
+    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    
+    # Default wellbeing resources
+    wellbeing_resources = [
+        {
+            "title": "Employee Assistance Program (EAP)",
+            "description": "Free, confidential counseling and support services for employees and their families.",
+            "phone": "1800 EAP HELP",
+            "website": "https://www.eap.example.com",
+        },
+        {
+            "title": "Beyond Blue",
+            "description": "24/7 support for anyone experiencing anxiety, depression or suicidal thoughts.",
+            "phone": "1300 22 4636",
+            "website": "https://www.beyondblue.org.au",
+        },
+        {
+            "title": "Lifeline",
+            "description": "24-hour crisis support and suicide prevention services.",
+            "phone": "13 11 14",
+            "website": "https://www.lifeline.org.au",
+        },
+        {
+            "title": "Kids Helpline",
+            "description": "Free, private and confidential 24/7 phone and online counselling service for young people aged 5 to 25.",
+            "phone": "1800 55 1800",
+            "website": "https://kidshelpline.com.au",
+        },
+        {
+            "title": "MensLine Australia",
+            "description": "24/7 telephone and online support, information and referral service for men.",
+            "phone": "1300 78 99 78",
+            "website": "https://mensline.org.au",
+        },
+        {
+            "title": "1800RESPECT",
+            "description": "24/7 national sexual assault, domestic and family violence counselling service.",
+            "phone": "1800 737 732",
+            "website": "https://www.1800respect.org.au",
+        },
+    ]
+    
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "Staff Wellbeing Support",
+            "plan": plan,
+            "wellbeing_resources": wellbeing_resources,
+            "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+        },
+    )
+    
+    return templates.TemplateResponse("bcp/wellbeing.html", context)
