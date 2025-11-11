@@ -311,6 +311,36 @@ async def bcp_risks(request: Request, severity: str = Query(None), heatmap_filte
     return templates.TemplateResponse("bcp/risks.html", context)
 
 
+@router.get("/risks/heatmap", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_risks_heatmap_partial(request: Request):
+    """Return just the heatmap HTML for HTMX updates."""
+    user, company_id = await _require_bcp_view(request)
+    
+    from fastapi.templating import Jinja2Templates
+    from app.core.config import get_templates_config
+    from app.services.risk_calculator import get_severity_band_info
+    
+    # Get or create plan for this company
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        plan = await bcp_repo.create_plan(company_id)
+        await bcp_repo.seed_default_objectives(plan["id"])
+    
+    # Get heatmap data
+    heatmap_data = await bcp_repo.get_risk_heatmap_data(plan["id"])
+    
+    templates_config = get_templates_config()
+    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    
+    context = {
+        "request": request,
+        "heatmap_data": heatmap_data,
+        "severity_bands": get_severity_band_info(),
+    }
+    
+    return templates.TemplateResponse("bcp/heatmap_partial.html", context)
+
+
 @router.get("/bia", response_class=HTMLResponse, include_in_schema=False)
 async def bcp_bia(request: Request, sort_by: str = Query("importance")):
     """BCP Business Impact Analysis page with critical activities list."""
