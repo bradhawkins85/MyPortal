@@ -417,6 +417,202 @@ async def export_to_pdf(
     return pdf_buffer, content_hash
 
 
+async def export_bcp_to_pdf(
+    plan_id: int,
+    event_log_limit: int = 100,
+) -> tuple[io.BytesIO, str]:
+    """
+    Export a Business Continuity Plan to template-faithful PDF format.
+    
+    Generates comprehensive PDF with all BCP sections in prescribed order:
+    1. Plan Overview
+    2. Risk Management
+    3. Business Impact Analysis
+    4. Incident Response  
+    5. Recovery
+    6. Rehearse/Maintain/Review
+    
+    Includes footer attribution and configurable event log entries.
+    
+    Args:
+        plan_id: ID of the BCP plan to export
+        event_log_limit: Maximum number of event log entries to include (default 100)
+        
+    Returns:
+        Tuple of (BytesIO buffer with PDF data, content hash)
+        
+    Raises:
+        ValueError: If plan not found
+        RuntimeError: If WeasyPrint not available
+    """
+    if HTML is None:  # pragma: no cover - depends on system configuration
+        raise RuntimeError(
+            "PDF export requires WeasyPrint and its native dependencies (libpango and libpangocairo). "
+            "Install the system packages documented at "
+            "https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation"
+        ) from _WEASYPRINT_IMPORT_ERROR
+
+    # Fetch plan data
+    plan = await bc_repo.get_plan_by_id(plan_id)
+    if not plan:
+        raise ValueError(f"Plan {plan_id} not found")
+    
+    # Gather all required data for the PDF
+    data = await _gather_bcp_export_data(plan_id, event_log_limit)
+    
+    # Compute content hash from gathered data
+    content_hash = compute_content_hash(data, {"plan_id": plan_id, "plan_title": plan["title"]})
+    
+    # Render HTML from BCP template
+    html_content = _render_bcp_pdf_html(plan, data)
+    
+    # Convert HTML to PDF using WeasyPrint
+    pdf_buffer = io.BytesIO()
+    HTML(string=html_content).write_pdf(pdf_buffer)
+    pdf_buffer.seek(0)
+    
+    return pdf_buffer, content_hash
+
+
+async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[str, Any]:
+    """
+    Gather all data needed for BCP PDF export.
+    
+    Args:
+        plan_id: ID of the BCP plan
+        event_log_limit: Maximum number of event log entries
+        
+    Returns:
+        Dictionary containing all BCP data sections
+    """
+    from app.services.time_utils import humanize_hours
+    
+    # Section 1: Plan Overview
+    objectives = await bc_repo.list_objectives(plan_id)
+    distribution_list = await bc_repo.list_distribution_list(plan_id)
+    
+    # Section 2: Risk Management
+    risks = await bc_repo.list_risks(plan_id)
+    insurance_policies = await bc_repo.list_insurance_policies(plan_id)
+    backup_items = await bc_repo.list_backup_items(plan_id)
+    
+    # Section 3: Business Impact Analysis
+    critical_activities = await bc_repo.list_critical_activities(plan_id, sort_by="importance")
+    # Add humanized RTO to each activity
+    for activity in critical_activities:
+        if activity.get("impact") and activity["impact"].get("rto_hours") is not None:
+            activity["impact"]["rto_humanized"] = humanize_hours(activity["impact"]["rto_hours"])
+    
+    # Section 4: Incident Response
+    checklist_items = await bc_repo.list_checklist_items(plan_id, phase="Immediate")
+    evacuation = await bc_repo.get_evacuation_plan(plan_id)
+    emergency_kit_items = await bc_repo.list_emergency_kit_items(plan_id)
+    emergency_kit_documents = [item for item in emergency_kit_items if item["category"] == "Document"]
+    emergency_kit_equipment = [item for item in emergency_kit_items if item["category"] == "Equipment"]
+    roles = await bc_repo.list_roles_with_assignments(plan_id)
+    contacts = await bc_repo.list_contacts(plan_id)
+    
+    # Get event log - last N entries
+    # First try to get from active incident, otherwise get all
+    active_incident = await bc_repo.get_active_incident(plan_id)
+    if active_incident:
+        all_event_log = await bc_repo.list_event_log_entries(
+            plan_id, 
+            incident_id=active_incident["id"]
+        )
+    else:
+        # Get latest entries across all incidents
+        all_event_log = await bc_repo.list_event_log_entries(plan_id)
+    
+    # Limit to the specified number of entries (already ordered by happened_at DESC)
+    event_log = all_event_log[:event_log_limit] if len(all_event_log) > event_log_limit else all_event_log
+    
+    # Section 5: Recovery
+    recovery_actions = await bc_repo.list_recovery_actions(plan_id)
+    # Enrich recovery actions with humanized RTO and owner names
+    for action in recovery_actions:
+        if action.get("rto_hours") is not None:
+            action["rto_humanized"] = humanize_hours(action["rto_hours"])
+        if action.get("owner_id"):
+            owner = await user_repo.get_user_by_id(action["owner_id"])
+            action["owner_name"] = owner.get("name") if owner else None
+    
+    crisis_recovery_checklist = await bc_repo.list_checklist_items(plan_id, phase="CrisisRecovery")
+    recovery_contacts = await bc_repo.list_recovery_contacts(plan_id)
+    insurance_claims = await bc_repo.list_insurance_claims(plan_id)
+    market_changes = await bc_repo.list_market_changes(plan_id)
+    
+    # Section 6: Rehearse/Maintain/Review
+    training_items = await bc_repo.list_training_items(plan_id)
+    review_items = await bc_repo.list_review_items(plan_id)
+    
+    # Enrich roles with user names for assignments
+    for role in roles:
+        for assignment in role.get("assignments", []):
+            if assignment.get("user_id"):
+                user = await user_repo.get_user_by_id(assignment["user_id"])
+                assignment["user_name"] = user.get("name") if user else "Unknown"
+    
+    return {
+        # Section 1
+        "objectives": objectives,
+        "distribution_list": distribution_list,
+        # Section 2
+        "risks": risks,
+        "insurance_policies": insurance_policies,
+        "backup_items": backup_items,
+        # Section 3
+        "critical_activities": critical_activities,
+        # Section 4
+        "checklist_items": checklist_items,
+        "evacuation": evacuation,
+        "emergency_kit_documents": emergency_kit_documents,
+        "emergency_kit_equipment": emergency_kit_equipment,
+        "roles": roles,
+        "contacts": contacts,
+        "event_log": event_log,
+        # Section 5
+        "recovery_actions": recovery_actions,
+        "crisis_recovery_checklist": crisis_recovery_checklist,
+        "recovery_contacts": recovery_contacts,
+        "insurance_claims": insurance_claims,
+        "market_changes": market_changes,
+        # Section 6
+        "training_items": training_items,
+        "review_items": review_items,
+    }
+
+
+def _render_bcp_pdf_html(plan: dict[str, Any], data: dict[str, Any]) -> str:
+    """
+    Render BCP plan to HTML using Jinja2 template.
+    
+    Args:
+        plan: BCP plan overview data
+        data: All gathered BCP data sections
+        
+    Returns:
+        Rendered HTML string
+    """
+    import os
+    from jinja2 import Environment, FileSystemLoader
+    
+    # Determine template path
+    template_dir = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        "templates", "bcp", "export"
+    )
+    
+    # Create Jinja2 environment
+    env = Environment(loader=FileSystemLoader(template_dir))
+    
+    # Load template
+    template = env.get_template("bcp_pdf.html")
+    
+    # Render with plan and data
+    return template.render(plan=plan, **data)
+
+
 def _render_plan_html(
     plan: dict[str, Any],
     version: dict[str, Any],
