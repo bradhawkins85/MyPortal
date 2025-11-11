@@ -73,8 +73,15 @@ class _RecordingsRepositoryStub:
 
     def add_recording(self, **kwargs):
         """Helper to add a test recording."""
-        recording_id = self.next_id
-        self.next_id += 1
+        # Allow custom ID to be passed in kwargs
+        if "id" in kwargs:
+            recording_id = kwargs.pop("id")
+            # Update next_id to avoid collisions
+            if recording_id >= self.next_id:
+                self.next_id = recording_id + 1
+        else:
+            recording_id = self.next_id
+            self.next_id += 1
         
         recording = {
             "id": recording_id,
@@ -432,3 +439,79 @@ async def test_transcribe_recording_allows_force_reprocessing(monkeypatch):
     # Verify it was re-transcribed
     assert result["transcription"] == "New transcription"
     assert result["transcription_status"] == "completed"
+
+
+@pytest.mark.anyio
+async def test_process_queued_transcriptions_prioritizes_queued_over_failed(monkeypatch):
+    """Test that queued recordings are processed and failed recordings are ignored.
+    
+    This integration test verifies the fix for the issue where failed recordings
+    were being automatically retried during scheduled tasks. The expected behavior
+    is that only queued recordings are processed, and failed recordings remain
+    in failed status until manually retried.
+    """
+    repo = _RecordingsRepositoryStub()
+    modules_repo = _ModulesRepositoryStub()
+    
+    # Add a failed recording (should be ignored)
+    failed_recording = repo.add_recording(
+        id=1,
+        transcription_status="failed",
+        transcription=None,
+    )
+    
+    # Add a queued recording (should be processed)
+    queued_recording = repo.add_recording(
+        id=2,
+        transcription_status="queued",
+        transcription=None,
+    )
+    
+    # Add WhisperX module
+    modules_repo.add_module("whisperx", enabled=True, settings={
+        "base_url": "http://whisperx.test",
+    })
+    
+    # Track which recordings were transcribed
+    transcribe_calls = []
+    
+    async def mock_transcribe(recording_id, *, force=False):
+        transcribe_calls.append(recording_id)
+        recording = repo.recordings[recording_id]
+        recording["transcription"] = f"Transcribed {recording_id}"
+        recording["transcription_status"] = "completed"
+        return recording
+    
+    # Patch dependencies
+    monkeypatch.setattr(
+        "app.services.call_recordings.call_recordings_repo",
+        repo,
+    )
+    monkeypatch.setattr(
+        "app.services.call_recordings.modules_repo",
+        modules_repo,
+    )
+    monkeypatch.setattr(
+        "app.services.call_recordings.transcribe_recording",
+        mock_transcribe,
+    )
+    
+    # Run the processing function
+    result = await call_recordings_service.process_queued_transcriptions()
+    
+    # Verify only the queued recording was processed
+    assert result["status"] == "ok"
+    assert result["processed"] == 1
+    assert result["recording_id"] == queued_recording["id"]
+    
+    # Verify only the queued recording was transcribed
+    assert len(transcribe_calls) == 1
+    assert transcribe_calls[0] == queued_recording["id"]
+    
+    # Verify the failed recording was NOT touched
+    assert failed_recording["transcription_status"] == "failed"
+    assert failed_recording["transcription"] is None
+    
+    # Verify the queued recording was successfully transcribed
+    assert queued_recording["transcription_status"] == "completed"
+    assert queued_recording["transcription"] == f"Transcribed {queued_recording['id']}"
