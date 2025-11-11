@@ -1,0 +1,495 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-container">
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">BCP Seed Data & Defaults</h2>
+      <div class="button-group">
+        {% if can_edit %}
+        <button type="button" class="btn btn-primary" onclick="showReseedModal()">
+          <i class="fas fa-sync"></i> Re-seed Defaults
+        </button>
+        {% endif %}
+        <a href="/bcp" class="btn btn-secondary">Back to Overview</a>
+      </div>
+    </div>
+    
+    <div class="card-body">
+      <!-- Description -->
+      <div class="alert alert-info mb-4">
+        <i class="fas fa-info-circle"></i>
+        <strong>{{ seed_docs.description }}</strong>
+        <br>
+        <small class="text-muted">{{ seed_docs.idempotency }}</small>
+      </div>
+
+      <!-- Categories -->
+      <h3 class="section-title">Default Content Categories</h3>
+      <div class="seed-categories">
+        {% for category in seed_docs.categories %}
+        <div class="seed-category">
+          <div class="category-header">
+            <h4 class="category-title">{{ category.title }}</h4>
+            <span class="badge badge-primary">{{ category.count }} items</span>
+          </div>
+          <p class="category-description">{{ category.description }}</p>
+          <div class="category-meta">
+            <div class="meta-item">
+              <i class="fas fa-edit"></i>
+              <span>Edit at: <strong>{{ category.edit_location }}</strong></span>
+            </div>
+            {% if category.can_reseed %}
+            <div class="meta-item text-success">
+              <i class="fas fa-check-circle"></i>
+              <span>Can be re-seeded if deleted</span>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Risk Scales Legend -->
+      <h3 class="section-title mt-5">Risk Assessment Scales</h3>
+      
+      <div class="risk-scales">
+        <!-- Likelihood Scale -->
+        <div class="scale-section">
+          <h4 class="scale-title">Likelihood Scale</h4>
+          <table class="scale-table">
+            <thead>
+              <tr>
+                <th>Value</th>
+                <th>Label</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in seed_docs.risk_scales.likelihood %}
+              <tr>
+                <td class="text-center"><strong>{{ item.value }}</strong></td>
+                <td>{{ item.label }}</td>
+                <td class="text-muted">{{ item.description }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Impact Scale -->
+        <div class="scale-section">
+          <h4 class="scale-title">Impact Scale</h4>
+          <table class="scale-table">
+            <thead>
+              <tr>
+                <th>Value</th>
+                <th>Label</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in seed_docs.risk_scales.impact %}
+              <tr>
+                <td class="text-center"><strong>{{ item.value }}</strong></td>
+                <td>{{ item.label }}</td>
+                <td class="text-muted">{{ item.description }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Severity Bands -->
+        <div class="scale-section full-width">
+          <h4 class="scale-title">Severity Bands (Rating = Likelihood × Impact)</h4>
+          <table class="scale-table">
+            <thead>
+              <tr>
+                <th>Rating Range</th>
+                <th>Severity</th>
+                <th>Action Required</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for band in seed_docs.risk_scales.severity_bands %}
+              <tr>
+                <td class="text-center"><strong>{{ band.range }}</strong></td>
+                <td>
+                  <span class="severity-badge severity-{{ band.color }}">{{ band.label }}</span>
+                </td>
+                <td>{{ band.action }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Modification Guidance -->
+      <div class="alert alert-warning mt-4">
+        <i class="fas fa-lightbulb"></i>
+        <strong>Modification Guidance:</strong> {{ seed_docs.modification_guidance }}
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- Re-seed Modal -->
+{% if can_edit %}
+<div id="reseedModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Re-seed BCP Defaults</h3>
+      <button type="button" class="close" onclick="closeReseedModal()">&times;</button>
+    </div>
+    <form method="POST" action="/bcp/admin/reseed">
+      <div class="modal-body">
+        <p class="mb-3">Select which categories to re-seed. Only missing items will be added (no duplication).</p>
+        
+        <div class="checkbox-group">
+          <label class="checkbox-label">
+            <input type="checkbox" name="categories" value="objectives" checked>
+            <span>Objectives (5 items)</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="categories" value="immediate_checklist" checked>
+            <span>Immediate Response Checklist (18 items)</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="categories" value="crisis_recovery_checklist" checked>
+            <span>Crisis & Recovery Checklist (23 items)</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="categories" value="emergency_kit" checked>
+            <span>Emergency Kit Items (24 items)</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="categories" value="example_risks" checked>
+            <span>Example Risks (2 items)</span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeReseedModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">
+          <i class="fas fa-sync"></i> Re-seed Selected
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<style>
+.seed-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.seed-category {
+  padding: 1.5rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: #f9fafb;
+}
+
+.category-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.category-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+}
+
+.category-description {
+  color: #4b5563;
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.category-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.meta-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.meta-item i {
+  width: 1rem;
+}
+
+.section-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.risk-scales {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+}
+
+.scale-section {
+  background: #f9fafb;
+  padding: 1.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid #e5e7eb;
+}
+
+.scale-section.full-width {
+  grid-column: 1 / -1;
+}
+
+.scale-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 1rem;
+}
+
+.scale-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.scale-table thead {
+  background: #fff;
+}
+
+.scale-table th {
+  padding: 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  color: #374151;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.scale-table td {
+  padding: 0.75rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.scale-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.severity-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.25rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.severity-green { background: #d1fae5; color: #065f46; }
+.severity-yellow { background: #fef3c7; color: #92400e; }
+.severity-orange { background: #fed7aa; color: #9a3412; }
+.severity-red { background: #fecaca; color: #991b1b; }
+
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.badge-primary {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.alert {
+  padding: 1rem;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.alert i {
+  margin-top: 0.125rem;
+  flex-shrink: 0;
+}
+
+.alert-info {
+  background: #dbeafe;
+  color: #1e40af;
+  border: 1px solid #93c5fd;
+}
+
+.alert-warning {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  align-items: center;
+  justify-content: center;
+}
+
+.modal.show {
+  display: flex;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 0.5rem;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 0;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close:hover {
+  color: #1f2937;
+}
+
+.modal-body {
+  padding: 1.5rem;
+}
+
+.checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.checkbox-label:hover {
+  background: #f9fafb;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 1.25rem;
+  height: 1.25rem;
+  cursor: pointer;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.button-group {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  font-weight: 500;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background: #3b82f6;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #2563eb;
+}
+
+.btn-secondary {
+  background: #6b7280;
+  color: white;
+}
+
+.btn-secondary:hover {
+  background: #4b5563;
+}
+</style>
+
+<script>
+function showReseedModal() {
+  document.getElementById('reseedModal').classList.add('show');
+}
+
+function closeReseedModal() {
+  document.getElementById('reseedModal').classList.remove('show');
+}
+
+// Close modal when clicking outside
+document.getElementById('reseedModal')?.addEventListener('click', function(e) {
+  if (e.target === this) {
+    closeReseedModal();
+  }
+});
+</script>
+{% endblock %}
