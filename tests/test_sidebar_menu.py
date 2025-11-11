@@ -32,11 +32,15 @@ def mock_startup(monkeypatch):
     async def fake_refresh_automations():
         return None
 
+    async def fake_get_module(slug, *, redact=True):
+        return None
+
     monkeypatch.setattr(db, "connect", fake_connect)
     monkeypatch.setattr(db, "disconnect", fake_disconnect)
     monkeypatch.setattr(db, "run_migrations", fake_run_migrations)
     monkeypatch.setattr(main_module.change_log_service, "sync_change_log_sources", fake_change_log_sync)
     monkeypatch.setattr(main_module.modules_service, "ensure_default_modules", fake_ensure_modules)
+    monkeypatch.setattr(main_module.modules_service, "get_module", fake_get_module)
     monkeypatch.setattr(main_module.automations_service, "refresh_all_schedules", fake_refresh_automations)
     monkeypatch.setattr(scheduler_service, "start", fake_start)
     monkeypatch.setattr(scheduler_service, "stop", fake_stop)
@@ -80,6 +84,7 @@ def company_admin_context(monkeypatch):
             "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": 0},
             "notification_unread_count": 0,
             "can_access_tickets": True,
+            "can_view_bcp": True,
         }
         if extra:
             context.update(extra)
@@ -109,28 +114,23 @@ def test_company_admin_sees_authorised_menu_items(company_admin_context):
     assert 'href="/assets"' not in html
 
 
-def test_business_continuity_appears_after_compliance(company_admin_context):
-    """Test that Business Continuity menu appears after Compliance in the sidebar."""
+def test_bcp_menu_replaces_business_continuity(company_admin_context):
+    """Ensure the BCP navigation link is present and the legacy menu is removed."""
     with TestClient(app) as client:
         response = client.get("/")
 
     assert response.status_code == 200
     html = response.text
-    
-    # Both Compliance and Business Continuity should be present
+
+    # Compliance remains available and BCP has replaced the legacy menu
     assert 'href="/compliance"' in html
-    assert 'href="/business-continuity/plans"' in html
-    
-    # Business Continuity should appear after Compliance
+    assert 'href="/bcp"' in html
+    assert '/business-continuity/' not in html
+
+    # BCP should appear after Compliance in the menu ordering
     compliance_pos = html.find('href="/compliance"')
-    bc_pos = html.find('href="/business-continuity/plans"')
-    
+    bcp_pos = html.find('href="/bcp"')
+
     assert compliance_pos > 0, "Compliance menu not found"
-    assert bc_pos > 0, "Business Continuity menu not found"
-    assert bc_pos > compliance_pos, "Business Continuity should appear after Compliance in the menu"
-    
-    # Business Continuity should NOT appear in the Administration section
-    admin_section_start = html.find('<li class="menu__heading" role="presentation">Administration</li>')
-    if admin_section_start > 0:
-        # Verify BC menu appears before the Administration section
-        assert bc_pos < admin_section_start, "Business Continuity should not be in Administration section"
+    assert bcp_pos > 0, "BCP menu not found"
+    assert bcp_pos > compliance_pos, "BCP should appear after Compliance in the menu"
