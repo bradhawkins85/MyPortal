@@ -216,3 +216,96 @@ def test_prorata_calculation_realistic_price():
     # For 214 days, should be around $70.36
     assert per_license_charge > Decimal("70.00")
     assert per_license_charge < Decimal("71.00")
+
+
+def test_calculate_chargeable_licenses_no_pending():
+    """Test calculating chargeable licenses with no pending changes."""
+    from app.services.subscription_changes import calculate_chargeable_licenses
+    
+    # Current quantity: 5, adding 3 more, no pending changes
+    # Should charge for all 3 licenses
+    chargeable = calculate_chargeable_licenses(
+        current_quantity=5,
+        quantity_to_add=3,
+        pending_net_change=0,
+    )
+    assert chargeable == 3
+
+
+def test_calculate_chargeable_licenses_with_pending_decrease():
+    """Test calculating chargeable licenses with pending decrease.
+    
+    Scenario: Start with 2 licenses, remove 1 (pending), add 1 more
+    - Current quantity: 2
+    - Pending decrease: 1
+    - Quantity at term end without new addition: 2 - 1 = 1
+    - Adding 1: would result in 2 at term end
+    - Since contracted quantity is 2, no charge for the addition
+    """
+    from app.services.subscription_changes import calculate_chargeable_licenses
+    
+    chargeable = calculate_chargeable_licenses(
+        current_quantity=2,
+        quantity_to_add=1,
+        pending_net_change=-1,  # net decrease of 1
+    )
+    assert chargeable == 0
+
+
+def test_calculate_chargeable_licenses_partial_charge():
+    """Test calculating chargeable licenses with partial charge scenario.
+    
+    Scenario: Start with 5 licenses, remove 3 (pending), add 4 more
+    - Current quantity: 5
+    - Pending decrease: 3
+    - Quantity at term end without new addition: 5 - 3 = 2
+    - Adding 4: would result in 6 at term end
+    - Since contracted quantity is 5, charge for 6 - 5 = 1 license
+    """
+    from app.services.subscription_changes import calculate_chargeable_licenses
+    
+    chargeable = calculate_chargeable_licenses(
+        current_quantity=5,
+        quantity_to_add=4,
+        pending_net_change=-3,
+    )
+    assert chargeable == 1
+
+
+def test_calculate_chargeable_licenses_with_prior_additions():
+    """Test calculating chargeable licenses after prior additions.
+    
+    Scenario: Start with 1 license, add 2 (already applied), then add 2 more
+    - Current quantity: 3 (1 original + 2 added)
+    - No pending changes
+    - Adding 2 more: would result in 5 at term end
+    - Since contracted quantity is 3, charge for all 2 licenses
+    """
+    from app.services.subscription_changes import calculate_chargeable_licenses
+    
+    chargeable = calculate_chargeable_licenses(
+        current_quantity=3,
+        quantity_to_add=2,
+        pending_net_change=0,
+    )
+    assert chargeable == 2
+
+
+def test_calculate_chargeable_licenses_exact_contracted_amount():
+    """Test that adding licenses up to contracted amount has no charge.
+    
+    Scenario: Start with 10 licenses, remove 5 (pending), add 5
+    - Current quantity: 10
+    - Pending decrease: 5
+    - Quantity at term end without new addition: 10 - 5 = 5
+    - Adding 5: would result in 10 at term end
+    - Since contracted quantity is 10, no charge for the 5 licenses
+    """
+    from app.services.subscription_changes import calculate_chargeable_licenses
+    
+    chargeable = calculate_chargeable_licenses(
+        current_quantity=10,
+        quantity_to_add=5,
+        pending_net_change=-5,
+    )
+    assert chargeable == 0

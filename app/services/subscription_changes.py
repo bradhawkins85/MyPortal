@@ -60,6 +60,42 @@ def calculate_net_changes(
     }
 
 
+def calculate_chargeable_licenses(
+    current_quantity: int,
+    quantity_to_add: int,
+    pending_net_change: int,
+) -> int:
+    """Calculate how many licenses should be charged when adding licenses.
+    
+    Only charge for licenses that would exceed the contracted quantity at term end.
+    The contracted quantity is the current quantity since additions are applied immediately.
+    
+    Args:
+        current_quantity: Current subscription quantity (already includes applied additions)
+        quantity_to_add: Number of licenses to add
+        pending_net_change: Net pending change (additions - decreases, only counting pending ones)
+        
+    Returns:
+        Number of licenses that should be charged
+        
+    Example:
+        - current_quantity=2, quantity_to_add=1, pending_net_change=-1
+        - At term end without new addition: 2 + (-1) = 1
+        - At term end with new addition: 2 + (-1) + 1 = 2
+        - Since contracted quantity is 2, charge for max(0, 2 - 2) = 0 licenses
+    """
+    # The contracted quantity is the current quantity (which already includes applied additions)
+    contracted_quantity = current_quantity
+    
+    # Calculate what the quantity would be at term end with this new addition
+    quantity_at_term_end_with_addition = current_quantity + pending_net_change + quantity_to_add
+    
+    # Only charge for licenses that exceed the contracted quantity
+    chargeable_licenses = max(0, quantity_at_term_end_with_addition - contracted_quantity)
+    
+    return chargeable_licenses
+
+
 async def preview_subscription_change(
     subscription_id: str,
     quantity_change: int,
@@ -105,26 +141,59 @@ async def preview_subscription_change(
     # Calculate prorata charge for additions
     prorated_charge = None
     prorated_explanation = None
+    chargeable_licenses = 0
     
     if change_type == "addition":
-        # Calculate prorated price for each additional license
-        today = date.today()
-        per_license_charge = calculate_coterm_price(unit_price, today, end_date)
-        prorated_charge = per_license_charge * quantity_change
+        # Calculate how many licenses should be charged based on contracted quantity
+        pending_net_change = net_current["net_change"]
+        chargeable_licenses = calculate_chargeable_licenses(
+            current_quantity=current_quantity,
+            quantity_to_add=quantity_change,
+            pending_net_change=pending_net_change,
+        )
         
-        days_remaining = (end_date - today).days + 1
-        prorated_explanation = {
-            "per_license_charge": per_license_charge,
-            "quantity": quantity_change,
-            "total_charge": prorated_charge,
-            "days_remaining": days_remaining,
-            "unit_price": unit_price,
-            "end_date": end_date,
-            "formula": (
-                f"({quantity_change} licenses × ${unit_price:.2f} ÷ 365) × {days_remaining} days = "
-                f"${prorated_charge:.2f}"
-            ),
-        }
+        # Calculate prorated price only for chargeable licenses
+        if chargeable_licenses > 0:
+            today = date.today()
+            per_license_charge = calculate_coterm_price(unit_price, today, end_date)
+            prorated_charge = per_license_charge * chargeable_licenses
+            
+            days_remaining = (end_date - today).days + 1
+            prorated_explanation = {
+                "per_license_charge": per_license_charge,
+                "quantity": quantity_change,
+                "chargeable_licenses": chargeable_licenses,
+                "free_licenses": quantity_change - chargeable_licenses,
+                "total_charge": prorated_charge,
+                "days_remaining": days_remaining,
+                "unit_price": unit_price,
+                "end_date": end_date,
+                "formula": (
+                    f"({chargeable_licenses} chargeable licenses × ${unit_price:.2f} ÷ 365) × {days_remaining} days = "
+                    f"${prorated_charge:.2f}"
+                ),
+                "explanation": (
+                    f"Charging for {chargeable_licenses} of {quantity_change} licenses. "
+                    f"{quantity_change - chargeable_licenses} licenses are free as they do not exceed the contracted quantity."
+                ) if chargeable_licenses < quantity_change else None,
+            }
+        else:
+            # No charge needed - adding licenses within contracted quantity
+            prorated_charge = Decimal("0.00")
+            prorated_explanation = {
+                "per_license_charge": Decimal("0.00"),
+                "quantity": quantity_change,
+                "chargeable_licenses": 0,
+                "free_licenses": quantity_change,
+                "total_charge": Decimal("0.00"),
+                "days_remaining": (end_date - date.today()).days + 1,
+                "unit_price": unit_price,
+                "end_date": end_date,
+                "formula": "No charge - licenses are within contracted quantity",
+                "explanation": (
+                    f"No charge for adding {quantity_change} licenses as they do not exceed the contracted quantity."
+                ),
+            }
     
     # Calculate new net impact including this change
     if change_type == "addition":
