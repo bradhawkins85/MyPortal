@@ -2319,11 +2319,15 @@ async def _validate_xero(
 
     should_discover = bool(company_name and client_id and client_secret and refresh_token)
 
+    # Track updated settings to avoid reverting previous updates
+    updated_settings = dict(settings)
+    
     if company_name_env and settings.get("company_name") != company_name_env:
         try:
+            updated_settings["company_name"] = company_name_env
             await module_repo.update_module(
                 XERO_MODULE_SLUG,
-                settings={**settings, "company_name": company_name_env},
+                settings=dict(updated_settings),  # Pass a copy to avoid mutation issues
             )
             result["company_name_updated"] = True
             logger.info(
@@ -2332,7 +2336,7 @@ async def _validate_xero(
             )
         except Exception as exc:
             logger.error(
-                "Failed to synchronise Xero company name from environment",
+                "Failed to synchronised Xero company name from environment",
                 error=str(exc),
             )
             result["company_name_updated"] = False
@@ -2353,9 +2357,11 @@ async def _validate_xero(
             result["tenant_id_discovery"] = "success"
             if discovered_tenant_id != tenant_id:
                 try:
+                    # Use updated_settings to preserve company_name update
+                    updated_settings["tenant_id"] = discovered_tenant_id
                     await module_repo.update_module(
                         XERO_MODULE_SLUG,
-                        settings={**settings, "tenant_id": discovered_tenant_id},
+                        settings=dict(updated_settings),  # Pass a copy to avoid mutation issues
                     )
                     result["tenant_id_updated"] = True
                     logger.info(
