@@ -568,6 +568,41 @@ async def update_watchers(
     return await _build_ticket_detail(ticket_id, current_user)
 
 
+@router.post("/{ticket_id}/watchers/{user_id}", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
+async def add_watcher(
+    ticket_id: int,
+    user_id: int,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TicketDetail:
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    await tickets_repo.add_watcher(ticket_id, user_id)
+    await tickets_service.emit_ticket_updated_event(
+        ticket_id,
+        actor_type="technician",
+        actor=current_user,
+    )
+    return await _build_ticket_detail(ticket_id, current_user)
+
+
+@router.delete("/{ticket_id}/watchers/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_watcher(
+    ticket_id: int,
+    user_id: int,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> None:
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    await tickets_repo.remove_watcher(ticket_id, user_id)
+    await tickets_service.emit_ticket_updated_event(
+        ticket_id,
+        actor_type="technician",
+        actor=current_user,
+    )
+
+
 @router.get("/labour-types", response_model=LabourTypeListResponse)
 async def list_labour_types_endpoint(
     current_user: dict = Depends(require_helpdesk_technician),
