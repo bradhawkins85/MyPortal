@@ -1,10 +1,11 @@
 """Service for managing live subscription changes with prorata pricing.
 
 This service handles:
-- Immediate license additions with prorated charges
+- Immediate license additions with prorated charges (only for licenses exceeding contracted quantity)
 - License decrease requests processed at term end
 - Stacking of multiple changes with net impact calculation
 - Preview of changes before applying
+- Smart charging that only bills for licenses exceeding the contracted quantity
 """
 from __future__ import annotations
 
