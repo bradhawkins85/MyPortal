@@ -1569,24 +1569,36 @@
           hour12: false,
         }).replace(',', '');
 
-        listItem.innerHTML = `
-          <div style="display: flex; align-items: center; justify-content: space-between;">
-            <div>
-              <strong>${userEmail}</strong>
-              <div class="list__meta">Watching since ${formattedDate}</div>
-            </div>
-            <button
-              type="button"
-              class="button button--small button--ghost"
-              data-remove-watcher
-              data-user-id="${userId}"
-              data-user-email="${userEmail}"
-              title="Remove watcher"
-            >
-              Remove
-            </button>
-          </div>
-        `;
+        // Create elements safely without using innerHTML
+        const itemContainer = document.createElement('div');
+        itemContainer.style.display = 'flex';
+        itemContainer.style.alignItems = 'center';
+        itemContainer.style.justifyContent = 'space-between';
+
+        const infoContainer = document.createElement('div');
+        
+        const emailStrong = document.createElement('strong');
+        emailStrong.textContent = userEmail;
+        
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'list__meta';
+        metaDiv.textContent = `Watching since ${formattedDate}`;
+        
+        infoContainer.appendChild(emailStrong);
+        infoContainer.appendChild(metaDiv);
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'button button--small button--ghost';
+        removeButton.setAttribute('data-remove-watcher', '');
+        removeButton.setAttribute('data-user-id', userId);
+        removeButton.setAttribute('data-user-email', userEmail);
+        removeButton.setAttribute('title', 'Remove watcher');
+        removeButton.textContent = 'Remove';
+
+        itemContainer.appendChild(infoContainer);
+        itemContainer.appendChild(removeButton);
+        listItem.appendChild(itemContainer);
 
         watchersList.appendChild(listItem);
 
@@ -1597,10 +1609,7 @@
         watchersList.style.display = '';
 
         // Attach remove handler to the new button
-        const removeButton = listItem.querySelector('[data-remove-watcher]');
-        if (removeButton) {
-          attachRemoveHandler(removeButton);
-        }
+        attachRemoveHandler(removeButton);
       } catch (error) {
         console.error('Failed to add watcher:', error);
         alert(error instanceof Error ? error.message : 'Failed to add watcher');
