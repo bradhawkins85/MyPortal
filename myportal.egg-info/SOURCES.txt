@@ -374,8 +374,10 @@ tests/test_subscription_categories.py
 tests/test_subscription_change_requests_migration.py
 tests/test_subscription_change_ticket.py
 tests/test_subscription_changes.py
+tests/test_subscription_ownership_check.py
 tests/test_subscription_price_changes.py
 tests/test_subscription_pricing.py
+tests/test_subscription_purchase_prevention.py
 tests/test_subscriptions_api_admin.py
 tests/test_subscriptions_page.py
 tests/test_switch_company_payload.py
@@ -398,6 +400,7 @@ tests/test_ticket_statuses_service.py
 tests/test_ticket_tasks_repository.py
 tests/test_ticket_view_schemas.py
 tests/test_ticket_views_api.py
+tests/test_ticket_watchers_api.py
 tests/test_tickets_dashboard_api.py
 tests/test_tickets_repository.py
 tests/test_tickets_service_create.py

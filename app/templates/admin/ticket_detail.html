@@ -318,21 +318,62 @@
                 <div class="definition-list__item">
                   <dt>Watchers</dt>
                   <dd>
-                    {% if ticket_watchers %}
-                      <ul class="list">
-                        {% for watcher in ticket_watchers %}
-                          {% set watcher_user = watcher.user %}
-                          <li class="list__item">
-                            <strong>{{ watcher_user.email if watcher_user else 'User #' ~ watcher.user_id }}</strong>
-                            {% if watcher.created_at %}
-                              <div class="list__meta">Watching since {{ watcher.created_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</div>
+                    <div data-watchers-container>
+                      {% if ticket_watchers %}
+                        <ul class="list" data-watchers-list>
+                          {% for watcher in ticket_watchers %}
+                            {% set watcher_user = watcher.user %}
+                            <li class="list__item" data-watcher-item data-user-id="{{ watcher.user_id }}">
+                              <div style="display: flex; align-items: center; justify-content: space-between;">
+                                <div>
+                                  <strong>{{ watcher_user.email if watcher_user else 'User #' ~ watcher.user_id }}</strong>
+                                  {% if watcher.created_at %}
+                                    <div class="list__meta">Watching since {{ watcher.created_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</div>
+                                  {% endif %}
+                                </div>
+                                <button
+                                  type="button"
+                                  class="button button--small button--ghost"
+                                  data-remove-watcher
+                                  data-user-id="{{ watcher.user_id }}"
+                                  data-user-email="{{ watcher_user.email if watcher_user else 'User #' ~ watcher.user_id }}"
+                                  title="Remove watcher"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </li>
+                          {% endfor %}
+                        </ul>
+                      {% else %}
+                        <ul class="list" data-watchers-list style="display: none;"></ul>
+                        <span class="card__empty" data-watchers-empty>No watchers are subscribed to this ticket.</span>
+                      {% endif %}
+                      <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
+                        <select class="form-input" data-watcher-select style="flex: 1;">
+                          <option value="">Select a user to add...</option>
+                          {% for user in ticket_user_options %}
+                            {% set is_watching = namespace(value=false) %}
+                            {% for watcher in ticket_watchers %}
+                              {% if watcher.user_id == user.id %}
+                                {% set is_watching.value = true %}
+                              {% endif %}
+                            {% endfor %}
+                            {% if not is_watching.value %}
+                              <option value="{{ user.id }}">{{ user.email }}</option>
                             {% endif %}
-                          </li>
-                        {% endfor %}
-                      </ul>
-                    {% else %}
-                      <span class="card__empty">No watchers are subscribed to this ticket.</span>
-                    {% endif %}
+                          {% endfor %}
+                        </select>
+                        <button
+                          type="button"
+                          class="button button--primary"
+                          data-add-watcher
+                          disabled
+                        >
+                          Add watcher
+                        </button>
+                      </div>
+                    </div>
                   </dd>
                 </div>
                 <div class="definition-list__item">
