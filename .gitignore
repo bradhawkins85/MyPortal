@@ -14,3 +14,4 @@ venv/
 test_venv/
 changes/*.json
 myportal.egg-info/
+myportal.db
