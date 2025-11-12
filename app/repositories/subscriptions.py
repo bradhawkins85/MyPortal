@@ -277,3 +277,25 @@ async def delete_subscription(subscription_id: str) -> None:
         "DELETE FROM subscriptions WHERE id = %s",
         (subscription_id,),
     )
+
+
+async def get_active_subscription_product_ids(customer_id: int) -> set[int]:
+    """Get the set of product IDs for which the customer has active subscriptions.
+    
+    Args:
+        customer_id: The customer company ID
+        
+    Returns:
+        Set of product IDs with active subscriptions
+    """
+    rows = await db.fetch_all(
+        """
+        SELECT DISTINCT product_id
+        FROM subscriptions
+        WHERE customer_id = %s
+          AND status IN ('active', 'pending_renewal')
+        """,
+        (customer_id,),
+    )
+    
+    return {int(row["product_id"]) for row in rows}
