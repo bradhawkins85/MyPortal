@@ -1496,6 +1496,201 @@
     });
   }
 
+  function initialiseWatcherManagement() {
+    const container = document.querySelector('[data-watchers-container]');
+    if (!container) {
+      return;
+    }
+
+    const selectElement = container.querySelector('[data-watcher-select]');
+    const addButton = container.querySelector('[data-add-watcher]');
+    const watchersList = container.querySelector('[data-watchers-list]');
+    const emptyMessage = container.querySelector('[data-watchers-empty]');
+
+    if (!selectElement || !addButton || !watchersList) {
+      return;
+    }
+
+    const ticketId = getTicketIdFromPath();
+    if (!ticketId) {
+      return;
+    }
+
+    // Enable/disable add button based on selection
+    selectElement.addEventListener('change', () => {
+      addButton.disabled = !selectElement.value;
+    });
+
+    // Handle add watcher
+    addButton.addEventListener('click', async () => {
+      const userId = selectElement.value;
+      if (!userId) {
+        return;
+      }
+
+      const selectedOption = selectElement.options[selectElement.selectedIndex];
+      const userEmail = selectedOption.textContent || '';
+
+      addButton.disabled = true;
+      addButton.setAttribute('aria-busy', 'true');
+
+      try {
+        const csrfToken = getCsrfToken();
+        const response = await fetch(`/api/tickets/${ticketId}/watchers/${userId}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
+          },
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.detail || 'Failed to add watcher');
+        }
+
+        // Remove the option from select
+        selectedOption.remove();
+        selectElement.value = '';
+
+        // Add to watchers list
+        const listItem = document.createElement('li');
+        listItem.className = 'list__item';
+        listItem.setAttribute('data-watcher-item', '');
+        listItem.setAttribute('data-user-id', userId);
+
+        const now = new Date();
+        const formattedDate = now.toLocaleString('en-CA', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }).replace(',', '');
+
+        // Create elements safely without using innerHTML
+        const itemContainer = document.createElement('div');
+        itemContainer.style.display = 'flex';
+        itemContainer.style.alignItems = 'center';
+        itemContainer.style.justifyContent = 'space-between';
+
+        const infoContainer = document.createElement('div');
+        
+        const emailStrong = document.createElement('strong');
+        emailStrong.textContent = userEmail;
+        
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'list__meta';
+        metaDiv.textContent = `Watching since ${formattedDate}`;
+        
+        infoContainer.appendChild(emailStrong);
+        infoContainer.appendChild(metaDiv);
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'button button--small button--ghost';
+        removeButton.setAttribute('data-remove-watcher', '');
+        removeButton.setAttribute('data-user-id', userId);
+        removeButton.setAttribute('data-user-email', userEmail);
+        removeButton.setAttribute('title', 'Remove watcher');
+        removeButton.textContent = 'Remove';
+
+        itemContainer.appendChild(infoContainer);
+        itemContainer.appendChild(removeButton);
+        listItem.appendChild(itemContainer);
+
+        watchersList.appendChild(listItem);
+
+        // Show list, hide empty message
+        if (emptyMessage) {
+          emptyMessage.style.display = 'none';
+        }
+        watchersList.style.display = '';
+
+        // Attach remove handler to the new button
+        attachRemoveHandler(removeButton);
+      } catch (error) {
+        console.error('Failed to add watcher:', error);
+        alert(error instanceof Error ? error.message : 'Failed to add watcher');
+      } finally {
+        addButton.disabled = !selectElement.value;
+        addButton.removeAttribute('aria-busy');
+      }
+    });
+
+    // Handle remove watcher
+    function attachRemoveHandler(button) {
+      button.addEventListener('click', async () => {
+        const userId = button.getAttribute('data-user-id');
+        const userEmail = button.getAttribute('data-user-email');
+
+        if (!userId || !confirm(`Remove ${userEmail} from watchers?`)) {
+          return;
+        }
+
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+
+        try {
+          const csrfToken = getCsrfToken();
+          const response = await fetch(`/api/tickets/${ticketId}/watchers/${userId}`, {
+            method: 'DELETE',
+            headers: {
+              'X-CSRF-Token': csrfToken,
+            },
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || 'Failed to remove watcher');
+          }
+
+          // Remove from list
+          const listItem = button.closest('[data-watcher-item]');
+          if (listItem) {
+            listItem.remove();
+          }
+
+          // Add back to select
+          const option = document.createElement('option');
+          option.value = userId;
+          option.textContent = userEmail;
+          selectElement.appendChild(option);
+
+          // Sort options alphabetically
+          const options = Array.from(selectElement.options).slice(1); // Skip first "Select..." option
+          options.sort((a, b) => a.textContent.localeCompare(b.textContent));
+          options.forEach(opt => selectElement.appendChild(opt));
+
+          // Show empty message if no watchers
+          const remainingWatchers = watchersList.querySelectorAll('[data-watcher-item]');
+          if (remainingWatchers.length === 0) {
+            watchersList.style.display = 'none';
+            if (emptyMessage) {
+              emptyMessage.style.display = '';
+            }
+          }
+        } catch (error) {
+          console.error('Failed to remove watcher:', error);
+          alert(error instanceof Error ? error.message : 'Failed to remove watcher');
+        } finally {
+          button.disabled = false;
+          button.removeAttribute('aria-busy');
+        }
+      });
+    }
+
+    // Attach handlers to existing remove buttons
+    const removeButtons = container.querySelectorAll('[data-remove-watcher]');
+    removeButtons.forEach(button => attachRemoveHandler(button));
+  }
+
+  function getTicketIdFromPath() {
+    const match = window.location.pathname.match(/\/admin\/tickets\/(\d+)/);
+    return match ? match[1] : null;
+  }
+
   function ready() {
     const messageWrappers = document.querySelectorAll('[data-timeline-message]');
 
@@ -1512,6 +1707,7 @@
     initialiseCallRecordingTimeEditing();
     initialiseAssetSelector();
     initialiseTaskManagement();
+    initialiseWatcherManagement();
   }
 
   if (document.readyState === 'loading') {
