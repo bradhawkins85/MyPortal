@@ -380,6 +380,93 @@ async def test_discover_xero_tenant_id_missing_credentials():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_validate_xero_updates_company_name_and_tenant_id():
+    """Test that when XERO_COMPANY_NAME changes, both company_name and tenant_id are updated correctly."""
+    
+    # Mock the module repository
+    with patch("app.services.modules.module_repo.get_module") as mock_get_module, \
+         patch("app.services.modules.module_repo.update_module") as mock_update_module, \
+         patch("app.services.modules.httpx.AsyncClient") as mock_client_class, \
+         patch.dict("os.environ", {"XERO_COMPANY_NAME": "New Company Name"}):
+        
+        # Setup initial module state with old company name and tenant_id
+        mock_get_module.return_value = {
+            "slug": "xero",
+            "settings": {
+                "client_id": "test-client-id",
+                "client_secret": "test-secret",
+                "refresh_token": "test-refresh-token",
+                "access_token": "test-access-token",
+                "tenant_id": "old-tenant-id",
+                "company_name": "Old Company Name",
+                "token_expires_at": None,
+            }
+        }
+        
+        # Mock the HTTP client for token refresh and connections API
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+        
+        # Mock token response
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {
+            "access_token": "new_access_token",
+            "expires_in": 1800,
+        }
+        mock_token_response.raise_for_status.return_value = None
+        
+        # Mock connections response with new tenant
+        mock_connections_response = MagicMock()
+        mock_connections_response.json.return_value = [
+            {
+                "tenantId": "new-tenant-id",
+                "tenantName": "New Company Name",
+                "tenantType": "ORGANISATION",
+            },
+        ]
+        mock_connections_response.raise_for_status.return_value = None
+        
+        mock_client.post.return_value = mock_token_response
+        mock_client.get.return_value = mock_connections_response
+        
+        # Call _validate_xero with the old settings
+        old_settings = {
+            "client_id": "test-client-id",
+            "client_secret": "test-secret",
+            "refresh_token": "test-refresh-token",
+            "tenant_id": "old-tenant-id",
+            "company_name": "Old Company Name",
+        }
+        
+        result = await modules_service._validate_xero(old_settings, {})
+        
+        # Verify the result
+        assert result["status"] == "ok"
+        assert result["company_name"] == "New Company Name"
+        assert result["company_name_updated"] is True
+        assert result["tenant_id_discovery"] == "success"
+        assert result["tenant_id_updated"] is True
+        assert result["discovered_tenant_id"] == "new-tenant-id"
+        
+        # Verify update_module was called twice
+        assert mock_update_module.call_count == 2
+        
+        # First call should update company_name
+        first_call = mock_update_module.call_args_list[0]
+        assert first_call[0][0] == "xero"
+        assert first_call[1]["settings"]["company_name"] == "New Company Name"
+        # Should preserve old tenant_id in first call
+        assert first_call[1]["settings"]["tenant_id"] == "old-tenant-id"
+        
+        # Second call should update tenant_id AND preserve the new company_name
+        second_call = mock_update_module.call_args_list[1]
+        assert second_call[0][0] == "xero"
+        assert second_call[1]["settings"]["tenant_id"] == "new-tenant-id"
+        # This is the critical assertion - company_name should still be "New Company Name"
+        assert second_call[1]["settings"]["company_name"] == "New Company Name"
+
+
+@pytest.mark.anyio("asyncio")
 async def test_sync_company_creates_webhook_monitor_event():
     """Test that sync_company creates a webhook monitor event and records request/response."""
     
