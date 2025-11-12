@@ -203,7 +203,11 @@
                 <td class="table__actions">
                   <div class="table__action-buttons">
                     <button type="button" class="button button--ghost" data-product-details="{{ product.id }}">Details</button>
-                    {% if product.stock > 0 %}
+                    {% set is_subscription = product.subscription_category_id is not none %}
+                    {% set has_active_subscription = is_subscription and product.id in active_subscription_product_ids %}
+                    {% if has_active_subscription %}
+                      <a href="/subscriptions" class="button button--primary">Manage</a>
+                    {% elif product.stock > 0 %}
                       {% if cart_allowed %}
                         <form action="/cart/add" method="post" class="inline-form">
                           {% include "partials/csrf.html" %}

@@ -4360,6 +4360,9 @@ async def shop_page(
 
     categories = await categories_task
 
+    # Get active subscription product IDs for the customer
+    active_subscription_product_ids = await subscriptions_repo.get_active_subscription_product_ids(company_id)
+
     extra = {
         "title": "Shop",
         "categories": categories,
@@ -4370,6 +4373,7 @@ async def shop_page(
         "search_term": search_term,
         "cart_error": cart_error,
         "low_stock_threshold": SHOP_LOW_STOCK_THRESHOLD,
+        "active_subscription_product_ids": active_subscription_product_ids,
     }
     return await _render_template("shop/index.html", request, user, extra=extra)
 
@@ -4482,6 +4486,17 @@ async def add_to_cart(request: Request) -> RedirectResponse:
             url=f"{request.url_for('cart_page')}?cartError={message}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
+
+    # Check if this is a subscription product that the user already owns
+    subscription_category_id = product.get("subscription_category_id")
+    if subscription_category_id is not None:
+        active_subscription_product_ids = await subscriptions_repo.get_active_subscription_product_ids(company_id)
+        if product_id in active_subscription_product_ids:
+            message = quote("You already have an active subscription for this product. Please manage your subscription from the Subscriptions page.")
+            return RedirectResponse(
+                url=f"{request.url_for('shop_page')}?cart_error={message}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
 
     existing = await cart_repo.get_item(session.id, product_id)
     existing_quantity = existing.get("quantity") if existing else 0
@@ -4620,6 +4635,9 @@ async def add_package_to_cart(request: Request) -> RedirectResponse:
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
+    # Get active subscription product IDs to check for subscription conflicts
+    active_subscription_product_ids = await subscriptions_repo.get_active_subscription_product_ids(company_id)
+
     cart_updates: list[tuple[int, int, Decimal, dict[str, Any]]] = []
     for item in items:
         resolved = item.get("resolved_product") or {}
@@ -4644,6 +4662,19 @@ async def add_package_to_cart(request: Request) -> RedirectResponse:
                 url=f"{request.url_for('shop_packages_page')}?cart_error={message}",
                 status_code=status.HTTP_303_SEE_OTHER,
             )
+        
+        # Check if this is a subscription product that the user already owns
+        subscription_category_id = product.get("subscription_category_id")
+        if subscription_category_id is not None and product_id in active_subscription_product_ids:
+            product_name = str(product.get("name") or "a product")
+            message = quote(
+                f"Cannot add package. You already have an active subscription for {product_name}. Please manage your subscription from the Subscriptions page."
+            )
+            return RedirectResponse(
+                url=f"{request.url_for('shop_packages_page')}?cart_error={message}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        
         stock_available = int(product.get("stock") or 0)
         existing_item = await cart_repo.get_item(session.id, product_id)
         existing_quantity = existing_item.get("quantity") if existing_item else 0
