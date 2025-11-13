@@ -7,36 +7,36 @@ from app.core.database import db
 
 
 async def list_billing_contacts_for_company(company_id: int) -> list[dict[str, Any]]:
-    """Get all billing contacts for a company with user details."""
+    """Get all billing contacts for a company with staff details."""
     rows = await db.fetch_all(
         """
         SELECT 
             bc.id,
             bc.company_id,
-            bc.user_id,
+            bc.staff_id,
             bc.created_at,
-            u.email,
-            u.first_name,
-            u.last_name
+            s.email,
+            s.first_name,
+            s.last_name
         FROM billing_contacts bc
-        JOIN users u ON u.id = bc.user_id
+        JOIN staff s ON s.id = bc.staff_id
         WHERE bc.company_id = %s
-        ORDER BY u.email
+        ORDER BY s.email
         """,
         (company_id,),
     )
     return [dict(row) for row in rows]
 
 
-async def add_billing_contact(company_id: int, user_id: int) -> dict[str, Any]:
-    """Add a user as a billing contact for a company."""
+async def add_billing_contact(company_id: int, staff_id: int) -> dict[str, Any]:
+    """Add a staff member as a billing contact for a company."""
     await db.execute(
         """
-        INSERT INTO billing_contacts (company_id, user_id)
+        INSERT INTO billing_contacts (company_id, staff_id)
         VALUES (%s, %s)
         ON DUPLICATE KEY UPDATE company_id = company_id
         """,
-        (company_id, user_id),
+        (company_id, staff_id),
     )
     
     row = await db.fetch_one(
@@ -44,25 +44,25 @@ async def add_billing_contact(company_id: int, user_id: int) -> dict[str, Any]:
         SELECT 
             bc.id,
             bc.company_id,
-            bc.user_id,
+            bc.staff_id,
             bc.created_at,
-            u.email,
-            u.first_name,
-            u.last_name
+            s.email,
+            s.first_name,
+            s.last_name
         FROM billing_contacts bc
-        JOIN users u ON u.id = bc.user_id
-        WHERE bc.company_id = %s AND bc.user_id = %s
+        JOIN staff s ON s.id = bc.staff_id
+        WHERE bc.company_id = %s AND bc.staff_id = %s
         """,
-        (company_id, user_id),
+        (company_id, staff_id),
     )
     return dict(row) if row else {}
 
 
-async def remove_billing_contact(company_id: int, user_id: int) -> None:
-    """Remove a user as a billing contact for a company."""
+async def remove_billing_contact(company_id: int, staff_id: int) -> None:
+    """Remove a staff member as a billing contact for a company."""
     await db.execute(
-        "DELETE FROM billing_contacts WHERE company_id = %s AND user_id = %s",
-        (company_id, user_id),
+        "DELETE FROM billing_contacts WHERE company_id = %s AND staff_id = %s",
+        (company_id, staff_id),
     )
 
 
@@ -72,7 +72,7 @@ async def get_billing_contacts_for_companies(
     """Get billing contacts for multiple companies.
     
     Returns a dictionary mapping company_id to list of contact dictionaries.
-    Each contact dictionary contains user_id and email.
+    Each contact dictionary contains staff_id and email.
     """
     if not company_ids:
         return {}
@@ -82,12 +82,12 @@ async def get_billing_contacts_for_companies(
         f"""
         SELECT 
             bc.company_id,
-            bc.user_id,
-            u.email
+            bc.staff_id,
+            s.email
         FROM billing_contacts bc
-        JOIN users u ON u.id = bc.user_id
+        JOIN staff s ON s.id = bc.staff_id
         WHERE bc.company_id IN ({placeholders})
-        ORDER BY bc.company_id, u.email
+        ORDER BY bc.company_id, s.email
         """,
         tuple(company_ids),
     )
@@ -98,7 +98,7 @@ async def get_billing_contacts_for_companies(
         if company_id not in result:
             result[company_id] = []
         result[company_id].append({
-            "user_id": int(row["user_id"]),
+            "staff_id": int(row["staff_id"]),
             "email": str(row["email"]),
         })
     
