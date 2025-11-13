@@ -28,8 +28,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_ticket_watchers_ticket_email
 
 -- Add check constraint to ensure at least one of user_id or email is set
 -- Note: MySQL 8.0.16+ supports CHECK constraints
-ALTER TABLE ticket_watchers
-DROP CHECK IF EXISTS chk_ticket_watchers_identity;
+-- MariaDB does not support "DROP CHECK IF EXISTS" so we need to conditionally
+-- drop the constraint using dynamic SQL if it exists.
+SET @chk_name := (
+    SELECT CONSTRAINT_NAME
+    FROM information_schema.TABLE_CONSTRAINTS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'ticket_watchers'
+      AND CONSTRAINT_TYPE = 'CHECK'
+      AND CONSTRAINT_NAME = 'chk_ticket_watchers_identity'
+);
+
+SET @drop_sql := IF(
+    @chk_name IS NOT NULL,
+    'ALTER TABLE ticket_watchers DROP CONSTRAINT chk_ticket_watchers_identity',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @drop_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 ALTER TABLE ticket_watchers
 ADD CONSTRAINT chk_ticket_watchers_identity
