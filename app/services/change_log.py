@@ -125,6 +125,68 @@ def _load_change_file(path: Path) -> ChangeLogEntry | None:
     return entry
 
 
+_CACHE_FILENAME = ".change-log-cache"
+
+
+def _cache_key(path: Path, *, root: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:  # pragma: no cover - fallback for unexpected layouts
+        return str(path.resolve())
+
+
+def _load_sync_cache(changes_dir: Path) -> dict[str, int]:
+    cache_path = changes_dir / _CACHE_FILENAME
+    try:
+        raw = json.loads(cache_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError) as exc:  # pragma: no cover - log and fallback
+        log_error("Unable to load change log cache", file=str(cache_path), error=str(exc))
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    cache: dict[str, int] = {}
+    for key, value in raw.items():
+        if isinstance(key, str) and isinstance(value, (int, float)):
+            cache[key] = int(value)
+    return cache
+
+
+def _save_sync_cache(changes_dir: Path, *, root: Path) -> None:
+    cache_path = changes_dir / _CACHE_FILENAME
+    states: dict[str, int] = {}
+
+    for path in sorted(changes_dir.glob("*.json")):
+        mtime = _get_mtime(path)
+        if mtime is None:
+            continue
+        states[_cache_key(path, root=root)] = mtime
+
+    changes_md = root / "changes.md"
+    mtime = _get_mtime(changes_md)
+    if mtime is not None:
+        states[_cache_key(changes_md, root=root)] = mtime
+
+    try:
+        cache_path.write_text(
+            json.dumps(states, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:  # pragma: no cover - log and continue
+        log_error("Unable to persist change log cache", file=str(cache_path), error=str(exc))
+
+
+def _get_mtime(path: Path) -> int | None:
+    try:
+        stat_result = path.stat()
+    except FileNotFoundError:
+        return None
+    except OSError:  # pragma: no cover - treat as changed
+        return None
+    return int(getattr(stat_result, "st_mtime_ns", int(stat_result.st_mtime * 1_000_000_000)))
+
+
 def _parse_changes_md(path: Path) -> list[ChangeLogEntry]:
     entries: list[ChangeLogEntry] = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -216,18 +278,27 @@ async def sync_change_log_sources(*, base_path: Path | None = None, repository=c
         log_info("Skipping change log synchronisation because the database is not connected")
         return
 
+    cache = _load_sync_cache(changes_dir)
     entries: list[ChangeLogEntry] = []
     for path in sorted(changes_dir.glob("*.json")):
+        cache_key = _cache_key(path, root=root)
+        mtime = _get_mtime(path)
+        if mtime is not None and cache.get(cache_key) == mtime:
+            continue
         entry = _load_change_file(path)
         if entry:
             entries.append(entry)
 
     changes_md = root / "changes.md"
     if changes_md.exists():
-        entries.extend(_parse_changes_md(changes_md))
+        cache_key = _cache_key(changes_md, root=root)
+        mtime = _get_mtime(changes_md)
+        if mtime is None or cache.get(cache_key) != mtime:
+            entries.extend(_parse_changes_md(changes_md))
 
-    if not entries:
-        return
+    stored = 0
+    if entries:
+        stored = await _persist_entries(entries, changes_dir=changes_dir, repository=repository)
+        log_info("Change log entries synchronised", total=len(entries), stored=stored)
 
-    stored = await _persist_entries(entries, changes_dir=changes_dir, repository=repository)
-    log_info("Change log entries synchronised", total=len(entries), stored=stored)
+    _save_sync_cache(changes_dir, root=root)
