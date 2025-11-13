@@ -1,4 +1,6 @@
 import asyncio
+import pytest
+from decimal import Decimal
 
 from app.services import xero
 
@@ -128,3 +130,124 @@ def test_build_invoice_context(monkeypatch):
     assert result["active_servers"] == 5
     assert result["active_users"] == 5
     assert result["total_assets"] == 25
+
+
+@pytest.mark.asyncio
+async def test_build_recurring_invoice_items_fetches_xero_rates(monkeypatch):
+    """Test that build_recurring_invoice_items fetches item rates from Xero."""
+    
+    # Track whether fetch_xero_item_rates was called
+    fetch_called = {"called": False, "item_codes": []}
+    
+    async def fake_list_recurring_items(company_id: int):
+        return [
+            {
+                "id": 1,
+                "company_id": company_id,
+                "active": True,
+                "product_code": "MANAGED-SERVICES",
+                "description_template": "Managed Services",
+                "qty_expression": "1",
+                "price_override": None,  # No override, should fetch from Xero
+            },
+            {
+                "id": 2,
+                "company_id": company_id,
+                "active": True,
+                "product_code": "CLOUD-BACKUP",
+                "description_template": "Cloud Backup",
+                "qty_expression": "1",
+                "price_override": Decimal("50.00"),  # Has override, should NOT fetch
+            },
+            {
+                "id": 3,
+                "company_id": company_id,
+                "active": False,  # Inactive, should be skipped
+                "product_code": "INACTIVE-ITEM",
+                "description_template": "Inactive Item",
+                "qty_expression": "1",
+                "price_override": None,
+            },
+        ]
+    
+    async def fake_fetch_xero_item_rates(item_codes, *, tenant_id, access_token):
+        # Record that the function was called
+        fetch_called["called"] = True
+        fetch_called["item_codes"] = list(item_codes)
+        
+        # Return rates for items
+        return {
+            "MANAGED-SERVICES": Decimal("150.00"),
+        }
+    
+    monkeypatch.setattr(xero.recurring_items_repo, "list_company_recurring_invoice_items", fake_list_recurring_items)
+    monkeypatch.setattr(xero, "fetch_xero_item_rates", fake_fetch_xero_item_rates)
+    
+    # Call the function with credentials
+    line_items = await xero.build_recurring_invoice_items(
+        company_id=1,
+        tax_type="OUTPUT",
+        context={},
+        tenant_id="test-tenant",
+        access_token="test-token",
+    )
+    
+    # Verify fetch_xero_item_rates was called
+    assert fetch_called["called"], "fetch_xero_item_rates should have been called"
+    assert "MANAGED-SERVICES" in fetch_called["item_codes"], "Should fetch rate for MANAGED-SERVICES"
+    assert "CLOUD-BACKUP" not in fetch_called["item_codes"], "Should NOT fetch rate for CLOUD-BACKUP (has override)"
+    assert "INACTIVE-ITEM" not in fetch_called["item_codes"], "Should NOT fetch rate for INACTIVE-ITEM (inactive)"
+    
+    # Verify line items were created correctly
+    assert len(line_items) == 2, "Should have 2 line items (2 active items)"
+    
+    # Find the MANAGED-SERVICES item
+    managed_services_item = next(item for item in line_items if item["ItemCode"] == "MANAGED-SERVICES")
+    assert managed_services_item["UnitAmount"] == 150.00, "Should use Xero item rate"
+    
+    # Find the CLOUD-BACKUP item
+    cloud_backup_item = next(item for item in line_items if item["ItemCode"] == "CLOUD-BACKUP")
+    assert cloud_backup_item["UnitAmount"] == 50.00, "Should use price override"
+
+
+@pytest.mark.asyncio
+async def test_build_recurring_invoice_items_without_credentials(monkeypatch):
+    """Test that build_recurring_invoice_items works without credentials (doesn't fetch rates)."""
+    
+    fetch_called = {"called": False}
+    
+    async def fake_list_recurring_items(company_id: int):
+        return [
+            {
+                "id": 1,
+                "company_id": company_id,
+                "active": True,
+                "product_code": "MANAGED-SERVICES",
+                "description_template": "Managed Services",
+                "qty_expression": "1",
+                "price_override": None,
+            },
+        ]
+    
+    async def fake_fetch_xero_item_rates(item_codes, *, tenant_id, access_token):
+        fetch_called["called"] = True
+        return {}
+    
+    monkeypatch.setattr(xero.recurring_items_repo, "list_company_recurring_invoice_items", fake_list_recurring_items)
+    monkeypatch.setattr(xero, "fetch_xero_item_rates", fake_fetch_xero_item_rates)
+    
+    # Call without credentials
+    line_items = await xero.build_recurring_invoice_items(
+        company_id=1,
+        tax_type="OUTPUT",
+        context={},
+        # No tenant_id or access_token
+    )
+    
+    # Verify fetch_xero_item_rates was NOT called
+    assert not fetch_called["called"], "fetch_xero_item_rates should NOT have been called without credentials"
+    
+    # Verify line item was created (without UnitAmount, Xero will use default)
+    assert len(line_items) == 1
+    assert line_items[0]["ItemCode"] == "MANAGED-SERVICES"
+    assert "UnitAmount" not in line_items[0], "Should not have UnitAmount without credentials"
