@@ -22,7 +22,7 @@ def _normalise_record(row: dict[str, Any]) -> LabourTypeRecord:
 async def list_labour_types() -> list[LabourTypeRecord]:
     rows = await db.fetch_all(
         """
-        SELECT id, code, name, created_at, updated_at
+        SELECT id, code, name, rate, created_at, updated_at
         FROM ticket_labour_types
         ORDER BY name ASC
         """
@@ -33,7 +33,7 @@ async def list_labour_types() -> list[LabourTypeRecord]:
 async def get_labour_type(labour_type_id: int) -> LabourTypeRecord | None:
     row = await db.fetch_one(
         """
-        SELECT id, code, name, created_at, updated_at
+        SELECT id, code, name, rate, created_at, updated_at
         FROM ticket_labour_types
         WHERE id = %s
         """,
@@ -47,7 +47,7 @@ async def get_labour_type(labour_type_id: int) -> LabourTypeRecord | None:
 async def get_labour_type_by_code(code: str) -> LabourTypeRecord | None:
     row = await db.fetch_one(
         """
-        SELECT id, code, name, created_at, updated_at
+        SELECT id, code, name, rate, created_at, updated_at
         FROM ticket_labour_types
         WHERE LOWER(code) = LOWER(%s)
         """,
@@ -58,13 +58,13 @@ async def get_labour_type_by_code(code: str) -> LabourTypeRecord | None:
     return None
 
 
-async def create_labour_type(*, code: str, name: str) -> LabourTypeRecord:
+async def create_labour_type(*, code: str, name: str, rate: float | None = None) -> LabourTypeRecord:
     labour_type_id = await db.execute_returning_lastrowid(
         """
-        INSERT INTO ticket_labour_types (code, name, created_at, updated_at)
-        VALUES (%s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+        INSERT INTO ticket_labour_types (code, name, rate, created_at, updated_at)
+        VALUES (%s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
         """,
-        (code, name),
+        (code, name, rate),
     )
     if labour_type_id:
         record = await get_labour_type(int(labour_type_id))
@@ -74,6 +74,7 @@ async def create_labour_type(*, code: str, name: str) -> LabourTypeRecord:
         "id": int(labour_type_id) if labour_type_id else None,
         "code": code,
         "name": name,
+        "rate": rate,
         "created_at": None,
         "updated_at": None,
     }
@@ -84,6 +85,7 @@ async def update_labour_type(
     *,
     code: str | None = None,
     name: str | None = None,
+    rate: float | None = None,
 ) -> LabourTypeRecord | None:
     updates: list[str] = []
     params: list[Any] = []
@@ -93,6 +95,9 @@ async def update_labour_type(
     if name is not None:
         updates.append("name = %s")
         params.append(name)
+    if rate is not None:
+        updates.append("rate = %s")
+        params.append(rate)
     if updates:
         updates.append("updated_at = UTC_TIMESTAMP(6)")
         params.append(labour_type_id)
@@ -136,6 +141,7 @@ async def replace_labour_types(definitions: Sequence[dict[str, Any]]) -> list[La
                 for entry in definitions:
                     raw_code = str(entry.get("code") or "").strip()
                     raw_name = str(entry.get("name") or "").strip()
+                    raw_rate = entry.get("rate")
                     if not raw_code and not raw_name:
                         continue
                     if not raw_code:
@@ -159,19 +165,20 @@ async def replace_labour_types(definitions: Sequence[dict[str, Any]]) -> list[La
                             UPDATE ticket_labour_types
                             SET code = %s,
                                 name = %s,
+                                rate = %s,
                                 updated_at = UTC_TIMESTAMP(6)
                             WHERE id = %s
                             """,
-                            (raw_code, raw_name, labour_type_id),
+                            (raw_code, raw_name, raw_rate, labour_type_id),
                         )
                         retained_ids.add(labour_type_id)
                     else:
                         await cursor.execute(
                             """
-                            INSERT INTO ticket_labour_types (code, name, created_at, updated_at)
-                            VALUES (%s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                            INSERT INTO ticket_labour_types (code, name, rate, created_at, updated_at)
+                            VALUES (%s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
                             """,
-                            (raw_code, raw_name),
+                            (raw_code, raw_name, raw_rate),
                         )
                         inserted_id = cursor.lastrowid
                         if inserted_id:
