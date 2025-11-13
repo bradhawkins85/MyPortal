@@ -13,18 +13,15 @@ MODIFY COLUMN user_id INT NULL;
 ALTER TABLE ticket_watchers 
 DROP INDEX uq_ticket_watchers_ticket_user;
 
--- Add new unique constraint that handles both user_id and email
--- This ensures a watcher can't be added twice (either by user_id or email)
+-- Add unique constraint for user_id based watchers (where user_id IS NOT NULL)
+-- This ensures a user can only watch a ticket once
 ALTER TABLE ticket_watchers 
-ADD UNIQUE INDEX uq_ticket_watchers_ticket_user_email (
-    ticket_id, 
-    user_id, 
-    email(191)
-);
+ADD UNIQUE INDEX uq_ticket_watchers_ticket_user (ticket_id, user_id);
 
--- Add index for email lookups
+-- Add unique constraint for email based watchers (where email IS NOT NULL)
+-- This ensures an email can only watch a ticket once
 ALTER TABLE ticket_watchers 
-ADD INDEX idx_ticket_watchers_email (email(191));
+ADD UNIQUE INDEX uq_ticket_watchers_ticket_email (ticket_id, email(191));
 
 -- Add check constraint to ensure at least one of user_id or email is set
 -- Note: MySQL 8.0.16+ supports CHECK constraints
