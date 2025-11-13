@@ -1668,3 +1668,325 @@ async def send_order_to_xero(
             "error": str(exc),
             "event_id": event_id,
         }
+
+
+async def send_subscription_charge_to_xero(
+    subscription_id: str,
+    change_request_id: str,
+    customer_id: int,
+    product_name: str,
+    quantity_change: int,
+    prorated_charge: Decimal,
+    end_date: date,
+) -> dict[str, Any]:
+    """Send a subscription charge to Xero for invoicing.
+    
+    Args:
+        subscription_id: The subscription ID
+        change_request_id: The change request ID
+        customer_id: The customer/company ID
+        product_name: The product/subscription name
+        quantity_change: Number of licenses added
+        prorated_charge: The prorated charge amount
+        end_date: The subscription end date
+        
+    Returns:
+        Dictionary with status and details of the operation
+    """
+    
+    # Check if Xero module is enabled and configured
+    module = await modules_service.get_module("xero", redact=False)
+    if not module or not module.get("enabled"):
+        return {
+            "status": "skipped",
+            "reason": "Xero module is disabled",
+            "subscription_id": subscription_id,
+            "customer_id": customer_id,
+        }
+    
+    settings = dict(module.get("settings") or {})
+    required_fields = ["client_id", "client_secret", "refresh_token", "tenant_id"]
+    missing = [field for field in required_fields if not str(settings.get(field) or "").strip()]
+    if missing:
+        return {
+            "status": "skipped",
+            "reason": "Xero module not fully configured",
+            "missing": missing,
+            "subscription_id": subscription_id,
+            "customer_id": customer_id,
+        }
+    
+    # Get settings for invoice
+    account_code = str(settings.get("account_code", "")).strip() or "200"
+    tax_type = str(settings.get("tax_type", "")).strip() or None
+    line_amount_type = str(settings.get("line_amount_type", "")).strip() or "Exclusive"
+    tenant_id = str(settings.get("tenant_id", "")).strip()
+    reference_prefix = str(settings.get("reference_prefix", "")).strip() or "Support"
+    
+    # Get access token
+    try:
+        access_token = await modules_service.acquire_xero_access_token()
+    except Exception as exc:
+        logger.error("Failed to acquire Xero access token for subscription charge", error=str(exc))
+        return {
+            "status": "error",
+            "reason": "Failed to acquire access token",
+            "error": str(exc),
+            "subscription_id": subscription_id,
+            "customer_id": customer_id,
+        }
+    
+    # Get company details
+    company = await company_repo.get_company_by_id(customer_id)
+    if not company:
+        return {
+            "status": "error",
+            "reason": "Company not found",
+            "subscription_id": subscription_id,
+            "customer_id": customer_id,
+        }
+    
+    # Build invoice line item
+    charge_decimal = _to_decimal(prorated_charge) or Decimal("0")
+    line_items: list[dict[str, Any]] = []
+    
+    description = f"Subscription: {product_name} - {quantity_change} license(s) added (prorated to {end_date.isoformat()})"
+    
+    line_item: dict[str, Any] = {
+        "Description": description,
+        "Quantity": 1,
+        "UnitAmount": float(_quantize(charge_decimal)),
+        "AccountCode": str(account_code or "").strip(),
+    }
+    
+    if tax_type:
+        line_item["TaxType"] = str(tax_type).strip()
+    
+    line_items.append(line_item)
+    
+    # Build contact payload
+    xero_id = company.get("xero_id")
+    contact_payload: dict[str, Any] = {}
+    if xero_id:
+        contact_payload["ContactID"] = str(xero_id)
+    else:
+        company_name = company.get("name") or f"Company #{customer_id}"
+        contact_payload["Name"] = str(company_name).strip()
+    
+    # Build reference
+    reference = f"{reference_prefix} - Subscription {subscription_id[:8]}"
+    
+    # Build Xero invoice payload
+    xero_payload = {
+        "Type": "ACCREC",
+        "Contact": contact_payload,
+        "LineItems": line_items,
+        "LineAmountTypes": line_amount_type,
+        "Reference": reference,
+        "Date": date.today().isoformat(),
+        "Status": "DRAFT",
+    }
+    
+    # Make API call to Xero
+    api_url = "https://api.xero.com/api.xro/2.0/Invoices"
+    request_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "xero-tenant-id": tenant_id,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    
+    # Create webhook monitor event
+    webhook_payload = {
+        "subscription_id": subscription_id,
+        "change_request_id": change_request_id,
+        "customer_id": customer_id,
+        "company_name": company.get("name"),
+        "product_name": product_name,
+        "quantity_change": quantity_change,
+        "prorated_charge": float(charge_decimal),
+        "invoice": xero_payload,
+    }
+    
+    try:
+        event = await webhook_monitor.create_manual_event(
+            name="xero.subscription.charge",
+            target_url=api_url,
+            payload=webhook_payload,
+            headers=request_headers,
+            max_attempts=1,
+            backoff_seconds=0,
+        )
+    except Exception as exc:
+        logger.error("Failed to create webhook monitor event for subscription charge", error=str(exc))
+        event = None
+    
+    event_id: int | None = None
+    if event and event.get("id") is not None:
+        try:
+            event_id = int(event["id"])
+        except (TypeError, ValueError):
+            event_id = None
+    
+    # Make HTTP request to Xero
+    response_status: int | None = None
+    response_body: str | None = None
+    response_headers: dict[str, Any] | None = None
+    xero_invoice_number: str | None = None
+    
+    xero_request_payload = {"Invoices": [xero_payload]}
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                api_url,
+                json=xero_request_payload,
+                headers=request_headers,
+            )
+            response_status = response.status_code
+            response_body = response.text
+            response_headers = dict(response.headers)
+        
+        success = 200 <= response_status < 300
+        
+        # Parse invoice number from response
+        if success and response_body:
+            try:
+                response_data = json.loads(response_body)
+                invoices_list = response_data.get("Invoices", [])
+                if invoices_list:
+                    xero_invoice_number = invoices_list[0].get("InvoiceNumber")
+            except Exception as parse_exc:
+                logger.warning(
+                    "Failed to parse Xero invoice number from subscription charge response",
+                    error=str(parse_exc),
+                )
+        
+        if event_id is not None:
+            if success:
+                try:
+                    await webhook_monitor.record_manual_success(
+                        event_id,
+                        attempt_number=1,
+                        response_status=response_status,
+                        response_body=response_body,
+                        request_headers=request_headers,
+                        request_body=xero_request_payload,
+                        response_headers=response_headers,
+                    )
+                except Exception as record_exc:
+                    logger.error(
+                        "Failed to record webhook success for subscription charge",
+                        event_id=event_id,
+                        error=str(record_exc),
+                    )
+            else:
+                try:
+                    await webhook_monitor.record_manual_failure(
+                        event_id,
+                        attempt_number=1,
+                        status="failed",
+                        error_message=f"HTTP {response_status}",
+                        response_status=response_status,
+                        response_body=response_body,
+                        request_headers=request_headers,
+                        request_body=xero_request_payload,
+                        response_headers=response_headers,
+                    )
+                except Exception as record_exc:
+                    logger.error(
+                        "Failed to record webhook failure for subscription charge",
+                        event_id=event_id,
+                        error=str(record_exc),
+                    )
+        
+        if success:
+            logger.info(
+                "Successfully sent subscription charge to Xero",
+                subscription_id=subscription_id,
+                customer_id=customer_id,
+                invoice_number=xero_invoice_number,
+                response_status=response_status,
+                event_id=event_id,
+            )
+            return {
+                "status": "succeeded",
+                "subscription_id": subscription_id,
+                "customer_id": customer_id,
+                "invoice_number": xero_invoice_number,
+                "response_status": response_status,
+                "event_id": event_id,
+            }
+        else:
+            logger.error(
+                "Xero API returned error status for subscription charge",
+                subscription_id=subscription_id,
+                customer_id=customer_id,
+                response_status=response_status,
+                response_body=response_body,
+            )
+            return {
+                "status": "failed",
+                "subscription_id": subscription_id,
+                "customer_id": customer_id,
+                "response_status": response_status,
+                "error": f"HTTP {response_status}",
+                "event_id": event_id,
+            }
+    
+    except httpx.HTTPError as exc:
+        logger.error("Xero API request failed for subscription charge", subscription_id=subscription_id, error=str(exc))
+        if event_id is not None:
+            try:
+                await webhook_monitor.record_manual_failure(
+                    event_id,
+                    attempt_number=1,
+                    status="error",
+                    error_message=str(exc),
+                    response_status=response_status,
+                    response_body=response_body,
+                    request_headers=request_headers,
+                    request_body=xero_payload,
+                    response_headers=response_headers,
+                )
+            except Exception as record_exc:
+                logger.error(
+                    "Failed to record webhook error for subscription charge",
+                    event_id=event_id,
+                    error=str(record_exc),
+                )
+        return {
+            "status": "error",
+            "subscription_id": subscription_id,
+            "customer_id": customer_id,
+            "error": str(exc),
+            "event_id": event_id,
+        }
+    except Exception as exc:
+        logger.error("Unexpected error sending subscription charge to Xero", subscription_id=subscription_id, error=str(exc))
+        if event_id is not None:
+            try:
+                await webhook_monitor.record_manual_failure(
+                    event_id,
+                    attempt_number=1,
+                    status="error",
+                    error_message=str(exc),
+                    response_status=None,
+                    response_body=None,
+                    request_headers=request_headers,
+                    request_body=xero_payload,
+                    response_headers=None,
+                )
+            except Exception as record_exc:
+                logger.error(
+                    "Failed to record webhook error for subscription charge",
+                    event_id=event_id,
+                    error=str(record_exc),
+                )
+        return {
+            "status": "error",
+            "subscription_id": subscription_id,
+            "customer_id": customer_id,
+            "error": str(exc),
+            "event_id": event_id,
+        }
