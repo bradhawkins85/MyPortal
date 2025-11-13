@@ -1134,6 +1134,8 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
     ticket_line_items: list[dict[str, Any]] = []
     tickets_context: list[dict[str, Any]] = []
     ticket_numbers: list[str] = []
+    billable_tickets_found = 0
+    tickets_skipped_reason: str | None = None
     
     if billable_statuses_raw:
         try:
@@ -1142,13 +1144,27 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
         except (InvalidOperation, ValueError):
             hourly_rate = Decimal("0")
         
-        if hourly_rate > 0:
+        if hourly_rate <= 0:
+            logger.warning(
+                "Billable statuses configured but hourly rate is not set",
+                company_id=company_id,
+                billable_statuses=billable_statuses_raw,
+            )
+            tickets_skipped_reason = "Hourly rate not configured"
+        elif hourly_rate > 0:
             account_code = str(settings.get("account_code", "")).strip() or "400"
             description_template = str(settings.get("line_item_description_template", "")).strip()
             
             # Normalize billable statuses
             status_filter = _normalise_status_filter(billable_statuses_raw)
-            if status_filter:
+            if not status_filter:
+                logger.warning(
+                    "Billable statuses configured but could not be parsed",
+                    company_id=company_id,
+                    billable_statuses_raw=billable_statuses_raw,
+                )
+                tickets_skipped_reason = "Invalid billable statuses configuration"
+            elif status_filter:
                 # Find tickets for this company matching billable statuses
                 tickets = await tickets_repo.list_tickets(
                     company_id=company_id,
@@ -1171,7 +1187,17 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                     if unbilled_reply_ids:
                         billable_tickets.append(ticket)
                 
-                if billable_tickets:
+                billable_tickets_found = len(billable_tickets)
+                
+                if not billable_tickets:
+                    logger.info(
+                        "No billable tickets with unbilled time found for company",
+                        company_id=company_id,
+                        billable_statuses=list(status_filter),
+                        total_tickets_checked=len(tickets),
+                    )
+                    tickets_skipped_reason = "No tickets with unbilled time in billable status"
+                elif billable_tickets:
                     # Build line items for billable tickets
                     for ticket in billable_tickets:
                         ticket_id = ticket.get("id")
@@ -1205,6 +1231,12 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                             bucket["minutes"] += minutes
                         
                         if billable_minutes <= 0:
+                            logger.debug(
+                                "Ticket has unbilled replies but no billable minutes",
+                                ticket_id=ticket_id,
+                                company_id=company_id,
+                                unbilled_reply_count=len(unbilled_replies),
+                            )
                             continue
                         
                         # Create line items for this ticket
@@ -1273,13 +1305,22 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
         logger.info(
             "No active recurring invoice items or billable tickets for company",
             company_id=company_id,
+            recurring_items_count=len(recurring_items_info),
+            billable_tickets_found=billable_tickets_found,
+            ticket_line_items_created=len(ticket_line_items),
+            tickets_skipped_reason=tickets_skipped_reason,
         )
-        return {
+        result = {
             "status": "skipped",
             "reason": "No active recurring invoice items or billable tickets",
             "company_id": company_id,
             "recurring_items_count": len(recurring_items_info),
+            "billable_tickets_found": billable_tickets_found,
+            "ticket_line_items_created": len(ticket_line_items),
         }
+        if tickets_skipped_reason:
+            result["tickets_skipped_reason"] = tickets_skipped_reason
+        return result
 
     # Build invoice payload for Xero API
     xero_id = company.get("xero_id")
