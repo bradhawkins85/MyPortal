@@ -25,6 +25,7 @@ def _normalize_change_request(row: dict[str, Any]) -> dict[str, Any]:
             if row.get("prorated_charge") is not None
             else None
         ),
+        "xero_invoice_number": row.get("xero_invoice_number"),
         "notes": row.get("notes"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
@@ -182,3 +183,18 @@ async def get_pending_decreases_by_end_date(
         )
     
     return [_normalize_change_request(row) for row in rows]
+
+
+async def update_xero_invoice_number(
+    change_request_id: str,
+    xero_invoice_number: str,
+) -> None:
+    """Update the Xero invoice number for a change request."""
+    await db.execute(
+        """
+        UPDATE subscription_change_requests 
+        SET xero_invoice_number = %s
+        WHERE id = %s
+        """,
+        (xero_invoice_number, change_request_id),
+    )
