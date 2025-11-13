@@ -96,7 +96,11 @@ async def test_replace_labour_types_with_rates():
 
 @pytest.mark.asyncio
 async def test_xero_uses_local_rate_first():
-    """Test that Xero billing uses local labour type rate before Xero rate."""
+    """Test that Xero billing uses local labour type rate.
+    
+    Local rate is the only source for labour-specific rates now.
+    Xero item rates are no longer fetched.
+    """
     
     # Mock ticket with labour type that has a local rate
     mock_ticket = {
@@ -166,8 +170,12 @@ async def test_xero_uses_local_rate_first():
 
 
 @pytest.mark.asyncio
-async def test_xero_falls_back_to_xero_rate_when_no_local_rate():
-    """Test that Xero billing falls back to Xero rate when no local rate is set."""
+async def test_xero_falls_back_to_default_when_no_local_rate():
+    """Test that Xero billing falls back to default rate when no local rate is set.
+    
+    Note: Xero item rates are no longer fetched. Only local labour type rates
+    are used, with fallback to default hourly rate.
+    """
     
     mock_ticket = {
         "id": 1,
@@ -202,7 +210,7 @@ async def test_xero_falls_back_to_xero_rate_when_no_local_rate():
     async def fetch_company(company_id: int):
         return mock_company
     
-    # Xero item rates available
+    # Xero item rates parameter is now ignored (deprecated)
     xero_item_rates = {
         "REMOTE": Decimal("120.00")
     }
@@ -217,19 +225,19 @@ async def test_xero_falls_back_to_xero_rate_when_no_local_rate():
         allowed_statuses=["closed"],
         description_template="Ticket {ticket_id}",
         reference_prefix="Support",
-        xero_item_rates=xero_item_rates,
+        xero_item_rates=xero_item_rates,  # This is now ignored
         fetch_ticket=fetch_ticket,
         fetch_replies=fetch_replies,
         fetch_company=fetch_company,
     )
     
-    # Should use Xero rate (120.00), not default (80.00)
+    # Should use default rate (80.00), NOT Xero rate (120.00)
     assert len(invoices) == 1
     invoice = invoices[0]
     line_item = invoice["line_items"][0]
     
-    # Rate should be 120.00 (Xero rate)
-    assert line_item["UnitAmount"] == 120.00
+    # Rate should be 80.00 (default rate, Xero rate is no longer fetched)
+    assert line_item["UnitAmount"] == 80.00
 
 
 @pytest.mark.asyncio
