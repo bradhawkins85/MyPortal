@@ -2832,66 +2832,22 @@
 
   function bindXeroTenantSelector() {
     const loadButton = document.getElementById('xero-load-tenants');
-    const toggleButton = document.getElementById('xero-toggle-manual');
     const selectElement = document.getElementById('xero-tenant-id');
-    const manualInput = document.getElementById('xero-tenant-id-manual');
 
-    if (!loadButton || !selectElement || !manualInput || !toggleButton) {
+    if (!loadButton || !selectElement) {
       return;
     }
 
-    let isManualMode = false;
-
-    // Load current tenant ID into the appropriate field
-    const currentTenantId = manualInput.value;
-    if (currentTenantId) {
-      selectElement.value = currentTenantId;
-    }
-
-    // Toggle between dropdown and manual input
-    toggleButton.addEventListener('click', () => {
-      isManualMode = !isManualMode;
-      
-      if (isManualMode) {
-        selectElement.style.display = 'none';
-        selectElement.removeAttribute('name');
-        manualInput.style.display = 'block';
-        manualInput.setAttribute('name', 'settings.tenant_id');
-        toggleButton.textContent = 'Use Dropdown';
-        // Copy value from select to manual input
-        if (selectElement.value) {
-          manualInput.value = selectElement.value;
-        }
-      } else {
-        selectElement.style.display = 'block';
-        selectElement.setAttribute('name', 'settings.tenant_id');
-        manualInput.style.display = 'none';
-        manualInput.removeAttribute('name');
-        toggleButton.textContent = 'Manual Entry';
-        // Copy value from manual input to select
-        if (manualInput.value) {
-          selectElement.value = manualInput.value;
-        }
-      }
-    });
-
-    // Sync values between select and manual input
-    selectElement.addEventListener('change', () => {
-      manualInput.value = selectElement.value;
-    });
-
-    manualInput.addEventListener('input', () => {
-      selectElement.value = manualInput.value;
-    });
-
     // Load tenants from API
     loadButton.addEventListener('click', async () => {
-      const originalText = loadButton.textContent;
       loadButton.disabled = true;
-      loadButton.textContent = 'Loading...';
+      loadButton.setAttribute('aria-busy', 'true');
 
       try {
         const data = await requestJson('/api/integration-modules/xero/tenants');
+        
+        // Save the current selection
+        const currentSelection = selectElement.value;
         
         // Clear existing options except the placeholder
         while (selectElement.options.length > 1) {
@@ -2910,7 +2866,8 @@
           // Select current tenant if available
           if (data.current_tenant_id) {
             selectElement.value = data.current_tenant_id;
-            manualInput.value = data.current_tenant_id;
+          } else if (currentSelection) {
+            selectElement.value = currentSelection;
           }
 
           alert(`Loaded ${data.tenants.length} Xero organization(s). Please select one and save.`);
@@ -2923,7 +2880,7 @@
         alert(message);
       } finally {
         loadButton.disabled = false;
-        loadButton.textContent = originalText;
+        loadButton.removeAttribute('aria-busy');
       }
     });
   }
