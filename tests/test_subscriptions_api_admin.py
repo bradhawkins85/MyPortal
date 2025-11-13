@@ -1,5 +1,5 @@
 """Tests for subscription admin API endpoints (edit and delete)."""
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -121,8 +121,8 @@ def mock_subscription():
         "product_name": "Test Product",
         "subscription_category_id": 1,
         "category_name": "Software",
-        "start_date": "2025-01-01",
-        "end_date": "2025-12-31",
+        "start_date": date(2025, 1, 1),
+        "end_date": date(2025, 12, 31),
         "quantity": 5,
         "unit_price": "10.00",
         "prorated_price": None,
@@ -269,3 +269,103 @@ def test_delete_nonexistent_subscription(super_admin_session, monkeypatch):
     
     assert response.status_code == 404
     assert "Subscription not found" in response.json()["detail"]
+
+
+def test_update_subscription_end_date_as_super_admin(super_admin_session, mock_subscription, monkeypatch):
+    """Test updating subscription end date as super admin."""
+    new_end_date = date(2026, 6, 30)
+    updated_subscription = {**mock_subscription, "unit_price": 10.00, "prorated_price": None, "end_date": new_end_date}
+    
+    call_count = [0]
+    
+    async def fake_get_subscription(subscription_id):
+        if subscription_id == mock_subscription["id"]:
+            call_count[0] += 1
+            # First call returns original, second call returns updated
+            if call_count[0] == 1:
+                return {**mock_subscription, "unit_price": 10.00, "prorated_price": None}
+            else:
+                return updated_subscription
+        return None
+    
+    async def fake_update_subscription(subscription_id, **kwargs):
+        pass
+    
+    monkeypatch.setattr(subscriptions_repo, "get_subscription", fake_get_subscription)
+    monkeypatch.setattr(subscriptions_repo, "update_subscription", fake_update_subscription)
+    
+    with TestClient(app) as client:
+        response = client.patch(
+            f"/api/v1/subscriptions/{mock_subscription['id']}",
+            json={"endDate": "2026-06-30"},
+            headers={"X-CSRF-Token": super_admin_session.csrf_token}
+        )
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == mock_subscription["id"]
+    assert data["endDate"] == "2026-06-30"
+
+
+def test_update_subscription_end_date_before_start_date(super_admin_session, mock_subscription, monkeypatch):
+    """Test updating subscription end date to before start date fails."""
+    async def fake_get_subscription(subscription_id):
+        if subscription_id == mock_subscription["id"]:
+            return {**mock_subscription, "unit_price": 10.00, "prorated_price": None}
+        return None
+    
+    monkeypatch.setattr(subscriptions_repo, "get_subscription", fake_get_subscription)
+    
+    with TestClient(app) as client:
+        response = client.patch(
+            f"/api/v1/subscriptions/{mock_subscription['id']}",
+            json={"endDate": "2024-12-31"},  # Before start date of 2025-01-01
+            headers={"X-CSRF-Token": super_admin_session.csrf_token}
+        )
+    
+    assert response.status_code == 400
+    assert "End date must be after start date" in response.json()["detail"]
+
+
+def test_update_subscription_multiple_fields(super_admin_session, mock_subscription, monkeypatch):
+    """Test updating multiple subscription fields at once."""
+    new_end_date = date(2026, 3, 31)
+    updated_subscription = {
+        **mock_subscription, 
+        "unit_price": 10.00, 
+        "prorated_price": None, 
+        "status": "pending_renewal",
+        "auto_renew": False,
+        "end_date": new_end_date
+    }
+    
+    call_count = [0]
+    
+    async def fake_get_subscription(subscription_id):
+        if subscription_id == mock_subscription["id"]:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return {**mock_subscription, "unit_price": 10.00, "prorated_price": None}
+            else:
+                return updated_subscription
+        return None
+    
+    async def fake_update_subscription(subscription_id, **kwargs):
+        pass
+    
+    monkeypatch.setattr(subscriptions_repo, "get_subscription", fake_get_subscription)
+    monkeypatch.setattr(subscriptions_repo, "update_subscription", fake_update_subscription)
+    
+    with TestClient(app) as client:
+        response = client.patch(
+            f"/api/v1/subscriptions/{mock_subscription['id']}",
+            json={"status": "pending_renewal", "autoRenew": False, "endDate": "2026-03-31"},
+            headers={"X-CSRF-Token": super_admin_session.csrf_token}
+        )
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == mock_subscription["id"]
+    assert data["status"] == "pending_renewal"
+    assert data["autoRenew"] is False
+    assert data["endDate"] == "2026-03-31"
