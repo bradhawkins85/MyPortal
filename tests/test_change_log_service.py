@@ -83,8 +83,44 @@ async def test_sync_change_log_sources_reuses_existing_entries(tmp_path):
     assert first_guid in repo.by_guid
 
     await change_log_service.sync_change_log_sources(base_path=tmp_path, repository=repo)
+    assert len(repo.upserts) == 1
     assert repo.upserts[0]["guid"] == first_guid
-    assert all(item["guid"] == first_guid for item in repo.upserts)
 
     files = list((tmp_path / "changes").glob("*.json"))
     assert len(files) == 1
+
+
+@pytest.mark.anyio
+async def test_sync_change_log_sources_processes_modified_files(tmp_path):
+    repo = _RepositoryStub()
+
+    changes_dir = tmp_path / "changes"
+    changes_dir.mkdir()
+    existing_guid = "11111111-1111-4111-8111-222222222222"
+    entry_path = changes_dir / f"{existing_guid}.json"
+    entry_path.write_text(
+        json.dumps(
+            {
+                "guid": existing_guid,
+                "occurred_at": "2025-10-23T01:20Z",
+                "change_type": "Feature",
+                "summary": "Initial summary",
+                "content_hash": "",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    await change_log_service.sync_change_log_sources(base_path=tmp_path, repository=repo)
+    assert len(repo.upserts) == 1
+
+    await change_log_service.sync_change_log_sources(base_path=tmp_path, repository=repo)
+    assert len(repo.upserts) == 1
+
+    data = json.loads(entry_path.read_text(encoding="utf-8"))
+    data["summary"] = "Updated summary"
+    entry_path.write_text(json.dumps(data), encoding="utf-8")
+
+    await change_log_service.sync_change_log_sources(base_path=tmp_path, repository=repo)
+    assert len(repo.upserts) == 2
+    assert repo.upserts[-1]["summary"] == "Updated summary"
