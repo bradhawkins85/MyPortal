@@ -773,14 +773,10 @@ async def sync_billable_tickets(
         "Accept": "application/json",
     }
     
-    # Create webhook monitor event
-    webhook_payload = {
-        "company_id": company_id,
-        "company_name": company.get("name"),
-        "invoice": invoice_payload,
-        "tickets_context": tickets_context,
-    }
-    
+    # Create webhook monitor event with the exact request payload so manual retries
+    # resend the same body that was submitted to Xero.
+    webhook_payload = {"Invoices": [invoice_payload]}
+
     try:
         event = await webhook_monitor.create_manual_event(
             name="xero.sync.billable_tickets",
@@ -1191,14 +1187,8 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
         "Accept": "application/json",
     }
 
-    # Create webhook monitor event
-    webhook_payload = {
-        "company_id": company_id,
-        "company_name": company.get("name"),
-        "invoice": invoice_payload,
-        "recurring_items": recurring_items_info,
-        "tickets_sync": tickets_result,
-    }
+    # Store the exact request payload so that manual retries resubmit a valid body.
+    webhook_payload = {"Invoices": [invoice_payload]}
 
     try:
         event = await webhook_monitor.create_manual_event(
@@ -1477,15 +1467,9 @@ async def send_order_to_xero(
         "Accept": "application/json",
     }
     
-    # Create webhook monitor event
-    webhook_payload = {
-        "order_number": order_number,
-        "company_id": company_id,
-        "company_name": company.get("name"),
-        "user_name": user_name,
-        "invoice": xero_payload,
-    }
-    
+    # Persist the exact request payload for webhook retries
+    webhook_payload = {"Invoices": [xero_payload]}
+
     try:
         event = await webhook_monitor.create_manual_event(
             name="xero.order.created",
@@ -1624,7 +1608,7 @@ async def send_order_to_xero(
                     response_status=response_status,
                     response_body=response_body,
                     request_headers=request_headers,
-                    request_body=xero_payload,
+                    request_body=xero_request_payload,
                     response_headers=response_headers,
                 )
             except Exception as record_exc:
@@ -1652,7 +1636,7 @@ async def send_order_to_xero(
                     response_status=None,
                     response_body=None,
                     request_headers=request_headers,
-                    request_body=xero_payload,
+                    request_body=xero_request_payload,
                     response_headers=None,
                 )
             except Exception as record_exc:
