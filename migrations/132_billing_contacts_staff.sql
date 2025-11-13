@@ -10,10 +10,22 @@ SET @column_exists = (
     AND COLUMN_NAME = 'staff_id'
 );
 
-SET @sql = IF(@column_exists = 0,
-  'ALTER TABLE billing_contacts ADD COLUMN staff_id INT DEFAULT NULL AFTER user_id',
-  'SELECT "Column staff_id already exists, skipping" AS message'
+SET @user_column_exists = (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'billing_contacts'
+    AND COLUMN_NAME = 'user_id'
 );
+
+SET @sql = CASE
+  WHEN @column_exists = 0 AND @user_column_exists > 0 THEN
+    'ALTER TABLE billing_contacts ADD COLUMN staff_id INT DEFAULT NULL AFTER user_id'
+  WHEN @column_exists = 0 THEN
+    'ALTER TABLE billing_contacts ADD COLUMN staff_id INT DEFAULT NULL AFTER company_id'
+  ELSE
+    'SELECT "Column staff_id already exists, skipping" AS message'
+END;
 
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
