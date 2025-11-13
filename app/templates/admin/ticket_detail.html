@@ -323,10 +323,14 @@
                         <ul class="list" data-watchers-list>
                           {% for watcher in ticket_watchers %}
                             {% set watcher_user = watcher.user %}
-                            <li class="list__item" data-watcher-item data-user-id="{{ watcher.user_id }}">
+                            {% set watcher_email = watcher.email %}
+                            {% set display_text = watcher_user.email if watcher_user else (watcher_email if watcher_email else 'User #' ~ watcher.user_id) %}
+                            <li class="list__item" data-watcher-item 
+                                data-user-id="{{ watcher.user_id if watcher.user_id else '' }}"
+                                data-watcher-email="{{ watcher_email if watcher_email else '' }}">
                               <div style="display: flex; align-items: center; justify-content: space-between;">
                                 <div>
-                                  <strong>{{ watcher_user.email if watcher_user else 'User #' ~ watcher.user_id }}</strong>
+                                  <strong>{{ display_text }}</strong>
                                   {% if watcher.created_at %}
                                     <div class="list__meta">Watching since {{ watcher.created_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</div>
                                   {% endif %}
@@ -335,8 +339,9 @@
                                   type="button"
                                   class="button button--small button--ghost"
                                   data-remove-watcher
-                                  data-user-id="{{ watcher.user_id }}"
-                                  data-user-email="{{ watcher_user.email if watcher_user else 'User #' ~ watcher.user_id }}"
+                                  data-user-id="{{ watcher.user_id if watcher.user_id else '' }}"
+                                  data-watcher-email="{{ watcher_email if watcher_email else '' }}"
+                                  data-user-display="{{ display_text }}"
                                   title="Remove watcher"
                                 >
                                   Remove
@@ -349,29 +354,59 @@
                         <ul class="list" data-watchers-list style="display: none;"></ul>
                         <span class="card__empty" data-watchers-empty>No watchers are subscribed to this ticket.</span>
                       {% endif %}
-                      <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
-                        <select class="form-input" data-watcher-select style="flex: 1;">
-                          <option value="">Select a user to add...</option>
-                          {% for user in ticket_user_options %}
-                            {% set is_watching = namespace(value=false) %}
-                            {% for watcher in ticket_watchers %}
-                              {% if watcher.user_id == user.id %}
-                                {% set is_watching.value = true %}
-                              {% endif %}
-                            {% endfor %}
-                            {% if not is_watching.value %}
-                              <option value="{{ user.id }}">{{ user.email }}</option>
+                      <div style="margin-top: 12px; display: flex; gap: 8px; align-items: flex-start; flex-direction: column;">
+                        <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+                          <select class="form-input" data-watcher-select style="flex: 1;">
+                            <option value="">Select a staff member to add...</option>
+                            {% if ticket_watcher_staff_options %}
+                              {% for staff_user in ticket_watcher_staff_options %}
+                                {% set is_watching = namespace(value=false) %}
+                                {% for watcher in ticket_watchers %}
+                                  {% if watcher.user_id == staff_user.id %}
+                                    {% set is_watching.value = true %}
+                                  {% endif %}
+                                {% endfor %}
+                                {% if not is_watching.value %}
+                                  <option value="{{ staff_user.id }}">{{ staff_user.email }}</option>
+                                {% endif %}
+                              {% endfor %}
                             {% endif %}
-                          {% endfor %}
-                        </select>
-                        <button
-                          type="button"
-                          class="button button--primary"
-                          data-add-watcher
-                          disabled
-                        >
-                          Add watcher
-                        </button>
+                          </select>
+                          <button
+                            type="button"
+                            class="button button--primary"
+                            data-add-watcher
+                            disabled
+                          >
+                            Add
+                          </button>
+                        </div>
+                        {% if ticket.company_id %}
+                          <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+                            <input
+                              type="email"
+                              class="form-input"
+                              data-watcher-email-input
+                              placeholder="Or enter email address..."
+                              style="flex: 1;"
+                            />
+                            <button
+                              type="button"
+                              class="button button--primary"
+                              data-add-watcher-email
+                              disabled
+                            >
+                              Add
+                            </button>
+                          </div>
+                          <p class="form-help" style="margin-top: 4px;">
+                            Add company staff from the dropdown, or enter any email address to notify them about ticket updates.
+                          </p>
+                        {% else %}
+                          <p class="form-help" style="margin-top: 4px;">
+                            Link a company to this ticket to add watchers from the company staff.
+                          </p>
+                        {% endif %}
                       </div>
                     </div>
                   </dd>

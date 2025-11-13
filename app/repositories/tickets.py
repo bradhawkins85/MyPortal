@@ -107,6 +107,8 @@ def _normalise_watcher(row: dict[str, Any]) -> TicketRecord:
         if key in record and record[key] is not None:
             record[key] = int(record[key])
     record["created_at"] = _make_aware(record.get("created_at"))
+    if "email" in record and record["email"]:
+        record["email"] = str(record["email"]).strip()
     return record
 
 
@@ -760,22 +762,59 @@ async def update_reply(
     return await get_reply_by_id(reply_id)
 
 
-async def add_watcher(ticket_id: int, user_id: int) -> None:
-    await db.execute(
-        """
-        INSERT INTO ticket_watchers (ticket_id, user_id)
-        VALUES (%s, %s)
-        ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)
-        """,
-        (ticket_id, user_id),
-    )
+async def add_watcher(ticket_id: int, user_id: int | None = None, email: str | None = None) -> None:
+    """Add a watcher to a ticket by user_id or email.
+    
+    At least one of user_id or email must be provided.
+    """
+    if user_id is None and not email:
+        raise ValueError("Either user_id or email must be provided")
+    
+    if user_id is not None:
+        # Adding by user_id
+        await db.execute(
+            """
+            INSERT INTO ticket_watchers (ticket_id, user_id, email)
+            VALUES (%s, %s, NULL)
+            ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)
+            """,
+            (ticket_id, user_id),
+        )
+    else:
+        # Adding by email only
+        email_normalized = email.strip().lower() if email else None
+        if not email_normalized:
+            raise ValueError("Email cannot be empty")
+        
+        await db.execute(
+            """
+            INSERT INTO ticket_watchers (ticket_id, user_id, email)
+            VALUES (%s, NULL, %s)
+            ON DUPLICATE KEY UPDATE email = VALUES(email)
+            """,
+            (ticket_id, email_normalized),
+        )
 
 
-async def remove_watcher(ticket_id: int, user_id: int) -> None:
-    await db.execute(
-        "DELETE FROM ticket_watchers WHERE ticket_id = %s AND user_id = %s",
-        (ticket_id, user_id),
-    )
+async def remove_watcher(ticket_id: int, user_id: int | None = None, email: str | None = None) -> None:
+    """Remove a watcher from a ticket by user_id or email.
+    
+    At least one of user_id or email must be provided.
+    """
+    if user_id is None and not email:
+        raise ValueError("Either user_id or email must be provided")
+    
+    if user_id is not None:
+        await db.execute(
+            "DELETE FROM ticket_watchers WHERE ticket_id = %s AND user_id = %s",
+            (ticket_id, user_id),
+        )
+    else:
+        email_normalized = email.strip().lower() if email else None
+        await db.execute(
+            "DELETE FROM ticket_watchers WHERE ticket_id = %s AND email = %s",
+            (ticket_id, email_normalized),
+        )
 
 
 async def list_watchers(ticket_id: int) -> list[TicketRecord]:
@@ -811,6 +850,13 @@ async def bulk_add_watchers(ticket_id: int, user_ids: Iterable[int]) -> None:
     )
 
 
-async def replace_watchers(ticket_id: int, user_ids: Iterable[int]) -> None:
+async def replace_watchers(ticket_id: int, user_ids: Iterable[int], emails: Iterable[str] | None = None) -> None:
+    """Replace all watchers for a ticket with new user_ids and emails."""
     await db.execute("DELETE FROM ticket_watchers WHERE ticket_id = %s", (ticket_id,))
     await bulk_add_watchers(ticket_id, user_ids)
+    
+    if emails:
+        for email in emails:
+            email_normalized = email.strip().lower() if email else None
+            if email_normalized:
+                await add_watcher(ticket_id, email=email_normalized)

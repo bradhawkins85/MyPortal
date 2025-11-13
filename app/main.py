@@ -11019,8 +11019,11 @@ async def _render_ticket_detail(
         HELPDESK_PERMISSION_KEY
     )
     requester_options: list[dict[str, Any]] = []
+    watcher_staff_options: list[dict[str, Any]] = []
     if ticket_company_id is not None:
         requester_options = await staff_repo.list_enabled_staff_users(ticket_company_id)
+        # Get all enabled staff for the company as watcher options
+        watcher_staff_options = await staff_repo.list_enabled_staff_users(ticket_company_id)
 
     current_requester_id = ticket.get("requester_id")
     if isinstance(current_requester_id, int):
@@ -11155,6 +11158,7 @@ async def _render_ticket_detail(
         "ticket_company_options": companies,
         "ticket_user_options": technician_users,
         "ticket_requester_options": requester_options,
+        "ticket_watcher_staff_options": watcher_staff_options,
         "ticket_priority_options": priority_options,
         "ticket_return_url": request.url.path,
         "ticket_assets": ticket_assets,
