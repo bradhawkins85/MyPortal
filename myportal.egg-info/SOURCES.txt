@@ -431,3 +431,4 @@ tests/test_xero_include_archived.py
 tests/test_xero_module.py
 tests/test_xero_recurring_items.py
 tests/test_xero_shop_orders.py
+tests/test_xero_sync_diagnostics.py
