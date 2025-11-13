@@ -381,6 +381,7 @@ tests/test_subscription_ownership_check.py
 tests/test_subscription_price_changes.py
 tests/test_subscription_pricing.py
 tests/test_subscription_purchase_prevention.py
+tests/test_subscription_xero_invoice.py
 tests/test_subscriptions_api_admin.py
 tests/test_subscriptions_page.py
 tests/test_switch_company_payload.py
