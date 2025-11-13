@@ -18,14 +18,13 @@ SET @user_column_exists = (
     AND COLUMN_NAME = 'user_id'
 );
 
-SET @sql = CASE
-  WHEN @column_exists = 0 AND @user_column_exists > 0 THEN
-    'ALTER TABLE billing_contacts ADD COLUMN staff_id INT DEFAULT NULL AFTER user_id'
-  WHEN @column_exists = 0 THEN
+SET @sql = IF(@column_exists = 0,
+  IF(@user_column_exists > 0,
+    'ALTER TABLE billing_contacts ADD COLUMN staff_id INT DEFAULT NULL AFTER user_id',
     'ALTER TABLE billing_contacts ADD COLUMN staff_id INT DEFAULT NULL AFTER company_id'
-  ELSE
-    'SELECT "Column staff_id already exists, skipping" AS message'
-END;
+  ),
+  'SELECT "Column staff_id already exists, skipping" AS message'
+);
 
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
@@ -59,12 +58,11 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- Step 4: Drop the old foreign key constraint on user_id (only if it exists)
 SET @fk_exists = (
-  SELECT COUNT(*) 
-  FROM information_schema.TABLE_CONSTRAINTS 
-  WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'billing_contacts' 
+  SELECT COUNT(*)
+  FROM information_schema.TABLE_CONSTRAINTS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'billing_contacts'
     AND CONSTRAINT_NAME = 'billing_contacts_ibfk_2'
     AND CONSTRAINT_TYPE = 'FOREIGN KEY'
 );
@@ -78,12 +76,48 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- Step 5: Drop the old user_id column (only if it exists)
+-- Step 5: Drop the old unique key referencing user_id (only if it exists)
+SET @key_exists = (
+  SELECT COUNT(*)
+  FROM information_schema.TABLE_CONSTRAINTS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'billing_contacts'
+    AND CONSTRAINT_NAME = 'unique_company_user'
+);
+
+SET @sql = IF(@key_exists > 0,
+  'ALTER TABLE billing_contacts DROP KEY unique_company_user',
+  'SELECT "Key unique_company_user does not exist, skipping drop" AS message'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Step 6: Drop the old user_id index (only if it exists)
+SET @index_exists = (
+  SELECT COUNT(*)
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'billing_contacts'
+    AND INDEX_NAME = 'idx_billing_contacts_user'
+);
+
+SET @sql = IF(@index_exists > 0,
+  'ALTER TABLE billing_contacts DROP INDEX idx_billing_contacts_user',
+  'SELECT "Index idx_billing_contacts_user does not exist, skipping drop" AS message'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Step 7: Drop the old user_id column (only if it exists)
 SET @column_exists = (
-  SELECT COUNT(*) 
-  FROM information_schema.COLUMNS 
-  WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'billing_contacts' 
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'billing_contacts'
     AND COLUMN_NAME = 'user_id'
 );
 
@@ -96,12 +130,12 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- Step 6: Make staff_id NOT NULL (only if the column is nullable)
+-- Step 8: Make staff_id NOT NULL (only if the column is nullable)
 SET @column_nullable = (
-  SELECT IS_NULLABLE 
-  FROM information_schema.COLUMNS 
-  WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'billing_contacts' 
+  SELECT IS_NULLABLE
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'billing_contacts'
     AND COLUMN_NAME = 'staff_id'
 );
 
@@ -114,12 +148,12 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- Step 7: Add foreign key constraint for staff_id (only if it doesn't exist)
+-- Step 9: Add foreign key constraint for staff_id (only if it doesn't exist)
 SET @fk_exists = (
-  SELECT COUNT(*) 
-  FROM information_schema.TABLE_CONSTRAINTS 
-  WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'billing_contacts' 
+  SELECT COUNT(*)
+  FROM information_schema.TABLE_CONSTRAINTS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'billing_contacts'
     AND CONSTRAINT_NAME = 'billing_contacts_staff_fk'
     AND CONSTRAINT_TYPE = 'FOREIGN KEY'
 );
@@ -133,29 +167,12 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- Step 8: Update the unique key to use staff_id
+-- Step 10: Ensure the unique key uses staff_id
 SET @key_exists = (
-  SELECT COUNT(*) 
-  FROM information_schema.TABLE_CONSTRAINTS 
-  WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'billing_contacts' 
-    AND CONSTRAINT_NAME = 'unique_company_user'
-);
-
-SET @sql = IF(@key_exists > 0,
-  'ALTER TABLE billing_contacts DROP KEY unique_company_user',
-  'SELECT "Key unique_company_user does not exist, skipping drop" AS message'
-);
-
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
-SET @key_exists = (
-  SELECT COUNT(*) 
-  FROM information_schema.TABLE_CONSTRAINTS 
-  WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'billing_contacts' 
+  SELECT COUNT(*)
+  FROM information_schema.TABLE_CONSTRAINTS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'billing_contacts'
     AND CONSTRAINT_NAME = 'unique_company_staff'
 );
 
@@ -168,14 +185,12 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- Step 9: Update the index
-DROP INDEX IF EXISTS idx_billing_contacts_user ON billing_contacts;
-
+-- Step 11: Ensure an index exists for staff_id
 SET @index_exists = (
-  SELECT COUNT(*) 
-  FROM information_schema.STATISTICS 
-  WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'billing_contacts' 
+  SELECT COUNT(*)
+  FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'billing_contacts'
     AND INDEX_NAME = 'idx_billing_contacts_staff'
 );
 
