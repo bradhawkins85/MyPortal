@@ -168,7 +168,15 @@ async def fetch_xero_item_rates(
         Dictionary mapping item codes to their unit prices (from SalesDetails.UnitPrice)
         Only includes items that have a valid sales unit price configured
     """
+    logger.debug(
+        "fetch_xero_item_rates called",
+        item_codes=list(item_codes) if item_codes else [],
+        tenant_id_present=bool(tenant_id),
+        access_token_present=bool(access_token),
+    )
+    
     if not item_codes:
+        logger.debug("No item codes provided, returning empty dict")
         return {}
     
     rates: dict[str, Decimal] = {}
@@ -180,6 +188,12 @@ async def fetch_xero_item_rates(
     }
 
     api_url = "https://api.xero.com/api.xro/2.0/Items"
+    
+    logger.info(
+        "Starting Xero Items API requests",
+        item_codes_count=len(item_codes),
+        api_url=api_url,
+    )
 
     # Xero's Items endpoint expects a filter query when looking up by code.
     # We request each item individually to avoid large where clauses and so we
@@ -187,14 +201,27 @@ async def fetch_xero_item_rates(
     async with httpx.AsyncClient(timeout=30.0) as client:
         for item_code in item_codes:
             if not item_code or not str(item_code).strip():
+                logger.debug("Skipping empty item code")
                 continue
 
             code_text = str(item_code).strip()
             filter_code = code_text.replace('"', '\"')
             params = {"where": f'Code=="{filter_code}"'}
+            
+            logger.debug(
+                "Making Xero Items API request",
+                item_code=code_text,
+                where_clause=params["where"],
+            )
 
             try:
                 response = await client.get(api_url, headers=headers, params=params)
+                
+                logger.debug(
+                    "Received Xero Items API response",
+                    item_code=code_text,
+                    status_code=response.status_code,
+                )
 
                 if response.status_code == 200:
                     data = response.json()
@@ -250,6 +277,13 @@ async def fetch_xero_item_rates(
                     item_code=code_text,
                     error=str(e),
                 )
+    
+    logger.info(
+        "Completed Xero Items API requests",
+        total_codes_requested=len(item_codes),
+        rates_fetched=len(rates),
+        item_codes_with_rates=list(rates.keys()),
+    )
 
     return rates
 
