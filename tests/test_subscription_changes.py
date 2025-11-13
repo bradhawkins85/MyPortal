@@ -453,3 +453,111 @@ async def test_preview_addition_with_pending_decrease_partial_charge(monkeypatch
     assert preview["prorated_charge"] > Decimal("0")
     assert preview["prorated_explanation"]["chargeable_licenses"] == 1
     assert preview["prorated_explanation"]["free_licenses"] == 3
+
+
+def test_calculate_chargeable_licenses_issue_scenario():
+    """Test the reported issue scenario.
+    
+    Scenario from issue:
+    - Start with 2 licenses
+    - Remove 1 (pending) -> 1 at renewal
+    - Add 1 (replacement) -> Should be free (uses spare from pending removal)
+    - Add 1 more (above original count) -> BUG: Should charge but doesn't
+    """
+    from app.services.subscription_changes import calculate_chargeable_licenses
+    
+    # Step 1: Start with 2 licenses, remove 1 pending
+    current_quantity = 2
+    pending_net_change = -1  # -1 from the removal
+    
+    # Step 2: Add 1 (replacement)
+    chargeable_first_add = calculate_chargeable_licenses(
+        current_quantity=current_quantity,
+        quantity_to_add=1,
+        pending_net_change=pending_net_change,
+    )
+    assert chargeable_first_add == 0, "First addition should be free (within contracted quantity)"
+    
+    # Step 3: After first addition is applied, current_quantity becomes 3
+    # But the original contracted quantity is still 2
+    current_quantity_after_first_add = 3
+    # Pending removal is still there
+    pending_net_change_after_first_add = -1
+    
+    # Now add 1 more (above original count of 2)
+    chargeable_second_add = calculate_chargeable_licenses(
+        current_quantity=current_quantity_after_first_add,
+        quantity_to_add=1,
+        pending_net_change=pending_net_change_after_first_add,
+    )
+    
+    # This is the bug: it returns 0 but should return 1
+    # At term end: 3 (current) - 1 (pending decrease) + 1 (new add) = 3
+    # Original contracted quantity: 2
+    # Should charge for: 3 - 2 = 1
+    assert chargeable_second_add == 1, "Second addition should charge for 1 license (exceeds original contracted quantity)"
+
+
+@pytest.mark.asyncio
+async def test_preview_issue_scenario_sequential_additions(monkeypatch):
+    """Test the reported issue using preview with sequential additions.
+    
+    This simulates:
+    1. Start with 2 licenses, pending decrease of 1
+    2. Add 1 license (applied immediately, no charge due to pending decrease)
+    3. Add 1 more license (should charge as it exceeds original contracted quantity)
+    """
+    subscription_id = str(uuid4())
+    
+    # Mock subscription starting with 2 licenses
+    mock_subscription = {
+        "id": subscription_id,
+        "quantity": 2,
+        "unit_price": Decimal("120.00"),
+        "end_date": date.today() + timedelta(days=180),
+        "customer_id": 1,
+    }
+    
+    # Mock pending decrease of 1
+    mock_pending_changes = [
+        {
+            "id": str(uuid4()),
+            "subscription_id": subscription_id,
+            "change_type": "decrease",
+            "quantity_change": 1,
+            "prorated_charge": None,
+            "status": "pending",
+        }
+    ]
+    
+    async def mock_get_subscription(sub_id):
+        return mock_subscription
+    
+    async def mock_list_pending_changes(sub_id):
+        return mock_pending_changes
+    
+    import app.repositories.subscriptions as subscriptions_repo
+    import app.repositories.subscription_change_requests as change_requests_repo
+    
+    monkeypatch.setattr(subscriptions_repo, "get_subscription", mock_get_subscription)
+    monkeypatch.setattr(change_requests_repo, "list_pending_changes_for_subscription", mock_list_pending_changes)
+    
+    # Preview adding 1 license (replacement)
+    preview1 = await preview_subscription_change(subscription_id, 1, "addition")
+    assert preview1["prorated_charge"] == Decimal("0.00"), "First addition should be free"
+    assert preview1["prorated_explanation"]["chargeable_licenses"] == 0
+    assert preview1["prorated_explanation"]["free_licenses"] == 1
+    
+    # Simulate that the first addition was applied
+    mock_subscription["quantity"] = 3  # Now 3 licenses (2 + 1)
+    
+    # Preview adding 1 more license (above original count of 2)
+    preview2 = await preview_subscription_change(subscription_id, 1, "addition")
+    
+    # This should charge for 1 license
+    # At term end: 3 (current) - 1 (pending decrease) + 1 (new add) = 3
+    # Original contracted quantity: 2
+    # Should charge for: 3 - 2 = 1
+    assert preview2["prorated_charge"] > Decimal("0.00"), "Second addition should have a charge"
+    assert preview2["prorated_explanation"]["chargeable_licenses"] == 1, "Should charge for 1 license"
+    assert preview2["prorated_explanation"]["free_licenses"] == 0
