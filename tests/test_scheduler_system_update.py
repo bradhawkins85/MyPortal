@@ -27,7 +27,7 @@ def test_run_now_forces_restart_flag(monkeypatch):
         recorded["force_restart"] = force_restart
         return "ok"
 
-    monkeypatch.setattr(SchedulerService, "_run_system_update", fake_run_system_update)
+    monkeypatch.setattr(SchedulerService, "run_system_update", fake_run_system_update)
 
     asyncio.run(scheduler.run_now(7))
 
