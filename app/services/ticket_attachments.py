@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import UploadFile
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
-from app.core.config import settings
+from app.core.config import get_settings
 from app.core.logging import log_debug, log_error, log_info
 from app.repositories import ticket_attachments as attachments_repo
 
@@ -216,7 +216,8 @@ def generate_open_access_token(attachment_id: int, expires_in_seconds: int = 864
         Signed token string
     """
     # Use the secret key from settings
-    secret_key = getattr(settings, "SECRET_KEY", "change-me-in-production")
+    config = get_settings()
+    secret_key = getattr(config, "SECRET_KEY", "change-me-in-production")
     serializer = URLSafeTimedSerializer(secret_key, salt="ticket-attachment")
     
     token = serializer.dumps({"attachment_id": attachment_id})
@@ -234,7 +235,8 @@ def verify_open_access_token(token: str, max_age: int = 86400) -> int | None:
     Returns:
         Attachment ID if valid, None otherwise
     """
-    secret_key = getattr(settings, "SECRET_KEY", "change-me-in-production")
+    config = get_settings()
+    secret_key = getattr(config, "SECRET_KEY", "change-me-in-production")
     serializer = URLSafeTimedSerializer(secret_key, salt="ticket-attachment")
     
     try:
