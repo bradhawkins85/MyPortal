@@ -106,14 +106,6 @@
                   <a href="/compliance/control/{{ record.control_id }}" class="button button--ghost button--small">
                     View requirements
                   </a>
-                  <button
-                    type="button"
-                    class="button button--secondary button--small"
-                    data-edit-compliance="{{ record.id }}"
-                    data-control-id="{{ record.control_id }}"
-                  >
-                    Update
-                  </button>
                 </div>
               </td>
             </tr>
@@ -133,66 +125,6 @@
     </div>
   </section>
 </div>
-
-<dialog id="compliance-dialog" class="dialog">
-  <form method="dialog" class="dialog__container" id="compliance-form">
-    <header class="dialog__header">
-      <h3 class="dialog__title">Update compliance</h3>
-      <button type="submit" class="dialog__close" aria-label="Close">
-        <span aria-hidden="true">&times;</span>
-      </button>
-    </header>
-    <div class="dialog__body">
-      <input type="hidden" id="compliance-id" />
-      <input type="hidden" id="control-id" />
-
-      <div class="form-field">
-        <label for="compliance-status" class="form-label">Status</label>
-        <select id="compliance-status" class="form-input" required>
-          <option value="not_started">Not started</option>
-          <option value="in_progress">In progress</option>
-          <option value="compliant">Compliant</option>
-          <option value="non_compliant">Non-compliant</option>
-          <option value="not_applicable">Not applicable</option>
-        </select>
-      </div>
-
-      <div class="form-field">
-        <label for="compliance-maturity" class="form-label">Maturity level</label>
-        <select id="compliance-maturity" class="form-input" required>
-          <option value="ml0">ML0 - Not implemented</option>
-          <option value="ml1">ML1 - Maturity level 1</option>
-          <option value="ml2">ML2 - Maturity level 2</option>
-          <option value="ml3">ML3 - Maturity level 3</option>
-        </select>
-      </div>
-
-      <div class="form-field">
-        <label for="compliance-last-reviewed" class="form-label">Last reviewed date</label>
-        <input type="date" id="compliance-last-reviewed" class="form-input" />
-      </div>
-
-      <div class="form-field">
-        <label for="compliance-target-date" class="form-label">Target compliance date</label>
-        <input type="date" id="compliance-target-date" class="form-input" />
-      </div>
-
-      <div class="form-field">
-        <label for="compliance-evidence" class="form-label">Evidence</label>
-        <textarea id="compliance-evidence" class="form-input form-input--textarea" rows="3" placeholder="Links to documentation, screenshots, etc."></textarea>
-      </div>
-
-      <div class="form-field">
-        <label for="compliance-notes" class="form-label">Notes</label>
-        <textarea id="compliance-notes" class="form-input form-input--textarea" rows="4" placeholder="Implementation details, outstanding items, etc."></textarea>
-      </div>
-    </div>
-    <footer class="dialog__footer">
-      <button type="button" class="button button--ghost" data-close-dialog>Cancel</button>
-      <button type="button" class="button button--primary" id="save-compliance">Save</button>
-    </footer>
-  </form>
-</dialog>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
@@ -222,77 +154,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
-
-  // Edit compliance
-  document.querySelectorAll('[data-edit-compliance]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      if (!companyId) return;
-      const controlId = btn.dataset.controlId;
-
-      try {
-        const response = await fetch(`/api/essential8/companies/${companyId}/compliance/${controlId}`);
-        if (!response.ok) {
-          throw new Error('Unable to load compliance record');
-        }
-        const data = await response.json();
-
-        document.getElementById('compliance-id').value = data.id;
-        document.getElementById('control-id').value = data.control_id;
-        document.getElementById('compliance-status').value = data.status;
-        document.getElementById('compliance-maturity').value = data.maturity_level;
-        document.getElementById('compliance-last-reviewed').value = data.last_reviewed_date || '';
-        document.getElementById('compliance-target-date').value = data.target_compliance_date || '';
-        document.getElementById('compliance-evidence').value = data.evidence || '';
-        document.getElementById('compliance-notes').value = data.notes || '';
-
-        document.getElementById('compliance-dialog').showModal();
-      } catch (error) {
-        console.error('Error:', error);
-        alert('Failed to load compliance record');
-      }
-    });
-  });
-
-  // Save compliance
-  document.getElementById('save-compliance')?.addEventListener('click', async () => {
-    if (!companyId) return;
-    const controlId = document.getElementById('control-id').value;
-    const formData = {
-      status: document.getElementById('compliance-status').value,
-      maturity_level: document.getElementById('compliance-maturity').value,
-      last_reviewed_date: document.getElementById('compliance-last-reviewed').value || null,
-      target_compliance_date: document.getElementById('compliance-target-date').value || null,
-      evidence: document.getElementById('compliance-evidence').value || null,
-      notes: document.getElementById('compliance-notes').value || null,
-    };
-
-    try {
-      const response = await fetch(`/api/essential8/companies/${companyId}/compliance/${controlId}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken
-        },
-        body: JSON.stringify(formData)
-      });
-
-      if (response.ok) {
-        window.location.reload();
-      } else {
-        alert('Failed to update compliance record');
-      }
-    } catch (error) {
-      console.error('Error:', error);
-      alert('Failed to update compliance record');
-    }
-  });
-
-  // Close dialog handlers
-  document.querySelectorAll('[data-close-dialog]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.getElementById('compliance-dialog').close();
-    });
-  });
 
   // Filter functionality
   const filterInput = document.getElementById('compliance-filter');
