@@ -38,7 +38,7 @@
   flex-direction: column;
   gap: clamp(1.25rem, 2.5vw, 2.5rem);
   position: relative;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .bcp-theme {
@@ -47,17 +47,27 @@
   gap: clamp(1.5rem, 3vw, 2.75rem);
   position: relative;
   color: var(--bcp-text);
-  width: 100%;
+  width: min(1100px, 100%);
+  margin-inline: auto;
+  padding: clamp(1.5rem, 3vw, 2.75rem);
+  box-sizing: border-box;
   height: 100%;
   overflow-y: auto;
+  overflow-x: clip;
+}
+
+.bcp-page {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .bcp-page::before {
   content: "";
   position: absolute;
-  inset: -30% -20% auto auto;
+  inset: -30% 0 auto auto;
   width: clamp(240px, 40vw, 420px);
   height: clamp(240px, 40vw, 420px);
+  transform: translate(25%, 0);
   background: radial-gradient(circle at center, rgba(37, 99, 235, 0.22), transparent 70%);
   pointer-events: none;
   z-index: 0;
