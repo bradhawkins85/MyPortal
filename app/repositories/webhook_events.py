@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.core.database import db
@@ -151,6 +151,23 @@ async def list_due_events(limit: int = 25) -> list[dict[str, Any]]:
         LIMIT %s
         """,
         (now, limit),
+    )
+    return [_normalise_event(row) for row in rows]
+
+
+async def list_stalled_events(timeout_seconds: int = 600) -> list[dict[str, Any]]:
+    """Find webhook events stuck in 'in_progress' status beyond the timeout threshold."""
+    now = _utcnow()
+    cutoff = now - timedelta(seconds=timeout_seconds)
+    rows = await db.fetch_all(
+        """
+        SELECT *
+        FROM webhook_events
+        WHERE status = 'in_progress'
+          AND updated_at < %s
+        ORDER BY updated_at ASC
+        """,
+        (cutoff,),
     )
     return [_normalise_event(row) for row in rows]
 

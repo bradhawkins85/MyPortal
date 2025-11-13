@@ -201,6 +201,61 @@ async def purge_completed_events(*, retention: timedelta = timedelta(hours=24)) 
     return deleted
 
 
+async def fail_stalled_events(*, timeout_seconds: int = 600) -> int:
+    """Mark webhook events that have been in_progress for too long as failed.
+    
+    Args:
+        timeout_seconds: Maximum time a webhook can be in_progress (default: 600 = 10 minutes)
+    
+    Returns:
+        Number of events marked as failed
+    """
+    events = await webhook_repo.list_stalled_events(timeout_seconds=timeout_seconds)
+    if not events:
+        return 0
+    
+    failed_count = 0
+    for event in events:
+        event_id = int(event["id"])
+        attempt_number = int(event.get("attempt_count") or 0) + 1
+        error_message = f"Webhook task timed out after {timeout_seconds} seconds"
+        
+        try:
+            await webhook_repo.record_attempt(
+                event_id=event_id,
+                attempt_number=attempt_number,
+                status="timeout",
+                response_status=None,
+                response_body=None,
+                error_message=error_message,
+            )
+            await webhook_repo.mark_event_failed(
+                event_id=event_id,
+                attempt_number=attempt_number,
+                error_message=error_message,
+                response_status=None,
+                response_body=None,
+            )
+            log_error(
+                "Webhook event timed out",
+                event_id=event_id,
+                timeout_seconds=timeout_seconds,
+                name=event.get("name"),
+            )
+            failed_count += 1
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to mark stalled webhook event as failed",
+                event_id=event_id,
+                error=str(exc),
+            )
+    
+    if failed_count:
+        log_info("Failed stalled webhook events", count=failed_count)
+    
+    return failed_count
+
+
 async def force_retry(event_id: int) -> dict[str, Any] | None:
     await webhook_repo.force_retry(event_id)
     event = await webhook_repo.get_event(event_id)
