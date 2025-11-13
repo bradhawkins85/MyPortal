@@ -20,12 +20,46 @@ When the "Sync to Xero" scheduler runs, the system will:
 Configure the following settings in **Admin > Modules > Xero**:
 
 - **Billable Statuses**: Comma-separated list of ticket statuses that should be billed (e.g., "resolved, completed")
-- **Default Hourly Rate**: The hourly rate to charge for billable time
+- **Default Hourly Rate**: The default hourly rate to charge for billable time (used when no Xero item rate is available)
 - **Account Code**: Xero account code for ticket billing (default: "400")
 - **Tax Type**: Xero tax type to apply
 - **Line Amount Type**: "Exclusive" or "Inclusive"
 - **Reference Prefix**: Prefix for invoice reference (default: "Support")
 - **Line Item Description Template**: Template for invoice line item descriptions
+
+### Labour Type Rates from Xero
+
+MyPortal automatically looks up rates for labour types from Xero items, allowing you to have different billing rates for different types of work (e.g., remote support vs. on-site visits).
+
+**How it works:**
+
+1. **Create Labour Types** in MyPortal (**Admin > Tickets > Labour Types**) with unique codes (e.g., "REMOTE", "ONSITE")
+2. **Create matching Items in Xero** with the same item codes and set their sales unit prices
+3. **When syncing to Xero**, MyPortal will:
+   - Automatically fetch the unit price for each labour type from Xero
+   - Use the Xero item price instead of the default hourly rate
+   - Fall back to the default hourly rate if no matching Xero item is found
+
+**Example Setup:**
+
+In MyPortal:
+- Labour Type: Code="REMOTE", Name="Remote Support"
+- Labour Type: Code="ONSITE", Name="On-site Support"
+
+In Xero:
+- Item: Code="REMOTE", Name="Remote Support", Unit Price=$95.00
+- Item: Code="ONSITE", Name="On-site Support", Unit Price=$150.00
+
+Result:
+- When a ticket has 1 hour of "REMOTE" time, it will be invoiced at $95/hour
+- When a ticket has 1 hour of "ONSITE" time, it will be invoiced at $150/hour
+- If no matching Xero item exists, the default hourly rate is used
+
+**Benefits:**
+- Maintain billing rates in a single location (Xero)
+- Different rates for different service types
+- Rates automatically update when changed in Xero
+- No need to update MyPortal configuration when rates change
 
 ### Line Item Description Template Variables
 
@@ -172,12 +206,28 @@ Check:
 5. Company has Xero ID or name configured
 6. Hourly rate is set and greater than zero
 
+### Labour Type Rates Not Being Used
+
+If labour type rates from Xero are not being applied:
+
+1. **Check Labour Type Codes**: Verify labour types have unique codes set in **Admin > Tickets > Labour Types**
+2. **Check Xero Items**: Ensure items exist in Xero with exact same codes as labour types
+3. **Check Unit Prices**: Verify Xero items have a "Sales Unit Price" configured
+4. **Check Logs**: Look for messages like "Fetching Xero item rates for labour types" in application logs
+5. **Test with Default Rate**: If no Xero item is found, the default hourly rate should be used as fallback
+
+Common issues:
+- Code mismatch: Xero item code "Remote" ≠ Labour type code "REMOTE" (case-sensitive)
+- Missing sales price: Xero item exists but has no Unit Price configured
+- Item not found: Xero item doesn't exist yet - create it in Xero first
+
 ### View Webhook Monitor
 
 Check **Admin > Webhook Monitor** for Xero API calls:
-- Event name: `xero.sync.billable_tickets`
+- Event name: `xero.sync.billable_tickets` or `xero.sync.company`
 - View request/response details
 - Check for error messages
+- Look for individual item rate fetch requests
 
 ### Database Queries
 
