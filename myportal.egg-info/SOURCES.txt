@@ -160,6 +160,7 @@ app/security/encryption.py
 app/security/passwords.py
 app/security/rate_limiter.py
 app/security/request_logger.py
+app/security/security_headers.py
 app/security/session.py
 app/services/__init__.py
 app/services/agent.py
@@ -312,6 +313,7 @@ tests/test_create_ticket_module.py
 tests/test_csrf_middleware.py
 tests/test_dashboard_agent_section.py
 tests/test_email_service.py
+tests/test_endpoint_rate_limiting.py
 tests/test_env_flag_defaults.py
 tests/test_essential8_compliance.py
 tests/test_essential8_requirements.py
@@ -341,6 +343,7 @@ tests/test_notifications_service.py
 tests/test_opnform.py
 tests/test_orders_api.py
 tests/test_passwords.py
+tests/test_path_traversal_prevention.py
 tests/test_phone_e164_normalization.py
 tests/test_process_update_flag_script.py
 tests/test_products_service.py
@@ -355,6 +358,7 @@ tests/test_scheduled_ticket_creation.py
 tests/test_scheduler_service.py
 tests/test_scheduler_system_update.py
 tests/test_section_permissions.py
+tests/test_security_headers.py
 tests/test_shop_admin_delete_product.py
 tests/test_shop_admin_product_description.py
 tests/test_shop_admin_subscription_fields.py
@@ -371,6 +375,7 @@ tests/test_shop_service.py
 tests/test_sidebar_menu.py
 tests/test_sms_gateway_module.py
 tests/test_sms_service.py
+tests/test_sql_injection_prevention.py
 tests/test_staff_access.py
 tests/test_staff_importer.py
 tests/test_staff_repository.py
@@ -435,3 +440,4 @@ tests/test_xero_module.py
 tests/test_xero_recurring_items.py
 tests/test_xero_shop_orders.py
 tests/test_xero_sync_diagnostics.py
+tests/test_xss_prevention.py
