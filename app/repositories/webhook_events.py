@@ -158,7 +158,7 @@ async def list_due_events(limit: int = 25) -> list[dict[str, Any]]:
 async def list_stalled_events(timeout_seconds: int = 600) -> list[dict[str, Any]]:
     """Find webhook events stuck in 'in_progress' status beyond the timeout threshold."""
     now = _utcnow()
-    cutoff = datetime(now.year, now.month, now.day, now.hour, now.minute, now.second) - timedelta(seconds=timeout_seconds)
+    cutoff = now - timedelta(seconds=timeout_seconds)
     rows = await db.fetch_all(
         """
         SELECT *
