@@ -589,7 +589,7 @@ async def add_watcher(
 @router.post("/{ticket_id}/watchers/email", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
 async def add_watcher_by_email(
     ticket_id: int,
-    email: str,
+    email: str = Query(..., description="Email address of the watcher"),
     current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketDetail:
     """Add a watcher to a ticket by email address."""
