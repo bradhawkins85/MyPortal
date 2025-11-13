@@ -1,7 +1,0 @@
-{
-  "guid": "969be035-0886-4af1-b1f2-ad997e2dd525",
-  "occurred_at": "2025-10-30T00:00Z",
-  "change_type": "Fix",
-  "summary": "Align issue tracker migration foreign keys with existing INT identifiers",
-  "content_hash": "64874531ae5ee003df90969748ef881ab03dd9d25da42e8847f4a810a8bc8cc9"
-}

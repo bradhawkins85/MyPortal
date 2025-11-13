@@ -1,7 +1,0 @@
-{
-  "guid": "fc224f38-dfac-4cca-aa36-13fa246ef7fd",
-  "occurred_at": "2025-11-07T12:52Z",
-  "change_type": "Feature",
-  "summary": "Changed subscription Term days to Commitment type and Payment frequency",
-  "content_hash": "47a910482fd5b40f03d2aa2811ad965500e03e5bd19ce01888c5def40ebe3e00"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "21bdbf3d-6e2a-4057-8088-1392a6b600b8",
-  "occurred_at": "2025-12-23T14:30Z",
-  "change_type": "Feature",
-  "summary": "Added Tactical RMM asset sync, ticket asset linking UI, and scheduler automation.",
-  "content_hash": "04cf37ebbcbd0c4751e50d8f9b51c5774328f96e301e72cbd8e7c783f9fcea90"
-}

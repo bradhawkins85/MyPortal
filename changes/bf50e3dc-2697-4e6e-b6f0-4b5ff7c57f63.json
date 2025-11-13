@@ -1,7 +1,0 @@
-{
-  "guid": "bf50e3dc-2697-4e6e-b6f0-4b5ff7c57f63",
-  "occurred_at": "2025-10-30T12:39Z",
-  "change_type": "Feature",
-  "summary": "Added ticket status editor with API endpoints and repository safeguards.",
-  "content_hash": "15c362becdff1b943b6e9b14f31a2e13b04cd55610e40ec202b7b890679b6556"
-}

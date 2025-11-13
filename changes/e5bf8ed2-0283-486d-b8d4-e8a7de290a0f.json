@@ -1,7 +1,0 @@
-{
-  "guid": "e5bf8ed2-0283-486d-b8d4-e8a7de290a0f",
-  "occurred_at": "2025-10-08T11:20Z",
-  "change_type": "Feature",
-  "summary": "Added hashed API key management endpoints with usage telemetry, audit logging, and admin reporting",
-  "content_hash": "ba85e3c524450a809bff4bc280e17b2cedfa142922df8adc4bc1893529c5fe3d"
-}

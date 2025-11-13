@@ -1,7 +1,0 @@
-{
-  "guid": "c01b2e5d-2a37-4302-917a-3cb789f8c85e",
-  "occurred_at": "2025-10-11T10:30Z",
-  "change_type": "Fix",
-  "summary": "Restored legacy shop product image loading by securing nested upload path handling",
-  "content_hash": "b2d501c1c43d885e17184ae18d2bc215e757614ce3bff4d6f8c1d2ad851204e9"
-}

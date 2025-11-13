@@ -1,7 +1,0 @@
-{
-  "guid": "94babaa2-29af-45b2-a60f-6d8ecaba5cfa",
-  "occurred_at": "2025-10-09T11:52Z",
-  "change_type": "Fix",
-  "summary": "Removed the Syncro import card from the Staff view and restyled the Add Staff form to span the full content width",
-  "content_hash": "ffa1993fd419ea5ebcb8ebfe17c75d8578b7b8fbb7c44436e3972dc659e3adeb"
-}

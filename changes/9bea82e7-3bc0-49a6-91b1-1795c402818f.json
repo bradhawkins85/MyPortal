@@ -1,7 +1,0 @@
-{
-  "guid": "9bea82e7-3bc0-49a6-91b1-1795c402818f",
-  "occurred_at": "2025-11-03T11:53Z",
-  "change_type": "Fix",
-  "summary": "Redirected package cart success flow to the packages category view on the main shop page.",
-  "content_hash": "ef0ae5599c3e79f0808b69750bbe785e3ed6132216032617f6c4c675fdd33ed5"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "db942ecd-1248-4675-8e53-56dc6dc2036f",
-  "occurred_at": "2025-11-03T07:01Z",
-  "change_type": "Fix",
-  "summary": "Prevented template cloning errors from breaking ticket status and labour type modals in the admin workspace.",
-  "content_hash": "babd55fe315575f92845b4f0f6e2475d40ddafe93d9c143067ed42829c167ac3"
-}

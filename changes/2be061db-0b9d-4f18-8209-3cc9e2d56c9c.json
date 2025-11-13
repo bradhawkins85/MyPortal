@@ -1,7 +1,0 @@
-{
-  "guid": "2be061db-0b9d-4f18-8209-3cc9e2d56c9c",
-  "occurred_at": "2025-11-01T11:48Z",
-  "change_type": "Feature",
-  "summary": "Added in-browser force refresh control to clear cached assets and reload the latest portal build.",
-  "content_hash": "385b74375568071a96534a727915b5eb9b84d74ed2ba2d05983cbbe22255862a"
-}

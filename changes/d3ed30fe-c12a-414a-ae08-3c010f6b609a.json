@@ -1,7 +1,0 @@
-{
-  "guid": "d3ed30fe-c12a-414a-ae08-3c010f6b609a",
-  "occurred_at": "2025-11-06T05:41Z",
-  "change_type": "Feature",
-  "summary": "Enabled automation trigger subject filters to support wildcard pattern matching and documented examples.",
-  "content_hash": "500cafbc01a85766ac6c019302bf38a26c3509e164640383f2a3bd4cc2c48c5c"
-}

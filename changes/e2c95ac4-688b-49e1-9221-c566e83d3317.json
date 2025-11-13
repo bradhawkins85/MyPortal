@@ -1,7 +1,0 @@
-{
-  "guid": "e2c95ac4-688b-49e1-9221-c566e83d3317",
-  "occurred_at": "2025-10-26T09:00Z",
-  "change_type": "Fix",
-  "summary": "Expanded dashboard padding and responsive spacing so overview cards and status lists no longer overlap on compact screens",
-  "content_hash": "6ec39154fdbcba95562e0021ab0cb9933a359df7ced731f526687305f5e604bd"
-}

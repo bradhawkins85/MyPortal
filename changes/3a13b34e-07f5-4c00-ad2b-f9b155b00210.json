@@ -1,7 +1,0 @@
-{
-  "guid": "3a13b34e-07f5-4c00-ad2b-f9b155b00210",
-  "occurred_at": "2025-12-26T14:50Z",
-  "change_type": "Fix",
-  "summary": "Rebuilt system variables knowledge base section seeds with CONCAT_WS strings to restore valid SQL syntax during article re-imports",
-  "content_hash": "c2fe0b86fa50d557f9fd70e1fccc63e09209af8cb2dbcca02d0cb9317327eda2"
-}

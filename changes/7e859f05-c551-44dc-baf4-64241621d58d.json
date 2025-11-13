@@ -1,7 +1,0 @@
-{
-  "guid": "7e859f05-c551-44dc-baf4-64241621d58d",
-  "occurred_at": "2025-10-10T02:28Z",
-  "change_type": "Change",
-  "summary": "Retired the legacy Node.js/TypeScript codebase and tooling so only the FastAPI stack remains",
-  "content_hash": "db385311108d24711ad804dad3f6a286f75c029074ca712d60f2fb67cc0b6cec"
-}

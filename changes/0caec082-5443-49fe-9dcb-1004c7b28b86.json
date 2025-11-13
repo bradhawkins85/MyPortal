@@ -1,7 +1,0 @@
-{
-  "guid": "0caec082-5443-49fe-9dcb-1004c7b28b86",
-  "occurred_at": "2025-12-15T10:15Z",
-  "change_type": "Fix",
-  "summary": "Escaped webhook event payloads in the admin delivery queue so delete actions parse identifiers correctly",
-  "content_hash": "b9cf9ab70294c8cf0881dffba159f7935284cb67ec9537cde324dfcfbe3130d2"
-}

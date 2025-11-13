@@ -1,7 +1,0 @@
-{
-  "guid": "1fb7b863-cab3-4369-9955-a792a1b01389",
-  "occurred_at": "2025-11-06T05:59Z",
-  "change_type": "Fix",
-  "summary": "Escaped ticket asset selector datasets so labels with apostrophes remain selectable and link correctly",
-  "content_hash": "5c7b378b0ce6ffd78ae559b3b18a0cb1fca29f400a5ef971f2dc21397a0751de"
-}

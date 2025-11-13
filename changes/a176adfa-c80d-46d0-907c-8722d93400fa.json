@@ -1,7 +1,0 @@
-{
-  "guid": "a176adfa-c80d-46d0-907c-8722d93400fa",
-  "occurred_at": "2025-10-19T09:45Z",
-  "change_type": "Feature",
-  "summary": "Added pagination to shop category lists showing five entries per page to keep the admin UI manageable",
-  "content_hash": "f8b035560cd67f4412055297e53cb46bd7845c9dbbd06f6c7929ece18b1e3b17"
-}

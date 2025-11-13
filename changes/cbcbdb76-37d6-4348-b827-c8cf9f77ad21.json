@@ -1,7 +1,0 @@
-{
-  "guid": "cbcbdb76-37d6-4348-b827-c8cf9f77ad21",
-  "occurred_at": "2025-10-09T13:16Z",
-  "change_type": "Fix",
-  "summary": "Limited the Available products catalogue to display a maximum of five items per page for consistent pagination",
-  "content_hash": "c1fcdd33fded9bfb34ee28271e9deb69808647f3fca6e3c2d4e8709056333c8e"
-}

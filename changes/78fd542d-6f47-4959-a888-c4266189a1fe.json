@@ -1,7 +1,0 @@
-{
-  "guid": "78fd542d-6f47-4959-a888-c4266189a1fe",
-  "occurred_at": "2025-09-18T04:10Z",
-  "change_type": "Fix",
-  "summary": "Restored direct OpnForm URL management in Forms admin instead of requiring iframe embed snippets",
-  "content_hash": "854d49981213f42d0b1d3a8246f06504b353c103136d5705286c14aa254d2c64"
-}

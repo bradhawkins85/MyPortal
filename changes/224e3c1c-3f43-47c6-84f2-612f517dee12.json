@@ -1,7 +1,0 @@
-{
-  "guid": "224e3c1c-3f43-47c6-84f2-612f517dee12",
-  "occurred_at": "2025-09-18T01:20Z",
-  "change_type": "Fix",
-  "summary": "Served sanitised OpnForm embed snippets directly to avoid upstream fetch failures when loading forms",
-  "content_hash": "74fa7ab0fbb4d9edd98bc389515a9c283a08619fc0f42358ad9b67b0f9a0a428"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "2e32b750-b83a-452f-aaff-572c6d64b6c8",
-  "occurred_at": "2025-10-09T11:25Z",
-  "change_type": "Fix",
-  "summary": "Expanded the API credentials administration card to full width for improved visibility",
-  "content_hash": "4bd21df2adb08a2cd7bfad97b4e97434c37243ed98814498567b09b63dd1b99f"
-}

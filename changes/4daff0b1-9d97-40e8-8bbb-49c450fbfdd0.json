@@ -1,7 +1,0 @@
-{
-  "guid": "4daff0b1-9d97-40e8-8bbb-49c450fbfdd0",
-  "occurred_at": "2025-11-01T12:26Z",
-  "change_type": "Fix",
-  "summary": "Optimised the ticket workspace for portrait mobile layouts by stacking filters with stats and collapsing table columns.",
-  "content_hash": "79a972a5314686ff502b3b1c3da9e7497d4ea2e829b91869c1729efa96af421e"
-}

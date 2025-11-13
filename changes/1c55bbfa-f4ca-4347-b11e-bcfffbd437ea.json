@@ -1,7 +1,0 @@
-{
-  "guid": "1c55bbfa-f4ca-4347-b11e-bcfffbd437ea",
-  "occurred_at": "2025-10-29T08:05Z",
-  "change_type": "Feature",
-  "summary": "Add IMAP mailbox cloning and priority scheduling",
-  "content_hash": "2597f3e192b69b7a612e29526f33b5a5b4728e8c7aea2c036f63a1daf62b366c"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "8ea0728d-73b9-42b3-bcf6-60074a4d0d74",
-  "occurred_at": "2025-11-06T05:44Z",
-  "change_type": "Feature",
-  "summary": "Added dropdown-driven asset linking UI with Tactical RMM shortcuts on ticket detail page.",
-  "content_hash": "363b85b60f35d456dcb581627e5221bcf7c346139c79d3b331dcb46babf7ac08"
-}

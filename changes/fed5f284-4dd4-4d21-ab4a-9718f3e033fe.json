@@ -1,7 +1,0 @@
-{
-  "guid": "fed5f284-4dd4-4d21-ab4a-9718f3e033fe",
-  "occurred_at": "2025-11-01T05:55Z",
-  "change_type": "Fix",
-  "summary": "Adjusted admin shop layout to prevent product form and catalogue table from overflowing horizontally.",
-  "content_hash": "2461f5510e1848961d8044ac25590ce36d42fb4d06955b516db9c4855c2b4cc0"
-}

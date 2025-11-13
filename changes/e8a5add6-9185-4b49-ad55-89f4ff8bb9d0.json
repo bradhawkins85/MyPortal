@@ -1,7 +1,0 @@
-{
-  "guid": "e8a5add6-9185-4b49-ad55-89f4ff8bb9d0",
-  "occurred_at": "2025-10-09T11:36Z",
-  "change_type": "Fix",
-  "summary": "Removed the SKU column from the software licenses table to simplify the display per request",
-  "content_hash": "7b3ce026d171cae54d96b151c031d51ffc93d213f2194f56b94910c680a72850"
-}

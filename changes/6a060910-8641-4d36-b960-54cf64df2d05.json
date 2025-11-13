@@ -1,7 +1,0 @@
-{
-  "guid": "6a060910-8641-4d36-b960-54cf64df2d05",
-  "occurred_at": "2025-10-08T13:09Z",
-  "change_type": "Fix",
-  "summary": "Ensured the shop category sidebar remains top-aligned when product listings extend the page",
-  "content_hash": "2d7f62f8928fed27971f27ca0bba1921d2561849bb10029d98b4b6cd6370504e"
-}

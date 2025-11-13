@@ -1,7 +1,0 @@
-{
-  "guid": "d2bcc901-6e81-4529-ad56-cdef08fe6735",
-  "occurred_at": "2025-10-08T10:58Z",
-  "change_type": "Feature",
-  "summary": "Rebuilt forms repositories, assignment APIs, and OpnForm embedding for the Python portal",
-  "content_hash": "76d57a5a365193369ecbe639eb4ccb1783ac0cbee27bae3a49e8be484921b338"
-}

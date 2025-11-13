@@ -1,7 +1,0 @@
-{
-  "guid": "894f124e-566f-4917-b6b0-cbdae2baedc6",
-  "occurred_at": "2025-10-08T10:19Z",
-  "change_type": "Fix",
-  "summary": "Hardened company switching payload parsing to support form, JSON, and query parameters with updated documentation",
-  "content_hash": "1e395ab5af25260c822406ff3963e2de6742b65375d764e99d37ec0654b8c495"
-}

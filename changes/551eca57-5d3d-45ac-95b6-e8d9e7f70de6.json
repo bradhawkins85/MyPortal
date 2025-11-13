@@ -1,7 +1,0 @@
-{
-  "guid": "551eca57-5d3d-45ac-95b6-e8d9e7f70de6",
-  "occurred_at": "2025-10-18T11:30Z",
-  "change_type": "Fix",
-  "summary": "Restored the Orders navigation link by initialising membership context before evaluating shop permissions in the base template",
-  "content_hash": "29e545682172b25ce16f9c5bf4135bd0432f05616ffff59b5cbabfb3749fa578"
-}

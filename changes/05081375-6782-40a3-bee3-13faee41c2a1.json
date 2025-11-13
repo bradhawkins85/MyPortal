@@ -1,7 +1,0 @@
-{
-  "guid": "05081375-6782-40a3-bee3-13faee41c2a1",
-  "occurred_at": "2025-10-21T11:31Z",
-  "change_type": "Feature",
-  "summary": "Added rich text ticket replies with sanitised storage, WYSIWYG composer, and HTML conversation rendering",
-  "content_hash": "ac546f9be05462e6fff4837fe398371f28ec8dce45435ffadb0d88e6985a555d"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "7cc170f0-3b65-4c6f-9c9c-2d649083c220",
-  "occurred_at": "2025-10-29T06:11Z",
-  "change_type": "Feature",
-  "summary": "Added admin control to reprocess ticket AI summaries and tags on demand.",
-  "content_hash": "4bff61aa9678f30b98ed96ff1722f4cfdab2219f0a0b53a83a2388a057cc11bc"
-}

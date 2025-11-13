@@ -1,7 +1,0 @@
-{
-  "guid": "db6984ee-191f-4db4-8dd5-69f63e4b252d",
-  "occurred_at": "2025-10-06T08:30Z",
-  "change_type": "Fix",
-  "summary": "Expanded the upgrade cleanup to purge truncated ~myportal metadata directories so pip stops warning about invalid distributions during installs",
-  "content_hash": "4b66972a77278512c4a6a2ddc7b678fbd5cb22b1837c2b47c627738bfbeae086"
-}

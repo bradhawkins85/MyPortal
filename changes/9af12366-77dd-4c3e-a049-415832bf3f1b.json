@@ -1,7 +1,0 @@
-{
-  "guid": "9af12366-77dd-4c3e-a049-415832bf3f1b",
-  "occurred_at": "2025-10-04T09:20Z",
-  "change_type": "Fix",
-  "summary": "Restored ticket detail layout to single-column grid when the sidebar is absent to prevent content squeezing",
-  "content_hash": "1a8d51d3bcc816dd55a71ed8f481d287e35390e630946a5c88d2ec1f2f915438"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "dadc4df0-2370-4c7c-a97b-54262f8c6f24",
-  "occurred_at": "2025-10-11T14:05Z",
-  "change_type": "Fix",
-  "summary": "Locked the shop category sidebar to the scroll container top so it no longer drifts when many products load",
-  "content_hash": "6aedeaa6f8b81d5f832cb60f114f57f32c91226d52d2e52816a89428136b40f6"
-}

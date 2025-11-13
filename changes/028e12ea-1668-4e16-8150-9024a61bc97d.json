@@ -1,7 +1,0 @@
-{
-  "guid": "028e12ea-1668-4e16-8150-9024a61bc97d",
-  "occurred_at": "2024-06-07T00:00Z",
-  "change_type": "Fix",
-  "summary": "Propagated module failure states to ticket automations so SMTP errors surface correctly.",
-  "content_hash": "fbf81795db65493a846e517635cecb52285d8f18143d95c6b715ebc1cb5971c4"
-}

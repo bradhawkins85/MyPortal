@@ -1,7 +1,0 @@
-{
-  "guid": "ce9ed234-438f-4a1e-945f-800c6d6f1ff9",
-  "occurred_at": "2025-10-19T08:30Z",
-  "change_type": "Fix",
-  "summary": "Ensured the system upgrade automation reuses the managed virtual environment before reinstalling dependencies",
-  "content_hash": "d1f146ea7b5b5abe5125afc9ed85850c0235f02ccee0c6d76201125dc8481b04"
-}

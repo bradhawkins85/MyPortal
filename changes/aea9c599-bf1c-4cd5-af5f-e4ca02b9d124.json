@@ -1,7 +1,0 @@
-{
-  "guid": "aea9c599-bf1c-4cd5-af5f-e4ca02b9d124",
-  "occurred_at": "2025-10-16T00:08Z",
-  "change_type": "Fix",
-  "summary": "Hid cart quantity and submission controls on the shop page when membership lacks cart permissions",
-  "content_hash": "78cb04cbf0f713afa8007224c0bcb4e16484dda2b76c9bf1b802304bcd1c953c"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "42913ccd-7dc8-474d-8997-84a186ad7982",
-  "occurred_at": "2025-11-07T04:10Z",
-  "change_type": "Feature",
-  "summary": "Billable tickets now sync to Xero with automatic invoice generation",
-  "content_hash": "3616a44f174669819079ab1faae15dd6ccb875cbb8f973d74fb3cb42a3194f23"
-}

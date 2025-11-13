@@ -1,7 +1,0 @@
-{
-  "guid": "acf0189c-d807-4b32-9c22-51ae02a5585e",
-  "occurred_at": "2025-10-06T15:45Z",
-  "change_type": "Feature",
-  "summary": "Enabled drag-to-resize handles for knowledge base editor images with live preview updates",
-  "content_hash": "301e858686ef5db5e4e94d3d422b74b48c1765663e5312d11fec5719793a8710"
-}

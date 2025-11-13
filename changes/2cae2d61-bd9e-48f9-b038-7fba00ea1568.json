@@ -1,7 +1,0 @@
-{
-  "guid": "2cae2d61-bd9e-48f9-b038-7fba00ea1568",
-  "occurred_at": "2025-10-20T10:00Z",
-  "change_type": "Fix",
-  "summary": "Purged stray ~myportal pip metadata during upgrades so dependency installs stop warning about invalid distributions",
-  "content_hash": "2d22de4ffb102f27fc9a8b2493fc894f133ee380d4a2968558a8f7298e4d6f38"
-}

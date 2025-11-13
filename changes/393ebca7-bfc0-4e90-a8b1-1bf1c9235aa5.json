@@ -1,7 +1,0 @@
-{
-  "guid": "393ebca7-bfc0-4e90-a8b1-1bf1c9235aa5",
-  "occurred_at": "2025-11-02T22:21Z",
-  "change_type": "Fix",
-  "summary": "Stabilize notification and shop tests by isolating database access and adjusting Xero async markers",
-  "content_hash": "024530f5b89fd9b43bdb8fe2534c08b3c03b60bcbc2db6143acab13941772e10"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "580163a7-c654-4cb8-a537-ef81ba845683",
-  "occurred_at": "2025-10-13T12:15Z",
-  "change_type": "Feature",
-  "summary": "Added Uptime Kuma alert ingestion module with secure webhook endpoint, admin configuration UI, and alert listing APIs",
-  "content_hash": "4122e706b624fa8613b5a47f0fecc8d23962e4950b1b0a623ea71a4fd5f49613"
-}

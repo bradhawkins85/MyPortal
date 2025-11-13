@@ -1,7 +1,0 @@
-{
-  "guid": "005eb726-7efc-4ccc-9b16-a376cfd7aa01",
-  "occurred_at": "2025-02-14T00:00Z",
-  "change_type": "Fix",
-  "summary": "Documented the SMTP Relay automation payload format so workflows supply correctly structured data.",
-  "content_hash": "c99385bcb57eb4cade435ac4a30271f1393db19c937311d20eb24dc0a4331ce2"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "124ae521-46dd-4315-8af6-a01623d3fcec",
-  "occurred_at": "2025-10-08T10:00Z",
-  "change_type": "Feature",
-  "summary": "Seeded super-admin-only knowledge base articles covering operations, system variables, and HTTP POST automation",
-  "content_hash": "0cc24dd7bf33a49b522038f6bd32318e486857f688fec1ffc11c6e576aa5bab7"
-}

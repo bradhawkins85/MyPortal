@@ -1,7 +1,0 @@
-{
-  "guid": "e86b7f51-d8d5-4345-a0c7-0f460fbc252e",
-  "occurred_at": "2025-10-29T13:57Z",
-  "change_type": "Feature",
-  "summary": "Collapsed the Add staff member panel by default to reduce visual clutter on the staff workspace",
-  "content_hash": "1f503712c54e49cabb769200c177531b5e9f049a12acfc327d20b3a968139047"
-}

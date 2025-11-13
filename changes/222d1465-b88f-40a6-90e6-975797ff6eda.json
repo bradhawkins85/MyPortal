@@ -1,7 +1,0 @@
-{
-  "guid": "222d1465-b88f-40a6-90e6-975797ff6eda",
-  "occurred_at": "2025-12-11T10:00Z",
-  "change_type": "Feature",
-  "summary": "Routed integration module webhooks through the monitor with persisted event metadata and regression tests",
-  "content_hash": "d5455e5229f56a2c854d1f7041bb72c7e284c4a3e94d41942203114e1ff41c3c"
-}

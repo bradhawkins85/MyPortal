@@ -1,7 +1,0 @@
-{
-  "guid": "8fccb0e6-512f-4028-8e7e-bfc74e91487d",
-  "occurred_at": "2025-09-17T14:47Z",
-  "change_type": "Fix",
-  "summary": "Proxied OpnForm embeds through an internal viewer to keep forms inside the portal while honouring template variables",
-  "content_hash": "5e164d8d3b7efd9ce7f80c845076a107275234ac475d169ee7aeeef71469f577"
-}

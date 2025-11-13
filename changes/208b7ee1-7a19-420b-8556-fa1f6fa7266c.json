@@ -1,7 +1,0 @@
-{
-  "guid": "208b7ee1-7a19-420b-8556-fa1f6fa7266c",
-  "occurred_at": "2025-11-01T06:01Z",
-  "change_type": "Fix",
-  "summary": "Fixed product queries so cross-sell and up-sell recommendations persist when editing catalogue items.",
-  "content_hash": "bd361d848ad0029f78ef1c0e4423b0e63437ae9ab0d2e69a1a2ab3d1587cda7a"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "be3fa71b-6108-4d00-8a11-2da6fdcc9e17",
-  "occurred_at": "2025-12-19T16:10Z",
-  "change_type": "Fix",
-  "summary": "Removed the AI tag status label entirely from the admin ticket detail view for a leaner tags section",
-  "content_hash": "c5ad95ad146178ab136ce0e7b2650da6d0a1ece46877deb450ca542063775792"
-}

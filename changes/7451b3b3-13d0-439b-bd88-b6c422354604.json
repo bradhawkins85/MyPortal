@@ -1,7 +1,0 @@
-{
-  "guid": "7451b3b3-13d0-439b-bd88-b6c422354604",
-  "occurred_at": "2025-10-08T10:48Z",
-  "change_type": "Fix",
-  "summary": "Updated upgrade automation to skip dependency reinstalls and service restarts when no upstream changes are pulled",
-  "content_hash": "ce631b4230413e0a5429aea55abe41949d8d4cb048d5c2ab85dcf459146ac1c0"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "3320f3a1-ce43-4dcc-8031-9d0502059c7d",
-  "occurred_at": "2025-10-09T13:09Z",
-  "change_type": "Fix",
-  "summary": "Restored customer shop pagination with capped page sizes and navigation controls to prevent sprawling product lists",
-  "content_hash": "4ee51d100ea92c325c94d9199fc34f230a50acd3674be2a6811bf5cfd4c5e5bb"
-}

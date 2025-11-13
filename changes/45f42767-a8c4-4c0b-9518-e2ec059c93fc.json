@@ -1,7 +1,0 @@
-{
-  "guid": "45f42767-a8c4-4c0b-9518-e2ec059c93fc",
-  "occurred_at": "2025-10-29T12:50Z",
-  "change_type": "Fix",
-  "summary": "Restored the API Docs menu link for authenticated users so the Swagger UI remains accessible after sign-in.",
-  "content_hash": "9d6e08b3fb61f79dd0812e876e46549552b21f524c39fcdd0ea4d5e4b8dd6c85"
-}

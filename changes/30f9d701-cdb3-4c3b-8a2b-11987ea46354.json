@@ -1,7 +1,0 @@
-{
-  "guid": "30f9d701-cdb3-4c3b-8a2b-11987ea46354",
-  "occurred_at": "2025-10-20T10:55Z",
-  "change_type": "Fix",
-  "summary": "Normalised automation schedule timestamps before database insertion so creating active automations no longer triggers MySQL timezone errors",
-  "content_hash": "3c42a4e0e2b5df6bb4aa2237924d31225621b0e70003d78b983a4f24f9f1fcea"
-}

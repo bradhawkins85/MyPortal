@@ -1,7 +1,0 @@
-{
-  "guid": "ec1b88a4-3ff6-47e9-a31a-ffb5c4e47a1f",
-  "occurred_at": "2025-10-15T13:44Z",
-  "change_type": "Fix",
-  "summary": "Allowed company membership permission toggles to send CSRF tokens from the page meta tag when the session cookie name is customised",
-  "content_hash": "b07fd2736262e36376465536396d9f8b3dc33d51b057606854d4b31431fb2f43"
-}

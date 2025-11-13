@@ -1,7 +1,0 @@
-{
-  "guid": "d2a37b79-f6d0-4a12-b219-90ffada33677",
-  "occurred_at": "2025-10-09T11:34Z",
-  "change_type": "Fix",
-  "summary": "Expanded the Companies administration card to occupy the full grid width for consistent layout",
-  "content_hash": "21ff384ae683529c730f61d8e7d7e1dd863780c1ef53e06f3d1834805ac26879"
-}

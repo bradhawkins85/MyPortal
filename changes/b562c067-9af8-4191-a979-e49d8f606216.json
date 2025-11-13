@@ -1,7 +1,0 @@
-{
-  "guid": "b562c067-9af8-4191-a979-e49d8f606216",
-  "occurred_at": "2025-10-08T07:28Z",
-  "change_type": "Feature",
-  "summary": "Rebuilt staff data models, Syncro import client, scheduled sync runner, and management UI with API parity and permissions",
-  "content_hash": "8869c30bf2fa6c7c1b3a86b106d3280968619ef96ccd97b0c7f1ea97aa7b995a"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "73bbe83b-d092-4af6-aa72-347ba5352c7c",
-  "occurred_at": "2025-10-27T11:00Z",
-  "change_type": "Feature",
-  "summary": "Added admin navigation entries for tickets, ticket automations, and modules while retaining the scheduler automation tools",
-  "content_hash": "0bfbb32b8bf019aba4e1568641e67e7f99be745e267b0163eca23a7af49a131b"
-}

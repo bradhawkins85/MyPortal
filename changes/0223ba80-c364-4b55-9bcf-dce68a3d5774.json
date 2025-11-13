@@ -1,7 +1,0 @@
-{
-  "guid": "0223ba80-c364-4b55-9bcf-dce68a3d5774",
-  "occurred_at": "2025-10-23T08:45Z",
-  "change_type": "Fix",
-  "summary": "Removed event automation fetch limits so ntfy publish alerts fire during ticket creation workflows",
-  "content_hash": "d4a6388d4fcb9f8935b35efc2a6a249976e974fd537f5d096caa4dfdd9e6bcfb"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "3ea4e94d-0d8d-4ae3-ad0e-f281b573e02c",
-  "occurred_at": "2025-11-01T12:08Z",
-  "change_type": "Fix",
-  "summary": "Prevented horizontal overflow on mobile layout to match device width.",
-  "content_hash": "35a3bbda6f34be38312d4f463205b0263fdcbc88b6dc7f73ddc00dd4d5bb6eca"
-}

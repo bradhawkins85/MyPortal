@@ -1,7 +1,0 @@
-{
-  "guid": "fb931c81-561d-4826-8a8f-81d7118342ba",
-  "occurred_at": "2025-10-08T10:14Z",
-  "change_type": "Fix",
-  "summary": "Allowed company switching endpoint to accept JSON and form payloads while validating memberships",
-  "content_hash": "e9fbef8c7696d6dddf9a98b01aa29f8da5a712c771445e07188425f8fbde5353"
-}

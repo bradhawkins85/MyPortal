@@ -1,7 +1,0 @@
-{
-  "guid": "abe01f34-be36-473c-baa5-afde77d7dabd",
-  "occurred_at": "2025-11-06T05:55Z",
-  "change_type": "Feature",
-  "summary": "Added trigger action templates for creating tickets and batching task creation.",
-  "content_hash": "13bbf023eaf13f82925a3ca8c84630977ea4c126bd24beb40a77ec8b84ae1bed"
-}

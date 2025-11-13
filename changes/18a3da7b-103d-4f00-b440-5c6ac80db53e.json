@@ -1,7 +1,0 @@
-{
-  "guid": "18a3da7b-103d-4f00-b440-5c6ac80db53e",
-  "occurred_at": "2025-10-29T12:12Z",
-  "change_type": "Feature",
-  "summary": "Expanded ticket automation context with requester, watcher, and latest reply variables plus documentation",
-  "content_hash": "8bf8ddd4963330a9e97c7eed984b12f79f6cf015aa1cf9d6204ac3ac29feada1"
-}
