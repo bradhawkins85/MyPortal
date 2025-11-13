@@ -1,7 +1,0 @@
-{
-  "guid": "77cbfc67-4865-4e5c-bf3c-037ae786ae3c",
-  "occurred_at": "2025-11-01T13:22Z",
-  "change_type": "Fix",
-  "summary": "Record initial ticket descriptions as first conversation replies for new tickets.",
-  "content_hash": "ea6e9254e94a501c9b703b3545a7807f923a65ce5a24ab5ffc9a711dc6c04f9c"
-}

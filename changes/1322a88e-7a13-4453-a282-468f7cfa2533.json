@@ -1,7 +1,0 @@
-{
-  "guid": "1322a88e-7a13-4453-a282-468f7cfa2533",
-  "occurred_at": "2025-10-17T08:15Z",
-  "change_type": "Fix",
-  "summary": "Positioned the cross-service audit correlations card below API credentials for consistent admin layout",
-  "content_hash": "a95d11fc98d47768d9b08ae9c4945f8e2ce9fc85d90b5da12551709ea1cac260"
-}

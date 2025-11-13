@@ -1,7 +1,0 @@
-{
-  "guid": "0951cf78-e10a-4bc6-bc21-1e821650a391",
-  "occurred_at": "2025-10-13T18:00Z",
-  "change_type": "Fix",
-  "summary": "Loaded the admin.js bundle on the Syncro ticket import page so the import forms trigger the API workflow",
-  "content_hash": "8483a89680306ba7ec97cd1cd8f6ce20e8757ac324883b33e6d9c49a0a2c1258"
-}

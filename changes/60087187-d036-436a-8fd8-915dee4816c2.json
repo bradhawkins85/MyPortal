@@ -1,7 +1,0 @@
-{
-  "guid": "60087187-d036-436a-8fd8-915dee4816c2",
-  "occurred_at": "2025-10-09T23:30Z",
-  "change_type": "Fix",
-  "summary": "Removed leftover patch markers from dashboard template to restore valid Jinja block structure",
-  "content_hash": "22845587b2327578ac8fc54303f5a8712cc7a66d6336b3e3472858be34c49df5"
-}

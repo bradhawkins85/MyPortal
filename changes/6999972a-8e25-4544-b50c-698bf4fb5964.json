@@ -1,7 +1,0 @@
-{
-  "guid": "6999972a-8e25-4544-b50c-698bf4fb5964",
-  "occurred_at": "2025-10-29T08:02Z",
-  "change_type": "Fix",
-  "summary": "Ensure email reply markers strip quoted history below the latest notification line before AI processing.",
-  "content_hash": "387d91a2c76bc1fc0d3f47a6463781a7e11d26d1c8de2faa231fe7501760d435"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "2d26f0d1-eee5-44a2-8d25-d202a27239f5",
-  "occurred_at": "2025-10-29T14:02Z",
-  "change_type": "Feature",
-  "summary": "Collapsed the cross-service audit correlations panel by default on the API credentials admin page.",
-  "content_hash": "21a1d91f9bc04eab4a607cf3f7b8e3d67a63e5eeb7a2617049e60134d5b54594"
-}

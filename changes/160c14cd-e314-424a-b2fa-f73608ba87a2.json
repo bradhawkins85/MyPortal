@@ -1,7 +1,0 @@
-{
-  "guid": "160c14cd-e314-424a-b2fa-f73608ba87a2",
-  "occurred_at": "2025-10-23T01:25Z",
-  "change_type": "Feature",
-  "summary": "Added enriched ticket automation variables including company and assignment metadata with AI and status fields for template tokens",
-  "content_hash": "5578b70193aa1dc7dd40303b751f5f5219f848a1d6aad510ccd958166d1f815b"
-}

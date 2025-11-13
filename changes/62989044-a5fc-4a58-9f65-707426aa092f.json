@@ -1,7 +1,0 @@
-{
-  "guid": "62989044-a5fc-4a58-9f65-707426aa092f",
-  "occurred_at": "2025-10-15T13:26Z",
-  "change_type": "Fix",
-  "summary": "Prevented blank CSRF headers from blocking company membership saves when the session cookie name is customised",
-  "content_hash": "131ec19771d2b8c380fafc1daeda084c45a7e82726871f4711316afcbb823629"
-}

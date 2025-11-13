@@ -1,7 +1,0 @@
-{
-  "guid": "7791f509-c7b3-4493-917e-77c52fadd93d",
-  "occurred_at": "2025-10-15T11:59Z",
-  "change_type": "Feature",
-  "summary": "Added shipping status notification event defaults so users can subscribe to fulfilment updates across UI and API",
-  "content_hash": "3868431c9e908800821683752f691b905b7732353d879bb3c7b38cb22c5e05ab"
-}

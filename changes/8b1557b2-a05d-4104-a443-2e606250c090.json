@@ -1,7 +1,0 @@
-{
-  "guid": "8b1557b2-a05d-4104-a443-2e606250c090",
-  "occurred_at": "2025-12-12T09:00Z",
-  "change_type": "Fix",
-  "summary": "Routed shop Discord stock notifications through the webhook monitor with persisted event metadata and tests",
-  "content_hash": "ed0b923d20ec0f39bb1582a6b92796c7aaf3228a3e764b1c677fc378a3e168ec"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "c672cb1e-a5f0-45c0-b3d1-f3fad3f7f95d",
-  "occurred_at": "2025-10-15T13:45Z",
-  "change_type": "Fix",
-  "summary": "Restored sidebar company features for company admins when memberships grant access",
-  "content_hash": "43e7a657ade005c6673fd9bdac95494f0f538827d723e91adb6ca29aeea8c1bb"
-}

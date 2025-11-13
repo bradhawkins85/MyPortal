@@ -1,7 +1,0 @@
-{
-  "guid": "e5486210-d9df-4568-b99e-1a017cd95cbb",
-  "occurred_at": "2025-10-07T12:19Z",
-  "change_type": "Feature",
-  "summary": "Added secure upgrade automation script for pulling updates and restarting services",
-  "content_hash": "245a720dca4e6e7f1653dd2d538e15a0fd7648faba09eb2c9160c7f3ac2d1822"
-}

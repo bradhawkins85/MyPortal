@@ -1,7 +1,0 @@
-{
-  "guid": "e30e64d6-68bf-4595-a3eb-8de04904ffce",
-  "occurred_at": "2025-10-16T08:45Z",
-  "change_type": "Fix",
-  "summary": "Added a secure system update scheduler handler that runs update.sh with locking and output auditing",
-  "content_hash": "4ad5846adebc7335b32dc6eec12076cec1a039f18f04a63b40402a798d5fbd2c"
-}

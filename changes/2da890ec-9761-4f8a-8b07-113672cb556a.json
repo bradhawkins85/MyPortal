@@ -1,7 +1,0 @@
-{
-  "guid": "2da890ec-9761-4f8a-8b07-113672cb556a",
-  "occurred_at": "2025-10-29T12:30Z",
-  "change_type": "Feature",
-  "summary": "Added ChatGPT MCP integration module with secure ticket tools and JSON-RPC endpoint for ChatGPT",
-  "content_hash": "6d2bc086ee4bc16468d8f68a94168ae674c4705e8fe44d4117e8dcc05d6ba57b"
-}

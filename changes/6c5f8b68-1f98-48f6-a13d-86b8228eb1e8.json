@@ -1,7 +1,0 @@
-{
-  "guid": "6c5f8b68-1f98-48f6-a13d-86b8228eb1e8",
-  "occurred_at": "2025-12-16T10:00Z",
-  "change_type": "Fix",
-  "summary": "Sanitised Syncro ticket import text to convert HTML line breaks and remove unsupported tags",
-  "content_hash": "a15f0627b78c478db1c129f83e3e1c57418a383c931ea22da42205abf1940d99"
-}

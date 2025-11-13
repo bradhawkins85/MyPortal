@@ -1,7 +1,0 @@
-{
-  "guid": "ad98e4a2-1315-4467-b79c-3d80585abbf5",
-  "occurred_at": "2025-10-30T12:37Z",
-  "change_type": "Fix",
-  "summary": "Reordered Assign staff access dropdowns so company selection precedes user selection.",
-  "content_hash": "d1c8a3fdc8e3b587767ea9c467de7f4ddb2fbbc56934767364e16d1ad79aa329"
-}

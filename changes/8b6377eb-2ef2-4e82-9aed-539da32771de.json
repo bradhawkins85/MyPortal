@@ -1,7 +1,0 @@
-{
-  "guid": "8b6377eb-2ef2-4e82-9aed-539da32771de",
-  "occurred_at": "2025-10-15T12:55Z",
-  "change_type": "Fix",
-  "summary": "Hardened system update automation to use a writable Git config home and tolerate missing service restart permissions",
-  "content_hash": "ece118ca748739d019d7d5e479adc35d59a861ad5ed1b1b8d08c77d9d038a065"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "65f90020-2f6c-4674-a1fb-e7869e3eca42",
-  "occurred_at": "2025-10-09T11:28Z",
-  "change_type": "Fix",
-  "summary": "Expanded the Companies dashboard card to span the full grid width for clearer management access",
-  "content_hash": "d9ddb3a9812a51ecf72c066d47b3b90d4541e3b83968d3e825169254bb2f16a7"
-}

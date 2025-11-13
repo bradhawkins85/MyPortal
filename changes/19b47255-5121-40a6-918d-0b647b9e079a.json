@@ -1,7 +1,0 @@
-{
-  "guid": "19b47255-5121-40a6-918d-0b647b9e079a",
-  "occurred_at": "2025-10-19T10:20Z",
-  "change_type": "Feature",
-  "summary": "Collapsed the shop admin category manager by default with a persisted toggle so the grid stays tidy while remaining easy to access",
-  "content_hash": "66cea15f24bf352c8a839b534896e340d4bbfc0fdcaf094d4fe770e35de4ccb8"
-}

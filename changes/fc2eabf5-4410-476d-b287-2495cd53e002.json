@@ -1,7 +1,0 @@
-{
-  "guid": "fc2eabf5-4410-476d-b287-2495cd53e002",
-  "occurred_at": "2025-10-23T10:38Z",
-  "change_type": "Fix",
-  "summary": "Align Tactical RMM sync endpoints with published API schema and update authentication header.",
-  "content_hash": "167d14c610e0784d3dd1f4211f0a7f57ffb702bc87285163b8bb42ef382697d9"
-}

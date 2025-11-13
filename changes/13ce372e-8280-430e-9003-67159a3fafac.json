@@ -1,7 +1,0 @@
-{
-  "guid": "13ce372e-8280-430e-9003-67159a3fafac",
-  "occurred_at": "2025-10-20T11:24Z",
-  "change_type": "Feature",
-  "summary": "Split the knowledge base admin into a catalogue list with dedicated editor pages for creating and updating articles",
-  "content_hash": "6fe318cf6a27175840174d69252b87d2ffd75c87a494ab884e5a7e5c5fa5a0c9"
-}

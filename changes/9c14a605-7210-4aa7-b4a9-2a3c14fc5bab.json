@@ -1,7 +1,0 @@
-{
-  "guid": "9c14a605-7210-4aa7-b4a9-2a3c14fc5bab",
-  "occurred_at": "2025-10-09T15:42Z",
-  "change_type": "Fix",
-  "summary": "Switched password hashing to bcrypt_sha256 to support long credentials without login failures",
-  "content_hash": "ec7d03edc8ddfa3d57c235d409c2104cdc318b3a19614c7a9dd2eac0f6372151"
-}

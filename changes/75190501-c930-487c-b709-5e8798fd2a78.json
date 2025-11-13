@@ -1,7 +1,0 @@
-{
-  "guid": "75190501-c930-487c-b709-5e8798fd2a78",
-  "occurred_at": "2025-11-03T06:56Z",
-  "change_type": "Fix",
-  "summary": "Broadcast refresh requests from the Refresh app control before forcing a local reload.",
-  "content_hash": "13dd664deb6ac17e947c18e6ad4c3477cf6fa956d844c0b34ae19393b5a9b641"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "98fa5ce3-525f-402d-bf62-adceab36e164",
-  "occurred_at": "2025-09-18T07:03Z",
-  "change_type": "Fix",
-  "summary": "Replaced proxied form viewer with direct iframe embedding and refreshed OpnForm documentation",
-  "content_hash": "d3c65069de38eaf1816966cb3ef4c398ee3780426db77492ce7ce7f0724891e5"
-}

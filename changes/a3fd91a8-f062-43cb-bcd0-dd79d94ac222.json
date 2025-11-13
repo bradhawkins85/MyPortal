@@ -1,7 +1,0 @@
-{
-  "guid": "a3fd91a8-f062-43cb-bcd0-dd79d94ac222",
-  "occurred_at": "2025-10-20T06:29Z",
-  "change_type": "Fix",
-  "summary": "Guarded module catalog and automation schedule refresh when the database is offline so startup and tests proceed without MySQL",
-  "content_hash": "2a1684354ddcb08c39b2590a9383dbf958e9c245b9d73d88ee9757b98a2cf549"
-}

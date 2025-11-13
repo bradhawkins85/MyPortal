@@ -1,7 +1,0 @@
-{
-  "guid": "43f188d9-e23e-4556-8af1-f8df354b5c91",
-  "occurred_at": "2025-11-10T04:40Z",
-  "change_type": "Feature",
-  "summary": "Business Continuity Plans module with support for Disaster Recovery, Incident Response, and Business Continuity plan types with version control and granular access permissions",
-  "content_hash": "9efbe569724fe8527c04746caec24b3b56ed74fe7d937ce9946508288d92e464"
-}

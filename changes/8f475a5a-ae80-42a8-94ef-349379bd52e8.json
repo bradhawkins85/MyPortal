@@ -1,7 +1,0 @@
-{
-  "guid": "8f475a5a-ae80-42a8-94ef-349379bd52e8",
-  "occurred_at": "2025-10-29T02:19Z",
-  "change_type": "Feature",
-  "summary": "Deferred dependency installation to cron-managed restart flag after Git pulls.",
-  "content_hash": "d9fa29cf2defdf8e5ace92b3595a651f85127b5319a4a219edbd5a03339e2400"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "60b24c84-d877-43d7-8037-4a31bd7e9889",
-  "occurred_at": "2025-10-01T09:05Z",
-  "change_type": "Fix",
-  "summary": "Ensured automation inserts reuse their connection so creation succeeds without 500 errors",
-  "content_hash": "0deb875416f15371ca6d3e51e06b437ed9a2c7b4eb913660c72acef93f573634"
-}

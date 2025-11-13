@@ -1,7 +1,0 @@
-{
-  "guid": "0942525f-1bce-42fb-862c-2bd97de3fb93",
-  "occurred_at": "2025-12-20T09:45Z",
-  "change_type": "Fix",
-  "summary": "Corrected automation admin handler to import the automation repository consistently so creation succeeds without runtime errors",
-  "content_hash": "ebcb16f6e233c25c80290fb7dd622983d799fd7c7f5eedd1b06c4dcdaf2ed332"
-}

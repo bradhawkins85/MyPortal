@@ -1,7 +1,0 @@
-{
-  "guid": "bed1a62b-aa83-48cb-9f69-bece58fb139e",
-  "occurred_at": "2025-10-29T13:26Z",
-  "change_type": "Fix",
-  "summary": "Removed Knowledge Base and Forms admin entries from the sidebar navigation.",
-  "content_hash": "71be602ab1a1373ba4b40dd90acc717ccbfa9626d4a12b72c8dc6ba15ed1cf5b"
-}

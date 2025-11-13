@@ -1,7 +1,0 @@
-{
-  "guid": "308f6953-8313-467b-af68-c5644a264deb",
-  "occurred_at": "2025-12-07T09:00Z",
-  "change_type": "Fix",
-  "summary": "Removed knowledge base search results and Ollama insight panels from the portal view to simplify the article list",
-  "content_hash": "6a5dfd536ef99a43a687defe7294b482d2e21147ed0aac0ebb4022e758d95c93"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "f4c37fe1-cba8-4389-905e-77e1acb35ff5",
-  "occurred_at": "2025-10-29T03:15Z",
-  "change_type": "Fix",
-  "summary": "Restored ticket bulk selection controls on the admin ticket table.",
-  "content_hash": "d470bad54c993754319179e729bfd35483e26caded99650e9070669a17475287"
-}

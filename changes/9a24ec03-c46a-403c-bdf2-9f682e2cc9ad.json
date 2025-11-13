@@ -1,7 +1,0 @@
-{
-  "guid": "9a24ec03-c46a-403c-bdf2-9f682e2cc9ad",
-  "occurred_at": "2025-10-10T03:54Z",
-  "change_type": "Fix",
-  "summary": "Removed the five item page cap from the shop catalogue so pagination now follows viewport measurements",
-  "content_hash": "5ddc5693f39bc7db468fa144647604afc22411f35defd09612f869a27547b790"
-}

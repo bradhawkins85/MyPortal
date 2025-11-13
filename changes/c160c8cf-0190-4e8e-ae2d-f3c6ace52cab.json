@@ -1,7 +1,0 @@
-{
-  "guid": "c160c8cf-0190-4e8e-ae2d-f3c6ace52cab",
-  "occurred_at": "2025-10-23T02:40Z",
-  "change_type": "Feature",
-  "summary": "Added company email domain mapping to support automatic signup assignment.",
-  "content_hash": "deb397f886aa2f4bd9828e6790decfc5e5745d946982a0ef847959cbfe9d1383"
-}

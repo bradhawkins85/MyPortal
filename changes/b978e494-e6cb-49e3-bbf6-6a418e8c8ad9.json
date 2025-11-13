@@ -1,7 +1,0 @@
-{
-  "guid": "b978e494-e6cb-49e3-bbf6-6a418e8c8ad9",
-  "occurred_at": "2025-10-30T12:11Z",
-  "change_type": "Fix",
-  "summary": "Collapsed the Roles administration guidance panel by default for quicker page scanning.",
-  "content_hash": "a958baf4f4029028c407c25d0660f862c738f833dea19d6944ed278315868867"
-}

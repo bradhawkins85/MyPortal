@@ -1,7 +1,0 @@
-{
-  "guid": "a9f65e06-5d7b-4ae2-a245-88804c744fbf",
-  "occurred_at": "2025-10-08T12:34Z",
-  "change_type": "Fix",
-  "summary": "Added multipart fallback parsing for mislabelled switch-company submissions so company switching succeeds for FormData clients",
-  "content_hash": "3b95202016e0c0dab15dc4b4b65e4501800acd3cb1e5093ccfecedfdedc678dd"
-}

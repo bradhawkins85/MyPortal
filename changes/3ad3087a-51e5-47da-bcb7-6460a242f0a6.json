@@ -1,7 +1,0 @@
-{
-  "guid": "3ad3087a-51e5-47da-bcb7-6460a242f0a6",
-  "occurred_at": "2025-10-08T12:17Z",
-  "change_type": "Change",
-  "summary": "Updated the customer forms portal route to /myforms with navigation updates and a legacy redirect",
-  "content_hash": "63eee773c5b33c65b316136964d1ff60d5db00de86460558bc935e9cecd5117e"
-}

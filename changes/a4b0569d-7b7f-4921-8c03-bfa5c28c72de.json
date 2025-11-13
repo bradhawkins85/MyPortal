@@ -1,7 +1,0 @@
-{
-  "guid": "a4b0569d-7b7f-4921-8c03-bfa5c28c72de",
-  "occurred_at": "2025-10-07T12:36Z",
-  "change_type": "Feature",
-  "summary": "Added FastAPI session management, CSRF middleware, login rate limiting, password reset, and TOTP flows with documented endpoints",
-  "content_hash": "c8d2c91f91c5e8668efbb5a8561fa423134fce433ebe9f7043652e719f87407c"
-}

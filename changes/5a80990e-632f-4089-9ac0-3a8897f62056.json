@@ -1,7 +1,0 @@
-{
-  "guid": "5a80990e-632f-4089-9ac0-3a8897f62056",
-  "occurred_at": "2025-10-20T07:49Z",
-  "change_type": "Feature",
-  "summary": "Moved integration module diagnostics actions into each module card with inline testing controls and refreshed layout spacing",
-  "content_hash": "4735e99eedfa80c36c548f785b27563acbdbf0a55647fb969fe76d9132f0395a"
-}

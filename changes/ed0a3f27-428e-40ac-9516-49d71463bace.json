@@ -1,7 +1,0 @@
-{
-  "guid": "ed0a3f27-428e-40ac-9516-49d71463bace",
-  "occurred_at": "2025-09-17T07:26Z",
-  "change_type": "Feature",
-  "summary": "Split scheduled tasks into system and company tables for clearer administration and visibility",
-  "content_hash": "8037407602795f28fa5c7ca770d88d30f49d6a2daaf754a927a7709ddd3389cc"
-}

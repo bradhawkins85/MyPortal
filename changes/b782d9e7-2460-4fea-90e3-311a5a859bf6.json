@@ -1,7 +1,0 @@
-{
-  "guid": "b782d9e7-2460-4fea-90e3-311a5a859bf6",
-  "occurred_at": "2025-12-02T14:30Z",
-  "change_type": "Fix",
-  "summary": "Guarded optional task company field lookups in automation.js so action builders initialise on page load",
-  "content_hash": "4a190ceaf785bb59ebb750a8fdcb72974da67905a472fb9b89fda0f4af4fe2da"
-}

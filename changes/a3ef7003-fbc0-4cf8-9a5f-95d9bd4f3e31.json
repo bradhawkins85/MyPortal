@@ -1,7 +1,0 @@
-{
-  "guid": "a3ef7003-fbc0-4cf8-9a5f-95d9bd4f3e31",
-  "occurred_at": "2025-11-01T06:42Z",
-  "change_type": "Fix",
-  "summary": "Fixed the shop admin import product modal so it opens via the local script bindings.",
-  "content_hash": "11eadeabe868759d56a0bd1315e887b90ec0a8bf4a35cb3c708b0364efe89f18"
-}

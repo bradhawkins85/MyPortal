@@ -1,7 +1,0 @@
-{
-  "guid": "58c510fc-ceb7-4ce0-baeb-34dc90016ca1",
-  "occurred_at": "2025-10-30T13:52Z",
-  "change_type": "Fix",
-  "summary": "Display pending staff company permissions alongside active memberships",
-  "content_hash": "fde299c63824a6da8807085016899a09b807daa4c68bcc728a8f740c3fbb3ecb"
-}

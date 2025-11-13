@@ -1,7 +1,0 @@
-{
-  "guid": "e93b51d5-a488-43a0-8107-1044fc6d5d29",
-  "occurred_at": "2025-10-17T12:30Z",
-  "change_type": "Fix",
-  "summary": "Added a global form confirmation handler and removed the missing forms_admin.js reference to resolve admin script 404s",
-  "content_hash": "677280cd40dc3cfb7a97c025bb033a016c01302ef3ddd14a6703a507e23733b6"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "8ec554bf-3632-4509-85d2-5d6eca0a4a2f",
-  "occurred_at": "2025-10-29T14:47Z",
-  "change_type": "Fix",
-  "summary": "Fix upgrade script to respect FORCE_RESTART flag from environment file.",
-  "content_hash": "e7279d10523332c9eeca24fb1d5fad5a77f80d15e8be434a07bd403d06dc08bf"
-}

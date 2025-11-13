@@ -1,7 +1,0 @@
-{
-  "guid": "96125a2e-9e83-470f-b853-2ab8c24e5724",
-  "occurred_at": "2025-09-18T07:21Z",
-  "change_type": "Change",
-  "summary": "Switched the portal authentication route from /login to /logon and updated dependent redirects and templates",
-  "content_hash": "53894f51212804b2172184cc18aa8360066901207cec1e5452c01951941f8574"
-}

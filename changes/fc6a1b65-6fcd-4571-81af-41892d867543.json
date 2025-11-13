@@ -1,7 +1,0 @@
-{
-  "guid": "fc6a1b65-6fcd-4571-81af-41892d867543",
-  "occurred_at": "2025-12-22T12:00Z",
-  "change_type": "Fix",
-  "summary": "Ensured ticket creation helper emits ticket-created automation events across UI, API, and Syncro imports so event workflows fire consistently",
-  "content_hash": "21c4413d3b79f18b58925b9b9c919612746d49a90cced95965367a23e35a19d4"
-}

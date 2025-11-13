@@ -1,7 +1,0 @@
-{
-  "guid": "2d0759f8-5ce2-44f1-a727-cbf868e9492a",
-  "occurred_at": "2025-09-17T07:18Z",
-  "change_type": "Fix",
-  "summary": "Added CSRF protection tokens to scheduled task forms to prevent invalid token errors when managing schedules",
-  "content_hash": "4e136ceaadc2212e6cb098a382d418d0ae9f8a94d3e5d6ce50e24c940a5e8ab2"
-}

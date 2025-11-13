@@ -1,7 +1,0 @@
-{
-  "guid": "d3cc2efe-ef89-4f05-8f4f-5a6ed3c50800",
-  "occurred_at": "2025-12-06T12:25Z",
-  "change_type": "Fix",
-  "summary": "Normalised AI summary parsing to strip Markdown-style code blocks so ticket summaries render as pla",
-  "content_hash": "e213044f932a4cb46415f2dbd1efe0a7f690329ed56be315e04920454993bd33"
-}

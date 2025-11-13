@@ -1,7 +1,0 @@
-{
-  "guid": "9064ec95-9fbb-4c5a-a678-1f5a281a29f5",
-  "occurred_at": "2025-10-10T04:30Z",
-  "change_type": "Fix",
-  "summary": "Mounted legacy uploads directory in FastAPI so shop product images load successfully",
-  "content_hash": "d78b4f87e05b3d66aa937f132b315679d35b5997d043d0e465c21fa4225eb9c2"
-}

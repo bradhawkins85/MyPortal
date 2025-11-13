@@ -1,7 +1,0 @@
-{
-  "guid": "1574340f-e9da-4545-9fb7-9334718f54a0",
-  "occurred_at": "2025-10-02T15:00Z",
-  "change_type": "Fix",
-  "summary": "Removed the ticket controls sidebar and placed the watcher list beneath the Updated metadata on the admin ticket detail view",
-  "content_hash": "94a2bef8adea7043f0bef8f9adee3ef6be067524621b55de5ac6aafc7a46a5bc"
-}

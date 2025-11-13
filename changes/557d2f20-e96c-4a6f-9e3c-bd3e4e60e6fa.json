@@ -1,7 +1,0 @@
-{
-  "guid": "557d2f20-e96c-4a6f-9e3c-bd3e4e60e6fa",
-  "occurred_at": "2025-10-29T13:39Z",
-  "change_type": "Fix",
-  "summary": "Repositioned Knowledge base admin link into header actions with button styling aligned to search",
-  "content_hash": "8f5cc4b1b685ff318c2515017d734d5a3a0389241e3b70b59fad932789512db4"
-}

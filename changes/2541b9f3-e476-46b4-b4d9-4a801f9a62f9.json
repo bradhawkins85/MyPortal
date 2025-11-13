@@ -1,7 +1,0 @@
-{
-  "guid": "2541b9f3-e476-46b4-b4d9-4a801f9a62f9",
-  "occurred_at": "2025-12-20T09:00Z",
-  "change_type": "Fix",
-  "summary": "Restored scheduler task creation responses by fetching the inserted row using the returned task ID",
-  "content_hash": "83204808dafc6c4a6f288f25d2e35c8e036664642b46e666f31131df55adcb78"
-}

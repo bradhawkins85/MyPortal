@@ -1,7 +1,0 @@
-{
-  "guid": "35498f42-e3da-4d5a-a6e5-8c9993d21e71",
-  "occurred_at": "2025-10-29T10:30Z",
-  "change_type": "Feature",
-  "summary": "Added ticket automation trigger selector with multi-action builder and event-driven schedule hiding improvements",
-  "content_hash": "539a848c0a0ef2e44062037a2ab37f14f57779e91344b4a1eeb57774623ac93c"
-}
