@@ -295,3 +295,75 @@ async def test_sync_company_skips_when_no_rates_available(monkeypatch):
     assert "No billing rates configured" in result["tickets_skipped_reason"]
     assert result["billable_tickets_found"] == 1
     assert result["ticket_line_items_created"] == 0
+
+
+@pytest.mark.asyncio
+async def test_build_ticket_invoices_uses_xero_item_rates():
+    """Test that build_ticket_invoices uses Xero item rates when provided."""
+    from decimal import Decimal
+    
+    async def fake_fetch_ticket(ticket_id: int):
+        return {
+            "id": ticket_id,
+            "company_id": 1,
+            "subject": f"Test Ticket #{ticket_id}",
+            "status": "to bill",
+        }
+
+    async def fake_fetch_replies(ticket_id: int):
+        return [
+            {
+                "id": 100,
+                "minutes_spent": 60,
+                "is_billable": True,
+                "labour_type_code": "REMOTE",
+                "labour_type_name": "Remote Support",
+            },
+            {
+                "id": 101,
+                "minutes_spent": 120,
+                "is_billable": True,
+                "labour_type_code": "ONSITE",
+                "labour_type_name": "On-site Support",
+            },
+        ]
+
+    async def fake_fetch_company(company_id: int):
+        return {"id": company_id, "name": "Test Corp", "xero_id": "xero-456"}
+
+    # Build invoices with Xero item rates
+    xero_item_rates = {
+        "REMOTE": Decimal("95.00"),
+        "ONSITE": Decimal("150.00"),
+    }
+    
+    invoices = await xero_service.build_ticket_invoices(
+        [1],
+        hourly_rate=Decimal("100"),  # Default rate - should not be used for items with Xero rates
+        account_code="400",
+        tax_type="OUTPUT",
+        line_amount_type="Exclusive",
+        reference_prefix="IT Support",
+        xero_item_rates=xero_item_rates,
+        fetch_ticket=fake_fetch_ticket,
+        fetch_replies=fake_fetch_replies,
+        fetch_company=fake_fetch_company,
+    )
+
+    assert len(invoices) == 1
+    invoice = invoices[0]
+    
+    # Should have 2 line items (one per labour type)
+    assert len(invoice["line_items"]) == 2
+    
+    # Find the line items by ItemCode
+    remote_item = next(item for item in invoice["line_items"] if item.get("ItemCode") == "REMOTE")
+    onsite_item = next(item for item in invoice["line_items"] if item.get("ItemCode") == "ONSITE")
+    
+    # Verify REMOTE uses Xero item rate: 60 minutes = 1 hour @ $95
+    assert remote_item["Quantity"] == 1.0
+    assert remote_item["UnitAmount"] == 95.00
+    
+    # Verify ONSITE uses Xero item rate: 120 minutes = 2 hours @ $150
+    assert onsite_item["Quantity"] == 2.0
+    assert onsite_item["UnitAmount"] == 150.00
