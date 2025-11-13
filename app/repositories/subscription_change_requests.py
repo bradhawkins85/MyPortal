@@ -124,6 +124,31 @@ async def list_pending_changes_for_subscriptions(
     return result
 
 
+async def get_applied_additions_for_subscription(
+    subscription_id: str,
+) -> int:
+    """Get the total number of licenses added via applied addition requests.
+    
+    This is used to calculate the original contracted quantity by subtracting
+    applied additions from the current quantity.
+    
+    Returns:
+        Total quantity added via applied addition change requests
+    """
+    row = await db.fetch_one(
+        """
+        SELECT COALESCE(SUM(quantity_change), 0) as total_added
+        FROM subscription_change_requests 
+        WHERE subscription_id = %s 
+          AND change_type = 'addition' 
+          AND status = 'applied'
+        """,
+        (subscription_id,),
+    )
+    
+    return int(row["total_added"]) if row else 0
+
+
 async def update_change_request_status(
     change_request_id: str,
     status: str,
