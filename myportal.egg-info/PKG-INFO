@@ -25,7 +25,7 @@ Requires-Dist: apscheduler
 Requires-Dist: croniter>=1.4
 Requires-Dist: httpx
 Requires-Dist: loguru
-Requires-Dist: cryptography
+Requires-Dist: cryptography>=42.0.4
 Requires-Dist: email-validator
 Requires-Dist: python-multipart
 Requires-Dist: bleach

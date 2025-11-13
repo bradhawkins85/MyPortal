@@ -102,7 +102,7 @@ class Settings(BaseSettings):
         validation_alias="BCP_ENABLED",
     )
     enable_hsts: bool = Field(
-        default=True,
+        default=False,
         validation_alias="ENABLE_HSTS",
     )
 
