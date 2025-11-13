@@ -1104,9 +1104,12 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
             "company_id": company_id,
         }
     
-    # Sync billable tickets first if configured
+    # Build ticket line items if billable tickets are configured
     billable_statuses_raw = settings.get("billable_statuses")
-    tickets_result: dict[str, Any] | None = None
+    ticket_line_items: list[dict[str, Any]] = []
+    tickets_context: list[dict[str, Any]] = []
+    ticket_numbers: list[str] = []
+    
     if billable_statuses_raw:
         try:
             hourly_rate_str = str(settings.get("default_hourly_rate", "")).strip()
@@ -1116,40 +1119,141 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
         
         if hourly_rate > 0:
             account_code = str(settings.get("account_code", "")).strip() or "400"
-            line_amount_type = str(settings.get("line_amount_type", "")).strip() or "Exclusive"
-            reference_prefix = str(settings.get("reference_prefix", "")).strip() or "Support"
             description_template = str(settings.get("line_item_description_template", "")).strip()
             
-            tickets_result = await sync_billable_tickets(
-                company_id,
-                billable_statuses=billable_statuses_raw,
-                hourly_rate=hourly_rate,
-                account_code=account_code,
-                tax_type=tax_type,
-                line_amount_type=line_amount_type,
-                reference_prefix=reference_prefix,
-                description_template=description_template,
-                tenant_id=tenant_id,
-                access_token=access_token,
-                auto_send=auto_send,
-            )
+            # Normalize billable statuses
+            status_filter = _normalise_status_filter(billable_statuses_raw)
+            if status_filter:
+                # Find tickets for this company matching billable statuses
+                tickets = await tickets_repo.list_tickets(
+                    company_id=company_id,
+                    limit=1000,
+                )
+                
+                # Filter to only billable status tickets with unbilled time
+                billable_tickets: list[dict[str, Any]] = []
+                for ticket in tickets:
+                    ticket_status = str(ticket.get("status") or "").strip().lower()
+                    if ticket_status not in status_filter:
+                        continue
+                    
+                    # Check if ticket has any unbilled time entries
+                    ticket_id = ticket.get("id")
+                    if not ticket_id:
+                        continue
+                        
+                    unbilled_reply_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
+                    if unbilled_reply_ids:
+                        billable_tickets.append(ticket)
+                
+                if billable_tickets:
+                    # Build line items for billable tickets
+                    for ticket in billable_tickets:
+                        ticket_id = ticket.get("id")
+                        if not ticket_id:
+                            continue
+                        
+                        # Get unbilled replies for this ticket
+                        unbilled_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
+                        all_replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
+                        unbilled_replies = [r for r in all_replies if r.get("id") in unbilled_ids]
+                        
+                        # Group by labour type
+                        labour_map: dict[tuple[str | None, str | None], dict[str, Any]] = {}
+                        billable_minutes = 0
+                        
+                        for reply in unbilled_replies:
+                            minutes = _coerce_minutes(reply.get("minutes_spent"))
+                            if minutes <= 0:
+                                continue
+                            is_billable = reply.get("is_billable")
+                            if not is_billable:
+                                continue
+                            billable_minutes += minutes
+                            labour_code = str(reply.get("labour_type_code") or "").strip() or None
+                            labour_name = str(reply.get("labour_type_name") or "").strip() or None
+                            key = (labour_code, labour_name)
+                            bucket = labour_map.get(key)
+                            if not bucket:
+                                bucket = {"minutes": 0, "code": labour_code, "name": labour_name}
+                                labour_map[key] = bucket
+                            bucket["minutes"] += minutes
+                        
+                        if billable_minutes <= 0:
+                            continue
+                        
+                        # Create line items for this ticket
+                        labour_groups = list(labour_map.values())
+                        if labour_groups:
+                            for group in labour_groups:
+                                group_minutes = int(group.get("minutes") or 0)
+                                if group_minutes <= 0:
+                                    continue
+                                hours_decimal = _minutes_to_hours(group_minutes)
+                                description = _format_line_description(
+                                    description_template,
+                                    ticket,
+                                    group,
+                                    group_minutes,
+                                )
+                                line_item: dict[str, Any] = {
+                                    "Description": description,
+                                    "Quantity": float(hours_decimal),
+                                    "UnitAmount": float(_quantize(hourly_rate)),
+                                    "AccountCode": str(account_code or "").strip(),
+                                }
+                                labour_code = str(group.get("code") or "").strip()
+                                if labour_code:
+                                    line_item["ItemCode"] = labour_code
+                                if tax_type:
+                                    line_item["TaxType"] = str(tax_type).strip()
+                                ticket_line_items.append(line_item)
+                        else:
+                            hours_decimal = _minutes_to_hours(billable_minutes)
+                            description = _format_line_description(
+                                description_template,
+                                ticket,
+                                None,
+                                billable_minutes,
+                            )
+                            line_item = {
+                                "Description": description,
+                                "Quantity": float(hours_decimal),
+                                "UnitAmount": float(_quantize(hourly_rate)),
+                                "AccountCode": str(account_code or "").strip(),
+                            }
+                            if tax_type:
+                                line_item["TaxType"] = str(tax_type).strip()
+                            ticket_line_items.append(line_item)
+                        
+                        # Track ticket context for post-processing
+                        tickets_context.append({
+                            "id": ticket_id,
+                            "subject": ticket.get("subject"),
+                            "status": ticket.get("status"),
+                            "billable_minutes": billable_minutes,
+                            "labour_groups": labour_groups,
+                        })
+                        
+                        # Collect ticket numbers for reference
+                        ticket_num = str(ticket_id)
+                        if ticket_num not in ticket_numbers:
+                            ticket_numbers.append(ticket_num)
 
-    # If no line items from recurring, skip that part of the sync
-    if not line_items:
+    # Combine recurring and ticket line items
+    combined_line_items = line_items + ticket_line_items
+    
+    # If no line items at all, skip
+    if not combined_line_items:
         logger.info(
-            "No active recurring invoice items for company",
+            "No active recurring invoice items or billable tickets for company",
             company_id=company_id,
         )
-        # If we synced tickets, return that result
-        if tickets_result and tickets_result.get("status") in {"succeeded", "failed", "error"}:
-            return tickets_result
-        
         return {
             "status": "skipped",
             "reason": "No active recurring invoice items or billable tickets",
             "company_id": company_id,
             "recurring_items_count": len(recurring_items_info),
-            "tickets_sync": tickets_result,
         }
 
     # Build invoice payload for Xero API
@@ -1164,12 +1268,15 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
     line_amount_type = str(settings.get("line_amount_type", "")).strip() or "Exclusive"
     reference_prefix = str(settings.get("reference_prefix", "")).strip() or "Support"
     
+    # Build reference including ticket numbers if any
+    reference = _build_reference(reference_prefix, ticket_numbers)
+    
     invoice_payload = {
         "Type": "ACCREC",
         "Contact": contact_payload,
-        "LineItems": line_items,
+        "LineItems": combined_line_items,
         "LineAmountTypes": line_amount_type,
-        "Reference": reference_prefix,
+        "Reference": reference,
         "Date": date.today().isoformat(),
         "Status": "AUTHORISED" if auto_send else "DRAFT",
     }
@@ -1270,12 +1377,92 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                     )
         
         if success:
+            # Parse invoice number from response
+            xero_invoice_number: str | None = None
+            if response_body:
+                try:
+                    response_data = json.loads(response_body)
+                    invoices_list = response_data.get("Invoices", [])
+                    if invoices_list:
+                        xero_invoice_number = invoices_list[0].get("InvoiceNumber")
+                except Exception as parse_exc:
+                    logger.warning(
+                        "Failed to parse Xero invoice number from response",
+                        error=str(parse_exc),
+                    )
+            
+            # Record billed time entries and update ticket statuses if we billed tickets
+            billed_count = 0
+            if tickets_context and xero_invoice_number:
+                now = datetime.now(timezone.utc)
+                
+                for ticket_ctx in tickets_context:
+                    ticket_id = ticket_ctx.get("id")
+                    if not ticket_id:
+                        continue
+                    
+                    # Get all replies for this ticket that were in the invoice
+                    unbilled_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
+                    replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
+                    
+                    for reply in replies:
+                        reply_id = reply.get("id")
+                        if reply_id not in unbilled_ids:
+                            continue
+                        
+                        # Ensure entry is billable
+                        is_billable = reply.get("is_billable")
+                        if not is_billable:
+                            continue
+                        
+                        minutes = reply.get("minutes_spent")
+                        if not minutes or minutes <= 0:
+                            continue
+                        
+                        labour_type_id = reply.get("labour_type_id")
+                        
+                        try:
+                            await billed_time_repo.create_billed_time_entry(
+                                ticket_id=ticket_id,
+                                reply_id=reply_id,
+                                xero_invoice_number=xero_invoice_number,
+                                minutes_billed=minutes,
+                                labour_type_id=labour_type_id,
+                            )
+                            billed_count += 1
+                        except Exception as entry_exc:
+                            logger.error(
+                                "Failed to record billed time entry",
+                                ticket_id=ticket_id,
+                                reply_id=reply_id,
+                                error=str(entry_exc),
+                            )
+                    
+                    # Update ticket: mark as billed and move to Closed status
+                    try:
+                        await tickets_repo.update_ticket(
+                            ticket_id,
+                            xero_invoice_number=xero_invoice_number,
+                            billed_at=now,
+                            status="closed",
+                            closed_at=now,
+                        )
+                    except Exception as update_exc:
+                        logger.error(
+                            "Failed to update ticket billing status",
+                            ticket_id=ticket_id,
+                            error=str(update_exc),
+                        )
+            
             logger.info(
                 "Successfully synced company to Xero",
                 company_id=company_id,
                 tenant_id=tenant_id,
                 response_status=response_status,
                 event_id=event_id,
+                invoice_number=xero_invoice_number,
+                tickets_billed=len(tickets_context),
+                time_entries_recorded=billed_count,
             )
             return {
                 "status": "succeeded",
@@ -1284,7 +1471,9 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                 "response_status": response_status,
                 "event_id": event_id,
                 "recurring_items_count": len(recurring_items_info),
-                "tickets_sync": tickets_result,
+                "invoice_number": xero_invoice_number,
+                "tickets_billed": len(tickets_context),
+                "time_entries_recorded": billed_count,
             }
         else:
             logger.error(
