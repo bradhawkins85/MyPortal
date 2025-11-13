@@ -86,7 +86,8 @@ class TicketReply(BaseModel):
 class TicketWatcher(BaseModel):
     id: int
     ticket_id: int
-    user_id: int
+    user_id: Optional[int] = None
+    email: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -216,6 +217,7 @@ class TicketStatusListResponse(BaseModel):
 
 class TicketWatcherUpdate(BaseModel):
     user_ids: list[int] = Field(default_factory=list)
+    emails: list[str] = Field(default_factory=list)
 
 
 class SyncroTicketImportMode(str, Enum):

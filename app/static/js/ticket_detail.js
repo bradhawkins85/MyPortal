@@ -1504,6 +1504,8 @@
 
     const selectElement = container.querySelector('[data-watcher-select]');
     const addButton = container.querySelector('[data-add-watcher]');
+    const emailInput = container.querySelector('[data-watcher-email-input]');
+    const addEmailButton = container.querySelector('[data-add-watcher-email]');
     const watchersList = container.querySelector('[data-watchers-list]');
     const emptyMessage = container.querySelector('[data-watchers-empty]');
 
@@ -1521,7 +1523,15 @@
       addButton.disabled = !selectElement.value;
     });
 
-    // Handle add watcher
+    // Enable/disable email add button based on input
+    if (emailInput && addEmailButton) {
+      emailInput.addEventListener('input', () => {
+        const email = emailInput.value.trim();
+        addEmailButton.disabled = !email || !email.includes('@');
+      });
+    }
+
+    // Handle add watcher by user ID
     addButton.addEventListener('click', async () => {
       const userId = selectElement.value;
       if (!userId) {
@@ -1554,62 +1564,7 @@
         selectElement.value = '';
 
         // Add to watchers list
-        const listItem = document.createElement('li');
-        listItem.className = 'list__item';
-        listItem.setAttribute('data-watcher-item', '');
-        listItem.setAttribute('data-user-id', userId);
-
-        const now = new Date();
-        const formattedDate = now.toLocaleString('en-CA', {
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        }).replace(',', '');
-
-        // Create elements safely without using innerHTML
-        const itemContainer = document.createElement('div');
-        itemContainer.style.display = 'flex';
-        itemContainer.style.alignItems = 'center';
-        itemContainer.style.justifyContent = 'space-between';
-
-        const infoContainer = document.createElement('div');
-        
-        const emailStrong = document.createElement('strong');
-        emailStrong.textContent = userEmail;
-        
-        const metaDiv = document.createElement('div');
-        metaDiv.className = 'list__meta';
-        metaDiv.textContent = `Watching since ${formattedDate}`;
-        
-        infoContainer.appendChild(emailStrong);
-        infoContainer.appendChild(metaDiv);
-
-        const removeButton = document.createElement('button');
-        removeButton.type = 'button';
-        removeButton.className = 'button button--small button--ghost';
-        removeButton.setAttribute('data-remove-watcher', '');
-        removeButton.setAttribute('data-user-id', userId);
-        removeButton.setAttribute('data-user-email', userEmail);
-        removeButton.setAttribute('title', 'Remove watcher');
-        removeButton.textContent = 'Remove';
-
-        itemContainer.appendChild(infoContainer);
-        itemContainer.appendChild(removeButton);
-        listItem.appendChild(itemContainer);
-
-        watchersList.appendChild(listItem);
-
-        // Show list, hide empty message
-        if (emptyMessage) {
-          emptyMessage.style.display = 'none';
-        }
-        watchersList.style.display = '';
-
-        // Attach remove handler to the new button
-        attachRemoveHandler(removeButton);
+        addWatcherToList(userId, userEmail, null);
       } catch (error) {
         console.error('Failed to add watcher:', error);
         alert(error instanceof Error ? error.message : 'Failed to add watcher');
@@ -1619,13 +1574,133 @@
       }
     });
 
+    // Handle add watcher by email
+    if (emailInput && addEmailButton) {
+      addEmailButton.addEventListener('click', async () => {
+        const email = emailInput.value.trim();
+        if (!email || !email.includes('@')) {
+          return;
+        }
+
+        addEmailButton.disabled = true;
+        addEmailButton.setAttribute('aria-busy', 'true');
+
+        try {
+          const csrfToken = getCsrfToken();
+          const response = await fetch(`/api/tickets/${ticketId}/watchers/email?email=${encodeURIComponent(email)}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': csrfToken,
+            },
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || 'Failed to add watcher');
+          }
+
+          // Clear the input
+          emailInput.value = '';
+
+          // Add to watchers list
+          addWatcherToList(null, email, email);
+        } catch (error) {
+          console.error('Failed to add watcher by email:', error);
+          alert(error instanceof Error ? error.message : 'Failed to add watcher');
+        } finally {
+          addEmailButton.disabled = true;
+          addEmailButton.removeAttribute('aria-busy');
+        }
+      });
+
+      // Handle Enter key in email input
+      emailInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !addEmailButton.disabled) {
+          e.preventDefault();
+          addEmailButton.click();
+        }
+      });
+    }
+
+    // Helper function to add watcher to list
+    function addWatcherToList(userId, displayText, watcherEmail) {
+      const listItem = document.createElement('li');
+      listItem.className = 'list__item';
+      listItem.setAttribute('data-watcher-item', '');
+      if (userId) {
+        listItem.setAttribute('data-user-id', userId);
+      }
+      if (watcherEmail) {
+        listItem.setAttribute('data-watcher-email', watcherEmail);
+      }
+
+      const now = new Date();
+      const formattedDate = now.toLocaleString('en-CA', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).replace(',', '');
+
+      // Create elements safely without using innerHTML
+      const itemContainer = document.createElement('div');
+      itemContainer.style.display = 'flex';
+      itemContainer.style.alignItems = 'center';
+      itemContainer.style.justifyContent = 'space-between';
+
+      const infoContainer = document.createElement('div');
+      
+      const emailStrong = document.createElement('strong');
+      emailStrong.textContent = displayText;
+      
+      const metaDiv = document.createElement('div');
+      metaDiv.className = 'list__meta';
+      metaDiv.textContent = `Watching since ${formattedDate}`;
+      
+      infoContainer.appendChild(emailStrong);
+      infoContainer.appendChild(metaDiv);
+
+      const removeButton = document.createElement('button');
+      removeButton.type = 'button';
+      removeButton.className = 'button button--small button--ghost';
+      removeButton.setAttribute('data-remove-watcher', '');
+      if (userId) {
+        removeButton.setAttribute('data-user-id', userId);
+      }
+      if (watcherEmail) {
+        removeButton.setAttribute('data-watcher-email', watcherEmail);
+      }
+      removeButton.setAttribute('data-user-display', displayText);
+      removeButton.setAttribute('title', 'Remove watcher');
+      removeButton.textContent = 'Remove';
+
+      itemContainer.appendChild(infoContainer);
+      itemContainer.appendChild(removeButton);
+      listItem.appendChild(itemContainer);
+
+      watchersList.appendChild(listItem);
+
+      // Show list, hide empty message
+      if (emptyMessage) {
+        emptyMessage.style.display = 'none';
+      }
+      watchersList.style.display = '';
+
+      // Attach remove handler to the new button
+      attachRemoveHandler(removeButton);
+    }
+
     // Handle remove watcher
     function attachRemoveHandler(button) {
       button.addEventListener('click', async () => {
         const userId = button.getAttribute('data-user-id');
-        const userEmail = button.getAttribute('data-user-email');
+        const watcherEmail = button.getAttribute('data-watcher-email');
+        const displayText = button.getAttribute('data-user-display');
 
-        if (!userId || !confirm(`Remove ${userEmail} from watchers?`)) {
+        if ((!userId && !watcherEmail) || !confirm(`Remove ${displayText} from watchers?`)) {
           return;
         }
 
@@ -1634,7 +1709,17 @@
 
         try {
           const csrfToken = getCsrfToken();
-          const response = await fetch(`/api/tickets/${ticketId}/watchers/${userId}`, {
+          let url;
+          
+          if (userId) {
+            url = `/api/tickets/${ticketId}/watchers/${userId}`;
+          } else if (watcherEmail) {
+            url = `/api/tickets/${ticketId}/watchers/email/${encodeURIComponent(watcherEmail)}`;
+          } else {
+            throw new Error('No user ID or email found');
+          }
+
+          const response = await fetch(url, {
             method: 'DELETE',
             headers: {
               'X-CSRF-Token': csrfToken,
@@ -1652,16 +1737,18 @@
             listItem.remove();
           }
 
-          // Add back to select
-          const option = document.createElement('option');
-          option.value = userId;
-          option.textContent = userEmail;
-          selectElement.appendChild(option);
+          // Add back to select if it was a user ID
+          if (userId && displayText) {
+            const option = document.createElement('option');
+            option.value = userId;
+            option.textContent = displayText;
+            selectElement.appendChild(option);
 
-          // Sort options alphabetically
-          const options = Array.from(selectElement.options).slice(1); // Skip first "Select..." option
-          options.sort((a, b) => a.textContent.localeCompare(b.textContent));
-          options.forEach(opt => selectElement.appendChild(opt));
+            // Sort options alphabetically
+            const options = Array.from(selectElement.options).slice(1); // Skip first "Select..." option
+            options.sort((a, b) => a.textContent.localeCompare(b.textContent));
+            options.forEach(opt => selectElement.appendChild(opt));
+          }
 
           // Show empty message if no watchers
           const remainingWatchers = watchersList.querySelectorAll('[data-watcher-item]');

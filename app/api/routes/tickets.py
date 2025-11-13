@@ -559,7 +559,7 @@ async def update_watchers(
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    await tickets_repo.replace_watchers(ticket_id, payload.user_ids)
+    await tickets_repo.replace_watchers(ticket_id, payload.user_ids, payload.emails)
     await tickets_service.emit_ticket_updated_event(
         ticket_id,
         actor_type="technician",
@@ -577,7 +577,34 @@ async def add_watcher(
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    await tickets_repo.add_watcher(ticket_id, user_id)
+    await tickets_repo.add_watcher(ticket_id, user_id=user_id)
+    await tickets_service.emit_ticket_updated_event(
+        ticket_id,
+        actor_type="technician",
+        actor=current_user,
+    )
+    return await _build_ticket_detail(ticket_id, current_user)
+
+
+@router.post("/{ticket_id}/watchers/email", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
+async def add_watcher_by_email(
+    ticket_id: int,
+    email: str = Query(..., description="Email address of the watcher"),
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TicketDetail:
+    """Add a watcher to a ticket by email address."""
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    email_normalized = email.strip().lower()
+    if not email_normalized or "@" not in email_normalized:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid email address"
+        )
+    
+    await tickets_repo.add_watcher(ticket_id, email=email_normalized)
     await tickets_service.emit_ticket_updated_event(
         ticket_id,
         actor_type="technician",
@@ -595,7 +622,27 @@ async def remove_watcher(
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    await tickets_repo.remove_watcher(ticket_id, user_id)
+    await tickets_repo.remove_watcher(ticket_id, user_id=user_id)
+    await tickets_service.emit_ticket_updated_event(
+        ticket_id,
+        actor_type="technician",
+        actor=current_user,
+    )
+
+
+@router.delete("/{ticket_id}/watchers/email/{email:path}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_watcher_by_email(
+    ticket_id: int,
+    email: str,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> None:
+    """Remove a watcher from a ticket by email address."""
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    email_normalized = email.strip().lower()
+    await tickets_repo.remove_watcher(ticket_id, email=email_normalized)
     await tickets_service.emit_ticket_updated_event(
         ticket_id,
         actor_type="technician",
