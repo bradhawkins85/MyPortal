@@ -26,6 +26,7 @@ MyPortal is a Python-first customer portal built with FastAPI, async MySQL, and 
 - Tests are located in the `tests/` directory
 - Always test code changes to prevent Internal Server Error occurrences
 - Use existing test patterns (pytest-asyncio, fixtures in conftest.py)
+- SQL Migrations should be idempotent
 
 ### Building and Deployment
 
