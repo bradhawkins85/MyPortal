@@ -40,12 +40,13 @@ def test_migration_132_checks_all_operations():
     # 2. user_id column exists (for data migration)
     # 3. user_id column exists (for DELETE statement)
     # 4. billing_contacts_ibfk_2 FK exists (for DROP FK)
-    # 5. user_id column exists (for DROP COLUMN)
-    # 6. staff_id IS_NULLABLE (for MODIFY COLUMN)
-    # 7. billing_contacts_staff_fk FK exists (for ADD FK)
-    # 8. unique_company_user key exists (for DROP KEY)
-    # 9. unique_company_staff key exists (for ADD KEY)
-    # 10. idx_billing_contacts_staff index exists (for CREATE INDEX)
+    # 5. unique_company_user key exists (for DROP KEY)
+    # 6. idx_billing_contacts_user index exists (for DROP INDEX)
+    # 7. user_id column exists (for DROP COLUMN)
+    # 8. staff_id IS_NULLABLE (for MODIFY COLUMN)
+    # 9. billing_contacts_staff_fk FK exists (for ADD FK)
+    # 10. unique_company_staff key exists (for ADD KEY)
+    # 11. idx_billing_contacts_staff index exists (for CREATE INDEX)
     
     assert info_schema_checks >= 7, f"Expected at least 7 information_schema checks, found {info_schema_checks}"
 
