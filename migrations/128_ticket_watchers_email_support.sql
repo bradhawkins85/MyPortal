@@ -10,6 +10,13 @@ ALTER TABLE ticket_watchers
 MODIFY COLUMN user_id INT NULL;
 
 -- Drop the old unique constraint
+-- Ensure foreign keys retain necessary supporting indexes before dropping the composite key
+CREATE INDEX IF NOT EXISTS idx_ticket_watchers_ticket_id
+    ON ticket_watchers (ticket_id);
+
+CREATE INDEX IF NOT EXISTS idx_ticket_watchers_user_id
+    ON ticket_watchers (user_id);
+
 ALTER TABLE ticket_watchers
 DROP INDEX IF EXISTS uq_ticket_watchers_ticket_user;
 
