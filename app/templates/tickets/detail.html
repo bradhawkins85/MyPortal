@@ -73,6 +73,20 @@
                     {% endif %}
                   </dd>
                 </div>
+                {% if ticket.xero_invoice_number %}
+                  <div class="description-list__row">
+                    <dt>Invoice Number</dt>
+                    <dd><strong>{{ ticket.xero_invoice_number }}</strong></dd>
+                  </div>
+                {% endif %}
+                {% if ticket.billed_at_iso %}
+                  <div class="description-list__row">
+                    <dt>Billed At</dt>
+                    <dd>
+                      <span data-utc="{{ ticket.billed_at_iso }}"></span>
+                    </dd>
+                  </div>
+                {% endif %}
               </dl>
             </div>
           </article>
