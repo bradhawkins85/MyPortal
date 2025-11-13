@@ -151,6 +151,7 @@ class LabourTypeModel(BaseModel):
     id: int
     code: str
     name: str
+    rate: Optional[float] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -165,11 +166,13 @@ class LabourTypeListResponse(BaseModel):
 class LabourTypeUpdateRequest(BaseModel):
     code: Optional[str] = Field(default=None, min_length=1, max_length=64)
     name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    rate: Optional[float] = Field(default=None, ge=0)
 
 
 class LabourTypeCreateRequest(BaseModel):
     code: str = Field(..., min_length=1, max_length=64)
     name: str = Field(..., min_length=1, max_length=128)
+    rate: Optional[float] = Field(default=None, ge=0)
 
 
 class TicketSearchFilters(BaseModel):

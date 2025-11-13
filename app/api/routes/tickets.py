@@ -681,6 +681,7 @@ async def list_labour_types_endpoint(
             id=int(item.get("id")),
             code=str(item.get("code") or ""),
             name=str(item.get("name") or ""),
+            rate=item.get("rate"),
             created_at=item.get("created_at"),
             updated_at=item.get("updated_at"),
         )
@@ -696,7 +697,7 @@ async def create_labour_type_endpoint(
     current_user: dict = Depends(require_super_admin),
 ) -> LabourTypeModel:
     try:
-        record = await labour_types_service.create_labour_type(code=payload.code, name=payload.name)
+        record = await labour_types_service.create_labour_type(code=payload.code, name=payload.name, rate=payload.rate)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return LabourTypeModel(**record)
@@ -713,6 +714,7 @@ async def update_labour_type_endpoint(
             labour_type_id,
             code=payload.code,
             name=payload.name,
+            rate=payload.rate,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
