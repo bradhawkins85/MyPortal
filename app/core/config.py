@@ -101,6 +101,10 @@ class Settings(BaseSettings):
         default=True,
         validation_alias="BCP_ENABLED",
     )
+    enable_hsts: bool = Field(
+        default=True,
+        validation_alias="ENABLE_HSTS",
+    )
 
     @field_validator(
         "syncro_webhook_url",
