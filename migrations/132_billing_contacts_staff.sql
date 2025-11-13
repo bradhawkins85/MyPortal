@@ -11,30 +11,33 @@ INNER JOIN users u ON u.id = bc.user_id
 INNER JOIN staff s ON s.company_id = bc.company_id AND LOWER(s.email) = LOWER(u.email)
 SET bc.staff_id = s.id;
 
--- Step 3: Drop the old foreign key constraint on user_id
+-- Step 3: Remove any billing contacts that couldn't be migrated (no matching staff)
+DELETE FROM billing_contacts WHERE staff_id IS NULL;
+
+-- Step 4: Drop the old foreign key constraint on user_id
 ALTER TABLE billing_contacts
 DROP FOREIGN KEY billing_contacts_ibfk_2;
 
--- Step 4: Drop the old user_id column
+-- Step 5: Drop the old user_id column
 ALTER TABLE billing_contacts
 DROP COLUMN user_id;
 
--- Step 5: Make staff_id NOT NULL
+-- Step 6: Make staff_id NOT NULL
 ALTER TABLE billing_contacts
 MODIFY COLUMN staff_id INT NOT NULL;
 
--- Step 6: Add foreign key constraint for staff_id
+-- Step 7: Add foreign key constraint for staff_id
 ALTER TABLE billing_contacts
 ADD CONSTRAINT billing_contacts_staff_fk 
 FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE;
 
--- Step 7: Update the unique key to use staff_id
+-- Step 8: Update the unique key to use staff_id
 ALTER TABLE billing_contacts
 DROP KEY unique_company_user;
 
 ALTER TABLE billing_contacts
 ADD UNIQUE KEY unique_company_staff (company_id, staff_id);
 
--- Step 8: Update the index
+-- Step 9: Update the index
 DROP INDEX IF EXISTS idx_billing_contacts_user ON billing_contacts;
 CREATE INDEX idx_billing_contacts_staff ON billing_contacts(staff_id);
