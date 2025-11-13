@@ -807,11 +807,13 @@ async def sync_billable_tickets(
     response_headers: dict[str, Any] | None = None
     xero_invoice_number: str | None = None
     
+    xero_request_payload = {"Invoices": [invoice_payload]}
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 api_url,
-                json=invoice_payload,
+                json=xero_request_payload,
                 headers=request_headers,
             )
             response_status = response.status_code
@@ -842,7 +844,7 @@ async def sync_billable_tickets(
                         response_status=response_status,
                         response_body=response_body,
                         request_headers=request_headers,
-                        request_body=invoice_payload,
+                        request_body=xero_request_payload,
                         response_headers=response_headers,
                     )
                 except Exception as record_exc:
@@ -861,7 +863,7 @@ async def sync_billable_tickets(
                         response_status=response_status,
                         response_body=response_body,
                         request_headers=request_headers,
-                        request_body=invoice_payload,
+                        request_body=xero_request_payload,
                         response_headers=response_headers,
                     )
                 except Exception as record_exc:
@@ -1223,11 +1225,13 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
     response_body: str | None = None
     response_headers: dict[str, Any] | None = None
     
+    xero_request_payload = {"Invoices": [invoice_payload]}
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 api_url,
-                json=invoice_payload,
+                json=xero_request_payload,
                 headers=request_headers,
             )
             response_status = response.status_code
@@ -1246,7 +1250,7 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                         response_status=response_status,
                         response_body=response_body,
                         request_headers=request_headers,
-                        request_body=invoice_payload,
+                        request_body=xero_request_payload,
                         response_headers=response_headers,
                     )
                 except Exception as record_exc:
@@ -1265,7 +1269,7 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                         response_status=response_status,
                         response_body=response_body,
                         request_headers=request_headers,
-                        request_body=invoice_payload,
+                        request_body=xero_request_payload,
                         response_headers=response_headers,
                     )
                 except Exception as record_exc:
@@ -1508,11 +1512,13 @@ async def send_order_to_xero(
     response_headers: dict[str, Any] | None = None
     xero_invoice_number: str | None = None
     
+    xero_request_payload = {"Invoices": [xero_payload]}
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 api_url,
-                json=xero_payload,
+                json=xero_request_payload,
                 headers=request_headers,
             )
             response_status = response.status_code
@@ -1543,7 +1549,7 @@ async def send_order_to_xero(
                         response_status=response_status,
                         response_body=response_body,
                         request_headers=request_headers,
-                        request_body=xero_payload,
+                        request_body=xero_request_payload,
                         response_headers=response_headers,
                     )
                 except Exception as record_exc:
@@ -1562,7 +1568,7 @@ async def send_order_to_xero(
                         response_status=response_status,
                         response_body=response_body,
                         request_headers=request_headers,
-                        request_body=xero_payload,
+                        request_body=xero_request_payload,
                         response_headers=response_headers,
                     )
                 except Exception as record_exc:
