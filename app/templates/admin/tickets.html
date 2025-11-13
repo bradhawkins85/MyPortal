@@ -593,6 +593,7 @@
             <tr>
               <th scope="col">Code</th>
               <th scope="col">Name</th>
+              <th scope="col">Rate ($/hr)</th>
               <th scope="col" class="table__actions">Actions</th>
             </tr>
           </thead>
@@ -623,6 +624,19 @@
                       required
                     />
                   </td>
+                  <td data-label="Rate ($/hr)">
+                    <label class="visually-hidden" for="labour-rate-{{ loop.index0 }}">Rate</label>
+                    <input
+                      id="labour-rate-{{ loop.index0 }}"
+                      name="labourRate"
+                      class="form-input"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value="{{ labour_type.rate if labour_type.rate is not none else '' }}"
+                      placeholder="0.00"
+                    />
+                  </td>
                   <td class="table__actions">
                     <button type="button" class="button button--ghost" data-labour-remove>Remove</button>
                   </td>
@@ -638,6 +652,10 @@
                 <td data-label="Name">
                   <label class="visually-hidden" for="labour-name-0">Name</label>
                   <input id="labour-name-0" name="labourName" class="form-input" maxlength="128" required />
+                </td>
+                <td data-label="Rate ($/hr)">
+                  <label class="visually-hidden" for="labour-rate-0">Rate</label>
+                  <input id="labour-rate-0" name="labourRate" class="form-input" type="number" step="0.01" min="0" placeholder="0.00" />
                 </td>
                 <td class="table__actions">
                   <button type="button" class="button button--ghost" data-labour-remove disabled>Remove</button>
@@ -665,6 +683,10 @@
         <td data-label="Name">
           <label class="visually-hidden">Name</label>
           <input name="labourName" class="form-input" maxlength="128" required />
+        </td>
+        <td data-label="Rate ($/hr)">
+          <label class="visually-hidden">Rate</label>
+          <input name="labourRate" class="form-input" type="number" step="0.01" min="0" placeholder="0.00" />
         </td>
         <td class="table__actions">
           <button type="button" class="button button--ghost" data-labour-remove>Remove</button>

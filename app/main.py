@@ -11838,16 +11838,24 @@ async def admin_replace_labour_types(request: Request):
     ids = form.getlist("labourId")
     codes = form.getlist("labourCode")
     names = form.getlist("labourName")
+    rates = form.getlist("labourRate")
 
     definitions: list[dict[str, Any]] = []
-    max_length = max(len(ids), len(codes), len(names))
+    max_length = max(len(ids), len(codes), len(names), len(rates))
     for index in range(max_length):
         identifier = ids[index] if index < len(ids) else None
         code = codes[index] if index < len(codes) else ""
         name = names[index] if index < len(names) else ""
+        rate_str = rates[index] if index < len(rates) else ""
         if not code and not name:
             continue
-        definitions.append({"id": identifier, "code": code, "name": name})
+        rate_value: float | None = None
+        if rate_str and rate_str.strip():
+            try:
+                rate_value = float(rate_str.strip())
+            except (ValueError, TypeError):
+                rate_value = None
+        definitions.append({"id": identifier, "code": code, "name": name, "rate": rate_value})
 
     try:
         await labour_types_service.replace_labour_types(definitions)

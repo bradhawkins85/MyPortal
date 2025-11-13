@@ -699,7 +699,7 @@ async def list_replies(ticket_id: int, *, include_internal: bool = True) -> list
         where += " AND is_internal = 0"
     rows = await db.fetch_all(
         f"""
-        SELECT tr.*, lt.name AS labour_type_name, lt.code AS labour_type_code
+        SELECT tr.*, lt.name AS labour_type_name, lt.code AS labour_type_code, lt.rate AS labour_type_rate
         FROM ticket_replies tr
         LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id
         WHERE {where}
@@ -713,7 +713,7 @@ async def list_replies(ticket_id: int, *, include_internal: bool = True) -> list
 async def get_reply_by_id(reply_id: int) -> TicketRecord | None:
     row = await db.fetch_one(
         """
-        SELECT tr.*, lt.name AS labour_type_name, lt.code AS labour_type_code
+        SELECT tr.*, lt.name AS labour_type_name, lt.code AS labour_type_code, lt.rate AS labour_type_rate
         FROM ticket_replies tr
         LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id
         WHERE tr.id = %s

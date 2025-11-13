@@ -33,7 +33,7 @@ async def get_labour_type(labour_type_id: int) -> dict[str, Any] | None:
     return await labour_types_repo.get_labour_type(labour_type_id)
 
 
-async def create_labour_type(*, code: str, name: str) -> dict[str, Any]:
+async def create_labour_type(*, code: str, name: str, rate: float | None = None) -> dict[str, Any]:
     cleaned_code = _clean_code(code)
     cleaned_name = _clean_name(name)
     if not cleaned_code:
@@ -43,7 +43,7 @@ async def create_labour_type(*, code: str, name: str) -> dict[str, Any]:
     existing = await labour_types_repo.get_labour_type_by_code(cleaned_code)
     if existing:
         raise ValueError("A labour type with this code already exists.")
-    return await labour_types_repo.create_labour_type(code=cleaned_code, name=cleaned_name)
+    return await labour_types_repo.create_labour_type(code=cleaned_code, name=cleaned_name, rate=rate)
 
 
 async def update_labour_type(
@@ -51,10 +51,11 @@ async def update_labour_type(
     *,
     code: str | None = None,
     name: str | None = None,
+    rate: float | None = None,
 ) -> dict[str, Any] | None:
     if labour_type_id <= 0:
         return None
-    updates: dict[str, str] = {}
+    updates: dict[str, str | float] = {}
     if code is not None:
         cleaned_code = _clean_code(code)
         if not cleaned_code:
@@ -68,6 +69,8 @@ async def update_labour_type(
         if not cleaned_name:
             raise ValueError("Labour type name is required.")
         updates["name"] = cleaned_name
+    if rate is not None:
+        updates["rate"] = rate
     if not updates:
         return await labour_types_repo.get_labour_type(labour_type_id)
     return await labour_types_repo.update_labour_type(labour_type_id, **updates)
@@ -84,6 +87,7 @@ async def replace_labour_types(definitions: Sequence[dict[str, Any]]) -> list[di
     for entry in definitions:
         raw_code = _clean_code(str(entry.get("code")) if entry.get("code") is not None else None)
         raw_name = _clean_name(str(entry.get("name")) if entry.get("name") is not None else None)
+        raw_rate = entry.get("rate")
         identifier = entry.get("id")
         labour_type_id: int | None = None
         if identifier is not None:
@@ -96,6 +100,7 @@ async def replace_labour_types(definitions: Sequence[dict[str, Any]]) -> list[di
                 "id": labour_type_id,
                 "code": raw_code,
                 "name": raw_name,
+                "rate": raw_rate,
             }
         )
     return await labour_types_repo.replace_labour_types(cleaned_definitions)

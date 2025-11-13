@@ -329,10 +329,11 @@ async def build_ticket_invoices(
             billable_minutes += minutes
             labour_code = str(reply.get("labour_type_code") or "").strip() or None
             labour_name = str(reply.get("labour_type_name") or "").strip() or None
+            labour_rate = reply.get("labour_type_rate")
             key = (labour_code, labour_name)
             bucket = labour_map.get(key)
             if not bucket:
-                bucket = {"minutes": 0, "code": labour_code, "name": labour_name}
+                bucket = {"minutes": 0, "code": labour_code, "name": labour_name, "rate": labour_rate}
                 labour_map[key] = bucket
             bucket["minutes"] += minutes
         if billable_minutes <= 0:
@@ -377,13 +378,22 @@ async def build_ticket_invoices(
                         group_minutes,
                     )
                     
-                    # Determine rate to use: Xero item rate if available, else default
+                    # Determine rate to use: Local labour type rate first, then Xero item rate, then default
                     labour_code = str(group.get("code") or "").strip()
+                    local_rate = group.get("rate")
                     item_rate = None
-                    if labour_code and xero_item_rates:
-                        item_rate = xero_item_rates.get(labour_code)
                     
-                    rate_to_use = item_rate if item_rate is not None else rate_decimal
+                    # Priority: 1. Local rate, 2. Xero rate, 3. Default
+                    if local_rate is not None:
+                        try:
+                            rate_to_use = _to_decimal(local_rate) or rate_decimal
+                        except (ValueError, TypeError, InvalidOperation):
+                            rate_to_use = rate_decimal
+                    elif labour_code and xero_item_rates:
+                        item_rate = xero_item_rates.get(labour_code)
+                        rate_to_use = item_rate if item_rate is not None else rate_decimal
+                    else:
+                        rate_to_use = rate_decimal
                     
                     line_item: dict[str, Any] = {
                         "Description": description,
@@ -1469,10 +1479,11 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                             billable_minutes += minutes
                             labour_code = str(reply.get("labour_type_code") or "").strip() or None
                             labour_name = str(reply.get("labour_type_name") or "").strip() or None
+                            labour_rate = reply.get("labour_type_rate")
                             key = (labour_code, labour_name)
                             bucket = labour_map.get(key)
                             if not bucket:
-                                bucket = {"minutes": 0, "code": labour_code, "name": labour_name}
+                                bucket = {"minutes": 0, "code": labour_code, "name": labour_name, "rate": labour_rate}
                                 labour_map[key] = bucket
                             bucket["minutes"] += minutes
                         
@@ -1500,13 +1511,22 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                                     group_minutes,
                                 )
                                 
-                                # Determine rate to use: Xero item rate if available, else default
+                                # Determine rate to use: Local labour type rate first, then Xero item rate, then default
                                 labour_code = str(group.get("code") or "").strip()
+                                local_rate = group.get("rate")
                                 item_rate = None
-                                if labour_code and xero_item_rates:
-                                    item_rate = xero_item_rates.get(labour_code)
                                 
-                                rate_to_use = item_rate if item_rate is not None else hourly_rate
+                                # Priority: 1. Local rate, 2. Xero rate, 3. Default
+                                if local_rate is not None:
+                                    try:
+                                        rate_to_use = _to_decimal(local_rate) or hourly_rate
+                                    except (ValueError, TypeError, InvalidOperation):
+                                        rate_to_use = hourly_rate
+                                elif labour_code and xero_item_rates:
+                                    item_rate = xero_item_rates.get(labour_code)
+                                    rate_to_use = item_rate if item_rate is not None else hourly_rate
+                                else:
+                                    rate_to_use = hourly_rate
                                 
                                 line_item: dict[str, Any] = {
                                     "Description": description,
