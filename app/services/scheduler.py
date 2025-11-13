@@ -242,11 +242,6 @@ class SchedulerService:
         async with db.acquire_lock(lock_name, timeout=1) as lock_acquired:
             if not lock_acquired:
                 # Another worker is already executing this task, skip silently
-                log_info(
-                    "Scheduled task already running on another worker, skipping",
-                    task_id=task_id,
-                    command=command,
-                )
                 return
 
             log_info("Running scheduled task", task_id=task_id, command=command)
