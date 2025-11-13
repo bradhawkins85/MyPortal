@@ -219,12 +219,15 @@ async def test_send_order_to_xero_success():
         call_args = mock_client.post.call_args
         
         # Check the invoice payload
-        invoice_payload = call_args[1]["json"]
+        request_payload = call_args[1]["json"]
+        assert "Invoices" in request_payload
+        assert len(request_payload["Invoices"]) == 1
+        invoice_payload = request_payload["Invoices"][0]
         assert invoice_payload["Type"] == "ACCREC"
         assert invoice_payload["Reference"] == "PO-12345"
         assert invoice_payload["Status"] == "DRAFT"
         assert len(invoice_payload["LineItems"]) == 2
-        
+
         # Check that user info line was included
         user_line = invoice_payload["LineItems"][1]
         assert "Test User" in user_line["Description"]
