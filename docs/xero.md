@@ -29,6 +29,29 @@ comma-separated technical statuses inside the **Billable ticket statuses**
 field. Only tickets matching one of the configured statuses are considered for
 invoicing during the scheduled synchronisation runs.
 
+### Labour Type Rates
+
+MyPortal automatically fetches billing rates for labour types from Xero, enabling different rates for different types of work:
+
+- **Remote Support** might be billed at $95/hour
+- **On-site Support** might be billed at $150/hour  
+- **After Hours** might be billed at $200/hour
+
+To use this feature:
+
+1. Create labour types in MyPortal (**Admin > Tickets > Labour Types**) with unique codes
+2. Create matching items in Xero with the same codes
+3. Set the Unit Price for each item in Xero
+
+When syncing tickets, MyPortal will:
+- Fetch the Unit Price from Xero for each labour type code
+- Use that price instead of the default hourly rate
+- Fall back to the default hourly rate if no matching Xero item is found
+
+This allows you to maintain all pricing in Xero, and changes to rates in Xero automatically apply to future invoices without needing to update MyPortal configuration.
+
+### Invoice Grouping
+
 When the scheduler runs it reuses any invoice that MyPortal has already created
 for the same company on the same UTC date, appending new billable tickets as
 extra line items instead of creating duplicate invoices. This keeps batched
