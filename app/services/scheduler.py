@@ -144,6 +144,7 @@ class SchedulerService:
             if not lock_acquired:
                 log_info("Webhook monitor already running on another worker, skipping")
                 return
+            await webhook_monitor.fail_stalled_events(timeout_seconds=600)
             await webhook_monitor.process_pending_events()
 
     async def _run_webhook_cleanup(self) -> None:
