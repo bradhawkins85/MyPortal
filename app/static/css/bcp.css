@@ -47,7 +47,8 @@
   gap: clamp(1.5rem, 3vw, 2.75rem);
   position: relative;
   color: var(--bcp-text);
-  width: min(1100px, 100%);
+  width: 100%;
+  max-width: none;
   margin-inline: auto;
   padding: clamp(1.5rem, 3vw, 2.75rem);
   box-sizing: border-box;
