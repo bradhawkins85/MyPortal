@@ -54,6 +54,7 @@ class SchedulerService:
         settings = get_settings()
         self._scheduler = AsyncIOScheduler(timezone=settings.default_timezone)
         self._started = False
+        self._refresh_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         if self._started:
@@ -61,12 +62,20 @@ class SchedulerService:
         self._scheduler.start()
         self._started = True
         self._ensure_monitoring_jobs()
-        await self.refresh()
+        refresh_task = asyncio.create_task(self.refresh())
+        self._track_refresh_task(refresh_task)
         log_info("Scheduler started")
 
     async def stop(self) -> None:
         if not self._started:
             return
+        refresh_task = self._refresh_task
+        self._refresh_task = None
+        if refresh_task and not refresh_task.done():
+            try:
+                await refresh_task
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("Scheduler refresh failed during shutdown", error=str(exc))
         self._scheduler.shutdown(wait=True)
         self._started = False
         log_info("Scheduler stopped")
@@ -93,6 +102,19 @@ class SchedulerService:
             )
         log_info("Scheduler tasks loaded", count=len(tasks))
         self._ensure_monitoring_jobs()
+
+    def _track_refresh_task(self, task: asyncio.Task[None]) -> None:
+        self._refresh_task = task
+        task.add_done_callback(self._handle_refresh_completion)
+
+    def _handle_refresh_completion(self, task: asyncio.Task[None]) -> None:
+        try:
+            task.result()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error("Scheduler refresh failed", error=str(exc))
+        finally:
+            if self._refresh_task is task:
+                self._refresh_task = None
 
     def _ensure_monitoring_jobs(self) -> None:
         if not self._started:
