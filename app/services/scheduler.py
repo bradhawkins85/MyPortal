@@ -326,7 +326,7 @@ class SchedulerService:
                 elif command == "update_stock_feed":
                     await products_service.update_stock_feed()
                 elif command == "system_update":
-                    output = await self._run_system_update(force_restart=force_restart)
+                    output = await self.run_system_update(force_restart=force_restart)
                     if output:
                         details = output
                 elif command == "create_scheduled_ticket":
@@ -578,6 +578,15 @@ class SchedulerService:
         if not task:
             raise ValueError(f"Task {task_id} not found")
         await self._run_task(task, force_restart=True)
+
+    async def run_system_update(self, *, force_restart: bool = False) -> str | None:
+        """Public helper to execute the system update script.
+
+        This wraps the private implementation so that other parts of the
+        application can reuse the same update mechanism used by scheduled
+        tasks.
+        """
+        return await self._run_system_update(force_restart=force_restart)
 
     async def _run_system_update(self, *, force_restart: bool = False) -> str | None:
         script_path = _PROJECT_ROOT / "scripts" / "upgrade.sh"
