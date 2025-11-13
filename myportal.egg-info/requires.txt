@@ -17,7 +17,7 @@ apscheduler
 croniter>=1.4
 httpx
 loguru
-cryptography
+cryptography>=42.0.4
 email-validator
 python-multipart
 bleach
