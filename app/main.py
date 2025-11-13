@@ -126,8 +126,14 @@ from app.schemas.tickets import SyncroTicketImportRequest
 from app.security.cache_control import CacheControlMiddleware
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import encrypt_secret
-from app.security.rate_limiter import RateLimiterMiddleware, SimpleRateLimiter
+from app.security.rate_limiter import (
+    EndpointRateLimiter,
+    EndpointRateLimiterMiddleware,
+    RateLimiterMiddleware,
+    SimpleRateLimiter,
+)
 from app.security.request_logger import RequestLoggingMiddleware
+from app.security.security_headers import SecurityHeadersMiddleware
 from app.security.session import SessionData, session_manager
 from app.api.dependencies.auth import get_current_session
 from app.services.scheduler import scheduler_service
@@ -348,17 +354,84 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add security headers middleware
+app.add_middleware(
+    SecurityHeadersMiddleware,
+    exempt_paths=("/static",),
+)
+
 # Add request logging middleware
 app.add_middleware(
     RequestLoggingMiddleware,
     exempt_paths=("/static", "/health", "/manifest.webmanifest", "/service-worker.js"),
 )
 
-general_rate_limiter = SimpleRateLimiter(limit=300, window_seconds=900)
+# Configure endpoint-specific rate limits per security requirements
+endpoint_limiter = EndpointRateLimiter()
+
+# Login: 5 attempts per 15 minutes per IP
+endpoint_limiter.add_limit("/api/auth/login", "POST", limit=5, window_seconds=900)
+
+# Password reset: 3 requests per hour per email
+def _password_reset_key(request: Request) -> str:
+    """Generate rate limit key based on email from form data."""
+    try:
+        # Try to get email from query params or form
+        email = request.query_params.get("email")
+        if not email:
+            # For POST requests, we'd need to read the body but that's already
+            # consumed by the time middleware runs. Use IP as fallback.
+            client_ip = request.headers.get("x-forwarded-for")
+            if client_ip:
+                return client_ip.split(",")[0].strip()
+            client = request.client
+            return client.host if client else "anonymous"
+        return f"reset:{email.lower()}"
+    except Exception:
+        # Fallback to IP-based limiting
+        client_ip = request.headers.get("x-forwarded-for")
+        if client_ip:
+            return client_ip.split(",")[0].strip()
+        client = request.client
+        return client.host if client else "anonymous"
+
+endpoint_limiter.add_limit("/api/auth/password/forgot", "POST", limit=3, window_seconds=3600, key_func=_password_reset_key)
+endpoint_limiter.add_limit("/auth/password/forgot", "POST", limit=3, window_seconds=3600, key_func=_password_reset_key)
+
+# File upload: 10 files per hour per user
+def _user_upload_key(request: Request) -> str:
+    """Generate rate limit key based on user ID from session."""
+    from app.security.session import session_manager
+    # Note: This is synchronous approximation - actual implementation
+    # would need to be async. For now, use IP-based limiting.
+    client_ip = request.headers.get("x-forwarded-for")
+    if client_ip:
+        return f"upload:{client_ip.split(',')[0].strip()}"
+    client = request.client
+    return f"upload:{client.host if client else 'anonymous'}"
+
+# Apply to common upload endpoints
+upload_paths = [
+    "/api/tickets/attachments",
+    "/api/shop/products/image",
+    "/api/business-continuity/attachments",
+]
+for path in upload_paths:
+    endpoint_limiter.add_limit(path, "POST", limit=10, window_seconds=3600, key_func=_user_upload_key)
+
+# API calls: 100 requests per minute per user (applied via general rate limiter)
+
+app.add_middleware(
+    EndpointRateLimiterMiddleware,
+    endpoint_limiter=endpoint_limiter,
+    exempt_paths=(SWAGGER_UI_PATH, PROTECTED_OPENAPI_PATH, "/static"),
+)
+
+general_rate_limiter = SimpleRateLimiter(limit=100, window_seconds=60)
 app.add_middleware(
     RateLimiterMiddleware,
     rate_limiter=general_rate_limiter,
-    exempt_paths=(SWAGGER_UI_PATH, PROTECTED_OPENAPI_PATH, "/static"),
+    exempt_paths=(SWAGGER_UI_PATH, PROTECTED_OPENAPI_PATH, "/static", "/health"),
 )
 
 app.add_middleware(
