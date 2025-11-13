@@ -217,7 +217,7 @@ def generate_open_access_token(attachment_id: int, expires_in_seconds: int = 864
     """
     # Use the secret key from settings
     config = get_settings()
-    secret_key = getattr(config, "SECRET_KEY", "change-me-in-production")
+    secret_key = getattr(config, "secret_key", "change-me-in-production")
     serializer = URLSafeTimedSerializer(secret_key, salt="ticket-attachment")
     
     token = serializer.dumps({"attachment_id": attachment_id})
@@ -236,7 +236,7 @@ def verify_open_access_token(token: str, max_age: int = 86400) -> int | None:
         Attachment ID if valid, None otherwise
     """
     config = get_settings()
-    secret_key = getattr(config, "SECRET_KEY", "change-me-in-production")
+    secret_key = getattr(config, "secret_key", "change-me-in-production")
     serializer = URLSafeTimedSerializer(secret_key, salt="ticket-attachment")
     
     try:
