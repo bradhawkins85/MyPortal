@@ -962,7 +962,6 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         return {"status": "skipped", "reason": "pending_restart"}
     module = await modules_service.get_module("imap", redact=False)
     if not module or not module.get("enabled"):
-        log_info("Skipping IMAP sync because module is disabled", account_id=account_id)
         return {"status": "skipped", "reason": "Module disabled"}
     account = await imap_repo.get_account(account_id)
     if not account or not account.get("active", True):
