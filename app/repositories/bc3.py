@@ -5,6 +5,7 @@ Provides database access for templates, plans, versions, reviews, attachments, a
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any, Optional
 
@@ -22,11 +23,17 @@ async def create_template(
     schema_json: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Create a new BC template."""
+
+    if schema_json is not None and not isinstance(schema_json, str):
+        schema_json = json.dumps(schema_json, ensure_ascii=False)
+
     query = """
         INSERT INTO bc_template (name, version, is_default, schema_json)
         VALUES (%s, %s, %s, %s)
     """
-    template_id = await db.execute(query, (name, version, is_default, schema_json))
+    template_id = await db.execute_returning_lastrowid(
+        query, (name, version, is_default, schema_json)
+    )
     return await get_template_by_id(template_id)
 
 
@@ -83,6 +90,8 @@ async def update_template(
         updates.append("is_default = %s")
         params.append(is_default)
     if schema_json is not None:
+        if not isinstance(schema_json, str):
+            schema_json = json.dumps(schema_json, ensure_ascii=False)
         updates.append("schema_json = %s")
         params.append(schema_json)
     
