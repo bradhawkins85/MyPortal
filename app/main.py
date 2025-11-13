@@ -2954,7 +2954,7 @@ async def _render_company_edit_page(
 
     # Fetch billing contacts for the company
     billing_contacts = []
-    company_users = []
+    company_staff = []
     if is_super_admin:
         try:
             billing_contacts = await billing_contacts_repo.list_billing_contacts_for_company(
@@ -2965,8 +2965,14 @@ async def _render_company_edit_page(
                 billing_contacts = []
             else:
                 raise
-        # Get all users for this company for the dropdown
-        company_users = assignments  # Reuse assignments which already has user info
+        # Get all staff for this company for the dropdown
+        try:
+            company_staff = await staff_repo.list_staff(company_id)
+        except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
+            if "Database pool not initialised" in str(exc):
+                company_staff = []
+            else:
+                raise
 
     assign_form = {
         "company_id": assign_company_id,
@@ -2999,7 +3005,7 @@ async def _render_company_edit_page(
         "automation_company_options": automation_company_options,
         "recurring_invoice_items": recurring_invoice_items,
         "billing_contacts": billing_contacts,
-        "company_users": company_users,
+        "company_staff": company_staff,
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
@@ -7408,40 +7414,45 @@ async def admin_remove_company_assignment(company_id: int, user_id: int, request
 
 @app.post("/admin/companies/{company_id}/billing-contacts/add")
 async def admin_add_billing_contact(company_id: int, request: Request):
-    """Add a user as a billing contact for a company."""
+    """Add a staff member as a billing contact for a company."""
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
     
     payload = await request.json()
-    user_id = payload.get("user_id") or payload.get("userId")
+    staff_id = payload.get("staff_id") or payload.get("staffId")
     
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id required")
+    if not staff_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="staff_id required")
     
     try:
-        user_id_int = int(user_id)
+        staff_id_int = int(staff_id)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user_id")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid staff_id")
     
     # Verify company exists
     company = await company_repo.get_company_by_id(company_id)
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     
-    # Verify user exists and has access to the company
-    assignment = await user_company_repo.get_user_company(user_id_int, company_id)
-    if not assignment:
+    # Verify staff exists and belongs to the company
+    staff = await staff_repo.get_staff_by_id(staff_id_int)
+    if not staff:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User must be a member of the company before being added as a billing contact"
+            detail="Staff member not found"
+        )
+    if staff.get("company_id") != company_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Staff member must belong to the company"
         )
     
-    contact = await billing_contacts_repo.add_billing_contact(company_id, user_id_int)
+    contact = await billing_contacts_repo.add_billing_contact(company_id, staff_id_int)
     return JSONResponse({
         "success": True,
         "contact": {
-            "user_id": contact.get("user_id"),
+            "staff_id": contact.get("staff_id"),
             "email": contact.get("email"),
             "first_name": contact.get("first_name"),
             "last_name": contact.get("last_name"),
@@ -7449,14 +7460,14 @@ async def admin_add_billing_contact(company_id: int, request: Request):
     })
 
 
-@app.post("/admin/companies/{company_id}/billing-contacts/{user_id}/remove")
-async def admin_remove_billing_contact(company_id: int, user_id: int, request: Request):
-    """Remove a user as a billing contact for a company."""
+@app.post("/admin/companies/{company_id}/billing-contacts/{staff_id}/remove")
+async def admin_remove_billing_contact(company_id: int, staff_id: int, request: Request):
+    """Remove a staff member as a billing contact for a company."""
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
     
-    await billing_contacts_repo.remove_billing_contact(company_id, user_id)
+    await billing_contacts_repo.remove_billing_contact(company_id, staff_id)
     return JSONResponse({"success": True})
 
 
