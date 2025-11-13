@@ -279,8 +279,6 @@ async def fetch_agents(client_id: str | None = None) -> list[Mapping[str, Any]]:
     endpoints: list[str]
     if client_id:
         endpoints = [
-            f"beta/v1/agent?client_id={client_id}",
-            f"clients/{client_id}/agents/",
             f"agents/?client={client_id}",
         ]
     else:
