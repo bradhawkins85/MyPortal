@@ -291,3 +291,82 @@ async def test_build_ticket_invoices_uses_template():
     assert "Email not working" in line_item["Description"]
     assert "Remote Support" in line_item["Description"]
     assert "0.75" in line_item["Description"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_billable_tickets_closes_tickets_after_invoicing():
+    """Test that tickets are moved to 'closed' status after successful invoicing."""
+    
+    tickets = [
+        {"id": 1, "status": "resolved", "company_id": 1, "subject": "Test Ticket"},
+    ]
+    
+    unbilled_reply_ids = {10}
+    
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = json.dumps({"Invoices": [{"InvoiceNumber": "INV-12345"}]})
+    mock_response.headers = {}
+    
+    with patch("app.services.xero.tickets_repo") as mock_tickets_repo, \
+         patch("app.services.xero.billed_time_repo") as mock_billed_repo, \
+         patch("app.services.xero.company_repo") as mock_company_repo, \
+         patch("app.services.xero.webhook_monitor") as mock_webhook, \
+         patch("app.services.xero.httpx.AsyncClient") as mock_client:
+        
+        mock_tickets_repo.list_tickets = AsyncMock(return_value=tickets)
+        mock_tickets_repo.get_ticket = AsyncMock(return_value=tickets[0])
+        mock_tickets_repo.list_replies = AsyncMock(return_value=[
+            {"id": 10, "minutes_spent": 60, "is_billable": True, "labour_type_id": None},
+        ])
+        mock_tickets_repo.update_ticket = AsyncMock()
+        
+        mock_billed_repo.get_unbilled_reply_ids = AsyncMock(return_value=unbilled_reply_ids)
+        mock_billed_repo.create_billed_time_entry = AsyncMock()
+        
+        mock_company_repo.get_company_by_id = AsyncMock(return_value={
+            "id": 1,
+            "name": "Test Company",
+            "xero_id": "xero-test-123",
+        })
+        
+        mock_webhook.create_manual_event = AsyncMock(return_value={"id": 1})
+        mock_webhook.record_manual_success = AsyncMock()
+        
+        mock_client_instance = MagicMock()
+        mock_client_instance.post = AsyncMock(return_value=mock_response)
+        mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client.return_value.__aexit__ = AsyncMock()
+        
+        result = await xero_service.sync_billable_tickets(
+            company_id=1,
+            billable_statuses=["resolved"],
+            hourly_rate=Decimal("150"),
+            account_code="400",
+            tax_type="OUTPUT",
+            line_amount_type="Exclusive",
+            reference_prefix="Support",
+            description_template="Ticket {ticket_id}",
+            tenant_id="tenant-123",
+            access_token="access-token-123",
+        )
+        
+        # Verify the sync succeeded
+        assert result["status"] == "succeeded"
+        assert result["invoice_number"] == "INV-12345"
+        assert result["tickets_billed"] == 1
+        
+        # Verify that update_ticket was called to close the ticket
+        mock_tickets_repo.update_ticket.assert_called_once()
+        
+        # Get the call arguments
+        call_args = mock_tickets_repo.update_ticket.call_args
+        ticket_id = call_args[0][0]
+        kwargs = call_args[1]
+        
+        # Verify the ticket was closed
+        assert ticket_id == 1
+        assert kwargs["status"] == "closed"
+        assert kwargs["xero_invoice_number"] == "INV-12345"
+        assert "closed_at" in kwargs
+        assert "billed_at" in kwargs

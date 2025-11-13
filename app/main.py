@@ -10571,6 +10571,12 @@ async def _render_portal_ticket_detail(
         if hasattr(updated_at, "astimezone")
         else ""
     )
+    billed_at = ticket.get("billed_at")
+    billed_at_iso = (
+        billed_at.astimezone(timezone.utc).isoformat()
+        if hasattr(billed_at, "astimezone")
+        else ""
+    )
 
     company_record: Mapping[str, Any] | None = None
     company_name = None
@@ -10755,6 +10761,7 @@ async def _render_portal_ticket_detail(
             "assigned_label": _format_user_label(assigned_record) if assigned_record else None,
             "created_iso": created_iso,
             "updated_iso": updated_iso,
+            "billed_at_iso": billed_at_iso,
         },
         "ticket_replies": timeline_entries,
         "can_reply": bool(has_helpdesk_access or is_super_admin or is_requester),
