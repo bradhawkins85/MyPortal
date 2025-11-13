@@ -928,6 +928,17 @@ async def sync_billable_tickets(
                 rates_found=len(xero_item_rates),
                 item_codes=list(xero_item_rates.keys()),
             )
+        
+        # Log missing labour codes
+        missing_codes = labour_codes - set(xero_item_rates.keys())
+        if missing_codes:
+            logger.warning(
+                "Some labour codes not found in Xero items",
+                company_id=company_id,
+                missing_codes=list(missing_codes),
+                expected_codes=list(labour_codes),
+                found_codes=list(xero_item_rates.keys()),
+            )
     
     ticket_ids = [t["id"] for t in billable_tickets]
     invoices = await build_ticket_invoices(
@@ -1174,7 +1185,7 @@ async def sync_billable_tickets(
                 event_id=event_id,
             )
             
-            return {
+            result = {
                 "status": "succeeded",
                 "company_id": company_id,
                 "invoice_number": xero_invoice_number,
@@ -1183,6 +1194,16 @@ async def sync_billable_tickets(
                 "response_status": response_status,
                 "event_id": event_id,
             }
+            
+            # Include labour code information if any were used
+            if labour_codes:
+                result["labour_codes_expected"] = list(labour_codes)
+                result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
+                missing_codes = labour_codes - set(xero_item_rates.keys())
+                if missing_codes:
+                    result["labour_codes_missing_from_xero"] = list(missing_codes)
+            
+            return result
         else:
             logger.error(
                 "Xero API returned error status for tickets",
@@ -1190,13 +1211,23 @@ async def sync_billable_tickets(
                 response_status=response_status,
                 response_body=response_body,
             )
-            return {
+            result = {
                 "status": "failed",
                 "company_id": company_id,
                 "response_status": response_status,
                 "error": f"HTTP {response_status}",
                 "event_id": event_id,
             }
+            
+            # Include labour code information if any were used
+            if labour_codes:
+                result["labour_codes_expected"] = list(labour_codes)
+                result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
+                missing_codes = labour_codes - set(xero_item_rates.keys())
+                if missing_codes:
+                    result["labour_codes_missing_from_xero"] = list(missing_codes)
+            
+            return result
     
     except httpx.HTTPError as exc:
         logger.error("Xero API request failed for tickets", company_id=company_id, error=str(exc))
@@ -1219,12 +1250,22 @@ async def sync_billable_tickets(
                     event_id=event_id,
                     error=str(record_exc),
                 )
-        return {
+        result = {
             "status": "error",
             "company_id": company_id,
             "error": str(exc),
             "event_id": event_id,
         }
+        
+        # Include labour code information if any were used
+        if labour_codes:
+            result["labour_codes_expected"] = list(labour_codes)
+            result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
+            missing_codes = labour_codes - set(xero_item_rates.keys())
+            if missing_codes:
+                result["labour_codes_missing_from_xero"] = list(missing_codes)
+        
+        return result
     except Exception as exc:
         logger.error("Unexpected error during Xero tickets sync", company_id=company_id, error=str(exc))
         if event_id is not None:
@@ -1246,12 +1287,22 @@ async def sync_billable_tickets(
                     event_id=event_id,
                     error=str(record_exc),
                 )
-        return {
+        result = {
             "status": "error",
             "company_id": company_id,
             "error": str(exc),
             "event_id": event_id,
         }
+        
+        # Include labour code information if any were used
+        if labour_codes:
+            result["labour_codes_expected"] = list(labour_codes)
+            result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
+            missing_codes = labour_codes - set(xero_item_rates.keys())
+            if missing_codes:
+                result["labour_codes_missing_from_xero"] = list(missing_codes)
+        
+        return result
 
 
 async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, Any]:
@@ -1345,6 +1396,8 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
     ticket_numbers: list[str] = []
     billable_tickets_found = 0
     tickets_skipped_reason: str | None = None
+    labour_codes: set[str] = set()
+    xero_item_rates: dict[str, Decimal] = {}
     
     if billable_statuses_raw:
         try:
@@ -1400,7 +1453,6 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                 tickets_skipped_reason = "No tickets with unbilled time in billable status"
             elif billable_tickets:
                 # Collect all unique labour codes from billable tickets
-                labour_codes: set[str] = set()
                 for ticket in billable_tickets:
                     ticket_id = ticket.get("id")
                     if not ticket_id:
@@ -1414,7 +1466,6 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                             labour_codes.add(labour_code)
                 
                 # Fetch Xero item rates for all labour codes
-                xero_item_rates: dict[str, Decimal] = {}
                 if labour_codes:
                     logger.info(
                         "Fetching Xero item rates for labour types",
@@ -1432,6 +1483,17 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                             company_id=company_id,
                             rates_found=len(xero_item_rates),
                             item_codes=list(xero_item_rates.keys()),
+                        )
+                    
+                    # Log missing labour codes
+                    missing_codes = labour_codes - set(xero_item_rates.keys())
+                    if missing_codes:
+                        logger.warning(
+                            "Some labour codes not found in Xero items",
+                            company_id=company_id,
+                            missing_codes=list(missing_codes),
+                            expected_codes=list(labour_codes),
+                            found_codes=list(xero_item_rates.keys()),
                         )
                 
                 # Check if we have rates available (either default or from Xero items)
@@ -1804,7 +1866,7 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                 tickets_billed=len(tickets_context),
                 time_entries_recorded=billed_count,
             )
-            return {
+            result = {
                 "status": "succeeded",
                 "company_id": company_id,
                 "tenant_id": tenant_id,
@@ -1815,6 +1877,16 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                 "tickets_billed": len(tickets_context),
                 "time_entries_recorded": billed_count,
             }
+            
+            # Include labour code information if any were used
+            if labour_codes:
+                result["labour_codes_expected"] = list(labour_codes)
+                result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
+                missing_codes = labour_codes - set(xero_item_rates.keys())
+                if missing_codes:
+                    result["labour_codes_missing_from_xero"] = list(missing_codes)
+            
+            return result
         else:
             logger.error(
                 "Xero API returned error status",
@@ -1822,13 +1894,23 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                 response_status=response_status,
                 response_body=response_body,
             )
-            return {
+            result = {
                 "status": "failed",
                 "company_id": company_id,
                 "response_status": response_status,
                 "error": f"HTTP {response_status}",
                 "event_id": event_id,
             }
+            
+            # Include labour code information if any were used
+            if labour_codes:
+                result["labour_codes_expected"] = list(labour_codes)
+                result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
+                missing_codes = labour_codes - set(xero_item_rates.keys())
+                if missing_codes:
+                    result["labour_codes_missing_from_xero"] = list(missing_codes)
+            
+            return result
     
     except httpx.HTTPError as exc:
         logger.error("Xero API request failed", company_id=company_id, error=str(exc))
@@ -1851,12 +1933,22 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                     event_id=event_id,
                     error=str(record_exc),
                 )
-        return {
+        result = {
             "status": "error",
             "company_id": company_id,
             "error": str(exc),
             "event_id": event_id,
         }
+        
+        # Include labour code information if any were used
+        if labour_codes:
+            result["labour_codes_expected"] = list(labour_codes)
+            result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
+            missing_codes = labour_codes - set(xero_item_rates.keys())
+            if missing_codes:
+                result["labour_codes_missing_from_xero"] = list(missing_codes)
+        
+        return result
     except Exception as exc:
         logger.error("Unexpected error during Xero sync", company_id=company_id, error=str(exc))
         if event_id is not None:
@@ -1878,12 +1970,22 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                     event_id=event_id,
                     error=str(record_exc),
                 )
-        return {
+        result = {
             "status": "error",
             "company_id": company_id,
             "error": str(exc),
             "event_id": event_id,
         }
+        
+        # Include labour code information if any were used
+        if labour_codes:
+            result["labour_codes_expected"] = list(labour_codes)
+            result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
+            missing_codes = labour_codes - set(xero_item_rates.keys())
+            if missing_codes:
+                result["labour_codes_missing_from_xero"] = list(missing_codes)
+        
+        return result
 
 
 
