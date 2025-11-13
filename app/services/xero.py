@@ -173,23 +173,29 @@ async def fetch_xero_item_rates(
     
     rates: dict[str, Decimal] = {}
     
-    # Xero API allows filtering items by code
-    # We'll fetch items one by one or in batches if needed
-    for item_code in item_codes:
-        if not item_code or not str(item_code).strip():
-            continue
-        
-        try:
-            api_url = f"https://api.xero.com/api.xro/2.0/Items/{item_code}"
-            headers = {
-                "Authorization": f"Bearer {access_token}",
-                "xero-tenant-id": tenant_id,
-                "Accept": "application/json",
-            }
-            
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(api_url, headers=headers)
-                
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "xero-tenant-id": tenant_id,
+        "Accept": "application/json",
+    }
+
+    api_url = "https://api.xero.com/api.xro/2.0/Items"
+
+    # Xero's Items endpoint expects a filter query when looking up by code.
+    # We request each item individually to avoid large where clauses and so we
+    # can gracefully handle per-item failures without aborting the full batch.
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for item_code in item_codes:
+            if not item_code or not str(item_code).strip():
+                continue
+
+            code_text = str(item_code).strip()
+            filter_code = code_text.replace('"', '\"')
+            params = {"where": f'Code=="{filter_code}"'}
+
+            try:
+                response = await client.get(api_url, headers=headers, params=params)
+
                 if response.status_code == 200:
                     data = response.json()
                     items = data.get("Items", [])
@@ -197,49 +203,54 @@ async def fetch_xero_item_rates(
                         item = items[0]
                         sales_details = item.get("SalesDetails", {})
                         unit_price = sales_details.get("UnitPrice")
-                        
+
                         if unit_price is not None:
                             try:
                                 price_decimal = Decimal(str(unit_price))
                                 if price_decimal > 0:
-                                    rates[item_code] = price_decimal
+                                    rates[code_text] = price_decimal
                                     logger.debug(
                                         "Fetched Xero item rate",
-                                        item_code=item_code,
+                                        item_code=code_text,
                                         rate=float(price_decimal),
                                     )
                             except (InvalidOperation, ValueError) as e:
                                 logger.warning(
                                     "Invalid unit price for Xero item",
-                                    item_code=item_code,
+                                    item_code=code_text,
                                     unit_price=unit_price,
                                     error=str(e),
                                 )
+                    else:
+                        logger.debug(
+                            "Xero item not found",
+                            item_code=code_text,
+                        )
                 elif response.status_code == 404:
                     logger.debug(
                         "Xero item not found",
-                        item_code=item_code,
+                        item_code=code_text,
                     )
                 else:
                     logger.warning(
                         "Failed to fetch Xero item",
-                        item_code=item_code,
+                        item_code=code_text,
                         status_code=response.status_code,
                         response_text=response.text[:500],
                     )
-        except httpx.HTTPError as e:
-            logger.warning(
-                "HTTP error fetching Xero item",
-                item_code=item_code,
-                error=str(e),
-            )
-        except Exception as e:
-            logger.error(
-                "Unexpected error fetching Xero item",
-                item_code=item_code,
-                error=str(e),
-            )
-    
+            except httpx.HTTPError as e:
+                logger.warning(
+                    "HTTP error fetching Xero item",
+                    item_code=code_text,
+                    error=str(e),
+                )
+            except Exception as e:
+                logger.error(
+                    "Unexpected error fetching Xero item",
+                    item_code=code_text,
+                    error=str(e),
+                )
+
     return rates
 
 
