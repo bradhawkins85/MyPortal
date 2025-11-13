@@ -103,6 +103,7 @@ app/repositories/subscription_categories.py
 app/repositories/subscription_change_requests.py
 app/repositories/subscriptions.py
 app/repositories/tag_exclusions.py
+app/repositories/ticket_attachments.py
 app/repositories/ticket_billed_time_entries.py
 app/repositories/ticket_statuses.py
 app/repositories/ticket_tasks.py
@@ -214,6 +215,7 @@ app/services/system_variables.py
 app/services/tacticalrmm.py
 app/services/tagging.py
 app/services/template_variables.py
+app/services/ticket_attachments.py
 app/services/ticket_importer.py
 app/services/tickets.py
 app/services/time_utils.py
@@ -390,6 +392,7 @@ tests/test_template_variables_service.py
 tests/test_ticket_access.py
 tests/test_ticket_ai_summary_service.py
 tests/test_ticket_ai_tags_service.py
+tests/test_ticket_attachments.py
 tests/test_ticket_automation_variables.py
 tests/test_ticket_creation_with_requester.py
 tests/test_ticket_importer.py
@@ -420,6 +423,7 @@ tests/test_xero_api.py
 tests/test_xero_auto_send.py
 tests/test_xero_billable_tickets.py
 tests/test_xero_connect.py
+tests/test_xero_include_archived.py
 tests/test_xero_module.py
 tests/test_xero_recurring_items.py
 tests/test_xero_shop_orders.py
