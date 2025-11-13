@@ -672,6 +672,8 @@ async def build_recurring_invoice_items(
     *,
     tax_type: str | None,
     context: dict[str, Any] | None = None,
+    tenant_id: str | None = None,
+    access_token: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build line items for recurring invoice items configured for a company.
     
@@ -679,6 +681,8 @@ async def build_recurring_invoice_items(
         company_id: The company ID to fetch recurring items for
         tax_type: Tax type to apply to line items
         context: Dictionary of variables available for template substitution
+        tenant_id: Optional Xero tenant ID for fetching item rates
+        access_token: Optional Xero API access token for fetching item rates
     
     Returns:
         List of Xero line item dictionaries
@@ -688,6 +692,39 @@ async def build_recurring_invoice_items(
         return []
     
     template_context = _TemplateValues(context or {})
+    
+    # Collect item codes that need rates from Xero (those without price_override)
+    item_codes_to_fetch: set[str] = set()
+    for item in recurring_items:
+        if not item.get("active"):
+            continue
+        product_code = str(item.get("product_code") or "").strip()
+        price_override = item.get("price_override")
+        # Only fetch rate if no price_override is set and we have credentials
+        if product_code and price_override is None and tenant_id and access_token:
+            item_codes_to_fetch.add(product_code)
+    
+    # Fetch item rates from Xero
+    xero_item_rates: dict[str, Decimal] = {}
+    if item_codes_to_fetch and tenant_id and access_token:
+        logger.info(
+            "Fetching Xero item rates for recurring invoice items",
+            company_id=company_id,
+            item_codes=list(item_codes_to_fetch),
+        )
+        xero_item_rates = await fetch_xero_item_rates(
+            list(item_codes_to_fetch),
+            tenant_id=tenant_id,
+            access_token=access_token,
+        )
+        if xero_item_rates:
+            logger.info(
+                "Fetched Xero item rates for recurring items",
+                company_id=company_id,
+                rates_found=len(xero_item_rates),
+                item_codes=list(xero_item_rates.keys()),
+            )
+    
     line_items: list[dict[str, Any]] = []
     
     for item in recurring_items:
@@ -709,14 +746,16 @@ async def build_recurring_invoice_items(
         qty_expression = str(item.get("qty_expression") or "1")
         quantity = _evaluate_qty_expression(qty_expression, template_context)
         
+        product_code = str(item.get("product_code") or "")
+        
         # Build the line item
         line_item: dict[str, Any] = {
             "Description": description,
             "Quantity": quantity,
-            "ItemCode": str(item.get("product_code") or ""),
+            "ItemCode": product_code,
         }
         
-        # Add price override if specified
+        # Add price: use override if specified, otherwise use Xero item rate if available
         price_override = item.get("price_override")
         if price_override is not None:
             try:
@@ -724,6 +763,11 @@ async def build_recurring_invoice_items(
                 line_item["UnitAmount"] = unit_amount
             except (TypeError, ValueError):
                 pass
+        elif product_code in xero_item_rates:
+            # Use rate fetched from Xero
+            unit_amount = float(_quantize(xero_item_rates[product_code]))
+            line_item["UnitAmount"] = unit_amount
+        # If no override and no Xero rate, let Xero use the item's default price
         
         # Add tax type if specified
         if tax_type:
@@ -1236,6 +1280,18 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
             "company_id": company_id,
         }
 
+    # Get or refresh access token (needed for both tickets and recurring items)
+    try:
+        access_token = await modules_service.acquire_xero_access_token()
+    except Exception as exc:
+        logger.error("Failed to acquire Xero access token", error=str(exc))
+        return {
+            "status": "error",
+            "reason": "Failed to acquire access token",
+            "error": str(exc),
+            "company_id": company_id,
+        }
+
     # Fetch recurring invoice items for this company
     recurring_items = await recurring_items_repo.list_company_recurring_invoice_items(company_id)
     recurring_items_info = []
@@ -1257,19 +1313,9 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
         company_id,
         tax_type=tax_type,
         context=context,
+        tenant_id=tenant_id,
+        access_token=access_token,
     )
-
-    # Get or refresh access token (needed for both tickets and recurring items)
-    try:
-        access_token = await modules_service.acquire_xero_access_token()
-    except Exception as exc:
-        logger.error("Failed to acquire Xero access token", error=str(exc))
-        return {
-            "status": "error",
-            "reason": "Failed to acquire access token",
-            "error": str(exc),
-            "company_id": company_id,
-        }
     
     # Build ticket line items if billable tickets are configured
     billable_statuses_raw = settings.get("billable_statuses")
