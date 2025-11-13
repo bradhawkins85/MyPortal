@@ -53,6 +53,8 @@ async def test_start_runs_refresh_in_background(monkeypatch):
     refresh_task = service._refresh_task
     assert refresh_task is not None
     assert not refresh_task.done()
+    # Scheduler.start should not await refresh completion
+    assert service._refresh_task is refresh_task
 
     await refresh_started.wait()
 
@@ -90,6 +92,7 @@ async def test_stop_waits_for_refresh_completion(monkeypatch):
     monkeypatch.setattr(SchedulerService, "refresh", fake_refresh)
 
     await service.start()
+    assert service._refresh_task is not None
     await refresh_started.wait()
 
     stop_task = asyncio.create_task(service.stop())
@@ -102,6 +105,7 @@ async def test_stop_waits_for_refresh_completion(monkeypatch):
     await stop_task
 
     assert shutdown_called is True
+    assert service._refresh_task is None
 
 
 @pytest.mark.anyio
