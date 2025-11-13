@@ -62,20 +62,13 @@ class SchedulerService:
         self._scheduler.start()
         self._started = True
         self._ensure_monitoring_jobs()
-        refresh_task = asyncio.create_task(self.refresh())
-        self._track_refresh_task(refresh_task)
+        self._start_refresh_task()
         log_info("Scheduler started")
 
     async def stop(self) -> None:
         if not self._started:
             return
-        refresh_task = self._refresh_task
-        self._refresh_task = None
-        if refresh_task and not refresh_task.done():
-            try:
-                await refresh_task
-            except Exception as exc:  # pragma: no cover - defensive logging
-                log_error("Scheduler refresh failed during shutdown", error=str(exc))
+        await self._await_refresh_task()
         self._scheduler.shutdown(wait=True)
         self._started = False
         log_info("Scheduler stopped")
@@ -115,6 +108,20 @@ class SchedulerService:
         finally:
             if self._refresh_task is task:
                 self._refresh_task = None
+
+    def _start_refresh_task(self) -> None:
+        task = asyncio.create_task(self.refresh())
+        self._track_refresh_task(task)
+
+    async def _await_refresh_task(self) -> None:
+        task = self._refresh_task
+        self._refresh_task = None
+        if not task:
+            return
+        try:
+            await task
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error("Scheduler refresh failed during shutdown", error=str(exc))
 
     def _ensure_monitoring_jobs(self) -> None:
         if not self._started:
