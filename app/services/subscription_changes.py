@@ -65,34 +65,39 @@ def calculate_chargeable_licenses(
     current_quantity: int,
     quantity_to_add: int,
     pending_net_change: int,
+    applied_additions: int = 0,
 ) -> int:
     """Calculate how many licenses should be charged when adding licenses.
     
-    Only charge for licenses that would exceed the contracted quantity at term end.
-    The contracted quantity is the current quantity since additions are applied immediately.
+    Only charge for licenses that would exceed the original contracted quantity at term end.
+    The original contracted quantity is the quantity at term start, before any mid-term additions.
     
     Args:
-        current_quantity: Current subscription quantity (already includes applied additions)
+        current_quantity: Current subscription quantity (includes applied additions)
         quantity_to_add: Number of licenses to add
         pending_net_change: Net pending change (additions - decreases, only counting pending ones)
+        applied_additions: Number of licenses already added via applied addition requests (default 0)
         
     Returns:
         Number of licenses that should be charged
         
     Example:
-        - current_quantity=2, quantity_to_add=1, pending_net_change=-1
-        - At term end without new addition: 2 + (-1) = 1
-        - At term end with new addition: 2 + (-1) + 1 = 2
-        - Since contracted quantity is 2, charge for max(0, 2 - 2) = 0 licenses
+        - current_quantity=3 (original 2 + 1 applied addition)
+        - quantity_to_add=1
+        - pending_net_change=-1 (pending decrease)
+        - applied_additions=1
+        - Original contracted quantity: 3 - 1 = 2
+        - At term end with new addition: 3 + (-1) + 1 = 3
+        - Since original contracted quantity is 2, charge for max(0, 3 - 2) = 1 license
     """
-    # The contracted quantity is the current quantity (which already includes applied additions)
-    contracted_quantity = current_quantity
+    # Calculate the original contracted quantity by removing applied additions
+    original_contracted_quantity = current_quantity - applied_additions
     
     # Calculate what the quantity would be at term end with this new addition
     quantity_at_term_end_with_addition = current_quantity + pending_net_change + quantity_to_add
     
-    # Only charge for licenses that exceed the contracted quantity
-    chargeable_licenses = max(0, quantity_at_term_end_with_addition - contracted_quantity)
+    # Only charge for licenses that exceed the original contracted quantity
+    chargeable_licenses = max(0, quantity_at_term_end_with_addition - original_contracted_quantity)
     
     return chargeable_licenses
 
@@ -136,6 +141,11 @@ async def preview_subscription_change(
         subscription_id
     )
     
+    # Get applied additions to calculate original contracted quantity
+    applied_additions = await change_requests_repo.get_applied_additions_for_subscription(
+        subscription_id
+    )
+    
     # Calculate net effect of existing pending changes
     net_current = calculate_net_changes(pending_changes)
     
@@ -145,12 +155,13 @@ async def preview_subscription_change(
     chargeable_licenses = 0
     
     if change_type == "addition":
-        # Calculate how many licenses should be charged based on contracted quantity
+        # Calculate how many licenses should be charged based on original contracted quantity
         pending_net_change = net_current["net_change"]
         chargeable_licenses = calculate_chargeable_licenses(
             current_quantity=current_quantity,
             quantity_to_add=quantity_change,
             pending_net_change=pending_net_change,
+            applied_additions=applied_additions,
         )
         
         # Calculate prorated price only for chargeable licenses
