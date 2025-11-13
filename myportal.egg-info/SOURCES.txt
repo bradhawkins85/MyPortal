@@ -327,6 +327,7 @@ tests/test_knowledge_base_conditionals.py
 tests/test_knowledge_base_conditionals_integration.py
 tests/test_knowledge_base_service.py
 tests/test_knowledge_base_weak_relevance.py
+tests/test_labour_type_rates.py
 tests/test_logging.py
 tests/test_migration_reprocess.py
 tests/test_modules_service.py
