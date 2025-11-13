@@ -1,7 +1,0 @@
-{
-  "guid": "23a7bb39-c215-4ad6-bc36-ee411f270bf8",
-  "occurred_at": "2025-09-18T08:30Z",
-  "change_type": "Feature",
-  "summary": "Rebuilt the MyPortal backend and UI in Python with FastAPI, async MySQL access, and responsive 3-panel theming",
-  "content_hash": "c9e9cb5db86a6581c24ae28eee77d2927ce79f28f196d2f544d1a2d4febf5e5f"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "3d6c3256-9e8d-4c6f-b006-a301edcba266",
-  "occurred_at": "2025-10-29T03:31Z",
-  "change_type": "Fix",
-  "summary": "Auto-save ticket status changes directly from the dashboard dropdown.",
-  "content_hash": "fb75e8712a38e5a5c6214f2ff070c8df948b0213c54ca0146a1fbf97105d1e29"
-}

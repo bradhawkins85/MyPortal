@@ -1,7 +1,0 @@
-{
-  "guid": "39c033d6-9051-4a31-a32e-de6535764770",
-  "occurred_at": "2025-10-24T13:45Z",
-  "change_type": "Feature",
-  "summary": "Seeded default automation filter and action templates so new workflows start with example JSON payloads in the admin builder",
-  "content_hash": "e1e1c3c11a232e4f73543956ba163fd71bcd6b55bd6aacd08cf74a69c8159284"
-}

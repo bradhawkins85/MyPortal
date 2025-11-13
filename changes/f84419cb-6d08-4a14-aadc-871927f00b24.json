@@ -1,7 +1,0 @@
-{
-  "guid": "f84419cb-6d08-4a14-aadc-871927f00b24",
-  "occurred_at": "2025-10-10T14:20Z",
-  "change_type": "Fix",
-  "summary": "Replaced MariaDB-incompatible UTC timestamp defaults in scheduler migration to restore service startup",
-  "content_hash": "f23651872b8237a38dde17f57ec740ae7eec30a73530af6cc318ae4f2a4546c0"
-}

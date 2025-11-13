@@ -1,7 +1,0 @@
-{
-  "guid": "ad3dbb7a-6e78-4e04-8a96-e08cec6b1afd",
-  "occurred_at": "2025-12-05T09:20Z",
-  "change_type": "Fix",
-  "summary": "Restored ticket assignment technician list by filtering active memberships in code and including super admins when populating options",
-  "content_hash": "7c5470c292455d78df2736ebc64407ebadd24cce3aec28fb7fe73cc3b4e2f89c"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "edd29b93-52ea-4c18-aaa1-d8709d0612ad",
-  "occurred_at": "2025-11-03T13:21Z",
-  "change_type": "Feature",
-  "summary": "Added ACTIVE_ASSETS automation variable with day-range support.",
-  "content_hash": "af1a2a020ed578ac01b38e70fbf399a360b4603f58c3a5155834b03e76786ce4"
-}

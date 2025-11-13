@@ -1,7 +1,0 @@
-{
-  "guid": "7146086e-7559-4f58-af46-a96b3b17a818",
-  "occurred_at": "2025-10-08T06:41Z",
-  "change_type": "Fix",
-  "summary": "Restored shop catalogue display for products whose names match their SKUs so existing items appear",
-  "content_hash": "600aa42b93c177ec5ec4a46c8a5d8556cc8c5d08e28bd699dc676144b5148cda"
-}

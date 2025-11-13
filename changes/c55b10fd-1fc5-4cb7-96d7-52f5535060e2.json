@@ -1,7 +1,0 @@
-{
-  "guid": "c55b10fd-1fc5-4cb7-96d7-52f5535060e2",
-  "occurred_at": "2025-10-09T12:37Z",
-  "change_type": "Fix",
-  "summary": "Added responsive pagination to the shop product table that adapts row counts to the viewport height for readability",
-  "content_hash": "cd6e9f0095fff773e9a4285fbfb7b04a6f3b745ace26e84183af3feed09cb4ab"
-}

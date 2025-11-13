@@ -1,7 +1,0 @@
-{
-  "guid": "948ca78b-ff53-4ddf-9def-ee196d772eb7",
-  "occurred_at": "2025-10-23T02:31Z",
-  "change_type": "Fix",
-  "summary": "Prevented event automation trigger filters from auto-populating so templates are only applied on demand.",
-  "content_hash": "6d9825acabf02cee46351604811664815a0b26e3f57619737bd659f7ba2d57b4"
-}

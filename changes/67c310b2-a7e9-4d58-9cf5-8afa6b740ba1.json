@@ -1,7 +1,0 @@
-{
-  "guid": "67c310b2-a7e9-4d58-9cf5-8afa6b740ba1",
-  "occurred_at": "2025-10-30T12:53Z",
-  "change_type": "Fix",
-  "summary": "Ensure admin company assignments prefer the source company when submitting from edit page.",
-  "content_hash": "62dab74ad9da89e774794ab8769e011956ea3a96dec56ba3f8239b070332c053"
-}

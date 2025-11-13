@@ -1,7 +1,0 @@
-{
-  "guid": "2ee28a14-a1c4-43a9-ac6d-8172a96cfbe4",
-  "occurred_at": "2025-12-10T13:30Z",
-  "change_type": "Feature",
-  "summary": "Moved Syncro ticket import to dedicated admin page with module gating and configuration controls",
-  "content_hash": "29a94acb99b5ea836702e8c151ff52fbf981b3262c3cd465a511681d3f2e635b"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "7dfb7a30-e742-47df-ad9c-b1a7214853d4",
-  "occurred_at": "2025-10-19T09:45Z",
-  "change_type": "Feature",
-  "summary": "Added an asset inventory dashboard with summary analytics, column preferences, and secure deletion workflows for super admins",
-  "content_hash": "aa0da3a48ef9a4997d17fb9651d02c74d064aff13263bdba451d2bba8c792fb4"
-}

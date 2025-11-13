@@ -1,7 +1,0 @@
-{
-  "guid": "cf8ef9d8-db88-41de-ae19-25f7d71c370f",
-  "occurred_at": "2025-11-01T06:27Z",
-  "change_type": "Feature",
-  "summary": "Restricted issue tracker assignments to dedicated permission and super admins.",
-  "content_hash": "295ae794686a63c94e3ccf3ac626e5ca9efbe445f091785384577ef9826d3831"
-}

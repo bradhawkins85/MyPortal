@@ -1,7 +1,0 @@
-{
-  "guid": "e9ce9abe-eda5-441c-be8e-355b953841a4",
-  "occurred_at": "2025-11-10T09:04:17Z",
-  "change_type": "feature",
-  "summary": "BC11: Implemented supportive entities for business continuity plans",
-  "content_hash": "cbd54ad1b11d8063c1c0d06ea81aed7221d91a2e88a757b305d20d49f60a4013"
-}

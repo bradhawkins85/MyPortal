@@ -1,7 +1,0 @@
-{
-  "guid": "b7a9f079-503e-4d3c-bc52-0fad34eacf64",
-  "occurred_at": "2025-12-22T15:30Z",
-  "change_type": "Fix",
-  "summary": "Restored automation action variable interpolation with context-aware payload rendering and regression tests",
-  "content_hash": "103c987353703ab072f742ff187c65c520d84e1313c805bf1599f506cc2f89de"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "eaf1e1b6-4766-4320-8eaa-67298ac49e63",
-  "occurred_at": "2025-10-09T12:06Z",
-  "change_type": "Fix",
-  "summary": "Ensured the Cart navigation link remains visible whenever items are in the cart regardless of page context",
-  "content_hash": "f575e6e83630e11adddb0d70c77d629aba0646a3ca7874251a806325182f2747"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "c4618224-2f64-4137-b799-cb74edee1e70",
-  "occurred_at": "2025-11-01T06:53Z",
-  "change_type": "Feature",
-  "summary": "Rebuilt notification delivery preferences with module orchestration and stock alerts",
-  "content_hash": "214c473289ad08c7d2ae91a3eb42d784ecf0bb358b65390e62cafec90e59df31"
-}

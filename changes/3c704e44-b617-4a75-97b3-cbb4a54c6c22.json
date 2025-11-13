@@ -1,7 +1,0 @@
-{
-  "guid": "3c704e44-b617-4a75-97b3-cbb4a54c6c22",
-  "occurred_at": "2025-11-01T13:29Z",
-  "change_type": "Fix",
-  "summary": "Store complete ticket descriptions in the initial conversation entry.",
-  "content_hash": "c73be091c85f3dc7348247cddfc9b64232fb4e7674c4e3d398b1f9c2c93eebbc"
-}

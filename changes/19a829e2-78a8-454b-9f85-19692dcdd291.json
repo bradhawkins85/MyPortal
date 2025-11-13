@@ -1,7 +1,0 @@
-{
-  "guid": "19a829e2-78a8-454b-9f85-19692dcdd291",
-  "occurred_at": "2025-11-01T11:33Z",
-  "change_type": "Fix",
-  "summary": "Ensure the portal agent suggests matching shop packages alongside products.",
-  "content_hash": "0b744dddde84163fb0ac57c27c90113e6c9a315e3fe11fe591c1cb1d67fed0dd"
-}

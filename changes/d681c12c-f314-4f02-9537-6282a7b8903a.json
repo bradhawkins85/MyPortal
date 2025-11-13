@@ -1,7 +1,0 @@
-{
-  "guid": "d681c12c-f314-4f02-9537-6282a7b8903a",
-  "occurred_at": "2025-11-01T13:20Z",
-  "change_type": "Fix",
-  "summary": "Ensure the Refresh app control reloads the portal even when cache clearing APIs are unavailable.",
-  "content_hash": "c7365c1a3064264992e90e7a5e0b4a9d970f3fc7022159506f49d31d3f3645c5"
-}

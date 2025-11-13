@@ -1,7 +1,0 @@
-{
-  "guid": "4a531977-3a02-4d87-90e7-6efedcc6fa6c",
-  "occurred_at": "2025-10-09T16:18Z",
-  "change_type": "Fix",
-  "summary": "Normalised login TOTP payload handling to accept legacy keys and enforce numeric codes server-side",
-  "content_hash": "f2253f6b3b7002491baa9ac0339e8c605013ad0d90a65ca83b8fe6ccbde238eb"
-}

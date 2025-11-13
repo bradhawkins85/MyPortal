@@ -1,7 +1,0 @@
-{
-  "guid": "067ba870-bab2-4f88-8889-dd3ace4f8945",
-  "occurred_at": "2025-10-26T09:10Z",
-  "change_type": "Feature",
-  "summary": "Documented how to trigger targeted or full database migration reprocessing from the app helpers",
-  "content_hash": "f193acf0749d3beec8db17ca471c0751be71620f0ef79ae3d2799ec183beeb17"
-}

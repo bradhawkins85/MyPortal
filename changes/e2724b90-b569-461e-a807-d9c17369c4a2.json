@@ -1,7 +1,0 @@
-{
-  "guid": "e2724b90-b569-461e-a807-d9c17369c4a2",
-  "occurred_at": "2025-10-29T13:01Z",
-  "change_type": "Feature",
-  "summary": "Added billable and non-billable time tracking for ticket replies, including admin totals and timeline context.",
-  "content_hash": "f276a6bbeec9f383e15d34d37799b1ff38e654f8251286d13e5b17b1aa0f2f33"
-}

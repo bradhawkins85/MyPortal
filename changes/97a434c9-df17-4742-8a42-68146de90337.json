@@ -1,7 +1,0 @@
-{
-  "guid": "97a434c9-df17-4742-8a42-68146de90337",
-  "occurred_at": "2025-10-23T07:24Z",
-  "change_type": "Feature",
-  "summary": "Added Tactical RMM module action to push companies and ensure a Default site exists in TRMM.",
-  "content_hash": "a084f4fb4c00e0b9834a8724a21aa74f3e1236ffdc7574c7b260ff50f8b20b08"
-}

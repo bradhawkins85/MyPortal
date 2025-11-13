@@ -1,7 +1,0 @@
-{
-  "guid": "c4163961-f6e1-4450-b8cb-c4b6965fc62e",
-  "occurred_at": "2025-10-30T14:02Z",
-  "change_type": "Feature",
-  "summary": "Added admin tooling to cancel pending staff permission assignments before sign-up.",
-  "content_hash": "d4cf226953b74ef65a8891a9a494820b4766d135390ac10efddf06eb5466c78a"
-}

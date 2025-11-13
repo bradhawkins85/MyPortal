@@ -1,7 +1,0 @@
-{
-  "guid": "59da848a-4394-45b5-8ab5-759b2554d7d3",
-  "occurred_at": "2025-09-17T09:34Z",
-  "change_type": "Feature",
-  "summary": "Added dynamic template variables for app URLs and documented usage in README",
-  "content_hash": "fa73e33a99946e2949655ca3cf49574af8fa0edf3b335123c0c943da191cf5e9"
-}

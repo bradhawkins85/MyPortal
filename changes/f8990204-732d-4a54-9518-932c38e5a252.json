@@ -1,7 +1,0 @@
-{
-  "guid": "f8990204-732d-4a54-9518-932c38e5a252",
-  "occurred_at": "2025-10-11T11:45Z",
-  "change_type": "Feature",
-  "summary": "Recreated the invoices dashboard with FastAPI templates, filtering UI, and secured API endpoints",
-  "content_hash": "898fa2a61b920cbab807f87192d862227a19ed30e979f52be68c11003aed9331"
-}

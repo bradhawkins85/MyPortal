@@ -1,7 +1,0 @@
-{
-  "guid": "f858aa98-68f2-433d-8936-7f73084c6acb",
-  "occurred_at": "2025-10-29T13:47Z",
-  "change_type": "Fix",
-  "summary": "Moved the Swagger UI button to the header actions area on the API credentials page.",
-  "content_hash": "6cdce8d66072c7320ae684381beacaf5e84752493280bb82b4a8c31402e3fcdf"
-}

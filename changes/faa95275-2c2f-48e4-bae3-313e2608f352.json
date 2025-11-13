@@ -1,7 +1,0 @@
-{
-  "guid": "faa95275-2c2f-48e4-bae3-313e2608f352",
-  "occurred_at": "2025-10-09T11:31Z",
-  "change_type": "Change",
-  "summary": "Retired the /admin/memberships page and synced company assignments with active company membership records",
-  "content_hash": "d9ebcc852b4ecb30cdcc4c1d2ba7042ec6c758c306976f2f5d6d10fce3f14e69"
-}

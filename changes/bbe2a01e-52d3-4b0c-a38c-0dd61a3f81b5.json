@@ -1,7 +1,0 @@
-{
-  "guid": "bbe2a01e-52d3-4b0c-a38c-0dd61a3f81b5",
-  "occurred_at": "2025-10-19T07:15Z",
-  "change_type": "Fix",
-  "summary": "Routed the system update scheduler task through scripts/upgrade.sh for consistent upgrade automation",
-  "content_hash": "e5000a58ad5ee81dbfff33cb5141f40c17fb3cffce03fb23d6097ad0be3e2b1c"
-}

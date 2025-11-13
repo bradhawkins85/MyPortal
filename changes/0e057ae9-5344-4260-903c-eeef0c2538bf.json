@@ -1,7 +1,0 @@
-{
-  "guid": "0e057ae9-5344-4260-903c-eeef0c2538bf",
-  "occurred_at": "2025-11-01T05:27Z",
-  "change_type": "Feature",
-  "summary": "Added super-admin message template management UI for creating, editing, and deleting reusable content.",
-  "content_hash": "159eb52e4d1f97cdb64cf292c5ca37e1f1e5f003b0314d432bc25cb4e4cecdc7"
-}

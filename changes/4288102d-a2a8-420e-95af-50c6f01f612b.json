@@ -1,7 +1,0 @@
-{
-  "guid": "4288102d-a2a8-420e-95af-50c6f01f612b",
-  "occurred_at": "2025-10-30T12:57Z",
-  "change_type": "Feature",
-  "summary": "Added automated Git fallback when Uvicorn fails during startup.",
-  "content_hash": "4c3eac30aab089421e90665b425b4498dca7e9c04a131eabd89301728e56f6e4"
-}

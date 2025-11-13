@@ -1,7 +1,0 @@
-{
-  "guid": "aedbb5e0-bf5d-49f9-9fb3-bb76e9e703e1",
-  "occurred_at": "2025-10-21T12:06Z",
-  "change_type": "Feature",
-  "summary": "Added a super admin company access console with full company visibility and direct staff permission assignment without invitations",
-  "content_hash": "3abb6b9268d5c23ef3c674d799b55e5ff481bc548928c28702f2ad583bb3e0e1"
-}

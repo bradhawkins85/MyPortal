@@ -1,7 +1,0 @@
-{
-  "guid": "583cc045-8c18-4047-b0cc-06fddca0215a",
-  "occurred_at": "2025-09-18T09:05Z",
-  "change_type": "Fix",
-  "summary": "Replaced binary image assets with SVG icons to unblock PR creation and retain themeable layout",
-  "content_hash": "acca1f5564bda22a83849263e60fdbf2443d61bb0d190612c6ddceb302bc4f03"
-}

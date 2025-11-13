@@ -1,7 +1,0 @@
-{
-  "guid": "52377de1-402f-4853-935e-75b81e3383fa",
-  "occurred_at": "2025-10-29T15:15Z",
-  "change_type": "Feature",
-  "summary": "Enabled cart quantity editing with stock-aware validation.",
-  "content_hash": "a96f6b735b5ccad20ebb1d37af6a771492efb785c7b923e9683079b6b19fc25c"
-}

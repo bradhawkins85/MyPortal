@@ -1,7 +1,0 @@
-{
-  "guid": "41422c2a-7627-4758-a5a6-80c221f61f5b",
-  "occurred_at": "2025-10-09T12:01Z",
-  "change_type": "Fix",
-  "summary": "Removed the Description column from the Cart table to streamline checkout review",
-  "content_hash": "b1785fa7341c3752994d1a6c4ec5f297d826dd49c4783eac130e65c1c4f348a0"
-}

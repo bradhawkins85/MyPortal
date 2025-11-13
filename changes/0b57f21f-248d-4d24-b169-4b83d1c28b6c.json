@@ -1,7 +1,0 @@
-{
-  "guid": "0b57f21f-248d-4d24-b169-4b83d1c28b6c",
-  "occurred_at": "2025-12-09T10:00Z",
-  "change_type": "Feature",
-  "summary": "Added responsive mobile navigation with hamburger toggle and viewport clamping refinements",
-  "content_hash": "4211596372e6934e6c2cba0a9c79e84ca149c72fcbbbb3976bcf11a812b31b9c"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "87e65a8f-f3c6-4599-a6e4-9743207cda91",
-  "occurred_at": "2025-10-29T15:13Z",
-  "change_type": "Fix",
-  "summary": "Ensure scheduler-run system updates do not force restarts when no repository changes are pulled.",
-  "content_hash": "c048d30b84b39447c200bd4d916aa2d51d31ef3bab32d0de3cabe8a47549e02e"
-}

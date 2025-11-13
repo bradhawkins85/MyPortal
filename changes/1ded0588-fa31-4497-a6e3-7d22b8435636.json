@@ -1,7 +1,0 @@
-{
-  "guid": "1ded0588-fa31-4497-a6e3-7d22b8435636",
-  "occurred_at": "2025-10-09T12:38Z",
-  "change_type": "Feature",
-  "summary": "Delivered a notifications dashboard with filtering, bulk acknowledgement, Swagger-documented API enhancements, and navigation badge updates",
-  "content_hash": "6c47ec2e91cbe3a76185a3b643797831b21445723b3630126ca8928386ec5192"
-}

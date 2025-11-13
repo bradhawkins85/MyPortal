@@ -1,7 +1,0 @@
-{
-  "guid": "262cebf8-21b8-4323-9554-9ee107144a93",
-  "occurred_at": "2025-11-03T13:04Z",
-  "change_type": "Fix",
-  "summary": "Adjusted forms menu and embedded viewer to stretch with the viewport height.",
-  "content_hash": "7f93cbb89b875a8854aecac2f38f642bc0106eb3c538d449f751bb40b00a9af1"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "cf7b2caf-b2ee-498d-9272-9539ba43990e",
-  "occurred_at": "2025-09-17T09:16Z",
-  "change_type": "Fix",
-  "summary": "Updated CSP frame policy to allow embedding OpnForm frames from form.hawkinsit.au",
-  "content_hash": "e1f25f0b2b4d7fb7761797569841412fa67304552ae3dc40d85b60e0d67846b2"
-}

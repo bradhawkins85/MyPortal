@@ -1,7 +1,0 @@
-{
-  "guid": "9c366767-ef0c-4058-874b-8077f5127bdc",
-  "occurred_at": "2025-10-19T14:05Z",
-  "change_type": "Fix",
-  "summary": "Filtered unhelpful AI-generated tags for tickets and knowledge base content using shared validation helpers",
-  "content_hash": "c17556f9032e277e979a8abba5704c8ea158fb19199a5dfe494f415e4f511e3c"
-}

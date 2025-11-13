@@ -1,7 +1,0 @@
-{
-  "guid": "7e080a6d-ac44-4418-981c-5a3ade5d8962",
-  "occurred_at": "2025-09-17T23:06Z",
-  "change_type": "Feature",
-  "summary": "Enabled OpnForm iframe embed snippets in Forms admin with validation and sanitised storage",
-  "content_hash": "01e77cb8baff11ffc5512186e16d5ea9fa6a1f71b2d146e79bc0c7970d3f65b3"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "d091a706-36d3-461a-86bf-5831e5f75312",
-  "occurred_at": "2025-10-09T23:26Z",
-  "change_type": "Fix",
-  "summary": "Added stock_feed.xml to .gitignore so generated stock feeds stay out of version control",
-  "content_hash": "e0e438bb347f848af87c716fe356656002d73d55d40f18c82e4549b66e079301"
-}

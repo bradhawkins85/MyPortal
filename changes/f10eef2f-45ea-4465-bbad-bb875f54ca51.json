@@ -1,7 +1,0 @@
-{
-  "guid": "f10eef2f-45ea-4465-bbad-bb875f54ca51",
-  "occurred_at": "2025-10-09T11:16Z",
-  "change_type": "Change",
-  "summary": "Moved company creation into a modal trigger on the Companies dashboard and removed legacy user provisioning forms",
-  "content_hash": "38f068b27f67317011a93e65ed6436b88be9ea42aaa795ee4821b3bc2559f102"
-}

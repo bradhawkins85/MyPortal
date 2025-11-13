@@ -1,7 +1,0 @@
-{
-  "guid": "80104d04-3e82-4422-86d3-6d647667bb1d",
-  "occurred_at": "2025-10-07T11:53Z",
-  "change_type": "Fix",
-  "summary": "Added a virtual environment bootstrap script and README guidance to bypass externally managed pip install failures",
-  "content_hash": "1f50bff0f1c0c992d94053d702ba4032174f62f64bd0da88047238b9cf53f635"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "610b8760-0b70-4877-880a-3a762ace9280",
-  "occurred_at": "2025-10-20T11:41Z",
-  "change_type": "Fix",
-  "summary": "Split knowledge base article sections into a dedicated panel separate from article metadata in the admin editor",
-  "content_hash": "0fc2db84a08c6a93f7eae80b83e0d7fa66a8b6fae5071389f133ce49ead58c28"
-}

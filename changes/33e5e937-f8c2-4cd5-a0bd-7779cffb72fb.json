@@ -1,7 +1,0 @@
-{
-  "guid": "33e5e937-f8c2-4cd5-a0bd-7779cffb72fb",
-  "occurred_at": "2025-10-08T12:20Z",
-  "change_type": "Fix",
-  "summary": "Embedded CSRF tokens into Shop admin templates and base helpers to restore product management submissions",
-  "content_hash": "070995538abf7946907f463619ff1803182680940904ff8e8c3cdd50c74fe44d"
-}

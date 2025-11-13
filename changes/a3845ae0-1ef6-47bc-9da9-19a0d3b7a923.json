@@ -1,7 +1,0 @@
-{
-  "guid": "a3845ae0-1ef6-47bc-9da9-19a0d3b7a923",
-  "occurred_at": "2025-10-21T11:00Z",
-  "change_type": "Feature",
-  "summary": "Broadcast refresh notifications after knowledge base and module mutations with notifier injection and regression tests",
-  "content_hash": "6b58a17221b91ea6b15c21fdbcb932f6193ff8bde62803f47341356f8e77669d"
-}

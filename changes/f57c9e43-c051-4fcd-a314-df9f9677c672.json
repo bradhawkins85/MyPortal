@@ -1,7 +1,0 @@
-{
-  "guid": "f57c9e43-c051-4fcd-a314-df9f9677c672",
-  "occurred_at": "2025-01-27T12:00Z",
-  "change_type": "Fix",
-  "summary": "Suspended IMAP mailbox synchronisation while system updates await restart.",
-  "content_hash": "30626d9aeb8f6a6e63343f46fd7788b7c8fa6f81c42b30dd90a800e8e0fbb475"
-}

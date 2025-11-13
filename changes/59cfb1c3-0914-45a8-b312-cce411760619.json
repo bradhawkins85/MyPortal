@@ -1,7 +1,0 @@
-{
-  "guid": "59cfb1c3-0914-45a8-b312-cce411760619",
-  "occurred_at": "2025-10-30T13:26Z",
-  "change_type": "Feature",
-  "summary": "Moved API key usage and rotation actions into a dedicated modal with inline revoke controls",
-  "content_hash": "ff4665e157ff96ac1e817185ad51c72bc50cd52a9a6beee9e60273b0093a317b"
-}

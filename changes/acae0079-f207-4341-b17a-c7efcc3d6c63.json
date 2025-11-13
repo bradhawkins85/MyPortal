@@ -1,7 +1,0 @@
-{
-  "guid": "acae0079-f207-4341-b17a-c7efcc3d6c63",
-  "occurred_at": "2025-10-26T16:20Z",
-  "change_type": "Fix",
-  "summary": "Allowed ntfy automation payloads to override notification headers and metadata with JSON-defined values and added regression coverage",
-  "content_hash": "ba8c5529a82d6645e4ea03b68e9cdbacf59c3e665436ca0958592c916ef7c844"
-}

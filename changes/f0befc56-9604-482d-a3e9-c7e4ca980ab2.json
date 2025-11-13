@@ -1,7 +1,0 @@
-{
-  "guid": "f0befc56-9604-482d-a3e9-c7e4ca980ab2",
-  "occurred_at": "2025-10-09T11:09Z",
-  "change_type": "Feature",
-  "summary": "Moved scheduler editing into modal workflows, added per-task run history popups, and created a dedicated webhook delivery monitoring page",
-  "content_hash": "7c3efa7ec80cf5f326012ab885684e316a34eb53573f4a87319c3bf1ce090875"
-}

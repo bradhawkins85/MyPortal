@@ -1,7 +1,0 @@
-{
-  "guid": "810a78c8-27f3-4c3c-bfbf-c27c6379b214",
-  "occurred_at": "2025-10-10T03:37Z",
-  "change_type": "Fix",
-  "summary": "Compacted portal spacing with reusable 5px+ padding variables so the UI stays dense yet readable",
-  "content_hash": "76f29500f1d2168ad3f32d1ad77a394fcc1a6bdf6bbea2c8a25ac52cbd1ea73f"
-}
