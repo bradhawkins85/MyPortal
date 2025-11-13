@@ -3011,18 +3011,35 @@ async def _render_company_edit_page(
 async def on_startup() -> None:
     await db.connect()
     await db.run_migrations()
-    await change_log_service.sync_change_log_sources()
-    await modules_service.ensure_default_modules()
-    await automations_service.refresh_all_schedules()
-    
-    # Bootstrap default BCP template if it doesn't exist
-    try:
+    async def _bootstrap_default_bcp_template() -> None:
         from app.services.bcp_template import bootstrap_default_template
+
         await bootstrap_default_template()
-        log_info("BCP default template bootstrapped")
-    except Exception as exc:
-        log_error("Failed to bootstrap default BCP template", error=str(exc))
-    
+
+    startup_tasks = [
+        ("sync_change_log_sources", change_log_service.sync_change_log_sources()),
+        ("ensure_default_modules", modules_service.ensure_default_modules()),
+        ("refresh_all_schedules", automations_service.refresh_all_schedules()),
+        ("bootstrap_default_bcp_template", _bootstrap_default_bcp_template()),
+    ]
+
+    results = await asyncio.gather(
+        *(task for _, task in startup_tasks), return_exceptions=True
+    )
+
+    for (name, _), result in zip(startup_tasks, results):
+        if isinstance(result, Exception):
+            if name == "bootstrap_default_bcp_template":
+                log_error(
+                    "Failed to bootstrap default BCP template", error=str(result)
+                )
+            else:
+                log_error(
+                    "Startup task failed", task=name, error=str(result)
+                )
+        elif name == "bootstrap_default_bcp_template":
+            log_info("BCP default template bootstrapped")
+
     await scheduler_service.start()
     log_info("Application started", environment=settings.environment)
 
