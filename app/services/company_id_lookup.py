@@ -315,6 +315,7 @@ async def _lookup_xero_contact_id(company_name: str) -> str | None:
                 params = {
                     "page": page,
                     "order": "Name ASC",
+                    "includeArchived": "true",
                 }
                 
                 response = await client.get(api_url, headers=headers, params=params)
