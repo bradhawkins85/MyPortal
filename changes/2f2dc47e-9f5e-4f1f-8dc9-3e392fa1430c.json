@@ -1,7 +1,0 @@
-{
-  "guid": "2f2dc47e-9f5e-4f1f-8dc9-3e392fa1430c",
-  "occurred_at": "2025-11-21T10:15Z",
-  "change_type": "Fix",
-  "summary": "Restored exported helpdesk permission constant for admin compatibility.",
-  "content_hash": "7df6ee6adacddd96eb199d370ce8ff90c2c0ee7ee48e64ef6b3cc1aa8d7bd95d"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "1cd7a788-933b-4b87-ba76-5c3aaa22c138",
-  "occurred_at": "2025-10-08T12:36Z",
-  "change_type": "Fix",
-  "summary": "Allowed the CSRF middleware to validate multipart form tokens so shop product uploads succeed",
-  "content_hash": "78adf7bcbbb09c8ddf67ef4ab6df3f9ef6430f968ff7018e24ff7809d9aed3cd"
-}

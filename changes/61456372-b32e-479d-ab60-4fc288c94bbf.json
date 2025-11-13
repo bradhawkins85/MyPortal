@@ -1,7 +1,0 @@
-{
-  "guid": "61456372-b32e-479d-ab60-4fc288c94bbf",
-  "occurred_at": "2025-10-07T12:45Z",
-  "change_type": "Fix",
-  "summary": "Combined ticket AI tags into the AI summary panel so related insights stay in one place on the admin ticket detail view",
-  "content_hash": "1f53710951f79c551ffd4abeae44493bc180db8cf64c0f926719acdca9f6b5ec"
-}

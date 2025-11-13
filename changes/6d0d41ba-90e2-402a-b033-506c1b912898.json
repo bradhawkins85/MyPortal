@@ -1,7 +1,0 @@
-{
-  "guid": "6d0d41ba-90e2-402a-b033-506c1b912898",
-  "occurred_at": "2025-10-29T03:35Z",
-  "change_type": "Fix",
-  "summary": "Allow ticket descriptions and replies to render embedded images by permitting safe <img> HTML content.",
-  "content_hash": "e4c4cb5b28c4d1d3c1df6d66cbf0d6d8b8f2af6b73e1cd399da1d4e4503757f0"
-}

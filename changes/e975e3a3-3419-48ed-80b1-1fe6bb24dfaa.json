@@ -1,7 +1,0 @@
-{
-  "guid": "e975e3a3-3419-48ed-80b1-1fe6bb24dfaa",
-  "occurred_at": "2025-10-12T12:30Z",
-  "change_type": "Feature",
-  "summary": "Logged SMTP email deliveries through the webhook monitor with outcome metadata and test updates",
-  "content_hash": "9c316d2ab2f05a4f8c1e8c27599516f97b5fcac015ac2d110fec079a01fbaf10"
-}

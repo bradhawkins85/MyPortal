@@ -1,7 +1,0 @@
-{
-  "guid": "03067408-8fc6-43d3-804a-8ed8e2f15b12",
-  "occurred_at": "2025-10-08T13:39Z",
-  "change_type": "Fix",
-  "summary": "Normalised Decimal audit metadata before JSON serialisation so the admin API key dashboard renders without errors",
-  "content_hash": "0e406dec7f5670d4ee7950651ac26f4e449949b7cb0b9d44b0827b80e11706fd"
-}

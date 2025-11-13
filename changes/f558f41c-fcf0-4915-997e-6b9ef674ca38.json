@@ -1,7 +1,0 @@
-{
-  "guid": "f558f41c-fcf0-4915-997e-6b9ef674ca38",
-  "occurred_at": "2025-10-02T14:30Z",
-  "change_type": "Feature",
-  "summary": "Added ticket detail workspace with standalone status management and threaded reply history",
-  "content_hash": "b7cd5bffae078cd8b6fd405787810a82017e9e7ba4542fafcfde6e3adeb94944"
-}

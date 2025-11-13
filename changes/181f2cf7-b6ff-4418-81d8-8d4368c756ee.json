@@ -1,7 +1,0 @@
-{
-  "guid": "181f2cf7-b6ff-4418-81d8-8d4368c756ee",
-  "occurred_at": "2025-10-30T12:11Z",
-  "change_type": "Feature",
-  "summary": "Moved staff access assignment to company editor with dynamic cross-company user filtering.",
-  "content_hash": "78bf274d3290220a39ad472f0def65215c9da6a1131fb5c95f43f0dbfe2ddd82"
-}

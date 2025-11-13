@@ -1,7 +1,0 @@
-{
-  "guid": "2323b82d-322a-413e-acd2-dc50b25a9719",
-  "occurred_at": "2025-10-29T07:14Z",
-  "change_type": "Fix",
-  "summary": "Improved ticket AI reprocess control with inline status feedback and removed loading animation.",
-  "content_hash": "14e3a66016ada71593cb9afc69ec194b5f24f13003fe82a54960de2db494e8fa"
-}

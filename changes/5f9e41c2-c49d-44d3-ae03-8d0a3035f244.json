@@ -1,7 +1,0 @@
-{
-  "guid": "5f9e41c2-c49d-44d3-ae03-8d0a3035f244",
-  "occurred_at": "2025-10-20T12:20Z",
-  "change_type": "Fix",
-  "summary": "Removed the knowledge base admin preview pane from the article editor per request",
-  "content_hash": "c5643a0935799fa8e9116db68c59ceafe7f6596001a66bcd6885859b1881c399"
-}

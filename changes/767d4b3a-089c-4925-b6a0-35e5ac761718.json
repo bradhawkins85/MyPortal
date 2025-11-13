@@ -1,7 +1,0 @@
-{
-  "guid": "767d4b3a-089c-4925-b6a0-35e5ac761718",
-  "occurred_at": "2025-10-09T20:50Z",
-  "change_type": "Fix",
-  "summary": "Added missing FastAPI Form import to restore API startup",
-  "content_hash": "dc783b4632f7d61ab47b8aaa2073a2aab6ebba06adcdd459d447c27f67755ab9"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "1d96e9bc-b98f-4a96-adf2-3d0e71823210",
-  "occurred_at": "2025-11-01T06:47Z",
-  "change_type": "Fix",
-  "summary": "Auto-select the current company when creating automations from the company edit page and hide the company dropdown.",
-  "content_hash": "c3dcfcba53af8f41c8046039f83b07135ea3cf5c5b6502867a7aa10cdf36030c"
-}

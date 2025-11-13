@@ -1,7 +1,0 @@
-{
-  "guid": "193f9e40-2af6-47f1-be22-18e3ea9ebe07",
-  "occurred_at": "2025-10-22T09:30Z",
-  "change_type": "Feature",
-  "summary": "Added configurable notification delivery settings with API-backed preferences, UI controls, and persistence tests",
-  "content_hash": "d8e0560d94c5adab1152d7b75a589118cdc7f70e7717f22213d9608e66ed467b"
-}

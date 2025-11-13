@@ -1,7 +1,0 @@
-{
-  "guid": "1cf60c02-4989-4874-9181-4691f05b45a7",
-  "occurred_at": "2025-10-29T13:19Z",
-  "change_type": "Fix",
-  "summary": "Fix base layout header block to restore template rendering",
-  "content_hash": "6ed2408fabc2cc8dfe18ddd5cec9649cbf838c749f33aac5b5314c741f686ca7"
-}

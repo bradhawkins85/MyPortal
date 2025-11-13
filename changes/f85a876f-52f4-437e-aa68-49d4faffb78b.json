@@ -1,7 +1,0 @@
-{
-  "guid": "f85a876f-52f4-437e-aa68-49d4faffb78b",
-  "occurred_at": "2025-10-20T12:25Z",
-  "change_type": "Fix",
-  "summary": "Allowed super admins to be assigned to tickets by recognising their global permission during assignee validation",
-  "content_hash": "4cc7b03144127939ad76d162a6012ec0479d54f98829af91858b1eaeb605265f"
-}

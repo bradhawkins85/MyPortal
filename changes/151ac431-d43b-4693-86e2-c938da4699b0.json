@@ -1,7 +1,0 @@
-{
-  "guid": "151ac431-d43b-4693-86e2-c938da4699b0",
-  "occurred_at": "2025-09-17T07:08Z",
-  "change_type": "Fix",
-  "summary": "Repositioned asset search/view controls above the table with a default-collapsed column accordion",
-  "content_hash": "4a985e2164ada4c1b25b01f74cc22acfa9b6275e40e7094a1995315bf6ab173c"
-}

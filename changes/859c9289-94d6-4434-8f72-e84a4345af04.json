@@ -1,7 +1,0 @@
-{
-  "guid": "859c9289-94d6-4434-8f72-e84a4345af04",
-  "occurred_at": "2025-10-29T03:25Z",
-  "change_type": "Fix",
-  "summary": "Render ticket descriptions with sanitised HTML instead of escaped markup.",
-  "content_hash": "e37028ba5581517946d5cf21a99012aa0e3a1b532dd95bddc704eb7398a3140b"
-}

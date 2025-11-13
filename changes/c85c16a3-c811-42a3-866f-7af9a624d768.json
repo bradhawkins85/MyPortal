@@ -1,7 +1,0 @@
-{
-  "guid": "c85c16a3-c811-42a3-866f-7af9a624d768",
-  "occurred_at": "2025-10-09T13:05Z",
-  "change_type": "Feature",
-  "summary": "Documented legacy Node.js parity gaps and outlined restoration tasks in docs/node-parity-gap.md",
-  "content_hash": "af9150af8895de7718d35e87b3b3ea33461e80cb33fd00be10a14bd986c74e54"
-}

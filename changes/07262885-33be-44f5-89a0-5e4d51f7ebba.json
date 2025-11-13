@@ -1,7 +1,0 @@
-{
-  "guid": "07262885-33be-44f5-89a0-5e4d51f7ebba",
-  "occurred_at": "2025-10-01T09:15Z",
-  "change_type": "Fix",
-  "summary": "Restored knowledge base search by including the CSRF token header in fetch submissions",
-  "content_hash": "2b728d44a42085d9f2cf1a75632de6a9bd37c628764f5a2aa4662ecfac7f8d58"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "eef48f03-8140-4d22-9f32-e1805bf7e126",
-  "occurred_at": "2025-10-20T11:02Z",
-  "change_type": "Feature",
-  "summary": "Enabled editable ticket metadata in a dedicated left-column form with validation for status, priority, requester, assignee, company, category, and external reference fields",
-  "content_hash": "a4d1724c14c9590ea1cf864d059b009ed9d591fdc45c94b189e9daec1304dfba"
-}

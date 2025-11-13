@@ -1,7 +1,0 @@
-{
-  "guid": "ba63637d-e066-4957-801d-35ff8a0111f4",
-  "occurred_at": "2025-11-01T06:23Z",
-  "change_type": "Fix",
-  "summary": "Recalculate automation task table pagination when sections collapse or expand.",
-  "content_hash": "737158e449383dec1bcc644004fdee75ac3ded47346a44431fdbbb71d13efede"
-}

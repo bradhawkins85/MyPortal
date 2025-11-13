@@ -1,7 +1,0 @@
-{
-  "guid": "aaa9e64e-51ed-414d-b01f-3ea61680a8aa",
-  "occurred_at": "2025-11-01T06:10Z",
-  "change_type": "Fix",
-  "summary": "Ensure cart upgrades only replace the targeted product so add-ons remain in the cart.",
-  "content_hash": "14e935b28939a11ddae7deb72752fa7d449003e138e410c357749abd53145e14"
-}

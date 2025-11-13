@@ -1,7 +1,0 @@
-{
-  "guid": "048721e9-aeeb-467e-986d-4d59eadc4733",
-  "occurred_at": "2025-10-30T14:00Z",
-  "change_type": "Fix",
-  "summary": "Switched company email domain fields to single-line inputs in admin forms.",
-  "content_hash": "ecb4cfa34bcea3e9ce5667522ab54d95eb7145705ff81e26bd042914ceac26c9"
-}

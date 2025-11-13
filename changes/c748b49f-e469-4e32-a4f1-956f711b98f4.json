@@ -1,7 +1,0 @@
-{
-  "guid": "c748b49f-e469-4e32-a4f1-956f711b98f4",
-  "occurred_at": "2025-10-21T12:02Z",
-  "change_type": "Fix",
-  "summary": "Removed automation workspace sidebar from automation creation forms per request",
-  "content_hash": "4cedd35ecfe4939b3959d1fa004f726f48cd45fd79f9ab0c8b6675e1688c085e"
-}

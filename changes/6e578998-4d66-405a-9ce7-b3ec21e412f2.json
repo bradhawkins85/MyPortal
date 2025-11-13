@@ -1,7 +1,0 @@
-{
-  "guid": "6e578998-4d66-405a-9ce7-b3ec21e412f2",
-  "occurred_at": "2025-10-14T09:00Z",
-  "change_type": "Feature",
-  "summary": "Enriched Syncro ticket import to persist ticket numbers, map companies by business name, sync comment replies, and subscribe watcher emails from destination lists",
-  "content_hash": "09cf5657ec1da4e4f1b2d35b3561f5088ee0acc95fe28fcbf5396a7b98820137"
-}

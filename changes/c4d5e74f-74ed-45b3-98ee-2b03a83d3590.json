@@ -1,7 +1,0 @@
-{
-  "guid": "c4d5e74f-74ed-45b3-98ee-2b03a83d3590",
-  "occurred_at": "2025-10-09T12:17Z",
-  "change_type": "Feature",
-  "summary": "Introduced a notifications dashboard with filtering, sorting, and read-state tracking across the UI and API",
-  "content_hash": "915705952338d50e729791fdc2b68b39781045ec0799b38c44e1b654e5d33531"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "ba25600a-4237-421c-8e32-97bae910adef",
-  "occurred_at": "2025-12-20T09:15Z",
-  "change_type": "Fix",
-  "summary": "Corrected automation insert column list to avoid SQL syntax errors when creating ticket automations",
-  "content_hash": "ed3d7152b2d439e3b8060eb67b4552460fdde9b92783367ebe518b346429d2d0"
-}

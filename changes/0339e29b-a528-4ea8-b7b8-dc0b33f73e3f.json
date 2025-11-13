@@ -1,7 +1,0 @@
-{
-  "guid": "0339e29b-a528-4ea8-b7b8-dc0b33f73e3f",
-  "occurred_at": "2025-10-15T12:21Z",
-  "change_type": "Fix",
-  "summary": "Enabled SMTP-backed email delivery for password resets, staff invitations, and notification alerts",
-  "content_hash": "a123090c1fb562883135ca1072b341aec77f80ec8546c09b1a5ae4cc658a557a"
-}

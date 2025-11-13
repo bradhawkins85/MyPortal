@@ -1,7 +1,0 @@
-{
-  "guid": "4d84cb8c-cbc6-4cb6-923c-8e9a9f738d52",
-  "occurred_at": "2025-10-29T03:44Z",
-  "change_type": "Feature",
-  "summary": "Combined ticket status display with inline update dropdown on the admin tickets table",
-  "content_hash": "3372c63096bdd67cae3028a3e5c1b7da8eda7c3ca78a302fa923f71bffdd616a"
-}

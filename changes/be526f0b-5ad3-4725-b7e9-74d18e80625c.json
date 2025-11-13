@@ -1,7 +1,0 @@
-{
-  "guid": "be526f0b-5ad3-4725-b7e9-74d18e80625c",
-  "occurred_at": "2025-09-18T07:28Z",
-  "change_type": "Change",
-  "summary": "Migrated forms routes from /forms to /myforms with documentation, nginx, and template updates plus legacy redirects",
-  "content_hash": "fce11104123b0edb6aa539975c2c978fdee59202a8e9a2a7269424452c23913e"
-}

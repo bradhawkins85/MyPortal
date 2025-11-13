@@ -1,7 +1,0 @@
-{
-  "guid": "b2f52d7f-916a-42f1-a7c5-461282f3b74d",
-  "occurred_at": "2025-09-17T07:02Z",
-  "change_type": "Fix",
-  "summary": "Added server-rendered CSRF tokens to Apps management forms to prevent invalid token errors when saving changes",
-  "content_hash": "751137e2bd1d077fccb7156d579ead17e4f26336ce67b96d341b134dc930012d"
-}

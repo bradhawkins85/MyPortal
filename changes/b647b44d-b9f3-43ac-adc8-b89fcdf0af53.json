@@ -1,7 +1,0 @@
-{
-  "guid": "b647b44d-b9f3-43ac-adc8-b89fcdf0af53",
-  "occurred_at": "2025-10-20T08:07Z",
-  "change_type": "Feature",
-  "summary": "Enabled public self-service registration with requester-scoped ticket access and public-only replies for non-admin users",
-  "content_hash": "743fde623dd23c933976610f6718c60732200ce5250457e44787286c1ba06cea"
-}

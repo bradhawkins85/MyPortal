@@ -1,7 +1,0 @@
-{
-  "guid": "bb7b360b-977a-4707-ab94-3516dc067057",
-  "occurred_at": "2025-11-24T10:00Z",
-  "change_type": "Fix",
-  "summary": "Removed the Super admin sidebar heading to keep navigation compact for privileged users",
-  "content_hash": "a423bd3956f770497a14c05b6f2de2b4f2fe96ac693399438dba30d07cd45124"
-}

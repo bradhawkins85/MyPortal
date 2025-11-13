@@ -1,7 +1,0 @@
-{
-  "guid": "41d00114-119c-44fa-967f-32faa12ce6d6",
-  "occurred_at": "2025-12-24T11:30Z",
-  "change_type": "Fix",
-  "summary": "Moved Ollama module generation into shared background tasks with ticket and knowledge base callbacks to remove UI delays",
-  "content_hash": "00e06e820175bf01a69574703dc861943b1c1f48ad999d39b83b4919b967c060"
-}

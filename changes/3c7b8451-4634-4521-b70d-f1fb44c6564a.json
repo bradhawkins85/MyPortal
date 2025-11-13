@@ -1,7 +1,0 @@
-{
-  "guid": "3c7b8451-4634-4521-b70d-f1fb44c6564a",
-  "occurred_at": "2025-10-20T11:59Z",
-  "change_type": "Feature",
-  "summary": "Reworked knowledge base portal layout to list articles and moved article reading to dedicated views",
-  "content_hash": "ae2b89c0c60e5db47e2151df86119a61befb92f5dac20fe297c691096f0bd1ac"
-}

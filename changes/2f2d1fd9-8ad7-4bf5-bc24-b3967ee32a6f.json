@@ -1,7 +1,0 @@
-{
-  "guid": "2f2d1fd9-8ad7-4bf5-bc24-b3967ee32a6f",
-  "occurred_at": "2025-10-09T18:00Z",
-  "change_type": "Feature",
-  "summary": "Added port catalogue data models, secure document uploads, pricing workflow approvals, notification APIs, and refreshed Swagger documentation",
-  "content_hash": "f5af0049159409142cf04ea36ba91c863bb40d71ec0ee415d501396cabfa879e"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "17431b46-7023-4cfb-988b-d8bdeaffa2b4",
-  "occurred_at": "2025-10-29T07:21Z",
-  "change_type": "Fix",
-  "summary": "Load admin client script on ticket detail page so AI reprocess button works",
-  "content_hash": "d500aa67bc2abdcc05ce84a34652ee88e1b161301f6362d32c7342e237d3f936"
-}

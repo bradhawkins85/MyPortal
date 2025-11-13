@@ -1,7 +1,0 @@
-{
-  "guid": "7b0ca327-9a3c-4876-968d-18fe6d85cda8",
-  "occurred_at": "2025-10-29T12:42Z",
-  "change_type": "Fix",
-  "summary": "Removed the ticket description rich text preview and label on the ticket details form.",
-  "content_hash": "bb8cf9af9501ad7ec9144c4d81e47e947bc2b9596397f8175b737cc7889e39e8"
-}

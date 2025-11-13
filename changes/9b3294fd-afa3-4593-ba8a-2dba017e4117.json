@@ -1,7 +1,0 @@
-{
-  "guid": "9b3294fd-afa3-4593-ba8a-2dba017e4117",
-  "occurred_at": "2025-01-15T10:30Z",
-  "change_type": "Fix",
-  "summary": "Removed finance and webhook notification settings from default event catalogue.",
-  "content_hash": "bbf2544b091bd8673a8b07394d378c77701c82057d990eb2ae922578a3c832f8"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "2b6b57f5-9922-478e-a2e8-0065fc0e3257",
-  "occurred_at": "2025-10-05T00:00Z",
-  "change_type": "Fix",
-  "summary": "Embedded CSRF tokens in company admin forms so email domain saves succeed without client-side scripts.",
-  "content_hash": "d0f8a3050b63649b5c0695e58d7b35909824984ff2dfca44cc987e1387a38f31"
-}

@@ -1,7 +1,0 @@
-{
-  "guid": "87e5e956-a85d-4854-9c94-116197e505d9",
-  "occurred_at": "2025-10-07T12:10Z",
-  "change_type": "Fix",
-  "summary": "Switched configuration fields to validation aliases so startup accepts secret and database env vars",
-  "content_hash": "6d6da2e2f093f68efbb6867da6ec9c40cb8176ebe56db62673d1cc212cfef63f"
-}

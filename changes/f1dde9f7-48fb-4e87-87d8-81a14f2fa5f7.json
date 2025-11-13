@@ -1,7 +1,0 @@
-{
-  "guid": "f1dde9f7-48fb-4e87-87d8-81a14f2fa5f7",
-  "occurred_at": "2025-10-15T23:36Z",
-  "change_type": "Fix",
-  "summary": "Restored admin membership removal handler closures to resolve admin.js syntax error",
-  "content_hash": "62596d746c62a39ea174a7f6ddf7ce5508fb3cd51cbf79d3b14411e78e9c5970"
-}

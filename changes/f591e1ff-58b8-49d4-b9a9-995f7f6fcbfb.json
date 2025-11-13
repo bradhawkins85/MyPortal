@@ -1,7 +1,0 @@
-{
-  "guid": "f591e1ff-58b8-49d4-b9a9-995f7f6fcbfb",
-  "occurred_at": "2025-10-10T13:45Z",
-  "change_type": "Fix",
-  "summary": "Restored notification API actions with summary counts, event-type catalogues, repository insert reliability, and UI refresh",
-  "content_hash": "9feca235d6dc308200aa111d469dfe5884b063a9ddb11d609643a3d2abd8dc09"
-}

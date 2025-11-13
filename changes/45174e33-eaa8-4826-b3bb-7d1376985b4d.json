@@ -1,7 +1,0 @@
-{
-  "guid": "45174e33-eaa8-4826-b3bb-7d1376985b4d",
-  "occurred_at": "2025-11-01T06:23Z",
-  "change_type": "Fix",
-  "summary": "Made the product category management panel always visible instead of collapsible.",
-  "content_hash": "1c2075f6bf6c2dbe7159e066d43f04700482e0e7eae5d0e87d5211e601cb6406"
-}

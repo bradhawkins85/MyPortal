@@ -1,7 +1,0 @@
-{
-  "guid": "68cd96ac-6bf0-4486-826f-182eff6e76e5",
-  "occurred_at": "2025-10-24T09:00Z",
-  "change_type": "Fix",
-  "summary": "Queued ticket automation module execution in background tasks so ntfy notifications run without blocking the UI",
-  "content_hash": "5b181d889587a74f617fe0c8538387ae2c8d2f8ea172ea91f2ca6f43a6978965"
-}

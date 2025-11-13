@@ -1,7 +1,0 @@
-{
-  "guid": "e66ca5c8-d04b-4f4d-a0e1-9ea24fe9acfa",
-  "occurred_at": "2025-11-03T07:30Z",
-  "change_type": "Fix",
-  "summary": "Resolved Manage labour types modal not opening by closing the ticket status modal wrapper.",
-  "content_hash": "eee1146e083e33cecb208d69d37ad2fd0450787870dab547f5ddf86ba25765ce"
-}

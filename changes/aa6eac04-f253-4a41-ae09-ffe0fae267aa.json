@@ -1,7 +1,0 @@
-{
-  "guid": "aa6eac04-f253-4a41-ae09-ffe0fae267aa",
-  "occurred_at": "2025-10-30T13:31Z",
-  "change_type": "Feature",
-  "summary": "Added super-admin impersonation workspace and API endpoints to mirror user permissions.",
-  "content_hash": "bed98625c0733d659aae634723d5cbed797dba2f775df4226803b596356cd9fc"
-}

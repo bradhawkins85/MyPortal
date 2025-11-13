@@ -1,7 +1,0 @@
-{
-  "guid": "bd64e4e8-7ba8-4430-bae5-5c9b1e7b979e",
-  "occurred_at": "2025-10-09T12:48Z",
-  "change_type": "Fix",
-  "summary": "Removed shop toolbar search and stock toggle controls from the customer catalogue view",
-  "content_hash": "0f49db2ca9ded35390b15585b149715bac1c2d59c1eadcb7bf6f05369d7c91de"
-}

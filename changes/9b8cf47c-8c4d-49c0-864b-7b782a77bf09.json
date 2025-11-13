@@ -1,7 +1,0 @@
-{
-  "guid": "9b8cf47c-8c4d-49c0-864b-7b782a77bf09",
-  "occurred_at": "2025-10-09T13:16Z",
-  "change_type": "Feature",
-  "summary": "Added viewport-aware pagination to the staff roster so visible rows adapt to screen height",
-  "content_hash": "ca99870f08f48b727ac1ba93419fb9235df620fd70b5d25487bfb6aa48bf02b5"
-}

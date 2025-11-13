@@ -1,7 +1,0 @@
-{
-  "guid": "2c8fc5d1-c6a1-4502-bc00-3b3f4848b2ba",
-  "occurred_at": "2025-10-29T06:43Z",
-  "change_type": "Fix",
-  "summary": "Defaulted Ollama model selection when module settings are blank to restore IMAP ticket AI summaries and tags.",
-  "content_hash": "bc6bf69f1156b7749f9a38766c7b30dae17a7402c17c30a619b17abaa1c0def9"
-}

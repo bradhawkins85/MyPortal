@@ -1,7 +1,0 @@
-{
-  "guid": "7fb74abb-3bd3-4b03-81e1-ef32a9fea885",
-  "occurred_at": "2025-10-29T04:45Z",
-  "change_type": "Fix",
-  "summary": "Improve IMAP email body parsing so ticket descriptions only show formatted HTML and inline images render.",
-  "content_hash": "6a04839a4d3915bf1829f8662bfbcda4d01041f849d5a7a5b76270179ef0f69b"
-}

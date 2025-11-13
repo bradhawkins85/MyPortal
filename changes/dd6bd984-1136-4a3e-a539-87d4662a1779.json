@@ -1,7 +1,0 @@
-{
-  "guid": "dd6bd984-1136-4a3e-a539-87d4662a1779",
-  "occurred_at": "2025-09-17T07:47Z",
-  "change_type": "Fix",
-  "summary": "Normalised Syncro CPUAge import to populate asset Approx Age",
-  "content_hash": "d20eab5a00704b532e4c3c25f8a0a5e1d977d28576cfd86f2b0e90f509234676"
-}

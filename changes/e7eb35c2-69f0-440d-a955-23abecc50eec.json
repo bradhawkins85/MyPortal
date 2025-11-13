@@ -1,7 +1,0 @@
-{
-  "guid": "e7eb35c2-69f0-440d-a955-23abecc50eec",
-  "occurred_at": "2025-11-20T14:05Z",
-  "change_type": "Feature",
-  "summary": "Generalised websocket table refresh controllers for realtime admin data updates.",
-  "content_hash": "675392eaf769fd086989f8dbe5704423239514c52d561fc753e0eacbdaae1831"
-}

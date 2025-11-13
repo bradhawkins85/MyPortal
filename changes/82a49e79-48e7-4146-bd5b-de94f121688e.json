@@ -1,7 +1,0 @@
-{
-  "guid": "82a49e79-48e7-4146-bd5b-de94f121688e",
-  "occurred_at": "2025-11-01T12:15Z",
-  "change_type": "Fix",
-  "summary": "Allow non-helpdesk users to access tickets they request or watch regardless of company filters.",
-  "content_hash": "0bd50b0c687735660b42d8834d9fc7bc206e63ae802080224341f3ac60758a74"
-}

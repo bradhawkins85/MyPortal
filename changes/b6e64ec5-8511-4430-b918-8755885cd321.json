@@ -1,7 +1,0 @@
-{
-  "guid": "b6e64ec5-8511-4430-b918-8755885cd321",
-  "occurred_at": "2025-10-19T09:45Z",
-  "change_type": "Fix",
-  "summary": "Hardened upgrade automation to locate python3 when python is absent so system updates no longer fail",
-  "content_hash": "67fd173e059d7c8244f6c7749e5fc67e219faa18f1b8b74cfe58fc0f9a2d99d8"
-}

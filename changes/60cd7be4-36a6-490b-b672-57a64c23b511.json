@@ -1,7 +1,0 @@
-{
-  "guid": "60cd7be4-36a6-490b-b672-57a64c23b511",
-  "occurred_at": "2025-10-08T16:45Z",
-  "change_type": "Fix",
-  "summary": "Redirected knowledge base deletion flow back to the admin catalogue to prevent Article not found errors",
-  "content_hash": "25def118637423ff4129813a6653a3851d2c79b96019f6c669a813b52976cebb"
-}

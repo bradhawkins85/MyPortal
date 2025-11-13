@@ -1,7 +1,0 @@
-{
-  "guid": "5d78d322-4a97-4c2e-9ff5-1e3f908e7241",
-  "occurred_at": "2025-10-09T22:00Z",
-  "change_type": "Feature",
-  "summary": "Added super-admin notification creation endpoint with Swagger docs, README updates, and regression tests",
-  "content_hash": "0dfd02f387b60ae1efd676471fc75bbadcbfb3f6f536dfb5eee2e980cc42e69b"
-}
