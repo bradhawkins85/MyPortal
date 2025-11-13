@@ -308,10 +308,9 @@ async def build_ticket_invoices(
     """Construct invoice payloads for the provided ticket identifiers.
     
     Args:
-        xero_item_rates: Optional mapping of item codes to their Xero-configured rates.
-                        When provided, these rates will be used for labour types instead 
-                        of the default hourly_rate. Falls back to hourly_rate if item 
-                        code not found in mapping.
+        xero_item_rates: Deprecated parameter, no longer used. Rates are now taken
+                        from the labour type configuration in the app, falling back
+                        to hourly_rate if not set.
     """
 
     status_filter = _normalise_status_filter(allowed_statuses)
@@ -412,20 +411,16 @@ async def build_ticket_invoices(
                         group_minutes,
                     )
                     
-                    # Determine rate to use: Local labour type rate first, then Xero item rate, then default
+                    # Determine rate to use: Local labour type rate, otherwise default hourly rate
                     labour_code = str(group.get("code") or "").strip()
                     local_rate = group.get("rate")
-                    item_rate = None
                     
-                    # Priority: 1. Local rate, 2. Xero rate, 3. Default
+                    # Use local rate if set, otherwise use default
                     if local_rate is not None:
                         try:
                             rate_to_use = _to_decimal(local_rate) or rate_decimal
                         except (ValueError, TypeError, InvalidOperation):
                             rate_to_use = rate_decimal
-                    elif labour_code and xero_item_rates:
-                        item_rate = xero_item_rates.get(labour_code)
-                        rate_to_use = item_rate if item_rate is not None else rate_decimal
                     else:
                         rate_to_use = rate_decimal
                     
@@ -930,49 +925,7 @@ async def sync_billable_tickets(
     async def fetch_company(cid: int):
         return await company_repo.get_company_by_id(cid)
     
-    # Collect all unique labour codes from billable tickets
-    labour_codes: set[str] = set()
-    for ticket in billable_tickets:
-        ticket_id = ticket.get("id")
-        if not ticket_id:
-            continue
-        replies = await fetch_replies(ticket_id)
-        for reply in replies:
-            labour_code = str(reply.get("labour_type_code") or "").strip()
-            if labour_code:
-                labour_codes.add(labour_code)
-    
-    # Fetch Xero item rates for all labour codes
-    xero_item_rates: dict[str, Decimal] = {}
-    if labour_codes:
-        logger.info(
-            "Fetching Xero item rates for labour types",
-            company_id=company_id,
-            labour_codes=list(labour_codes),
-        )
-        xero_item_rates = await fetch_xero_item_rates(
-            list(labour_codes),
-            tenant_id=tenant_id,
-            access_token=access_token,
-        )
-        if xero_item_rates:
-            logger.info(
-                "Fetched Xero item rates",
-                company_id=company_id,
-                rates_found=len(xero_item_rates),
-                item_codes=list(xero_item_rates.keys()),
-            )
-        
-        # Log missing labour codes
-        missing_codes = labour_codes - set(xero_item_rates.keys())
-        if missing_codes:
-            logger.warning(
-                "Some labour codes not found in Xero items",
-                company_id=company_id,
-                missing_codes=list(missing_codes),
-                expected_codes=list(labour_codes),
-                found_codes=list(xero_item_rates.keys()),
-            )
+    # No longer fetching Xero item rates - using local labour type rates only
     
     ticket_ids = [t["id"] for t in billable_tickets]
     invoices = await build_ticket_invoices(
@@ -984,7 +937,7 @@ async def sync_billable_tickets(
         reference_prefix=reference_prefix,
         description_template=description_template,
         invoice_date=date.today(),
-        xero_item_rates=xero_item_rates if xero_item_rates else None,
+        xero_item_rates=None,  # No longer using Xero item rates
         fetch_ticket=fetch_ticket,
         fetch_replies=fetch_replies,
         fetch_company=fetch_company,
@@ -1219,7 +1172,7 @@ async def sync_billable_tickets(
                 event_id=event_id,
             )
             
-            result = {
+            return {
                 "status": "succeeded",
                 "company_id": company_id,
                 "invoice_number": xero_invoice_number,
@@ -1228,16 +1181,6 @@ async def sync_billable_tickets(
                 "response_status": response_status,
                 "event_id": event_id,
             }
-            
-            # Include labour code information if any were used
-            if labour_codes:
-                result["labour_codes_expected"] = list(labour_codes)
-                result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
-                missing_codes = labour_codes - set(xero_item_rates.keys())
-                if missing_codes:
-                    result["labour_codes_missing_from_xero"] = list(missing_codes)
-            
-            return result
         else:
             logger.error(
                 "Xero API returned error status for tickets",
@@ -1245,23 +1188,13 @@ async def sync_billable_tickets(
                 response_status=response_status,
                 response_body=response_body,
             )
-            result = {
+            return {
                 "status": "failed",
                 "company_id": company_id,
                 "response_status": response_status,
                 "error": f"HTTP {response_status}",
                 "event_id": event_id,
             }
-            
-            # Include labour code information if any were used
-            if labour_codes:
-                result["labour_codes_expected"] = list(labour_codes)
-                result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
-                missing_codes = labour_codes - set(xero_item_rates.keys())
-                if missing_codes:
-                    result["labour_codes_missing_from_xero"] = list(missing_codes)
-            
-            return result
     
     except httpx.HTTPError as exc:
         logger.error("Xero API request failed for tickets", company_id=company_id, error=str(exc))
@@ -1284,22 +1217,12 @@ async def sync_billable_tickets(
                     event_id=event_id,
                     error=str(record_exc),
                 )
-        result = {
+        return {
             "status": "error",
             "company_id": company_id,
             "error": str(exc),
             "event_id": event_id,
         }
-        
-        # Include labour code information if any were used
-        if labour_codes:
-            result["labour_codes_expected"] = list(labour_codes)
-            result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
-            missing_codes = labour_codes - set(xero_item_rates.keys())
-            if missing_codes:
-                result["labour_codes_missing_from_xero"] = list(missing_codes)
-        
-        return result
     except Exception as exc:
         logger.error("Unexpected error during Xero tickets sync", company_id=company_id, error=str(exc))
         if event_id is not None:
@@ -1321,22 +1244,12 @@ async def sync_billable_tickets(
                     event_id=event_id,
                     error=str(record_exc),
                 )
-        result = {
+        return {
             "status": "error",
             "company_id": company_id,
             "error": str(exc),
             "event_id": event_id,
         }
-        
-        # Include labour code information if any were used
-        if labour_codes:
-            result["labour_codes_expected"] = list(labour_codes)
-            result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
-            missing_codes = labour_codes - set(xero_item_rates.keys())
-            if missing_codes:
-                result["labour_codes_missing_from_xero"] = list(missing_codes)
-        
-        return result
 
 
 async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, Any]:
@@ -1430,8 +1343,6 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
     ticket_numbers: list[str] = []
     billable_tickets_found = 0
     tickets_skipped_reason: str | None = None
-    labour_codes: set[str] = set()
-    xero_item_rates: dict[str, Decimal] = {}
     
     if billable_statuses_raw:
         try:
@@ -1486,143 +1397,77 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                 )
                 tickets_skipped_reason = "No tickets with unbilled time in billable status"
             elif billable_tickets:
-                # Collect all unique labour codes from billable tickets
+                # No longer fetching Xero item rates - using local labour type rates only
+                
+                # Build line items for billable tickets
                 for ticket in billable_tickets:
                     ticket_id = ticket.get("id")
                     if not ticket_id:
                         continue
+                    
+                    # Get unbilled replies for this ticket
                     unbilled_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
                     all_replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
                     unbilled_replies = [r for r in all_replies if r.get("id") in unbilled_ids]
+                    
+                    # Group by labour type
+                    labour_map: dict[tuple[str | None, str | None], dict[str, Any]] = {}
+                    billable_minutes = 0
+                    
                     for reply in unbilled_replies:
-                        labour_code = str(reply.get("labour_type_code") or "").strip()
-                        if labour_code:
-                            labour_codes.add(labour_code)
-                
-                # Fetch Xero item rates for all labour codes
-                if labour_codes:
-                    logger.info(
-                        "Fetching Xero item rates for labour types",
-                        company_id=company_id,
-                        labour_codes=list(labour_codes),
-                    )
-                    xero_item_rates = await fetch_xero_item_rates(
-                        list(labour_codes),
-                        tenant_id=tenant_id,
-                        access_token=access_token,
-                    )
-                    if xero_item_rates:
-                        logger.info(
-                            "Fetched Xero item rates",
-                            company_id=company_id,
-                            rates_found=len(xero_item_rates),
-                            item_codes=list(xero_item_rates.keys()),
-                        )
-                    
-                    # Log missing labour codes
-                    missing_codes = labour_codes - set(xero_item_rates.keys())
-                    if missing_codes:
-                        logger.warning(
-                            "Some labour codes not found in Xero items",
-                            company_id=company_id,
-                            missing_codes=list(missing_codes),
-                            expected_codes=list(labour_codes),
-                            found_codes=list(xero_item_rates.keys()),
-                        )
-                
-                # Check if we have rates available (either default or from Xero items)
-                has_default_rate = hourly_rate > 0
-                has_xero_rates = bool(xero_item_rates)
-                
-                if not has_default_rate and not has_xero_rates:
-                    logger.warning(
-                        "No rates available for billing: no default hourly rate and no Xero item rates found",
-                        company_id=company_id,
-                        billable_statuses=billable_statuses_raw,
-                        labour_codes=list(labour_codes),
-                    )
-                    tickets_skipped_reason = "No billing rates configured (neither default hourly rate nor Xero item rates)"
-                else:
-                    if not has_default_rate and has_xero_rates:
-                        logger.info(
-                            "Using Xero item rates for billing (no default hourly rate configured)",
-                            company_id=company_id,
-                            xero_item_rates_count=len(xero_item_rates),
-                        )
-                    
-                    # Build line items for billable tickets
-                    for ticket in billable_tickets:
-                        ticket_id = ticket.get("id")
-                        if not ticket_id:
+                        minutes = _coerce_minutes(reply.get("minutes_spent"))
+                        if minutes <= 0:
                             continue
-                        
-                        # Get unbilled replies for this ticket
-                        unbilled_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
-                        all_replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
-                        unbilled_replies = [r for r in all_replies if r.get("id") in unbilled_ids]
-                        
-                        # Group by labour type
-                        labour_map: dict[tuple[str | None, str | None], dict[str, Any]] = {}
-                        billable_minutes = 0
-                        
-                        for reply in unbilled_replies:
-                            minutes = _coerce_minutes(reply.get("minutes_spent"))
-                            if minutes <= 0:
+                        is_billable = reply.get("is_billable")
+                        if not is_billable:
+                            continue
+                        billable_minutes += minutes
+                        labour_code = str(reply.get("labour_type_code") or "").strip() or None
+                        labour_name = str(reply.get("labour_type_name") or "").strip() or None
+                        labour_rate = reply.get("labour_type_rate")
+                        key = (labour_code, labour_name)
+                        bucket = labour_map.get(key)
+                        if not bucket:
+                            bucket = {"minutes": 0, "code": labour_code, "name": labour_name, "rate": labour_rate}
+                            labour_map[key] = bucket
+                        bucket["minutes"] += minutes
+                    
+                    if billable_minutes <= 0:
+                        logger.debug(
+                            "Ticket has unbilled replies but no billable minutes",
+                            ticket_id=ticket_id,
+                            company_id=company_id,
+                            unbilled_reply_count=len(unbilled_replies),
+                        )
+                        continue
+                    
+                    # Create line items for this ticket
+                    labour_groups = list(labour_map.values())
+                    if labour_groups:
+                        for group in labour_groups:
+                            group_minutes = int(group.get("minutes") or 0)
+                            if group_minutes <= 0:
                                 continue
-                            is_billable = reply.get("is_billable")
-                            if not is_billable:
-                                continue
-                            billable_minutes += minutes
-                            labour_code = str(reply.get("labour_type_code") or "").strip() or None
-                            labour_name = str(reply.get("labour_type_name") or "").strip() or None
-                            labour_rate = reply.get("labour_type_rate")
-                            key = (labour_code, labour_name)
-                            bucket = labour_map.get(key)
-                            if not bucket:
-                                bucket = {"minutes": 0, "code": labour_code, "name": labour_name, "rate": labour_rate}
-                                labour_map[key] = bucket
-                            bucket["minutes"] += minutes
-                        
-                        if billable_minutes <= 0:
-                            logger.debug(
-                                "Ticket has unbilled replies but no billable minutes",
-                                ticket_id=ticket_id,
-                                company_id=company_id,
-                                unbilled_reply_count=len(unbilled_replies),
+                            hours_decimal = _minutes_to_hours(group_minutes)
+                            description = _format_line_description(
+                                description_template,
+                                ticket,
+                                group,
+                                group_minutes,
                             )
-                            continue
-                        
-                        # Create line items for this ticket
-                        labour_groups = list(labour_map.values())
-                        if labour_groups:
-                            for group in labour_groups:
-                                group_minutes = int(group.get("minutes") or 0)
-                                if group_minutes <= 0:
-                                    continue
-                                hours_decimal = _minutes_to_hours(group_minutes)
-                                description = _format_line_description(
-                                    description_template,
-                                    ticket,
-                                    group,
-                                    group_minutes,
-                                )
-                                
-                                # Determine rate to use: Local labour type rate first, then Xero item rate, then default
-                                labour_code = str(group.get("code") or "").strip()
-                                local_rate = group.get("rate")
-                                item_rate = None
-                                
-                                # Priority: 1. Local rate, 2. Xero rate, 3. Default
-                                if local_rate is not None:
-                                    try:
-                                        rate_to_use = _to_decimal(local_rate) or hourly_rate
-                                    except (ValueError, TypeError, InvalidOperation):
-                                        rate_to_use = hourly_rate
-                                elif labour_code and xero_item_rates:
-                                    item_rate = xero_item_rates.get(labour_code)
-                                    rate_to_use = item_rate if item_rate is not None else hourly_rate
-                                else:
+                            
+                            # Determine rate to use: Local labour type rate, otherwise default hourly rate
+                            labour_code = str(group.get("code") or "").strip()
+                            local_rate = group.get("rate")
+                            
+                            # Use local rate if set, otherwise use default
+                            if local_rate is not None:
+                                try:
+                                    rate_to_use = _to_decimal(local_rate) or hourly_rate
+                                except (ValueError, TypeError, InvalidOperation):
                                     rate_to_use = hourly_rate
+                            else:
+                                rate_to_use = hourly_rate
                                 
                                 line_item: dict[str, Any] = {
                                     "Description": description,
@@ -1912,14 +1757,6 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                 "time_entries_recorded": billed_count,
             }
             
-            # Include labour code information if any were used
-            if labour_codes:
-                result["labour_codes_expected"] = list(labour_codes)
-                result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
-                missing_codes = labour_codes - set(xero_item_rates.keys())
-                if missing_codes:
-                    result["labour_codes_missing_from_xero"] = list(missing_codes)
-            
             return result
         else:
             logger.error(
@@ -1928,23 +1765,13 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                 response_status=response_status,
                 response_body=response_body,
             )
-            result = {
+            return {
                 "status": "failed",
                 "company_id": company_id,
                 "response_status": response_status,
                 "error": f"HTTP {response_status}",
                 "event_id": event_id,
             }
-            
-            # Include labour code information if any were used
-            if labour_codes:
-                result["labour_codes_expected"] = list(labour_codes)
-                result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
-                missing_codes = labour_codes - set(xero_item_rates.keys())
-                if missing_codes:
-                    result["labour_codes_missing_from_xero"] = list(missing_codes)
-            
-            return result
     
     except httpx.HTTPError as exc:
         logger.error("Xero API request failed", company_id=company_id, error=str(exc))
@@ -1967,22 +1794,12 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                     event_id=event_id,
                     error=str(record_exc),
                 )
-        result = {
+        return {
             "status": "error",
             "company_id": company_id,
             "error": str(exc),
             "event_id": event_id,
         }
-        
-        # Include labour code information if any were used
-        if labour_codes:
-            result["labour_codes_expected"] = list(labour_codes)
-            result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
-            missing_codes = labour_codes - set(xero_item_rates.keys())
-            if missing_codes:
-                result["labour_codes_missing_from_xero"] = list(missing_codes)
-        
-        return result
     except Exception as exc:
         logger.error("Unexpected error during Xero sync", company_id=company_id, error=str(exc))
         if event_id is not None:
@@ -2004,22 +1821,12 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                     event_id=event_id,
                     error=str(record_exc),
                 )
-        result = {
+        return {
             "status": "error",
             "company_id": company_id,
             "error": str(exc),
             "event_id": event_id,
         }
-        
-        # Include labour code information if any were used
-        if labour_codes:
-            result["labour_codes_expected"] = list(labour_codes)
-            result["labour_codes_found_in_xero"] = list(xero_item_rates.keys())
-            missing_codes = labour_codes - set(xero_item_rates.keys())
-            if missing_codes:
-                result["labour_codes_missing_from_xero"] = list(missing_codes)
-        
-        return result
 
 
 
