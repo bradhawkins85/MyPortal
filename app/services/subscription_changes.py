@@ -235,7 +235,8 @@ async def apply_subscription_addition(
     """Apply a license addition immediately with prorata charge.
     
     Increases the subscription quantity immediately and creates a change request
-    record with the prorated charge.
+    record with the prorated charge. If there's a charge, automatically creates
+    a Xero invoice.
     
     Args:
         subscription_id: The subscription to modify
@@ -248,6 +249,7 @@ async def apply_subscription_addition(
         - subscription: Updated subscription
         - change_request: Created change request record
         - prorated_charge: Charge for this addition
+        - xero_result: Result of Xero invoice creation (if applicable)
     """
     if quantity_to_add <= 0:
         raise ValueError("Quantity to add must be positive")
@@ -286,6 +288,52 @@ async def apply_subscription_addition(
         f"prorated charge: ${prorated_charge:.2f}"
     )
     
+    # If there's a charge, send to Xero
+    xero_result = None
+    if prorated_charge and prorated_charge > 0:
+        from app.services import xero as xero_service
+        
+        # Get product name for invoice description
+        product_name = subscription.get("product_name") or f"Product {subscription['product_id']}"
+        
+        try:
+            xero_result = await xero_service.send_subscription_charge_to_xero(
+                subscription_id=subscription_id,
+                change_request_id=change_request["id"],
+                customer_id=subscription["customer_id"],
+                product_name=product_name,
+                quantity_change=quantity_to_add,
+                prorated_charge=prorated_charge,
+                end_date=subscription["end_date"],
+            )
+            
+            # If successful, update the change request with the invoice number
+            if xero_result.get("status") == "succeeded" and xero_result.get("invoice_number"):
+                await change_requests_repo.update_xero_invoice_number(
+                    change_request["id"],
+                    xero_result["invoice_number"],
+                )
+                logger.info(
+                    f"Xero invoice created for subscription addition: {xero_result['invoice_number']}"
+                )
+            elif xero_result.get("status") == "skipped":
+                logger.info(
+                    f"Xero invoice creation skipped: {xero_result.get('reason')}"
+                )
+            else:
+                logger.warning(
+                    f"Xero invoice creation failed: {xero_result.get('error', 'Unknown error')}"
+                )
+        except Exception as exc:
+            logger.error(
+                f"Failed to send subscription charge to Xero: {exc}",
+                exc_info=True,
+            )
+            xero_result = {
+                "status": "error",
+                "error": str(exc),
+            }
+    
     # Get updated subscription
     updated_subscription = await subscriptions_repo.get_subscription(subscription_id)
     
@@ -294,6 +342,7 @@ async def apply_subscription_addition(
         "change_request": change_request,
         "prorated_charge": prorated_charge,
         "preview": preview,
+        "xero_result": xero_result,
     }
 
 
