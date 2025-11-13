@@ -910,7 +910,7 @@ async def sync_billable_tickets(
     
     # Fetch Xero item rates for all labour codes
     xero_item_rates: dict[str, Decimal] = {}
-    if labour_codes:
+    if labour_codes and tenant_id and access_token:
         logger.info(
             "Fetching Xero item rates for labour types",
             company_id=company_id,
@@ -1466,7 +1466,7 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                             labour_codes.add(labour_code)
                 
                 # Fetch Xero item rates for all labour codes
-                if labour_codes:
+                if labour_codes and tenant_id and access_token:
                     logger.info(
                         "Fetching Xero item rates for labour types",
                         company_id=company_id,
