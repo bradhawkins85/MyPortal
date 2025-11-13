@@ -281,9 +281,11 @@ def test_calculate_chargeable_licenses_with_prior_additions():
     
     Scenario: Start with 1 license, add 2 (already applied), then add 2 more
     - Current quantity: 3 (1 original + 2 added)
+    - Applied additions: 2
+    - Original contracted quantity: 3 - 2 = 1
     - No pending changes
     - Adding 2 more: would result in 5 at term end
-    - Since contracted quantity is 3, charge for all 2 licenses
+    - Since original contracted quantity is 1, charge for 5 - 1 = 4 licenses
     """
     from app.services.subscription_changes import calculate_chargeable_licenses
     
@@ -291,8 +293,9 @@ def test_calculate_chargeable_licenses_with_prior_additions():
         current_quantity=3,
         quantity_to_add=2,
         pending_net_change=0,
+        applied_additions=2,
     )
-    assert chargeable == 2
+    assert chargeable == 4
 
 
 def test_calculate_chargeable_licenses_exact_contracted_amount():
@@ -337,11 +340,15 @@ async def test_preview_addition_with_no_pending_changes(monkeypatch):
     async def mock_list_pending_changes(sub_id):
         return []
     
+    async def mock_get_applied_additions(sub_id):
+        return 0
+    
     import app.repositories.subscriptions as subscriptions_repo
     import app.repositories.subscription_change_requests as change_requests_repo
     
     monkeypatch.setattr(subscriptions_repo, "get_subscription", mock_get_subscription)
     monkeypatch.setattr(change_requests_repo, "list_pending_changes_for_subscription", mock_list_pending_changes)
+    monkeypatch.setattr(change_requests_repo, "get_applied_additions_for_subscription", mock_get_applied_additions)
     
     # Preview adding 3 licenses
     preview = await preview_subscription_change(subscription_id, 3, "addition")
@@ -387,11 +394,15 @@ async def test_preview_addition_with_pending_decrease_no_charge(monkeypatch):
     async def mock_list_pending_changes(sub_id):
         return mock_pending_changes
     
+    async def mock_get_applied_additions(sub_id):
+        return 0
+    
     import app.repositories.subscriptions as subscriptions_repo
     import app.repositories.subscription_change_requests as change_requests_repo
     
     monkeypatch.setattr(subscriptions_repo, "get_subscription", mock_get_subscription)
     monkeypatch.setattr(change_requests_repo, "list_pending_changes_for_subscription", mock_list_pending_changes)
+    monkeypatch.setattr(change_requests_repo, "get_applied_additions_for_subscription", mock_get_applied_additions)
     
     # Preview adding 1 license
     preview = await preview_subscription_change(subscription_id, 1, "addition")
@@ -437,11 +448,15 @@ async def test_preview_addition_with_pending_decrease_partial_charge(monkeypatch
     async def mock_list_pending_changes(sub_id):
         return mock_pending_changes
     
+    async def mock_get_applied_additions(sub_id):
+        return 0
+    
     import app.repositories.subscriptions as subscriptions_repo
     import app.repositories.subscription_change_requests as change_requests_repo
     
     monkeypatch.setattr(subscriptions_repo, "get_subscription", mock_get_subscription)
     monkeypatch.setattr(change_requests_repo, "list_pending_changes_for_subscription", mock_list_pending_changes)
+    monkeypatch.setattr(change_requests_repo, "get_applied_additions_for_subscription", mock_get_applied_additions)
     
     # Preview adding 4 licenses
     preview = await preview_subscription_change(subscription_id, 4, "addition")
@@ -469,12 +484,14 @@ def test_calculate_chargeable_licenses_issue_scenario():
     # Step 1: Start with 2 licenses, remove 1 pending
     current_quantity = 2
     pending_net_change = -1  # -1 from the removal
+    applied_additions = 0  # No applied additions yet
     
     # Step 2: Add 1 (replacement)
     chargeable_first_add = calculate_chargeable_licenses(
         current_quantity=current_quantity,
         quantity_to_add=1,
         pending_net_change=pending_net_change,
+        applied_additions=applied_additions,
     )
     assert chargeable_first_add == 0, "First addition should be free (within contracted quantity)"
     
@@ -483,17 +500,19 @@ def test_calculate_chargeable_licenses_issue_scenario():
     current_quantity_after_first_add = 3
     # Pending removal is still there
     pending_net_change_after_first_add = -1
+    # Now we have 1 applied addition
+    applied_additions_after_first_add = 1
     
     # Now add 1 more (above original count of 2)
     chargeable_second_add = calculate_chargeable_licenses(
         current_quantity=current_quantity_after_first_add,
         quantity_to_add=1,
         pending_net_change=pending_net_change_after_first_add,
+        applied_additions=applied_additions_after_first_add,
     )
     
-    # This is the bug: it returns 0 but should return 1
     # At term end: 3 (current) - 1 (pending decrease) + 1 (new add) = 3
-    # Original contracted quantity: 2
+    # Original contracted quantity: 3 - 1 (applied additions) = 2
     # Should charge for: 3 - 2 = 1
     assert chargeable_second_add == 1, "Second addition should charge for 1 license (exceeds original contracted quantity)"
 
@@ -536,11 +555,18 @@ async def test_preview_issue_scenario_sequential_additions(monkeypatch):
     async def mock_list_pending_changes(sub_id):
         return mock_pending_changes
     
+    # Track applied additions
+    applied_additions_count = 0
+    
+    async def mock_get_applied_additions(sub_id):
+        return applied_additions_count
+    
     import app.repositories.subscriptions as subscriptions_repo
     import app.repositories.subscription_change_requests as change_requests_repo
     
     monkeypatch.setattr(subscriptions_repo, "get_subscription", mock_get_subscription)
     monkeypatch.setattr(change_requests_repo, "list_pending_changes_for_subscription", mock_list_pending_changes)
+    monkeypatch.setattr(change_requests_repo, "get_applied_additions_for_subscription", mock_get_applied_additions)
     
     # Preview adding 1 license (replacement)
     preview1 = await preview_subscription_change(subscription_id, 1, "addition")
@@ -550,6 +576,7 @@ async def test_preview_issue_scenario_sequential_additions(monkeypatch):
     
     # Simulate that the first addition was applied
     mock_subscription["quantity"] = 3  # Now 3 licenses (2 + 1)
+    applied_additions_count = 1  # Update the applied additions count
     
     # Preview adding 1 more license (above original count of 2)
     preview2 = await preview_subscription_change(subscription_id, 1, "addition")
