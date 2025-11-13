@@ -3,11 +3,14 @@ from __future__ import annotations
 import base64
 import email
 import imaplib
+import io
 import json
 import re
+import secrets
 from datetime import datetime, timezone
 from email.header import decode_header, make_header
 from email.utils import getaddresses, parsedate_to_datetime
+from pathlib import Path
 from typing import Any, Mapping
 
 from app.core.logging import log_error, log_info
@@ -17,6 +20,7 @@ from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import staff as staff_repo
 from app.repositories import users as users_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import ticket_attachments as attachments_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import modules as modules_service
 from app.services import system_state
@@ -714,7 +718,16 @@ def _decode_subject(message: email.message.Message) -> str:
         return raw
 
 
-def _extract_body(message: email.message.Message) -> str:
+def _extract_body_and_attachments(message: email.message.Message) -> tuple[str, list[dict[str, Any]]]:
+    """
+    Extract body text and non-image attachments from an email message.
+    
+    Returns:
+        Tuple of (body_html, attachments) where attachments is a list of dicts with:
+        - filename: str
+        - content_type: str
+        - payload: bytes
+    """
     def _decode_text_part(part: email.message.Message) -> str:
         payload = part.get_payload(decode=True) or b""
         if len(payload) > _MAX_FETCH_BYTES:
@@ -728,6 +741,7 @@ def _extract_body(message: email.message.Message) -> str:
         plain_parts: list[str] = []
         html_parts: list[str] = []
         inline_images: dict[str, tuple[str, bytes]] = {}
+        attachments: list[dict[str, Any]] = []
 
         for part in message.walk():
             if part.get_content_maintype() == "multipart":
@@ -746,17 +760,40 @@ def _extract_body(message: email.message.Message) -> str:
                 continue
 
             content_id = part.get("Content-ID")
-            if not content_id or disposition == "attachment":
+            
+            # Handle inline images (embed as base64)
+            if content_id and disposition != "attachment" and content_type.startswith("image/"):
+                payload = part.get_payload(decode=True) or b""
+                if payload and len(payload) <= _MAX_FETCH_BYTES:
+                    normalised_id = content_id.strip().strip("<>").lower()
+                    if normalised_id:
+                        inline_images[normalised_id] = (content_type, payload)
                 continue
-            if not content_type.startswith("image/"):
+            
+            # Handle non-inline attachments (files to save)
+            if disposition == "attachment" or (part.get_filename() and not content_id):
+                payload = part.get_payload(decode=True) or b""
+                if not payload or len(payload) > _MAX_FETCH_BYTES:
+                    continue
+                
+                filename = part.get_filename()
+                if filename:
+                    # Decode filename if it's encoded
+                    try:
+                        decoded_header = make_header(decode_header(filename))
+                        filename = str(decoded_header)
+                    except Exception:
+                        pass  # Use filename as-is if decoding fails
+                else:
+                    # Generate a filename if none provided
+                    filename = f"attachment_{secrets.token_hex(4)}"
+                
+                attachments.append({
+                    "filename": filename,
+                    "content_type": content_type,
+                    "payload": payload,
+                })
                 continue
-            payload = part.get_payload(decode=True) or b""
-            if not payload or len(payload) > _MAX_FETCH_BYTES:
-                continue
-            normalised_id = content_id.strip().strip("<>").lower()
-            if not normalised_id:
-                continue
-            inline_images[normalised_id] = (content_type, payload)
 
         if html_parts:
             html_body = "\n\n".join(fragment for fragment in html_parts if fragment).strip()
@@ -776,25 +813,36 @@ def _extract_body(message: email.message.Message) -> str:
 
                 html_body = _CID_REFERENCE_PATTERN.sub(_replace_cid, html_body)
 
-            return html_body
+            return html_body, attachments
 
         if plain_parts:
-            return "\n\n".join(fragment for fragment in plain_parts if fragment).strip()
+            return "\n\n".join(fragment for fragment in plain_parts if fragment).strip(), attachments
 
-        return ""
+        return "", attachments
 
     if message.get_content_type() == "text/html":
-        return _decode_text_part(message)
+        return _decode_text_part(message), []
     if message.get_content_type() == "text/plain":
-        return _decode_text_part(message)
+        return _decode_text_part(message), []
 
     payload = message.get_payload(decode=True) or b""
     if len(payload) > _MAX_FETCH_BYTES:
         payload = payload[: _MAX_FETCH_BYTES]
     try:
-        return payload.decode(message.get_content_charset() or "utf-8", errors="replace").strip()
+        return payload.decode(message.get_content_charset() or "utf-8", errors="replace").strip(), []
     except LookupError:
-        return payload.decode("utf-8", errors="replace").strip()
+        return payload.decode("utf-8", errors="replace").strip(), []
+
+
+def _extract_body(message: email.message.Message) -> str:
+    """
+    Extract body text from an email message (backward compatibility wrapper).
+    
+    Returns:
+        Body HTML as a string
+    """
+    body, _ = _extract_body_and_attachments(message)
+    return body
 
 
 async def _record_message(
@@ -813,6 +861,96 @@ async def _record_message(
         error=error,
         processed_at=datetime.now(timezone.utc),
     )
+
+
+def _get_upload_directory() -> Path:
+    """Get the base upload directory for ticket attachments."""
+    base_dir = Path(__file__).parent.parent / "static" / "uploads" / "tickets"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    return base_dir
+
+
+def _generate_secure_filename(original_filename: str) -> str:
+    """Generate a secure filename using a random token."""
+    # Extract extension from original filename
+    extension = ""
+    if "." in original_filename:
+        extension = original_filename.rsplit(".", 1)[1].lower()
+        # Limit extension length and sanitize
+        extension = extension[:10]
+        extension = "".join(c for c in extension if c.isalnum())
+    
+    # Generate random filename
+    random_name = secrets.token_urlsafe(32)
+    
+    if extension:
+        return f"{random_name}.{extension}"
+    return random_name
+
+
+async def _save_email_attachment(
+    ticket_id: int,
+    filename: str,
+    content_type: str,
+    payload: bytes,
+) -> dict[str, Any] | None:
+    """
+    Save an email attachment to disk and create a database record.
+    
+    Args:
+        ticket_id: The ticket ID to attach the file to
+        filename: Original filename from the email
+        content_type: MIME type of the attachment
+        payload: File content as bytes
+    
+    Returns:
+        The created attachment record or None if save failed
+    """
+    try:
+        # Generate secure filename
+        secure_filename = _generate_secure_filename(filename)
+        
+        # Get upload directory
+        upload_dir = _get_upload_directory()
+        file_path = upload_dir / secure_filename
+        
+        # Save file to disk
+        file_size = len(payload)
+        with open(file_path, "wb") as f:
+            f.write(payload)
+        
+        log_info(
+            f"Saved email attachment {secure_filename} ({file_size} bytes) for ticket {ticket_id}",
+            ticket_id=ticket_id,
+            original_filename=filename,
+            secure_filename=secure_filename,
+        )
+        
+        # Create database record with "restricted" access level
+        attachment = await attachments_repo.create_attachment(
+            ticket_id=ticket_id,
+            filename=secure_filename,
+            original_filename=filename,
+            file_size=file_size,
+            mime_type=content_type,
+            access_level="restricted",
+            uploaded_by_user_id=None,
+        )
+        return attachment
+    except Exception as e:
+        log_error(
+            f"Failed to save email attachment: {e}",
+            ticket_id=ticket_id,
+            filename=filename,
+            error=str(e),
+        )
+        # Clean up file if it was created
+        if file_path.exists():
+            try:
+                file_path.unlink()
+            except Exception:
+                pass
+        return None
 
 
 async def sync_account(account_id: int) -> dict[str, Any]:
@@ -924,7 +1062,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         flags.append(decoded)
             message = email.message_from_bytes(message_bytes)
             subject = _decode_subject(message) or f"Email from {username}"
-            body = _extract_body(message)
+            body, email_attachments = _extract_body_and_attachments(message)
             message_id = _normalise_string(message.get("Message-ID"), default=uid)
             received_at: datetime | None = None
             raw_date = message.get("Date")
@@ -1035,6 +1173,25 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             account_id=account_id,
                             uid=uid,
                             ticket_id=ticket_id,
+                            error=str(exc),
+                        )
+                
+                # Save non-image attachments with restricted access
+                for attachment_info in email_attachments:
+                    try:
+                        await _save_email_attachment(
+                            ticket_id=int(ticket_id),
+                            filename=attachment_info["filename"],
+                            content_type=attachment_info["content_type"],
+                            payload=attachment_info["payload"],
+                        )
+                    except Exception as exc:  # pragma: no cover - defensive logging
+                        log_error(
+                            "Failed to save email attachment",
+                            account_id=account_id,
+                            uid=uid,
+                            ticket_id=ticket_id,
+                            filename=attachment_info.get("filename"),
                             error=str(exc),
                         )
             await _record_message(
