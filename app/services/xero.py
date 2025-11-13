@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Awaitable, Callable, Mapping, MutableMapping, Sequence
@@ -28,11 +29,35 @@ class _TemplateValues(dict[str, Any]):
         return ""
 
 
-def _normalise_status_filter(statuses: Sequence[Any] | None) -> set[str] | None:
-    if not statuses:
+def _normalise_status_filter(
+    statuses: Sequence[Any] | str | None,
+) -> set[str] | None:
+    if statuses in (None, ""):
         return None
+
+    candidates: list[Any]
+    if isinstance(statuses, str):
+        text = statuses.strip()
+        if not text:
+            return None
+        parsed: Any
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            segments = [segment.strip() for segment in re.split(r"[,;\n]+", text) if segment.strip()]
+            candidates = segments if segments else [text]
+        else:
+            if isinstance(parsed, Sequence) and not isinstance(parsed, (str, bytes, bytearray)):
+                candidates = list(parsed)
+            else:
+                candidates = [parsed]
+    elif isinstance(statuses, Sequence):
+        candidates = list(statuses)
+    else:
+        candidates = [statuses]
+
     filtered: set[str] = set()
-    for status in statuses:
+    for status in candidates:
         text = str(status or "").strip().lower()
         if text:
             filtered.add(text)
@@ -604,7 +629,7 @@ async def build_recurring_invoice_items(
 async def sync_billable_tickets(
     company_id: int,
     *,
-    billable_statuses: Sequence[str] | None = None,
+    billable_statuses: Sequence[str] | str | None = None,
     hourly_rate: Decimal,
     account_code: str,
     tax_type: str | None,
