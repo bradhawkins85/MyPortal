@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 
 from app.api.dependencies.auth import (
     get_current_session,
@@ -13,6 +14,7 @@ from app.api.dependencies.auth import (
 from app.core.logging import log_error
 from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
+from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_tasks as ticket_tasks_repo
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import tickets as tickets_repo
@@ -23,6 +25,10 @@ from app.schemas.tickets import (
     LabourTypeUpdateRequest,
     SyncroTicketImportRequest,
     SyncroTicketImportSummary,
+    TicketAttachment,
+    TicketAttachmentCreate,
+    TicketAttachmentListResponse,
+    TicketAttachmentUpdate,
     TicketCreate,
     TicketDashboardResponse,
     TicketDashboardRow,
@@ -51,6 +57,7 @@ from app.schemas.tickets import (
 )
 from app.security.session import SessionData
 from app.services import labour_types as labour_types_service
+from app.services import ticket_attachments as attachments_service
 from app.services import ticket_importer, tickets as tickets_service
 from app.services.sanitization import sanitize_rich_text
 
@@ -116,10 +123,24 @@ async def _build_ticket_detail(ticket_id: int, current_user: dict) -> TicketDeta
             payload["time_summary"] = time_summary
         sanitised_replies.append(payload)
 
+    # Get attachments
+    attachment_records = []
+    if has_helpdesk_access:
+        # Helpdesk technicians can see all attachments
+        attachment_records = await attachments_repo.list_attachments(ticket_id)
+    else:
+        # Non-technicians can only see open and closed attachments (not restricted)
+        all_attachments = await attachments_repo.list_attachments(ticket_id)
+        attachment_records = [
+            att for att in all_attachments
+            if att.get("access_level") in ("open", "closed")
+        ]
+
     return TicketDetail(
         **ticket,
         replies=[TicketReply(**reply) for reply in sanitised_replies],
         watchers=[TicketWatcher(**watcher) for watcher in watcher_records],
+        attachments=[TicketAttachment(**attachment) for attachment in attachment_records],
     )
 
 
@@ -922,4 +943,252 @@ async def delete_ticket_view(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
 
+
+# ==================== Ticket Attachments ====================
+
+
+@router.get("/{ticket_id}/attachments", response_model=TicketAttachmentListResponse)
+async def list_ticket_attachments(
+    ticket_id: int,
+    current_user: dict = Depends(get_current_user),
+) -> TicketAttachmentListResponse:
+    """List all attachments for a ticket"""
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    has_helpdesk_access = await _has_helpdesk_permission(current_user)
+    
+    # Check access permissions
+    if not has_helpdesk_access:
+        requester_id = ticket.get("requester_id")
+        current_user_id = current_user.get("id")
+        try:
+            current_user_id_int = int(current_user_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        
+        if requester_id != current_user_id_int:
+            is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int)
+            if not is_watcher:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    # Get attachments
+    all_attachments = await attachments_repo.list_attachments(ticket_id)
+    
+    # Filter based on access level
+    if has_helpdesk_access:
+        attachments = all_attachments
+    else:
+        # Non-technicians cannot see restricted attachments
+        attachments = [
+            att for att in all_attachments
+            if att.get("access_level") in ("open", "closed")
+        ]
+    
+    return TicketAttachmentListResponse(
+        items=[TicketAttachment(**attachment) for attachment in attachments]
+    )
+
+
+@router.post(
+    "/{ticket_id}/attachments",
+    response_model=TicketAttachment,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_ticket_attachment(
+    ticket_id: int,
+    file: UploadFile = File(...),
+    access_level: str = Query(default="closed"),
+    session: SessionData = Depends(get_current_session),
+    current_user: dict = Depends(get_current_user),
+) -> TicketAttachment:
+    """Upload a file attachment to a ticket"""
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    has_helpdesk_access = await _has_helpdesk_permission(current_user)
+    
+    # Check if user can add attachments
+    if not has_helpdesk_access:
+        requester_id = ticket.get("requester_id")
+        if requester_id != session.user_id:
+            is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, session.user_id)
+            if not is_watcher:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    
+    # Validate access level
+    valid_levels = {"open", "closed", "restricted"}
+    if access_level not in valid_levels:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid access level. Must be one of: {', '.join(valid_levels)}"
+        )
+    
+    # Only helpdesk technicians can set restricted or open access
+    if not has_helpdesk_access and access_level in ("restricted", "open"):
+        access_level = "closed"
+    
+    # Save the file
+    try:
+        attachment = await attachments_service.save_uploaded_file(
+            ticket_id=ticket_id,
+            file=file,
+            access_level=access_level,
+            uploaded_by_user_id=session.user_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except IOError as e:
+        log_error(f"Failed to upload attachment: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save file"
+        )
+    
+    return TicketAttachment(**attachment)
+
+
+@router.get("/{ticket_id}/attachments/{attachment_id}/download")
+async def download_ticket_attachment(
+    ticket_id: int,
+    attachment_id: int,
+    current_user: dict = Depends(get_current_user),
+):
+    """Download a ticket attachment (requires authentication)"""
+    attachment = await attachments_repo.get_attachment(attachment_id)
+    if not attachment or attachment.get("ticket_id") != ticket_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    has_helpdesk_access = await _has_helpdesk_permission(current_user)
+    access_level = attachment.get("access_level")
+    
+    # Check access permissions
+    if access_level == "restricted" and not has_helpdesk_access:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    
+    if access_level == "closed" and not has_helpdesk_access:
+        requester_id = ticket.get("requester_id")
+        current_user_id = current_user.get("id")
+        try:
+            current_user_id_int = int(current_user_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        
+        if requester_id != current_user_id_int:
+            is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int)
+            if not is_watcher:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    
+    # Get file path
+    file_path = attachments_service.get_attachment_file_path(attachment.get("filename"))
+    if not file_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    
+    return FileResponse(
+        path=file_path,
+        filename=attachment.get("original_filename"),
+        media_type=attachment.get("mime_type") or "application/octet-stream",
+    )
+
+
+@router.get("/attachments/open/{token}")
+async def download_open_attachment(token: str):
+    """Download an attachment with an open access token (no authentication required)"""
+    # Verify token
+    attachment_id = attachments_service.verify_open_access_token(token)
+    if not attachment_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid or expired token"
+        )
+    
+    attachment = await attachments_repo.get_attachment(attachment_id)
+    if not attachment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    
+    # Verify this is an open access attachment
+    if attachment.get("access_level") != "open":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    
+    # Get file path
+    file_path = attachments_service.get_attachment_file_path(attachment.get("filename"))
+    if not file_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    
+    return FileResponse(
+        path=file_path,
+        filename=attachment.get("original_filename"),
+        media_type=attachment.get("mime_type") or "application/octet-stream",
+    )
+
+
+@router.patch("/{ticket_id}/attachments/{attachment_id}", response_model=TicketAttachment)
+async def update_ticket_attachment(
+    ticket_id: int,
+    attachment_id: int,
+    payload: TicketAttachmentUpdate,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TicketAttachment:
+    """Update attachment metadata (e.g., access level) - technicians only"""
+    attachment = await attachments_repo.get_attachment(attachment_id)
+    if not attachment or attachment.get("ticket_id") != ticket_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    
+    fields = payload.model_dump(exclude_unset=True)
+    if fields:
+        await attachments_repo.update_attachment(attachment_id, **fields)
+    
+    updated_attachment = await attachments_repo.get_attachment(attachment_id)
+    if not updated_attachment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    
+    return TicketAttachment(**updated_attachment)
+
+
+@router.delete("/{ticket_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_ticket_attachment(
+    ticket_id: int,
+    attachment_id: int,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> None:
+    """Delete a ticket attachment - technicians only"""
+    attachment = await attachments_repo.get_attachment(attachment_id)
+    if not attachment or attachment.get("ticket_id") != ticket_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    
+    try:
+        await attachments_service.delete_attachment_file(attachment)
+    except Exception as e:
+        log_error(f"Failed to delete attachment: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete attachment"
+        )
+
+
+@router.get("/{ticket_id}/attachments/{attachment_id}/token")
+async def get_open_access_token(
+    ticket_id: int,
+    attachment_id: int,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> dict[str, str]:
+    """Generate an open access token for an attachment - technicians only"""
+    attachment = await attachments_repo.get_attachment(attachment_id)
+    if not attachment or attachment.get("ticket_id") != ticket_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    
+    if attachment.get("access_level") != "open":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Can only generate tokens for open access attachments"
+        )
+    
+    token = attachments_service.generate_open_access_token(attachment_id)
+    return {"token": token, "url": f"/api/tickets/attachments/open/{token}"}
 

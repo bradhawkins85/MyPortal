@@ -117,6 +117,7 @@ class TicketResponse(TicketBase):
 class TicketDetail(TicketResponse):
     replies: list[TicketReply] = Field(default_factory=list)
     watchers: list[TicketWatcher] = Field(default_factory=list)
+    attachments: list[TicketAttachment] = Field(default_factory=list)
 
 
 class TicketListResponse(BaseModel):
@@ -361,3 +362,40 @@ class TicketViewModel(BaseModel):
 class TicketViewListResponse(BaseModel):
     """Response containing list of ticket views"""
     items: list[TicketViewModel] = Field(default_factory=list)
+
+
+class TicketAttachmentAccessLevel(str, Enum):
+    """Access levels for ticket attachments"""
+    OPEN = "open"  # Accessible via URL without login
+    CLOSED = "closed"  # Requires login, accessible by requester, watchers, technicians
+    RESTRICTED = "restricted"  # Only accessible by helpdesk technicians
+
+
+class TicketAttachmentCreate(BaseModel):
+    """Schema for creating a ticket attachment"""
+    access_level: TicketAttachmentAccessLevel = Field(default=TicketAttachmentAccessLevel.CLOSED)
+
+
+class TicketAttachmentUpdate(BaseModel):
+    """Schema for updating a ticket attachment"""
+    access_level: Optional[TicketAttachmentAccessLevel] = None
+
+
+class TicketAttachment(BaseModel):
+    """Schema for ticket attachment response"""
+    id: int
+    ticket_id: int
+    filename: str
+    original_filename: str
+    file_size: int
+    mime_type: Optional[str] = None
+    access_level: str
+    uploaded_by_user_id: Optional[int] = None
+    uploaded_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TicketAttachmentListResponse(BaseModel):
+    """Response containing list of ticket attachments"""
+    items: list[TicketAttachment] = Field(default_factory=list)
