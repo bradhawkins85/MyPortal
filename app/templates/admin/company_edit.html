@@ -128,7 +128,7 @@
         <summary class="card__header card__header--collapsible card__header--stacked">
           <div>
             <h2 class="card__title">Billing contacts</h2>
-            <p class="card__subtitle">Manage users who receive billing notifications for this company, including subscription price changes.</p>
+            <p class="card__subtitle">Manage staff members who receive billing notifications for this company, including subscription price changes.</p>
           </div>
           <div class="card__collapsible-meta" aria-hidden="true">
             <span class="card__toggle-icon"></span>
@@ -138,19 +138,19 @@
           <div class="form-field">
             <label class="form-label" for="billing-contact-select">Add billing contact</label>
             <select class="form-input" id="billing-contact-select" data-billing-contact-select>
-              <option value="">Select a user...</option>
-              {% for user in company_users %}
-                <option value="{{ user.user_id }}" data-email="{{ user.email }}" data-name="{{ user.first_name }} {{ user.last_name }}">
-                  {{ user.email }} - {{ user.first_name }} {{ user.last_name }}
+              <option value="">Select a staff member...</option>
+              {% for staff in company_staff %}
+                <option value="{{ staff.id }}" data-email="{{ staff.email }}" data-name="{{ staff.first_name }} {{ staff.last_name }}">
+                  {{ staff.email }} - {{ staff.first_name }} {{ staff.last_name }}
                 </option>
               {% endfor %}
             </select>
-            <p class="form-helper">Select a user to add as a billing contact for price change notifications.</p>
+            <p class="form-helper">Select a staff member to add as a billing contact for price change notifications.</p>
           </div>
           <div class="billing-contacts-list" id="billing-contacts-list">
             {% if billing_contacts %}
               {% for contact in billing_contacts %}
-                <div class="billing-contact-item" data-user-id="{{ contact.user_id }}">
+                <div class="billing-contact-item" data-staff-id="{{ contact.staff_id }}">
                   <div class="billing-contact-info">
                     <span class="billing-contact-email">{{ contact.email }}</span>
                     {% if contact.first_name or contact.last_name %}
@@ -160,7 +160,7 @@
                   <button 
                     type="button" 
                     class="button button--ghost button--small" 
-                    data-billing-contact-remove="{{ contact.user_id }}"
+                    data-billing-contact-remove="{{ contact.staff_id }}"
                     title="Remove billing contact"
                   >
                     Remove
@@ -853,8 +853,8 @@
         
         // Handle adding billing contact
         select.addEventListener('change', async function() {
-          const userId = this.value;
-          if (!userId) return;
+          const staffId = this.value;
+          if (!staffId) return;
           
           const option = this.options[this.selectedIndex];
           const email = option.dataset.email || '';
@@ -867,7 +867,7 @@
                 'Content-Type': 'application/json',
                 'X-CSRF-Token': document.querySelector('input[name="_csrf"]')?.value || ''
               },
-              body: JSON.stringify({ user_id: userId })
+              body: JSON.stringify({ staff_id: staffId })
             });
             
             if (response.ok) {
@@ -889,11 +889,11 @@
           const btn = e.target.closest('[data-billing-contact-remove]');
           if (!btn) return;
           
-          const userId = btn.dataset.billingContactRemove;
+          const staffId = btn.dataset.billingContactRemove;
           const item = btn.closest('.billing-contact-item');
           
           try {
-            const response = await fetch(`/admin/companies/${companyId}/billing-contacts/${userId}/remove`, {
+            const response = await fetch(`/admin/companies/${companyId}/billing-contacts/${staffId}/remove`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -924,7 +924,7 @@
           const fullName = [contact.first_name, contact.last_name].filter(Boolean).join(' ');
           const item = document.createElement('div');
           item.className = 'billing-contact-item';
-          item.dataset.userId = contact.user_id;
+          item.dataset.staffId = contact.staff_id;
           item.innerHTML = `
             <div class="billing-contact-info">
               <span class="billing-contact-email">${escapeHtml(contact.email)}</span>
@@ -933,7 +933,7 @@
             <button 
               type="button" 
               class="button button--ghost button--small" 
-              data-billing-contact-remove="${contact.user_id}"
+              data-billing-contact-remove="${contact.staff_id}"
               title="Remove billing contact"
             >
               Remove

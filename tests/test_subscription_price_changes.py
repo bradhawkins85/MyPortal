@@ -15,7 +15,7 @@ async def test_add_billing_contact(monkeypatch):
     mock_fetch_one = AsyncMock(return_value={
         "id": 1,
         "company_id": 5,
-        "user_id": 10,
+        "staff_id": 10,
         "created_at": "2025-01-01",
         "email": "test@example.com",
         "first_name": "John",
@@ -26,7 +26,7 @@ async def test_add_billing_contact(monkeypatch):
          patch("app.repositories.billing_contacts.db.fetch_one", mock_fetch_one):
         contact = await billing_contacts_repo.add_billing_contact(5, 10)
         
-        assert contact["user_id"] == 10
+        assert contact["staff_id"] == 10
         assert contact["company_id"] == 5
         assert contact["email"] == "test@example.com"
         mock_execute.assert_called_once()
@@ -49,7 +49,7 @@ async def test_list_billing_contacts_for_company(monkeypatch):
         {
             "id": 1,
             "company_id": 5,
-            "user_id": 10,
+            "staff_id": 10,
             "created_at": "2025-01-01",
             "email": "test1@example.com",
             "first_name": "John",
@@ -58,7 +58,7 @@ async def test_list_billing_contacts_for_company(monkeypatch):
         {
             "id": 2,
             "company_id": 5,
-            "user_id": 11,
+            "staff_id": 11,
             "created_at": "2025-01-01",
             "email": "test2@example.com",
             "first_name": "Jane",
