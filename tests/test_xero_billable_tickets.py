@@ -1,4 +1,5 @@
 """Tests for billable ticket syncing to Xero."""
+import json
 from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -17,20 +18,20 @@ def anyio_backend():
 @pytest.mark.anyio("asyncio")
 async def test_sync_billable_tickets_filters_by_status():
     """Test that sync_billable_tickets only processes tickets with billable statuses."""
-    
+
     # Mock data
     tickets = [
         {"id": 1, "status": "resolved", "company_id": 1},
         {"id": 2, "status": "open", "company_id": 1},
         {"id": 3, "status": "in_progress", "company_id": 1},
     ]
-    
+
     unbilled_reply_ids = {10, 11, 12}
-    
+
     with patch("app.services.xero.tickets_repo") as mock_tickets_repo, \
          patch("app.services.xero.billed_time_repo") as mock_billed_repo, \
          patch("app.services.xero.company_repo") as mock_company_repo:
-        
+
         mock_tickets_repo.list_tickets = AsyncMock(return_value=tickets)
         mock_billed_repo.get_unbilled_reply_ids = AsyncMock(return_value=unbilled_reply_ids)
         mock_company_repo.get_company_by_id = AsyncMock(return_value={
@@ -42,7 +43,7 @@ async def test_sync_billable_tickets_filters_by_status():
         mock_tickets_repo.list_replies = AsyncMock(return_value=[
             {"id": 10, "minutes_spent": 30, "is_billable": True, "labour_type_id": None},
         ])
-        
+
         # Only "resolved" status is billable
         result = await xero_service.sync_billable_tickets(
             company_id=1,
@@ -56,9 +57,69 @@ async def test_sync_billable_tickets_filters_by_status():
             tenant_id="tenant-123",
             access_token="access-token-123",
         )
-        
+
         # Should process ticket 1 (resolved) but not tickets 2 (open) or 3 (in_progress)
         assert result["status"] in ("succeeded", "failed", "error")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_billable_tickets_accepts_string_statuses():
+    """Ensure comma-separated status strings are normalised for billing checks."""
+
+    tickets = [
+        {"id": 1, "status": "Resolved", "company_id": 1, "subject": "Printer issue"},
+    ]
+
+    unbilled_reply_ids = {10}
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = json.dumps({"Invoices": [{"InvoiceNumber": "INV-100"}]})
+    mock_response.headers = {}
+
+    with patch("app.services.xero.tickets_repo") as mock_tickets_repo, \
+         patch("app.services.xero.billed_time_repo") as mock_billed_repo, \
+         patch("app.services.xero.company_repo") as mock_company_repo, \
+         patch("app.services.xero.webhook_monitor") as mock_webhook, \
+         patch("app.services.xero.httpx.AsyncClient") as mock_client:
+
+        mock_tickets_repo.list_tickets = AsyncMock(return_value=tickets)
+        mock_tickets_repo.get_ticket = AsyncMock(return_value=tickets[0])
+        mock_tickets_repo.list_replies = AsyncMock(return_value=[
+            {"id": 10, "minutes_spent": 60, "is_billable": True, "labour_type_id": None},
+        ])
+        mock_billed_repo.get_unbilled_reply_ids = AsyncMock(return_value=unbilled_reply_ids)
+        mock_billed_repo.create_billed_time_entry = AsyncMock()
+        mock_company_repo.get_company_by_id = AsyncMock(return_value={
+            "id": 1,
+            "name": "Acme Corp",
+            "xero_id": "xero-456",
+        })
+
+        mock_webhook.create_manual_event = AsyncMock(return_value={"id": 1})
+        mock_webhook.record_manual_success = AsyncMock()
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.post = AsyncMock(return_value=mock_response)
+        mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client.return_value.__aexit__ = AsyncMock()
+
+        result = await xero_service.sync_billable_tickets(
+            company_id=1,
+            billable_statuses="Resolved, Closed",
+            hourly_rate=Decimal("150"),
+            account_code="400",
+            tax_type="OUTPUT",
+            line_amount_type="Exclusive",
+            reference_prefix="Support",
+            description_template="Ticket {ticket_id}: {ticket_subject}",
+            tenant_id="tenant-123",
+            access_token="access-token-123",
+            auto_send=True,
+        )
+
+        assert mock_client_instance.post.called
+        assert result["status"] == "succeeded"
 
 
 @pytest.mark.anyio("asyncio")
