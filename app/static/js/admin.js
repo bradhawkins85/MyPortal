@@ -2308,7 +2308,24 @@
       if (rows.length <= 1) {
         return;
       }
+      
+      // Check if the row being removed has the default selected
+      const defaultRadio = row.querySelector('input[name="defaultLabourType"]');
+      const wasDefault = defaultRadio && defaultRadio.checked;
+      
       row.remove();
+      
+      // If the removed row was default, select the first remaining row as default
+      if (wasDefault) {
+        const remainingRows = list.querySelectorAll('[data-labour-row]');
+        if (remainingRows.length > 0) {
+          const firstDefaultRadio = remainingRows[0].querySelector('input[name="defaultLabourType"]');
+          if (firstDefaultRadio) {
+            firstDefaultRadio.checked = true;
+          }
+        }
+      }
+      
       updateRowIdentifiers();
       updateRemoveButtons();
       clearError();
@@ -2336,6 +2353,16 @@
       clearError();
       const rows = Array.from(list.querySelectorAll('[data-labour-row]'));
       const seenCodes = new Set();
+      
+      // Check if at least one default is selected
+      const defaultRadios = form.querySelectorAll('input[name="defaultLabourType"]');
+      const hasDefaultSelected = Array.from(defaultRadios).some(radio => radio.checked);
+      if (!hasDefaultSelected) {
+        showError('Please select a default labour type.');
+        event.preventDefault();
+        return;
+      }
+      
       for (const row of rows) {
         const codeInput = row.querySelector('input[name="labourCode"]');
         const nameInput = row.querySelector('input[name="labourName"]');

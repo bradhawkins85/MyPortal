@@ -462,6 +462,13 @@ async def add_reply(
         )
 
     labour_type_id = payload.labour_type_id if has_helpdesk_access else None
+    
+    # If time is being logged but no labour type specified, use the default labour type
+    if has_helpdesk_access and payload.minutes_spent and payload.minutes_spent > 0 and labour_type_id is None:
+        default_labour = await labour_types_service.get_default_labour_type()
+        if default_labour:
+            labour_type_id = default_labour.get("id")
+    
     if labour_type_id is not None:
         labour_record = await labour_types_service.get_labour_type(labour_type_id)
         if not labour_record:
@@ -682,6 +689,7 @@ async def list_labour_types_endpoint(
             code=str(item.get("code") or ""),
             name=str(item.get("name") or ""),
             rate=item.get("rate"),
+            is_default=bool(item.get("is_default", False)),
             created_at=item.get("created_at"),
             updated_at=item.get("updated_at"),
         )
