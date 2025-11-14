@@ -298,8 +298,10 @@
                     placeholder="Ticket #{ticket_id} - {ticket_subject} - {labour_name}"
                   />
                   <p class="form-help">
-                    Available placeholders include {ticket_id}, {ticket_subject}, {ticket_status}, {labour_name}, {labour_code},
-                    {labour_minutes}, {labour_hours}, and {labour_suffix}.
+                    Template for invoice line item descriptions when syncing billable tickets to Xero. 
+                    Available placeholders: {ticket_id}, {ticket_subject}, {ticket_status}, {labour_name}, {labour_code},
+                    {labour_minutes}, {labour_hours}, and {labour_suffix}. 
+                    Default: "Ticket {ticket_id}: {ticket_subject}{labour_suffix}"
                   </p>
                 </div>
               {% elif module.slug == 'sms-gateway' %}
