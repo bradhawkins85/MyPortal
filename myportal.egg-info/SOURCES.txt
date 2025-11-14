@@ -286,6 +286,7 @@ tests/test_bcp_template.py
 tests/test_bcp_template_api.py
 tests/test_bcp_template_bootstrap.py
 tests/test_bcp_ui_accessibility.py
+tests/test_billing_contacts_staff_migration.py
 tests/test_business_continuity_plans.py
 tests/test_cache_control_middleware.py
 tests/test_call_recordings.py
