@@ -1468,49 +1468,49 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                                     rate_to_use = hourly_rate
                             else:
                                 rate_to_use = hourly_rate
-                                
-                                line_item: dict[str, Any] = {
-                                    "Description": description,
-                                    "Quantity": float(hours_decimal),
-                                    "UnitAmount": float(_quantize(rate_to_use)),
-                                    "AccountCode": str(account_code or "").strip(),
-                                }
-                                if labour_code:
-                                    line_item["ItemCode"] = labour_code
-                                if tax_type:
-                                    line_item["TaxType"] = str(tax_type).strip()
-                                ticket_line_items.append(line_item)
-                        else:
-                            hours_decimal = _minutes_to_hours(billable_minutes)
-                            description = _format_line_description(
-                                description_template,
-                                ticket,
-                                None,
-                                billable_minutes,
-                            )
-                            line_item = {
+                            
+                            line_item: dict[str, Any] = {
                                 "Description": description,
                                 "Quantity": float(hours_decimal),
-                                "UnitAmount": float(_quantize(hourly_rate)),
+                                "UnitAmount": float(_quantize(rate_to_use)),
                                 "AccountCode": str(account_code or "").strip(),
                             }
+                            if labour_code:
+                                line_item["ItemCode"] = labour_code
                             if tax_type:
                                 line_item["TaxType"] = str(tax_type).strip()
                             ticket_line_items.append(line_item)
-                        
-                        # Track ticket context for post-processing
-                        tickets_context.append({
-                            "id": ticket_id,
-                            "subject": ticket.get("subject"),
-                            "status": ticket.get("status"),
-                            "billable_minutes": billable_minutes,
-                            "labour_groups": labour_groups,
-                        })
-                        
-                        # Collect ticket numbers for reference
-                        ticket_num = str(ticket_id)
-                        if ticket_num not in ticket_numbers:
-                            ticket_numbers.append(ticket_num)
+                    else:
+                        hours_decimal = _minutes_to_hours(billable_minutes)
+                        description = _format_line_description(
+                            description_template,
+                            ticket,
+                            None,
+                            billable_minutes,
+                        )
+                        line_item = {
+                            "Description": description,
+                            "Quantity": float(hours_decimal),
+                            "UnitAmount": float(_quantize(hourly_rate)),
+                            "AccountCode": str(account_code or "").strip(),
+                        }
+                        if tax_type:
+                            line_item["TaxType"] = str(tax_type).strip()
+                        ticket_line_items.append(line_item)
+                    
+                    # Track ticket context for post-processing
+                    tickets_context.append({
+                        "id": ticket_id,
+                        "subject": ticket.get("subject"),
+                        "status": ticket.get("status"),
+                        "billable_minutes": billable_minutes,
+                        "labour_groups": labour_groups,
+                    })
+                    
+                    # Collect ticket numbers for reference
+                    ticket_num = str(ticket_id)
+                    if ticket_num not in ticket_numbers:
+                        ticket_numbers.append(ticket_num)
 
     # Combine recurring and ticket line items
     combined_line_items = line_items + ticket_line_items
