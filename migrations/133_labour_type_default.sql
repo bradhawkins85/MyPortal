@@ -39,3 +39,19 @@ SET @sql = IF(
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
+
+-- Set first labour type as default if no default exists
+-- This ensures existing installations have a valid default
+UPDATE ticket_labour_types
+SET is_default = 1
+WHERE id = (
+    SELECT id FROM (
+        SELECT id FROM ticket_labour_types
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+    ) AS first_labour_type
+)
+AND NOT EXISTS (
+    SELECT 1 FROM ticket_labour_types WHERE is_default = 1
+);
+
