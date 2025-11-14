@@ -16,13 +16,15 @@ def _normalise_record(row: dict[str, Any]) -> LabourTypeRecord:
         record["id"] = int(identifier) if identifier is not None else None
     except (TypeError, ValueError):
         record["id"] = None
+    if "is_default" in record:
+        record["is_default"] = bool(record.get("is_default"))
     return record
 
 
 async def list_labour_types() -> list[LabourTypeRecord]:
     rows = await db.fetch_all(
         """
-        SELECT id, code, name, rate, created_at, updated_at
+        SELECT id, code, name, rate, is_default, created_at, updated_at
         FROM ticket_labour_types
         ORDER BY name ASC
         """
@@ -33,7 +35,7 @@ async def list_labour_types() -> list[LabourTypeRecord]:
 async def get_labour_type(labour_type_id: int) -> LabourTypeRecord | None:
     row = await db.fetch_one(
         """
-        SELECT id, code, name, rate, created_at, updated_at
+        SELECT id, code, name, rate, is_default, created_at, updated_at
         FROM ticket_labour_types
         WHERE id = %s
         """,
@@ -47,11 +49,26 @@ async def get_labour_type(labour_type_id: int) -> LabourTypeRecord | None:
 async def get_labour_type_by_code(code: str) -> LabourTypeRecord | None:
     row = await db.fetch_one(
         """
-        SELECT id, code, name, rate, created_at, updated_at
+        SELECT id, code, name, rate, is_default, created_at, updated_at
         FROM ticket_labour_types
         WHERE LOWER(code) = LOWER(%s)
         """,
         (code,),
+    )
+    if row:
+        return _normalise_record(row)
+    return None
+
+
+async def get_default_labour_type() -> LabourTypeRecord | None:
+    """Get the default labour type."""
+    row = await db.fetch_one(
+        """
+        SELECT id, code, name, rate, is_default, created_at, updated_at
+        FROM ticket_labour_types
+        WHERE is_default = 1
+        LIMIT 1
+        """,
     )
     if row:
         return _normalise_record(row)
@@ -137,11 +154,13 @@ async def replace_labour_types(definitions: Sequence[dict[str, Any]]) -> list[La
 
                 seen_codes: set[str] = set()
                 retained_ids: set[int] = set()
+                has_default = False
+                default_id: int | None = None
 
+                # First pass: validate and check for default
                 for entry in definitions:
                     raw_code = str(entry.get("code") or "").strip()
                     raw_name = str(entry.get("name") or "").strip()
-                    raw_rate = entry.get("rate")
                     if not raw_code and not raw_name:
                         continue
                     if not raw_code:
@@ -151,6 +170,29 @@ async def replace_labour_types(definitions: Sequence[dict[str, Any]]) -> list[La
                     code_key = raw_code.lower()
                     if code_key in seen_codes:
                         raise ValueError("Labour type codes must be unique.")
+                    seen_codes.add(code_key)
+                    
+                    is_default = bool(entry.get("is_default"))
+                    if is_default:
+                        if has_default:
+                            raise ValueError("Only one labour type can be set as default.")
+                        has_default = True
+
+                # Require at least one default labour type
+                if not has_default:
+                    raise ValueError("At least one labour type must be set as default.")
+
+                # Clear all defaults first
+                await cursor.execute("UPDATE ticket_labour_types SET is_default = 0")
+
+                # Second pass: update/insert records
+                for entry in definitions:
+                    raw_code = str(entry.get("code") or "").strip()
+                    raw_name = str(entry.get("name") or "").strip()
+                    raw_rate = entry.get("rate")
+                    is_default = bool(entry.get("is_default"))
+                    if not raw_code and not raw_name:
+                        continue
 
                     identifier = entry.get("id")
                     labour_type_id: int | None = None
@@ -166,24 +208,24 @@ async def replace_labour_types(definitions: Sequence[dict[str, Any]]) -> list[La
                             SET code = %s,
                                 name = %s,
                                 rate = %s,
+                                is_default = %s,
                                 updated_at = UTC_TIMESTAMP(6)
                             WHERE id = %s
                             """,
-                            (raw_code, raw_name, raw_rate, labour_type_id),
+                            (raw_code, raw_name, raw_rate, 1 if is_default else 0, labour_type_id),
                         )
                         retained_ids.add(labour_type_id)
                     else:
                         await cursor.execute(
                             """
-                            INSERT INTO ticket_labour_types (code, name, rate, created_at, updated_at)
-                            VALUES (%s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                            INSERT INTO ticket_labour_types (code, name, rate, is_default, created_at, updated_at)
+                            VALUES (%s, %s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
                             """,
-                            (raw_code, raw_name, raw_rate),
+                            (raw_code, raw_name, raw_rate, 1 if is_default else 0),
                         )
                         inserted_id = cursor.lastrowid
                         if inserted_id:
                             retained_ids.add(int(inserted_id))
-                    seen_codes.add(code_key)
 
                 to_delete = [
                     existing_id

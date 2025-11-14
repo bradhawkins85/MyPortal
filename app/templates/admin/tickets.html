@@ -591,6 +591,7 @@
         <table class="table table--compact">
           <thead>
             <tr>
+              <th scope="col">Default</th>
               <th scope="col">Code</th>
               <th scope="col">Name</th>
               <th scope="col">Rate ($/hr)</th>
@@ -601,6 +602,18 @@
             {% if ticket_labour_types %}
               {% for labour_type in ticket_labour_types %}
                 <tr data-labour-row>
+                  <td data-label="Default" style="text-align: center;">
+                    <label class="visually-hidden" for="labour-default-{{ loop.index0 }}">Default</label>
+                    <input
+                      id="labour-default-{{ loop.index0 }}"
+                      name="defaultLabourType"
+                      type="radio"
+                      value="{{ labour_type.id }}"
+                      {% if labour_type.is_default %}checked{% endif %}
+                      required
+                      data-labour-default
+                    />
+                  </td>
                   <td data-label="Code">
                     <label class="visually-hidden" for="labour-code-{{ loop.index0 }}">Code</label>
                     <input
@@ -644,6 +657,10 @@
               {% endfor %}
             {% else %}
               <tr data-labour-row>
+                <td data-label="Default" style="text-align: center;">
+                  <label class="visually-hidden" for="labour-default-0">Default</label>
+                  <input id="labour-default-0" name="defaultLabourType" type="radio" value="" checked required data-labour-default />
+                </td>
                 <td data-label="Code">
                   <label class="visually-hidden" for="labour-code-0">Code</label>
                   <input id="labour-code-0" name="labourCode" class="form-input" maxlength="64" required />
@@ -675,6 +692,10 @@
     </form>
     <template id="labour-type-row-template">
       <tr data-labour-row>
+        <td data-label="Default" style="text-align: center;">
+          <label class="visually-hidden">Default</label>
+          <input name="defaultLabourType" type="radio" value="" required data-labour-default />
+        </td>
         <td data-label="Code">
           <label class="visually-hidden">Code</label>
           <input name="labourCode" class="form-input" maxlength="64" required />

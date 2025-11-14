@@ -11927,6 +11927,7 @@ async def admin_replace_labour_types(request: Request):
     codes = form.getlist("labourCode")
     names = form.getlist("labourName")
     rates = form.getlist("labourRate")
+    default_id = form.get("defaultLabourType")
 
     definitions: list[dict[str, Any]] = []
     max_length = max(len(ids), len(codes), len(names), len(rates))
@@ -11943,7 +11944,15 @@ async def admin_replace_labour_types(request: Request):
                 rate_value = float(rate_str.strip())
             except (ValueError, TypeError):
                 rate_value = None
-        definitions.append({"id": identifier, "code": code, "name": name, "rate": rate_value})
+        # Check if this labour type should be default
+        is_default = (identifier and str(identifier) == str(default_id))
+        definitions.append({
+            "id": identifier,
+            "code": code,
+            "name": name,
+            "rate": rate_value,
+            "is_default": is_default,
+        })
 
     try:
         await labour_types_service.replace_labour_types(definitions)

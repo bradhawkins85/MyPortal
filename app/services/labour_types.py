@@ -33,6 +33,11 @@ async def get_labour_type(labour_type_id: int) -> dict[str, Any] | None:
     return await labour_types_repo.get_labour_type(labour_type_id)
 
 
+async def get_default_labour_type() -> dict[str, Any] | None:
+    """Get the default labour type."""
+    return await labour_types_repo.get_default_labour_type()
+
+
 async def create_labour_type(*, code: str, name: str, rate: float | None = None) -> dict[str, Any]:
     cleaned_code = _clean_code(code)
     cleaned_name = _clean_name(name)

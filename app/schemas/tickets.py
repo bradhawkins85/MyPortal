@@ -152,6 +152,7 @@ class LabourTypeModel(BaseModel):
     code: str
     name: str
     rate: Optional[float] = None
+    is_default: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
