@@ -47,10 +47,31 @@ def _normalise_ticket_view(row: dict[str, Any]) -> TicketViewRecord:
     return record
 
 
+def _rows_to_dicts(rows: list[Any], description: Any) -> list[dict[str, Any]]:
+    """Convert raw DB rows to dictionaries regardless of cursor type."""
+
+    if not rows:
+        return []
+
+    # SQLite returns ``Row`` objects that already behave as mappings, but
+    # aiomysql returns tuples.  We normalise everything to a plain dict using
+    # the cursor description so downstream code can assume mapping access.
+    columns = [col[0] for col in description]
+    dict_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if isinstance(row, dict):
+            dict_rows.append(dict(row))
+        elif hasattr(row, "keys"):
+            dict_rows.append({key: row[key] for key in row.keys()})
+        else:
+            dict_rows.append(dict(zip(columns, row)))
+    return dict_rows
+
+
 async def list_views_for_user(user_id: int) -> list[TicketViewRecord]:
     """List all saved views for a user"""
     query = """
-        SELECT id, user_id, name, description, filters, grouping_field, 
+        SELECT id, user_id, name, description, filters, grouping_field,
                sort_field, sort_direction, is_default, created_at, updated_at
         FROM ticket_views
         WHERE user_id = %s
@@ -60,7 +81,8 @@ async def list_views_for_user(user_id: int) -> list[TicketViewRecord]:
         async with conn.cursor() as cursor:
             await cursor.execute(query, (user_id,))
             rows = await cursor.fetchall()
-            return [_normalise_ticket_view(dict(row)) for row in rows]
+            dict_rows = _rows_to_dicts(list(rows), cursor.description)
+            return [_normalise_ticket_view(row) for row in dict_rows]
 
 
 async def get_view(view_id: int, user_id: int) -> TicketViewRecord | None:
@@ -75,7 +97,10 @@ async def get_view(view_id: int, user_id: int) -> TicketViewRecord | None:
         async with conn.cursor() as cursor:
             await cursor.execute(query, (view_id, user_id))
             row = await cursor.fetchone()
-            return _normalise_ticket_view(dict(row)) if row else None
+            if not row:
+                return None
+            dict_row = _rows_to_dicts([row], cursor.description)[0]
+            return _normalise_ticket_view(dict_row)
 
 
 async def get_default_view(user_id: int) -> TicketViewRecord | None:
@@ -91,7 +116,10 @@ async def get_default_view(user_id: int) -> TicketViewRecord | None:
         async with conn.cursor() as cursor:
             await cursor.execute(query, (user_id,))
             row = await cursor.fetchone()
-            return _normalise_ticket_view(dict(row)) if row else None
+            if not row:
+                return None
+            dict_row = _rows_to_dicts([row], cursor.description)[0]
+            return _normalise_ticket_view(dict_row)
 
 
 async def create_view(
