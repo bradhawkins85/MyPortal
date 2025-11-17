@@ -42,7 +42,7 @@ def _normalise_run(row: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-async def list_tasks(include_inactive: bool = True) -> list[dict[str, Any]]:
+async def list_tasks(include_inactive: bool = False) -> list[dict[str, Any]]:
     where = "" if include_inactive else "WHERE active = 1"
     rows = await db.fetch_all(
         f"SELECT * FROM scheduled_tasks {where} ORDER BY name ASC",
