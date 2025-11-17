@@ -477,6 +477,7 @@
           <table class="table table--compact" data-ticket-statuses-table>
             <thead>
               <tr>
+                <th scope="col">Default</th>
                 <th scope="col">Tech status (technician label)</th>
                 <th scope="col">Public status (customer label)</th>
                 <th scope="col" class="table__actions">Actions</th>
@@ -486,6 +487,17 @@
               {% if ticket_status_definitions %}
                 {% for status_option in ticket_status_definitions %}
                   <tr data-status-row>
+                    <td data-label="Default">
+                      <label class="visually-hidden" for="status-default-{{ loop.index0 }}">Set as default</label>
+                      <input
+                        id="status-default-{{ loop.index0 }}"
+                        type="radio"
+                        name="defaultStatus"
+                        value="{{ status_option.tech_status }}"
+                        data-status-default-radio
+                        {% if status_option.is_default %}checked{% endif %}
+                      />
+                    </td>
                     <td data-label="Tech status">
                       <label class="visually-hidden" for="status-tech-{{ loop.index0 }}">Tech status</label>
                       <input
@@ -523,6 +535,17 @@
                 {% endfor %}
               {% else %}
                 <tr data-status-row>
+                  <td data-label="Default">
+                    <label class="visually-hidden" for="status-default-0">Set as default</label>
+                    <input
+                      id="status-default-0"
+                      type="radio"
+                      name="defaultStatus"
+                      value=""
+                      data-status-default-radio
+                      checked
+                    />
+                  </td>
                   <td data-label="Tech status">
                     <label class="visually-hidden" for="status-tech-0">Tech status</label>
                     <input id="status-tech-0" name="techLabel" class="form-input" maxlength="128" required />
@@ -550,6 +573,10 @@
   </form>
   <template id="ticket-status-row-template">
     <tr data-status-row>
+      <td data-label="Default">
+        <label class="visually-hidden">Set as default</label>
+        <input type="radio" name="defaultStatus" value="" data-status-default-radio />
+      </td>
       <td data-label="Tech status">
         <label class="visually-hidden">Tech status</label>
         <input name="techLabel" class="form-input" maxlength="128" required />

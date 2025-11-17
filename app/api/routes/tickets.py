@@ -269,6 +269,7 @@ async def list_ticket_statuses_endpoint(
             tech_status=definition.tech_status,
             tech_label=definition.tech_label,
             public_status=definition.public_status,
+            is_default=definition.is_default,
         )
         for definition in definitions
     ]
@@ -289,6 +290,7 @@ async def replace_ticket_statuses_endpoint(
             tech_status=definition.tech_status,
             tech_label=definition.tech_label,
             public_status=definition.public_status,
+            is_default=definition.is_default,
         )
         for definition in definitions
     ]
