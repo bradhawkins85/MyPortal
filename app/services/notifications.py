@@ -161,7 +161,14 @@ async def emit_notification(
                 event_type=event_type,
             )
         else:
-            subject = f"{get_settings().app_name} notification: {event_type}"
+            # Render subject with variables - use shortened final_message
+            # Build a subject that includes the message but limits length
+            subject_base = f"{get_settings().app_name} notification"
+            # Limit message length in subject to 50 chars
+            message_preview = final_message[:50].strip()
+            if len(final_message) > 50:
+                message_preview += "..."
+            subject = f"{subject_base}: {message_preview}"
             text_body = final_message
             html_body = f"<p>{escape(final_message)}</p>"
             try:
