@@ -2693,9 +2693,9 @@
       requesterSelect.disabled = false;
 
       try {
-        const staff = await requestJson(`/api/staff?companyId=${encodeURIComponent(companyId)}`);
+        const users = await requestJson(`/api/companies/${encodeURIComponent(companyId)}/staff-users`);
         
-        if (!Array.isArray(staff) || staff.length === 0) {
+        if (!Array.isArray(users) || users.length === 0) {
           requesterSelect.disabled = true;
           // Add a disabled option to show why it's empty
           const emptyOption = document.createElement('option');
@@ -2706,10 +2706,10 @@
           return;
         }
 
-        staff.forEach((member) => {
+        users.forEach((user) => {
           const option = document.createElement('option');
-          option.value = member.id;
-          option.textContent = `${member.first_name} ${member.last_name} (${member.email})`;
+          option.value = user.id;
+          option.textContent = `${user.first_name} ${user.last_name} (${user.email})`;
           requesterSelect.appendChild(option);
         });
       } catch (error) {
