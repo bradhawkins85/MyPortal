@@ -374,8 +374,13 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
     enriched: TicketRecord = dict(ticket)
 
     # Add 'number' alias for 'ticket_number' to support {{ticket.number}} template variable
-    if "ticket_number" in enriched and "number" not in enriched:
-        enriched["number"] = enriched["ticket_number"]
+    # Ensure it's always present for consistent template access
+    if "number" not in enriched:
+        enriched["number"] = enriched.get("ticket_number")
+    
+    # Add 'labels' alias for 'ai_tags' to support {{ticket.labels}} template variable
+    if "labels" not in enriched:
+        enriched["labels"] = enriched.get("ai_tags") or []
 
     company_value = enriched.get("company") if isinstance(enriched.get("company"), Mapping) else None
     company_id = enriched.get("company_id")
