@@ -2155,6 +2155,8 @@
       clearError();
       const rows = Array.from(list.querySelectorAll('[data-status-row]'));
       const seen = new Set();
+      const selectedDefaultRadio = form.querySelector('input[name="defaultStatus"]:checked');
+      let selectedDefaultSlug = '';
       for (const row of rows) {
         const techInput = row.querySelector('input[name="techLabel"]');
         const publicInput = row.querySelector('input[name="publicLabel"]');
@@ -2184,6 +2186,12 @@
           return;
         }
         seen.add(slug);
+        if (selectedDefaultRadio && row.contains(selectedDefaultRadio)) {
+          selectedDefaultSlug = slug;
+        }
+      }
+      if (selectedDefaultRadio && selectedDefaultSlug) {
+        selectedDefaultRadio.value = selectedDefaultSlug;
       }
     });
 
