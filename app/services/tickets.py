@@ -110,6 +110,7 @@ class TicketStatusDefinition:
     tech_status: str
     tech_label: str
     public_status: str
+    is_default: bool = False
 
 
 def _build_status_definitions(records: Sequence[Mapping[str, Any]]) -> list[TicketStatusDefinition]:
@@ -120,11 +121,13 @@ def _build_status_definitions(records: Sequence[Mapping[str, Any]]) -> list[Tick
             continue
         label = str(record.get("tech_label") or "").strip() or slug.replace("_", " ").title()
         public_status = str(record.get("public_status") or "").strip() or label
+        is_default = bool(record.get("is_default", False))
         definitions.append(
             TicketStatusDefinition(
                 tech_status=slug,
                 tech_label=label,
                 public_status=public_status,
+                is_default=is_default,
             )
         )
     return definitions
@@ -177,6 +180,7 @@ async def replace_ticket_statuses(status_inputs: Sequence[Mapping[str, Any]]) ->
     cleaned: list[dict[str, Any]] = []
     seen_slugs: set[str] = set()
     encountered_originals: set[str] = set()
+    has_default = False
 
     for index, definition in enumerate(status_inputs):
         tech_label = str(
@@ -209,6 +213,17 @@ async def replace_ticket_statuses(status_inputs: Sequence[Mapping[str, Any]]) ->
             or ""
         ).strip()
 
+        is_default = bool(
+            definition.get("is_default")
+            or definition.get("isDefault")
+            or False
+        )
+
+        if is_default:
+            if has_default:
+                raise ValueError("Only one status can be set as default.")
+            has_default = True
+
         slug = ticket_status_repo.slugify_status_label(tech_label)
         if not slug:
             raise ValueError("Tech status labels must include letters or numbers.")
@@ -233,8 +248,13 @@ async def replace_ticket_statuses(status_inputs: Sequence[Mapping[str, Any]]) ->
                 "tech_label": tech_label,
                 "public_status": public_status,
                 "original_slug": original_slug or slug,
+                "is_default": is_default,
             }
         )
+
+    # If no status was marked as default, mark the first one as default
+    if not has_default and cleaned:
+        cleaned[0]["is_default"] = True
 
     records = await ticket_status_repo.replace_statuses(cleaned)
     return _build_status_definitions(records)
@@ -253,6 +273,11 @@ async def resolve_status_or_default(value: str | None) -> str:
     slug = ticket_status_repo.slugify_status_label(value or "")
     if slug and await ticket_status_repo.status_exists(slug):
         return slug
+    # Try to get the default status
+    default_status = await ticket_status_repo.get_default_status()
+    if default_status:
+        return default_status["tech_status"]
+    # Fall back to first status in list
     definitions = await list_status_definitions()
     if definitions:
         return definitions[0].tech_status

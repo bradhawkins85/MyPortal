@@ -11883,6 +11883,7 @@ async def admin_replace_ticket_statuses(request: Request):
     tech_labels = form.getlist("techLabel")
     public_labels = form.getlist("publicLabel")
     existing_slugs = form.getlist("existingSlug")
+    default_status = form.get("defaultStatus")
 
     statuses: list[dict[str, Any]] = []
     max_length = max(len(tech_labels), len(public_labels), len(existing_slugs))
@@ -11892,11 +11893,15 @@ async def admin_replace_ticket_statuses(request: Request):
         existing_slug = existing_slugs[index] if index < len(existing_slugs) else None
         if not tech_label and not public_status:
             continue
+        # Determine if this status should be the default
+        # The default_status value is the tech_status slug
+        is_default = (existing_slug and str(existing_slug) == str(default_status))
         statuses.append(
             {
                 "techLabel": tech_label,
                 "publicStatus": public_status,
                 "existingSlug": existing_slug,
+                "isDefault": is_default,
             }
         )
 
