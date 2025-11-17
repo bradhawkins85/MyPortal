@@ -279,3 +279,129 @@ def test_no_company_context_removes_all_conditionals() -> None:
     # But default content should still be there
     assert "Default content" in content
 
+
+def test_conditional_companies_extracted_for_admin() -> None:
+    """Test that conditional companies are extracted when include_permissions is True."""
+    article = _article_with_conditionals(
+        sections=[
+            {
+                "id": 1,
+                "heading": "Section 1",
+                "content": (
+                    '<p>Content</p>'
+                    '<kb-if company="ACME Corp">ACME content</kb-if>'
+                    '<kb-if company="XYZ Inc">XYZ content</kb-if>'
+                ),
+                "position": 1,
+            },
+            {
+                "id": 2,
+                "heading": "Section 2",
+                "content": (
+                    '<kb-if company="Test Company">Test content</kb-if>'
+                    '<kb-if company="ACME Corp">More ACME content</kb-if>'
+                ),
+                "position": 2,
+            },
+        ],
+    )
+    
+    # Create a super admin context
+    admin_context = ArticleAccessContext(
+        user={"id": 1, "email": "admin@example.com", "is_super_admin": True},
+        user_id=1,
+        is_super_admin=True,
+        memberships={},
+    )
+    
+    # Serialize with include_permissions=True (admin mode)
+    serialized = _serialise_article(
+        article,
+        include_content=True,
+        include_permissions=True,
+        context=admin_context,
+    )
+    
+    # Check that conditional_companies is populated
+    conditional_companies = serialized.get("conditional_companies", [])
+    
+    # Should contain all unique companies, sorted
+    assert len(conditional_companies) == 3
+    assert "ACME Corp" in conditional_companies
+    assert "Test Company" in conditional_companies
+    assert "XYZ Inc" in conditional_companies
+    assert conditional_companies == sorted(conditional_companies)
+
+
+def test_conditional_companies_not_included_for_regular_users() -> None:
+    """Test that conditional_companies is not included for regular user views."""
+    article = _article_with_conditionals(
+        sections=[
+            {
+                "id": 1,
+                "heading": "Section",
+                "content": '<kb-if company="ACME Corp">ACME content</kb-if>',
+                "position": 1,
+            },
+        ],
+    )
+    
+    # Create a regular user context
+    user_context = ArticleAccessContext(
+        user={"id": 1, "email": "user@acme.com"},
+        user_id=1,
+        is_super_admin=False,
+        memberships={
+            1: {"company_id": 1, "company_name": "ACME Corp", "is_admin": False}
+        },
+    )
+    
+    # Serialize without include_permissions (regular user view)
+    serialized = _serialise_article(
+        article,
+        include_content=True,
+        include_permissions=False,
+        context=user_context,
+    )
+    
+    # Check that conditional_companies is not in the response
+    assert "conditional_companies" not in serialized
+
+
+def test_conditional_companies_with_combined_content() -> None:
+    """Test that conditional companies are extracted from combined content too."""
+    article = _article_with_conditionals(
+        content='<kb-if company="From Combined Content">Content</kb-if>',
+        sections=[
+            {
+                "id": 1,
+                "heading": "Section",
+                "content": '<kb-if company="From Section">Section content</kb-if>',
+                "position": 1,
+            },
+        ],
+    )
+    
+    # Create a super admin context
+    admin_context = ArticleAccessContext(
+        user={"id": 1, "email": "admin@example.com", "is_super_admin": True},
+        user_id=1,
+        is_super_admin=True,
+        memberships={},
+    )
+    
+    # Serialize with include_permissions=True
+    serialized = _serialise_article(
+        article,
+        include_content=True,
+        include_permissions=True,
+        context=admin_context,
+    )
+    
+    # Check that companies from both combined content and sections are included
+    conditional_companies = serialized.get("conditional_companies", [])
+    assert len(conditional_companies) == 2
+    assert "From Combined Content" in conditional_companies
+    assert "From Section" in conditional_companies
+
+
