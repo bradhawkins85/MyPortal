@@ -24,6 +24,7 @@ async def test_replace_ticket_statuses_normalises_and_persists(monkeypatch):
                 "tech_status": item["tech_status"],
                 "tech_label": item["tech_label"],
                 "public_status": item["public_status"],
+                "is_default": item.get("is_default", False),
             }
             for item in definitions
         ]
@@ -50,6 +51,63 @@ async def test_replace_ticket_statuses_normalises_and_persists(monkeypatch):
     ]
     assert captured[0]["original_slug"] == "in_progress"
     assert captured[1]["tech_status"] == "waiting_on_customer"
+    # First status should be default if none specified
+    assert captured[0]["is_default"] is True
+    assert captured[1]["is_default"] is False
+
+
+@pytest.mark.anyio
+async def test_replace_ticket_statuses_sets_specified_default(monkeypatch):
+    captured: list[dict[str, str]] = []
+
+    async def fake_replace_statuses(definitions):
+        captured.extend(definitions)
+        return [
+            {
+                "tech_status": item["tech_status"],
+                "tech_label": item["tech_label"],
+                "public_status": item["public_status"],
+                "is_default": item.get("is_default", False),
+            }
+            for item in definitions
+        ]
+
+    monkeypatch.setattr(ticket_status_repo, "replace_statuses", fake_replace_statuses)
+
+    results = await tickets_service.replace_ticket_statuses(
+        [
+            {
+                "techLabel": "Open",
+                "publicStatus": "Open",
+                "existingSlug": "open",
+            },
+            {
+                "techLabel": "In Progress",
+                "publicStatus": "Working",
+                "existingSlug": "in_progress",
+                "isDefault": True,
+            },
+        ]
+    )
+
+    assert captured[0]["is_default"] is False
+    assert captured[1]["is_default"] is True
+
+
+@pytest.mark.anyio
+async def test_replace_ticket_statuses_rejects_multiple_defaults(monkeypatch):
+    replace_mock = AsyncMock(return_value=[])
+    monkeypatch.setattr(ticket_status_repo, "replace_statuses", replace_mock)
+
+    with pytest.raises(ValueError, match="Only one status can be set as default"):
+        await tickets_service.replace_ticket_statuses(
+            [
+                {"techLabel": "Open", "publicStatus": "Open", "isDefault": True},
+                {"techLabel": "Closed", "publicStatus": "Closed", "isDefault": True},
+            ]
+        )
+
+    replace_mock.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -91,9 +149,49 @@ async def test_validate_status_choice_rejects_unknown_status(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_resolve_status_or_default_uses_first_definition(monkeypatch):
+async def test_resolve_status_or_default_uses_default_status(monkeypatch):
     async def fake_exists(slug: str) -> bool:
         return False
+
+    async def fake_get_default_status():
+        return {
+            "tech_status": "in_progress",
+            "tech_label": "In Progress",
+            "public_status": "In Progress",
+            "is_default": True,
+        }
+
+    async def fake_list_definitions():
+        return [
+            tickets_service.TicketStatusDefinition(
+                tech_status="open",
+                tech_label="Open",
+                public_status="Open",
+                is_default=False,
+            ),
+            tickets_service.TicketStatusDefinition(
+                tech_status="in_progress",
+                tech_label="In Progress",
+                public_status="In Progress",
+                is_default=True,
+            ),
+        ]
+
+    monkeypatch.setattr(ticket_status_repo, "status_exists", fake_exists)
+    monkeypatch.setattr(ticket_status_repo, "get_default_status", fake_get_default_status)
+    monkeypatch.setattr(tickets_service, "list_status_definitions", fake_list_definitions)
+
+    slug = await tickets_service.resolve_status_or_default(None)
+    assert slug == "in_progress"
+
+
+@pytest.mark.anyio
+async def test_resolve_status_or_default_uses_first_definition_as_fallback(monkeypatch):
+    async def fake_exists(slug: str) -> bool:
+        return False
+
+    async def fake_get_default_status():
+        return None
 
     async def fake_list_definitions():
         return [
@@ -101,15 +199,18 @@ async def test_resolve_status_or_default_uses_first_definition(monkeypatch):
                 tech_status="queued",
                 tech_label="Queued",
                 public_status="Queued",
+                is_default=False,
             ),
             tickets_service.TicketStatusDefinition(
                 tech_status="on_hold",
                 tech_label="On hold",
                 public_status="On hold",
+                is_default=False,
             ),
         ]
 
     monkeypatch.setattr(ticket_status_repo, "status_exists", fake_exists)
+    monkeypatch.setattr(ticket_status_repo, "get_default_status", fake_get_default_status)
     monkeypatch.setattr(tickets_service, "list_status_definitions", fake_list_definitions)
 
     slug = await tickets_service.resolve_status_or_default(None)
