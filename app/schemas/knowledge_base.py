@@ -57,6 +57,7 @@ class KnowledgeBaseArticleResponse(BaseModel):
     allowed_user_ids: list[int]
     allowed_company_ids: list[int]
     company_admin_ids: list[int]
+    conditional_companies: list[str] = Field(default_factory=list)
     sections: list[KnowledgeBaseArticleSectionResponse]
     created_by: int | None
     created_at: datetime | None

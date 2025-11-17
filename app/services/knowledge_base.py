@@ -16,7 +16,11 @@ from app.services import company_access
 from app.services import modules as modules_service
 from app.services.tagging import filter_helpful_texts
 from app.services.realtime import RefreshNotifier, refresh_notifier
-from app.services.knowledge_base_conditionals import process_conditionals, validate_conditional_syntax
+from app.services.knowledge_base_conditionals import (
+    get_conditional_companies,
+    process_conditionals,
+    validate_conditional_syntax,
+)
 
 PermissionScope = str
 
@@ -471,11 +475,26 @@ def _serialise_article(
                 article_content = process_conditionals(article_content, company_name=company_name)
         base["content"] = article_content or ""
     if include_permissions:
+        # Collect all companies referenced in conditional blocks across all sections
+        all_conditional_companies: set[str] = set()
+        for section in sections_payload:
+            content = section.get("content") or ""
+            if content:
+                companies = get_conditional_companies(str(content))
+                all_conditional_companies.update(companies)
+        
+        # Also check the combined content if it exists
+        article_content = article.get("content")
+        if article_content:
+            companies = get_conditional_companies(str(article_content))
+            all_conditional_companies.update(companies)
+        
         base.update(
             {
                 "allowed_user_ids": _normalise_ids(article.get("allowed_user_ids", [])),
                 "allowed_company_ids": _normalise_ids(article.get("company_ids", [])),
                 "company_admin_ids": _normalise_ids(article.get("company_admin_ids", [])),
+                "conditional_companies": sorted(all_conditional_companies),
             }
         )
     return base

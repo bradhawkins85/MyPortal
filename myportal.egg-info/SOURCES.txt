@@ -301,6 +301,7 @@ tests/test_change_log_service.py
 tests/test_chatgpt_mcp_service.py
 tests/test_companies_api.py
 tests/test_company_edit_automation_tasks_sorting.py
+tests/test_company_edit_inactive_tasks.py
 tests/test_company_id_lookup.py
 tests/test_company_importer.py
 tests/test_company_lookup_api.py
