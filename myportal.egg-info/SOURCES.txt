@@ -338,6 +338,7 @@ tests/test_modules_service.py
 tests/test_modules_service_chatgpt.py
 tests/test_notification_preferences_repository.py
 tests/test_notification_ticket_variables.py
+tests/test_notification_variable_rendering.py
 tests/test_notifications_api.py
 tests/test_notifications_page.py
 tests/test_notifications_repository.py
@@ -356,6 +357,7 @@ tests/test_relevant_kb_articles.py
 tests/test_risk_calculator.py
 tests/test_role_permission_enrichment.py
 tests/test_sanitization.py
+tests/test_scheduled_tasks_hide_inactive.py
 tests/test_scheduled_ticket_creation.py
 tests/test_scheduler_service.py
 tests/test_scheduler_system_update.py
