@@ -6,20 +6,33 @@ from collections import deque
 from typing import Callable, Deque, Dict, Iterable
 
 from fastapi import Request
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from app.core.logging import log_warning
+from app.services import rate_limit_store
 
 
 class SimpleRateLimiter:
-    def __init__(self, limit: int, window_seconds: int) -> None:
+    def __init__(
+        self,
+        limit: int,
+        window_seconds: int,
+        *,
+        redis_client: Redis | None = None,
+        namespace: str = "rate-limit",
+    ) -> None:
         self.limit = limit
         self.window_seconds = window_seconds
         self._events: Dict[str, Deque[float]] = {}
         self._lock = asyncio.Lock()
+        self._redis = redis_client
+        self._namespace = namespace
+        self._redis_failed = False
 
-    async def check(self, key: str) -> tuple[bool, float | None]:
+    async def _check_in_memory(self, key: str) -> tuple[bool, float | None]:
         now = time.monotonic()
         async with self._lock:
             bucket = self._events.setdefault(key, deque())
@@ -31,14 +44,32 @@ class SimpleRateLimiter:
             bucket.append(now)
             return True, None
 
+    async def check(self, key: str) -> tuple[bool, float | None]:
+        if self._redis is not None:
+            namespaced_key = f"{self._namespace}:{key}"
+            try:
+                return await rate_limit_store.acquire_slot(
+                    self._redis,
+                    key=namespaced_key,
+                    limit=self.limit,
+                    window_seconds=self.window_seconds,
+                )
+            except RedisError as exc:
+                if not self._redis_failed:
+                    log_warning("Redis rate limiter unavailable", error=str(exc))
+                    self._redis_failed = True
+                self._redis = None
+        return await self._check_in_memory(key)
+
 
 class EndpointRateLimiter:
     """Rate limiter that supports per-endpoint limits with custom key generation."""
-    
-    def __init__(self) -> None:
+
+    def __init__(self, *, redis_client: Redis | None = None) -> None:
         self._limiters: Dict[str, SimpleRateLimiter] = {}
         self._path_configs: list[tuple[str, str, SimpleRateLimiter, Callable[[Request], str]]] = []
-    
+        self._redis = redis_client
+
     def add_limit(
         self,
         path: str,
@@ -48,7 +79,7 @@ class EndpointRateLimiter:
         key_func: Callable[[Request], str] | None = None,
     ) -> None:
         """Add a rate limit for a specific endpoint.
-        
+
         Args:
             path: URL path to rate limit (e.g., "/auth/login")
             method: HTTP method (e.g., "POST")
@@ -57,14 +88,19 @@ class EndpointRateLimiter:
             key_func: Function to generate rate limit key from request (defaults to IP-based)
         """
         config_key = f"{method}:{path}"
-        limiter = SimpleRateLimiter(limit=limit, window_seconds=window_seconds)
+        limiter = SimpleRateLimiter(
+            limit=limit,
+            window_seconds=window_seconds,
+            redis_client=self._redis,
+            namespace=f"endpoint-rate:{config_key}",
+        )
         self._limiters[config_key] = limiter
-        
+
         if key_func is None:
             key_func = self._default_key_func
-        
+
         self._path_configs.append((path, method.upper(), limiter, key_func))
-    
+
     @staticmethod
     def _default_key_func(request: Request) -> str:
         """Extract client IP from request."""
@@ -75,23 +111,23 @@ class EndpointRateLimiter:
             client = request.client
             client_ip = client.host if client else "anonymous"
         return client_ip or "anonymous"
-    
+
     async def check(self, request: Request) -> tuple[bool, float | None, str | None]:
         """Check if request is allowed.
-        
+
         Returns:
             Tuple of (allowed, retry_after, reason)
         """
         path = request.url.path
         method = request.method.upper()
-        
+
         for config_path, config_method, limiter, key_func in self._path_configs:
             if path == config_path and method == config_method:
                 key = key_func(request)
                 allowed, retry_after = await limiter.check(key)
                 reason = f"{method} {path}" if not allowed else None
                 return allowed, retry_after, reason
-        
+
         # No specific limit configured for this endpoint
         return True, None, None
 
@@ -142,7 +178,7 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
 
 class EndpointRateLimiterMiddleware(BaseHTTPMiddleware):
     """Middleware for endpoint-specific rate limiting."""
-    
+
     def __init__(
         self,
         app,
@@ -153,12 +189,12 @@ class EndpointRateLimiterMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.endpoint_limiter = endpoint_limiter
         self.exempt_paths = tuple(exempt_paths or ())
-    
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         if any(path.startswith(prefix) for prefix in self.exempt_paths):
             return await call_next(request)
-        
+
         allowed, retry_after, reason = await self.endpoint_limiter.check(request)
         if not allowed:
             client_ip = request.headers.get("x-forwarded-for")
@@ -167,7 +203,7 @@ class EndpointRateLimiterMiddleware(BaseHTTPMiddleware):
             else:
                 client = request.client
                 client_ip = client.host if client else "anonymous"
-            
+
             log_warning(
                 "Endpoint rate limit exceeded",
                 client_ip=client_ip,
@@ -184,6 +220,6 @@ class EndpointRateLimiterMiddleware(BaseHTTPMiddleware):
                     "Retry-After": f"{int(retry_after or 60)}",
                 },
             )
-        
+
         response = await call_next(request)
         return response

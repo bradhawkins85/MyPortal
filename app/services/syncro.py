@@ -8,9 +8,14 @@ from typing import Any
 import httpx
 
 from app.core.config import get_settings
-from app.core.logging import log_error, log_info
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
+
+from app.core.logging import log_error, log_info, log_warning
 from app.repositories import integration_modules as module_repo
 from app.services import webhook_monitor
+from app.services import rate_limit_store
+from app.services.redis import get_redis_client
 
 
 class SyncroConfigurationError(RuntimeError):
@@ -103,7 +108,12 @@ async def _get_or_create_rate_limiter(limit: int) -> "AsyncRateLimiter":
     async with _RATE_LIMITER_LOCK:
         if _RATE_LIMITER_CACHE and _RATE_LIMITER_CACHE[0] == limit:
             return _RATE_LIMITER_CACHE[1]
-        limiter = AsyncRateLimiter(limit=limit, interval=60.0)
+        limiter = AsyncRateLimiter(
+            limit=limit,
+            interval=60.0,
+            redis_client=get_redis_client(),
+            namespace="syncro-api",
+        )
         _RATE_LIMITER_CACHE = (limit, limiter)
         return limiter
 
@@ -119,9 +129,24 @@ async def get_rate_limiter() -> "AsyncRateLimiter":
 class AsyncRateLimiter:
     """Coroutine-friendly token bucket limiting requests per interval."""
 
-    __slots__ = ("_limit", "_interval", "_lock", "_events")
+    __slots__ = (
+        "_limit",
+        "_interval",
+        "_lock",
+        "_events",
+        "_redis",
+        "_namespace",
+        "_redis_failed",
+    )
 
-    def __init__(self, limit: int, interval: float) -> None:
+    def __init__(
+        self,
+        limit: int,
+        interval: float,
+        *,
+        redis_client: Redis | None = None,
+        namespace: str = "async-rate",
+    ) -> None:
         if limit <= 0:
             raise ValueError("limit must be positive")
         if interval <= 0:
@@ -130,9 +155,36 @@ class AsyncRateLimiter:
         self._interval = interval
         self._lock = asyncio.Lock()
         self._events: deque[float] = deque()
+        self._redis = redis_client
+        self._namespace = namespace
+        self._redis_failed = False
+
+    async def _acquire_with_redis(self) -> bool:
+        assert self._redis is not None
+        redis_key = f"{self._namespace}:{self._limit}:{int(self._interval)}"
+        try:
+            allowed, retry_after = await rate_limit_store.acquire_slot(
+                self._redis,
+                key=redis_key,
+                limit=self._limit,
+                window_seconds=self._interval,
+            )
+        except RedisError as exc:
+            if not self._redis_failed:
+                log_warning("Redis Syncro rate limiter unavailable", error=str(exc))
+                self._redis_failed = True
+            self._redis = None
+            return False
+        if allowed:
+            return True
+        await asyncio.sleep(max(retry_after or 0.05, 0.05))
+        return False
 
     async def acquire(self) -> None:
         while True:
+            if self._redis is not None:
+                if await self._acquire_with_redis():
+                    return
             async with self._lock:
                 now = monotonic()
                 while self._events and now - self._events[0] >= self._interval:
