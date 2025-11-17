@@ -30,16 +30,26 @@ def _normalise_ticket_view(row: dict[str, Any]) -> TicketViewRecord:
     
     # Parse JSON filters if present
     filters_value = record.get("filters")
-    if filters_value:
+    parsed_filters: dict[str, Any] | None = None
+    if filters_value not in (None, "", b""):
+        value = filters_value
         if isinstance(filters_value, str):
             try:
-                record["filters"] = json.loads(filters_value)
+                value = json.loads(filters_value)
             except json.JSONDecodeError:
-                record["filters"] = None
-        elif isinstance(filters_value, dict):
-            record["filters"] = filters_value
-    else:
-        record["filters"] = None
+                value = None
+        if isinstance(value, dict):
+            parsed_filters = value
+        elif isinstance(value, list):
+            string_values = [item for item in value if isinstance(item, str) and item]
+            if string_values and len(string_values) == len(value):
+                # Legacy rows stored the status filters as an array of strings.
+                parsed_filters = {"status": string_values}
+            else:
+                parsed_filters = None
+        else:
+            parsed_filters = None
+    record["filters"] = parsed_filters
     
     if "is_default" in record:
         record["is_default"] = bool(record.get("is_default"))
