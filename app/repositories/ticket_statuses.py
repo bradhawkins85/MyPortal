@@ -121,6 +121,9 @@ async def replace_statuses(definitions: Sequence[dict[str, Any]]) -> list[dict[s
                     first_def = definitions[0]
                     default_slug = str(first_def.get("tech_status") or "").strip().lower()
 
+                # Clear all existing default flags to ensure only one default
+                await cursor.execute("UPDATE ticket_statuses SET is_default = 0 WHERE is_default = 1")
+
                 for definition in definitions:
                     slug = str(definition.get("tech_status") or "").strip().lower()
                     label = str(definition.get("tech_label") or "").strip()
