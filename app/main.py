@@ -168,6 +168,7 @@ from app.services import xero as xero_service
 from app.services import issues as issues_service
 from app.services import impersonation as impersonation_service
 from app.services.realtime import refresh_notifier
+from app.services.redis import close_redis_client, get_redis_client
 from app.services.sanitization import sanitize_rich_text
 from app.services.opnform import (
     OpnformValidationError,
@@ -340,9 +341,23 @@ app = FastAPI(
 @app.on_event("startup")
 async def _load_message_template_cache() -> None:
     try:
-        await message_templates_service.refresh_cache()
+        await message_templates_service.preload_cache()
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.error("Failed to preload message templates", error=str(exc))
+
+
+@app.on_event("startup")
+async def _start_refresh_notifier() -> None:
+    try:
+        await refresh_notifier.start(redis_client=get_redis_client())
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("Failed to initialise refresh notifier", error=str(exc))
+
+
+@app.on_event("shutdown")
+async def _shutdown_integrations() -> None:
+    await refresh_notifier.stop()
+    await close_redis_client()
 
 SWAGGER_UI_PATH = settings.swagger_ui_url or "/docs"
 PROTECTED_OPENAPI_PATH = "/internal/openapi.json"
@@ -368,7 +383,8 @@ app.add_middleware(
 )
 
 # Configure endpoint-specific rate limits per security requirements
-endpoint_limiter = EndpointRateLimiter()
+_rate_limit_redis = get_redis_client()
+endpoint_limiter = EndpointRateLimiter(redis_client=_rate_limit_redis)
 
 # Login: 5 attempts per 15 minutes per IP
 endpoint_limiter.add_limit("/api/auth/login", "POST", limit=5, window_seconds=900)
@@ -428,7 +444,12 @@ app.add_middleware(
     exempt_paths=(SWAGGER_UI_PATH, PROTECTED_OPENAPI_PATH, "/static"),
 )
 
-general_rate_limiter = SimpleRateLimiter(limit=100, window_seconds=60)
+general_rate_limiter = SimpleRateLimiter(
+    limit=100,
+    window_seconds=60,
+    redis_client=_rate_limit_redis,
+    namespace="rate-limit:general",
+)
 app.add_middleware(
     RateLimiterMiddleware,
     rate_limiter=general_rate_limiter,

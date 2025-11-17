@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import re
+import json
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from threading import RLock
 from typing import Any, Mapping
 
 from loguru import logger
+from redis.exceptions import RedisError
 
 from app.repositories import message_templates as template_repo
+from app.services.redis import get_redis_client
 
 
 @dataclass(slots=True)
@@ -34,6 +37,7 @@ _CONTENT_TYPE_MAP = {
 
 _CACHE_LOCK = RLock()
 _TEMPLATE_CACHE: dict[str, MessageTemplate] = {}
+_REDIS_CACHE_KEY = "message-templates:records"
 
 
 def _normalise_slug(slug: str) -> str:
@@ -87,6 +91,49 @@ def _set_cache(records: list[MessageTemplate]) -> None:
             _TEMPLATE_CACHE[template.slug] = template
 
 
+async def _persist_cache_to_redis(records: list[MessageTemplate]) -> None:
+    client = get_redis_client()
+    if not client:
+        return
+    payload = [_to_dict(template) for template in records]
+    try:
+        await client.set(_REDIS_CACHE_KEY, json.dumps(payload))
+    except RedisError as exc:
+        logger.warning("Failed to persist message template cache to Redis", error=str(exc))
+
+
+async def _load_cache_from_redis() -> bool:
+    client = get_redis_client()
+    if not client:
+        return False
+    try:
+        cached = await client.get(_REDIS_CACHE_KEY)
+    except RedisError as exc:
+        logger.warning("Failed to load message template cache from Redis", error=str(exc))
+        return False
+    if not cached:
+        return False
+    try:
+        records = json.loads(cached)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(records, list):
+        return False
+    templates: list[MessageTemplate] = []
+    for record in records:
+        if isinstance(record, Mapping):
+            templates.append(_coerce_template(record))
+    _set_cache(templates)
+    return True
+
+
+async def preload_cache() -> None:
+    if await _load_cache_from_redis():
+        logger.debug("Loaded message templates from Redis cache")
+        return
+    await refresh_cache()
+
+
 async def refresh_cache() -> None:
     """Reload the in-memory template cache from the database."""
 
@@ -103,6 +150,7 @@ async def refresh_cache() -> None:
             break
         offset += batch_size
     _set_cache(templates)
+    await _persist_cache_to_redis(templates)
 
 
 def iter_templates() -> list[dict[str, Any]]:
