@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.routes.tickets import require_helpdesk_technician, require_super_admin
+import app.main as main_module
 from app.main import app
 from app.main import automations_service, change_log_service, modules_service, scheduler_service
 from app.core.database import db
@@ -183,3 +184,14 @@ def test_replace_ticket_statuses_endpoint_handles_errors(monkeypatch):
     assert response.status_code == 400
     assert response.json()["detail"] == "Tech status values must be unique."
     replace_mock.assert_awaited_once()
+
+def test_build_ticket_status_payloads_marks_new_default():
+    payloads = main_module._build_ticket_status_payloads(
+        ["Awaiting reply"],
+        ["Awaiting reply"],
+        [""],
+        "awaiting_reply",
+    )
+
+    assert payloads
+    assert payloads[0]["isDefault"] is True

@@ -115,6 +115,7 @@ from app.repositories import staff as staff_repo
 from app.repositories import pending_staff_access as pending_staff_access_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import ticket_views as ticket_views_repo
+from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories import automations as automation_repo
 from app.repositories import integration_modules as integration_modules_repo
 from app.repositories import webhook_events as webhook_events_repo
@@ -11878,6 +11879,40 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
+def _build_ticket_status_payloads(
+    tech_labels: Sequence[str],
+    public_labels: Sequence[str],
+    existing_slugs: Sequence[str],
+    default_status_value: str,
+) -> list[dict[str, Any]]:
+    statuses: list[dict[str, Any]] = []
+    max_length = max(len(tech_labels), len(public_labels), len(existing_slugs)) if (
+        tech_labels or public_labels or existing_slugs
+    ) else 0
+    for index in range(max_length):
+        tech_label = tech_labels[index] if index < len(tech_labels) else ""
+        public_status = public_labels[index] if index < len(public_labels) else ""
+        existing_slug = existing_slugs[index] if index < len(existing_slugs) else None
+        if not tech_label and not public_status:
+            continue
+        candidate_slug = ticket_status_repo.slugify_status_label(tech_label)
+        existing_slug_normalized = ticket_status_repo.slugify_status_label(str(existing_slug or ""))
+        is_default = False
+        if existing_slug_normalized and existing_slug_normalized == default_status_value:
+            is_default = True
+        elif (not existing_slug_normalized) and candidate_slug and candidate_slug == default_status_value:
+            is_default = True
+        statuses.append(
+            {
+                "techLabel": tech_label,
+                "publicStatus": public_status,
+                "existingSlug": existing_slug,
+                "isDefault": is_default,
+            }
+        )
+    return statuses
+
+
 @app.post("/admin/tickets/statuses", response_class=HTMLResponse)
 async def admin_replace_ticket_statuses(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
@@ -11888,27 +11923,14 @@ async def admin_replace_ticket_statuses(request: Request):
     tech_labels = form.getlist("techLabel")
     public_labels = form.getlist("publicLabel")
     existing_slugs = form.getlist("existingSlug")
-    default_status = form.get("defaultStatus")
+    default_status_value = ticket_status_repo.slugify_status_label(str(form.get("defaultStatus") or ""))
 
-    statuses: list[dict[str, Any]] = []
-    max_length = max(len(tech_labels), len(public_labels), len(existing_slugs))
-    for index in range(max_length):
-        tech_label = tech_labels[index] if index < len(tech_labels) else ""
-        public_status = public_labels[index] if index < len(public_labels) else ""
-        existing_slug = existing_slugs[index] if index < len(existing_slugs) else None
-        if not tech_label and not public_status:
-            continue
-        # Determine if this status should be the default
-        # The default_status value is the tech_status slug
-        is_default = (existing_slug and str(existing_slug) == str(default_status))
-        statuses.append(
-            {
-                "techLabel": tech_label,
-                "publicStatus": public_status,
-                "existingSlug": existing_slug,
-                "isDefault": is_default,
-            }
-        )
+    statuses = _build_ticket_status_payloads(
+        tech_labels,
+        public_labels,
+        existing_slugs,
+        default_status_value,
+    )
 
     try:
         await tickets_service.replace_ticket_statuses(statuses)
