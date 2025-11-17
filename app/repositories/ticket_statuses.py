@@ -31,20 +31,22 @@ def slugify_status_label(value: str) -> str:
     return slug
 
 
-def _normalise_row(row: dict[str, Any]) -> dict[str, str]:
+def _normalise_row(row: dict[str, Any]) -> dict[str, Any]:
     slug = str(row.get("tech_status") or "").strip().lower()
     label = str(row.get("tech_label") or "").strip()
     public = str(row.get("public_status") or "").strip()
+    is_default = bool(row.get("is_default", False))
     return {
         "tech_status": slug,
         "tech_label": label or slug.replace("_", " ").title(),
         "public_status": public or label or slug.replace("_", " ").title(),
+        "is_default": is_default,
     }
 
 
-async def list_statuses() -> list[dict[str, str]]:
+async def list_statuses() -> list[dict[str, Any]]:
     rows = await db.fetch_all(
-        "SELECT tech_status, tech_label, public_status FROM ticket_statuses ORDER BY tech_label ASC"
+        "SELECT tech_status, tech_label, public_status, is_default FROM ticket_statuses ORDER BY tech_label ASC"
     )
     return [_normalise_row(row) for row in rows]
 
@@ -90,7 +92,7 @@ async def status_exists(slug: str) -> bool:
     return bool(row)
 
 
-async def replace_statuses(definitions: Sequence[dict[str, Any]]) -> list[dict[str, str]]:
+async def replace_statuses(definitions: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     if not definitions:
         return await list_statuses()
 
@@ -103,12 +105,28 @@ async def replace_statuses(definitions: Sequence[dict[str, Any]]) -> list[dict[s
                 current_slugs = {str(row["tech_status"]).strip().lower() for row in current_rows}
 
                 encountered: set[str] = set()
+                default_slug: str | None = None
+
+                # First, find which status should be default
+                for definition in definitions:
+                    is_default = bool(definition.get("is_default", False))
+                    if is_default:
+                        slug = str(definition.get("tech_status") or "").strip().lower()
+                        if default_slug is not None:
+                            raise ValueError("Only one status can be set as default.")
+                        default_slug = slug
+
+                # If no default specified, use the first one
+                if default_slug is None and definitions:
+                    first_def = definitions[0]
+                    default_slug = str(first_def.get("tech_status") or "").strip().lower()
 
                 for definition in definitions:
                     slug = str(definition.get("tech_status") or "").strip().lower()
                     label = str(definition.get("tech_label") or "").strip()
                     public_status = str(definition.get("public_status") or "").strip() or label
                     original_slug = str(definition.get("original_slug") or "").strip().lower() or slug
+                    is_default = 1 if slug == default_slug else 0
 
                     if original_slug and original_slug in current_slugs:
                         if slug == original_slug:
@@ -117,10 +135,11 @@ async def replace_statuses(definitions: Sequence[dict[str, Any]]) -> list[dict[s
                                 UPDATE ticket_statuses
                                 SET tech_label = %s,
                                     public_status = %s,
+                                    is_default = %s,
                                     updated_at = UTC_TIMESTAMP(6)
                                 WHERE tech_status = %s
                                 """,
-                                (label, public_status, original_slug),
+                                (label, public_status, is_default, original_slug),
                             )
                         else:
                             if slug in current_slugs and slug != original_slug:
@@ -133,10 +152,11 @@ async def replace_statuses(definitions: Sequence[dict[str, Any]]) -> list[dict[s
                                 SET tech_status = %s,
                                     tech_label = %s,
                                     public_status = %s,
+                                    is_default = %s,
                                     updated_at = UTC_TIMESTAMP(6)
                                 WHERE tech_status = %s
                                 """,
-                                (slug, label, public_status, original_slug),
+                                (slug, label, public_status, is_default, original_slug),
                             )
                             await cursor.execute(
                                 "UPDATE tickets SET status = %s WHERE status = %s",
@@ -149,10 +169,10 @@ async def replace_statuses(definitions: Sequence[dict[str, Any]]) -> list[dict[s
                             raise ValueError("Tech status values must be unique.")
                         await cursor.execute(
                             """
-                            INSERT INTO ticket_statuses (tech_status, tech_label, public_status, created_at, updated_at)
-                            VALUES (%s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                            INSERT INTO ticket_statuses (tech_status, tech_label, public_status, is_default, created_at, updated_at)
+                            VALUES (%s, %s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
                             """,
-                            (slug, label, public_status),
+                            (slug, label, public_status, is_default),
                         )
                         current_slugs.add(slug)
 
@@ -193,11 +213,19 @@ async def replace_statuses(definitions: Sequence[dict[str, Any]]) -> list[dict[s
     return await list_statuses()
 
 
-async def get_status_definition(slug: str) -> dict[str, str] | None:
+async def get_status_definition(slug: str) -> dict[str, Any] | None:
     if not slug:
         return None
     row = await db.fetch_one(
-        "SELECT tech_status, tech_label, public_status FROM ticket_statuses WHERE tech_status = %s",
+        "SELECT tech_status, tech_label, public_status, is_default FROM ticket_statuses WHERE tech_status = %s",
         (slug,),
+    )
+    return _normalise_row(row) if row else None
+
+
+async def get_default_status() -> dict[str, Any] | None:
+    """Get the default status definition."""
+    row = await db.fetch_one(
+        "SELECT tech_status, tech_label, public_status, is_default FROM ticket_statuses WHERE is_default = 1",
     )
     return _normalise_row(row) if row else None
