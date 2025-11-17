@@ -8256,11 +8256,11 @@ async def admin_message_templates_edit(request: Request, template_id: int):
 
 
 @app.get("/admin/automation", response_class=HTMLResponse)
-async def admin_automation(request: Request):
+async def admin_automation(request: Request, show_inactive: bool = Query(default=False)):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    tasks = await scheduled_tasks_repo.list_tasks(include_inactive=True)
+    tasks = await scheduled_tasks_repo.list_tasks(include_inactive=show_inactive)
     companies = await company_repo.list_companies()
 
     company_lookup: dict[int, str] = {}
@@ -8327,6 +8327,7 @@ async def admin_automation(request: Request):
         "global_tasks": global_tasks,
         "command_options": command_options,
         "company_options": company_options,
+        "show_inactive_tasks": show_inactive,
     }
     return await _render_template("admin/automation.html", request, current_user, extra=extra)
 
