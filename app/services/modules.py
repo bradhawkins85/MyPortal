@@ -1125,10 +1125,20 @@ async def _invoke_smtp(
 ) -> dict[str, Any]:
     recipients = _ensure_list(payload.get("recipients")) or _ensure_list(settings.get("default_recipients"))
     subject_prefix = str(settings.get("subject_prefix") or "").strip()
-    subject = str(payload.get("subject") or "Automation notification")
+    # Use payload value if key exists, even if empty string (template may have rendered to empty)
+    if "subject" in payload:
+        subject = str(payload["subject"])
+    else:
+        subject = "Automation notification"
     if subject_prefix:
         subject = f"{subject_prefix} {subject}".strip()
-    html_body = str(payload.get("html") or payload.get("body") or "<p>Automation triggered.</p>")
+    # Use payload value if key exists, even if empty string (template may have rendered to empty)
+    if "html" in payload:
+        html_body = str(payload["html"])
+    elif "body" in payload:
+        html_body = str(payload["body"])
+    else:
+        html_body = "<p>Automation triggered.</p>"
     text_body = payload.get("text")
     sender = str(settings.get("from_address") or "") or None
     event = await webhook_monitor.create_manual_event(

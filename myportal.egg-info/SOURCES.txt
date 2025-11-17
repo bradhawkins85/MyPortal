@@ -330,6 +330,7 @@ tests/test_knowledge_base_conditionals.py
 tests/test_knowledge_base_conditionals_integration.py
 tests/test_knowledge_base_service.py
 tests/test_knowledge_base_weak_relevance.py
+tests/test_labour_type_default.py
 tests/test_labour_type_rates.py
 tests/test_logging.py
 tests/test_migration_reprocess.py
@@ -376,6 +377,7 @@ tests/test_shop_service.py
 tests/test_sidebar_menu.py
 tests/test_sms_gateway_module.py
 tests/test_sms_service.py
+tests/test_smtp_template_rendering.py
 tests/test_sql_injection_prevention.py
 tests/test_staff_access.py
 tests/test_staff_importer.py
@@ -398,6 +400,7 @@ tests/test_system_variables_service.py
 tests/test_tacticalrmm_service.py
 tests/test_tag_exclusions.py
 tests/test_tag_exclusions_repo.py
+tests/test_template_usage.py
 tests/test_template_variables_service.py
 tests/test_ticket_access.py
 tests/test_ticket_ai_summary_service.py
@@ -442,4 +445,5 @@ tests/test_xero_recurring_items.py
 tests/test_xero_shop_orders.py
 tests/test_xero_sync_company_labour_rates.py
 tests/test_xero_sync_diagnostics.py
+tests/test_xero_template_edge_cases.py
 tests/test_xss_prevention.py
