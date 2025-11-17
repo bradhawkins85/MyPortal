@@ -11,18 +11,20 @@ def anyio_backend() -> str:
 
 @pytest.mark.anyio
 async def test_email_subject_renders_variables(monkeypatch):
-    """Test that email subject should render variables like {{ticket.number}}."""
+    """Test that email subject renders variables from the message template."""
     from app.services import notifications as notifications_service
     from app.services import notification_event_settings
     from app.services import email as email_service
     from app.repositories import users as user_repo
+    from app.repositories import notifications as notifications_repo
+    from app.repositories import notification_preferences as preferences_repo
     
-    # Mock the event setting to return a notification config
+    # Mock the event setting to return a notification config with variables in message_template
     async def fake_get_event_setting(event_type: str):
         return {
             "event_type": event_type,
             "display_name": "Test Notification",
-            "message_template": "Ticket {{ticket.number}} was updated",
+            "message_template": "Ticket {{ticket.number}} was updated: {{ticket.subject}}",
             "module_actions": [],
             "allow_channel_in_app": True,
             "allow_channel_email": True,
@@ -58,14 +60,8 @@ async def test_email_subject_renders_variables(monkeypatch):
     monkeypatch.setattr(notification_event_settings, "get_event_setting", fake_get_event_setting)
     monkeypatch.setattr(user_repo, "get_user_by_id", fake_get_user_by_id)
     monkeypatch.setattr(email_service, "send_email", fake_send_email)
-    monkeypatch.setattr(
-        "app.repositories.notifications.create_notification",
-        fake_create_notification,
-    )
-    monkeypatch.setattr(
-        "app.repositories.notification_preferences.get_preference",
-        fake_get_preference,
-    )
+    monkeypatch.setattr(notifications_repo, "create_notification", fake_create_notification)
+    monkeypatch.setattr(preferences_repo, "get_preference", fake_get_preference)
     
     # Emit a notification with ticket context
     context = {
@@ -85,16 +81,20 @@ async def test_email_subject_renders_variables(monkeypatch):
     )
     
     # Verify an email was sent
-    assert len(sent_emails) == 1
+    assert len(sent_emails) == 1, "Expected exactly one email to be sent"
     sent_email = sent_emails[0]
     
-    # The subject should ideally include the ticket number, but currently it's hardcoded
-    # This test documents the current behavior
+    # The subject should now include the rendered message with variables replaced
     subject = sent_email["subject"]
     
-    # Current behavior: subject is hardcoded and doesn't render variables
-    # Expected behavior: subject should include ticket number like "MyPortal notification: Ticket TKT-456 was updated"
-    assert "notification" in subject.lower()
+    # After fix: subject should include ticket number from rendered message
+    assert "TKT-456" in subject, f"Subject should include ticket number, got: {subject}"
+    assert "Printer broken" in subject or "Ticket TKT-456" in subject, f"Subject should include rendered message content, got: {subject}"
+    
+    # Body should also have variables rendered
+    text_body = sent_email.get("text_body", "")
+    assert "TKT-456" in text_body, "Body should include ticket number"
+    assert "Printer broken" in text_body, "Body should include ticket subject"
 
 
 @pytest.mark.anyio
