@@ -1,6 +1,8 @@
 """Tests for ticket views repository layer."""
 import pytest
 
+import json
+
 from app.repositories import ticket_views
 
 
@@ -65,4 +67,52 @@ async def test_normalise_ticket_view_handles_none_filters():
     
     assert result["filters"] is None
     assert result["is_default"] is False
+
+
+@pytest.mark.anyio
+async def test_normalise_ticket_view_handles_legacy_list_filters():
+    """Legacy rows stored filters as a raw list of statuses."""
+    from datetime import datetime, timezone
+
+    row = {
+        "id": 2,
+        "user_id": 11,
+        "name": "Legacy View",
+        "description": "",
+        "filters": json.dumps(["open", "in_progress"]),
+        "grouping_field": None,
+        "sort_field": None,
+        "sort_direction": None,
+        "is_default": 0,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+    }
+
+    result = ticket_views._normalise_ticket_view(row)
+
+    assert result["filters"] == {"status": ["open", "in_progress"]}
+
+
+@pytest.mark.anyio
+async def test_normalise_ticket_view_discards_invalid_filters():
+    """Invalid JSON blobs should not break the response payload."""
+    from datetime import datetime, timezone
+
+    row = {
+        "id": 3,
+        "user_id": 11,
+        "name": "Broken View",
+        "description": None,
+        "filters": "not-json",
+        "grouping_field": None,
+        "sort_field": None,
+        "sort_direction": None,
+        "is_default": 0,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+    }
+
+    result = ticket_views._normalise_ticket_view(row)
+
+    assert result["filters"] is None
 
