@@ -193,6 +193,14 @@
               aria-label="Filter company automations"
               data-table-filter="company-automation-tasks"
             />
+            <button 
+              type="button" 
+              class="button button--ghost" 
+              id="toggle-inactive-tasks"
+              data-show-inactive="{{ 'true' if show_inactive_tasks else 'false' }}"
+            >
+              {{ 'Hide' if show_inactive_tasks else 'Show' }} inactive
+            </button>
             <button type="button" class="button button--primary" data-task-create>New automation</button>
           </div>
           <div class="table-wrapper">
@@ -947,6 +955,28 @@
           div.textContent = text;
           return div.innerHTML;
         }
+      });
+
+      // Toggle inactive tasks visibility
+      document.addEventListener('DOMContentLoaded', function() {
+        const toggleBtn = document.getElementById('toggle-inactive-tasks');
+        if (!toggleBtn) return;
+        
+        toggleBtn.addEventListener('click', function() {
+          const currentShowInactive = toggleBtn.dataset.showInactive === 'true';
+          const newShowInactive = !currentShowInactive;
+          
+          // Build the new URL with the show_inactive parameter
+          const url = new URL(window.location.href);
+          if (newShowInactive) {
+            url.searchParams.set('show_inactive', 'true');
+          } else {
+            url.searchParams.delete('show_inactive');
+          }
+          
+          // Navigate to the new URL
+          window.location.href = url.toString();
+        });
       });
     </script>
   {% endif %}
