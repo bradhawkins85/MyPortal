@@ -176,9 +176,12 @@ def build_template_token_map(
             include_templates=False,
         )
         upper_name = _uppercase_token(slug)
+        stringified = _stringify_template_value(rendered)
         if upper_name:
-            tokens[f"TEMPLATE_{upper_name}"] = _stringify_template_value(rendered)
-        tokens[f"template.{slug}"] = _stringify_template_value(rendered)
+            tokens[f"TEMPLATE_{upper_name}"] = stringified
+        tokens[f"template.{slug}"] = stringified
+        # Also add the slug directly to allow {{slug}} references
+        tokens[slug] = stringified
     return tokens
 
 
