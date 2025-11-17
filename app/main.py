@@ -2624,6 +2624,7 @@ async def _render_company_edit_page(
     success_message: str | None = None,
     error_message: str | None = None,
     status_code: int = status.HTTP_200_OK,
+    show_inactive_tasks: bool = False,
 ) -> HTMLResponse:
     company_record = await company_repo.get_company_by_id(company_id)
     if not company_record:
@@ -2973,7 +2974,7 @@ async def _render_company_edit_page(
         default_command_values = {option["value"] for option in automation_command_options}
 
         try:
-            tasks = await scheduled_tasks_repo.list_tasks(include_inactive=True)
+            tasks = await scheduled_tasks_repo.list_tasks(include_inactive=show_inactive_tasks)
         except Exception:  # pragma: no cover - fallback to keep page rendering
             tasks = []
 
@@ -3079,6 +3080,7 @@ async def _render_company_edit_page(
         "recurring_invoice_items": recurring_invoice_items,
         "billing_contacts": billing_contacts,
         "company_staff": company_staff,
+        "show_inactive_tasks": show_inactive_tasks,
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
@@ -6748,6 +6750,7 @@ async def admin_company_edit_page(
     request: Request,
     success: str | None = Query(default=None),
     error: str | None = Query(default=None),
+    show_inactive: bool = Query(default=False),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -6758,6 +6761,7 @@ async def admin_company_edit_page(
         company_id=company_id,
         success_message=_sanitize_message(success),
         error_message=_sanitize_message(error),
+        show_inactive_tasks=show_inactive,
     )
 
 
