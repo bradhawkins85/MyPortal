@@ -2973,7 +2973,7 @@ async def _render_company_edit_page(
         default_command_values = {option["value"] for option in automation_command_options}
 
         try:
-            tasks = await scheduled_tasks_repo.list_tasks()
+            tasks = await scheduled_tasks_repo.list_tasks(include_inactive=True)
         except Exception:  # pragma: no cover - fallback to keep page rendering
             tasks = []
 
@@ -8256,7 +8256,7 @@ async def admin_automation(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    tasks = await scheduled_tasks_repo.list_tasks()
+    tasks = await scheduled_tasks_repo.list_tasks(include_inactive=True)
     companies = await company_repo.list_companies()
 
     company_lookup: dict[int, str] = {}
