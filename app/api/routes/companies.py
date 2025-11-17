@@ -4,11 +4,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.dependencies.auth import require_super_admin
+from app.api.dependencies.auth import require_super_admin, require_helpdesk_technician
 from app.api.dependencies.database import require_database
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
+from app.repositories import staff as staff_repo
 from app.schemas.assets import AssetResponse
 from app.schemas.companies import CompanyCreate, CompanyResponse, CompanyUpdate
 from app.schemas.company_recurring_invoice_items import (
@@ -16,6 +17,7 @@ from app.schemas.company_recurring_invoice_items import (
     RecurringInvoiceItemResponse,
     RecurringInvoiceItemUpdate,
 )
+from app.schemas.users import UserResponse
 from app.services import company_id_lookup
 
 router = APIRouter(prefix="/api/companies", tags=["Companies"])
@@ -140,6 +142,24 @@ async def unarchive_company(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     updated = await company_repo.unarchive_company(company_id)
     return updated
+
+
+@router.get("/{company_id}/staff-users", response_model=list[UserResponse])
+async def list_company_staff_users(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_helpdesk_technician),
+):
+    """Get enabled staff members as users for the specified company.
+    
+    This endpoint returns user records (with user IDs) for enabled staff members,
+    which can be used for selecting requesters when creating tickets.
+    """
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    users = await staff_repo.list_enabled_staff_users(company_id)
+    return [UserResponse.model_validate(user) for user in users]
 
 
 @router.get("/{company_id}/assets", response_model=list[AssetResponse])
