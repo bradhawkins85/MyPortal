@@ -28,7 +28,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 
 @router.get("/tasks", response_model=list[ScheduledTaskResponse])
 async def list_tasks(
-    include_inactive: bool = True,
+    include_inactive: bool = False,
     _: None = Depends(require_database),
     __: dict[str, Any] = Depends(require_super_admin),
 ) -> list[ScheduledTaskResponse]:
