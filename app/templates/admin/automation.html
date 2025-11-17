@@ -26,6 +26,7 @@
     </header>
     {% set global_tasks = global_tasks | default([], true) %}
     {% set company_tasks = company_tasks | default([], true) %}
+    {% set show_inactive_tasks = show_inactive_tasks | default(false, true) %}
     <div class="card__body card__body--stacked">
       <details class="card-collapsible" data-automation-section="global" open>
         <summary class="card__header card__header--collapsible">
@@ -46,6 +47,19 @@
               aria-label="Filter all-company tasks"
               data-table-filter="tasks-table-global"
             />
+            <form method="get" action="{{ request.url.path }}" class="inline-form" data-show-inactive-form>
+              <label class="form-checkbox-label">
+                <input
+                  type="checkbox"
+                  name="show_inactive"
+                  value="1"
+                  class="form-checkbox"
+                  {% if show_inactive_tasks %}checked{% endif %}
+                  onchange="this.form.submit()"
+                />
+                <span class="form-checkbox-text">Show inactive tasks</span>
+              </label>
+            </form>
           </div>
           <div class="table-wrapper">
             <table class="table" id="tasks-table-global" data-table>
@@ -91,7 +105,13 @@
                 </tr>
               {% else %}
                 <tr>
-                  <td colspan="8" class="table__empty">No global tasks configured yet.</td>
+                  <td colspan="8" class="table__empty">
+                    {% if show_inactive_tasks %}
+                      No global tasks configured yet.
+                    {% else %}
+                      No active global tasks. Enable "Show inactive tasks" to review archived entries.
+                    {% endif %}
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>
