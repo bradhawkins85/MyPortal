@@ -273,6 +273,11 @@
         headerRow.className = 'ticket-group-header';
         headerRow.setAttribute('data-group-key', groupKey);
         
+        // Hide the group header if there are no visible rows in this group
+        if (visibleRowsInGroup.length === 0) {
+          headerRow.classList.add('ticket-filtered-hidden');
+        }
+        
         const headerCell = document.createElement('td');
         headerCell.colSpan = table.querySelector('thead tr').children.length;
         headerCell.innerHTML = `
