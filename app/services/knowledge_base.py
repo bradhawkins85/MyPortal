@@ -414,6 +414,33 @@ def _get_primary_company_name(context: ArticleAccessContext) -> str | None:
     return None
 
 
+def _section_visible(section: Mapping[str, Any], context: ArticleAccessContext | None) -> bool:
+    """Check if a section is visible to the user based on company permissions.
+    
+    Sections without company restrictions are visible to all.
+    Sections with company restrictions are only visible to users in those companies.
+    """
+    allowed_company_ids = section.get("allowed_company_ids", [])
+    
+    # If no company restrictions, section is visible to all
+    if not allowed_company_ids:
+        return True
+    
+    # If no context (anonymous user), hide restricted sections
+    if not context:
+        return False
+    
+    # Super admins can see all sections
+    if context.is_super_admin:
+        return True
+    
+    # Check if user is a member of any allowed company
+    user_company_ids = set(context.memberships.keys())
+    allowed_company_id_set = {int(cid) for cid in allowed_company_ids if isinstance(cid, (int, str))}
+    
+    return bool(user_company_ids & allowed_company_id_set)
+
+
 def _serialise_article(
     article: Mapping[str, Any],
     *,
@@ -449,21 +476,32 @@ def _serialise_article(
     sections_payload = article.get("sections") or []
     serialised_sections: list[dict[str, Any]] = []
     for index, section in enumerate(sections_payload, start=1):
+        # Filter sections based on company permissions (unless admin is editing)
+        if not include_permissions and not _section_visible(section, context):
+            continue
+            
         content = section.get("content") or ""
         heading = section.get("heading")
+        section_id = section.get("id")
+        allowed_company_ids = section.get("allowed_company_ids", [])
         
         # Process conditional blocks in section content
         if content and not include_permissions:
             # Only process conditionals for end-user views, not for admin editing
             content = process_conditionals(content, company_name=company_name)
         
-        serialised_sections.append(
-            {
-                "position": section.get("position") or index,
-                "heading": heading if isinstance(heading, str) else None,
-                "content": content,
-            }
-        )
+        section_data = {
+            "position": section.get("position") or index,
+            "heading": heading if isinstance(heading, str) else None,
+            "content": content,
+        }
+        
+        # Include section ID and company IDs for admin views
+        if include_permissions:
+            section_data["id"] = section_id
+            section_data["allowed_company_ids"] = _normalise_ids(allowed_company_ids)
+        
+        serialised_sections.append(section_data)
     base["sections"] = serialised_sections
     if include_content:
         article_content = article.get("content")

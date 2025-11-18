@@ -11,9 +11,11 @@ PermissionScope = Literal["anonymous", "user", "company", "company_admin", "supe
 class KnowledgeBaseArticleSection(BaseModel):
     heading: constr(strip_whitespace=True, max_length=255) | None = None
     content: constr(min_length=1)
+    allowed_company_ids: list[int] = Field(default_factory=list)
 
 
 class KnowledgeBaseArticleSectionResponse(KnowledgeBaseArticleSection):
+    id: int | None = None
     position: conint(ge=1) = 1
 
 
