@@ -20,6 +20,8 @@ _BOOLEAN_FIELDS = {
     "can_access_cart",
     "can_access_orders",
     "can_access_forms",
+    "can_view_compliance",
+    "can_view_bcp",
     "is_admin",
 }
 
@@ -34,6 +36,8 @@ _PERMISSION_FIELDS = {
     "can_access_cart",
     "can_access_orders",
     "can_access_forms",
+    "can_view_compliance",
+    "can_view_bcp",
     "is_admin",
 }
 
@@ -61,6 +65,7 @@ def _enrich_with_role_permissions(data: dict[str, Any], role_permissions_raw: An
     
     This function updates the boolean permission fields based on the role's permissions,
     enabling backward compatibility while migrating to the role-based permission system.
+    Role permissions take precedence over legacy boolean fields.
     """
     if not role_permissions_raw:
         return
@@ -71,9 +76,14 @@ def _enrich_with_role_permissions(data: dict[str, Any], role_permissions_raw: An
         role_permissions = []
     
     # Update boolean fields based on role permissions
+    # Role permissions override legacy boolean fields
     for role_perm, field_name in _PERMISSION_MAPPING.items():
         if role_perm in role_permissions:
             data[field_name] = True
+        elif field_name in _PERMISSION_FIELDS:
+            # If the role doesn't have this permission, explicitly set to False
+            # This ensures role-based permissions override legacy settings
+            data[field_name] = False
 
 
 def _normalise(row: dict[str, Any]) -> dict[str, Any]:
