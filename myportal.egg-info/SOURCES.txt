@@ -424,6 +424,7 @@ tests/test_ticket_tasks_repository.py
 tests/test_ticket_variable_availability.py
 tests/test_ticket_view_schemas.py
 tests/test_ticket_views_api.py
+tests/test_ticket_views_route_order.py
 tests/test_ticket_watchers_api.py
 tests/test_tickets_dashboard_api.py
 tests/test_tickets_repository.py
