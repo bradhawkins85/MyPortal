@@ -96,9 +96,3 @@ def queue_background_task(
     task.add_done_callback(_cleanup)
     return resolved_task_id
 
-
-def active_background_tasks() -> dict[str, asyncio.Task[Any]]:
-    """Return a snapshot of the currently scheduled background tasks."""
-
-    return dict(_BACKGROUND_TASKS)
-
