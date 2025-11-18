@@ -1,6 +1,4 @@
-"""
-Utility functions for working with time and duration.
-"""
+"""Utility functions for working with time and duration."""
 
 
 def humanize_hours(hours: int | None) -> str:
@@ -75,56 +73,3 @@ def humanize_hours(hours: int | None) -> str:
         month_str = f"{months} month" if months == 1 else f"{months} months"
         week_str = f"{remainder_weeks} week" if remainder_weeks == 1 else f"{remainder_weeks} weeks"
         return f"{month_str}, {week_str}"
-
-
-def parse_humanized_hours(humanized: str) -> int | None:
-    """
-    Parse a humanized time string back to hours.
-    
-    This is a simple implementation that handles basic cases.
-    For more complex parsing, consider using a library like dateparser.
-    
-    Args:
-        humanized: Human-readable time string
-        
-    Returns:
-        Number of hours, or None if parsing fails
-        
-    Examples:
-        >>> parse_humanized_hours("2 hours")
-        2
-        >>> parse_humanized_hours("1 day")
-        24
-        >>> parse_humanized_hours("2 weeks")
-        336
-        >>> parse_humanized_hours("Immediate")
-        0
-    """
-    if not humanized or humanized == "-":
-        return None
-    
-    if humanized.lower() == "immediate":
-        return 0
-    
-    # Simple parser - handles basic formats
-    humanized = humanized.lower().strip()
-    
-    try:
-        # Try to parse simple formats like "2 hours", "3 days", "1 week"
-        parts = humanized.split()
-        if len(parts) >= 2:
-            value = int(parts[0])
-            unit = parts[1].rstrip('s')  # Remove trailing 's' for plural
-            
-            if unit == "hour":
-                return value
-            elif unit == "day":
-                return value * 24
-            elif unit == "week":
-                return value * 168
-            elif unit == "month":
-                return value * 730
-    except (ValueError, IndexError):
-        pass
-    
-    return None
