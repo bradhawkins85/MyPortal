@@ -414,6 +414,7 @@ tests/test_ticket_ai_tags_service.py
 tests/test_ticket_attachments.py
 tests/test_ticket_automation_variables.py
 tests/test_ticket_creation_with_requester.py
+tests/test_ticket_default_status.py
 tests/test_ticket_importer.py
 tests/test_ticket_number_token.py
 tests/test_ticket_portal_pages.py
