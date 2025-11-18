@@ -13,52 +13,59 @@
         class="form-input"
         placeholder="Filter roles"
         aria-label="Filter roles"
-        data-card-filter="roles-cards"
+        data-table-filter="roles-table"
       />
     </header>
-    <div class="roles-grid" id="roles-cards">
-      {% for role in roles %}
-        <div class="role-card"
-          data-role-id="{{ role.id }}"
-          data-role-name="{{ role.name }}"
-          data-role-description="{{ role.description or '' }}"
-          data-role-permissions='{{ role.permissions | tojson }}'
-          data-role-system="{{ 'true' if role.is_system else 'false' }}"
-          data-searchable="{{ role.name|lower }} {{ role.description|lower if role.description else '' }} {{ role.permissions|join(' ')|lower if role.permissions else '' }}"
-        >
-          <div class="role-card__header">
-            <div class="role-card__title-group">
-              <h3 class="role-card__title">{{ role.name }}</h3>
-              {% if role.is_system %}
-                <span class="badge badge--info">System</span>
-              {% endif %}
-            </div>
-            <div class="role-card__actions">
-              <button type="button" class="button button--ghost button--small" data-role-edit>Edit</button>
-              {% if not role.is_system %}
-                <button type="button" class="button button--danger button--small" data-role-delete>Delete</button>
-              {% endif %}
-            </div>
-          </div>
-          {% if role.description %}
-            <p class="role-card__description">{{ role.description }}</p>
-          {% endif %}
-          <div class="role-card__permissions">
-            <span class="role-card__permissions-label">Permissions:</span>
-            {% if role.permissions %}
-              <span class="tag-list">
-                {% for perm in role.permissions %}
-                  <span class="tag tag--small">{{ perm }}</span>
-                {% endfor %}
-              </span>
-            {% else %}
-              <span class="text-muted">None</span>
-            {% endif %}
-          </div>
-        </div>
-      {% else %}
-        <div class="roles-grid__empty">No roles have been defined yet.</div>
-      {% endfor %}
+    <div class="table-wrapper">
+      <table class="table" id="roles-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string">Name</th>
+            <th scope="col" data-sort="string">Description</th>
+            <th scope="col" data-sort="string">Permissions</th>
+            <th scope="col" data-sort="string">System</th>
+            <th scope="col" class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for role in roles %}
+            <tr
+              data-role-id="{{ role.id }}"
+              data-role-name="{{ role.name }}"
+              data-role-description="{{ role.description or '' }}"
+              data-role-permissions='{{ role.permissions | tojson }}'
+              data-role-system="{{ 'true' if role.is_system else 'false' }}"
+            >
+              <td data-label="Name">{{ role.name }}</td>
+              <td data-label="Description">{{ role.description or '—' }}</td>
+              <td data-label="Permissions">
+                {% if role.permissions %}
+                  <span class="tag-list">
+                    {% for perm in role.permissions %}
+                      <span class="tag">{{ perm }}</span>
+                    {% endfor %}
+                  </span>
+                {% else %}
+                  <span class="text-muted">None</span>
+                {% endif %}
+              </td>
+              <td data-label="System">{{ 'Yes' if role.is_system else 'No' }}</td>
+              <td class="table__actions">
+                <div class="table__action-buttons">
+                  <button type="button" class="button button--ghost" data-role-edit>Edit</button>
+                  {% if not role.is_system %}
+                    <button type="button" class="button button--danger" data-role-delete>Delete</button>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="5" class="table__empty">No roles have been defined yet.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   </section>
 
