@@ -13,10 +13,7 @@ async def list_tag_exclusions() -> list[dict[str, Any]]:
         FROM tag_exclusions
         ORDER BY tag_slug ASC
     """
-    async with db.cursor() as cursor:
-        await cursor.execute(query)
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
+    return await db.fetch_all(query)
 
 
 async def get_excluded_tag_slugs() -> set[str]:
@@ -25,10 +22,8 @@ async def get_excluded_tag_slugs() -> set[str]:
         SELECT tag_slug
         FROM tag_exclusions
     """
-    async with db.cursor() as cursor:
-        await cursor.execute(query)
-        rows = await cursor.fetchall()
-        return {row["tag_slug"] for row in rows}
+    rows = await db.fetch_all(query)
+    return {row["tag_slug"] for row in rows}
 
 
 async def add_tag_exclusion(tag_slug: str, created_by: int | None = None) -> dict[str, Any] | None:
@@ -38,20 +33,16 @@ async def add_tag_exclusion(tag_slug: str, created_by: int | None = None) -> dic
         VALUES (%s, %s, %s)
     """
     created_at = datetime.now(timezone.utc)
-    async with db.cursor() as cursor:
-        try:
-            await cursor.execute(query, (tag_slug, created_by, created_at))
-            await db.commit()
-            exclusion_id = cursor.lastrowid
-            return {
-                "id": exclusion_id,
-                "tag_slug": tag_slug,
-                "created_at": created_at,
-                "created_by": created_by,
-            }
-        except Exception:
-            await db.rollback()
-            return None
+    try:
+        exclusion_id = await db.execute_returning_lastrowid(query, (tag_slug, created_by, created_at))
+        return {
+            "id": exclusion_id,
+            "tag_slug": tag_slug,
+            "created_at": created_at,
+            "created_by": created_by,
+        }
+    except Exception:
+        return None
 
 
 async def delete_tag_exclusion(tag_slug: str) -> bool:
@@ -60,11 +51,14 @@ async def delete_tag_exclusion(tag_slug: str) -> bool:
         DELETE FROM tag_exclusions
         WHERE tag_slug = %s
     """
-    async with db.cursor() as cursor:
-        await cursor.execute(query, (tag_slug,))
-        affected = cursor.rowcount
-        await db.commit()
-        return affected > 0
+    # For delete operations, we need to check if any rows were deleted
+    # We'll do this by checking if the row exists first, then deleting it
+    check_query = "SELECT COUNT(*) as count FROM tag_exclusions WHERE tag_slug = %s"
+    result = await db.fetch_one(check_query, (tag_slug,))
+    if result and result.get("count", 0) > 0:
+        await db.execute(query, (tag_slug,))
+        return True
+    return False
 
 
 async def is_tag_excluded(tag_slug: str) -> bool:
@@ -74,7 +68,5 @@ async def is_tag_excluded(tag_slug: str) -> bool:
         FROM tag_exclusions
         WHERE tag_slug = %s
     """
-    async with db.cursor() as cursor:
-        await cursor.execute(query, (tag_slug,))
-        result = await cursor.fetchone()
-        return result["count"] > 0 if result else False
+    result = await db.fetch_one(query, (tag_slug,))
+    return result["count"] > 0 if result else False
