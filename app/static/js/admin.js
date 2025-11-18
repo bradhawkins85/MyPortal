@@ -2073,6 +2073,14 @@
       });
     }
 
+    function ensureDefaultRadioChecked() {
+      const defaultRadios = form.querySelectorAll('input[name="defaultStatus"]');
+      const hasChecked = Array.from(defaultRadios).some(radio => radio.checked);
+      if (!hasChecked && defaultRadios.length > 0) {
+        defaultRadios[0].checked = true;
+      }
+    }
+
     function createRow() {
       if (template instanceof HTMLTemplateElement) {
         const fragmentClone = template.content.cloneNode(true);
@@ -2127,7 +2135,24 @@
       if (rows.length <= 1) {
         return;
       }
+      
+      // Check if the row being removed has the default selected
+      const defaultRadio = row.querySelector('input[name="defaultStatus"]');
+      const wasDefault = defaultRadio && defaultRadio.checked;
+      
       row.remove();
+      
+      // If the removed row was default, select the first remaining row as default
+      if (wasDefault) {
+        const remainingRows = list.querySelectorAll('[data-status-row]');
+        if (remainingRows.length > 0) {
+          const firstDefaultRadio = remainingRows[0].querySelector('input[name="defaultStatus"]');
+          if (firstDefaultRadio) {
+            firstDefaultRadio.checked = true;
+          }
+        }
+      }
+      
       updateRowIdentifiers();
       updateRemoveButtons();
       clearError();
@@ -2197,6 +2222,12 @@
 
     updateRowIdentifiers();
     updateRemoveButtons();
+    ensureDefaultRadioChecked();
+    
+    // Return the initialization function for use in onOpen callback
+    return {
+      ensureDefaultRadioChecked: ensureDefaultRadioChecked
+    };
   }
 
   function bindLabourTypeManager() {
@@ -2940,7 +2971,7 @@
     bindApiKeyEditModal();
     bindApiKeyCopyButtons();
     bindConfirmationButtons();
-    bindTicketStatusManager();
+    const ticketStatusManager = bindTicketStatusManager();
     bindLabourTypeManager();
     bindTicketRequesterField();
     bindCompanyDeleteButtons();
@@ -2952,7 +2983,11 @@
     bindModal({ modalId: 'create-ticket-modal', triggerSelector: '[data-create-ticket-modal-open]' });
     bindModal({ modalId: 'create-api-key-modal', triggerSelector: '[data-create-api-key-modal-open]' });
     bindModal({ modalId: 'create-issue-modal', triggerSelector: '[data-create-issue-modal-open]' });
-    bindModal({ modalId: 'edit-ticket-statuses-modal', triggerSelector: '[data-edit-ticket-statuses-open]' });
+    bindModal({ 
+      modalId: 'edit-ticket-statuses-modal', 
+      triggerSelector: '[data-edit-ticket-statuses-open]',
+      onOpen: ticketStatusManager ? () => ticketStatusManager.ensureDefaultRadioChecked() : undefined
+    });
     bindModal({ modalId: 'edit-labour-types-modal', triggerSelector: '[data-edit-labour-types-open]' });
     bindModal({ modalId: 'import-product-modal', triggerSelector: '[data-import-product-modal-open]' });
   });
