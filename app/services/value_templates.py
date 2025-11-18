@@ -26,49 +26,61 @@ def build_base_token_map(context: Mapping[str, Any] | None) -> dict[str, Any]:
     return tokens
 
 
-def _collect_tokens(value: Any) -> set[str]:
-    tokens: set[str] = set()
-    if isinstance(value, str):
-        # Collect tokens from conditional expressions
-        conditionals = conditional_expressions.find_conditionals(value)
-        for _, condition, then_value, else_value in conditionals:
-            # Extract token references from condition, then, and else clauses
-            # These can be bare token names (not wrapped in {{}})
-            for part in [condition, then_value, else_value]:
-                if part:
-                    # Look for wrapped tokens first
-                    tokens.update(match.group(1) for match in _TOKEN_PATTERN.finditer(part))
-                    
-                    # Also look for bare token-like strings (e.g., count:asset:bitdefender)
-                    # These are identifiers that contain colons and don't start with quotes
-                    part = part.strip()
-                    # Skip quoted strings
-                    if part and not (part.startswith('"') or part.startswith("'")):
-                        # Split on comparison operators to get left and right sides
-                        comparison_parts = re.split(r'\s*(>=|<=|>|<|==|!=)\s*', part)
-                        for token_candidate in comparison_parts:
-                            token_candidate = token_candidate.strip()
-                            # Add if it looks like a token (contains colon or is a known pattern)
-                            if ':' in token_candidate or token_candidate.replace('_', '').replace('-', '').replace('.', '').isalnum():
-                                # Exclude numeric literals
-                                try:
-                                    float(token_candidate)
-                                except (ValueError, TypeError):
-                                    # Not a number, might be a token
-                                    if token_candidate and token_candidate not in ['>', '<', '>=', '<=', '==', '!=']:
-                                        tokens.add(token_candidate)
-        
-        # Collect regular tokens (wrapped in {{}})
-        tokens.update(match.group(1) for match in _TOKEN_PATTERN.finditer(value))
-        return tokens
-    if isinstance(value, Mapping):
-        for item in value.values():
-            tokens.update(_collect_tokens(item))
-        return tokens
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        for item in value:
-            tokens.update(_collect_tokens(item))
-        return tokens
+def _collect_tokens(value: Any) -> list[str]:
+    tokens: list[str] = []
+    seen: set[str] = set()
+
+    def _add(token: str | None) -> None:
+        if token and token not in seen:
+            seen.add(token)
+            tokens.append(token)
+
+    def _walk(current: Any) -> None:
+        if isinstance(current, str):
+            # Collect tokens from conditional expressions
+            conditionals = conditional_expressions.find_conditionals(current)
+            for _, condition, then_value, else_value in conditionals:
+                # Extract token references from condition, then, and else clauses
+                # These can be bare token names (not wrapped in {{}})
+                for part in [condition, then_value, else_value]:
+                    if part:
+                        # Look for wrapped tokens first
+                        for match in _TOKEN_PATTERN.finditer(part):
+                            _add(match.group(1))
+
+                        # Also look for bare token-like strings (e.g., count:asset:bitdefender)
+                        # These are identifiers that contain colons and don't start with quotes
+                        trimmed = part.strip()
+                        # Skip quoted strings
+                        if trimmed and not (trimmed.startswith('"') or trimmed.startswith("'")):
+                            # Split on comparison operators to get left and right sides
+                            comparison_parts = re.split(r'\s*(>=|<=|>|<|==|!=)\s*', trimmed)
+                            for token_candidate in comparison_parts:
+                                candidate = token_candidate.strip()
+                                # Add if it looks like a token (contains colon or is a known pattern)
+                                if ':' in candidate or candidate.replace('_', '').replace('-', '').replace('.', '').isalnum():
+                                    # Exclude numeric literals
+                                    try:
+                                        float(candidate)
+                                    except (ValueError, TypeError):
+                                        # Not a number, might be a token
+                                        if candidate and candidate not in ['>', '<', '>=', '<=', '==', '!=']:
+                                            _add(candidate)
+
+            # Collect regular tokens (wrapped in {{}})
+            for match in _TOKEN_PATTERN.finditer(current):
+                _add(match.group(1))
+            return
+        if isinstance(current, Mapping):
+            for item in current.values():
+                _walk(item)
+            return
+        if isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)):
+            for item in current:
+                _walk(item)
+            return
+
+    _walk(value)
     return tokens
 
 
@@ -79,10 +91,21 @@ async def build_async_base_token_map(
     include_templates: bool = True,
 ) -> dict[str, Any]:
     base_tokens = build_base_token_map(context)
-    required_tokens: set[str] = set(tokens or [])
+    required_tokens: list[str] = []
+    seen: set[str] = set()
+
+    def _add(iterable: Iterable[str] | None) -> None:
+        if not iterable:
+            return
+        for token in iterable:
+            if token and token not in seen:
+                seen.add(token)
+                required_tokens.append(token)
+
+    _add(tokens)
     if include_templates:
         for template in message_templates.iter_templates():
-            required_tokens.update(_collect_tokens(str(template.get("content") or "")))
+            _add(_collect_tokens(str(template.get("content") or "")))
     if required_tokens:
         dynamic_values = await dynamic_variables.build_dynamic_token_map(
             required_tokens,
@@ -289,9 +312,3 @@ async def render_value_async(
         base_tokens=base_tokens,
         include_templates=include_templates,
     )
-
-
-def render_payload(value: Any, context: Mapping[str, Any] | None) -> Any:
-    """Backwards-compatible helper for rendering arbitrary payloads."""
-
-    return render_value(value, context)
