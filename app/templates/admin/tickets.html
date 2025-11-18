@@ -381,7 +381,7 @@
             <select id="modal-ticket-status" name="status" class="form-input">
               {% if ticket_status_definitions %}
                 {% for status_option in ticket_status_definitions %}
-                  <option value="{{ status_option.tech_status }}" {% if loop.first %}selected{% endif %}>{{ status_option.tech_label }}</option>
+                  <option value="{{ status_option.tech_status }}" {% if status_option.is_default %}selected{% endif %}>{{ status_option.tech_label }}</option>
                 {% endfor %}
               {% else %}
                 <option value="open" selected>Open</option>
