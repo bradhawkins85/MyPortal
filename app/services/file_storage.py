@@ -151,3 +151,61 @@ async def store_product_image(
 
     public_url = f"/uploads/shop/{stored_name}"
     return public_url, destination
+
+
+async def store_knowledge_base_image(
+    *,
+    upload: UploadFile,
+    uploads_root: Path,
+    max_size: int = 5 * 1024 * 1024,
+) -> str:
+    """Persist a validated knowledge base image in the uploads directory.
+
+    Returns the public URL for the image. The image is validated to ensure
+    only common web image formats are stored and that oversized uploads
+    are rejected before touching disk.
+    """
+
+    uploads_root.mkdir(parents=True, exist_ok=True)
+    kb_directory = uploads_root / "knowledge-base"
+    kb_directory.mkdir(parents=True, exist_ok=True)
+
+    original_name = sanitize_filename(upload.filename or upload.content_type or "upload")
+    suffix = Path(original_name).suffix.lower()
+    content_type = (upload.content_type or "").lower()
+
+    if suffix not in _ALLOWED_IMAGE_EXTENSIONS:
+        suffix = _IMAGE_CONTENT_TYPE_MAP.get(content_type, suffix)
+    if suffix not in _ALLOWED_IMAGE_EXTENSIONS:
+        await upload.close()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported image type. Upload PNG, JPEG, GIF, or WebP files.",
+        )
+
+    stored_name = f"{uuid4().hex}{suffix}"
+    destination = kb_directory / stored_name
+
+    total_size = 0
+    try:
+        async with aiofiles.open(destination, "wb") as buffer:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > max_size:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="Uploaded image exceeds the 5 MB limit.",
+                    )
+                await buffer.write(chunk)
+    except Exception:
+        if destination.exists():
+            destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await upload.close()
+
+    public_url = f"/uploads/knowledge-base/{stored_name}"
+    return public_url
