@@ -57,6 +57,8 @@ class MembershipResponse(BaseModel):
     last_name: Optional[str] = None
     role_name: Optional[str] = None
     permissions: list[str] = Field(default_factory=list)
+    user_permissions: list[str] = Field(default_factory=list)
+    combined_permissions: list[str] = Field(default_factory=list)
 
     class Config:
         from_attributes = True

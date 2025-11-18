@@ -111,3 +111,34 @@ async def delete_role(
         request=request,
     )
     return None
+
+
+@router.get("/permissions/available", response_model=list[str])
+async def list_available_permissions(
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Get list of all available permissions in the system."""
+    # These are all the permissions defined in the system
+    # Extracted from migrations and used throughout the codebase
+    return sorted([
+        "assets.manage",
+        "audit.view",
+        "billing.manage",
+        "cart.access",
+        "company.admin",
+        "company.manage",
+        "compliance.access",
+        "continuity.access",
+        "forms.access",
+        "invoices.manage",
+        "issues.manage",
+        "licenses.manage",
+        "licenses.order",
+        "membership.manage",
+        "office_groups.manage",
+        "orders.access",
+        "portal.access",
+        "shop.access",
+        "staff.manage",
+    ])
