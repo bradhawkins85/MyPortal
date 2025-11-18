@@ -6,6 +6,7 @@ const PRECACHE_URLS = [
   '/static/logo.svg',
   '/static/favicon.svg'
 ];
+const NAVIGATION_ERROR_STATUSES = new Set([404, 502, 503, 504, 521, 522, 523, 524]);
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -29,12 +30,19 @@ const OFFLINE_RESPONSE = new Response(
   `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8" />` +
     `<meta name="viewport" content="width=device-width, initial-scale=1" />` +
     `<title>Offline</title>` +
-    `<style>body{font-family:system-ui, sans-serif;margin:0;min-height:100vh;display:flex;` +
+    `<style>body{font-family:system-ui,sans-serif;margin:0;min-height:100vh;display:flex;` +
     `align-items:center;justify-content:center;background:#0f172a;color:#f8fafc;text-align:center;padding:2rem;}` +
-    `h1{font-size:1.75rem;margin-bottom:0.5rem;}p{font-size:1rem;max-width:28rem;}` +
+    `h1{font-size:1.75rem;margin-bottom:0.5rem;}p{font-size:1rem;max-width:32rem;margin:0 auto 1rem auto;}` +
+    `.retry{opacity:0.8;font-size:0.95rem;}` +
     `</style></head><body><main><h1>Offline</h1>` +
-    `<p>The application is unavailable because your device is offline. ` +
-    `Please reconnect to continue using the portal.</p></main></body></html>`,
+    `<p id="offline-status-detail">The portal is restarting or temporarily unavailable. ` +
+    `This page will reload automatically once service is restored.</p>` +
+    `<p class="retry">If this message does not disappear, refresh the page or check your connection.</p>` +
+    `<script>(function(){var d=4000;var m=15;var a=0;var t=null;function u(msg){try{var el=document.getElementById('offline-status-detail');` +
+    `if(el){el.textContent=msg;}}catch(e){}}function p(){a+=1;fetch(window.location.href,{method:'HEAD',cache:'no-store'})` +
+    `.then(function(resp){if(resp&&resp.ok){window.location.reload();return;}if(a<m){t=setTimeout(p,d);}else{u('Still waiting for the portal to restart…');}})` +
+    `.catch(function(){if(a<m){t=setTimeout(p,d);}else{u('Still waiting for the portal to restart…');}});}t=setTimeout(p,d);})();</script>` +
+    `</main></body></html>`,
   {
     status: 503,
     headers: {
@@ -56,9 +64,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request).catch(() => OFFLINE_RESPONSE.clone())
-    );
+    event.respondWith(handleNavigationRequest(request));
     return;
   }
 
@@ -119,4 +125,27 @@ self.addEventListener('message', (event) => {
     );
   }
 });
+
+async function handleNavigationRequest(request) {
+  try {
+    const response = await fetch(request);
+    if (shouldShowOfflineFallback(response)) {
+      return OFFLINE_RESPONSE.clone();
+    }
+    return response;
+  } catch (error) {
+    return OFFLINE_RESPONSE.clone();
+  }
+}
+
+function shouldShowOfflineFallback(response) {
+  if (!response) {
+    return true;
+  }
+  if (!NAVIGATION_ERROR_STATUSES.has(response.status)) {
+    return false;
+  }
+  const contentType = response.headers.get('content-type') || '';
+  return contentType.includes('text/html');
+}
 
