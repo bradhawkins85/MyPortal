@@ -532,10 +532,82 @@
     editor.addEventListener('input', () => {
       decorateEditorImages(editor);
     });
-    editor.addEventListener('paste', () => {
-      window.requestAnimationFrame(() => {
-        decorateEditorImages(editor);
-      });
+    editor.addEventListener('paste', async (event) => {
+      const items = (event.clipboardData || event.originalEvent.clipboardData).items;
+      let foundImage = false;
+      
+      for (const item of items) {
+        if (item.type.indexOf('image') !== -1) {
+          foundImage = true;
+          event.preventDefault();
+          
+          const file = item.getAsFile();
+          if (!file) {
+            continue;
+          }
+          
+          // Create a placeholder image while uploading
+          const tempId = 'temp-' + Date.now();
+          const placeholderImg = document.createElement('img');
+          placeholderImg.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100"%3E%3Crect fill="%23ddd" width="100" height="100"/%3E%3Ctext x="50" y="50" text-anchor="middle" dy=".3em" fill="%23999"%3EUploading...%3C/text%3E%3C/svg%3E';
+          placeholderImg.alt = 'Uploading...';
+          placeholderImg.dataset.tempId = tempId;
+          placeholderImg.style.maxWidth = '100%';
+          
+          // Insert the placeholder
+          const selection = window.getSelection();
+          if (selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            range.insertNode(placeholderImg);
+            range.collapse(false);
+          } else {
+            editor.appendChild(placeholderImg);
+          }
+          
+          // Upload the image
+          try {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const response = await fetch('/api/knowledge-base/upload-image', {
+              method: 'POST',
+              body: formData,
+            });
+            
+            if (!response.ok) {
+              const detail = await response.json().catch(() => ({}));
+              throw new Error((detail && detail.detail) || `Upload failed: ${response.status}`);
+            }
+            
+            const result = await response.json();
+            
+            // Replace placeholder with actual image
+            const placeholder = editor.querySelector(`img[data-temp-id="${tempId}"]`);
+            if (placeholder && result.url) {
+              placeholder.src = result.url;
+              placeholder.removeAttribute('data-temp-id');
+              placeholder.alt = '';
+              decorateEditorImages(editor);
+            }
+          } catch (error) {
+            console.error('Failed to upload image:', error);
+            // Remove placeholder on error
+            const placeholder = editor.querySelector(`img[data-temp-id="${tempId}"]`);
+            if (placeholder) {
+              placeholder.remove();
+            }
+            alert('Failed to upload image: ' + (error.message || 'Unknown error'));
+          }
+        }
+      }
+      
+      if (!foundImage) {
+        // For non-image paste events, let the browser handle it normally
+        window.requestAnimationFrame(() => {
+          decorateEditorImages(editor);
+        });
+      }
     });
     const observer = new MutationObserver(() => {
       decorateEditorImages(editor);
