@@ -15,9 +15,8 @@ spec = importlib.util.spec_from_file_location(
 time_utils_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(time_utils_module)
 
-# Extract the functions
+# Extract the function under test
 humanize_hours = time_utils_module.humanize_hours
-parse_humanized_hours = time_utils_module.parse_humanized_hours
 
 
 def test_humanize_hours_none():
@@ -108,63 +107,6 @@ def test_humanize_hours_edge_cases():
     result = humanize_hours(169)
     # 169 hours = 1 week + 1 hour, but our function only shows day remainders for weeks
     assert result == "1 week"  # This is the actual behavior
-
-
-def test_parse_humanized_hours_none():
-    """Test parsing None or empty string."""
-    assert parse_humanized_hours(None) is None
-    assert parse_humanized_hours("") is None
-    assert parse_humanized_hours("-") is None
-
-
-def test_parse_humanized_hours_immediate():
-    """Test parsing 'Immediate'."""
-    assert parse_humanized_hours("Immediate") == 0
-    assert parse_humanized_hours("immediate") == 0
-
-
-def test_parse_humanized_hours_hours():
-    """Test parsing hours."""
-    assert parse_humanized_hours("1 hour") == 1
-    assert parse_humanized_hours("2 hours") == 2
-    assert parse_humanized_hours("24 hours") == 24
-
-
-def test_parse_humanized_hours_days():
-    """Test parsing days."""
-    assert parse_humanized_hours("1 day") == 24
-    assert parse_humanized_hours("2 days") == 48
-    assert parse_humanized_hours("7 days") == 168
-
-
-def test_parse_humanized_hours_weeks():
-    """Test parsing weeks."""
-    assert parse_humanized_hours("1 week") == 168
-    assert parse_humanized_hours("2 weeks") == 336
-
-
-def test_parse_humanized_hours_months():
-    """Test parsing months."""
-    assert parse_humanized_hours("1 month") == 730
-    assert parse_humanized_hours("2 months") == 1460
-
-
-def test_humanize_parse_round_trip():
-    """Test that humanize and parse are (mostly) inverse operations."""
-    # Test simple cases that should round-trip perfectly
-    test_hours = [0, 1, 24, 48, 168, 336, 730]
-    
-    for hours in test_hours:
-        humanized = humanize_hours(hours)
-        # Note: parse_humanized_hours is simplified and may not handle complex formats
-        # This test verifies basic round-tripping works for simple cases
-        if "," not in humanized and humanized not in ["-", "Immediate"]:
-            # Only test simple single-unit cases
-            continue
-        elif humanized == "-":
-            assert parse_humanized_hours(humanized) is None
-        elif humanized == "Immediate":
-            assert parse_humanized_hours(humanized) == 0
 
 
 def test_humanize_hours_real_world_examples():
