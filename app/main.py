@@ -11919,10 +11919,16 @@ def _build_ticket_status_payloads(
         candidate_slug = ticket_status_repo.slugify_status_label(tech_label)
         existing_slug_normalized = ticket_status_repo.slugify_status_label(str(existing_slug or ""))
         is_default = False
-        if existing_slug_normalized and existing_slug_normalized == default_status_value:
-            is_default = True
-        elif (not existing_slug_normalized) and candidate_slug and candidate_slug == default_status_value:
-            is_default = True
+        if default_status_value:
+            # When editing an existing status the technician may change the label, which
+            # means the slug (candidate_slug) can differ from the persisted
+            # existing_slug. The UI updates the selected radio button value to the
+            # current slugified label, so we need to consider both possibilities when
+            # determining which entry should be marked as the default.
+            if existing_slug_normalized and existing_slug_normalized == default_status_value:
+                is_default = True
+            elif candidate_slug and candidate_slug == default_status_value:
+                is_default = True
         statuses.append(
             {
                 "techLabel": tech_label,
