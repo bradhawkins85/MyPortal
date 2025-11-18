@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 
 {% block header_actions %}
-  <a class="button button--primary" href="#new-ticket">New ticket</a>
+  <button
+    type="button"
+    class="button button--primary"
+    data-create-ticket-modal-open
+    aria-haspopup="dialog"
+    aria-controls="create-ticket-modal"
+  >
+    New ticket
+  </button>
 {% endblock %}
 
 {% block content %}
@@ -114,46 +122,286 @@
     </div>
   </section>
 
-  <section class="card card--panel" id="new-ticket">
-    <header class="card__header">
-      <div>
-        <h2 class="card__title">Create a ticket</h2>
-        <p class="card__subtitle">Raise a new support request and the team will follow up with updates.</p>
-      </div>
-    </header>
-    <div class="card__body">
-      <form action="/tickets" method="post" class="form" novalidate>
+  <!-- User ticket creation modal -->
+  <div
+    class="modal"
+    id="create-ticket-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="create-ticket-title"
+    aria-hidden="true"
+    hidden
+  >
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-modal-close>
+        <span class="visually-hidden">Close create ticket form</span>
+        &times;
+      </button>
+      <h2 class="modal__title" id="create-ticket-title">Create a ticket</h2>
+      <p class="modal__subtitle">Raise a new support request and the team will follow up with updates.</p>
+      <form id="user-ticket-form" action="/tickets" method="post" class="form" enctype="multipart/form-data" novalidate data-user-ticket-form>
         {% include "partials/csrf.html" %}
         <div class="form-field">
-          <label class="form-label" for="ticket-subject">Subject</label>
+          <label class="form-label" for="modal-ticket-subject">Subject</label>
           <input
-            id="ticket-subject"
+            id="modal-ticket-subject"
             name="subject"
             class="form-input"
             maxlength="255"
             required
-            value="{{ form_values.subject if form_values else '' }}"
           />
         </div>
         <div class="form-field">
-          <label class="form-label" for="ticket-description">Description</label>
-          <textarea
-            id="ticket-description"
-            name="description"
-            class="form-input form-input--textarea"
-            rows="6"
-            placeholder="Describe the issue, impact, and any troubleshooting already attempted."
-          >{{ form_values.description if form_values else '' }}</textarea>
+          <label class="form-label" for="modal-ticket-description">Description</label>
+          <div
+            class="rich-text-editor"
+            data-rich-text-editor
+            aria-labelledby="modal-ticket-description-label"
+          >
+            <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Formatting options">
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="bold"
+                aria-label="Bold"
+              >
+                <span aria-hidden="true">B</span>
+              </button>
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="italic"
+                aria-label="Italic"
+              >
+                <span aria-hidden="true">I</span>
+              </button>
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="underline"
+                aria-label="Underline"
+              >
+                <span aria-hidden="true">U</span>
+              </button>
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="insertUnorderedList"
+                aria-label="Bulleted list"
+              >
+                <span aria-hidden="true">•</span>
+              </button>
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="insertOrderedList"
+                aria-label="Numbered list"
+              >
+                <span aria-hidden="true">1.</span>
+              </button>
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="formatBlock"
+                data-command-value="blockquote"
+                aria-label="Quote"
+              >
+                <span aria-hidden="true">""</span>
+              </button>
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="formatBlock"
+                data-command-value="pre"
+                aria-label="Code block"
+              >
+                <span aria-hidden="true">&lt;/&gt;</span>
+              </button>
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="link"
+                aria-label="Insert link"
+              >
+                <span aria-hidden="true">🔗</span>
+              </button>
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="removeFormat"
+                aria-label="Clear formatting"
+              >
+                <span aria-hidden="true">⨯</span>
+              </button>
+            </div>
+            <div
+              id="modal-ticket-description"
+              class="rich-text-editor__surface"
+              data-rich-text-content
+              contenteditable="true"
+              role="textbox"
+              aria-labelledby="modal-ticket-description-label"
+              aria-multiline="true"
+              data-placeholder="Describe the issue, impact, and any troubleshooting already attempted..."
+            ></div>
+            <input type="hidden" id="modal-ticket-description-value" name="description" data-rich-text-value required />
+          </div>
+          <span class="visually-hidden" id="modal-ticket-description-label">Description</span>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="modal-ticket-attachments">Attachments (optional)</label>
+          <input
+            id="modal-ticket-attachments"
+            name="attachments"
+            type="file"
+            class="form-input"
+            multiple
+            accept="image/*,.pdf,.doc,.docx,.txt,.log,.zip"
+            data-ticket-attachments
+          />
+          <p class="form-help">You can upload images, PDFs, documents, and other files to help describe your issue.</p>
         </div>
         <div class="form-actions">
           <button type="submit" class="button button--primary">Submit ticket</button>
+          <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
         </div>
       </form>
     </div>
-  </section>
+  </div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/rich_text_editor.js" defer></script>
+  <script>
+    // Initialize modal for ticket creation
+    (function() {
+      function bindModal({ modalId, triggerSelector }) {
+        const modal = document.getElementById(modalId);
+        const triggerButtons = triggerSelector
+          ? Array.from(document.querySelectorAll(triggerSelector))
+          : [];
+
+        if (!modal || triggerButtons.length === 0) {
+          return;
+        }
+
+        const focusableSelector =
+          'a[href], button:not([disabled]), textarea, input:not([type="hidden"]):not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+        let activeTrigger = null;
+
+        function getFocusableElements() {
+          return Array.from(modal.querySelectorAll(focusableSelector)).filter((element) => {
+            if (element.hasAttribute('disabled')) {
+              return false;
+            }
+            if (element.getAttribute('aria-hidden') === 'true') {
+              return false;
+            }
+            return element.offsetParent !== null;
+          });
+        }
+
+        function focusFirstElement() {
+          const [firstFocusable] = getFocusableElements();
+          if (firstFocusable && typeof firstFocusable.focus === 'function') {
+            firstFocusable.focus();
+          }
+        }
+
+        function handleKeydown(event) {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            closeModal();
+            return;
+          }
+          if (event.key !== 'Tab') {
+            return;
+          }
+
+          const focusable = getFocusableElements();
+          if (!focusable.length) {
+            event.preventDefault();
+            return;
+          }
+
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          const currentActive = document.activeElement;
+
+          if (event.shiftKey) {
+            if (currentActive === first) {
+              event.preventDefault();
+              last.focus();
+            }
+          } else if (currentActive === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
+
+        function openModal(trigger) {
+          activeTrigger = trigger instanceof HTMLElement ? trigger : null;
+          modal.hidden = false;
+          modal.classList.add('is-visible');
+          modal.setAttribute('aria-hidden', 'false');
+          if (activeTrigger) {
+            activeTrigger.setAttribute('aria-expanded', 'true');
+          }
+          document.addEventListener('keydown', handleKeydown);
+          window.requestAnimationFrame(() => {
+            focusFirstElement();
+          });
+        }
+
+        function closeModal() {
+          modal.hidden = true;
+          modal.classList.remove('is-visible');
+          modal.setAttribute('aria-hidden', 'true');
+          if (activeTrigger) {
+            activeTrigger.setAttribute('aria-expanded', 'false');
+            activeTrigger.focus();
+          }
+          document.removeEventListener('keydown', handleKeydown);
+          activeTrigger = null;
+        }
+
+        triggerButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            openModal(button);
+          });
+        });
+
+        const closeButtons = modal.querySelectorAll('[data-modal-close]');
+        closeButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            closeModal();
+          });
+        });
+
+        modal.addEventListener('click', (event) => {
+          if (event.target === modal) {
+            closeModal();
+          }
+        });
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        bindModal({ 
+          modalId: 'create-ticket-modal', 
+          triggerSelector: '[data-create-ticket-modal-open]' 
+        });
+      });
+    })();
+  </script>
 {% endblock %}
