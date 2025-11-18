@@ -47,10 +47,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Content-Security-Policy: Restrict resource loading to same origin
         # Allow 'unsafe-inline' for styles and scripts that are inline in templates
         # Allow 'unsafe-eval' for some JavaScript libraries that use eval
+        # Allow unpkg.com for loading htmx library from CDN
         # In production, these should be replaced with nonces or hashes
         csp_directives = [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com",
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob:",
             "font-src 'self' data:",
