@@ -162,6 +162,7 @@ from app.services import labour_types as labour_types_service
 from app.services import subscription_shop_integration
 from app.services import ticket_importer
 from app.services import tickets as tickets_service
+from app.services import ticket_attachments as attachments_service
 from app.services import template_variables
 from app.services import webhook_monitor
 from app.services import xero as xero_service
@@ -5812,6 +5813,23 @@ async def portal_create_ticket(request: Request):
             initial_reply_author_id=requester_id,
         )
         await tickets_repo.add_watcher(ticket["id"], requester_id)
+        
+        # Handle file attachments
+        attachments = form.getlist("attachments")
+        if attachments:
+            for attachment in attachments:
+                if hasattr(attachment, "filename") and attachment.filename:
+                    try:
+                        await attachments_service.save_uploaded_file(
+                            ticket_id=ticket["id"],
+                            file=attachment,
+                            access_level="closed",  # Users can only create closed-access attachments
+                            uploaded_by_user_id=requester_id,
+                        )
+                    except (ValueError, IOError) as attach_error:
+                        log_error(f"Failed to save attachment: {attach_error}")
+                        # Continue processing ticket even if attachment fails
+        
         try:
             await tickets_service.refresh_ticket_ai_summary(ticket["id"])
         except RuntimeError:
