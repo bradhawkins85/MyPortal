@@ -2187,6 +2187,39 @@ async def _load_invoice_context(request: Request):
     return user, membership, company, company_id, None
 
 
+async def _load_compliance_context(request: Request):
+    """Load context for compliance-related pages.
+    
+    Requires user to have can_view_compliance permission.
+    """
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return user, None, None, None, redirect
+    is_super_admin = bool(user.get("is_super_admin"))
+    company_id_raw = user.get("company_id")
+    if company_id_raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No company associated with the current user",
+        )
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
+    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    can_view = bool(membership and membership.get("can_view_compliance"))
+    if not (is_super_admin or can_view):
+        return (
+            user,
+            membership,
+            None,
+            company_id,
+            RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
+        )
+    company = await company_repo.get_company_by_id(company_id)
+    return user, membership, company, company_id, None
+
+
 async def _send_license_webhook(
     *,
     action: str,
@@ -3572,7 +3605,7 @@ async def compliance_page(request: Request):
     """Essential 8 compliance tracking page."""
     from app.repositories import essential8 as essential8_repo
     
-    user, membership, company, company_id, redirect = await _load_license_context(request, require_manage=False)
+    user, membership, company, company_id, redirect = await _load_compliance_context(request)
     if redirect:
         return redirect
     
@@ -3599,7 +3632,7 @@ async def compliance_control_requirements_page(request: Request, control_id: int
     """Essential 8 control requirements page."""
     from app.repositories import essential8 as essential8_repo
     
-    user, membership, company, company_id, redirect = await _load_license_context(request, require_manage=False)
+    user, membership, company, company_id, redirect = await _load_compliance_context(request)
     if redirect:
         return redirect
     
