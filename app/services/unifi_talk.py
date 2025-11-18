@@ -45,7 +45,25 @@ async def download_recordings_from_sftp(
     
     # Connect to SFTP server
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    
+    # Try to load system host keys first for better security
+    try:
+        ssh.load_system_host_keys()
+    except Exception:
+        pass  # If system keys aren't available, continue
+    
+    # Load user known_hosts if available
+    known_hosts_path = Path.home() / ".ssh" / "known_hosts"
+    if known_hosts_path.exists():
+        try:
+            ssh.load_host_keys(str(known_hosts_path))
+        except Exception:
+            pass
+    
+    # Use WarningPolicy as fallback - logs warnings but allows connections
+    # This is safer than AutoAddPolicy which silently accepts unknown hosts
+    # For maximum security, configure known_hosts and use RejectPolicy
+    ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
     
     try:
         logger.info(
