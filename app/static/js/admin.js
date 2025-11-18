@@ -1325,15 +1325,15 @@
 
     document.querySelectorAll('[data-role-edit]').forEach((button) => {
       button.addEventListener('click', () => {
-        const card = button.closest('[data-role-id]');
-        if (!card) {
+        const row = button.closest('tr');
+        if (!row) {
           return;
         }
-        idField.value = card.dataset.roleId || '';
-        nameField.value = card.dataset.roleName || '';
-        descriptionField.value = card.dataset.roleDescription || '';
+        idField.value = row.dataset.roleId || '';
+        nameField.value = row.dataset.roleName || '';
+        descriptionField.value = row.dataset.roleDescription || '';
         try {
-          const permissions = JSON.parse(card.dataset.rolePermissions || '[]');
+          const permissions = JSON.parse(row.dataset.rolePermissions || '[]');
           setSelectedPermissions(permissions);
         } catch (error) {
           setSelectedPermissions([]);
@@ -1344,11 +1344,11 @@
 
     document.querySelectorAll('[data-role-delete]').forEach((button) => {
       button.addEventListener('click', async () => {
-        const card = button.closest('[data-role-id]');
-        if (!card) {
+        const row = button.closest('tr');
+        if (!row) {
           return;
         }
-        const roleId = card.dataset.roleId;
+        const roleId = row.dataset.roleId;
         if (!roleId) {
           return;
         }
