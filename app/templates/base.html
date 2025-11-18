@@ -29,6 +29,7 @@
     data-low-stock-threshold="{{ low_stock_threshold | default(5) }}"
     data-super-admin="{{ 'true' if current_user and current_user.is_super_admin else 'false' }}"
   >
+    {% set has_authenticated_user = current_user is defined and current_user and current_user.get('id') %}
     <div class="layout" data-layout>
       <div class="layout__scrim" data-mobile-nav-scrim aria-hidden="true"></div>
       <nav class="layout__sidebar" id="primary-navigation" data-sidebar tabindex="-1">
@@ -447,7 +448,6 @@
               {% endblock %}
             </div>
           </div>
-          {% set has_authenticated_user = current_user is defined and current_user and current_user.get('id') %}
           {% set header_actions_content %}
             {% block header_actions %}{% endblock %}
           {% endset %}
@@ -463,6 +463,31 @@
           {% endif %}
         </header>
         <section class="layout__content">
+          <div
+            class="update-banner"
+            data-update-banner
+            role="status"
+            aria-live="polite"
+            aria-hidden="true"
+            hidden
+          >
+            <div class="update-banner__body">
+              <div class="update-banner__copy">
+                <p class="update-banner__title">Update available</p>
+                <p class="update-banner__message" data-update-banner-message>
+                  A new version of the portal is ready. Refresh to apply the latest release.
+                </p>
+              </div>
+              <div class="update-banner__actions">
+                <button type="button" class="button" data-update-banner-refresh>
+                  Refresh now
+                </button>
+                <button type="button" class="button button--ghost" data-update-banner-dismiss>
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
           {% block content %}{% endblock %}
         </section>
       </main>
