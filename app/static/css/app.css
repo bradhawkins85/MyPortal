@@ -4702,6 +4702,39 @@ dialog.modal:not([open]) {
   justify-content: flex-end;
 }
 
+.kb-admin__section-company-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem;
+  background-color: rgba(96, 165, 250, 0.08);
+  border-radius: var(--radius-xs);
+}
+
+.kb-admin__section-companies-display {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  flex: 1;
+}
+
+.kb-admin__company-tag {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  background-color: rgba(96, 165, 250, 0.2);
+  color: rgba(226, 232, 240, 0.95);
+  border-radius: var(--radius-xs);
+  font-size: 0.875rem;
+}
+
+.kb-admin__no-companies {
+  color: rgba(226, 232, 240, 0.6);
+  font-size: 0.875rem;
+  font-style: italic;
+}
+
 .kb-admin__scope-help {
   color: rgba(226, 232, 240, 0.8);
 }
