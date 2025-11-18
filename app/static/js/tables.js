@@ -555,6 +555,37 @@
         });
       });
     });
+
+    // Card filter support
+    document.querySelectorAll('[data-card-filter]').forEach((input) => {
+      const containerId = input.getAttribute('data-card-filter');
+      if (!containerId) {
+        return;
+      }
+      const container = document.getElementById(containerId);
+      if (!container) {
+        return;
+      }
+      input.addEventListener('input', () => {
+        const term = input.value.trim().toLowerCase();
+        const cards = container.querySelectorAll('[data-searchable]');
+        let visibleCount = 0;
+        cards.forEach((card) => {
+          const searchText = card.getAttribute('data-searchable') || '';
+          if (!term || searchText.includes(term)) {
+            card.style.display = '';
+            visibleCount++;
+          } else {
+            card.style.display = 'none';
+          }
+        });
+        // Handle empty state
+        const emptyState = container.querySelector('.roles-grid__empty');
+        if (emptyState) {
+          emptyState.style.display = visibleCount === 0 && cards.length > 0 ? 'block' : 'none';
+        }
+      });
+    });
   }
 
   function convertUtcElements() {
