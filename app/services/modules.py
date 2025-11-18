@@ -29,6 +29,7 @@ from app.repositories import webhook_events as webhook_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import call_recordings as call_recordings_service
 from app.services import email as email_service, webhook_monitor
+from app.services import unifi_talk as unifi_talk_service
 from app.services.realtime import RefreshNotifier, refresh_notifier
 from app.services import tickets as tickets_service
 
@@ -506,6 +507,20 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "recordings_path": "/var/lib/myportal/call_recordings",
         },
     },
+    {
+        "slug": "unifi-talk",
+        "name": "Unifi Talk",
+        "description": "Import call recordings from Unifi Talk server via SFTP. Downloads MP3 recordings to local storage for transcription processing.",
+        "icon": "📞",
+        "settings": {
+            "remote_host": "",
+            "remote_path": "/volume1/.srv/unifi-talk/recordings",
+            "username": "",
+            "password": "",
+            "local_path": "/var/lib/myportal/call_recordings",
+            "port": 22,
+        },
+    },
 ]
 
 
@@ -726,6 +741,27 @@ def _coerce_settings(
                 "authorization": authorization,
             }
         )
+    elif slug == "unifi-talk":
+        overrides = payload or {}
+        password_override = overrides.get("password")
+        if password_override is None:
+            password = str(merged.get("password") or "").strip()
+        else:
+            candidate = str(password_override or "").strip()
+            if not candidate and existing_settings and existing_settings.get("password"):
+                password = str(existing_settings.get("password") or "").strip()
+            else:
+                password = candidate
+        merged.update(
+            {
+                "remote_host": str(merged.get("remote_host", "")).strip(),
+                "remote_path": str(merged.get("remote_path", "")).strip() or "/volume1/.srv/unifi-talk/recordings",
+                "username": str(merged.get("username", "")).strip(),
+                "password": password,
+                "local_path": str(merged.get("local_path", "")).strip() or "/var/lib/myportal/call_recordings",
+                "port": _coerce_int(merged.get("port"), minimum=1, maximum=65535) or 22,
+            }
+        )
     return merged
 
 
@@ -739,6 +775,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "ntfy": ("auth_token",),
         "xero": ("client_secret", "refresh_token", "access_token"),
         "sms-gateway": ("authorization",),
+        "unifi-talk": ("password",),
     }
     targets = fields_to_redact.get(slug)
     if not targets:
@@ -804,6 +841,7 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "syncro",         # Syncro - removed from trigger actions
     "chatgpt-mcp",    # ChatGPT MCP - removed from trigger actions
     "call-recordings", # Call Recordings - configuration only, not an action module
+    "unifi-talk",     # Unifi Talk - SFTP import module, not an action module
 }
 
 
@@ -884,6 +922,7 @@ async def trigger_module(
         "create-ticket": _invoke_create_ticket,
         "create-task": _invoke_create_task,
         "call-recordings": _validate_call_recordings,
+        "unifi-talk": _invoke_unifi_talk,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -2161,6 +2200,118 @@ async def _validate_call_recordings(
             "status": "error",
             "recordings_path": recordings_path,
             "has_recordings_path": True,
+            "error": str(exc),
+        }
+
+
+async def _invoke_unifi_talk(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Download call recordings from Unifi Talk via SFTP and sync to database."""
+    remote_host = str(settings.get("remote_host") or "").strip()
+    remote_path = str(settings.get("remote_path") or "").strip() or "/volume1/.srv/unifi-talk/recordings"
+    username = str(settings.get("username") or "").strip()
+    password = str(settings.get("password") or "").strip()
+    local_path = str(settings.get("local_path") or "").strip() or "/var/lib/myportal/call_recordings"
+    port = _coerce_int(settings.get("port"), minimum=1, maximum=65535) or 22
+    
+    # Validate required settings
+    if not remote_host:
+        return {
+            "status": "error",
+            "error": "Remote host is not configured",
+            "has_remote_host": False,
+        }
+    
+    if not username:
+        return {
+            "status": "error",
+            "error": "Username is not configured",
+            "has_username": False,
+        }
+    
+    if not password:
+        return {
+            "status": "error",
+            "error": "Password is not configured",
+            "has_password": False,
+        }
+    
+    try:
+        # Download recordings from SFTP
+        logger.info(
+            "Starting Unifi Talk SFTP download",
+            remote_host=remote_host,
+            remote_path=remote_path,
+            local_path=local_path,
+        )
+        download_result = await unifi_talk_service.download_recordings_from_sftp(
+            remote_host=remote_host,
+            remote_path=remote_path,
+            username=username,
+            password=password,
+            local_path=local_path,
+            port=port,
+        )
+        
+        # Sync downloaded recordings to database
+        if download_result["downloaded"] > 0:
+            logger.info(
+                f"Downloaded {download_result['downloaded']} recordings, syncing to database",
+                local_path=local_path,
+            )
+            sync_result = await call_recordings_service.sync_recordings_from_filesystem(local_path)
+            
+            return {
+                "status": "ok",
+                "remote_host": remote_host,
+                "remote_path": remote_path,
+                "local_path": local_path,
+                "downloaded": download_result["downloaded"],
+                "skipped": download_result["skipped"],
+                "total_files": download_result["total_files"],
+                "sync_created": sync_result.get("created", 0),
+                "sync_updated": sync_result.get("updated", 0),
+                "sync_skipped": sync_result.get("skipped", 0),
+                "errors": download_result["errors"] + sync_result.get("errors", []),
+            }
+        else:
+            return {
+                "status": "ok",
+                "remote_host": remote_host,
+                "remote_path": remote_path,
+                "local_path": local_path,
+                "downloaded": 0,
+                "skipped": download_result["skipped"],
+                "total_files": download_result["total_files"],
+                "message": "No new recordings to download",
+                "errors": download_result["errors"],
+            }
+    
+    except ValueError as exc:
+        logger.error("Unifi Talk configuration error", error=str(exc))
+        return {
+            "status": "error",
+            "remote_host": remote_host,
+            "error": str(exc),
+        }
+    
+    except RuntimeError as exc:
+        logger.error("Unifi Talk SFTP connection error", error=str(exc))
+        return {
+            "status": "error",
+            "remote_host": remote_host,
+            "error": str(exc),
+        }
+    
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("Unexpected error in Unifi Talk module")
+        return {
+            "status": "error",
+            "remote_host": remote_host,
             "error": str(exc),
         }
 
