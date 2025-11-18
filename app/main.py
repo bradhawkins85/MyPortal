@@ -5440,7 +5440,7 @@ async def place_order(request: Request) -> RedirectResponse:
                 url=f"{request.url_for('cart_page')}?orderMessage={message}",
                 status_code=status.HTTP_303_SEE_OTHER,
             )
-        await shop_service.maybe_send_discord_stock_notification_by_id(
+        await shop_service.maybe_send_stock_notification_by_id(
             int(item.get("product_id")),
             previous_stock,
             new_stock,
