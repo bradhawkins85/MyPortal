@@ -1,15 +1,93 @@
-# Knowledge Base Conditional Logic
+# Knowledge Base Conditional Logic and Section Permissions
 
 ## Overview
 
-The knowledge base system supports conditional logic that allows articles to display different content based on the company viewing the article. This feature enables you to maintain a single article while customizing specific sections for different companies.
+The knowledge base system provides two complementary ways to control content visibility based on company membership:
+
+1. **Section-Level Company Permissions** (Recommended): Restrict entire sections to specific companies through an easy-to-use interface
+2. **Legacy Conditional Logic**: Use `<kb-if>` tags to embed company-specific content within sections (backward compatible)
+
+## Section-Level Company Permissions
+
+### What Are Section Permissions?
+
+Section permissions allow you to control which companies can view specific sections of an article. This is the **recommended approach** for company-specific content as it provides:
+
+- **Easy management**: Click a button to select companies via a modal dialog
+- **Clear visibility**: See which companies can access each section at a glance
+- **Secure filtering**: Sections are filtered server-side before sending to users
+- **Flexible control**: Mix public and restricted sections within the same article
+
+### How to Use Section Permissions
+
+#### Setting Up Section Permissions
+
+1. Open the knowledge base article editor
+2. Create or edit a section
+3. Click the **"Company Access"** button (🏢 icon) above the section content
+4. A modal dialog appears showing all active companies
+5. Check the companies that should have access to this section
+6. Click **Save** to apply the permissions
+7. The selected companies are displayed below the section heading
+
+#### Understanding Visibility Rules
+
+- **No companies selected**: Section is visible to everyone (no restrictions)
+- **Companies selected**: Only users from those companies can view the section
+- **Super admins**: Always see all sections regardless of restrictions
+- **Anonymous users**: Only see sections with no company restrictions
+
+#### Permission Inheritance
+
+Section permissions work **in addition to** article-level permissions:
+
+1. First, users must have permission to view the article itself (based on article permission scope)
+2. Then, section permissions further restrict which sections they can see within the article
+
+**Example:**
+- Article permission: "Company members" (Companies A, B, C can access)
+- Section 1: No restrictions (visible to all who can access the article)
+- Section 2: Companies A and B only
+- Section 3: Company C only
+
+Result:
+- Company A users see Sections 1 and 2
+- Company B users see Sections 1 and 2
+- Company C users see Sections 1 and 3
+
+### Visual Indicators
+
+In the editor, section company permissions are shown:
+- A light blue background bar below the section heading
+- Company names displayed as badges (e.g., "ACME Corp", "XYZ Inc")
+- If no restrictions: Shows "All companies (no restrictions)" in gray italics
+
+### Best Practices for Section Permissions
+
+1. **Use descriptive section headings**: Help users understand what content they're viewing
+2. **Group related content**: Put company-specific content in dedicated sections
+3. **Test with different companies**: Preview as different users to verify visibility
+4. **Document your approach**: Keep notes on which sections are restricted and why
+5. **Prefer section permissions over conditional tags**: Easier to manage and maintain
+
+## Legacy Conditional Logic (Backward Compatible)
+
+The `<kb-if>` tag system continues to work for backward compatibility, but **section-level permissions are now the recommended approach** for new content.
 
 ## Use Cases
 
-- **Company-Specific Instructions**: Display different setup or configuration steps for each company
-- **Branded Content**: Show company-specific logos, images, or branding
-- **Custom Procedures**: Provide tailored workflows for different organizations
-- **Localized Information**: Display region or company-specific contact details
+### Section-Level Permissions Use Cases
+
+- **Company-Specific Procedures**: Entire workflows that differ by company
+- **Restricted Information**: Sensitive content for specific companies only
+- **Feature Documentation**: Document features available only to certain companies
+- **Custom Configurations**: Company-specific setup instructions as separate sections
+
+### Conditional Logic Use Cases (Legacy)
+
+- **Inline Variations**: Small text differences within a paragraph
+- **Dynamic Content**: Company names or logos embedded in flowing text
+- **Backward Compatibility**: Existing articles using `<kb-if>` tags
 
 ## Syntax
 
@@ -197,15 +275,29 @@ If validation fails, you'll see an error message indicating what needs to be fix
 - Check browser console for JavaScript errors
 - Verify you're using a supported browser
 
+## Migration Guide
+
+### Moving from Conditional Tags to Section Permissions
+
+If you have articles using `<kb-if>` tags, consider migrating to section-level permissions:
+
+1. **Identify conditional blocks**: Review your articles for `<kb-if>` tags
+2. **Reorganize content**: Move each company-specific block into its own section
+3. **Set section permissions**: Use the Company Access button to assign companies
+4. **Test thoroughly**: Verify content appears correctly for each company
+5. **Remove old tags**: Once verified, remove the `<kb-if>` tags
+
+**Note**: Both systems can coexist in the same article during migration.
+
 ## Future Enhancements
 
-Potential future improvements to the conditional system:
+Potential future improvements:
 
-- Support for multiple conditions (OR logic)
-- User-based conditionals in addition to company-based
-- Permission scope conditionals
-- Date/time-based conditionals
-- Visual conditional block editor with preview
+- User-based section permissions in addition to company-based
+- Role-based section permissions
+- Date/time-based section visibility
+- Section permission templates for quick setup
+- Bulk permission management across multiple sections
 
 ## Examples Library
 
@@ -285,6 +377,39 @@ Potential future improvements to the conditional system:
 
 <p>To learn more about upgrading your plan, contact your account manager.</p>
 ```
+
+### Example 4: Using Section Permissions (Recommended)
+
+Instead of using conditional tags, organize content into sections with permissions:
+
+**Section 1: "Overview"** (No restrictions)
+```html
+<h2>Installation Instructions</h2>
+<p>This guide will help you install and configure the software.</p>
+```
+
+**Section 2: "ACME Corp Setup"** (Restricted to ACME Corp)
+```html
+<h3>ACME Corp Portal</h3>
+<p>Visit <a href="https://portal.acme.com">https://portal.acme.com</a></p>
+<p>Login credentials: Use your ACME email and password</p>
+<img src="/uploads/acme-portal-screenshot.png" alt="ACME Portal" />
+```
+
+**Section 3: "Globex Setup"** (Restricted to Globex Corporation)
+```html
+<h3>Globex Portal</h3>
+<p>Visit <a href="https://downloads.globex.com">https://downloads.globex.com</a></p>
+<p>Login credentials: Use your SSO credentials</p>
+```
+
+**Section 4: "Post-Installation"** (No restrictions)
+```html
+<h3>After Download</h3>
+<p>Run the installer and follow the on-screen instructions.</p>
+```
+
+This approach provides cleaner organization and easier maintenance than conditional tags.
 
 ## Support
 
