@@ -226,10 +226,23 @@
       if (!hasMeaningfulContent(content)) {
         return;
       }
+      
+      // Get company IDs from the section
+      let allowedCompanyIds = [];
+      try {
+        const companyIdsJson = section.dataset.kbSectionCompanyIds;
+        if (companyIdsJson) {
+          allowedCompanyIds = JSON.parse(companyIdsJson);
+        }
+      } catch (e) {
+        console.error('Failed to parse section company IDs', e);
+      }
+      
       sections.push({
         heading: heading || null,
         content,
         position: index + 1,
+        allowed_company_ids: allowedCompanyIds,
       });
     });
     return sections;
@@ -285,6 +298,31 @@
     headingWrapper.className = 'kb-admin__section-heading-group';
     headingWrapper.appendChild(headingLabel);
     headingWrapper.appendChild(headingInput);
+
+    // Add company restriction controls
+    const companyControlsWrapper = document.createElement('div');
+    companyControlsWrapper.className = 'kb-admin__section-company-controls';
+    
+    const companyButton = document.createElement('button');
+    companyButton.type = 'button';
+    companyButton.className = 'button button--ghost button--sm';
+    companyButton.dataset.kbSectionCompanies = 'true';
+    companyButton.innerHTML = '<span class="button__icon">🏢</span><span class="button__label">Company Access</span>';
+    companyButton.title = 'Set which companies can view this section';
+    
+    const companyDisplay = document.createElement('div');
+    companyDisplay.className = 'kb-admin__section-companies-display';
+    companyDisplay.dataset.kbSectionCompaniesDisplay = 'true';
+    
+    // Store selected company IDs
+    const allowedCompanyIds = section && section.allowed_company_ids ? section.allowed_company_ids : [];
+    wrapper.dataset.kbSectionCompanyIds = JSON.stringify(allowedCompanyIds);
+    
+    // Update display
+    updateCompanyDisplay(companyDisplay, allowedCompanyIds);
+    
+    companyControlsWrapper.appendChild(companyButton);
+    companyControlsWrapper.appendChild(companyDisplay);
 
     const toolbar = document.createElement('div');
     toolbar.className = 'kb-admin__toolbar';
@@ -345,10 +383,31 @@
     controls.appendChild(remove);
 
     wrapper.appendChild(headingWrapper);
+    wrapper.appendChild(companyControlsWrapper);
     wrapper.appendChild(toolbar);
     wrapper.appendChild(editor);
     wrapper.appendChild(controls);
     return wrapper;
+  }
+
+  function updateCompanyDisplay(displayElement, companyIds) {
+    if (!displayElement) {
+      return;
+    }
+    
+    if (!companyIds || companyIds.length === 0) {
+      displayElement.innerHTML = '<span class="kb-admin__no-companies">All companies (no restrictions)</span>';
+      return;
+    }
+    
+    const companyNames = companyIds.map(id => {
+      const company = companyOptions.find(c => c.id === id);
+      return company ? company.name : `Company #${id}`;
+    });
+    
+    displayElement.innerHTML = companyNames.map(name => 
+      `<span class="kb-admin__company-tag">${escapeHtml(name)}</span>`
+    ).join('');
   }
 
   function ensureImageOverlay() {
@@ -929,6 +988,109 @@
     }
   }
 
+  function showSectionCompanyModal(sectionElement) {
+    // Get current selected company IDs
+    let currentCompanyIds = [];
+    try {
+      const companyIdsJson = sectionElement.dataset.kbSectionCompanyIds;
+      if (companyIdsJson) {
+        currentCompanyIds = JSON.parse(companyIdsJson);
+      }
+    } catch (e) {
+      console.error('Failed to parse section company IDs', e);
+    }
+    
+    // Create modal
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+    
+    const modalContent = document.createElement('div');
+    modalContent.className = 'modal__content';
+    modalContent.style.cssText = 'background: white; padding: 2rem; border-radius: 8px; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;';
+    
+    const modalHeader = document.createElement('h3');
+    modalHeader.textContent = 'Select Companies with Access to This Section';
+    modalHeader.style.cssText = 'margin-top: 0; margin-bottom: 1rem;';
+    
+    const modalHelp = document.createElement('p');
+    modalHelp.textContent = 'Leave empty to allow all companies to view this section. Select specific companies to restrict access.';
+    modalHelp.style.cssText = 'font-size: 0.9rem; color: #666; margin-bottom: 1rem;';
+    
+    const companyList = document.createElement('div');
+    companyList.style.cssText = 'max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 0.5rem; margin-bottom: 1rem;';
+    
+    // Add checkboxes for each company
+    companyOptions.forEach(company => {
+      const label = document.createElement('label');
+      label.style.cssText = 'display: block; padding: 0.5rem; cursor: pointer;';
+      
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = company.id;
+      checkbox.checked = currentCompanyIds.includes(company.id);
+      checkbox.style.cssText = 'margin-right: 0.5rem;';
+      
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(company.name));
+      companyList.appendChild(label);
+    });
+    
+    const buttonGroup = document.createElement('div');
+    buttonGroup.style.cssText = 'display: flex; gap: 0.5rem; justify-content: flex-end;';
+    
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.className = 'button button--ghost';
+    cancelButton.textContent = 'Cancel';
+    
+    const saveButton = document.createElement('button');
+    saveButton.type = 'button';
+    saveButton.className = 'button';
+    saveButton.textContent = 'Save';
+    
+    buttonGroup.appendChild(cancelButton);
+    buttonGroup.appendChild(saveButton);
+    
+    modalContent.appendChild(modalHeader);
+    modalContent.appendChild(modalHelp);
+    modalContent.appendChild(companyList);
+    modalContent.appendChild(buttonGroup);
+    modal.appendChild(modalContent);
+    
+    // Event handlers
+    cancelButton.addEventListener('click', () => {
+      document.body.removeChild(modal);
+    });
+    
+    saveButton.addEventListener('click', () => {
+      const selectedIds = [];
+      companyList.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
+        selectedIds.push(parseInt(checkbox.value, 10));
+      });
+      
+      // Update section data
+      sectionElement.dataset.kbSectionCompanyIds = JSON.stringify(selectedIds);
+      
+      // Update display
+      const display = sectionElement.querySelector('[data-kb-section-companies-display]');
+      if (display) {
+        updateCompanyDisplay(display, selectedIds);
+      }
+      
+      document.body.removeChild(modal);
+    });
+    
+    // Close on background click
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        document.body.removeChild(modal);
+      }
+    });
+    
+    document.body.appendChild(modal);
+  }
+
   async function deleteArticle() {
     const articleId = idField.value ? parseInt(idField.value, 10) : null;
     if (!articleId) {
@@ -1056,6 +1218,13 @@
       if (!section) {
         return;
       }
+      
+      // Handle company selection button
+      if (event.target.closest('[data-kb-section-companies]')) {
+        showSectionCompanyModal(section);
+        return;
+      }
+      
       if (event.target.closest('[data-kb-section-up]')) {
         moveSection(section, -1);
       } else if (event.target.closest('[data-kb-section-down]')) {
