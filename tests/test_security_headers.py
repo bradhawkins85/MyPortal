@@ -57,6 +57,8 @@ def test_csp_header_configuration(test_app):
     assert "frame-ancestors 'none'" in csp
     assert "base-uri 'self'" in csp
     assert "form-action 'self'" in csp
+    # Check that unpkg.com is allowed for loading htmx in script-src directive
+    assert "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com" in csp
 
 
 def test_x_frame_options_deny(test_app):
