@@ -179,6 +179,16 @@
             <span>Company Administrator</span>
             <span class="form-help">Full administrative access to company resources</span>
           </label>
+          <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="compliance.access" data-permission-checkbox />
+            <span>Compliance Access</span>
+            <span class="form-help">Access to view and manage compliance requirements</span>
+          </label>
+          <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="continuity.access" data-permission-checkbox />
+            <span>Continuity Access</span>
+            <span class="form-help">Access to view and manage business continuity plans</span>
+          </label>
         </div>
         <p class="form-help" id="role-permissions-help">Select the permissions to assign to this role.</p>
       </div>
@@ -248,6 +258,14 @@
         <div class="definition-list__item">
           <dt><code>helpdesk.technician</code></dt>
           <dd>Grant designated staff access to the global ticketing workspace so they can triage, assign, and update tickets without broader administrative privileges.</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt><code>compliance.access</code></dt>
+          <dd>Provide access to view and manage compliance requirements and essential 8 assessments.</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt><code>continuity.access</code></dt>
+          <dd>Provide access to view and manage business continuity plans and related documentation.</dd>
         </div>
       </dl>
       <p class="text-muted">New permissions will be documented here as they become available.</p>
