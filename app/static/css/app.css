@@ -7412,3 +7412,66 @@ textarea:focus-visible,
     border-top-color: transparent;
   }
 }
+
+/* User permissions modal styles */
+.modal__content--large {
+  width: 90vw;
+  max-width: 1200px;
+  height: 90vh;
+  max-height: 90vh;
+}
+
+.permissions-display {
+  padding: var(--space-gap-base);
+  background: rgba(30, 41, 59, 0.5);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.permissions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-gap-base);
+}
+
+.permission-card {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-gap-roomy);
+  background: rgba(30, 41, 59, 0.5);
+  border: 2px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.permission-card:hover {
+  background: rgba(51, 65, 85, 0.6);
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.permission-card input[type="checkbox"] {
+  margin-bottom: var(--space-gap-tight);
+}
+
+.permission-card input[type="checkbox"]:checked ~ .permission-card__title {
+  color: #60a5fa;
+}
+
+.permission-card input[type="checkbox"]:checked + .permission-card__title,
+.permission-card input[type="checkbox"]:checked ~ .permission-card__description {
+  color: inherit;
+}
+
+.permission-card__title {
+  font-weight: 600;
+  font-size: 1rem;
+  margin-bottom: var(--space-gap-tight);
+  color: #e2e8f0;
+}
+
+.permission-card__description {
+  font-size: 0.875rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
