@@ -10913,6 +10913,7 @@ async def _render_tickets_dashboard(
             "tech_status": definition.tech_status,
             "tech_label": definition.tech_label,
             "public_status": definition.public_status,
+            "is_default": definition.is_default,
         }
         for definition in dashboard.status_definitions
     ]
@@ -11289,6 +11290,7 @@ async def _render_ticket_detail(
                 "tech_status": definition.tech_status,
                 "tech_label": definition.tech_label,
                 "public_status": definition.public_status,
+                "is_default": definition.is_default,
             }
             for definition in status_definitions
         ],
