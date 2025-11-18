@@ -51,6 +51,8 @@ _PERMISSION_MAPPING = {
     "office_groups.manage": "can_manage_office_groups",
     "issues.manage": "can_manage_issues",
     "company.admin": "is_admin",
+    "compliance.access": "can_view_compliance",
+    "continuity.access": "can_view_bcp",
 }
 
 

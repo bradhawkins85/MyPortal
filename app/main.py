@@ -1067,18 +1067,17 @@ async def _build_base_context(
     def _has_permission(flag: str) -> bool:
         return bool(membership_data.get(flag))
     
-    # Check BCP permissions
-    can_view_bcp = is_super_admin
+    # Check BCP permissions - use new continuity.access permission system
+    can_view_bcp = is_super_admin or _has_permission("can_view_bcp")
     can_edit_bcp = is_super_admin
     if not is_super_admin and active_company_id is not None:
         user_id = user.get("id")
         if user_id:
             try:
-                can_view_bcp = await membership_repo.user_has_permission(int(user_id), "bcp:view")
+                # Also check legacy bcp:edit permission for backward compatibility
                 can_edit_bcp = await membership_repo.user_has_permission(int(user_id), "bcp:edit")
             except Exception as exc:  # pragma: no cover - defensive fallback
-                log_error("Failed to check BCP permissions", error=str(exc))
-                can_view_bcp = False
+                log_error("Failed to check BCP edit permissions", error=str(exc))
                 can_edit_bcp = False
 
     permission_flags = {
@@ -1095,7 +1094,7 @@ async def _build_base_context(
             or staff_permission_level > 0
         ),
         "can_manage_issues": has_issue_tracker_access,
-        "can_view_compliance": is_super_admin or (active_company_id is not None),
+        "can_view_compliance": is_super_admin or _has_permission("can_view_compliance"),
         "can_view_bcp": can_view_bcp,
         "can_edit_bcp": can_edit_bcp,
     }
