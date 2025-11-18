@@ -5764,7 +5764,7 @@ async def portal_create_ticket(request: Request):
         )
 
     try:
-        status_value = await tickets_service.resolve_status_or_default("open")
+        status_value = await tickets_service.resolve_status_or_default(None)
         ticket = await tickets_service.create_ticket(
             subject=subject,
             description=description_payload,
