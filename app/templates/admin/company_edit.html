@@ -574,15 +574,31 @@
                           {% endif %}
                         </div>
                       {% else %}
-                        <button
-                          type="button"
-                          class="button button--danger"
-                          data-remove-assignment
-                          data-company-id="{{ assignment.company_id }}"
-                          data-user-id="{{ assignment.user_id }}"
-                        >
-                          Remove
-                        </button>
+                        <div class="table__action-buttons">
+                          {% if assignment.membership_id %}
+                            <button
+                              type="button"
+                              class="button button--ghost"
+                              data-edit-user-permissions
+                              data-membership-id="{{ assignment.membership_id }}"
+                              data-company-id="{{ assignment.company_id }}"
+                              data-user-id="{{ assignment.user_id }}"
+                              data-user-email="{{ assignment.email }}"
+                              data-user-name="{{ assignment.first_name or '' }} {{ assignment.last_name or '' }}"
+                            >
+                              Permissions
+                            </button>
+                          {% endif %}
+                          <button
+                            type="button"
+                            class="button button--danger"
+                            data-remove-assignment
+                            data-company-id="{{ assignment.company_id }}"
+                            data-user-id="{{ assignment.user_id }}"
+                          >
+                            Remove
+                          </button>
+                        </div>
                       {% endif %}
                     </td>
                   </tr>
@@ -840,6 +856,138 @@
         </div>
       </div>
     </div>
+
+    <div class="modal" id="user-permissions-modal" role="dialog" aria-modal="true" hidden>
+      <div class="modal__content modal__content--large" role="document">
+        <button type="button" class="modal__close" data-modal-close>
+          <span class="visually-hidden">Close user permissions editor</span>
+        </button>
+        <h2 class="modal__title" id="user-permissions-title">User Permissions</h2>
+        <p class="modal__subtitle" id="user-permissions-subtitle">
+          Select additional permissions for this user. These are cumulative with their role-based permissions.
+        </p>
+        <div class="modal__body">
+          <form id="user-permissions-form" class="form" autocomplete="off">
+            <input type="hidden" name="membership_id" id="user-permissions-membership-id" />
+            <input type="hidden" name="company_id" id="user-permissions-company-id" />
+            <input type="hidden" name="user_id" id="user-permissions-user-id" />
+            
+            <div class="form-field">
+              <label class="form-label">Role Permissions (from assigned role)</label>
+              <div id="user-permissions-role-list" class="permissions-display">
+                <p class="text-muted">Loading...</p>
+              </div>
+            </div>
+
+            <div class="form-field">
+              <label class="form-label">Additional User-Specific Permissions</label>
+              <div class="form-checkboxes permissions-grid" id="user-permissions-group" role="group">
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="company.manage" data-user-permission-checkbox />
+                  <span class="permission-card__title">Company Management</span>
+                  <span class="permission-card__description">Configure company profiles, contact details, and operational settings</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="membership.manage" data-user-permission-checkbox />
+                  <span class="permission-card__title">Membership Management</span>
+                  <span class="permission-card__description">Invite, approve, suspend, or reassign company members</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="billing.manage" data-user-permission-checkbox />
+                  <span class="permission-card__title">Billing Management</span>
+                  <span class="permission-card__description">Access subscription, invoicing, and payment methods</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="audit.view" data-user-permission-checkbox />
+                  <span class="permission-card__title">Audit View</span>
+                  <span class="permission-card__description">Read-only visibility into security and activity audit trails</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="portal.access" data-user-permission-checkbox />
+                  <span class="permission-card__title">Portal Access</span>
+                  <span class="permission-card__description">Sign in and use the general portal experience</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="licenses.manage" data-user-permission-checkbox />
+                  <span class="permission-card__title">Manage Licenses</span>
+                  <span class="permission-card__description">Manage company licenses and subscriptions</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="licenses.order" data-user-permission-checkbox />
+                  <span class="permission-card__title">Order Licenses</span>
+                  <span class="permission-card__description">Place orders for new licenses</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="staff.manage" data-user-permission-checkbox />
+                  <span class="permission-card__title">Manage Staff</span>
+                  <span class="permission-card__description">Manage company staff members</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="shop.access" data-user-permission-checkbox />
+                  <span class="permission-card__title">Shop Access</span>
+                  <span class="permission-card__description">Access the company shop</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="cart.access" data-user-permission-checkbox />
+                  <span class="permission-card__title">Cart Access</span>
+                  <span class="permission-card__description">Access and manage shopping cart</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="orders.access" data-user-permission-checkbox />
+                  <span class="permission-card__title">Orders Access</span>
+                  <span class="permission-card__description">View and manage company orders</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="forms.access" data-user-permission-checkbox />
+                  <span class="permission-card__title">Forms Access</span>
+                  <span class="permission-card__description">Access and submit company forms</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="assets.manage" data-user-permission-checkbox />
+                  <span class="permission-card__title">Manage Assets</span>
+                  <span class="permission-card__description">Manage company assets and inventory</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="invoices.manage" data-user-permission-checkbox />
+                  <span class="permission-card__title">Manage Invoices</span>
+                  <span class="permission-card__description">View and manage company invoices</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="office_groups.manage" data-user-permission-checkbox />
+                  <span class="permission-card__title">Manage Office Groups</span>
+                  <span class="permission-card__description">Manage company office groups and locations</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="issues.manage" data-user-permission-checkbox />
+                  <span class="permission-card__title">Manage Issues</span>
+                  <span class="permission-card__description">Manage company issues and support tickets</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="company.admin" data-user-permission-checkbox />
+                  <span class="permission-card__title">Company Administrator</span>
+                  <span class="permission-card__description">Full administrative access to company resources</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="compliance.access" data-user-permission-checkbox />
+                  <span class="permission-card__title">Compliance Access</span>
+                  <span class="permission-card__description">Access to view and manage compliance requirements</span>
+                </label>
+                <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="continuity.access" data-user-permission-checkbox />
+                  <span class="permission-card__title">Continuity Access</span>
+                  <span class="permission-card__description">Access to view and manage business continuity plans</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="button">Save Permissions</button>
+              <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
   {% endif %}
   </div>
 {% endblock %}
@@ -977,6 +1125,154 @@
           // Navigate to the new URL
           window.location.href = url.toString();
         });
+      });
+
+      // User permissions modal management
+      document.addEventListener('DOMContentLoaded', function() {
+        const companyId = {{ company.id }};
+        const modal = document.getElementById('user-permissions-modal');
+        const form = document.getElementById('user-permissions-form');
+        const roleList = document.getElementById('user-permissions-role-list');
+        const titleEl = document.getElementById('user-permissions-title');
+        const subtitleEl = document.getElementById('user-permissions-subtitle');
+        
+        if (!modal || !form) return;
+
+        // Open permissions modal
+        document.addEventListener('click', async function(e) {
+          const btn = e.target.closest('[data-edit-user-permissions]');
+          if (!btn) return;
+
+          const membershipId = btn.dataset.membershipId;
+          const userId = btn.dataset.userId;
+          const userEmail = btn.dataset.userEmail || 'User';
+          const userName = btn.dataset.userName?.trim() || userEmail;
+
+          // Update modal title
+          titleEl.textContent = `Permissions for ${userName}`;
+          subtitleEl.textContent = `Manage permissions for ${userEmail}. User-specific permissions are cumulative with role-based permissions.`;
+
+          // Set form data
+          document.getElementById('user-permissions-membership-id').value = membershipId;
+          document.getElementById('user-permissions-company-id').value = companyId;
+          document.getElementById('user-permissions-user-id').value = userId;
+
+          try {
+            // Fetch membership details to get role permissions
+            const membershipResponse = await fetch(`/api/companies/${companyId}/memberships`, {
+              headers: {
+                'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
+              }
+            });
+            
+            if (!membershipResponse.ok) throw new Error('Failed to fetch memberships');
+            
+            const memberships = await membershipResponse.json();
+            const membership = memberships.find(m => m.id === parseInt(membershipId));
+            
+            if (membership) {
+              // Display role permissions (read-only)
+              const rolePermissions = membership.permissions || [];
+              if (rolePermissions.length > 0) {
+                roleList.innerHTML = '<div class="tag-list">' +
+                  rolePermissions.map(p => `<span class="tag tag--muted">${escapeHtml(p)}</span>`).join('') +
+                  '</div>';
+              } else {
+                roleList.innerHTML = '<p class="text-muted">No role permissions assigned</p>';
+              }
+            }
+
+            // Fetch and display current user permissions
+            const userPermsResponse = await fetch(
+              `/api/companies/${companyId}/memberships/${membershipId}/user-permissions`,
+              {
+                headers: {
+                  'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
+                }
+              }
+            );
+
+            if (!userPermsResponse.ok) throw new Error('Failed to fetch user permissions');
+            
+            const userPermissions = await userPermsResponse.json();
+            
+            // Clear all checkboxes
+            form.querySelectorAll('[data-user-permission-checkbox]').forEach(cb => {
+              cb.checked = false;
+            });
+
+            // Check boxes for current user permissions
+            userPermissions.forEach(perm => {
+              const checkbox = form.querySelector(`[data-user-permission-checkbox][value="${perm}"]`);
+              if (checkbox) checkbox.checked = true;
+            });
+
+            // Show modal
+            modal.hidden = false;
+            modal.setAttribute('aria-hidden', 'false');
+            
+          } catch (err) {
+            console.error('Error loading permissions:', err);
+            alert('Failed to load user permissions. Please try again.');
+          }
+        });
+
+        // Handle form submission
+        form.addEventListener('submit', async function(e) {
+          e.preventDefault();
+
+          const membershipId = document.getElementById('user-permissions-membership-id').value;
+          const checkedBoxes = form.querySelectorAll('[data-user-permission-checkbox]:checked');
+          const permissions = Array.from(checkedBoxes).map(cb => cb.value);
+
+          try {
+            const response = await fetch(
+              `/api/companies/${companyId}/memberships/${membershipId}/user-permissions`,
+              {
+                method: 'PUT',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`,
+                  'X-CSRF-Token': document.querySelector('input[name="_csrf"]')?.value || ''
+                },
+                body: JSON.stringify({ permissions })
+              }
+            );
+
+            if (!response.ok) {
+              const error = await response.json();
+              throw new Error(error.detail || 'Failed to update permissions');
+            }
+
+            // Close modal
+            modal.hidden = true;
+            modal.setAttribute('aria-hidden', 'true');
+
+            // Show success message (optional - could add a toast notification)
+            alert('User permissions updated successfully!');
+            
+            // Optionally reload the page to reflect changes
+            window.location.reload();
+
+          } catch (err) {
+            console.error('Error saving permissions:', err);
+            alert(err.message || 'Failed to save user permissions. Please try again.');
+          }
+        });
+
+        // Handle modal close
+        modal.addEventListener('click', function(e) {
+          if (e.target.closest('[data-modal-close]') || e.target === modal) {
+            modal.hidden = true;
+            modal.setAttribute('aria-hidden', 'true');
+          }
+        });
+
+        function escapeHtml(text) {
+          const div = document.createElement('div');
+          div.textContent = text;
+          return div.innerHTML;
+        }
       });
     </script>
   {% endif %}
