@@ -97,6 +97,7 @@ async def _attach_relations(rows: Sequence[dict[str, Any]]) -> list[dict[str, An
     member_company_map: dict[int, list[int]] = defaultdict(list)
     admin_company_map: dict[int, list[int]] = defaultdict(list)
     section_map: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    section_company_map: dict[int, list[int]] = defaultdict(list)
 
     if placeholders:
         user_rows = await db.fetch_all(
@@ -136,18 +137,40 @@ async def _attach_relations(rows: Sequence[dict[str, Any]]) -> list[dict[str, An
             """,
             params,
         )
+        
+        # Collect all section IDs for fetching company associations
+        section_ids = [int(row.get("id")) for row in section_rows if row.get("id") is not None]
+        
+        # Fetch section-company associations if we have sections
+        if section_ids:
+            section_placeholders, section_params = _prepare_in_clause(section_ids)
+            if section_placeholders:
+                section_company_rows = await db.fetch_all(
+                    f"SELECT section_id, company_id FROM knowledge_base_section_companies WHERE section_id IN ({section_placeholders})",
+                    section_params,
+                )
+                for relation in section_company_rows:
+                    try:
+                        section_id = int(relation.get("section_id"))
+                        company_id = int(relation.get("company_id"))
+                    except (TypeError, ValueError):
+                        continue
+                    section_company_map[section_id].append(company_id)
+        
         for row in section_rows:
             try:
                 article_id = int(row.get("article_id"))
+                section_id = int(row.get("id"))
             except (TypeError, ValueError):
                 continue
             heading = row.get("heading")
             section_map[article_id].append(
                 {
-                    "id": row.get("id"),
+                    "id": section_id,
                     "heading": heading if isinstance(heading, str) else None,
                     "content": row.get("content") or "",
                     "position": row.get("position"),
+                    "allowed_company_ids": sorted(set(section_company_map.get(section_id, []))),
                 }
             )
 
@@ -353,12 +376,44 @@ async def replace_article_sections(
             position_int = int(position) if position is not None else index
         except (TypeError, ValueError):
             position_int = index
-        await db.execute(
+        section_id = await db.execute_returning_lastrowid(
             """
             INSERT INTO knowledge_base_sections (article_id, position, heading, content)
             VALUES (%s, %s, %s, %s)
             """,
             (article_id, position_int, heading, content),
+        )
+        
+        # Handle section company associations
+        allowed_company_ids = section.get("allowed_company_ids", [])
+        if allowed_company_ids:
+            await replace_section_companies(section_id, allowed_company_ids)
+
+
+async def replace_section_companies(
+    section_id: int,
+    company_ids: Iterable[int],
+) -> None:
+    """Replace company associations for a specific section."""
+    await db.execute(
+        "DELETE FROM knowledge_base_section_companies WHERE section_id = %s",
+        (section_id,),
+    )
+    seen: set[int] = set()
+    for company_id in company_ids:
+        try:
+            company_id_int = int(company_id)
+        except (TypeError, ValueError):
+            continue
+        if company_id_int in seen:
+            continue
+        seen.add(company_id_int)
+        await db.execute(
+            """
+            INSERT INTO knowledge_base_section_companies (section_id, company_id)
+            VALUES (%s, %s)
+            """,
+            (section_id, company_id_int),
         )
 
 
