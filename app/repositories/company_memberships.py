@@ -6,6 +6,7 @@ from typing import Any, List, Optional
 
 from app.core.database import db
 from app.repositories import users as user_repo
+from app.repositories import user_permissions as user_permissions_repo
 
 _VALID_STATUSES = {"invited", "active", "suspended"}
 
@@ -22,7 +23,19 @@ async def list_company_memberships(company_id: int) -> list[dict[str, Any]]:
         """,
         (company_id,),
     )
-    return [_normalise_membership(row) for row in rows]
+    result = []
+    for row in rows:
+        membership = _normalise_membership(row)
+        # Add user-specific permissions
+        user_permissions = await user_permissions_repo.list_user_permissions(
+            membership["user_id"], company_id
+        )
+        membership["user_permissions"] = user_permissions
+        # Combine role and user permissions for total permissions
+        all_permissions = set(membership.get("permissions", [])) | set(user_permissions)
+        membership["combined_permissions"] = sorted(all_permissions)
+        result.append(membership)
+    return result
 
 
 async def get_membership_by_id(membership_id: int) -> Optional[dict[str, Any]]:
@@ -38,7 +51,16 @@ async def get_membership_by_id(membership_id: int) -> Optional[dict[str, Any]]:
     )
     if not row:
         return None
-    return _normalise_membership(row)
+    membership = _normalise_membership(row)
+    # Add user-specific permissions
+    user_permissions = await user_permissions_repo.list_user_permissions(
+        membership["user_id"], membership["company_id"]
+    )
+    membership["user_permissions"] = user_permissions
+    # Combine role and user permissions
+    all_permissions = set(membership.get("permissions", [])) | set(user_permissions)
+    membership["combined_permissions"] = sorted(all_permissions)
+    return membership
 
 
 async def get_membership_by_company_user(company_id: int, user_id: int) -> Optional[dict[str, Any]]:
@@ -146,14 +168,25 @@ async def delete_membership(membership_id: int) -> None:
 
 
 async def user_has_permission(user_id: int, permission: str) -> bool:
+    # Check if user is super admin first
+    user_record = await user_repo.get_user_by_id(user_id)
+    if user_record and bool(user_record.get("is_super_admin")):
+        return True
+    
+    # Check role-based permissions from memberships
     memberships = await list_memberships_for_user(user_id, status="active")
     for membership in memberships:
         permissions = membership.get("permissions") or []
         if permission in permissions:
             return True
-    user_record = await user_repo.get_user_by_id(user_id)
-    if user_record and bool(user_record.get("is_super_admin")):
-        return True
+        
+        # Also check user-specific permissions for this company
+        company_id = membership.get("company_id")
+        if company_id:
+            user_permissions = await user_permissions_repo.list_user_permissions(user_id, company_id)
+            if permission in user_permissions:
+                return True
+    
     return False
 
 
