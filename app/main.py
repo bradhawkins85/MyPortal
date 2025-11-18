@@ -5499,7 +5499,7 @@ async def place_order(request: Request) -> RedirectResponse:
 
 @app.get("/notifications", response_class=HTMLResponse)
 async def notifications_dashboard(request: Request):
-    user, redirect = await _require_authenticated_user(request)
+    user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
 
@@ -5941,7 +5941,7 @@ async def knowledge_base_article(request: Request, slug: str):
 
 @app.get("/notifications/settings", response_class=HTMLResponse)
 async def notification_settings_page(request: Request):
-    user, redirect = await _require_authenticated_user(request)
+    user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
 

@@ -109,6 +109,7 @@
               <span class="menu__label">Dashboard</span>
             </a>
           </li>
+          {% if is_super_admin %}
           <li class="menu__item">
             <a href="/notifications" {% if current_path.startswith('/notifications') %}aria-current="page"{% endif %}>
               <span class="menu__icon" aria-hidden="true">
@@ -122,6 +123,7 @@
               </span>
             </a>
           </li>
+          {% endif %}
           <li class="menu__item">
             <a href="/knowledge-base" {% if current_path.startswith('/knowledge-base') %}aria-current="page"{% endif %}>
               <span class="menu__icon" aria-hidden="true">
