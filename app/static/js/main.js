@@ -533,6 +533,102 @@
     });
   }
 
+  function setupUpdateBanner() {
+    if (typeof window !== 'undefined') {
+      window.__MYPORTAL_HAS_UPDATE_HANDLER__ = true;
+    }
+
+    const banner = document.querySelector('[data-update-banner]');
+    const messageEl = banner ? banner.querySelector('[data-update-banner-message]') : null;
+    const refreshButton = banner ? banner.querySelector('[data-update-banner-refresh]') : null;
+    const dismissButton = banner ? banner.querySelector('[data-update-banner-dismiss]') : null;
+
+    function registerFallbackPrompt() {
+      if (typeof window === 'undefined') {
+        return;
+      }
+
+      window.addEventListener('pwa:update-available', (event) => {
+        if (!event || !event.detail || typeof event.detail.applyUpdate !== 'function') {
+          return;
+        }
+
+        const confirmation = window.confirm(
+          'An update is available. Reload now to apply the latest version?'
+        );
+        if (confirmation) {
+          try {
+            event.detail.applyUpdate();
+          } catch (error) {
+            console.error('Failed to apply update via service worker', error);
+            window.location.reload();
+          }
+        }
+      });
+    }
+
+    if (!banner || !messageEl || !refreshButton) {
+      registerFallbackPrompt();
+      return;
+    }
+
+    const forceRefreshTrigger = document.querySelector('[data-force-refresh]');
+    let applyUpdate = null;
+
+    function hideBanner() {
+      banner.setAttribute('aria-hidden', 'true');
+      banner.hidden = true;
+      applyUpdate = null;
+    }
+
+    function showBanner(reason) {
+      const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+      const message =
+        trimmedReason
+          ? `${trimmedReason} Please refresh to apply the latest release.`
+          : 'A new version of the portal is ready. Refresh to apply the latest release.';
+      messageEl.textContent = message;
+      banner.hidden = false;
+      banner.setAttribute('aria-hidden', 'false');
+    }
+
+    refreshButton.addEventListener('click', () => {
+      const callback = applyUpdate;
+      hideBanner();
+
+      if (typeof callback === 'function') {
+        try {
+          callback();
+          return;
+        } catch (error) {
+          console.error('Failed to apply update via service worker', error);
+        }
+      }
+
+      if (forceRefreshTrigger) {
+        forceRefreshTrigger.click();
+      } else {
+        window.location.reload();
+      }
+    });
+
+    if (dismissButton) {
+      dismissButton.addEventListener('click', () => {
+        hideBanner();
+      });
+    }
+
+    window.addEventListener('pwa:update-available', (event) => {
+      if (!event || !event.detail || typeof event.detail.applyUpdate !== 'function') {
+        return;
+      }
+
+      applyUpdate = event.detail.applyUpdate;
+      const reason = typeof event.detail.reason === 'string' ? event.detail.reason : '';
+      showBanner(reason);
+    });
+  }
+
   function setupHeaderMenus() {
     const menus = Array.from(document.querySelectorAll('[data-header-menu]'));
     if (!menus.length) {
@@ -630,6 +726,7 @@
   function initialise() {
     setupAutoRefresh();
     setupForceRefresh();
+    setupUpdateBanner();
     setupHeaderMenus();
     setupAutoAlerts();
   }

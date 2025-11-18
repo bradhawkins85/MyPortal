@@ -52,6 +52,10 @@
 })();
 
 window.addEventListener('pwa:update-available', (event) => {
+  if (window.__MYPORTAL_HAS_UPDATE_HANDLER__) {
+    return;
+  }
+
   if (!event || !event.detail || typeof event.detail.applyUpdate !== 'function') {
     return;
   }
