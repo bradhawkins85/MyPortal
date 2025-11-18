@@ -1122,7 +1122,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     company_id=company_id,
                     assigned_user_id=None,
                     priority="normal",
-                    status="open",
+                    status=None,
                     category="email",
                     module_slug="imap",
                     external_reference=message_id,
