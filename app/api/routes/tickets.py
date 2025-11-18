@@ -405,7 +405,7 @@ async def create_ticket(
         else:
             status_value = await tickets_service.resolve_status_or_default(None)
     else:
-        status_value = await tickets_service.resolve_status_or_default("open")
+        status_value = await tickets_service.resolve_status_or_default(None)
     category = payload.category if has_helpdesk_access else None
     module_slug = payload.module_slug if has_helpdesk_access else None
     external_reference = payload.external_reference if has_helpdesk_access else None

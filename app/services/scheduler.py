@@ -361,7 +361,7 @@ class SchedulerService:
                                     requester_id=int(payload.get("requester_id")) if payload.get("requester_id") else None,
                                     assigned_user_id=int(payload.get("assigned_user_id")) if payload.get("assigned_user_id") else None,
                                     priority=str(payload.get("priority", "normal")),
-                                    status=str(payload.get("status", "open")),
+                                    status=str(payload.get("status")) if payload.get("status") else None,
                                     category=str(payload.get("category")) if payload.get("category") else None,
                                     module_slug=str(payload.get("module_slug")) if payload.get("module_slug") else None,
                                     external_reference=str(payload.get("external_reference")) if payload.get("external_reference") else None,
