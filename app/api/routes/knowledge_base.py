@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, status
 
 from app.api.dependencies.auth import get_optional_user, require_super_admin
 from app.schemas.knowledge_base import (
@@ -12,8 +14,13 @@ from app.schemas.knowledge_base import (
     KnowledgeBaseSearchResponse,
 )
 from app.services import knowledge_base as kb_service
+from app.services import file_storage
 
 router = APIRouter(prefix="/api/knowledge-base", tags=["Knowledge Base"])
+
+# Define uploads path at module level
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_PRIVATE_UPLOADS_PATH = _PROJECT_ROOT / "private_uploads"
 
 
 async def get_access_context(
@@ -209,4 +216,28 @@ async def search_articles(
 ) -> KnowledgeBaseSearchResponse:
     result = await kb_service.search_articles(payload.query, context)
     return KnowledgeBaseSearchResponse(**result)
+
+
+@router.post("/upload-image")
+async def upload_image(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_super_admin),
+) -> dict[str, str]:
+    """Upload an image for use in knowledge base articles.
+    
+    Returns the URL of the uploaded image that can be used in article content.
+    """
+    try:
+        image_url = await file_storage.store_knowledge_base_image(
+            upload=file,
+            uploads_root=_PRIVATE_UPLOADS_PATH,
+        )
+        return {"url": image_url}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload image: {str(exc)}"
+        ) from exc
 
