@@ -11618,6 +11618,15 @@ async def _render_ticket_detail(
             min_matching_tags=min_matching_tags,
         )
 
+    # Find relevant service statuses based on AI tag matching
+    from app.services import service_status as service_status_service
+    relevant_services: list[dict[str, Any]] = []
+    if ticket_ai_tags:
+        relevant_services = await service_status_service.find_relevant_services_for_ticket(
+            ticket_ai_tags=ticket_ai_tags,
+            company_id=ticket_company_id,
+        )
+
     extra = {
         "title": f"Ticket #{ticket_id}",
         "ticket": ticket,
@@ -11656,6 +11665,7 @@ async def _render_ticket_detail(
         "tacticalrmm_base_url": tactical_base_url,
         "can_delete_ticket": bool(user.get("is_super_admin")),
         "relevant_kb_articles": relevant_articles,
+        "relevant_services": relevant_services,
         "success_message": success_message,
         "error_message": error_message,
     }
