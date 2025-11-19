@@ -11254,6 +11254,9 @@ async def _render_portal_ticket_detail(
             ticket_ai_tags=ticket_ai_tags,
             company_id=company_numeric,
         )
+    
+    # Create service status lookup for consistent styling
+    service_status_lookup = {entry["value"]: entry for entry in service_status_service.STATUS_DEFINITIONS}
 
     extra = {
         "title": f"Ticket {ticket_id}",
@@ -11278,6 +11281,7 @@ async def _render_portal_ticket_detail(
         "ticket_watchers": watchers,
         "ticket_assets": ticket_assets,
         "relevant_services": relevant_services,
+        "service_status_lookup": service_status_lookup,
         "can_reply": bool(has_helpdesk_access or is_super_admin or is_requester),
         "is_requester": is_requester,
         "is_watcher": is_watcher,
@@ -11678,6 +11682,9 @@ async def _render_ticket_detail(
             ticket_ai_tags=ticket_ai_tags,
             company_id=ticket_company_id,
         )
+    
+    # Create service status lookup for consistent styling
+    service_status_lookup = {entry["value"]: entry for entry in service_status_service.STATUS_DEFINITIONS}
 
     extra = {
         "title": f"Ticket #{ticket_id}",
@@ -11718,6 +11725,7 @@ async def _render_ticket_detail(
         "can_delete_ticket": bool(user.get("is_super_admin")),
         "relevant_kb_articles": relevant_articles,
         "relevant_services": relevant_services,
+        "service_status_lookup": service_status_lookup,
         "success_message": success_message,
         "error_message": error_message,
     }
