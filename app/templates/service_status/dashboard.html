@@ -21,11 +21,11 @@
 
 {% block content %}
 <div class="service-status">
-  <section class="card card--panel service-status__summary">
-    <header class="card__header card__header--stacked">
+  <section class="service-status__summary">
+    <header class="service-status__summary-header">
       <div>
-        <h2 class="card__title">Current availability</h2>
-        <p class="card__subtitle">
+        <h2 class="service-status__summary-title">Current availability</h2>
+        <p class="service-status__summary-subtitle">
           {% if active_company %}
             Showing services assigned to {{ active_company.company_name or active_company.name }}.
           {% else %}
@@ -35,16 +35,16 @@
       </div>
     </header>
     <div class="service-status__stats">
+      <div class="service-status__stat service-status__stat--total">
+        <span class="service-status__stat-label">Tracked Services</span>
+        <span class="service-status__stat-value">{{ service_status_summary.total }}</span>
+      </div>
       {% for definition in service_status_definitions %}
-        <div class="service-status__stat">
+        <div class="service-status__stat service-status__stat--{{ definition.value }}">
           <span class="service-status__stat-label">{{ definition.label }}</span>
           <span class="service-status__stat-value">{{ service_status_summary.by_status.get(definition.value, 0) }}</span>
         </div>
       {% endfor %}
-      <div class="service-status__stat service-status__stat--total">
-        <span class="service-status__stat-label">Tracked services</span>
-        <span class="service-status__stat-value">{{ service_status_summary.total }}</span>
-      </div>
     </div>
   </section>
 
@@ -55,7 +55,8 @@
         {% set variant = status_meta.variant if status_meta else 'status--neutral' %}
         {% set label = status_meta.label if status_meta else service.status|title %}
         {% set description = status_meta.description if status_meta else '' %}
-        <article class="service-card">
+        {% set status_value = service.status or 'operational' %}
+        <article class="service-card service-card--{{ status_value }}">
           <header class="service-card__header">
             <h3 class="service-card__title">{{ service.name }}</h3>
             <span class="status {{ variant }}">{{ label }}</span>
@@ -79,10 +80,8 @@
       {% endfor %}
     </div>
   {% else %}
-    <div class="card card--panel">
-      <div class="card__body">
-        <p class="text-muted">No services are assigned to your company yet.</p>
-      </div>
+    <div class="service-status__empty">
+      <p class="text-muted">No services are assigned to your company yet.</p>
     </div>
   {% endif %}
 </div>
