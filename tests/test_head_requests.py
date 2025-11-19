@@ -37,7 +37,7 @@ def mock_startup(monkeypatch):
 
 def test_invoices_head_request():
     """Test that HEAD requests to /invoices don't return 405."""
-    with TestClient(app) as client:
+    with TestClient(app, follow_redirects=False) as client:
         response = client.head("/invoices")
     
     # Should not return 405 Method Not Allowed
@@ -49,7 +49,7 @@ def test_invoices_head_request():
 
 def test_admin_service_status_head_request():
     """Test that HEAD requests to /admin/service-status don't return 405."""
-    with TestClient(app) as client:
+    with TestClient(app, follow_redirects=False) as client:
         response = client.head("/admin/service-status")
     
     # Should not return 405 Method Not Allowed
@@ -60,7 +60,7 @@ def test_admin_service_status_head_request():
 
 def test_service_status_head_request():
     """Test that HEAD requests to /service-status don't return 405."""
-    with TestClient(app) as client:
+    with TestClient(app, follow_redirects=False) as client:
         response = client.head("/service-status")
     
     # Should not return 405 Method Not Allowed
