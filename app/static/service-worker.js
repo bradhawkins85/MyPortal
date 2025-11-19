@@ -39,7 +39,7 @@ const OFFLINE_RESPONSE = new Response(
     `This page will reload automatically once service is restored.</p>` +
     `<p class="retry">If this message does not disappear, refresh the page or check your connection.</p>` +
     `<script>(function(){var d=4000;var m=15;var a=0;var t=null;function u(msg){try{var el=document.getElementById('offline-status-detail');` +
-    `if(el){el.textContent=msg;}}catch(e){}}function p(){a+=1;fetch(window.location.href,{method:'HEAD',cache:'no-store'})` +
+    `if(el){el.textContent=msg;}}catch(e){}}function p(){a+=1;fetch(window.location.href,{method:'GET',cache:'no-store',redirect:'follow'})` +
     `.then(function(resp){if(resp&&resp.ok){window.location.reload();return;}if(a<m){t=setTimeout(p,d);}else{u('Still waiting for the portal to restart…');}})` +
     `.catch(function(){if(a<m){t=setTimeout(p,d);}else{u('Still waiting for the portal to restart…');}});}t=setTimeout(p,d);})();</script>` +
     `</main></body></html>`,
