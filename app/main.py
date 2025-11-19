@@ -3506,6 +3506,7 @@ async def index(request: Request):
     )
 
 
+@app.head("/service-status", response_class=HTMLResponse)
 @app.get("/service-status", response_class=HTMLResponse)
 async def service_status_dashboard(request: Request):
     user, redirect = await _require_authenticated_user(request)
@@ -3821,6 +3822,7 @@ async def compliance_control_requirements_page(request: Request, control_id: int
     return await _render_template("compliance/control_requirements.html", request, user, extra=extra)
 
 
+@app.head("/invoices", response_class=HTMLResponse)
 @app.get("/invoices", response_class=HTMLResponse)
 async def invoices_page(request: Request):
     user, membership, company, company_id, redirect = await _load_invoice_context(request)
@@ -6838,6 +6840,7 @@ async def invite_staff_member(staff_id: int, request: Request):
     )
     return JSONResponse({"success": True})
 
+@app.head("/admin/service-status", response_class=HTMLResponse)
 @app.get("/admin/service-status", response_class=HTMLResponse)
 async def admin_service_status_page(request: Request):
     user, redirect = await _require_super_admin_page(request)
