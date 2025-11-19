@@ -44,8 +44,8 @@ jobs:
       uses: github/codeql-action/init@v4
       with:
         languages: ${{ matrix.language }}
-        # Use default CodeQL query suite plus security-extended queries
-        queries: security-extended,security-and-quality
+        # Use CodeQL configuration file to control paths and queries
+        config-file: ./.github/codeql/codeql-config.yml
 
     # Autobuild attempts to build any compiled languages
     # For Python, this step typically completes quickly
