@@ -9,16 +9,7 @@ from app.api.dependencies.database import require_database
 from app.repositories import api_keys as api_key_repo
 
 
-async def require_api_key(
-    request: Request,
-    _: None = Depends(require_database),
-) -> dict:
-    api_key_value = request.headers.get("x-api-key")
-    if not api_key_value:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key required")
-    record = await api_key_repo.get_api_key_record(api_key_value)
-    if not record:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key")
+async def _resolve_api_key_record(request: Request, record: dict) -> dict:
     forwarded = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for")
     if forwarded:
         source_ip = forwarded.split(",")[0].strip()
@@ -74,3 +65,35 @@ async def require_api_key(
     await api_key_repo.record_api_key_usage(record["id"], source_ip or "unknown")
     request.state.api_key_id = record["id"]
     return record
+
+
+async def _lookup_api_key(request: Request, api_key_value: str | None) -> dict | None:
+    if not api_key_value:
+        return None
+    record = await api_key_repo.get_api_key_record(api_key_value)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key")
+    return await _resolve_api_key_record(request, record)
+
+
+async def require_api_key(
+    request: Request,
+    _: None = Depends(require_database),
+) -> dict:
+    api_key_value = request.headers.get("x-api-key")
+    if not api_key_value:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key required")
+    record = await _lookup_api_key(request, api_key_value)
+    if record is None:  # pragma: no cover - defensive guard
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key")
+    return record
+
+
+async def get_optional_api_key(
+    request: Request,
+    _: None = Depends(require_database),
+) -> dict | None:
+    api_key_value = request.headers.get("x-api-key")
+    if not api_key_value:
+        return None
+    return await _lookup_api_key(request, api_key_value)

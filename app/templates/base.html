@@ -109,6 +109,14 @@
               <span class="menu__label">Dashboard</span>
             </a>
           </li>
+          <li class="menu__item">
+            <a href="/service-status" {% if current_path.startswith('/service-status') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2h11A2.5 2.5 0 0 1 20 4.5v15a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 19.5zm2.5-.5a.5.5 0 0 0-.5.5v15a.5.5 0 0 0 .5.5h11a.5.5 0 0 0 .5-.5v-15a.5.5 0 0 0-.5-.5zm2 4a.75.75 0 0 1 .69.46L10.75 12l1.4-3.15a.75.75 0 0 1 1.35-.05l1.47 2.95H16a.75.75 0 0 1 0 1.5h-1.5a.75.75 0 0 1-.68-.42l-.92-1.84-1.32 2.97a.75.75 0 0 1-1.37.01L8.9 11.1 8.06 13a.75.75 0 0 1-1.39-.58l1-2.5A.75.75 0 0 1 8.5 8Z"/></svg>
+              </span>
+              <span class="menu__label">Service status</span>
+            </a>
+          </li>
           {% if is_super_admin %}
           <li class="menu__item">
             <a href="/notifications" {% if current_path.startswith('/notifications') %}aria-current="page"{% endif %}>
