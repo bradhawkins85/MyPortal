@@ -55,6 +55,12 @@ def _normalise_service(row: dict[str, Any], assignments: dict[int, list[int]]) -
         normalised["company_ids"] = assignments.get(service_id_int, [])
     else:
         normalised["company_ids"] = []
+    # Parse tags from comma-separated string to list
+    tags_value = normalised.get("tags")
+    if tags_value and isinstance(tags_value, str):
+        normalised["tags"] = [tag.strip() for tag in tags_value.split(",") if tag.strip()]
+    else:
+        normalised["tags"] = []
     return normalised
 
 
@@ -67,7 +73,7 @@ async def list_services(*, include_inactive: bool = False) -> list[dict[str, Any
     rows = await db.fetch_all(
         f"""
         SELECT id, name, description, status, status_message, display_order, is_active,
-               created_at, updated_at, updated_by
+               tags, created_at, updated_at, updated_by
         FROM service_status_services
         {where_clause}
         ORDER BY display_order ASC, name ASC
@@ -83,7 +89,7 @@ async def get_service(service_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
         """
         SELECT id, name, description, status, status_message, display_order, is_active,
-               created_at, updated_at, updated_by
+               tags, created_at, updated_at, updated_by
         FROM service_status_services
         WHERE id = %s
         """,

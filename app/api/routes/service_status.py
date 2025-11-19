@@ -21,6 +21,10 @@ router = APIRouter(prefix="/api/service-status", tags=["Service Status"])
 
 
 def _serialize_service(service: dict[str, Any]) -> ServiceStatusResponse:
+    tags = service.get("tags") or []
+    if isinstance(tags, str):
+        # Parse from comma-separated string if needed
+        tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
     return ServiceStatusResponse(
         id=service["id"],
         name=service["name"],
@@ -30,6 +34,7 @@ def _serialize_service(service: dict[str, Any]) -> ServiceStatusResponse:
         display_order=int(service.get("display_order") or 0),
         is_active=bool(service.get("is_active", True)),
         company_ids=list(service.get("company_ids") or []),
+        tags=list(tags),
         created_at=service.get("created_at"),
         updated_at=service.get("updated_at"),
         updated_by=service.get("updated_by"),
@@ -180,6 +185,21 @@ async def update_service_status(
             status_message=payload.status_message,
             updated_by=updated_by,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+    return _serialize_service(updated)
+
+
+@router.post("/services/{service_id}/refresh-tags", response_model=ServiceStatusResponse)
+async def refresh_service_tags(
+    service_id: int,
+    current_user: dict = Depends(require_super_admin),
+) -> ServiceStatusResponse:
+    """Regenerate AI tags for a service."""
+    try:
+        updated = await service_status_service.refresh_service_tags(service_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not updated:
