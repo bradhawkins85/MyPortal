@@ -37,7 +37,7 @@
           <img src="/static/logo.svg" alt="{{ app_name }}" class="brand__logo" />
           <span class="brand__name">{{ app_name }}</span>
         </div>
-        {% if available_companies %}
+        {% if available_companies and available_companies|length > 1 %}
         <div class="company-switcher">
           <form action="/switch-company" method="post" data-company-switcher>
             {% if csrf_token %}
