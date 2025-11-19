@@ -1,5 +1,5 @@
 # CodeQL code scanning workflow for security vulnerability detection
-# Analyzes Python code for security issues, bugs, and code quality problems
+# Analyzes Python and JavaScript/TypeScript code for security issues, bugs, and code quality problems
 # https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors/configuring-code-scanning
 
 name: "CodeQL Analysis"
@@ -15,7 +15,7 @@ on:
 
 jobs:
   analyze:
-    name: Analyze Python Code
+    name: Analyze Code (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 360
     permissions:
@@ -27,13 +27,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'python' ]
+        language: [ 'python', 'javascript-typescript' ]
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v5
 
     - name: Set up Python
+      if: matrix.language == 'python'
       uses: actions/setup-python@v6
       with:
         python-version: '3.10'
