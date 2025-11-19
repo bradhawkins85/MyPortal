@@ -62,6 +62,12 @@ def is_helpful_slug(slug: str, excluded_tags: set[str] | None = None) -> bool:
     exclusion_set = excluded_tags if excluded_tags is not None else UNHELPFUL_TAG_SLUGS
     if slug in exclusion_set:
         return False
+    # Check if any excluded word appears as a component within the tag
+    # Split by hyphens to get individual words in the slug
+    slug_words = slug.split("-")
+    for word in slug_words:
+        if word in exclusion_set:
+            return False
     if _slug_body_length(slug) < 3:
         return False
     if slug.replace("-", "").isdigit():
