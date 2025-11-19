@@ -194,6 +194,7 @@
     const answerBody = panel.querySelector('[data-agent-answer-body]');
     const sources = panel.querySelector('[data-agent-sources]');
     const sourcesLists = panel.querySelector('[data-agent-source-lists]');
+    const createTicketButton = panel.querySelector('[data-agent-create-ticket]');
 
     if (!form || !input) {
       return;
@@ -203,6 +204,9 @@
     if (status) {
       status.textContent = defaultStatus;
     }
+
+    let lastQuery = '';
+    let lastAnswer = '';
 
     function setBusy(isBusy) {
       if (submitButton) {
@@ -230,6 +234,49 @@
       if (results) {
         results.hidden = true;
       }
+      if (createTicketButton) {
+        createTicketButton.hidden = true;
+      }
+    }
+
+    function openTicketModal() {
+      // Find the create ticket modal
+      const ticketModal = document.getElementById('create-ticket-modal');
+      if (!ticketModal) {
+        return;
+      }
+
+      // Prefill subject with the query
+      const subjectField = ticketModal.querySelector('#modal-ticket-subject');
+      if (subjectField && lastQuery) {
+        subjectField.value = lastQuery;
+      }
+
+      // Prefill description with the query and answer
+      const descriptionField = ticketModal.querySelector('#modal-ticket-description');
+      if (descriptionField) {
+        let description = '';
+        if (lastQuery) {
+          description += `Original Question:\n${lastQuery}\n\n`;
+        }
+        if (lastAnswer) {
+          description += `Agent Response:\n${lastAnswer}`;
+        }
+        if (description) {
+          descriptionField.value = description;
+        }
+      }
+
+      // Open the modal
+      ticketModal.hidden = false;
+      ticketModal.setAttribute('aria-hidden', 'false');
+      
+      // Focus the subject field if empty, otherwise description
+      if (subjectField && !subjectField.value) {
+        subjectField.focus();
+      } else if (descriptionField) {
+        descriptionField.focus();
+      }
     }
 
     async function handleSubmit(event) {
@@ -247,6 +294,9 @@
       if (status) {
         status.textContent = 'Contacting the agent…';
       }
+
+      lastQuery = query;
+      lastAnswer = '';
 
       try {
         const response = await fetch('/api/agent/query', {
@@ -267,6 +317,7 @@
 
         if (payload && typeof payload === 'object') {
           if (payload.answer) {
+            lastAnswer = payload.answer;
             renderSimpleText(answerBody, payload.answer);
             if (answer) {
               answer.hidden = false;
@@ -284,10 +335,24 @@
             }
           }
 
+          // Show create ticket button if no relevant sources found or explicitly suggested
+          if (createTicketButton) {
+            const shouldShowButton = payload.has_relevant_sources === false || 
+                                   (payload.answer && (
+                                     payload.answer.toLowerCase().includes('create a support ticket') ||
+                                     payload.answer.toLowerCase().includes('contact support') ||
+                                     payload.answer.toLowerCase().includes("don't have")
+                                   ));
+            if (shouldShowButton) {
+              createTicketButton.hidden = false;
+            }
+          }
+
           if (results) {
             const answerVisible = answer && !answer.hidden;
             const sourcesVisible = sources && !sources.hidden;
-            results.hidden = !(answerVisible || sourcesVisible);
+            const ticketButtonVisible = createTicketButton && !createTicketButton.hidden;
+            results.hidden = !(answerVisible || sourcesVisible || ticketButtonVisible);
           }
         }
       } catch (error) {
@@ -301,5 +366,9 @@
     }
 
     form.addEventListener('submit', handleSubmit);
+    
+    if (createTicketButton) {
+      createTicketButton.addEventListener('click', openTicketModal);
+    }
   });
 })();

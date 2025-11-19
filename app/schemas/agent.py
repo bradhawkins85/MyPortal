@@ -71,5 +71,6 @@ class AgentQueryResponse(BaseModel):
     event_id: Optional[int] = None
     message: Optional[str] = None
     generated_at: datetime
+    has_relevant_sources: bool = True
     sources: AgentSources
     context: AgentContext
