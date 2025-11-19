@@ -265,6 +265,9 @@
               <div class="card__body">
                 <ul class="list">
                   {% for service in relevant_services %}
+                    {% set status_meta = service_status_lookup.get(service.status) %}
+                    {% set status_variant = status_meta.variant if status_meta else 'status--neutral' %}
+                    {% set status_label = status_meta.label if status_meta else (service.status | replace('_', ' ') | title) %}
                     <li class="list__item">
                       <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;">
                         <div style="flex: 1;">
@@ -272,24 +275,9 @@
                           {% if service.description %}
                             <div class="list__meta">{{ service.description }}</div>
                           {% endif %}
-                          {% if service.matching_tags_count %}
-                            <div class="list__meta">
-                              <span class="badge badge--muted">{{ service.matching_tags_count }} matching tag{{ 's' if service.matching_tags_count > 1 else '' }}</span>
-                            </div>
-                          {% endif %}
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.5rem;">
-                          {% set service_status = service.status or 'operational' %}
-                          {% set status_class_map = {
-                            'operational': 'badge--success',
-                            'maintenance': 'badge--warning',
-                            'degraded': 'badge--warning',
-                            'partial_outage': 'badge--danger',
-                            'outage': 'badge--danger'
-                          } %}
-                          <span class="badge {{ status_class_map.get(service_status, 'badge--muted') }}">
-                            {{ service_status.replace('_', ' ').title() }}
-                          </span>
+                          <span class="status {{ status_variant }}">{{ status_label }}</span>
                         </div>
                       </div>
                       {% if service.status_message %}
