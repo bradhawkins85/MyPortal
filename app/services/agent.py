@@ -272,9 +272,16 @@ async def execute_agent_query(
                 }
             )
 
+    # Check if we have any relevant sources
+    has_relevant_sources = bool(
+        knowledge_base_sources or ticket_sources or product_sources or package_sources
+    )
+    
     context_sections: list[str] = [
         "You are the MyPortal Agent. Answer the user using only the supplied context.",
-        "If the portal context does not contain the answer, say so and recommend contacting support.",
+        "If the portal context does not contain information relevant to the user's question, "
+        "explicitly state that you don't have that specific information available and suggest creating a support ticket.",
+        "Do NOT suggest unrelated articles or products - only reference sources that directly answer the question.",
         "Never reference systems, data, or permissions outside the provided information.",
         "Use Markdown and cite sources inline with [KB:slug], [Ticket:#id], or [Product:SKU].",
         f"User query: {query_text}",
@@ -344,8 +351,12 @@ async def execute_agent_query(
             context_sections.append("- " + " — ".join(parts))
         context_sections.append("")
 
-    if len(context_sections) == 6:  # only preamble, query, and blank line
-        context_sections.append("No portal records matched the query. Explain the absence to the user.")
+    if len(context_sections) == 8:  # only preamble, query, and blank line
+        context_sections.append(
+            "No portal records matched the query. "
+            "Politely inform the user that you don't have specific information about their question "
+            "and recommend they create a support ticket for personalized assistance."
+        )
 
     prompt = "\n".join(context_sections)
 
@@ -392,6 +403,7 @@ async def execute_agent_query(
         "event_id": event_id,
         "message": message,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "has_relevant_sources": has_relevant_sources,
         "sources": {
             "knowledge_base": knowledge_base_sources,
             "tickets": ticket_sources,

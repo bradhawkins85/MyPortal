@@ -43,6 +43,16 @@
           <h3 class="agent-sources__heading">Sources</h3>
           <div class="agent-sources__lists" data-agent-source-lists></div>
         </section>
+        <div class="agent-panel__actions" data-agent-actions hidden>
+          <button 
+            type="button" 
+            class="button button--primary" 
+            data-agent-create-ticket
+            hidden
+          >
+            Create Support Ticket
+          </button>
+        </div>
       </div>
     </div>
   </section>
@@ -155,6 +165,53 @@
     <p class="dashboard__empty">No company is active yet. Switch companies to populate the snapshot.</p>
     {% endif %}
   </section>
+
+  <!-- Simple ticket creation modal for dashboard -->
+  <div
+    class="modal"
+    id="create-ticket-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="create-ticket-title"
+    aria-hidden="true"
+    hidden
+  >
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-modal-close>
+        <span class="visually-hidden">Close create ticket form</span>
+        &times;
+      </button>
+      <h2 class="modal__title" id="create-ticket-title">Create a ticket</h2>
+      <p class="modal__subtitle">Raise a new support request and the team will follow up with updates.</p>
+      <form id="dashboard-ticket-form" action="/tickets" method="post" class="form" novalidate>
+        {% include "partials/csrf.html" %}
+        <div class="form-field">
+          <label class="form-label" for="modal-ticket-subject">Subject</label>
+          <input
+            id="modal-ticket-subject"
+            name="subject"
+            class="form-input"
+            maxlength="255"
+            required
+          />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="modal-ticket-description">Description</label>
+          <textarea
+            id="modal-ticket-description"
+            name="description"
+            class="form-input form-input--textarea"
+            rows="8"
+            placeholder="Describe the issue, impact, and any troubleshooting already attempted..."
+          ></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">Submit ticket</button>
+          <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 {% endblock %}
 
@@ -162,5 +219,39 @@
   {{ super() }}
   {% if ollama_enabled %}
   <script src="/static/js/agent.js" defer></script>
+  <script>
+    // Simple modal handler for dashboard ticket creation
+    document.addEventListener('DOMContentLoaded', () => {
+      const modal = document.getElementById('create-ticket-modal');
+      if (!modal) return;
+
+      const closeButtons = modal.querySelectorAll('[data-modal-close]');
+      
+      // Close modal function
+      function closeModal() {
+        modal.hidden = true;
+        modal.setAttribute('aria-hidden', 'true');
+      }
+      
+      // Close on button click
+      closeButtons.forEach(button => {
+        button.addEventListener('click', closeModal);
+      });
+      
+      // Close on outside click
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          closeModal();
+        }
+      });
+      
+      // Close on Escape key
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !modal.hidden) {
+          closeModal();
+        }
+      });
+    });
+  </script>
   {% endif %}
 {% endblock %}
