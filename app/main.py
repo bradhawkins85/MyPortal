@@ -33,13 +33,21 @@ from fastapi import (
 from fastapi.params import Form as FormField
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.exception_handlers import http_exception_handler
 from itsdangerous import BadSignature, URLSafeSerializer
 from pydantic import ValidationError
 from starlette.datastructures import FormData, URL
+from http import HTTPStatus
 
 from app.api.routes import (
     agent,
@@ -1014,6 +1022,118 @@ def _request_prefers_json(request: Request) -> bool:
     if "application/json" in content_type:
         return True
     return False
+
+
+def _request_accepts_html(request: Request) -> bool:
+    if _request_prefers_json(request):
+        return False
+    accept = (request.headers.get("accept") or "*").lower()
+    if "text/html" in accept or "application/xhtml+xml" in accept:
+        return True
+    return "*/*" in accept or accept == "*"
+
+
+def _get_status_phrase(status_code: int) -> str:
+    try:
+        return HTTPStatus(status_code).phrase
+    except ValueError:
+        return "Error"
+
+
+def _format_error_detail(detail: Any) -> str | None:
+    if detail is None:
+        return None
+    if isinstance(detail, str):
+        return detail
+    try:
+        return json.dumps(detail, ensure_ascii=False, indent=2)
+    except (TypeError, ValueError):
+        return str(detail)
+
+
+async def _render_error_page(
+    request: Request,
+    *,
+    status_code: int,
+    title: str | None = None,
+    message: str,
+    detail: str | None = None,
+) -> HTMLResponse:
+    status_message = _get_status_phrase(status_code)
+    document_title = title or f"{status_code} {status_message}"
+    try:
+        user, _ = await _get_optional_user(request)
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        log_error("Failed to load user context for error page", error=str(exc))
+        user = None
+    context = await _build_portal_context(
+        request,
+        user,
+        extra={
+            "title": document_title,
+            "error_title": title or status_message,
+            "error_message": message,
+            "error_status_code": status_code,
+            "error_status_message": status_message,
+            "error_detail": detail,
+            "error_path": str(request.url),
+        },
+    )
+    return templates.TemplateResponse(
+        "errors/error.html",
+        context,
+        status_code=status_code,
+    )
+
+
+@app.exception_handler(HTTPException)
+async def handle_http_exception(request: Request, exc: HTTPException):
+    if _request_prefers_json(request) or not _request_accepts_html(request):
+        return await http_exception_handler(request, exc)
+    detail_text = _format_error_detail(exc.detail)
+    friendly_titles = {
+        status.HTTP_404_NOT_FOUND: "Page not found",
+        status.HTTP_403_FORBIDDEN: "Access denied",
+        status.HTTP_401_UNAUTHORIZED: "Sign in required",
+    }
+    friendly_messages = {
+        status.HTTP_404_NOT_FOUND: "We couldn't find the page you were looking for. Use the navigation menu to continue.",
+        status.HTTP_403_FORBIDDEN: "You don't have permission to view this page. Choose another destination from the menu.",
+        status.HTTP_401_UNAUTHORIZED: "Please sign in to continue. You can return to the dashboard to start again.",
+    }
+    message = friendly_messages.get(exc.status_code) or detail_text or _get_status_phrase(exc.status_code)
+    detail_for_template = None
+    if detail_text and detail_text != message:
+        detail_for_template = detail_text
+    response = await _render_error_page(
+        request,
+        status_code=exc.status_code,
+        title=friendly_titles.get(exc.status_code),
+        message=message,
+        detail=detail_for_template,
+    )
+    if exc.headers:
+        for header, value in exc.headers.items():
+            response.headers[header] = value
+    return response
+
+
+@app.exception_handler(Exception)
+async def handle_unexpected_exception(request: Request, exc: Exception):  # pragma: no cover - defensive
+    log_error("Unhandled application error", error=str(exc), request_path=str(request.url))
+    if _request_prefers_json(request):
+        return JSONResponse(
+            {"detail": "Internal server error"},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    if not _request_accepts_html(request):
+        return PlainTextResponse("Internal Server Error", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return await _render_error_page(
+        request,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        title="Something went wrong",
+        message="We ran into a problem while loading this page. Try again, or pick another destination from the menu.",
+    )
 
 
 async def _resolve_initial_company_id(user: dict[str, Any]) -> int | None:
