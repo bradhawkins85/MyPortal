@@ -100,17 +100,12 @@ async def create_service(payload: dict[str, Any], *, company_ids: Sequence[int] 
         raise ValueError("Missing payload for service creation")
     columns = ", ".join(payload.keys())
     placeholders = ", ".join(["%s"] * len(payload))
-    await db.execute(
+    service_id = await db.execute_returning_lastrowid(
         f"INSERT INTO service_status_services ({columns}) VALUES ({placeholders})",
         tuple(payload.values()),
     )
-    row = await db.fetch_one("SELECT * FROM service_status_services WHERE id = LAST_INSERT_ID()")
-    if not row:
+    if not service_id:
         raise RuntimeError("Failed to create service status entry")
-    service = _normalise_service(row, {})
-    service_id = service.get("id")
-    if service_id is None:
-        raise RuntimeError("Created service is missing an identifier")
     await replace_service_companies(service_id, company_ids or [])
     return await get_service(service_id)
 
