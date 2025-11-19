@@ -280,3 +280,55 @@ def summarise_services(services: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "total": total,
         "by_status": {value: summary.get(value, 0) for value in _STATUS_LOOKUP},
     }
+
+
+async def find_relevant_services_for_ticket(
+    ticket_ai_tags: list[str],
+    company_id: int | None,
+) -> list[dict[str, Any]]:
+    """
+    Find services that have tags matching the ticket's AI tags.
+    Only returns services that the user has permission to see based on company_id.
+    
+    Args:
+        ticket_ai_tags: List of AI tags from the ticket
+        company_id: The company ID to filter services by (for permission checking)
+    
+    Returns:
+        List of relevant services with matching tag count
+    """
+    if not ticket_ai_tags:
+        return []
+    
+    # Get all services visible to this company
+    services = await list_services_for_company(company_id, include_inactive=False)
+    
+    # Filter services by matching tags
+    relevant_services = []
+    for service in services:
+        service_tags_raw = service.get("tags") or []
+        
+        # Parse service tags if they're stored as a string
+        if isinstance(service_tags_raw, str):
+            service_tags = [tag.strip().lower() for tag in service_tags_raw.split(",") if tag.strip()]
+        elif isinstance(service_tags_raw, list):
+            service_tags = [str(tag).strip().lower() for tag in service_tags_raw if tag]
+        else:
+            service_tags = []
+        
+        # Count matching tags
+        matching_tags = set(ticket_ai_tags).intersection(set(service_tags))
+        
+        if matching_tags:
+            # Add matching_tags_count to service info
+            service_with_matches = {
+                **service,
+                "matching_tags_count": len(matching_tags),
+                "matching_tags": list(matching_tags),
+            }
+            relevant_services.append(service_with_matches)
+    
+    # Sort by number of matching tags (descending) and then by name
+    relevant_services.sort(key=lambda s: (-s["matching_tags_count"], str(s.get("name", "")).lower()))
+    
+    return relevant_services
