@@ -133,3 +133,110 @@ async def test_execute_agent_query_rejects_blank(monkeypatch):
     result = await agent_service.execute_agent_query("   ", {"id": 1}, memberships=[])
     assert result["status"] == "error"
     assert result["answer"] is None
+
+
+@pytest.mark.anyio
+async def test_execute_agent_query_has_relevant_sources_flag(monkeypatch):
+    """Test that has_relevant_sources flag is set correctly when sources are found."""
+    user = {"id": 7, "is_super_admin": False}
+    memberships = [{"company_id": 1, "company_name": "Test Co", "can_access_shop": False}]
+
+    kb_result = {
+        "results": [
+            {
+                "slug": "test-article",
+                "title": "Test Article",
+                "summary": "Test summary",
+                "excerpt": "Test excerpt",
+                "updated_at_iso": "2025-01-05T09:00:00Z",
+            }
+        ]
+    }
+
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "build_access_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "search_articles",
+        AsyncMock(return_value=kb_result),
+    )
+    monkeypatch.setattr(
+        agent_service.tickets_repo,
+        "list_tickets_for_user",
+        AsyncMock(return_value=[]),
+    )
+
+    async def fake_trigger(slug, payload, *, background):
+        return {
+            "status": "succeeded",
+            "model": "llama3",
+            "response": {"response": "Answer text"},
+            "event_id": 918,
+        }
+
+    monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
+
+    result = await agent_service.execute_agent_query(
+        "test query",
+        user,
+        active_company_id=1,
+        memberships=memberships,
+    )
+
+    assert result["has_relevant_sources"] is True
+    assert len(result["sources"]["knowledge_base"]) == 1
+
+
+@pytest.mark.anyio
+async def test_execute_agent_query_no_relevant_sources(monkeypatch):
+    """Test that has_relevant_sources flag is False when no sources are found."""
+    user = {"id": 7, "is_super_admin": False}
+    memberships = [{"company_id": 1, "company_name": "Test Co", "can_access_shop": False}]
+
+    # Return empty results
+    kb_result = {"results": []}
+
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "build_access_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "search_articles",
+        AsyncMock(return_value=kb_result),
+    )
+    monkeypatch.setattr(
+        agent_service.tickets_repo,
+        "list_tickets_for_user",
+        AsyncMock(return_value=[]),
+    )
+
+    async def fake_trigger(slug, payload, *, background):
+        prompt = payload.get("prompt", "")
+        # Verify the prompt contains the updated messaging
+        assert "don't have specific information" in prompt.lower() or "no portal records matched" in prompt.lower()
+        return {
+            "status": "succeeded",
+            "model": "llama3",
+            "response": {"response": "I don't have specific information about that."},
+            "event_id": 919,
+        }
+
+    monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
+
+    result = await agent_service.execute_agent_query(
+        "test query",
+        user,
+        active_company_id=1,
+        memberships=memberships,
+    )
+
+    assert result["has_relevant_sources"] is False
+    assert len(result["sources"]["knowledge_base"]) == 0
+    assert len(result["sources"]["tickets"]) == 0
+    assert len(result["sources"]["products"]) == 0
+    assert len(result["sources"]["packages"]) == 0
