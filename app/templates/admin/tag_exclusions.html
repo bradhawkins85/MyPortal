@@ -116,6 +116,12 @@
             deleteExclusion(slug);
           });
         });
+
+        // Trigger table update event for sorting/filtering to refresh
+        const table = document.getElementById('exclusions-table');
+        if (table) {
+          table.dispatchEvent(new CustomEvent('table:rows-updated'));
+        }
       }
 
       async function deleteExclusion(tagSlug) {
