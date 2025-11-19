@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from app.repositories import service_status as service_status_repo
+from app.services import tag_generator
 
 DEFAULT_STATUS = "operational"
 
@@ -88,6 +89,36 @@ def describe_status(value: str) -> dict[str, str]:
     return _STATUS_LOOKUP.get(value, _STATUS_LOOKUP[DEFAULT_STATUS])
 
 
+def _parse_tags(value: Any) -> list[str]:
+    """Parse tags from a comma-separated string or list."""
+    if not value:
+        return []
+    
+    if isinstance(value, list):
+        # Already a list, clean each tag
+        tags = []
+        for tag in value:
+            cleaned = str(tag).strip().lower() if tag else ""
+            if cleaned and len(cleaned) <= 50:
+                tags.append(cleaned)
+        return tags
+    
+    # Parse as comma-separated string
+    tags = []
+    for tag in str(value).split(","):
+        cleaned = tag.strip().lower()
+        if cleaned and len(cleaned) <= 50:
+            tags.append(cleaned)
+    return tags
+
+
+def _serialize_tags(tags: list[str]) -> str:
+    """Convert a list of tags to a comma-separated string for storage."""
+    if not tags:
+        return ""
+    return ", ".join(str(tag).strip() for tag in tags if tag and str(tag).strip())
+
+
 async def list_services(*, include_inactive: bool = False) -> list[dict[str, Any]]:
     return await service_status_repo.list_services(include_inactive=include_inactive)
 
@@ -117,6 +148,7 @@ async def create_service(
     *,
     company_ids: Sequence[int | str] | None = None,
     updated_by: int | None = None,
+    generate_tags: bool = True,
 ) -> dict[str, Any]:
     name = _clean_text(payload.get("name")) if payload else None
     if not name:
@@ -126,6 +158,18 @@ async def create_service(
     status = _normalise_status((payload or {}).get("status"))
     display_order = _parse_int((payload or {}).get("display_order"), default=0)
     is_active = bool((payload or {}).get("is_active", True))
+    
+    # Handle tags
+    tags_input = (payload or {}).get("tags")
+    if tags_input:
+        # Use provided tags
+        tags = _parse_tags(tags_input)
+    elif generate_tags:
+        # Generate tags using AI
+        tags = await tag_generator.generate_tags_for_service(name, description)
+    else:
+        tags = []
+    
     repo_payload: dict[str, Any] = {
         "name": name,
         "description": description,
@@ -133,6 +177,7 @@ async def create_service(
         "status_message": status_message,
         "display_order": display_order,
         "is_active": 1 if is_active else 0,
+        "tags": _serialize_tags(tags),
     }
     if updated_by:
         repo_payload["updated_by"] = updated_by
@@ -170,6 +215,9 @@ async def update_service(
         updates["display_order"] = _parse_int(payload.get("display_order"), default=0)
     if "is_active" in payload:
         updates["is_active"] = 1 if bool(payload.get("is_active")) else 0
+    if "tags" in payload:
+        tags = _parse_tags(payload.get("tags"))
+        updates["tags"] = _serialize_tags(tags)
     if updated_by:
         updates["updated_by"] = updated_by
     return await service_status_repo.update_service(
@@ -197,6 +245,26 @@ async def update_service_status(
 
 async def delete_service(service_id: int) -> None:
     await service_status_repo.delete_service(service_id)
+
+
+async def refresh_service_tags(service_id: int) -> dict[str, Any]:
+    """Regenerate tags for a service using AI."""
+    service = await get_service(service_id)
+    if not service:
+        raise ValueError("Service not found")
+    
+    name = service.get("name")
+    description = service.get("description")
+    
+    if not name:
+        raise ValueError("Service name is required for tag generation")
+    
+    # Generate new tags
+    tags = await tag_generator.generate_tags_for_service(name, description)
+    
+    # Update the service with new tags
+    updates = {"tags": _serialize_tags(tags)}
+    return await service_status_repo.update_service(service_id, updates)
 
 
 def summarise_services(services: Sequence[Mapping[str, Any]]) -> dict[str, Any]:

@@ -6886,6 +6886,10 @@ def _extract_service_status_form(form: FormData) -> tuple[dict[str, Any], list[i
         "display_order": form.get("display_order"),
         "is_active": bool(form.get("is_active")),
     }
+    # Handle tags - can be comma-separated string
+    tags_input = form.get("tags")
+    if tags_input:
+        payload["tags"] = tags_input
     company_ids = form.getlist("companyIds") if hasattr(form, "getlist") else []
     return payload, company_ids
 
@@ -6950,6 +6954,25 @@ async def admin_delete_service_status(request: Request, service_id: int):
         return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(
         url=f"/admin/service-status?success={quote('Service deleted.')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/service-status/{service_id}/refresh-tags", response_class=HTMLResponse)
+async def admin_refresh_service_tags(request: Request, service_id: int):
+    user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    try:
+        await service_status_service.refresh_service_tags(service_id)
+    except ValueError as exc:
+        url = f"/admin/service-status?serviceId={service_id}&error={quote(str(exc))}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    except Exception as exc:  # pragma: no cover - defensive
+        url = f"/admin/service-status?serviceId={service_id}&error={quote('Failed to refresh tags.')}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        url=f"/admin/service-status?serviceId={service_id}&success={quote('Tags refreshed.')}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
