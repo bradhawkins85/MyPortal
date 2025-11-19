@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block header_title %}
+  <div class="header__title-content header__title-content--stacked">
+    <span class="header__title-text">Service status</span>
+    {% if active_company %}
+      <span class="header__title-meta">{{ active_company.company_name or active_company.name }}</span>
+    {% else %}
+      <span class="header__title-meta">Global services</span>
+    {% endif %}
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {% if is_super_admin %}
+    <a class="button button--ghost button--small" href="/admin/service-status">
+      Manage services
+    </a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="service-status">
+  <section class="card card--panel service-status__summary">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Current availability</h2>
+        <p class="card__subtitle">
+          {% if active_company %}
+            Showing services assigned to {{ active_company.company_name or active_company.name }}.
+          {% else %}
+            Showing services that are visible to every company.
+          {% endif %}
+        </p>
+      </div>
+    </header>
+    <div class="service-status__stats">
+      {% for definition in service_status_definitions %}
+        <div class="service-status__stat">
+          <span class="service-status__stat-label">{{ definition.label }}</span>
+          <span class="service-status__stat-value">{{ service_status_summary.by_status.get(definition.value, 0) }}</span>
+        </div>
+      {% endfor %}
+      <div class="service-status__stat service-status__stat--total">
+        <span class="service-status__stat-label">Tracked services</span>
+        <span class="service-status__stat-value">{{ service_status_summary.total }}</span>
+      </div>
+    </div>
+  </section>
+
+  {% if service_status_entries %}
+    <div class="service-status__grid">
+      {% for service in service_status_entries %}
+        {% set status_meta = service_status_lookup.get(service.status) %}
+        {% set variant = status_meta.variant if status_meta else 'status--neutral' %}
+        {% set label = status_meta.label if status_meta else service.status|title %}
+        {% set description = status_meta.description if status_meta else '' %}
+        <article class="service-card">
+          <header class="service-card__header">
+            <h3 class="service-card__title">{{ service.name }}</h3>
+            <span class="status {{ variant }}">{{ label }}</span>
+          </header>
+          {% if service.status_message %}
+            <p class="service-card__message">{{ service.status_message }}</p>
+          {% elif description %}
+            <p class="service-card__message service-card__message--muted">{{ description }}</p>
+          {% endif %}
+          {% if service.description %}
+            <p class="service-card__description">{{ service.description }}</p>
+          {% endif %}
+          <footer class="service-card__footer">
+            {% if service.updated_at %}
+              <span>Updated {{ service.updated_at.strftime('%d %b %Y %H:%M') if service.updated_at.__class__.__name__ == 'datetime' else service.updated_at }}</span>
+            {% else %}
+              <span>Last updated recently</span>
+            {% endif %}
+          </footer>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="card card--panel">
+      <div class="card__body">
+        <p class="text-muted">No services are assigned to your company yet.</p>
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}
