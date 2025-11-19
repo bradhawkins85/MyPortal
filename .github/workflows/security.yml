@@ -1,0 +1,90 @@
+# Security scanning workflow using Python security tools
+# Uses bandit for Python security linting and pip-audit for dependency vulnerabilities
+# https://bandit.readthedocs.io/
+# https://pypi.org/project/pip-audit/
+
+name: "Security Scan"
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+  schedule:
+    # Run security scan weekly on Tuesday at 9:00 AM UTC
+    - cron: '0 9 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  bandit:
+    name: Bandit Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install bandit
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit[toml] bandit-sarif-formatter
+
+      - name: Run bandit security scan
+        run: |
+          bandit -r app -f sarif -o bandit-results.sarif --exit-zero --severity-level medium
+
+      - name: Upload bandit results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: bandit-results.sarif
+          category: bandit
+
+  pip-audit:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+
+      - name: Run pip-audit for dependency vulnerabilities
+        run: |
+          # Install project dependencies first
+          pip install -e .
+          # Run pip-audit and continue even if vulnerabilities are found
+          pip-audit --desc --format json --output pip-audit-results.json || true
+
+      - name: Display pip-audit results
+        if: always()
+        run: |
+          if [ -f pip-audit-results.json ]; then
+            echo "Dependency vulnerabilities found:"
+            cat pip-audit-results.json
+          fi
+
+      - name: Upload pip-audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-results
+          path: pip-audit-results.json
+          retention-days: 30
