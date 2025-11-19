@@ -13,6 +13,7 @@ class ServiceStatusBase(BaseModel):
     display_order: int = 0
     is_active: bool = True
     company_ids: list[int] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
 
 
 class ServiceStatusCreate(ServiceStatusBase):
@@ -27,6 +28,7 @@ class ServiceStatusUpdate(BaseModel):
     display_order: int | None = None
     is_active: bool | None = None
     company_ids: list[int] | None = None
+    tags: list[str] | None = None
 
 
 class ServiceStatusResponse(BaseModel):
@@ -38,6 +40,7 @@ class ServiceStatusResponse(BaseModel):
     display_order: int
     is_active: bool
     company_ids: list[int] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
     updated_by: int | None = None
