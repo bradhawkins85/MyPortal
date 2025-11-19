@@ -71,6 +71,7 @@ from app.api.routes import (
     ports,
     scheduler as scheduler_api,
     roles,
+    service_status as service_status_api,
     staff as staff_api,
     subscriptions as subscriptions_api,
     tag_exclusions,
@@ -167,6 +168,7 @@ from app.services import template_variables
 from app.services import webhook_monitor
 from app.services import xero as xero_service
 from app.services import issues as issues_service
+from app.services import service_status as service_status_service
 from app.services import impersonation as impersonation_service
 from app.services.realtime import refresh_notifier
 from app.services.redis import close_redis_client, get_redis_client
@@ -653,6 +655,7 @@ app.include_router(imap_api.router)
 app.include_router(mcp_api.router)
 app.include_router(system.router)
 app.include_router(uptimekuma.router)
+app.include_router(service_status_api.router)
 app.include_router(xero.router)
 app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
@@ -3375,6 +3378,33 @@ async def index(request: Request):
             "overview": overview,
             "notification_unread_count": overview.get("unread_notifications", 0),
             "ollama_enabled": ollama_enabled,
+        },
+    )
+
+
+@app.get("/service-status", response_class=HTMLResponse)
+async def service_status_dashboard(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    active_company_id = getattr(request.state, "active_company_id", None)
+    try:
+        company_id = int(active_company_id) if active_company_id is not None else None
+    except (TypeError, ValueError):
+        company_id = None
+    services = await service_status_service.list_services_for_company(company_id)
+    summary = service_status_service.summarise_services(services)
+    status_lookup = {entry["value"]: entry for entry in service_status_service.STATUS_DEFINITIONS}
+    return await _render_template(
+        "service_status/dashboard.html",
+        request,
+        user,
+        extra={
+            "title": "Service status",
+            "service_status_entries": services,
+            "service_status_summary": summary,
+            "service_status_definitions": service_status_service.STATUS_DEFINITIONS,
+            "service_status_lookup": status_lookup,
         },
     )
 
@@ -6683,6 +6713,122 @@ async def invite_staff_member(staff_id: int, request: Request):
         invited_user_id=created_user["id"],
     )
     return JSONResponse({"success": True})
+
+@app.get("/admin/service-status", response_class=HTMLResponse)
+async def admin_service_status_page(request: Request):
+    user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    services = await service_status_service.list_services(include_inactive=True)
+    summary = service_status_service.summarise_services(services)
+    companies = await company_repo.list_companies()
+    service_id_param = request.query_params.get("serviceId")
+    editing_service = None
+    if service_id_param:
+        try:
+            editing_service = await service_status_service.get_service(int(service_id_param))
+        except (TypeError, ValueError):
+            editing_service = None
+    status_lookup = {entry["value"]: entry for entry in service_status_service.STATUS_DEFINITIONS}
+    company_lookup = {
+        int(company["id"]): company.get("name")
+        for company in companies
+        if company.get("id") is not None
+    }
+    return await _render_template(
+        "admin/service_status.html",
+        request,
+        user,
+        extra={
+            "title": "Service status",
+            "service_status_entries": services,
+            "service_status_summary": summary,
+            "service_status_definitions": service_status_service.STATUS_DEFINITIONS,
+            "service_status_lookup": status_lookup,
+            "company_options": companies,
+            "service_status_company_lookup": company_lookup,
+            "service_status_editing": editing_service,
+            "service_status_default": service_status_service.DEFAULT_STATUS,
+        },
+    )
+
+
+def _extract_service_status_form(form: FormData) -> tuple[dict[str, Any], list[int]]:
+    payload = {
+        "name": form.get("name"),
+        "description": form.get("description"),
+        "status": form.get("status") or service_status_service.DEFAULT_STATUS,
+        "status_message": form.get("status_message"),
+        "display_order": form.get("display_order"),
+        "is_active": bool(form.get("is_active")),
+    }
+    company_ids = form.getlist("companyIds") if hasattr(form, "getlist") else []
+    return payload, company_ids
+
+
+@app.post("/admin/service-status", response_class=HTMLResponse)
+async def admin_create_service_status(request: Request):
+    user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    payload, company_ids = _extract_service_status_form(form)
+    try:
+        await service_status_service.create_service(
+            payload,
+            company_ids=company_ids,
+            updated_by=int(user.get("id")) if user.get("id") else None,
+        )
+    except ValueError as exc:
+        url = f"/admin/service-status?error={quote(str(exc))}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        url=f"/admin/service-status?success={quote('Service created.')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/service-status/{service_id}", response_class=HTMLResponse)
+async def admin_update_service_status(request: Request, service_id: int):
+    user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    payload, company_ids = _extract_service_status_form(form)
+    try:
+        updated = await service_status_service.update_service(
+            service_id,
+            payload,
+            company_ids=company_ids,
+            updated_by=int(user.get("id")) if user.get("id") else None,
+        )
+    except ValueError as exc:
+        url = f"/admin/service-status?serviceId={service_id}&error={quote(str(exc))}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    if not updated:
+        url = f"/admin/service-status?error={quote('Service not found.')}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        url=f"/admin/service-status?success={quote('Service updated.')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/service-status/{service_id}/delete", response_class=HTMLResponse)
+async def admin_delete_service_status(request: Request, service_id: int):
+    user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    try:
+        await service_status_service.delete_service(service_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        url = f"/admin/service-status?error={quote(str(exc))}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        url=f"/admin/service-status?success={quote('Service deleted.')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
 
 @app.get("/admin/profile", response_class=HTMLResponse)
 async def admin_profile_page(request: Request):

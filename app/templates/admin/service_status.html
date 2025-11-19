@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block header_title %}
+  <div class="header__title-content header__title-content--stacked">
+    <span class="header__title-text">Service status catalogue</span>
+    <span class="header__title-meta">Control which customers can see each status tile.</span>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  <a class="button button--ghost button--small" href="/service-status">View dashboard</a>
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns service-status-admin">
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Tracked services</h2>
+        <p class="card__subtitle">Update availability details and adjust company visibility assignments.</p>
+      </div>
+      <div class="service-status-admin__stats">
+        {% for definition in service_status_definitions %}
+          <div class="service-status-admin__stat">
+            <span class="service-status-admin__stat-label">{{ definition.label }}</span>
+            <span class="service-status-admin__stat-value">{{ service_status_summary.by_status.get(definition.value, 0) }}</span>
+          </div>
+        {% endfor %}
+        <div class="service-status-admin__stat service-status-admin__stat--total">
+          <span class="service-status-admin__stat-label">Total</span>
+          <span class="service-status-admin__stat-value">{{ service_status_summary.total }}</span>
+        </div>
+      </div>
+    </header>
+    <div class="table-toolbar">
+      <input
+        type="search"
+        class="form-input"
+        placeholder="Filter services"
+        aria-label="Filter service status table"
+        data-table-filter="service-status-table"
+      />
+      <span class="text-muted">{{ service_status_entries|length }} entries</span>
+    </div>
+    <div class="table-wrapper">
+      <table class="table" id="service-status-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string">Service</th>
+            <th scope="col" data-sort="string">Status</th>
+            <th scope="col" data-sort="string">Visibility</th>
+            <th scope="col" data-sort="string">Updated</th>
+            <th scope="col" class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for service in service_status_entries %}
+            {% set status_meta = service_status_lookup.get(service.status) %}
+            {% set status_label = status_meta.label if status_meta else service.status|title %}
+            {% set variant = status_meta.variant if status_meta else 'status--neutral' %}
+            <tr>
+              <td data-label="Service">
+                <div class="service-status-admin__name">{{ service.name }}</div>
+                {% if service.description %}
+                  <div class="table__meta">{{ service.description }}</div>
+                {% endif %}
+              </td>
+              <td data-label="Status">
+                <span class="status {{ variant }}">{{ status_label }}</span>
+              </td>
+              <td data-label="Visibility">
+                {% if service.company_ids %}
+                  <ul class="service-status-admin__companies">
+                    {% for company_id in service.company_ids %}
+                      <li>{{ service_status_company_lookup.get(company_id, 'Company #' ~ company_id) }}</li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <span class="text-muted">All companies</span>
+                {% endif %}
+              </td>
+              <td data-label="Updated">
+                {% if service.updated_at %}
+                  {{ service.updated_at.strftime('%d %b %Y %H:%M') if service.updated_at.__class__.__name__ == 'datetime' else service.updated_at }}
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td class="table__actions">
+                <div class="action-menu">
+                  <a class="button button--ghost button--small" href="/admin/service-status?serviceId={{ service.id }}">Edit</a>
+                  <form action="/admin/service-status/{{ service.id }}/delete" method="post" class="inline-form" data-confirm="Delete this service?">
+                    {% include "partials/csrf.html" %}
+                    <button type="submit" class="button button--ghost button--danger button--small">Delete</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="5" class="table__empty">No services have been added yet.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">{{ 'Update service' if service_status_editing else 'Add service' }}</h2>
+        <p class="card__subtitle">{{ 'Modify the selected service entry.' if service_status_editing else 'Define a new tile for the status dashboard.' }}</p>
+      </div>
+    </header>
+    <div class="card__body card__body--stacked">
+      <form
+        action="{{ '/admin/service-status/' ~ service_status_editing.id if service_status_editing else '/admin/service-status' }}"
+        method="post"
+        class="form"
+      >
+        {% include "partials/csrf.html" %}
+        <div class="form-field">
+          <label class="form-label" for="service-name">Service name</label>
+          <input
+            id="service-name"
+            name="name"
+            class="form-input"
+            value="{{ service_status_editing.name if service_status_editing else '' }}"
+            required
+            maxlength="200"
+          />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="service-description">Description</label>
+          <textarea
+            id="service-description"
+            name="description"
+            class="form-input form-input--textarea"
+            rows="3"
+          >{{ service_status_editing.description if service_status_editing else '' }}</textarea>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="service-status">Status</label>
+          <select id="service-status" name="status" class="form-input">
+            {% set selected_status = service_status_editing.status if service_status_editing else service_status_default %}
+            {% for definition in service_status_definitions %}
+              <option value="{{ definition.value }}" {% if definition.value == selected_status %}selected{% endif %}>{{ definition.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="service-status-message">Status message</label>
+          <textarea
+            id="service-status-message"
+            name="status_message"
+            class="form-input form-input--textarea"
+            rows="2"
+          >{{ service_status_editing.status_message if service_status_editing else '' }}</textarea>
+          <p class="form-help">Optional short note displayed on the dashboard.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="service-companies">Visible to companies</label>
+          <select id="service-companies" name="companyIds" class="form-input" multiple size="6">
+            {% if company_options %}
+              {% for company in company_options %}
+                <option value="{{ company.id }}" {% if service_status_editing and company.id in service_status_editing.company_ids %}selected{% endif %}>{{ company.name }}</option>
+              {% endfor %}
+            {% else %}
+              <option value="" disabled>No companies available</option>
+            {% endif %}
+          </select>
+          <p class="form-help">Leave empty to show the service to every customer.</p>
+        </div>
+        <div class="form-grid">
+          <div class="form-field">
+            <label class="form-label" for="service-order">Display order</label>
+            <input
+              id="service-order"
+              name="display_order"
+              type="number"
+              inputmode="numeric"
+              class="form-input"
+              value="{{ service_status_editing.display_order if service_status_editing else 0 }}"
+            />
+          </div>
+          <div class="form-field form-field--checkbox">
+            <label class="form-checkbox">
+              <input type="checkbox" name="is_active" {% if service_status_editing is none or service_status_editing.is_active %}checked{% endif %} />
+              <span>Active</span>
+            </label>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">{{ 'Save changes' if service_status_editing else 'Create service' }}</button>
+          {% if service_status_editing %}
+            <a class="button button--ghost" href="/admin/service-status">Cancel</a>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+{% endblock %}
