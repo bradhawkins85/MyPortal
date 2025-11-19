@@ -6068,6 +6068,22 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
             minutes_spent=None,
             is_billable=False,
         )
+        
+        # Handle file attachments
+        from app.services import ticket_attachments as attachments_service
+        attachments = form.getlist("attachments")
+        if attachments:
+            for attachment in attachments:
+                if hasattr(attachment, "filename") and attachment.filename:
+                    try:
+                        await attachments_service.save_uploaded_file(
+                            ticket_id=ticket_id,
+                            file=attachment,
+                            access_level="closed",
+                            uploaded_by_user_id=user_id,
+                        )
+                    except Exception as exc:
+                        log_error("Failed to save attachment", ticket_id=ticket_id, filename=attachment.filename, error=str(exc))
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create portal ticket reply", ticket_id=ticket_id, error=str(exc))
         return await _render_portal_ticket_detail(
@@ -11206,6 +11222,36 @@ async def _render_portal_ticket_detail(
             min_matching_tags=min_matching_tags,
         )
 
+    # Get ticket watchers
+    watcher_records = await tickets_repo.list_watchers(ticket_id)
+    watchers = []
+    for watcher in watcher_records:
+        if watcher.get("user_id"):
+            watcher_user = user_lookup.get(watcher.get("user_id"))
+            watchers.append({
+                "id": watcher.get("user_id"),
+                "label": _format_user_label(watcher_user) if watcher_user else "Unknown User",
+                "email": watcher.get("email"),
+            })
+        elif watcher.get("email"):
+            watchers.append({
+                "id": None,
+                "label": watcher.get("email"),
+                "email": watcher.get("email"),
+            })
+
+    # Get linked assets
+    ticket_assets = await tickets_repo.list_ticket_assets(ticket_id)
+    
+    # Find relevant service statuses based on AI tag matching
+    from app.services import service_status as service_status_service
+    relevant_services: list[dict[str, Any]] = []
+    if ticket_ai_tags:
+        relevant_services = await service_status_service.find_relevant_services_for_ticket(
+            ticket_ai_tags=ticket_ai_tags,
+            company_id=company_numeric,
+        )
+
     extra = {
         "title": f"Ticket {ticket_id}",
         "ticket": {
@@ -11226,6 +11272,9 @@ async def _render_portal_ticket_detail(
             "billed_at_iso": billed_at_iso,
         },
         "ticket_replies": timeline_entries,
+        "ticket_watchers": watchers,
+        "ticket_assets": ticket_assets,
+        "relevant_services": relevant_services,
         "can_reply": bool(has_helpdesk_access or is_super_admin or is_requester),
         "is_requester": is_requester,
         "is_watcher": is_watcher,

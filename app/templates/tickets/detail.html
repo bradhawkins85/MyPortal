@@ -87,9 +87,74 @@
                     </dd>
                   </div>
                 {% endif %}
+                {% if ticket_watchers %}
+                  <div class="description-list__row">
+                    <dt>Watchers</dt>
+                    <dd>
+                      <ul class="list list--inline">
+                        {% for watcher in ticket_watchers %}
+                          <li>{{ watcher.label }}</li>
+                        {% endfor %}
+                      </ul>
+                    </dd>
+                  </div>
+                {% endif %}
               </dl>
             </div>
           </article>
+
+          {% if ticket_assets %}
+            <article class="card card--panel">
+              <header class="card__header">
+                <h2 class="card__title">Linked Assets</h2>
+              </header>
+              <div class="card__body">
+                <ul class="list">
+                  {% for asset in ticket_assets %}
+                    <li class="list__item">
+                      <strong>{{ asset.name }}</strong>
+                      {% if asset.type %}
+                        <div class="list__meta">Type: {{ asset.type }}</div>
+                      {% endif %}
+                      {% if asset.serial_number %}
+                        <div class="list__meta">Serial: {{ asset.serial_number }}</div>
+                      {% endif %}
+                    </li>
+                  {% endfor %}
+                </ul>
+              </div>
+            </article>
+          {% endif %}
+
+          {% if relevant_services %}
+            <article class="card card--panel">
+              <header class="card__header">
+                <h2 class="card__title">Associated Service Statuses</h2>
+              </header>
+              <div class="card__body">
+                <ul class="list">
+                  {% for service in relevant_services %}
+                    <li class="list__item">
+                      <strong>{{ service.name }}</strong>
+                      {% if service.status %}
+                        <div class="list__meta">
+                          <span class="badge badge--{{ service.status }}">{{ service.status | replace('_', ' ') | title }}</span>
+                        </div>
+                      {% endif %}
+                      {% if service.status_message %}
+                        <div class="list__meta">{{ service.status_message }}</div>
+                      {% endif %}
+                      {% if service.matching_tags_count %}
+                        <div class="list__meta">
+                          <span class="badge badge--muted">{{ service.matching_tags_count }} matching tag{{ 's' if service.matching_tags_count > 1 else '' }}</span>
+                        </div>
+                      {% endif %}
+                    </li>
+                  {% endfor %}
+                </ul>
+              </div>
+            </article>
+          {% endif %}
 
           {% if relevant_kb_articles %}
             <article class="card card--panel">
@@ -132,6 +197,7 @@
             </div>
           </article>
 
+          {% if has_helpdesk_access %}
           <article class="card card--panel" data-ticket-tasks-card>
             <header class="card__header">
               <h2 class="card__title">Tasks</h2>
@@ -156,6 +222,7 @@
               <p class="card__empty" data-tasks-empty hidden>No tasks have been added yet.</p>
             </div>
           </article>
+          {% endif %}
 
           <article class="card card--panel">
             <header class="card__header">
@@ -166,17 +233,131 @@
                 {% if reply_error %}
                   <div class="alert alert--error" role="alert">{{ reply_error }}</div>
                 {% endif %}
-                <form action="/tickets/{{ ticket.id }}/replies" method="post" class="form" novalidate>
+                <form action="/tickets/{{ ticket.id }}/replies" method="post" class="form" novalidate enctype="multipart/form-data" data-ticket-reply-form>
                   {% include "partials/csrf.html" %}
                   <div class="form-field">
-                    <label class="form-label" for="ticket-reply-body">Message</label>
+                    <span class="form-label" id="ticket-reply-label">Message</span>
+                    <div
+                      class="rich-text-editor"
+                      data-rich-text-editor
+                      aria-labelledby="ticket-reply-label"
+                    >
+                      <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Formatting options">
+                        <button
+                          type="button"
+                          class="rich-text-editor__button"
+                          data-rich-text-button
+                          data-command="bold"
+                          aria-label="Bold"
+                        >
+                          <span aria-hidden="true">B</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="rich-text-editor__button"
+                          data-rich-text-button
+                          data-command="italic"
+                          aria-label="Italic"
+                        >
+                          <span aria-hidden="true">I</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="rich-text-editor__button"
+                          data-rich-text-button
+                          data-command="underline"
+                          aria-label="Underline"
+                        >
+                          <span aria-hidden="true">U</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="rich-text-editor__button"
+                          data-rich-text-button
+                          data-command="insertUnorderedList"
+                          aria-label="Bulleted list"
+                        >
+                          <span aria-hidden="true">•</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="rich-text-editor__button"
+                          data-rich-text-button
+                          data-command="insertOrderedList"
+                          aria-label="Numbered list"
+                        >
+                          <span aria-hidden="true">1.</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="rich-text-editor__button"
+                          data-rich-text-button
+                          data-command="formatBlock"
+                          data-command-value="blockquote"
+                          aria-label="Quote"
+                        >
+                          <span aria-hidden="true">""</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="rich-text-editor__button"
+                          data-rich-text-button
+                          data-command="formatBlock"
+                          data-command-value="pre"
+                          aria-label="Code block"
+                        >
+                          <span aria-hidden="true">&lt;/&gt;</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="rich-text-editor__button"
+                          data-rich-text-button
+                          data-command="link"
+                          aria-label="Insert link"
+                        >
+                          <span aria-hidden="true">🔗</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="rich-text-editor__button"
+                          data-rich-text-button
+                          data-command="removeFormat"
+                          aria-label="Clear formatting"
+                        >
+                          <span aria-hidden="true">⨯</span>
+                        </button>
+                      </div>
+                      <div
+                        id="ticket-reply-body"
+                        class="rich-text-editor__surface"
+                        data-rich-text-content
+                        contenteditable="true"
+                        role="textbox"
+                        aria-labelledby="ticket-reply-label"
+                        aria-multiline="true"
+                        data-placeholder="Write your reply..."
+                      >{{ reply_body }}</div>
+                    </div>
                     <textarea
-                      id="ticket-reply-body"
+                      id="ticket-reply-body-hidden"
                       name="body"
-                      class="form-input form-input--textarea"
-                      rows="5"
+                      class="visually-hidden"
+                      aria-hidden="true"
                       required
                     >{{ reply_body }}</textarea>
+                  </div>
+                  <div class="form-field">
+                    <label class="form-label" for="ticket-reply-attachments">Attachments (optional)</label>
+                    <input
+                      type="file"
+                      id="ticket-reply-attachments"
+                      name="attachments"
+                      class="form-input"
+                      multiple
+                      accept="*/*"
+                      data-ticket-attachments
+                    />
+                    <p class="form-help">You can upload multiple files. Maximum file size: 10MB per file.</p>
                   </div>
                   <div class="form-actions">
                     <button type="submit" class="button button--primary">Post reply</button>
@@ -306,5 +487,6 @@
 
 {% block scripts %}
   {{ super() }}
+  <script src="/static/js/rich_text_editor.js" defer></script>
   <script src="/static/js/ticket_detail.js" defer></script>
 {% endblock %}
