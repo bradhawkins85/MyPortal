@@ -20,6 +20,7 @@ from app.services import automations as automations_service
 from app.services import company_id_lookup
 from app.services import imap as imap_service
 from app.services import m365 as m365_service
+from app.services import modules as modules_service
 from app.services import products as products_service
 from app.services import staff_importer
 from app.services import subscription_price_changes
@@ -438,12 +439,23 @@ class SchedulerService:
                     log_info("Transcriptions queued", **result)
                 elif command == "process_transcription":
                     from app.services import call_recordings as call_recordings_service
-                    
+
                     result = await call_recordings_service.process_queued_transcriptions()
                     details = json.dumps(result, default=str)
                     if result.get("status") == "error":
                         status = "failed"
                     log_info("Transcription processed", **result)
+                elif command == "sync_unifi_talk_recordings":
+                    result = await modules_service.trigger_module(
+                        "unifi-talk", {}, background=False
+                    )
+                    details = json.dumps(result, default=str)
+                    module_status = str(result.get("status") or "").lower()
+                    if module_status == "error":
+                        status = "failed"
+                    elif module_status == "skipped":
+                        status = "skipped"
+                    log_info("Unifi Talk recordings sync completed", **result)
                 elif command == "bcp_notify_upcoming_training":
                     # Notify about upcoming BCP training sessions
                     from app.repositories import bcp as bcp_repo
