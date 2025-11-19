@@ -3023,6 +3023,10 @@ async def _render_company_edit_page(
             {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
             {"value": "create_scheduled_ticket", "label": "Create scheduled ticket"},
             {"value": "sync_recordings", "label": "Sync call recordings"},
+            {
+                "value": "sync_unifi_talk_recordings",
+                "label": "Sync Unifi Talk recordings",
+            },
             {"value": "queue_transcriptions", "label": "Queue transcriptions"},
             {"value": "process_transcription", "label": "Process transcription"},
         ]
@@ -8378,6 +8382,10 @@ async def admin_automation(request: Request, show_inactive: bool = Query(default
         {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
         {"value": "create_scheduled_ticket", "label": "Create scheduled ticket"},
         {"value": "sync_recordings", "label": "Sync call recordings"},
+        {
+            "value": "sync_unifi_talk_recordings",
+            "label": "Sync Unifi Talk recordings",
+        },
         {"value": "queue_transcriptions", "label": "Queue transcriptions"},
         {"value": "process_transcription", "label": "Process transcription"},
     ]
