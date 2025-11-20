@@ -1795,6 +1795,51 @@
     initialiseAssetSelector();
     initialiseTaskManagement();
     initialiseWatcherManagement();
+    initialiseBookingModal();
+  }
+
+  function initialiseBookingModal() {
+    const modal = document.getElementById('booking-modal');
+    const iframe = document.getElementById('booking-iframe');
+    const trigger = document.querySelector('[data-booking-modal-trigger]');
+    
+    if (!modal || !iframe || !trigger) {
+      return;
+    }
+
+    function openModal() {
+      const bookingUrl = trigger.dataset.bookingLink;
+      if (bookingUrl) {
+        iframe.src = bookingUrl;
+        modal.hidden = false;
+        document.body.style.overflow = 'hidden';
+      }
+    }
+
+    function closeModal() {
+      modal.hidden = true;
+      document.body.style.overflow = '';
+      iframe.src = '';
+    }
+
+    trigger.addEventListener('click', openModal);
+
+    const closeButtons = modal.querySelectorAll('[data-modal-close]');
+    closeButtons.forEach((button) => {
+      button.addEventListener('click', closeModal);
+    });
+
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal || event.target.classList.contains('modal__overlay')) {
+        closeModal();
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !modal.hidden) {
+        closeModal();
+      }
+    });
   }
 
   if (document.readyState === 'loading') {
