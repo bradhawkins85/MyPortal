@@ -1245,6 +1245,20 @@ async def _build_base_context(
         module_lookup = {module.get("slug"): module for module in module_list if module.get("slug")}
         request.state.module_lookup = module_lookup
 
+    # Get Plausible analytics configuration for app-wide tracking
+    plausible_config = {"enabled": False}
+    plausible_module = (module_lookup or {}).get("plausible")
+    if plausible_module and plausible_module.get("enabled"):
+        plausible_settings = plausible_module.get("settings") or {}
+        base_url = str(plausible_settings.get("base_url") or "").strip().rstrip("/")
+        site_domain = str(plausible_settings.get("site_domain") or "").strip()
+        if base_url and site_domain:
+            plausible_config = {
+                "enabled": True,
+                "base_url": base_url,
+                "site_domain": site_domain,
+            }
+
     context: dict[str, Any] = {
         "request": request,
         "app_name": settings.app_name,
@@ -1267,6 +1281,7 @@ async def _build_base_context(
         "impersonation_started_at": impersonation_started_at,
         "has_issue_tracker_access": has_issue_tracker_access,
         "can_access_tickets": True,
+        "plausible_config": plausible_config,
     }
     context.update(permission_flags)
     if extra:

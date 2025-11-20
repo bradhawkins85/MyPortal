@@ -1,14 +1,35 @@
 # Email Tracking with Plausible Analytics
 
-MyPortal includes built-in email tracking functionality powered by Plausible Analytics integration. This privacy-focused feature allows you to track email opens and link clicks for all outgoing emails sent through the system.
+MyPortal includes built-in email tracking functionality powered by Plausible Analytics integration. This privacy-focused feature allows you to track email opens and link clicks for all outgoing emails sent through the system. Additionally, MyPortal can integrate with Plausible for app-wide page view analytics.
 
 ## Features
 
+### Email Tracking
 - **Email Open Tracking**: Track when recipients open emails using invisible tracking pixels
 - **Link Click Tracking**: Monitor which links recipients click in emails
 - **Privacy-First**: Events are stored locally and optionally synced to Plausible
 - **Visual Indicators**: Conversation history shows read/unread status for sent emails
 - **Detailed Analytics**: View open counts, timestamps, and click-through data
+
+### App Analytics (Page Views)
+- **Automatic Page Tracking**: Track page views across the entire application
+- **User Journey Analysis**: Understand how users navigate through MyPortal
+- **Privacy-Focused**: Uses Plausible's cookieless tracking
+- **Self-Hosted Support**: Works with both cloud and self-hosted Plausible instances
+
+## Self-Hosted Plausible Support
+
+MyPortal fully supports **self-hosted Plausible installations**. Simply configure the `PLAUSIBLE_BASE_URL` environment variable to point to your self-hosted instance:
+
+```bash
+# For self-hosted Plausible
+PLAUSIBLE_BASE_URL=https://analytics.yourcompany.com
+
+# For cloud Plausible (default)
+PLAUSIBLE_BASE_URL=https://plausible.io
+```
+
+The integration works identically with both cloud and self-hosted Plausible instances.
 
 ## How It Works
 
@@ -18,8 +39,15 @@ When an email is sent with tracking enabled, a 1x1 transparent tracking pixel (G
 ### Link Clicks
 All HTTP/HTTPS links in tracked emails are automatically rewritten to route through MyPortal's tracking endpoint. When a recipient clicks a link, the click is recorded before redirecting to the original destination URL.
 
+### App Page Views
+When the Plausible module is enabled, MyPortal automatically includes the Plausible tracking script in all pages. This tracks:
+- Page views and unique visitors
+- Navigation patterns and user journeys
+- Referrer sources and entry/exit pages
+- Device types and browsers
+
 ### Data Storage
-- **Local Database**: All tracking events are stored in the `email_tracking_events` table
+- **Local Database**: All email tracking events are stored in the `email_tracking_events` table
 - **Ticket Replies**: Summary data (first open time, open count) is stored in the `ticket_replies` table
 - **Plausible Sync** (Optional): Events can be forwarded to a Plausible Analytics instance for dashboard analytics
 
@@ -30,7 +58,7 @@ All HTTP/HTTPS links in tracked emails are automatically rewritten to route thro
 Add these variables to your `.env` file:
 
 ```bash
-# Plausible Analytics Base URL (default: https://plausible.io)
+# Plausible Analytics Base URL (supports self-hosted instances)
 PLAUSIBLE_BASE_URL=https://plausible.io
 
 # Your site domain registered in Plausible
@@ -56,16 +84,58 @@ The Plausible Analytics module is automatically created during database migratio
 1. Navigate to **Admin → Integration Modules**
 2. Find the **Plausible Analytics** module (📊 icon)
 3. Click **Configure** to edit settings:
-   - **Base URL**: Your Plausible instance URL
+   - **Base URL**: Your Plausible instance URL (cloud or self-hosted)
    - **Site Domain**: Your portal's domain name
-   - **API Key**: (Optional) Plausible API key
-   - **Track Opens**: Enable/disable open tracking
-   - **Track Clicks**: Enable/disable click tracking
+   - **API Key**: (Optional) Plausible API key for event forwarding
+   - **Track Opens**: Enable/disable email open tracking
+   - **Track Clicks**: Enable/disable link click tracking
    - **Send to Plausible**: Enable forwarding events to Plausible
+
+### Enabling App Analytics
+
+Once the Plausible module is configured and enabled:
+
+1. **Email Tracking**: Works automatically for emails sent with `enable_tracking=True`
+2. **App Analytics (Page Views)**: Automatically enabled across all pages
+   - The Plausible tracking script is automatically injected into every page
+   - Tracks page views, user journeys, and navigation patterns
+   - No additional configuration needed
+   - Privacy-friendly: no cookies, GDPR/CCPA compliant
+
+To view analytics:
+- Log into your Plausible dashboard (cloud or self-hosted)
+- Select your site domain to see page views, sources, and user behavior
+- Email tracking events appear as custom events (`email_open`, `email_click`)
 
 ## Usage
 
-### Enabling Tracking for Emails
+### Setting Up Plausible
+
+#### Option 1: Cloud Plausible (plausible.io)
+
+1. Sign up at https://plausible.io
+2. Add your site domain (e.g., `myportal.example.com`)
+3. Configure MyPortal with:
+   ```bash
+   PLAUSIBLE_BASE_URL=https://plausible.io
+   PLAUSIBLE_SITE_DOMAIN=myportal.example.com
+   ```
+4. Enable the module in Admin → Integration Modules
+
+#### Option 2: Self-Hosted Plausible
+
+1. Deploy Plausible using their self-hosting guide: https://plausible.io/docs/self-hosting
+2. Add your site domain in your Plausible admin panel
+3. Configure MyPortal with:
+   ```bash
+   PLAUSIBLE_BASE_URL=https://analytics.yourcompany.com
+   PLAUSIBLE_SITE_DOMAIN=myportal.example.com
+   ```
+4. Enable the module in Admin → Integration Modules
+
+The integration works identically with both options.
+
+### Enabling Email Tracking
 
 To enable tracking when sending an email programmatically:
 
@@ -89,6 +159,19 @@ In the ticket detail page, the conversation history shows status badges for trac
 - **✓ Read** (green badge): Email has been opened
 - **📧 Sent** (gray badge): Email sent but not yet opened
 - Hover over badges to see open count and details
+
+### Viewing Analytics
+
+**Page Analytics:**
+- Log into your Plausible dashboard
+- View page views, unique visitors, bounce rates
+- See top pages, referrer sources, and user locations
+- Analyze user navigation patterns
+
+**Email Analytics:**
+- Custom events appear as `email_open` and `email_click`
+- Filter by event properties to analyze email engagement
+- Track click-through rates and email effectiveness
 
 ### API Endpoints
 
@@ -148,6 +231,13 @@ plausible_sent_at DATETIME(6)     -- When sent to Plausible
 3. Ensure `enable_tracking=True` and `ticket_reply_id` is provided when sending emails
 4. Check that SMTP is properly configured
 
+### App Analytics Not Showing
+
+1. Verify Plausible module is enabled in Admin → Integration Modules
+2. Check that `base_url` and `site_domain` are configured correctly
+3. Make sure your site domain is added to your Plausible dashboard
+4. Check browser console for any script loading errors
+
 ### Email Opens Not Detected
 
 - Some email clients block external images by default
@@ -166,6 +256,7 @@ plausible_sent_at DATETIME(6)     -- When sent to Plausible
 - Tracking pixel is a tiny 43-byte GIF image
 - Click redirects are fast (<50ms) with immediate redirect
 - Database queries use indexes for optimal performance
+- Plausible script is lightweight (< 1KB) and loaded asynchronously
 
 ## Future Enhancements
 
@@ -178,10 +269,12 @@ Potential improvements for future versions:
 - Automated follow-up based on engagement
 - Export tracking data to CSV/JSON
 - Real-time dashboard with charts
+- Advanced funnel analysis
 
 ## Related Documentation
 
 - [Plausible Analytics Documentation](https://plausible.io/docs)
 - [Plausible Events API](https://plausible.io/docs/events-api)
+- [Plausible Self-Hosting Guide](https://plausible.io/docs/self-hosting)
 - [Integration Modules Guide](../docs/integration-modules.md)
 - [Email Service Documentation](../docs/email-service.md)
