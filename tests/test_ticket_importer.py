@@ -85,7 +85,8 @@ async def test_import_ticket_by_id_creates_new_ticket(monkeypatch):
 
     async def fake_create_ticket(**kwargs):
         created_calls.update(kwargs)
-        return {"id": 55, **kwargs}
+        # Return the ticket with the ID that was passed, or 55 if none was passed
+        return {"id": kwargs.get("id") or 55, **kwargs}
 
     update_calls = []
 
@@ -116,7 +117,9 @@ async def test_import_ticket_by_id_creates_new_ticket(monkeypatch):
     assert created_calls["status"] == "in_progress"
     assert created_calls["ticket_number"] == "101"
     assert created_calls["requester_id"] is None
-    assert update_calls[0][0] == 55
+    # Now the ticket ID should match the Syncro ticket number
+    assert created_calls["id"] == 101
+    assert update_calls[0][0] == 101
     assert "created_at" in update_calls[0][1]
 
 
@@ -332,7 +335,8 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
 
     async def fake_create_ticket(**kwargs):
         created_call.update(kwargs)
-        return {"id": 400, **kwargs}
+        # Return the ticket with the ID that was passed, or 400 if none was passed
+        return {"id": kwargs.get("id") or 400, **kwargs}
 
     update_calls = []
 
@@ -383,6 +387,8 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
     assert created_call["company_id"] == 8
     assert created_call["requester_id"] == 21
     assert created_call["description"] == "Customer message"
+    # Verify the ticket ID was set to 5001 from the number
+    assert created_call["id"] == 5001
     assert len(reply_calls) == 2
     assert reply_calls[0]["external_reference"] == "1"
     assert reply_calls[0]["is_internal"] is False
@@ -394,7 +400,8 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
     assert reply_calls[1]["author_id"] == 31
     assert reply_calls[1].get("minutes_spent") is None
     assert reply_calls[1].get("is_billable", False) is False
-    assert added_watchers == [(400, 31)]
+    # The ticket ID should now be 5001, not 400
+    assert added_watchers == [(5001, 31)]
 
 
 @pytest.mark.anyio
