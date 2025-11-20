@@ -885,7 +885,7 @@ def _extract_body(message: email.message.Message) -> str:
     return body
 
 
-def _extract_ticket_number_from_subject(subject: str) -> str | None:
+def _extract_ticket_number_from_subject(subject: str | None) -> str | None:
     """
     Extract ticket number from email subject.
     
@@ -914,6 +914,30 @@ def _extract_ticket_number_from_subject(subject: str) -> str | None:
     if match:
         return match.group(1)
     
+    return None
+
+
+def _extract_syncro_message_id(text: str | None) -> str | None:
+    """Extract a Syncro message identifier from email content.
+
+    Syncro replies may include a marker such as ``(message id: 101748802)`` in
+    the subject or body. The captured number can be used to match the ticket's
+    ``external_reference`` field when the ticket originated from Syncro.
+
+    Args:
+        text: The subject or body text to search.
+
+    Returns:
+        The numeric message identifier as a string if present, otherwise None.
+    """
+
+    if not text:
+        return None
+
+    match = re.search(r"\(message id:\s*(\d+)\)", text, flags=re.IGNORECASE)
+    if match:
+        return match.group(1)
+
     return None
 
 
@@ -962,6 +986,7 @@ async def _find_existing_ticket_for_reply(
     *,
     requester_id: int | None = None,
     related_message_ids: list[str] | None = None,
+    message_body: str | None = None,
 ) -> dict[str, Any] | None:
     """
     Find an existing ticket that this email is likely a reply to.
@@ -1010,6 +1035,16 @@ async def _find_existing_ticket_for_reply(
                         return ticket
             except Exception:  # pragma: no cover - defensive logging
                 pass
+
+    # Next, try to match Syncro-originated replies using the embedded message id
+    syncro_external_id = _extract_syncro_message_id(subject) or _extract_syncro_message_id(message_body)
+    if syncro_external_id:
+        try:
+            ticket = await tickets_repo.get_ticket_by_external_reference(syncro_external_id)
+            if ticket and not _ticket_is_closed(ticket):
+                return ticket
+        except Exception:  # pragma: no cover - defensive logging
+            pass
 
     # First, try to extract ticket number from subject
     ticket_number = _extract_ticket_number_from_subject(subject)
@@ -1403,6 +1438,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 from_email=from_email_addr or "",
                 requester_id=requester_id,
                 related_message_ids=related_message_ids,
+                message_body=body,
             )
             
             ticket: Mapping[str, Any] | None = None

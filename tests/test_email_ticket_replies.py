@@ -355,6 +355,85 @@ class TestFindExistingTicket:
         assert result is not None
         assert result["id"] == 9
 
+    async def test_find_ticket_by_syncro_message_id(self, monkeypatch):
+        """Test finding ticket by embedded Syncro message id in the email body."""
+
+        from app.services import imap
+
+        async def mock_get_ticket_by_external_reference(external_reference):
+            if external_reference == "101748802":
+                return {
+                    "id": 11,
+                    "ticket_number": "101748802",
+                    "external_reference": "101748802",
+                    "subject": "Syncro Ticket 101748802",
+                    "status": "open",
+                    "requester_id": 5,
+                    "company_id": 3,
+                    "created_at": None,
+                    "updated_at": None,
+                    "closed_at": None,
+                    "ai_summary_updated_at": None,
+                    "ai_tags": None,
+                    "ai_tags_updated_at": None,
+                }
+            return None
+
+        monkeypatch.setattr(
+            imap.tickets_repo,
+            "get_ticket_by_external_reference",
+            mock_get_ticket_by_external_reference,
+        )
+
+        result = await imap._find_existing_ticket_for_reply(
+            subject="Re: Syncro reply",
+            from_email="user@example.com",
+            requester_id=5,
+            related_message_ids=[],
+            message_body="Please see details (message id: 101748802)",
+        )
+
+        assert result is not None
+        assert result["external_reference"] == "101748802"
+
+    async def test_closed_ticket_skipped_for_syncro_message_id(self, monkeypatch):
+        """Ensure closed Syncro tickets are not matched by embedded message id."""
+
+        from app.services import imap
+
+        async def mock_get_ticket_by_external_reference(external_reference):
+            return {
+                "id": 12,
+                "ticket_number": external_reference,
+                "external_reference": external_reference,
+                "subject": "Closed Syncro Ticket",
+                "status": "closed",
+                "requester_id": 5,
+                "company_id": 3,
+                "created_at": None,
+                "updated_at": None,
+                "closed_at": None,
+                "ai_summary_updated_at": None,
+                "ai_tags": None,
+                "ai_tags_updated_at": None,
+            }
+
+        monkeypatch.setattr(
+            imap.tickets_repo,
+            "get_ticket_by_external_reference",
+            mock_get_ticket_by_external_reference,
+        )
+
+        result = await imap._find_existing_ticket_for_reply(
+            subject="Re: Syncro reply",
+            from_email="user@example.com",
+            requester_id=5,
+            related_message_ids=[],
+            message_body="Following up (message id: 222333444)",
+        )
+
+        assert result is None
+
     async def test_closed_ticket_not_matched(self, monkeypatch):
         """Test that closed tickets are not matched, forcing creation of new ticket."""
         from app.services import imap
