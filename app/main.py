@@ -1252,7 +1252,30 @@ async def _build_base_context(
         plausible_settings = plausible_module.get("settings") or {}
         base_url = str(plausible_settings.get("base_url") or "").strip().rstrip("/")
         site_domain = str(plausible_settings.get("site_domain") or "").strip()
-        if base_url and site_domain:
+        
+        # Validate base_url and site_domain to prevent injection attacks
+        # base_url must be a valid HTTPS URL
+        # site_domain must be a valid domain name (alphanumeric, dots, hyphens)
+        valid_base_url = False
+        valid_site_domain = False
+        
+        if base_url:
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(base_url)
+                # Must be https or http, have a netloc, and no suspicious characters
+                if parsed.scheme in ("https", "http") and parsed.netloc and not any(c in base_url for c in ["<", ">", '"', "'"]):
+                    valid_base_url = True
+            except Exception:
+                pass
+        
+        if site_domain:
+            # Domain must only contain alphanumeric, dots, hyphens, and underscores
+            # No spaces, quotes, or HTML-like characters
+            if all(c.isalnum() or c in ".-_" for c in site_domain) and not any(c in site_domain for c in ["<", ">", '"', "'"]):
+                valid_site_domain = True
+        
+        if valid_base_url and valid_site_domain:
             plausible_config = {
                 "enabled": True,
                 "base_url": base_url,

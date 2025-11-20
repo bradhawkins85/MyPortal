@@ -23,7 +23,7 @@
     {% block styles %}{% endblock %}
     {% if plausible_config.enabled %}
     <!-- Plausible Analytics -->
-    <script defer data-domain="{{ plausible_config.site_domain }}" src="{{ plausible_config.base_url }}/js/script.js"></script>
+    <script defer data-domain="{{ plausible_config.site_domain | e }}" src="{{ plausible_config.base_url | e }}/js/script.js"></script>
     {% endif %}
     {% block extra_head %}{% endblock %}
   </head>
