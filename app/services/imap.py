@@ -13,6 +13,7 @@ from email.utils import getaddresses, parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Mapping
 
+from app.core.database import db
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
 from app.repositories import imap_accounts as imap_repo
@@ -59,6 +60,13 @@ def _normalise_bool(value: Any, *, default: bool = False) -> bool:
         if lowered in {"0", "false", "no", "off"}:
             return False
     return default
+
+
+def _ticket_is_closed(ticket: Mapping[str, Any]) -> bool:
+    """Return True when a ticket is in a terminal closed/resolved state."""
+
+    status = str(ticket.get("status", "")).lower()
+    return status in {"closed", "resolved"}
 
 
 def _normalise_priority(value: Any, *, default: int = 100) -> int:
@@ -440,6 +448,38 @@ def _extract_email_addresses(from_header: str | None) -> list[str]:
         if candidate:
             addresses.append(candidate)
     return addresses
+
+
+def _extract_message_ids(header_value: str | None) -> list[str]:
+    """Extract message IDs from headers like In-Reply-To or References."""
+
+    if not header_value:
+        return []
+
+    message_ids: list[str] = []
+
+    for match in re.findall(r"<([^>]+)>", header_value):
+        candidate = _normalise_string(match)
+        if candidate:
+            message_ids.append(candidate)
+
+    if not message_ids:
+        for part in header_value.split():
+            candidate = _normalise_string(part)
+            if candidate:
+                message_ids.append(candidate)
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique_ids: list[str] = []
+    for message_id in message_ids:
+        lowered = message_id.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        unique_ids.append(message_id)
+
+    return unique_ids
 
 
 async def _resolve_ticket_entities(
@@ -921,21 +961,56 @@ async def _find_existing_ticket_for_reply(
     from_email: str,
     *,
     requester_id: int | None = None,
+    related_message_ids: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """
     Find an existing ticket that this email is likely a reply to.
-    
-    First checks for ticket number in subject, then falls back to subject matching
-    for non-closed tickets where the sender is the requester or a watcher.
-    
+
+    Priority order:
+    1. Match In-Reply-To/References message IDs against ticket and reply external references
+    2. Extract ticket number from subject
+    3. Fuzzy subject match for non-closed tickets where sender is requester or watcher.
+
     Args:
         subject: Email subject line
         from_email: Sender email address
         requester_id: ID of the requester user if resolved
+        related_message_ids: Message IDs from In-Reply-To/References headers
     
     Returns:
         Ticket record if found, None otherwise
     """
+    related_ids = [message_id for message_id in related_message_ids or [] if message_id]
+
+    if related_ids:
+        from app.repositories.tickets import _normalise_ticket
+
+        for message_id in related_ids:
+            try:
+                ticket = await tickets_repo.get_ticket_by_external_reference(message_id)
+                if ticket and not _ticket_is_closed(ticket):
+                    return ticket
+            except Exception:  # pragma: no cover - defensive logging
+                pass
+
+            try:
+                rows = await db.fetch_all(
+                    """
+                    SELECT t.*
+                    FROM ticket_replies tr
+                    JOIN tickets t ON tr.ticket_id = t.id
+                    WHERE tr.external_reference = %s
+                    LIMIT 1
+                    """,
+                    (message_id,),
+                )
+                if rows:
+                    ticket = _normalise_ticket(rows[0])
+                    if not _ticket_is_closed(ticket):
+                        return ticket
+            except Exception:  # pragma: no cover - defensive logging
+                pass
+
     # First, try to extract ticket number from subject
     ticket_number = _extract_ticket_number_from_subject(subject)
     if ticket_number:
@@ -949,12 +1024,12 @@ async def _find_existing_ticket_for_reply(
                 from app.repositories.tickets import _normalise_ticket
                 ticket = _normalise_ticket(rows[0])
                 # Don't match closed tickets - create a new ticket instead
-                if ticket.get("status", "").lower() in ("closed",):
+                if _ticket_is_closed(ticket):
                     return None
                 return ticket
         except Exception:  # pragma: no cover - defensive
             pass
-        
+
         # Also try by ID if ticket_number is numeric
         try:
             ticket_id = int(ticket_number)
@@ -966,7 +1041,7 @@ async def _find_existing_ticket_for_reply(
                 from app.repositories.tickets import _normalise_ticket
                 ticket = _normalise_ticket(rows[0])
                 # Don't match closed tickets - create a new ticket instead
-                if ticket.get("status", "").lower() in ("closed",):
+                if _ticket_is_closed(ticket):
                     return None
                 return ticket
         except (ValueError, Exception):  # pragma: no cover - defensive
@@ -1264,6 +1339,12 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             subject = _decode_subject(message) or f"Email from {username}"
             body, email_attachments = _extract_body_and_attachments(message)
             message_id = _normalise_string(message.get("Message-ID"), default=uid)
+            in_reply_to_ids = _extract_message_ids(_normalise_string(message.get("In-Reply-To")))
+            reference_headers = message.get_all("References", [])
+            reference_ids: list[str] = []
+            for ref_header in reference_headers:
+                reference_ids.extend(_extract_message_ids(ref_header))
+            related_message_ids = in_reply_to_ids + reference_ids
             received_at: datetime | None = None
             raw_date = message.get("Date")
             if raw_date:
@@ -1323,6 +1404,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 subject=subject,
                 from_email=from_email_addr or "",
                 requester_id=requester_id,
+                related_message_ids=related_message_ids,
             )
             
             ticket: Mapping[str, Any] | None = None

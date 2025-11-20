@@ -228,7 +228,7 @@ class TestFindExistingTicket:
         """Test finding ticket by matching normalized subject."""
         from app.services import imap
         from app.core import database
-        
+
         # Mock database to return tickets with matching subjects
         async def mock_fetch_all(query, params):
             # When searching by ticket_number, return empty
@@ -264,6 +264,96 @@ class TestFindExistingTicket:
         assert result is not None
         assert result["id"] == 2
         assert result["subject"] == "Network Connection Issue"
+
+    async def test_find_ticket_by_in_reply_to_header(self, monkeypatch):
+        """Test finding ticket by matching Message-ID references."""
+
+        from app.services import imap
+        from app.core import database
+
+        async def mock_get_ticket_by_external_reference(external_reference):
+            if external_reference == "message-123@example.com":
+                return {
+                    "id": 7,
+                    "ticket_number": "777",
+                    "subject": "Existing Ticket",
+                    "status": "open",
+                    "requester_id": 5,
+                    "company_id": 3,
+                    "created_at": None,
+                    "updated_at": None,
+                    "closed_at": None,
+                    "ai_summary_updated_at": None,
+                    "ai_tags": None,
+                    "ai_tags_updated_at": None,
+                }
+            return None
+
+        async def mock_fetch_all(query, params):
+            return []
+
+        monkeypatch.setattr(
+            imap.tickets_repo,
+            "get_ticket_by_external_reference",
+            mock_get_ticket_by_external_reference,
+        )
+        monkeypatch.setattr(database.db, "fetch_all", mock_fetch_all)
+
+        result = await imap._find_existing_ticket_for_reply(
+            subject="Re: Something else",
+            from_email="user@example.com",
+            requester_id=5,
+            related_message_ids=["message-123@example.com"],
+        )
+
+        assert result is not None
+        assert result["id"] == 7
+
+    async def test_find_ticket_by_reply_external_reference(self, monkeypatch):
+        """Test finding ticket by reply external_reference when ticket lookup fails."""
+
+        from app.services import imap
+        from app.core import database
+
+        async def mock_get_ticket_by_external_reference(external_reference):
+            return None
+
+        async def mock_fetch_all(query, params):
+            if params == ("reply-message@example.com",):
+                return [
+                    {
+                        "id": 9,
+                        "ticket_number": "999",
+                        "subject": "Outbound Message",
+                        "status": "open",
+                        "requester_id": 5,
+                        "company_id": 3,
+                        "created_at": None,
+                        "updated_at": None,
+                        "closed_at": None,
+                        "ai_summary_updated_at": None,
+                        "ai_tags": None,
+                        "ai_tags_updated_at": None,
+                    }
+                ]
+            return []
+
+        monkeypatch.setattr(
+            imap.tickets_repo,
+            "get_ticket_by_external_reference",
+            mock_get_ticket_by_external_reference,
+        )
+        monkeypatch.setattr(database.db, "fetch_all", mock_fetch_all)
+
+        result = await imap._find_existing_ticket_for_reply(
+            subject="Re: Outbound Message",
+            from_email="user@example.com",
+            requester_id=5,
+            related_message_ids=["reply-message@example.com"],
+        )
+
+        assert result is not None
+        assert result["id"] == 9
 
     async def test_closed_ticket_not_matched(self, monkeypatch):
         """Test that closed tickets are not matched, forcing creation of new ticket."""
