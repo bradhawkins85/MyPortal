@@ -29,3 +29,24 @@ def test_sanitize_rich_text_marks_plain_text_as_content():
     assert result.html == "Hello world"
     assert result.text_content == "Hello world"
     assert result.has_rich_content is True
+
+
+def test_sanitize_rich_text_strips_quoted_email_headers_and_styles():
+    content = """
+        <p>Latest reply</p>
+        <style>P { margin-top: 0; margin-bottom: 0; }</style>
+        <p>From: Example Sender &lt;sender@example.com&gt;</p>
+        <p>Sent: Monday, 1 January 2025 10:00</p>
+        <p>To: Support Team &lt;support@example.com&gt;</p>
+        <p>Subject: RE: Ticket update</p>
+        <p>Earlier thread content that should be trimmed</p>
+    """
+
+    result = sanitize_rich_text(content)
+
+    assert "Latest reply" in result.html
+    assert "Earlier thread content" not in result.html
+    assert "From:" not in result.html
+    assert "Sent:" not in result.html
+    assert "Subject:" not in result.html
+    assert "margin-top" not in result.html
