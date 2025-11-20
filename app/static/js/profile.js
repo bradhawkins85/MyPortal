@@ -172,6 +172,12 @@
       const input = emailSignatureForm.querySelector('#email-signature-value');
       const value = input ? input.value.trim() : '';
 
+      // Validate signature length (max 50KB)
+      if (value.length > 51200) {
+        showMessage(signatureError, 'Email signature is too large. Please keep it under 50KB.');
+        return;
+      }
+
       try {
         await requestJson(`/users/${userId}`, {
           method: 'PATCH',
