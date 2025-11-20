@@ -880,7 +880,7 @@ async def refresh_ticket_ai_tags(ticket_id: int) -> None:
         payload = result.get("response")
         tags: list[str] | None = None
         if status_value == "succeeded":
-            tags = await _extract_tags(payload, ticket)
+            tags = await _extract_tags(payload, ticket, replies)
         updated_at = datetime.now(timezone.utc)
         await _safely_call(
             tickets_repo.update_ticket,
@@ -1261,26 +1261,58 @@ def _normalise_resolution_state(label: str | None) -> str | None:
     return None
 
 
-async def _extract_tags(payload: Any, ticket: Mapping[str, Any]) -> list[str]:
+def _extract_external_reference_tokens(ticket: Mapping[str, Any], replies: list[Mapping[str, Any]]) -> set[str]:
+    """Extract and normalize tokens from external_reference fields to prevent them from becoming tags."""
+    tokens: set[str] = set()
+    
+    # Extract from ticket's external_reference
+    ticket_ref = ticket.get("external_reference")
+    if ticket_ref and isinstance(ticket_ref, str):
+        # Extract alphanumeric tokens from the reference
+        for token in re.findall(r"[A-Za-z0-9]+", ticket_ref):
+            if len(token) >= 3:  # Only meaningful tokens
+                slug = slugify_tag(token)
+                if slug:
+                    tokens.add(slug)
+    
+    # Extract from replies' external_reference
+    for reply in replies:
+        reply_ref = reply.get("external_reference")
+        if reply_ref and isinstance(reply_ref, str):
+            for token in re.findall(r"[A-Za-z0-9]+", reply_ref):
+                if len(token) >= 3:
+                    slug = slugify_tag(token)
+                    if slug:
+                        tokens.add(slug)
+    
+    return tokens
+
+
+async def _extract_tags(payload: Any, ticket: Mapping[str, Any], replies: list[Mapping[str, Any]] | None = None) -> list[str]:
     excluded_tags = await get_all_excluded_tags()
-    tags = _normalise_tag_list(payload, excluded_tags)
+    
+    # Get external reference tokens to exclude
+    external_ref_tokens = _extract_external_reference_tokens(ticket, replies or [])
+    combined_exclusions = excluded_tags | external_ref_tokens
+    
+    tags = _normalise_tag_list(payload, combined_exclusions)
     if tags:
-        return _finalise_tags(tags, ticket, excluded_tags)
+        return _finalise_tags(tags, ticket, combined_exclusions)
     if isinstance(payload, Mapping):
         nested = payload.get("response") or payload.get("message")
-        tags = _normalise_tag_list(nested, excluded_tags)
+        tags = _normalise_tag_list(nested, combined_exclusions)
         if tags:
-            return _finalise_tags(tags, ticket, excluded_tags)
+            return _finalise_tags(tags, ticket, combined_exclusions)
     text = str(payload).strip() if payload is not None else ""
     if not text:
-        return _finalise_tags([], ticket, excluded_tags)
+        return _finalise_tags([], ticket, combined_exclusions)
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
-        tags = _normalise_tag_list(text, excluded_tags)
+        tags = _normalise_tag_list(text, combined_exclusions)
     else:
-        tags = _normalise_tag_list(parsed, excluded_tags)
-    return _finalise_tags(tags, ticket, excluded_tags)
+        tags = _normalise_tag_list(parsed, combined_exclusions)
+    return _finalise_tags(tags, ticket, combined_exclusions)
 
 
 def _normalise_tag_list(source: Any, excluded_tags: set[str] | None = None) -> list[str]:
