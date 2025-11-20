@@ -845,6 +845,207 @@ def _extract_body(message: email.message.Message) -> str:
     return body
 
 
+def _extract_ticket_number_from_subject(subject: str) -> str | None:
+    """
+    Extract ticket number from email subject.
+    
+    Looks for patterns like:
+    - #123
+    - Ticket #123
+    - [Ticket #123]
+    - RE: Support Request #123
+    
+    Args:
+        subject: Email subject line
+    
+    Returns:
+        Ticket number as string if found, None otherwise
+    """
+    if not subject:
+        return None
+    
+    # Look for #number pattern (most common)
+    match = re.search(r'#(\d+)', subject)
+    if match:
+        return match.group(1)
+    
+    # Look for "Ticket: number" or similar patterns
+    match = re.search(r'[Tt]icket[:\s]+(\d+)', subject)
+    if match:
+        return match.group(1)
+    
+    return None
+
+
+def _normalize_subject_for_matching(subject: str) -> str:
+    """
+    Normalize email subject for matching by removing common reply/forward prefixes.
+    
+    Removes prefixes like RE:, FW:, FWD:, etc. and strips whitespace.
+    Also removes ticket numbers to match on the core subject.
+    
+    Args:
+        subject: Email subject line
+    
+    Returns:
+        Normalized subject string
+    """
+    if not subject:
+        return ""
+    
+    normalized = subject.strip()
+    
+    # Remove common reply/forward prefixes (case insensitive, multiple levels)
+    while True:
+        original = normalized
+        # Remove RE:, FW:, FWD:, etc. at the start
+        normalized = re.sub(r'^(re|fw|fwd|fw|fwd):\s*', '', normalized, flags=re.IGNORECASE)
+        # Remove [External] or similar tags
+        normalized = re.sub(r'^\[.*?\]\s*', '', normalized)
+        normalized = normalized.strip()
+        if normalized == original:
+            break
+    
+    # Remove ticket numbers
+    normalized = re.sub(r'#\d+', '', normalized)
+    normalized = re.sub(r'[Tt]icket[:\s]+\d+', '', normalized)
+    
+    # Clean up extra whitespace
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    
+    return normalized
+
+
+async def _find_existing_ticket_for_reply(
+    subject: str,
+    from_email: str,
+    *,
+    requester_id: int | None = None,
+) -> dict[str, Any] | None:
+    """
+    Find an existing ticket that this email is likely a reply to.
+    
+    First checks for ticket number in subject, then falls back to subject matching
+    for non-closed tickets where the sender is the requester or a watcher.
+    
+    Args:
+        subject: Email subject line
+        from_email: Sender email address
+        requester_id: ID of the requester user if resolved
+    
+    Returns:
+        Ticket record if found, None otherwise
+    """
+    # First, try to extract ticket number from subject
+    ticket_number = _extract_ticket_number_from_subject(subject)
+    if ticket_number:
+        # Try to find ticket by ticket_number field
+        try:
+            rows = await db.fetch_all(
+                "SELECT * FROM tickets WHERE ticket_number = %s LIMIT 1",
+                (ticket_number,)
+            )
+            if rows:
+                from app.repositories.tickets import _normalise_ticket
+                ticket = _normalise_ticket(rows[0])
+                # Don't match closed tickets - create a new ticket instead
+                if ticket.get("status", "").lower() in ("closed",):
+                    return None
+                return ticket
+        except Exception:  # pragma: no cover - defensive
+            pass
+        
+        # Also try by ID if ticket_number is numeric
+        try:
+            ticket_id = int(ticket_number)
+            rows = await db.fetch_all(
+                "SELECT * FROM tickets WHERE id = %s LIMIT 1",
+                (ticket_id,)
+            )
+            if rows:
+                from app.repositories.tickets import _normalise_ticket
+                ticket = _normalise_ticket(rows[0])
+                # Don't match closed tickets - create a new ticket instead
+                if ticket.get("status", "").lower() in ("closed",):
+                    return None
+                return ticket
+        except (ValueError, Exception):  # pragma: no cover - defensive
+            pass
+    
+    # If no ticket number found, try to match by normalized subject
+    # Only match non-closed tickets where sender is requester or watcher
+    normalized_subject = _normalize_subject_for_matching(subject)
+    if not normalized_subject or len(normalized_subject) < 5:
+        # Subject too short or empty to match reliably
+        return None
+    
+    # Build query to find tickets with matching subject where sender is involved
+    # We'll check if sender is the requester or a watcher
+    try:
+        # First, find tickets with similar subjects that are not closed/resolved
+        # We'll use LIKE with wildcards to match normalized subjects
+        query = """
+            SELECT DISTINCT t.*
+            FROM tickets t
+            LEFT JOIN ticket_watchers tw ON t.id = tw.ticket_id
+            LEFT JOIN users u ON tw.user_id = u.id
+            WHERE t.status NOT IN ('closed', 'resolved')
+        """
+        params: list[Any] = []
+        
+        # If we have a requester_id, include tickets where they are the requester
+        # or a watcher
+        if requester_id is not None:
+            query += """
+                AND (t.requester_id = %s OR tw.user_id = %s)
+            """
+            params.extend([requester_id, requester_id])
+        elif from_email:
+            # If no requester_id but we have an email, check watchers by email
+            query += """
+                AND (
+                    EXISTS (
+                        SELECT 1 FROM users ru 
+                        WHERE ru.id = t.requester_id AND LOWER(ru.email) = LOWER(%s)
+                    )
+                    OR LOWER(u.email) = LOWER(%s)
+                )
+            """
+            params.extend([from_email, from_email])
+        else:
+            # No way to match sender, can't reliably determine if this is a reply
+            return None
+        
+        query += " ORDER BY t.updated_at DESC LIMIT 20"
+        
+        rows = await db.fetch_all(query, tuple(params))
+        
+        if not rows:
+            return None
+        
+        # Now check which tickets have matching normalized subjects
+        from app.repositories.tickets import _normalise_ticket
+        
+        for row in rows:
+            ticket = _normalise_ticket(row)
+            ticket_subject = ticket.get("subject", "")
+            ticket_normalized = _normalize_subject_for_matching(ticket_subject)
+            
+            # Check if normalized subjects match (case insensitive)
+            if ticket_normalized.lower() == normalized_subject.lower():
+                return ticket
+        
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to search for existing ticket by subject",
+            subject=subject,
+            from_email=from_email,
+            error=str(exc),
+        )
+    
+    return None
+
+
 async def _record_message(
     *,
     account_id: int,
@@ -1114,26 +1315,53 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 from_address,
                 default_company_id=default_company_id,
             )
+            
+            # Check if this email is a reply to an existing ticket
+            from_email = _extract_email_addresses(from_address)
+            from_email_addr = from_email[0] if from_email else None
+            existing_ticket = await _find_existing_ticket_for_reply(
+                subject=subject,
+                from_email=from_email_addr or "",
+                requester_id=requester_id,
+            )
+            
+            ticket: Mapping[str, Any] | None = None
+            is_new_ticket = False
+            
             try:
-                ticket = await tickets_service.create_ticket(
-                    subject=subject,
-                    description=description or "Email body unavailable.",
-                    requester_id=requester_id,
-                    company_id=company_id,
-                    assigned_user_id=None,
-                    priority="normal",
-                    status=None,
-                    category="email",
-                    module_slug="imap",
-                    external_reference=message_id,
-                )
-                ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
-                if ticket_id is not None:
-                    try:
-                        await tickets_service.refresh_ticket_ai_summary(int(ticket_id))
-                    except RuntimeError:
-                        pass
-                    await tickets_service.refresh_ticket_ai_tags(int(ticket_id))
+                if existing_ticket:
+                    # This is a reply to an existing ticket
+                    ticket = existing_ticket
+                    ticket_id = ticket.get("id")
+                    log_info(
+                        "Email matched to existing ticket",
+                        account_id=account_id,
+                        uid=uid,
+                        ticket_id=ticket_id,
+                        subject=subject,
+                    )
+                else:
+                    # Create a new ticket
+                    ticket = await tickets_service.create_ticket(
+                        subject=subject,
+                        description=description or "Email body unavailable.",
+                        requester_id=requester_id,
+                        company_id=company_id,
+                        assigned_user_id=None,
+                        priority="normal",
+                        status=None,
+                        category="email",
+                        module_slug="imap",
+                        external_reference=message_id,
+                    )
+                    is_new_ticket = True
+                    ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
+                    if ticket_id is not None:
+                        try:
+                            await tickets_service.refresh_ticket_ai_summary(int(ticket_id))
+                        except RuntimeError:
+                            pass
+                        await tickets_service.refresh_ticket_ai_tags(int(ticket_id))
             except Exception as exc:  # pragma: no cover - defensive logging
                 error_text = str(exc)
                 errors.append({"uid": uid, "error": error_text})
@@ -1153,27 +1381,38 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 continue
             ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
             if isinstance(ticket_id, int):
-                conversation_source = description or body or ""
-                sanitized = sanitize_rich_text(conversation_source)
-                if sanitized.has_rich_content:
-                    reply_created_at = received_at or datetime.now(timezone.utc)
-                    try:
-                        await tickets_repo.create_reply(
-                            ticket_id=int(ticket_id),
-                            author_id=None,
-                            body=sanitized.html,
-                            is_internal=False,
-                            external_reference=message_id if message_id else None,
-                            created_at=reply_created_at,
-                        )
-                    except Exception as exc:  # pragma: no cover - defensive logging
-                        log_error(
-                            "Failed to add imported email to conversation history",
-                            account_id=account_id,
-                            uid=uid,
-                            ticket_id=ticket_id,
-                            error=str(exc),
-                        )
+                # For existing tickets (replies), always add a conversation entry
+                # For new tickets, create_ticket already adds the initial reply
+                if not is_new_ticket:
+                    conversation_source = description or body or ""
+                    sanitized = sanitize_rich_text(conversation_source)
+                    if sanitized.has_rich_content:
+                        reply_created_at = received_at or datetime.now(timezone.utc)
+                        # Determine the author - use requester_id if available
+                        reply_author_id = requester_id if requester_id is not None else None
+                        try:
+                            await tickets_repo.create_reply(
+                                ticket_id=int(ticket_id),
+                                author_id=reply_author_id,
+                                body=sanitized.html,
+                                is_internal=False,
+                                external_reference=message_id if message_id else None,
+                                created_at=reply_created_at,
+                            )
+                            log_info(
+                                "Added email reply to existing ticket",
+                                account_id=account_id,
+                                uid=uid,
+                                ticket_id=ticket_id,
+                            )
+                        except Exception as exc:  # pragma: no cover - defensive logging
+                            log_error(
+                                "Failed to add email reply to ticket",
+                                account_id=account_id,
+                                uid=uid,
+                                ticket_id=ticket_id,
+                                error=str(exc),
+                            )
                 
                 # Save non-image attachments with restricted access
                 for attachment_info in email_attachments:
