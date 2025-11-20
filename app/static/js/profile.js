@@ -160,6 +160,36 @@
     });
   }
 
+  const emailSignatureForm = document.getElementById('email-signature-form');
+  const signatureSuccess = document.querySelector('[data-signature-success]');
+  const signatureError = document.querySelector('[data-signature-error]');
+
+  if (emailSignatureForm && userId) {
+    emailSignatureForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      clearMessages([signatureSuccess, signatureError]);
+
+      const input = emailSignatureForm.querySelector('#email-signature-value');
+      const value = input ? input.value.trim() : '';
+
+      // Validate signature length (max 50KB)
+      if (value.length > 51200) {
+        showMessage(signatureError, 'Email signature is too large. Please keep it under 50KB.');
+        return;
+      }
+
+      try {
+        await requestJson(`/users/${userId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ email_signature: value || null }),
+        });
+        showMessage(signatureSuccess, 'Email signature saved.');
+      } catch (error) {
+        showMessage(signatureError, error.message || 'Unable to save email signature.');
+      }
+    });
+  }
+
   const totpTable = document.getElementById('totp-table');
   const totpBody = root.querySelector('[data-totp-body]');
   const totpEmptyRow = root.querySelector('[data-totp-empty]');
