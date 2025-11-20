@@ -105,6 +105,28 @@ class Settings(BaseSettings):
         default=False,
         validation_alias="ENABLE_HSTS",
     )
+    
+    # MCP (Model Context Protocol) Server Configuration
+    mcp_enabled: bool = Field(
+        default=False,
+        validation_alias="MCP_ENABLED",
+    )
+    mcp_token: str | None = Field(
+        default=None,
+        validation_alias="MCP_TOKEN",
+    )
+    mcp_allowed_models: str = Field(
+        default="users,tickets,change_log",
+        validation_alias="MCP_ALLOWED_MODELS",
+    )
+    mcp_readonly: bool = Field(
+        default=True,
+        validation_alias="MCP_READONLY",
+    )
+    mcp_rate_limit: int = Field(
+        default=60,
+        validation_alias="MCP_RATE_LIMIT",
+    )
 
     @field_validator(
         "syncro_webhook_url",

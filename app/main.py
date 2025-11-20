@@ -603,6 +603,16 @@ async def refresh_updates(websocket: WebSocket) -> None:
         await refresh_notifier.disconnect(websocket)
 
 
+# MCP WebSocket endpoint (only enabled if MCP_ENABLED is true)
+if settings.mcp_enabled:
+    from app.mcp_server import handle_mcp_connection
+
+    @app.websocket("/mcp/ws")
+    async def mcp_websocket_endpoint(websocket: WebSocket) -> None:
+        """Model Context Protocol WebSocket endpoint for authorized agent access."""
+        await handle_mcp_connection(websocket)
+
+
 @app.get(PROTECTED_OPENAPI_PATH, include_in_schema=False)
 async def authenticated_openapi_schema(
     _: SessionData = Depends(get_current_session),
