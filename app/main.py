@@ -1390,6 +1390,7 @@ async def _build_public_context(
         "can_manage_invoices": False,
         "can_manage_staff": False,
         "can_view_compliance": False,
+        "plausible_config": {"enabled": False},
         "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
         "notification_unread_count": 0,
         "enable_auto_refresh": bool(settings.enable_auto_refresh),
