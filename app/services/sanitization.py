@@ -52,6 +52,10 @@ _ALLOWED_ATTRIBUTES: Mapping[str, list[str]] = {
 
 _ALLOWED_PROTOCOLS: tuple[str, ...] = ("http", "https", "mailto", "tel", "data")
 
+_STYLE_BLOCK_PATTERN = re.compile(r"(?is)<style.*?>.*?</style>")
+_EMAIL_HEADER_PATTERN = re.compile(r"^(from|sent|to|subject|cc):", re.IGNORECASE)
+_EMAIL_THREAD_DIVIDER = re.compile(r"^-{2,}\s*original message\s*-{2,}$", re.IGNORECASE)
+
 
 @dataclass(slots=True)
 class SanitizedRichText:
@@ -60,6 +64,31 @@ class SanitizedRichText:
     html: str
     text_content: str
     has_rich_content: bool
+
+
+def _strip_quoted_email_headers(value: str) -> str:
+    """Remove common quoted email header blocks from replies.
+
+    This trims sections that start with header-like prefixes such as
+    "From:", "Sent:", or the "Original Message" divider. It helps keep
+    imported email replies focused on the latest response instead of the
+    full quoted thread.
+    """
+
+    lines = value.splitlines()
+    for idx, line in enumerate(lines):
+        normalised = re.sub(r"<[^>]+>", "", line).strip()
+        if _EMAIL_THREAD_DIVIDER.match(normalised):
+            return "\n".join(lines[:idx]).rstrip()
+        if _EMAIL_HEADER_PATTERN.match(normalised):
+            header_hits = 0
+            for candidate in lines[idx : idx + 6]:
+                candidate_text = re.sub(r"<[^>]+>", "", candidate).strip()
+                if _EMAIL_HEADER_PATTERN.match(candidate_text):
+                    header_hits += 1
+            if header_hits >= 2:
+                return "\n".join(lines[:idx]).rstrip()
+    return value
 
 
 def sanitize_rich_text(value: str | None) -> SanitizedRichText:
@@ -72,6 +101,9 @@ def sanitize_rich_text(value: str | None) -> SanitizedRichText:
     """
 
     raw_text = (value or "").strip()
+    if raw_text:
+        raw_text = _STYLE_BLOCK_PATTERN.sub("", raw_text)
+        raw_text = _strip_quoted_email_headers(raw_text)
     cleaned = bleach.clean(
         raw_text,
         tags=_ALLOWED_TAGS,

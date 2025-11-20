@@ -62,10 +62,11 @@ def test_sanitize_rich_text_removes_style_tags():
     """Test that style tags are removed."""
     malicious_input = '<style>body { display: none; }</style><p>Content</p>'
     result = sanitize_rich_text(malicious_input)
-    
+
     # Style tags should be removed (not executed)
     assert "<style>" not in result.html
     assert "</style>" not in result.html
+    assert "display: none" not in result.html
     # Content should remain
     assert "<p>Content</p>" in result.html
 
