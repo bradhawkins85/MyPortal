@@ -167,11 +167,123 @@
       </form>
     </div>
   </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Email signature</h2>
+        <p class="card__subtitle">
+          Create your email signature for use in automated email notifications. This signature is accessible through automation events.
+        </p>
+      </div>
+    </header>
+    <div class="card__body">
+      <form class="form" id="email-signature-form">
+        <div class="alert alert--info" data-signature-success hidden role="status"></div>
+        <div class="alert alert--error" data-signature-error hidden role="alert"></div>
+        <div class="form-field">
+          <label class="form-label" for="email-signature-editor" id="email-signature-label">Email signature</label>
+          <div
+            class="rich-text-editor"
+            data-rich-text-editor
+            aria-labelledby="email-signature-label"
+          >
+            <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Formatting options">
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="bold"
+                aria-label="Bold"
+              >
+                <span aria-hidden="true">B</span>
+              </button>
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="italic"
+                aria-label="Italic"
+              >
+                <span aria-hidden="true">I</span>
+              </button>
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="underline"
+                aria-label="Underline"
+              >
+                <span aria-hidden="true">U</span>
+              </button>
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="insertUnorderedList"
+                aria-label="Bulleted list"
+              >
+                <span aria-hidden="true">•</span>
+              </button>
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="insertOrderedList"
+                aria-label="Numbered list"
+              >
+                <span aria-hidden="true">1.</span>
+              </button>
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="link"
+                aria-label="Insert link"
+              >
+                <span aria-hidden="true">🔗</span>
+              </button>
+              <button
+                type="button"
+                class="rich-text-editor__button"
+                data-rich-text-button
+                data-command="removeFormat"
+                aria-label="Clear formatting"
+              >
+                <span aria-hidden="true">✕</span>
+              </button>
+            </div>
+            <div class="rich-text-editor__body">
+              <div
+                class="rich-text-editor__surface"
+                data-rich-text-content
+                contenteditable="true"
+                role="textbox"
+                aria-labelledby="email-signature-label"
+                aria-multiline="true"
+                data-placeholder="Enter your email signature..."
+              ></div>
+            </div>
+            <textarea
+              id="email-signature-value"
+              name="emailSignature"
+              data-rich-text-value
+              hidden
+            >{{ current_user.email_signature|e or '' }}</textarea>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button">Save signature</button>
+        </div>
+      </form>
+    </div>
+  </section>
 </div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/rich_text_editor.js" defer></script>
   <script src="/static/js/profile.js" defer></script>
 {% endblock %}
