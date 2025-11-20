@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'myportal-static-v1';
+const CACHE_VERSION = 'myportal-static-v2';
 const STATIC_CACHE = CACHE_VERSION;
 const PRECACHE_URLS = [
   '/static/css/app.css',
@@ -6,7 +6,6 @@ const PRECACHE_URLS = [
   '/static/logo.svg',
   '/static/favicon.svg'
 ];
-const NAVIGATION_ERROR_STATUSES = new Set([404, 502, 503, 504, 521, 522, 523, 524]);
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -129,23 +128,9 @@ self.addEventListener('message', (event) => {
 async function handleNavigationRequest(request) {
   try {
     const response = await fetch(request);
-    if (shouldShowOfflineFallback(response)) {
-      return OFFLINE_RESPONSE.clone();
-    }
     return response;
   } catch (error) {
     return OFFLINE_RESPONSE.clone();
   }
-}
-
-function shouldShowOfflineFallback(response) {
-  if (!response) {
-    return true;
-  }
-  if (!NAVIGATION_ERROR_STATUSES.has(response.status)) {
-    return false;
-  }
-  const contentType = response.headers.get('content-type') || '';
-  return contentType.includes('text/html');
 }
 
