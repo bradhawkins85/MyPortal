@@ -8,6 +8,7 @@ import paramiko
 from loguru import logger
 
 
+
 async def download_recordings_from_sftp(
     *,
     remote_host: str,
@@ -60,10 +61,9 @@ async def download_recordings_from_sftp(
         except Exception:
             pass
     
-    # Use WarningPolicy as fallback - logs warnings but allows connections
-    # This is safer than AutoAddPolicy which silently accepts unknown hosts
-    # For maximum security, configure known_hosts and use RejectPolicy
-    ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
+    # Always use RejectPolicy for security - requires proper known_hosts configuration
+    # To configure: ssh-keyscan -H <hostname> >> ~/.ssh/known_hosts
+    ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
     
     try:
         logger.info(
@@ -126,15 +126,24 @@ async def download_recordings_from_sftp(
         logger.error(error_msg)
         raise FileNotFoundError(error_msg) from e
     
-    except paramiko.AuthenticationException as e:
-        error_msg = f"Authentication failed: {str(e)}"
-        logger.error(error_msg)
-        raise ValueError(error_msg) from e
-    
     except paramiko.SSHException as e:
+        # Check if this is a host key rejection
+        if "not found in known_hosts" in str(e).lower() or "reject" in str(e).lower():
+            error_msg = (
+                f"Host key verification failed for {remote_host}. "
+                f"To fix, add the host key to known_hosts: "
+                f"ssh-keyscan -H {remote_host} >> ~/.ssh/known_hosts"
+            )
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
         error_msg = f"SSH connection failed: {str(e)}"
         logger.error(error_msg)
         raise RuntimeError(error_msg) from e
+    
+    except paramiko.AuthenticationException as e:
+        error_msg = f"Authentication failed for {remote_host}: {str(e)}"
+        logger.error(error_msg)
+        raise ValueError(error_msg) from e
     
     except Exception as e:
         error_msg = f"Unexpected error during SFTP download: {str(e)}"

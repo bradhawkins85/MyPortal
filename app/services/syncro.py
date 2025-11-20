@@ -160,7 +160,8 @@ class AsyncRateLimiter:
         self._redis_failed = False
 
     async def _acquire_with_redis(self) -> bool:
-        assert self._redis is not None
+        if self._redis is None:
+            raise RuntimeError("Redis client not configured for rate limiter")
         redis_key = f"{self._namespace}:{self._limit}:{int(self._interval)}"
         try:
             allowed, retry_after = await rate_limit_store.acquire_slot(

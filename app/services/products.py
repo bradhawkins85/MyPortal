@@ -11,7 +11,8 @@ from uuid import uuid4
 import aiofiles
 import httpx
 from email.utils import parsedate_to_datetime
-from xml.etree import ElementTree as ET
+from xml.etree.ElementTree import Element  # For type hints only
+from defusedxml.ElementTree import fromstring, ParseError
 
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
@@ -194,7 +195,7 @@ def _strip_xml_tag(name: str) -> str:
     return name
 
 
-def _get_feed_value(element: ET.Element, *names: str) -> str | None:
+def _get_feed_value(element: Element, *names: str) -> str | None:
     """Retrieve a child or attribute value from a stock feed XML element."""
 
     if not names:
@@ -238,7 +239,7 @@ def _coerce_feed_int(value: Any) -> int:
             return 0
 
 
-def _parse_feed_item(element: ET.Element) -> dict[str, Any] | None:
+def _parse_feed_item(element: Element) -> dict[str, Any] | None:
     sku = _get_feed_value(element, "StockCode", "stockcode", "stock_code", "sku")
     if not sku:
         return None
@@ -305,8 +306,8 @@ def _parse_feed_item(element: ET.Element) -> dict[str, Any] | None:
 
 def _parse_stock_feed_xml(payload: str) -> list[dict[str, Any]]:
     try:
-        root = ET.fromstring(payload)
-    except ET.ParseError as exc:
+        root = fromstring(payload)
+    except ParseError as exc:
         raise ValueError("Invalid stock feed XML") from exc
 
     items: list[dict[str, Any]] = []
