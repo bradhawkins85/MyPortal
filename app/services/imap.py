@@ -1386,8 +1386,6 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             description_lines = []
             if from_address:
                 description_lines.append(f"From: {from_address}")
-            if message_id:
-                description_lines.append(f"Message-ID: {message_id}")
             if body:
                 description_lines.append("\n" + body)
             description = "\n\n".join(description_lines).strip()
@@ -1466,7 +1464,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 # For existing tickets (replies), always add a conversation entry
                 # For new tickets, create_ticket already adds the initial reply
                 if not is_new_ticket:
-                    conversation_source = description or body or ""
+                    conversation_source = body or ""
                     sanitized = sanitize_rich_text(conversation_source)
                     if sanitized.has_rich_content:
                         reply_created_at = received_at or datetime.now(timezone.utc)
