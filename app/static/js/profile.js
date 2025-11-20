@@ -136,6 +136,30 @@
     });
   }
 
+  const bookingLinkForm = document.getElementById('booking-link-form');
+  const bookingSuccess = document.querySelector('[data-booking-success]');
+  const bookingError = document.querySelector('[data-booking-error]');
+
+  if (bookingLinkForm && userId) {
+    bookingLinkForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      clearMessages([bookingSuccess, bookingError]);
+
+      const input = bookingLinkForm.querySelector('#booking-link-url');
+      const value = input ? input.value.trim() : '';
+
+      try {
+        await requestJson(`/users/${userId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ booking_link_url: value || null }),
+        });
+        showMessage(bookingSuccess, 'Booking link saved.');
+      } catch (error) {
+        showMessage(bookingError, error.message || 'Unable to save booking link.');
+      }
+    });
+  }
+
   const totpTable = document.getElementById('totp-table');
   const totpBody = root.querySelector('[data-totp-body]');
   const totpEmptyRow = root.querySelector('[data-totp-empty]');
