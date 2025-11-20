@@ -223,3 +223,101 @@ def test_render_tags_prompt_discards_content_below_latest_reply_marker():
     assert "Archive rotation queued." not in prompt
     assert "Historical note retained only in thread." not in prompt
     assert "Reply ABOVE THIS LINE" not in prompt
+
+
+def test_external_reference_not_in_prompt():
+    """Verify that external_reference values are not included in AI tag prompts."""
+    ticket = {
+        "id": 11,
+        "subject": "Email delivery issue",
+        "description": "Cannot send emails from Outlook",
+        "status": "open",
+        "priority": "normal",
+        "category": "Email",
+        "module_slug": "imap",
+        "external_reference": "<message-id-12345@mail.example.com>",
+    }
+    replies = []
+
+    prompt = tickets_service._render_tags_prompt(ticket, replies, {})
+
+    # External reference should not appear in the prompt
+    assert "message-id-12345" not in prompt
+    assert "mail.example.com" not in prompt
+    assert "<message-id-12345@mail.example.com>" not in prompt
+    # But subject and description should be there
+    assert "Email delivery issue" in prompt
+    assert "Cannot send emails from Outlook" in prompt
+
+
+@pytest.mark.anyio
+async def test_external_reference_not_generated_as_tag(monkeypatch):
+    """Verify that external_reference values cannot become AI tags."""
+    updates: list[dict[str, Any]] = []
+
+    async def fake_get_ticket(ticket_id):
+        return {
+            "id": ticket_id,
+            "subject": "IMAP sync error",
+            "description": "Email synchronization failing",
+            "status": "open",
+            "priority": "normal",
+            "category": "Email",
+            "module_slug": "imap",
+            "external_reference": "<abc-xyz-123@example.com>",
+        }
+
+    async def fake_list_replies(ticket_id, include_internal=True):
+        return [
+            {
+                "ticket_id": ticket_id,
+                "author_id": 5,
+                "body": "Investigating the issue with message ID abc-xyz-123",
+                "is_internal": False,
+                "created_at": None,
+                "external_reference": "<reply-456@example.com>",
+            }
+        ]
+
+    async def fake_get_user(user_id):
+        return {"id": user_id, "email": f"user{user_id}@test.com"}
+
+    async def fake_trigger(slug, payload, *, background=True, on_complete=None):
+        # Simulate AI returning tags that include parts of the external reference
+        result = {
+            "status": "succeeded",
+            "model": "llama3",
+            "response": '{"tags": ["email", "imap", "sync", "abc-xyz-123", "example-com", "reply-456"]}',
+        }
+        if on_complete:
+            await on_complete(result)
+        return result
+
+    async def fake_update(ticket_id, **fields):
+        updates.append(fields)
+
+    async def fake_get_excluded_tags():
+        return set()
+
+    monkeypatch.setattr(tickets_service.tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(tickets_service.tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(tickets_service.tickets_repo, "update_ticket", fake_update)
+    monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
+    monkeypatch.setattr(tickets_service.modules_service, "trigger_module", fake_trigger)
+    monkeypatch.setattr("app.services.tickets.get_all_excluded_tags", fake_get_excluded_tags)
+
+    await tickets_service.refresh_ticket_ai_tags(12)
+
+    final_update = updates[-1]
+    assert final_update["ai_tags_status"] == "succeeded"
+    tags = final_update["ai_tags"]
+    
+    # Valid tags should be present
+    assert "email" in tags
+    assert "imap" in tags
+    assert "sync" in tags
+    
+    # External reference values should NOT be in tags
+    assert "abc-xyz-123" not in tags
+    assert "example-com" not in tags
+    assert "reply-456" not in tags
