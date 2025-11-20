@@ -7,6 +7,8 @@ from typing import Any
 import paramiko
 from loguru import logger
 
+from app.core.config import get_settings
+
 
 async def download_recordings_from_sftp(
     *,
@@ -60,15 +62,23 @@ async def download_recordings_from_sftp(
         except Exception:
             pass
     
-    # Use AutoAddPolicy to automatically add unknown host keys
-    # This saves new host keys to known_hosts for future verification
-    # If you need stricter security, configure known_hosts and use RejectPolicy
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    logger.warning(
-        "Using AutoAddPolicy for SSH host key verification. "
-        "For production use, configure known_hosts and use RejectPolicy.",
-        host=remote_host
-    )
+    # Use strict host key policy in production, warn in development
+    # In production, this requires known_hosts to be properly configured
+    # In development, warnings will be logged but connections still allowed
+    settings = get_settings()
+    if settings.environment == "production":
+        ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
+        logger.info(
+            "Using RejectPolicy for SSH host key verification (production mode)",
+            host=remote_host
+        )
+    else:
+        ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
+        logger.warning(
+            "Using WarningPolicy for SSH host key verification (development mode). "
+            "Unknown host keys will be accepted with a warning.",
+            host=remote_host
+        )
     
     try:
         logger.info(
