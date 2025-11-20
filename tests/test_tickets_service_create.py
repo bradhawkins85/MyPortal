@@ -15,7 +15,9 @@ def anyio_backend() -> str:
 @pytest.mark.anyio
 async def test_create_ticket_triggers_automations(monkeypatch):
     async def fake_create_ticket(**kwargs):
-        return {"id": 42, **kwargs}
+        # Use the provided ID or default to 42
+        ticket_id = kwargs.get("id") if kwargs.get("id") is not None else 42
+        return {"id": ticket_id, **{k: v for k, v in kwargs.items() if k != "id"}}
 
     async def fake_get_company(company_id):
         assert company_id == 3
@@ -64,7 +66,8 @@ async def test_create_ticket_triggers_automations(monkeypatch):
 @pytest.mark.anyio
 async def test_create_ticket_can_skip_automations(monkeypatch):
     async def fake_create_ticket(**kwargs):
-        return {"id": 77, **kwargs}
+        ticket_id = kwargs.get("id") if kwargs.get("id") is not None else 77
+        return {"id": ticket_id, **{k: v for k, v in kwargs.items() if k != "id"}}
 
     async def fake_get_company(company_id):
         return None
@@ -116,7 +119,8 @@ async def test_create_ticket_truncates_long_description(monkeypatch):
 
     async def fake_create_ticket(**kwargs):
         captured.update(kwargs)
-        return {"id": 91, **kwargs}
+        ticket_id = kwargs.get("id") if kwargs.get("id") is not None else 91
+        return {"id": ticket_id, **{k: v for k, v in kwargs.items() if k != "id"}}
 
     async def fake_handle_event(event_name, context):  # pragma: no cover - via test
         return []
@@ -169,7 +173,8 @@ async def test_create_ticket_initial_reply_uses_full_description(monkeypatch):
 
     async def fake_create_ticket(**kwargs):
         captured_ticket.update(kwargs)
-        return {"id": 222, **kwargs}
+        ticket_id = kwargs.get("id") if kwargs.get("id") is not None else 222
+        return {"id": ticket_id, **{k: v for k, v in kwargs.items() if k != "id"}}
 
     async def fake_create_reply(**kwargs):
         recorded_reply.update(kwargs)
@@ -231,7 +236,8 @@ async def test_create_ticket_records_initial_reply(monkeypatch):
     recorded_reply: dict[str, object] = {}
 
     async def fake_create_ticket(**kwargs):
-        return {"id": 135, **kwargs}
+        ticket_id = kwargs.get("id") if kwargs.get("id") is not None else 135
+        return {"id": ticket_id, **{k: v for k, v in kwargs.items() if k != "id"}}
 
     async def fake_create_reply(**kwargs):
         recorded_reply.update(kwargs)
@@ -283,7 +289,8 @@ async def test_create_ticket_records_initial_reply_without_author(monkeypatch):
     recorded_reply: dict[str, object] = {}
 
     async def fake_create_ticket(**kwargs):
-        return {"id": 864, **kwargs}
+        ticket_id = kwargs.get("id") if kwargs.get("id") is not None else 864
+        return {"id": ticket_id, **{k: v for k, v in kwargs.items() if k != "id"}}
 
     async def fake_create_reply(**kwargs):
         recorded_reply.update(kwargs)
