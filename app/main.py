@@ -11158,6 +11158,15 @@ async def _render_portal_ticket_detail(
             else ""
         )
         author_record = user_lookup.get(reply.get("author_id"))
+        
+        # Get email tracking status if available
+        email_tracking_id = reply.get("email_tracking_id")
+        email_opened_at = reply.get("email_opened_at")
+        email_open_count = reply.get("email_open_count", 0)
+        email_sent_at = reply.get("email_sent_at")
+        has_tracking = email_tracking_id is not None
+        is_email_opened = email_opened_at is not None
+        
         timeline_entries.append(
             {
                 "id": reply.get("id"),
@@ -11171,6 +11180,12 @@ async def _render_portal_ticket_detail(
                 "is_internal": bool(reply.get("is_internal")),
                 "labour_type_name": labour_type_name,
                 "labour_type_code": reply.get("labour_type_code"),
+                "email_tracking_id": email_tracking_id,
+                "email_sent_at": email_sent_at,
+                "email_opened_at": email_opened_at,
+                "email_open_count": email_open_count,
+                "has_email_tracking": has_tracking,
+                "is_email_opened": is_email_opened,
             }
         )
     
@@ -11498,6 +11513,15 @@ async def _render_ticket_detail(
             billable_flag,
             labour_type_name,
         )
+        
+        # Get email tracking status if available
+        email_tracking_id = reply.get("email_tracking_id")
+        email_opened_at = reply.get("email_opened_at")
+        email_open_count = reply.get("email_open_count", 0)
+        email_sent_at = reply.get("email_sent_at")
+        has_tracking = email_tracking_id is not None
+        is_email_opened = email_opened_at is not None
+        
         enriched_replies.append(
             {
                 **reply,
@@ -11508,6 +11532,12 @@ async def _render_ticket_detail(
                 "is_billable": billable_flag,
                 "time_summary": time_summary,
                 "labour_type_name": labour_type_name,
+                "email_tracking_id": email_tracking_id,
+                "email_sent_at": email_sent_at,
+                "email_opened_at": email_opened_at,
+                "email_open_count": email_open_count,
+                "has_email_tracking": has_tracking,
+                "is_email_opened": is_email_opened,
             }
         )
     
