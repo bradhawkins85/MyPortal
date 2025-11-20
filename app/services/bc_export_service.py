@@ -16,7 +16,7 @@ from typing import Any, Optional
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt, RGBColor
-from jinja2 import Environment, BaseLoader
+from jinja2 import Environment, BaseLoader, select_autoescape
 try:  # pragma: no cover - import guard for optional dependency
     from weasyprint import HTML
 except (ImportError, OSError) as exc:  # pragma: no cover - executed only when missing deps
@@ -607,7 +607,7 @@ def _render_bcp_pdf_html(plan: dict[str, Any], data: dict[str, Any]) -> str:
         Rendered HTML string
     """
     import os
-    from jinja2 import Environment, FileSystemLoader
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
     
     # Determine template path
     template_dir = os.path.join(
@@ -615,8 +615,11 @@ def _render_bcp_pdf_html(plan: dict[str, Any], data: dict[str, Any]) -> str:
         "templates", "bcp", "export"
     )
     
-    # Create Jinja2 environment
-    env = Environment(loader=FileSystemLoader(template_dir))
+    # Create Jinja2 environment with autoescape enabled for security
+    env = Environment(
+        loader=FileSystemLoader(template_dir),
+        autoescape=select_autoescape(['html', 'xml'])
+    )
     
     # Load template
     template = env.get_template("bcp_pdf.html")
@@ -858,8 +861,11 @@ def _render_plan_html(
                 return value
         return value
     
-    # Render template using Environment with custom filter
-    env = Environment(loader=BaseLoader())
+    # Render template using Environment with custom filter and autoescape enabled for security
+    env = Environment(
+        loader=BaseLoader(),
+        autoescape=select_autoescape(['html', 'xml'])
+    )
     env.filters["format_datetime"] = format_datetime
     jinja_template = env.from_string(html_template)
     
