@@ -136,6 +136,37 @@
       </form>
     </div>
   </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Booking link</h2>
+        <p class="card__subtitle">
+          Provide your booking link URL. This will be displayed to customers on tickets assigned to you.
+        </p>
+      </div>
+    </header>
+    <div class="card__body">
+      <form class="form" id="booking-link-form">
+        <div class="alert alert--info" data-booking-success hidden role="status"></div>
+        <div class="alert alert--error" data-booking-error hidden role="alert"></div>
+        <div class="form-field">
+          <label class="form-label" for="booking-link-url">Booking link URL</label>
+          <input
+            class="form-input"
+            type="url"
+            id="booking-link-url"
+            name="bookingLinkUrl"
+            value="{{ current_user.booking_link_url or '' }}"
+            placeholder="https://calendly.com/your-link"
+          />
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button">Save booking link</button>
+        </div>
+      </form>
+    </div>
+  </section>
 </div>
 {% endblock %}
 

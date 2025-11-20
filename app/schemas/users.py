@@ -12,6 +12,7 @@ class UserBase(BaseModel):
     last_name: Optional[str] = None
     mobile_phone: Optional[str] = None
     company_id: Optional[int] = None
+    booking_link_url: Optional[str] = None
 
 
 class UserCreate(UserBase):
@@ -24,6 +25,7 @@ class UserUpdate(BaseModel):
     mobile_phone: Optional[str] = None
     company_id: Optional[int] = None
     is_super_admin: Optional[bool] = None
+    booking_link_url: Optional[str] = None
 
 
 class UserResponse(UserBase):
