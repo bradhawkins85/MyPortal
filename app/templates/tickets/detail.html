@@ -459,6 +459,13 @@
                             {% if reply.is_internal %}
                               <span class="badge badge--muted">Internal</span>
                             {% endif %}
+                            {% if reply.has_email_tracking %}
+                              {% if reply.is_email_opened %}
+                                <span class="badge badge--success" title="Email opened {{ reply.email_open_count }} time{{ 's' if reply.email_open_count > 1 else '' }}">✓ Read</span>
+                              {% else %}
+                                <span class="badge badge--muted" title="Email sent, not yet opened">📧 Sent</span>
+                              {% endif %}
+                            {% endif %}
                           </span>
                           {% if reply.time_summary %}
                             <span class="timeline__meta text-muted">{{ reply.time_summary }}</span>
