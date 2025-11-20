@@ -13,6 +13,7 @@ from email.utils import getaddresses, parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Mapping
 
+from app.core.database import db
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
 from app.repositories import imap_accounts as imap_repo
@@ -936,45 +937,63 @@ async def _find_existing_ticket_for_reply(
     Returns:
         Ticket record if found, None otherwise
     """
+    # TEMPORARY DEBUG: Log function entry
+    log_info("_find_existing_ticket_for_reply called", subject=subject, from_email=from_email, requester_id=requester_id)
+    
     # First, try to extract ticket number from subject
-    ticket_number = _extract_ticket_number_from_subject(subject)
-    if ticket_number:
+    extracted = _extract_ticket_number_from_subject(subject)
+    log_info("_extract_ticket_number_from_subject result", subject=subject, extracted_ticket_number=extracted)
+    
+    if extracted:
         # Try to find ticket by ticket_number field
         try:
             rows = await db.fetch_all(
                 "SELECT * FROM tickets WHERE ticket_number = %s LIMIT 1",
-                (ticket_number,)
+                (extracted,)
             )
+            # TEMPORARY DEBUG: Log lookup results
+            log_info("Ticket lookup by ticket_number", ticket_number=extracted, rows_count=len(rows))
             if rows:
+                log_info("Ticket preview", ticket_id=rows[0].get("id"), ticket_number=rows[0].get("ticket_number"), status=rows[0].get("status"))
                 from app.repositories.tickets import _normalise_ticket
                 ticket = _normalise_ticket(rows[0])
                 # Don't match closed tickets - create a new ticket instead
                 if ticket.get("status", "").lower() in ("closed",):
                     return None
                 return ticket
-        except Exception:  # pragma: no cover - defensive
-            pass
+        except Exception as exc:  # pragma: no cover - defensive
+            # TEMPORARY DEBUG: Log exceptions during ticket_number lookup
+            log_error("Exception during ticket_number lookup", ticket_number=extracted, subject=subject, error=str(exc))
         
         # Also try by ID if ticket_number is numeric
         try:
-            ticket_id = int(ticket_number)
+            ticket_id = int(extracted)
             rows = await db.fetch_all(
                 "SELECT * FROM tickets WHERE id = %s LIMIT 1",
                 (ticket_id,)
             )
+            # TEMPORARY DEBUG: Log lookup results
+            log_info("Ticket lookup by id", ticket_id=ticket_id, rows_count=len(rows))
             if rows:
+                log_info("Ticket preview by id", ticket_id=rows[0].get("id"), ticket_number=rows[0].get("ticket_number"), status=rows[0].get("status"))
                 from app.repositories.tickets import _normalise_ticket
                 ticket = _normalise_ticket(rows[0])
                 # Don't match closed tickets - create a new ticket instead
                 if ticket.get("status", "").lower() in ("closed",):
                     return None
                 return ticket
-        except (ValueError, Exception):  # pragma: no cover - defensive
-            pass
+        except ValueError:
+            # TEMPORARY DEBUG: Not a numeric ID
+            log_info("Extracted ticket number is not numeric", extracted=extracted)
+        except Exception as exc:  # pragma: no cover - defensive
+            # TEMPORARY DEBUG: Log exceptions during id lookup
+            log_error("Exception during id lookup", ticket_id=extracted, subject=subject, error=str(exc))
     
     # If no ticket number found, try to match by normalized subject
     # Only match non-closed tickets where sender is requester or watcher
     normalized_subject = _normalize_subject_for_matching(subject)
+    # TEMPORARY DEBUG: Log normalized subject
+    log_info("Fallback to subject matching", normalized_subject=normalized_subject, original_subject=subject)
     if not normalized_subject or len(normalized_subject) < 5:
         # Subject too short or empty to match reliably
         return None
@@ -1018,7 +1037,12 @@ async def _find_existing_ticket_for_reply(
         
         query += " ORDER BY t.updated_at DESC LIMIT 20"
         
+        # TEMPORARY DEBUG: Log query execution
+        log_info("Executing subject match query", from_email=from_email, requester_id=requester_id, params_count=len(params))
         rows = await db.fetch_all(query, tuple(params))
+        
+        # TEMPORARY DEBUG: Log results
+        log_info("Subject match query results", rows_count=len(rows), normalized_subject=normalized_subject)
         
         if not rows:
             return None
@@ -1036,11 +1060,15 @@ async def _find_existing_ticket_for_reply(
                 return ticket
         
     except Exception as exc:  # pragma: no cover - defensive logging
+        # TEMPORARY DEBUG: Enhanced exception logging
         log_error(
             "Failed to search for existing ticket by subject",
             subject=subject,
             from_email=from_email,
+            normalized_subject=normalized_subject,
+            requester_id=requester_id,
             error=str(exc),
+            error_type=type(exc).__name__,
         )
     
     return None
@@ -1262,6 +1290,8 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         flags.append(decoded)
             message = email.message_from_bytes(message_bytes)
             subject = _decode_subject(message) or f"Email from {username}"
+            # TEMPORARY DEBUG: Log decoded subject for diagnosis
+            log_info("IMAP decoded subject for incoming message", subject=subject, raw_subject_header=message.get("Subject", ""))
             body, email_attachments = _extract_body_and_attachments(message)
             message_id = _normalise_string(message.get("Message-ID"), default=uid)
             received_at: datetime | None = None
