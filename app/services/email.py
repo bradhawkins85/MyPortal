@@ -39,8 +39,21 @@ async def send_email(
     sender: str | None = None,
     reply_to: str | None = None,
     timeout: float = 30.0,
+    enable_tracking: bool = False,
+    ticket_reply_id: int | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Send an email using the configured SMTP server.
+
+    Args:
+        subject: Email subject line
+        recipients: List of recipient email addresses
+        html_body: HTML content of the email
+        text_body: Plain text version of the email (optional)
+        sender: Sender email address (optional, uses SMTP_USER if not provided)
+        reply_to: Reply-to email address (optional)
+        timeout: SMTP connection timeout in seconds
+        enable_tracking: Enable email tracking (opens and clicks)
+        ticket_reply_id: ID of the ticket reply being sent (required for tracking)
 
     Returns a tuple where the first element indicates if delivery was attempted and
     succeeded, and the second element contains the webhook monitor event metadata
@@ -57,6 +70,48 @@ async def send_email(
         logger.warning("SMTP host not configured; email delivery skipped", subject=subject)
         return False, None
 
+    # Apply email tracking if enabled
+    tracking_id: str | None = None
+    modified_html_body = html_body
+    
+    if enable_tracking and ticket_reply_id is not None:
+        try:
+            from app.services import email_tracking
+            from app.services import modules as modules_service
+            
+            # Check if Plausible module is enabled and configured
+            module_settings = await modules_service.get_module_settings('plausible')
+            track_opens = module_settings.get('track_opens', True) if module_settings else True
+            track_clicks = module_settings.get('track_clicks', True) if module_settings else True
+            
+            if track_opens or track_clicks:
+                tracking_id = email_tracking.generate_tracking_id()
+                
+                # Insert tracking pixel for open tracking
+                if track_opens:
+                    modified_html_body = email_tracking.insert_tracking_pixel(modified_html_body, tracking_id)
+                
+                # Rewrite links for click tracking
+                if track_clicks:
+                    modified_html_body = email_tracking.rewrite_links_for_tracking(modified_html_body, tracking_id)
+                
+                logger.info(
+                    "Email tracking enabled",
+                    tracking_id=tracking_id,
+                    reply_id=ticket_reply_id,
+                    track_opens=track_opens,
+                    track_clicks=track_clicks,
+                )
+        except Exception as exc:
+            logger.error(
+                "Failed to apply email tracking",
+                reply_id=ticket_reply_id,
+                error=str(exc),
+            )
+            # Continue without tracking rather than failing the email send
+            modified_html_body = html_body
+            tracking_id = None
+
     message = EmailMessage()
     message["Subject"] = subject
     from_address = sender or settings.smtp_user or "no-reply@localhost"
@@ -67,10 +122,10 @@ async def send_email(
 
     if text_body:
         message.set_content(text_body)
-        if html_body:
-            message.add_alternative(html_body, subtype="html")
+        if modified_html_body:
+            message.add_alternative(modified_html_body, subtype="html")
     else:
-        message.set_content(html_body, subtype="html")
+        message.set_content(modified_html_body, subtype="html")
 
     port_segment = f":{settings.smtp_port}" if settings.smtp_port else ""
     endpoint = f"smtp://{settings.smtp_host}{port_segment}"
@@ -157,11 +212,26 @@ async def send_email(
                     event_id=event_id,
                     error=str(monitor_exc),
                 )
+    
+    # Record email tracking metadata if tracking is enabled
+    if tracking_id and ticket_reply_id:
+        try:
+            from app.services import email_tracking
+            await email_tracking.record_email_sent(ticket_reply_id, tracking_id)
+        except Exception as tracking_exc:
+            logger.error(
+                "Failed to record email tracking metadata",
+                reply_id=ticket_reply_id,
+                tracking_id=tracking_id,
+                error=str(tracking_exc),
+            )
+    
     logger.info(
         "Email dispatched via SMTP",
         subject=subject,
         recipients=to_addresses,
         sender=message["From"],
         event_id=event_record.get("id") if isinstance(event_record, dict) else None,
+        tracking_enabled=tracking_id is not None,
     )
     return True, event_record

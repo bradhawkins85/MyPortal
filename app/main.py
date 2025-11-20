@@ -62,6 +62,7 @@ from app.api.routes import (
     business_continuity_plans as bc_plans_api,
     call_recordings as call_recordings_api,
     companies,
+    email_tracking,
     essential8 as essential8_api,
     forms as forms_api,
     invoices as invoices_api,
@@ -644,6 +645,7 @@ app.include_router(agent.router)
 app.include_router(users.router)
 app.include_router(call_recordings_api.router)
 app.include_router(companies.router)
+app.include_router(email_tracking.router)
 app.include_router(essential8_api.router)
 app.include_router(licenses_api.router)
 app.include_router(forms_api.router)
@@ -1243,6 +1245,43 @@ async def _build_base_context(
         module_lookup = {module.get("slug"): module for module in module_list if module.get("slug")}
         request.state.module_lookup = module_lookup
 
+    # Get Plausible analytics configuration for app-wide tracking
+    plausible_config = {"enabled": False}
+    plausible_module = (module_lookup or {}).get("plausible")
+    if plausible_module and plausible_module.get("enabled"):
+        plausible_settings = plausible_module.get("settings") or {}
+        base_url = str(plausible_settings.get("base_url") or "").strip().rstrip("/")
+        site_domain = str(plausible_settings.get("site_domain") or "").strip()
+        
+        # Validate base_url and site_domain to prevent injection attacks
+        # base_url must be a valid HTTPS URL
+        # site_domain must be a valid domain name (alphanumeric, dots, hyphens)
+        valid_base_url = False
+        valid_site_domain = False
+        
+        if base_url:
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(base_url)
+                # Must be https or http, have a netloc, and no suspicious characters
+                if parsed.scheme in ("https", "http") and parsed.netloc and not any(c in base_url for c in ["<", ">", '"', "'"]):
+                    valid_base_url = True
+            except Exception:
+                pass
+        
+        if site_domain:
+            # Domain must only contain alphanumeric, dots, hyphens, and underscores
+            # No spaces, quotes, or HTML-like characters
+            if all(c.isalnum() or c in ".-_" for c in site_domain) and not any(c in site_domain for c in ["<", ">", '"', "'"]):
+                valid_site_domain = True
+        
+        if valid_base_url and valid_site_domain:
+            plausible_config = {
+                "enabled": True,
+                "base_url": base_url,
+                "site_domain": site_domain,
+            }
+
     context: dict[str, Any] = {
         "request": request,
         "app_name": settings.app_name,
@@ -1265,6 +1304,7 @@ async def _build_base_context(
         "impersonation_started_at": impersonation_started_at,
         "has_issue_tracker_access": has_issue_tracker_access,
         "can_access_tickets": True,
+        "plausible_config": plausible_config,
     }
     context.update(permission_flags)
     if extra:
@@ -11156,6 +11196,15 @@ async def _render_portal_ticket_detail(
             else ""
         )
         author_record = user_lookup.get(reply.get("author_id"))
+        
+        # Get email tracking status if available
+        email_tracking_id = reply.get("email_tracking_id")
+        email_opened_at = reply.get("email_opened_at")
+        email_open_count = reply.get("email_open_count", 0)
+        email_sent_at = reply.get("email_sent_at")
+        has_tracking = email_tracking_id is not None
+        is_email_opened = email_opened_at is not None
+        
         timeline_entries.append(
             {
                 "id": reply.get("id"),
@@ -11169,6 +11218,12 @@ async def _render_portal_ticket_detail(
                 "is_internal": bool(reply.get("is_internal")),
                 "labour_type_name": labour_type_name,
                 "labour_type_code": reply.get("labour_type_code"),
+                "email_tracking_id": email_tracking_id,
+                "email_sent_at": email_sent_at,
+                "email_opened_at": email_opened_at,
+                "email_open_count": email_open_count,
+                "has_email_tracking": has_tracking,
+                "is_email_opened": is_email_opened,
             }
         )
     
@@ -11497,6 +11552,15 @@ async def _render_ticket_detail(
             billable_flag,
             labour_type_name,
         )
+        
+        # Get email tracking status if available
+        email_tracking_id = reply.get("email_tracking_id")
+        email_opened_at = reply.get("email_opened_at")
+        email_open_count = reply.get("email_open_count", 0)
+        email_sent_at = reply.get("email_sent_at")
+        has_tracking = email_tracking_id is not None
+        is_email_opened = email_opened_at is not None
+        
         enriched_replies.append(
             {
                 **reply,
@@ -11507,6 +11571,12 @@ async def _render_ticket_detail(
                 "is_billable": billable_flag,
                 "time_summary": time_summary,
                 "labour_type_name": labour_type_name,
+                "email_tracking_id": email_tracking_id,
+                "email_sent_at": email_sent_at,
+                "email_opened_at": email_opened_at,
+                "email_open_count": email_open_count,
+                "has_email_tracking": has_tracking,
+                "is_email_opened": is_email_opened,
             }
         )
     
