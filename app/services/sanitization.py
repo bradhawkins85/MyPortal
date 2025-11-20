@@ -53,6 +53,7 @@ _ALLOWED_ATTRIBUTES: Mapping[str, list[str]] = {
 _ALLOWED_PROTOCOLS: tuple[str, ...] = ("http", "https", "mailto", "tel", "data")
 
 _STYLE_BLOCK_PATTERN = re.compile(r"(?is)<style.*?>.*?</style>")
+_INLINE_CSS_PATTERN = re.compile(r"(?is)^(?:\s*[a-z0-9._#-]+\s*\{[^}]*\}\s*)+")
 _EMAIL_HEADER_PATTERN = re.compile(r"^(from|sent|to|subject|cc):", re.IGNORECASE)
 _EMAIL_THREAD_DIVIDER = re.compile(r"^-{2,}\s*original message\s*-{2,}$", re.IGNORECASE)
 
@@ -103,6 +104,7 @@ def sanitize_rich_text(value: str | None) -> SanitizedRichText:
     raw_text = (value or "").strip()
     if raw_text:
         raw_text = _STYLE_BLOCK_PATTERN.sub("", raw_text)
+        raw_text = _INLINE_CSS_PATTERN.sub("", raw_text)
         raw_text = _strip_quoted_email_headers(raw_text)
     cleaned = bleach.clean(
         raw_text,
