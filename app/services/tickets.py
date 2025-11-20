@@ -943,6 +943,7 @@ async def create_ticket(
     ticket_number: str | None = None,
     trigger_automations: bool = True,
     initial_reply_author_id: int | None = None,
+    id: int | None = None,
 ) -> TicketRecord:
     """Create a ticket and emit the corresponding automation event."""
 
@@ -967,6 +968,7 @@ async def create_ticket(
         module_slug=module_slug,
         external_reference=external_reference,
         ticket_number=ticket_number,
+        id=id,
     )
 
     ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None

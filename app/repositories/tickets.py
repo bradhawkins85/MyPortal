@@ -125,6 +125,7 @@ async def create_ticket(
     module_slug: str | None,
     external_reference: str | None,
     ticket_number: str | None = None,
+    id: int | None = None,
 ) -> TicketRecord:
     log_info(
         "Creating ticket",
@@ -134,27 +135,67 @@ async def create_ticket(
         assigned_user_id=assigned_user_id,
         status=status,
         priority=priority,
+        explicit_id=id,
     )
-    ticket_id = await db.execute_returning_lastrowid(
-        """
-        INSERT INTO tickets
-            (company_id, requester_id, assigned_user_id, subject, description, status, priority, category, module_slug, external_reference, ticket_number)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            company_id,
-            requester_id,
-            assigned_user_id,
-            subject,
-            description,
-            status,
-            priority,
-            category,
-            module_slug,
-            external_reference,
-            ticket_number,
-        ),
-    )
+    
+    # If an explicit ID is provided, insert with that ID
+    if id is not None:
+        ticket_id = await db.execute_returning_lastrowid(
+            """
+            INSERT INTO tickets
+                (id, company_id, requester_id, assigned_user_id, subject, description, status, priority, category, module_slug, external_reference, ticket_number)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                id,
+                company_id,
+                requester_id,
+                assigned_user_id,
+                subject,
+                description,
+                status,
+                priority,
+                category,
+                module_slug,
+                external_reference,
+                ticket_number,
+            ),
+        )
+        # Ensure AUTO_INCREMENT is updated to be higher than the explicit ID
+        # This ensures app-generated tickets will use IDs higher than Syncro tickets
+        try:
+            # Get the current maximum ID
+            max_id_row = await db.fetch_one("SELECT MAX(id) as max_id FROM tickets")
+            max_id = max_id_row.get("max_id") if max_id_row else id
+            if max_id is not None:
+                # Update AUTO_INCREMENT to be one more than the maximum ID
+                await db.execute(
+                    f"ALTER TABLE tickets AUTO_INCREMENT = {int(max_id) + 1}"
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            log_debug("Failed to update AUTO_INCREMENT after explicit ID insert", error=str(exc))
+    else:
+        # Use normal auto-increment behavior
+        ticket_id = await db.execute_returning_lastrowid(
+            """
+            INSERT INTO tickets
+                (company_id, requester_id, assigned_user_id, subject, description, status, priority, category, module_slug, external_reference, ticket_number)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                company_id,
+                requester_id,
+                assigned_user_id,
+                subject,
+                description,
+                status,
+                priority,
+                category,
+                module_slug,
+                external_reference,
+                ticket_number,
+            ),
+        )
     if ticket_id:
         log_info("Ticket created successfully", ticket_id=ticket_id)
         row = await db.fetch_one("SELECT * FROM tickets WHERE id = %s", (ticket_id,))

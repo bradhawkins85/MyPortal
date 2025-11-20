@@ -200,6 +200,38 @@ def _extract_ticket_number(ticket: dict[str, Any]) -> str | None:
     return str(fallback) if fallback is not None else None
 
 
+def _extract_numeric_ticket_id(ticket: dict[str, Any]) -> int | None:
+    """
+    Extract a numeric ticket ID from the Syncro ticket data.
+    This is used to set the database ID when importing Syncro tickets.
+    """
+    # First try the 'number' field which is the actual ticket number from Syncro
+    ticket_number = _extract_ticket_number(ticket)
+    if ticket_number:
+        try:
+            # Try to parse as integer
+            return int(ticket_number)
+        except (ValueError, TypeError):
+            # If the ticket number is not purely numeric, try to extract digits
+            import re
+            digits = re.sub(r'\D', '', ticket_number)
+            if digits:
+                try:
+                    return int(digits)
+                except (ValueError, TypeError):
+                    pass
+    
+    # Fall back to the Syncro ID if number parsing fails
+    syncro_id = ticket.get("id")
+    if syncro_id is not None:
+        try:
+            return int(syncro_id)
+        except (ValueError, TypeError):
+            pass
+    
+    return None
+
+
 def _iter_company_name_candidates(ticket: dict[str, Any]):
     fields = [
         ticket.get("customer_business_then_name"),
@@ -652,6 +684,10 @@ async def _upsert_ticket(
         ticket_db_id = int(existing["id"])
         outcome = "updated"
     else:
+        # Extract the numeric ID for the ticket - this will be used as the database ID
+        # to ensure Syncro ticket numbers match the database ticket IDs
+        ticket_id_to_use = _extract_numeric_ticket_id(ticket)
+        
         created = await tickets_service.create_ticket(
             subject=subject,
             description=description_value,
@@ -665,6 +701,7 @@ async def _upsert_ticket(
             external_reference=external_reference,
             ticket_number=ticket_number,
             trigger_automations=True,
+            id=ticket_id_to_use,
         )
         created_id = created.get("id")
         if created_id is not None:
