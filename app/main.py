@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import re
 import secrets
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
@@ -1270,9 +1271,11 @@ async def _build_base_context(
                 pass
         
         if site_domain:
-            # Domain must only contain alphanumeric, dots, hyphens, and underscores
+            # Domain must only contain alphanumeric, dots, hyphens, underscores and optional port
             # No spaces, quotes, or HTML-like characters
-            if all(c.isalnum() or c in ".-_" for c in site_domain) and not any(c in site_domain for c in ["<", ">", '"', "'"]):
+            if re.match(r"^[A-Za-z0-9._-]+(?::\d+)?$", site_domain) and not any(
+                c in site_domain for c in ["<", ">", '"', "'"]
+            ):
                 valid_site_domain = True
         
         if valid_base_url and valid_site_domain:
