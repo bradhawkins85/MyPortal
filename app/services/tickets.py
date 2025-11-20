@@ -398,10 +398,16 @@ def _build_user_snapshot(user: Mapping[str, Any] | None) -> Mapping[str, Any] | 
 async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
     enriched: TicketRecord = dict(ticket)
 
+    # Normalise ticket number fields so templates always have access
+    ticket_number = enriched.get("ticket_number") or enriched.get("number")
+    if not ticket_number and enriched.get("id") is not None:
+        # Fall back to the database ID when an explicit ticket number is missing
+        ticket_number = str(enriched.get("id"))
+
     # Add 'number' alias for 'ticket_number' to support {{ticket.number}} template variable
     # Ensure it's always present for consistent template access
-    if "number" not in enriched:
-        enriched["number"] = enriched.get("ticket_number")
+    enriched["ticket_number"] = ticket_number
+    enriched["number"] = ticket_number
     
     # Add 'labels' alias for 'ai_tags' to support {{ticket.labels}} template variable
     if "labels" not in enriched:
