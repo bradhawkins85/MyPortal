@@ -7,7 +7,6 @@ from typing import Any
 import paramiko
 from loguru import logger
 
-from app.core.config import get_settings
 
 
 async def download_recordings_from_sftp(
@@ -62,23 +61,9 @@ async def download_recordings_from_sftp(
         except Exception:
             pass
     
-    # Use strict host key policy in production, warn in development
-    # In production, this requires known_hosts to be properly configured
-    # In development, warnings will be logged but connections still allowed
-    settings = get_settings()
-    if settings.environment == "production":
-        ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
-        logger.info(
-            "Using RejectPolicy for SSH host key verification (production mode)",
-            host=remote_host
-        )
-    else:
-        ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
-        logger.warning(
-            "Using WarningPolicy for SSH host key verification (development mode). "
-            "Unknown host keys will be accepted with a warning.",
-            host=remote_host
-        )
+    # Always use RejectPolicy for security - requires proper known_hosts configuration
+    # To configure: ssh-keyscan -H <hostname> >> ~/.ssh/known_hosts
+    ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
     
     try:
         logger.info(
@@ -141,15 +126,24 @@ async def download_recordings_from_sftp(
         logger.error(error_msg)
         raise FileNotFoundError(error_msg) from e
     
-    except paramiko.AuthenticationException as e:
-        error_msg = f"Authentication failed: {str(e)}"
-        logger.error(error_msg)
-        raise ValueError(error_msg) from e
-    
     except paramiko.SSHException as e:
+        # Check if this is a host key rejection
+        if "not found in known_hosts" in str(e).lower() or "reject" in str(e).lower():
+            error_msg = (
+                f"Host key verification failed for {remote_host}. "
+                f"To fix, add the host key to known_hosts: "
+                f"ssh-keyscan -H {remote_host} >> ~/.ssh/known_hosts"
+            )
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
         error_msg = f"SSH connection failed: {str(e)}"
         logger.error(error_msg)
         raise RuntimeError(error_msg) from e
+    
+    except paramiko.AuthenticationException as e:
+        error_msg = f"Authentication failed for {remote_host}: {str(e)}"
+        logger.error(error_msg)
+        raise ValueError(error_msg) from e
     
     except Exception as e:
         error_msg = f"Unexpected error during SFTP download: {str(e)}"
