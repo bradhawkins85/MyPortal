@@ -11287,6 +11287,7 @@ async def _render_portal_ticket_detail(
             "updated_iso": updated_iso,
             "billed_at_iso": billed_at_iso,
         },
+        "assigned_user": assigned_record,
         "ticket_replies": timeline_entries,
         "ticket_watchers": watchers,
         "ticket_assets": ticket_assets,
