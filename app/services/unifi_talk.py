@@ -60,10 +60,15 @@ async def download_recordings_from_sftp(
         except Exception:
             pass
     
-    # Use WarningPolicy as fallback - logs warnings but allows connections
-    # This is safer than AutoAddPolicy which silently accepts unknown hosts
-    # For maximum security, configure known_hosts and use RejectPolicy
-    ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
+    # Use AutoAddPolicy to automatically add unknown host keys
+    # This saves new host keys to known_hosts for future verification
+    # If you need stricter security, configure known_hosts and use RejectPolicy
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    logger.warning(
+        "Using AutoAddPolicy for SSH host key verification. "
+        "For production use, configure known_hosts and use RejectPolicy.",
+        host=remote_host
+    )
     
     try:
         logger.info(
