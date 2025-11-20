@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import asyncio
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from dotenv import load_dotenv
@@ -390,6 +390,20 @@ def _default_xero_settings() -> dict[str, Any]:
 
 DEFAULT_MODULES: list[dict[str, Any]] = [
     {
+        "slug": "plausible",
+        "name": "Plausible Analytics",
+        "description": "Privacy-first analytics integration for email tracking.",
+        "icon": "📊",
+        "settings": {
+            "base_url": "",
+            "site_domain": "",
+            "api_key": "",
+            "track_opens": True,
+            "track_clicks": True,
+            "send_to_plausible": False,
+        },
+    },
+    {
         "slug": "syncro",
         "name": "Syncro",
         "description": "Synchronise tickets and contacts from SyncroMSP.",
@@ -617,6 +631,29 @@ def _coerce_settings(
                 "auth_token": auth_token,
             }
         )
+    elif slug == "plausible":
+        overrides = payload or {}
+        api_key_override = overrides.get("api_key")
+        if api_key_override is None:
+            api_key = str(merged.get("api_key") or "").strip()
+        else:
+            candidate = str(api_key_override or "").strip()
+            if not candidate and existing_settings and existing_settings.get("api_key"):
+                api_key = str(existing_settings.get("api_key") or "").strip()
+            else:
+                api_key = candidate
+        base_url_value = str(merged.get("base_url", "")).strip()
+        base_url = base_url_value.rstrip("/") if base_url_value else ""
+        merged.update(
+            {
+                "base_url": base_url,
+                "site_domain": str(merged.get("site_domain", "")).strip(),
+                "api_key": api_key,
+                "track_opens": _ensure_bool(merged.get("track_opens"), True),
+                "track_clicks": _ensure_bool(merged.get("track_clicks"), True),
+                "send_to_plausible": _ensure_bool(merged.get("send_to_plausible"), False),
+            }
+        )
     elif slug == "imap":
         manage_url = str(merged.get("manage_url") or "").strip() or "/admin/modules/imap"
         merged.update({"manage_url": manage_url})
@@ -776,6 +813,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "xero": ("client_secret", "refresh_token", "access_token"),
         "sms-gateway": ("authorization",),
         "unifi-talk": ("password",),
+        "plausible": ("api_key",),
     }
     targets = fields_to_redact.get(slug)
     if not targets:
@@ -832,6 +870,20 @@ async def list_modules() -> list[dict[str, Any]]:
     return [_redact_module_settings(module) for module in modules]
 
 
+async def get_module_settings(slug: str) -> dict[str, Any] | None:
+    module = await module_repo.get_module(slug)
+    if not module:
+        return None
+    raw_settings = module.get("settings")
+    if isinstance(raw_settings, Mapping):
+        return _coerce_settings(slug, raw_settings, module)
+    try:
+        parsed = json.loads(raw_settings) if isinstance(raw_settings, str) else None
+    except json.JSONDecodeError:
+        parsed = None
+    return _coerce_settings(slug, parsed, module)
+
+
 # Modules that are only ingesters or interfaces and cannot trigger actions
 _NON_TRIGGERABLE_MODULE_SLUGS = {
     "imap",           # IMAP Mailboxes - only ingests emails
@@ -842,6 +894,7 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "chatgpt-mcp",    # ChatGPT MCP - removed from trigger actions
     "call-recordings", # Call Recordings - configuration only, not an action module
     "unifi-talk",     # Unifi Talk - SFTP import module, not an action module
+    "plausible",      # Plausible - email tracking config only
 }
 
 
@@ -923,6 +976,7 @@ async def trigger_module(
         "create-task": _invoke_create_task,
         "call-recordings": _validate_call_recordings,
         "unifi-talk": _invoke_unifi_talk,
+        "plausible": _validate_plausible,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -2144,6 +2198,39 @@ async def _validate_syncro(
         "base_url": base_url,
         "has_api_key": bool(api_key),
         "rate_limit_per_minute": rate_limit,
+    }
+
+
+async def _validate_plausible(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    base_url = str(settings.get("base_url") or "").strip().rstrip("/")
+    site_domain = str(settings.get("site_domain") or "").strip()
+    api_key = str(settings.get("api_key") or "").strip()
+    track_opens = _ensure_bool(settings.get("track_opens"), True)
+    track_clicks = _ensure_bool(settings.get("track_clicks"), True)
+    send_to_plausible = _ensure_bool(settings.get("send_to_plausible"), False)
+
+    if send_to_plausible:
+        if not base_url:
+            raise ValueError("Plausible base URL is not configured")
+        parsed = urlparse(base_url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError("Plausible base URL must include http/https and a hostname")
+        if not site_domain:
+            raise ValueError("Plausible site domain is not configured")
+
+    return {
+        "status": "ok",
+        "base_url": base_url,
+        "site_domain": site_domain,
+        "has_api_key": bool(api_key),
+        "track_opens": track_opens,
+        "track_clicks": track_clicks,
+        "send_to_plausible": send_to_plausible,
     }
 
 
