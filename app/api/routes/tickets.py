@@ -54,6 +54,10 @@ from app.schemas.tickets import (
     TicketViewUpdate,
     TicketWatcher,
     TicketWatcherUpdate,
+    TicketSplitRequest,
+    TicketSplitResponse,
+    TicketMergeRequest,
+    TicketMergeResponse,
 )
 from app.security.session import SessionData
 from app.services import labour_types as labour_types_service
@@ -509,6 +513,12 @@ async def add_reply(
     session: SessionData = Depends(get_current_session),
     current_user: dict = Depends(get_current_user),
 ) -> TicketReplyResponse:
+    # Check if this ticket has been merged into another
+    merged_target_id = await tickets_repo.get_merged_target_ticket_id(ticket_id)
+    if merged_target_id and merged_target_id != ticket_id:
+        # Redirect to the merged target ticket
+        ticket_id = merged_target_id
+    
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
@@ -1203,4 +1213,111 @@ async def get_open_access_token(
     
     token = attachments_service.generate_open_access_token(attachment_id)
     return {"token": token, "url": f"/api/tickets/attachments/open/{token}"}
+
+
+@router.post("/{ticket_id}/split", response_model=TicketSplitResponse, status_code=status.HTTP_201_CREATED)
+async def split_ticket(
+    ticket_id: int,
+    payload: TicketSplitRequest,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TicketSplitResponse:
+    """
+    Split a ticket by moving selected replies to a new ticket.
+    The new ticket will have the same company and requester as the original.
+    Requires helpdesk technician permission.
+    """
+    # Validate original ticket exists
+    original_ticket = await tickets_repo.get_ticket(ticket_id)
+    if not original_ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    
+    # Validate all reply_ids belong to this ticket
+    for reply_id in payload.reply_ids:
+        reply = await tickets_repo.get_reply_by_id(reply_id)
+        if not reply:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Reply {reply_id} not found"
+            )
+        if reply.get("ticket_id") != ticket_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Reply {reply_id} does not belong to ticket {ticket_id}"
+            )
+    
+    # Perform the split
+    try:
+        original, new_ticket, moved_count = await tickets_service.split_ticket(
+            original_ticket_id=ticket_id,
+            reply_ids=payload.reply_ids,
+            new_subject=payload.new_subject,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    
+    if not original or not new_ticket:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to split ticket"
+        )
+    
+    return TicketSplitResponse(
+        original_ticket=TicketResponse(**original),
+        new_ticket=TicketResponse(**new_ticket),
+        moved_reply_count=moved_count,
+    )
+
+
+@router.post("/merge", response_model=TicketMergeResponse)
+async def merge_tickets(
+    payload: TicketMergeRequest,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TicketMergeResponse:
+    """
+    Merge multiple tickets into one target ticket.
+    All replies and time entries are moved to the target ticket.
+    Source tickets are marked as closed and merged.
+    Requires helpdesk technician permission.
+    """
+    # Validate all tickets exist
+    for ticket_id in payload.ticket_ids:
+        ticket = await tickets_repo.get_ticket(ticket_id)
+        if not ticket:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Ticket {ticket_id} not found"
+            )
+    
+    # Validate target ticket is in the list
+    if payload.target_ticket_id not in payload.ticket_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Target ticket must be one of the tickets being merged"
+        )
+    
+    # Perform the merge
+    try:
+        merged_ticket, merged_ids, moved_count = await tickets_service.merge_tickets(
+            ticket_ids=payload.ticket_ids,
+            target_ticket_id=payload.target_ticket_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    
+    if not merged_ticket:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to merge tickets"
+        )
+    
+    # Count time entries (replies with minutes_spent)
+    all_replies = await tickets_repo.list_replies(payload.target_ticket_id, include_internal=True)
+    time_entry_count = sum(1 for r in all_replies if r.get("minutes_spent") and r.get("minutes_spent") > 0)
+    
+    return TicketMergeResponse(
+        merged_ticket=TicketResponse(**merged_ticket),
+        merged_ticket_ids=merged_ids,
+        moved_reply_count=moved_count,
+        moved_time_entry_count=time_entry_count,
+    )
 
