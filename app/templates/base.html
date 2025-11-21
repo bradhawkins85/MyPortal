@@ -197,7 +197,7 @@
           {% endif %}
           {% if can_access_forms %}
             <li class="menu__item">
-              <a href="/forms" {% if current_path.startswith('/forms') %}aria-current="page"{% endif %}>
+              <a href="/myforms" {% if current_path.startswith('/myforms') or current_path.startswith('/forms') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" focusable="false"><path d="M6 3a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18H6zm3 4h6a1 1 0 0 0 0-2H9a1 1 0 0 0 0 2zm0 4h6a1 1 0 0 0 0-2H9a1 1 0 0 0 0 2zm0 4h3a1 1 0 0 0 0-2H9a1 1 0 0 0 0 2z"/></svg>
                 </span>
