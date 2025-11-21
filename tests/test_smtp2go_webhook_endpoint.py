@@ -283,16 +283,25 @@ async def test_webhook_processing_exception(client):
 
 
 @pytest.mark.asyncio
-async def test_webhook_rejects_list_payload(client):
-    """Test that webhook endpoint rejects a list payload (old format)."""
-    with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings:
+async def test_webhook_accepts_list_payload(client):
+    """Test that webhook endpoint accepts and processes a list payload."""
+    with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process:
+
         mock_settings.return_value = None
-        
-        # Try to send a list of events (old incorrect format)
+        mock_process.side_effect = [
+            {'id': 1, 'event_type': 'delivered', 'tracking_id': 'track-1'},
+            {'id': 2, 'event_type': 'open', 'tracking_id': 'track-1'},
+        ]
+
         response = client.post(
             "/api/webhooks/smtp2go/events",
             json=[DELIVERED_EVENT, OPENED_EVENT],
         )
-        
-        # Should get 422 Unprocessable Entity
-        assert response.status_code == 422
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["processed"] == 2
+        mock_process.assert_any_call('delivered', DELIVERED_EVENT)
+        mock_process.assert_any_call('opened', OPENED_EVENT)
