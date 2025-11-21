@@ -90,6 +90,8 @@ class WebhookEventResponse(BaseModel):
     response_body: str | None = Field(default=None, serialization_alias="responseBody")
     created_at: datetime | None = Field(default=None, serialization_alias="createdAt")
     updated_at: datetime | None = Field(default=None, serialization_alias="updatedAt")
+    direction: str = Field(default="outgoing")
+    source_url: str | None = Field(default=None, serialization_alias="sourceUrl")
 
     model_config = {
         "populate_by_name": True,

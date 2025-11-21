@@ -95,12 +95,14 @@ async def create_event(
     payload: Any = None,
     max_attempts: int = 3,
     backoff_seconds: int = 300,
+    direction: str = "outgoing",
+    source_url: str | None = None,
 ) -> dict[str, Any]:
     event_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO webhook_events
-            (name, target_url, headers, payload, max_attempts, backoff_seconds)
-        VALUES (%s, %s, %s, %s, %s, %s)
+            (name, target_url, headers, payload, max_attempts, backoff_seconds, direction, source_url)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             name,
@@ -109,6 +111,8 @@ async def create_event(
             _serialise(payload),
             max(1, max_attempts),
             max(1, backoff_seconds),
+            direction,
+            source_url,
         ),
     )
     if not event_id:
