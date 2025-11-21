@@ -61,6 +61,7 @@ def company_admin_context(monkeypatch):
         "can_manage_invoices": True,
         "can_manage_issues": False,
         "can_manage_staff": False,
+        "can_view_compliance": True,
         "staff_permission": 2,
     }
 
@@ -69,6 +70,9 @@ def company_admin_context(monkeypatch):
 
     async def fake_overview(request, current_user):
         return {"unread_notifications": 0}
+
+    async def fake_run_system_update(*, force_restart: bool = False):
+        return None
 
     async def fake_build_base_context(request, current_user, *, extra=None):
         context = {
@@ -85,6 +89,8 @@ def company_admin_context(monkeypatch):
             "notification_unread_count": 0,
             "can_access_tickets": True,
             "can_view_bcp": True,
+            "can_view_compliance": True,
+            "plausible_config": {"enabled": False, "site_domain": "", "base_url": ""},
         }
         if extra:
             context.update(extra)
@@ -93,6 +99,12 @@ def company_admin_context(monkeypatch):
     monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_user)
     monkeypatch.setattr(main_module, "_build_consolidated_overview", fake_overview)
     monkeypatch.setattr(main_module, "_build_base_context", fake_build_base_context)
+    monkeypatch.setattr(scheduler_service, "run_system_update", fake_run_system_update)
+    main_module.templates.env.globals["plausible_config"] = {
+        "enabled": False,
+        "site_domain": "",
+        "base_url": "",
+    }
 
     yield
 
@@ -106,7 +118,7 @@ def test_company_admin_sees_authorised_menu_items(company_admin_context):
     assert 'href="/tickets"' in html
     assert 'href="/shop"' in html
     assert 'href="/cart"' not in html
-    assert 'href="/forms"' in html
+    assert 'href="/myforms"' in html
     assert 'href="/invoices"' in html
     assert 'href="/staff"' in html
     assert 'href="/orders"' not in html
