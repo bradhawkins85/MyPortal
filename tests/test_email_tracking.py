@@ -231,15 +231,21 @@ def test_invoke_smtp_with_ticket_reply_context(monkeypatch):
     monkeypatch.setattr(modules_service, "_record_success", mock_record_success)
     monkeypatch.setattr(modules_service, "_record_failure", mock_record_failure)
     
-    # Test payload with ticket reply context
+    # Test payload with ticket reply context (automation style with ticket.latest_reply)
     settings_payload = {}
     payload = {
         "subject": "Ticket Reply",
         "html": "<p>Your ticket has been updated</p>",
         "recipients": ["customer@example.com"],
         "context": {
-            "metadata": {
-                "reply_id": 456
+            "ticket": {
+                "id": 100,
+                "number": "100",
+                "latest_reply": {
+                    "id": 456,
+                    "body": "This is the reply",
+                    "author_id": 1
+                }
             }
         }
     }
@@ -252,6 +258,81 @@ def test_invoke_smtp_with_ticket_reply_context(monkeypatch):
     assert captured_email_params.get("ticket_reply_id") == 456
     assert captured_email_params.get("subject") == "Ticket Reply"
     assert captured_email_params.get("recipients") == ["customer@example.com"]
+
+
+def test_invoke_smtp_with_metadata_reply_id(monkeypatch):
+    """Test that _invoke_smtp enables tracking when metadata has reply_id."""
+    import asyncio
+    from app.services import modules as modules_service
+    from app.services import email as email_service
+    from app.services import webhook_monitor
+    from app.core.config import get_settings
+    
+    settings = get_settings()
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(settings, "smtp_port", 587)
+    
+    captured_email_params = {}
+    
+    # Mock SMTP
+    class DummySMTP:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def ehlo(self):
+            pass
+        def starttls(self, **kwargs):
+            pass
+        def login(self, *args):
+            pass
+        def send_message(self, message):
+            pass
+    
+    monkeypatch.setattr(email_service.smtplib, "SMTP", DummySMTP)
+    
+    # Mock send_email to capture parameters
+    async def mock_send_email(**kwargs):
+        captured_email_params.update(kwargs)
+        return True, {"id": 1}
+    
+    monkeypatch.setattr(email_service, "send_email", mock_send_email)
+    
+    # Mock webhook monitor
+    async def mock_create_manual_event(**kwargs):
+        return {"id": 123}
+    
+    async def mock_record_success(*args, **kwargs):
+        return {"id": 123, "status": "succeeded"}
+    
+    async def mock_record_failure(*args, **kwargs):
+        return {"id": 123, "status": "failed"}
+    
+    monkeypatch.setattr(webhook_monitor, "create_manual_event", mock_create_manual_event)
+    monkeypatch.setattr(modules_service, "_record_success", mock_record_success)
+    monkeypatch.setattr(modules_service, "_record_failure", mock_record_failure)
+    
+    # Test payload with reply_id in metadata (notification style)
+    settings_payload = {}
+    payload = {
+        "subject": "Ticket Reply",
+        "html": "<p>Your ticket has been updated</p>",
+        "recipients": ["customer@example.com"],
+        "context": {
+            "metadata": {
+                "reply_id": 789
+            }
+        }
+    }
+    
+    # Call _invoke_smtp
+    result = asyncio.run(modules_service._invoke_smtp(settings_payload, payload))
+    
+    # Verify tracking was enabled
+    assert captured_email_params.get("enable_tracking") is True
+    assert captured_email_params.get("ticket_reply_id") == 789
 
 
 def test_invoke_smtp_without_ticket_reply_context(monkeypatch):
