@@ -152,6 +152,30 @@ def list_email_templates() -> list[dict[str, Any]]:
     ]
 
 
+def _substitute_variables(template_str: str, variables: dict[str, Any]) -> str:
+    """Safely substitute variables in a template string.
+    
+    Args:
+        template_str: Template string with {variable_name} placeholders
+        variables: Dictionary of variable values to substitute
+        
+    Returns:
+        String with variables substituted
+        
+    Note:
+        This is a simple string replacement. For complex templates,
+        consider using Jinja2 template engine instead.
+    """
+    result = template_str
+    for key, value in variables.items():
+        # Escape HTML in variable values to prevent XSS
+        from html import escape
+        safe_value = escape(str(value))
+        placeholder = "{" + key + "}"
+        result = result.replace(placeholder, safe_value)
+    return result
+
+
 def format_template_payload(
     template_type: EmailTemplateType,
     variables: dict[str, Any],
@@ -188,22 +212,13 @@ def format_template_payload(
     example = template["example_payload"]
     
     # Format subject with variables
-    subject = template["subject_template"]
-    for key, value in variables.items():
-        placeholder = "{" + key + "}"
-        subject = subject.replace(placeholder, str(value))
+    subject = _substitute_variables(template["subject_template"], variables)
     
     # Format HTML body with variables
-    html_body = example.get("html", "")
-    for key, value in variables.items():
-        placeholder = "{" + key + "}"
-        html_body = html_body.replace(placeholder, str(value))
+    html_body = _substitute_variables(example.get("html", ""), variables)
     
     # Format text body with variables
-    text_body = example.get("text", "")
-    for key, value in variables.items():
-        placeholder = "{" + key + "}"
-        text_body = text_body.replace(placeholder, str(value))
+    text_body = _substitute_variables(example.get("text", ""), variables)
     
     # Build payload
     payload: dict[str, Any] = {
