@@ -9,6 +9,7 @@ Provides functionality for:
 
 from __future__ import annotations
 
+from html import escape as html_escape
 import json
 import secrets
 from datetime import datetime, timezone
@@ -28,7 +29,7 @@ class SMTP2GoError(Exception):
 # Email payload templates for common use cases
 EmailTemplateType = Literal[
     "password_reset",
-    "invoice", 
+    "invoice",
     "alert",
     "notification",
     "ticket_reply",
@@ -169,8 +170,7 @@ def _substitute_variables(template_str: str, variables: dict[str, Any]) -> str:
     result = template_str
     for key, value in variables.items():
         # Escape HTML in variable values to prevent XSS
-        from html import escape
-        safe_value = escape(str(value))
+        safe_value = html_escape(str(value))
         placeholder = "{" + key + "}"
         result = result.replace(placeholder, safe_value)
     return result
