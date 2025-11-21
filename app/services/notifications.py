@@ -171,12 +171,28 @@ async def emit_notification(
             subject = f"{subject_base}: {message_preview}"
             text_body = final_message
             html_body = f"<p>{escape(final_message)}</p>"
+            
+            # Extract ticket reply ID from metadata if present, to enable email tracking
+            enable_tracking = False
+            ticket_reply_id: int | None = None
+            if isinstance(metadata_payload, dict):
+                # Look for reply_id or ticket_reply_id in metadata
+                reply_id_value = metadata_payload.get("reply_id") or metadata_payload.get("ticket_reply_id")
+                if reply_id_value is not None:
+                    try:
+                        ticket_reply_id = int(reply_id_value)
+                        enable_tracking = True
+                    except (TypeError, ValueError):
+                        pass
+            
             try:
                 sent, event_metadata = await email_service.send_email(
                     subject=subject,
                     recipients=[user["email"]],
                     text_body=text_body,
                     html_body=html_body,
+                    enable_tracking=enable_tracking,
+                    ticket_reply_id=ticket_reply_id,
                 )
                 if not sent:
                     logger.warning(
