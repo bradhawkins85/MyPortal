@@ -1847,7 +1847,7 @@
         notes += `Ticket #${ticketId}`;
       }
       if (ticketSubject) {
-        notes += ticketSubject ? ` - ${ticketSubject}` : '';
+        notes += ` - ${ticketSubject}`;
       }
       if (ticketUrl) {
         notes += `\n\nTicket URL: ${ticketUrl}`;
@@ -1874,21 +1874,6 @@
               theme: 'auto',
             },
           });
-          
-          // Open the modal
-          setTimeout(() => {
-            if (window.Cal && window.Cal.ns && window.Cal.ns[namespace]) {
-              window.Cal.ns[namespace]('ui', {
-                styles: {
-                  branding: {
-                    brandColor: '#000000'
-                  }
-                },
-                hideEventTypeDetails: false,
-                layout: 'month_view'
-              });
-            }
-          }, 100);
         }
       });
     });
