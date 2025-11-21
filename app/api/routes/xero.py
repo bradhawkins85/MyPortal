@@ -28,8 +28,13 @@ async def _ensure_module_enabled() -> dict[str, Any]:
     name="xero_receive_callback",
 )
 async def receive_callback(request: Request) -> dict[str, str]:
+    from app.services import webhook_monitor
+    
     await _ensure_module_enabled()
 
+    source_url = str(request.url)
+    request_headers = dict(request.headers)
+    
     body = await request.body()
     payload: dict[str, Any]
     if not body:
@@ -38,6 +43,16 @@ async def receive_callback(request: Request) -> dict[str, str]:
         try:
             payload = json.loads(body.decode("utf-8"))
         except json.JSONDecodeError as exc:
+            # Log the failed request
+            await webhook_monitor.log_incoming_webhook(
+                name="Xero Webhook - Invalid JSON",
+                source_url=source_url,
+                payload=body.decode("utf-8", errors="replace"),
+                headers=request_headers,
+                response_status=400,
+                response_body="Invalid JSON payload",
+                error_message=str(exc),
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid JSON payload",
@@ -55,6 +70,17 @@ async def receive_callback(request: Request) -> dict[str, str]:
         xero_headers=xero_headers,
         payload_keys=sorted(payload.keys()),
     )
+    
+    # Log the incoming webhook
+    await webhook_monitor.log_incoming_webhook(
+        name="Xero Webhook - Callback",
+        source_url=source_url,
+        payload=payload,
+        headers=request_headers,
+        response_status=202,
+        response_body="Accepted",
+    )
+    
     return {"status": "accepted"}
 
 
