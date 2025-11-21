@@ -4,14 +4,16 @@ Provides functionality for:
 - Sending emails via SMTP2Go API
 - Processing webhooks for delivery, open, and click events
 - Tracking email status and events
+- Pre-defined email templates for common use cases
 """
 
 from __future__ import annotations
 
+from html import escape as html_escape
 import json
 import secrets
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from loguru import logger
@@ -24,12 +26,214 @@ class SMTP2GoError(Exception):
     """Raised when SMTP2Go API request fails."""
 
 
+# Email payload templates for common use cases
+EmailTemplateType = Literal[
+    "password_reset",
+    "invoice",
+    "alert",
+    "notification",
+    "ticket_reply",
+    "welcome",
+]
+
+EMAIL_TEMPLATES: dict[EmailTemplateType, dict[str, Any]] = {
+    "password_reset": {
+        "subject_template": "Password Reset Request",
+        "recommended_fields": ["recipient_name", "reset_link", "expiry_time"],
+        "example_payload": {
+            "recipients": ["user@example.com"],
+            "subject": "Password Reset Request",
+            "html": "<p>Hello {recipient_name},</p><p>Click here to reset your password: <a href='{reset_link}'>Reset Password</a></p><p>This link expires in {expiry_time}.</p>",
+            "text": "Hello {recipient_name},\n\nClick here to reset your password: {reset_link}\n\nThis link expires in {expiry_time}.",
+        },
+        "description": "Template for password reset emails with secure reset link",
+    },
+    "invoice": {
+        "subject_template": "Invoice #{invoice_number} - {company_name}",
+        "recommended_fields": ["invoice_number", "company_name", "amount", "due_date", "invoice_link"],
+        "example_payload": {
+            "recipients": ["customer@example.com"],
+            "subject": "Invoice #{invoice_number} - {company_name}",
+            "html": "<p>Dear Customer,</p><p>Please find your invoice #{invoice_number} for ${amount}.</p><p>Due date: {due_date}</p><p><a href='{invoice_link}'>View Invoice</a></p>",
+            "text": "Dear Customer,\n\nPlease find your invoice #{invoice_number} for ${amount}.\n\nDue date: {due_date}\n\nView Invoice: {invoice_link}",
+        },
+        "description": "Template for invoice notification emails",
+    },
+    "alert": {
+        "subject_template": "Alert: {alert_type}",
+        "recommended_fields": ["alert_type", "alert_message", "severity", "timestamp", "action_link"],
+        "example_payload": {
+            "recipients": ["admin@example.com"],
+            "subject": "Alert: {alert_type}",
+            "html": "<p><strong>{alert_type}</strong></p><p>Severity: {severity}</p><p>{alert_message}</p><p>Time: {timestamp}</p><p><a href='{action_link}'>Take Action</a></p>",
+            "text": "{alert_type}\n\nSeverity: {severity}\n\n{alert_message}\n\nTime: {timestamp}\n\nTake Action: {action_link}",
+        },
+        "description": "Template for system alerts and notifications",
+    },
+    "notification": {
+        "subject_template": "Notification: {title}",
+        "recommended_fields": ["title", "message", "action_text", "action_link"],
+        "example_payload": {
+            "recipients": ["user@example.com"],
+            "subject": "Notification: {title}",
+            "html": "<p><strong>{title}</strong></p><p>{message}</p><p><a href='{action_link}'>{action_text}</a></p>",
+            "text": "{title}\n\n{message}\n\n{action_text}: {action_link}",
+        },
+        "description": "General purpose notification template",
+    },
+    "ticket_reply": {
+        "subject_template": "Re: Ticket #{ticket_id} - {ticket_subject}",
+        "recommended_fields": ["ticket_id", "ticket_subject", "reply_content", "reply_author", "ticket_link"],
+        "example_payload": {
+            "recipients": ["customer@example.com"],
+            "subject": "Re: Ticket #{ticket_id} - {ticket_subject}",
+            "html": "<p>{reply_author} replied to your ticket:</p><div>{reply_content}</div><p><a href='{ticket_link}'>View Ticket</a></p>",
+            "text": "{reply_author} replied to your ticket:\n\n{reply_content}\n\nView Ticket: {ticket_link}",
+        },
+        "description": "Template for support ticket reply notifications",
+    },
+    "welcome": {
+        "subject_template": "Welcome to {company_name}!",
+        "recommended_fields": ["recipient_name", "company_name", "login_link", "support_email"],
+        "example_payload": {
+            "recipients": ["newuser@example.com"],
+            "subject": "Welcome to {company_name}!",
+            "html": "<p>Hello {recipient_name},</p><p>Welcome to {company_name}!</p><p><a href='{login_link}'>Get Started</a></p><p>Need help? Contact us at {support_email}</p>",
+            "text": "Hello {recipient_name},\n\nWelcome to {company_name}!\n\nGet Started: {login_link}\n\nNeed help? Contact us at {support_email}",
+        },
+        "description": "Template for new user welcome emails",
+    },
+}
+
+
 def generate_tracking_id() -> str:
     """Generate a unique tracking ID for email tracking.
     
     Returns a URL-safe random token.
     """
     return secrets.token_urlsafe(32)
+
+
+def get_email_template(template_type: EmailTemplateType) -> dict[str, Any]:
+    """Get an email template by type.
+    
+    Args:
+        template_type: The type of email template to retrieve
+        
+    Returns:
+        Dict containing template information including example payload
+        
+    Raises:
+        ValueError: If template_type is not recognized
+    """
+    if template_type not in EMAIL_TEMPLATES:
+        valid_types = ", ".join(EMAIL_TEMPLATES.keys())
+        raise ValueError(
+            f"Unknown template type: {template_type}. "
+            f"Valid types are: {valid_types}"
+        )
+    
+    return EMAIL_TEMPLATES[template_type].copy()
+
+
+def list_email_templates() -> list[dict[str, Any]]:
+    """List all available email templates.
+    
+    Returns:
+        List of template information dicts with type, description, and fields
+    """
+    return [
+        {
+            "type": template_type,
+            "description": template_info["description"],
+            "subject_template": template_info["subject_template"],
+            "recommended_fields": template_info["recommended_fields"],
+        }
+        for template_type, template_info in EMAIL_TEMPLATES.items()
+    ]
+
+
+def _substitute_variables(template_str: str, variables: dict[str, Any]) -> str:
+    """Safely substitute variables in a template string.
+    
+    Args:
+        template_str: Template string with {variable_name} placeholders
+        variables: Dictionary of variable values to substitute
+        
+    Returns:
+        String with variables substituted
+        
+    Note:
+        This is a simple string replacement. For complex templates,
+        consider using Jinja2 template engine instead.
+    """
+    result = template_str
+    for key, value in variables.items():
+        # Escape HTML in variable values to prevent XSS
+        safe_value = html_escape(str(value))
+        placeholder = "{" + key + "}"
+        result = result.replace(placeholder, safe_value)
+    return result
+
+
+def format_template_payload(
+    template_type: EmailTemplateType,
+    variables: dict[str, Any],
+    recipients: list[str],
+    sender: str | None = None,
+) -> dict[str, Any]:
+    """Format an email payload using a template.
+    
+    Args:
+        template_type: The type of template to use
+        variables: Dictionary of variables to substitute in the template
+        recipients: List of recipient email addresses
+        sender: Optional sender email address
+        
+    Returns:
+        Dict containing formatted email payload ready for send_email_via_api
+        
+    Raises:
+        ValueError: If template_type is not recognized
+        
+    Example:
+        >>> payload = format_template_payload(
+        ...     "password_reset",
+        ...     {
+        ...         "recipient_name": "John Doe",
+        ...         "reset_link": "https://example.com/reset/token123",
+        ...         "expiry_time": "1 hour",
+        ...     },
+        ...     ["user@example.com"],
+        ... )
+        >>> result = await send_email_via_api(**payload)
+    """
+    template = get_email_template(template_type)
+    example = template["example_payload"]
+    
+    # Format subject with variables
+    subject = _substitute_variables(template["subject_template"], variables)
+    
+    # Format HTML body with variables
+    html_body = _substitute_variables(example.get("html", ""), variables)
+    
+    # Format text body with variables
+    text_body = _substitute_variables(example.get("text", ""), variables)
+    
+    # Build payload
+    payload: dict[str, Any] = {
+        "to": recipients,
+        "subject": subject,
+        "html_body": html_body,
+    }
+    
+    if text_body:
+        payload["text_body"] = text_body
+    
+    if sender:
+        payload["sender"] = sender
+    
+    return payload
 
 
 async def send_email_via_api(
@@ -50,7 +254,7 @@ async def send_email_via_api(
         subject: Email subject line
         html_body: HTML content of the email
         text_body: Plain text version of the email (optional)
-        sender: Sender email address (optional)
+        sender: Sender email address (optional, but highly recommended)
         reply_to: Reply-to email address (optional)
         custom_headers: Additional email headers (optional)
         tracking_id: Internal tracking ID to associate with this email (optional)
@@ -75,10 +279,29 @@ async def send_email_via_api(
         if not api_key:
             raise SMTP2GoError("SMTP2Go API key not configured")
         
+        # Validate required fields
+        if not to or len(to) == 0:
+            raise SMTP2GoError("At least one recipient email address is required")
+        
+        if not subject:
+            raise SMTP2GoError("Email subject is required")
+        
+        if not html_body and not text_body:
+            raise SMTP2GoError("Email body (html_body or text_body) is required")
+        
+        # Determine sender - REQUIRED by SMTP2Go API
+        sender_address = sender or settings.smtp_user
+        if not sender_address:
+            raise SMTP2GoError(
+                "Sender email address is required. "
+                "Provide 'sender' parameter or configure SMTP_USER in settings."
+            )
+        
         # Build request payload
         payload = {
             "api_key": api_key,
             "to": to,
+            "sender": sender_address,
             "subject": subject,
             "html_body": html_body,
         }
@@ -86,11 +309,6 @@ async def send_email_via_api(
         # Add optional fields
         if text_body:
             payload["text_body"] = text_body
-        
-        if sender:
-            payload["sender"] = sender
-        elif settings.smtp_user:
-            payload["sender"] = settings.smtp_user
         
         if reply_to:
             payload["custom_headers"] = payload.get("custom_headers", [])
@@ -121,18 +339,50 @@ async def send_email_via_api(
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(api_url, json=payload)
+            
+            # Log detailed error information for 400 Bad Request
+            if response.status_code == 400:
+                try:
+                    error_detail = response.json()
+                except Exception:
+                    error_detail = response.text
+                
+                logger.error(
+                    "SMTP2Go API returned 400 Bad Request",
+                    subject=subject,
+                    recipients=to,
+                    sender=sender_address,
+                    status_code=response.status_code,
+                    error_response=error_detail,
+                    payload_keys=list(payload.keys()),
+                )
+                raise SMTP2GoError(
+                    f"API request failed with 400 Bad Request. "
+                    f"Response: {error_detail}. "
+                    f"Check that all required fields are present and valid."
+                )
+            
             response.raise_for_status()
             result = response.json()
         
         # Check if request was successful
         if result.get("data", {}).get("error_code") != "SUCCESS":
             error_msg = result.get("data", {}).get("error", "Unknown error")
-            raise SMTP2GoError(f"SMTP2Go API error: {error_msg}")
+            error_code = result.get("data", {}).get("error_code", "UNKNOWN")
+            logger.error(
+                "SMTP2Go API returned error",
+                subject=subject,
+                recipients=to,
+                error_code=error_code,
+                error_message=error_msg,
+            )
+            raise SMTP2GoError(f"SMTP2Go API error [{error_code}]: {error_msg}")
         
         logger.info(
             "Email sent via SMTP2Go API",
             subject=subject,
             recipients=to,
+            sender=sender_address,
             message_id=result.get("data", {}).get("email_id"),
             tracking_id=tracking_id,
         )
@@ -140,11 +390,24 @@ async def send_email_via_api(
         return result.get("data", {})
         
     except httpx.HTTPError as exc:
+        # Enhanced error logging for HTTP errors
+        response_text = None
+        status_code = None
+        if hasattr(exc, 'response') and exc.response is not None:
+            status_code = exc.response.status_code
+            try:
+                response_text = exc.response.text
+            except Exception:
+                pass
+        
         logger.error(
-            "SMTP2Go API request failed",
+            "SMTP2Go API HTTP error",
             subject=subject,
             recipients=to,
+            sender=sender_address,
+            status_code=status_code,
             error=str(exc),
+            response_text=response_text,
         )
         raise SMTP2GoError(f"API request failed: {str(exc)}") from exc
     except Exception as exc:
