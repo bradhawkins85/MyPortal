@@ -17,9 +17,46 @@ import httpx
 from fastapi import Request, Response
 from loguru import logger
 from starlette.middleware.base import BaseHTTPMiddleware
+from typing import Any
 
 from app.core.config import get_settings
 from app.security.session import session_manager
+
+
+# Default pepper warning - should be configured via PLAUSIBLE_PEPPER
+_DEFAULT_PEPPER_WARNING = "default-pepper-change-me"
+
+
+def hash_user_id_for_plausible(user_id: int, pepper: str | None, send_pii: bool = False) -> str:
+    """Hash a user ID for Plausible analytics with privacy protections.
+    
+    Args:
+        user_id: The user ID to hash
+        pepper: Secret pepper for HMAC hashing (None = use default with warning)
+        send_pii: If True, send raw user ID (only for self-hosted, compliant instances)
+        
+    Returns:
+        Hashed or raw user identifier string
+    """
+    import hashlib
+    import hmac
+    
+    if send_pii:
+        # Only for self-hosted, compliant instances
+        return f"user_{user_id}"
+    
+    # Use HMAC hashing for privacy
+    if not pepper:
+        logger.warning(
+            "Plausible tracking using default pepper - configure PLAUSIBLE_PEPPER for security"
+        )
+        pepper = _DEFAULT_PEPPER_WARNING
+    
+    user_data = str(user_id).encode("utf-8")
+    pepper_bytes = pepper.encode("utf-8")
+    h = hmac.new(pepper_bytes, user_data, hashlib.sha256)
+    
+    return f"hash_{h.hexdigest()[:16]}"
 
 
 class PlausibleTrackingMiddleware(BaseHTTPMiddleware):
@@ -37,7 +74,7 @@ class PlausibleTrackingMiddleware(BaseHTTPMiddleware):
         app,
         *,
         exempt_paths: tuple[str, ...] = (),
-        get_module_settings: Callable[[], dict[str, any]] | None = None,
+        get_module_settings: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         """Initialize the middleware.
         
@@ -127,7 +164,7 @@ class PlausibleTrackingMiddleware(BaseHTTPMiddleware):
             user_identifier = f"user_{user_id}"
         else:
             # Hash user ID with HMAC for privacy
-            user_identifier = self._hash_user_id(user_id, pepper)
+            user_identifier = hash_user_id_for_plausible(user_id, pepper, send_pii)
         
         # Build the event URL
         full_url = str(request.url)
@@ -189,26 +226,4 @@ class PlausibleTrackingMiddleware(BaseHTTPMiddleware):
                 url=full_url,
             )
 
-    def _hash_user_id(self, user_id: int, pepper: str) -> str:
-        """Hash a user ID with HMAC for privacy.
-        
-        Args:
-            user_id: The user ID to hash
-            pepper: Secret pepper for HMAC
-            
-        Returns:
-            Hashed user identifier (hex string)
-        """
-        # Use a default pepper if none provided (though this should be configured)
-        if not pepper:
-            pepper = "default-pepper-change-me"
-        
-        # Convert user_id to bytes
-        user_data = str(user_id).encode("utf-8")
-        pepper_bytes = pepper.encode("utf-8")
-        
-        # Create HMAC hash
-        h = hmac.new(pepper_bytes, user_data, hashlib.sha256)
-        
-        # Return hex digest
-        return f"hash_{h.hexdigest()[:16]}"  # Use first 16 chars for brevity
+    # Remove the old _hash_user_id method since we now use the shared utility

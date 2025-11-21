@@ -428,21 +428,19 @@ async def test_middleware_continues_on_plausible_error(test_app):
 
 def test_hash_user_id_with_pepper():
     """Test that user ID hashing produces consistent results."""
-    from app.security.plausible_tracking import PlausibleTrackingMiddleware
-    
-    middleware = PlausibleTrackingMiddleware(None)
+    from app.security.plausible_tracking import hash_user_id_for_plausible
     
     # Same user ID and pepper should produce same hash
-    hash1 = middleware._hash_user_id(123, "secret-pepper")
-    hash2 = middleware._hash_user_id(123, "secret-pepper")
+    hash1 = hash_user_id_for_plausible(123, "secret-pepper", send_pii=False)
+    hash2 = hash_user_id_for_plausible(123, "secret-pepper", send_pii=False)
     assert hash1 == hash2
     
     # Different user IDs should produce different hashes
-    hash3 = middleware._hash_user_id(456, "secret-pepper")
+    hash3 = hash_user_id_for_plausible(456, "secret-pepper", send_pii=False)
     assert hash1 != hash3
     
     # Different peppers should produce different hashes
-    hash4 = middleware._hash_user_id(123, "different-pepper")
+    hash4 = hash_user_id_for_plausible(123, "different-pepper", send_pii=False)
     assert hash1 != hash4
     
     # Verify hash format
@@ -452,11 +450,14 @@ def test_hash_user_id_with_pepper():
 
 def test_hash_user_id_with_default_pepper():
     """Test that user ID hashing works with default pepper."""
-    from app.security.plausible_tracking import PlausibleTrackingMiddleware
-    
-    middleware = PlausibleTrackingMiddleware(None)
+    from app.security.plausible_tracking import hash_user_id_for_plausible
     
     # Should use default pepper when none provided
-    hash1 = middleware._hash_user_id(123, "")
+    hash1 = hash_user_id_for_plausible(123, None, send_pii=False)
     assert hash1.startswith("hash_")
     assert len(hash1) > 5
+    
+    # Test PII mode
+    pii_id = hash_user_id_for_plausible(123, "pepper", send_pii=True)
+    assert pii_id == "user_123"
+    assert not pii_id.startswith("hash_")
