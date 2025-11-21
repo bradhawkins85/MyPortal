@@ -478,7 +478,7 @@
                   data-cal-config='{"layout":"month_view"}'
                   data-ticket-id="{{ ticket.id }}"
                   data-ticket-subject="{{ ticket.subject | e }}"
-                  data-user-name="{{ (user.first_name or '') | e }} {{ (user.last_name or '') | e }}"
+                  data-user-name="{{ ([user.first_name, user.last_name] | select | join(' ')) | e }}"
                   data-user-email="{{ (user.email or '') | e }}"
                   data-user-phone="{{ (user.mobile_phone or '') | e }}"
                   class="button button--primary"
