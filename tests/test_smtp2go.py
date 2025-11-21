@@ -70,6 +70,26 @@ def test_format_template_payload():
     assert "text_body" in payload
 
 
+def test_format_template_payload_escapes_html():
+    """Test that template variable substitution escapes HTML to prevent XSS."""
+    payload = smtp2go.format_template_payload(
+        "notification",
+        {
+            "title": "Test <script>alert('xss')</script>",
+            "message": "Message with <b>HTML</b>",
+            "action_text": "Click here",
+            "action_link": "https://example.com",
+        },
+        ["user@example.com"],
+    )
+    
+    # HTML should be escaped in the output
+    assert "<script>" not in payload["html_body"]
+    assert "&lt;script&gt;" in payload["html_body"]
+    assert "<b>" not in payload["subject"]  # If title appears in subject
+    # Note: The template's own HTML tags should remain, only variable content is escaped
+    
+
 @pytest.mark.asyncio
 async def test_send_email_via_api_success(monkeypatch):
     """Test successful email sending via SMTP2Go API."""
