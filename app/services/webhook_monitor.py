@@ -276,7 +276,6 @@ async def process_pending_events(limit: int = 10) -> None:
             log_error("Failed to process webhook event", event_id=event.get("id"), error=str(exc))
 
 
-
 async def purge_completed_events(*, retention: timedelta = timedelta(hours=24)) -> int:
     if retention.total_seconds() <= 0:
         return 0

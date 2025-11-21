@@ -9,8 +9,3 @@ ALTER TABLE webhook_events
 -- Add index for filtering by direction
 CREATE INDEX IF NOT EXISTS idx_webhook_events_direction
   ON webhook_events (direction, status);
-
--- Update existing records to explicitly set direction (they are all outgoing)
-UPDATE webhook_events
-SET direction = 'outgoing'
-WHERE direction = 'outgoing';
