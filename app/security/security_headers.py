@@ -34,11 +34,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         *,
         exempt_paths: Iterable[str] | None = None,
         get_extra_script_sources: Callable[[], Awaitable[list[str]]] | None = None,
+        get_extra_connect_sources: Callable[[], Awaitable[list[str]]] | None = None,
     ) -> None:
         super().__init__(app)
         self.exempt_paths = tuple(exempt_paths or ())
         self._settings = get_settings()
         self._get_extra_script_sources = get_extra_script_sources
+        self._get_extra_connect_sources = get_extra_connect_sources
 
     async def dispatch(self, request: Request, call_next):
         response: Response = await call_next(request)
@@ -50,7 +52,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Build script-src directive with dynamic sources
         script_sources = ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://unpkg.com"]
-        
+
         # Add extra script sources (e.g., Plausible analytics)
         if self._get_extra_script_sources:
             try:
@@ -61,6 +63,20 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             except Exception:
                 # If we fail to get extra sources, continue with defaults
                 # This ensures CSP is always present even if source lookup fails
+                pass
+
+        # Build connect-src directive
+        connect_sources = ["'self'"]
+
+        # Add extra connect sources (e.g., analytics APIs)
+        if self._get_extra_connect_sources:
+            try:
+                extra_sources = await self._get_extra_connect_sources()
+                for source in extra_sources:
+                    if source and self._is_valid_csp_source(source):
+                        connect_sources.append(source)
+            except Exception:
+                # If we fail to get extra sources, continue with defaults
                 pass
         
         # Content-Security-Policy: Restrict resource loading to same origin
@@ -74,7 +90,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob:",
             "font-src 'self' data:",
-            "connect-src 'self'",
+            f"connect-src {' '.join(connect_sources)}",
             "frame-ancestors 'none'",
             "base-uri 'self'",
             "form-action 'self'",

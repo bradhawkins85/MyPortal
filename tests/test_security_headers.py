@@ -66,6 +66,7 @@ def test_app_with_plausible():
         SecurityHeadersMiddleware,
         exempt_paths=("/static",),
         get_extra_script_sources=_mock_extra_sources_plausible,
+        get_extra_connect_sources=_mock_extra_sources_plausible,
     )
     
     return app
@@ -113,6 +114,7 @@ def test_csp_header_configuration(test_app):
     
     # Check key CSP directives
     assert "default-src 'self'" in csp
+    assert "connect-src 'self'" in csp
     assert "frame-ancestors 'none'" in csp
     assert "base-uri 'self'" in csp
     assert "form-action 'self'" in csp
@@ -196,11 +198,13 @@ def test_csp_with_plausible_analytics(test_app_with_plausible):
     """Test that Plausible analytics source is added to CSP."""
     client = TestClient(test_app_with_plausible)
     response = client.get("/test")
-    
+
     csp = response.headers["Content-Security-Policy"]
-    
+
     # Check that Plausible domain is included in script-src
     assert "https://plausible.example.com" in csp
+    # Plausible should also be allowed for connect-src
+    assert "connect-src 'self' https://plausible.example.com" in csp
     # Check that default sources are still present
     assert "'self'" in csp
     assert "'unsafe-inline'" in csp
