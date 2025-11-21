@@ -148,7 +148,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             if not parsed.netloc:
                 return False
             # Domain must be valid (alphanumeric, dots, hyphens, optional port)
-            if not re.match(r"^[a-zA-Z0-9._-]+(?::\d+)?$", parsed.netloc):
+            # Note: underscores are not allowed in RFC-compliant domain names
+            if not re.match(r"^[a-zA-Z0-9.-]+(?::\d+)?$", parsed.netloc):
                 return False
             return True
         except Exception:
