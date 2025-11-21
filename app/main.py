@@ -521,7 +521,7 @@ app.add_middleware(CSRFMiddleware)
 # It includes privacy protections (hashed user IDs) and only tracks authenticated users
 from app.security.plausible_tracking import PlausibleTrackingMiddleware
 
-def _get_plausible_module_settings() -> dict[str, any]:
+def _get_plausible_module_settings() -> dict[str, Any]:
     """Synchronous function to get Plausible module settings for middleware."""
     # We use a cached module lookup to avoid async issues in middleware
     # This is populated in _build_base_context
@@ -1361,21 +1361,11 @@ async def _build_base_context(
             
             # Add hashed user ID for client-side tracking if pageview tracking enabled
             if track_pageviews and user and user.get("id"):
-                import hashlib
-                import hmac
+                from app.security.plausible_tracking import hash_user_id_for_plausible
                 
                 user_id = user.get("id")
-                # Hash user ID for privacy
-                if send_pii:
-                    hashed_user_id = f"user_{user_id}"
-                else:
-                    # Use HMAC for privacy
-                    if not pepper:
-                        pepper = "default-pepper-change-me"
-                    user_data = str(user_id).encode("utf-8")
-                    pepper_bytes = pepper.encode("utf-8")
-                    h = hmac.new(pepper_bytes, user_data, hashlib.sha256)
-                    hashed_user_id = f"hash_{h.hexdigest()[:16]}"
+                # Hash user ID for privacy using shared utility
+                hashed_user_id = hash_user_id_for_plausible(user_id, pepper, send_pii)
                 
                 plausible_config["hashed_user_id"] = hashed_user_id
 
