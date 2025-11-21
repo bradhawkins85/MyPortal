@@ -418,6 +418,9 @@ async def send_email_via_api(
         
         return result.get("data", {})
         
+    except SMTP2GoError:
+        # Re-raise SMTP2GoError exceptions without wrapping
+        raise
     except httpx.HTTPError as exc:
         # Enhanced error logging for HTTP errors
         response_text = None
