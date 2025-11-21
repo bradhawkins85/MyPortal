@@ -535,6 +535,60 @@ async def _resolve_ticket_entities(
     return company_id, requester_id
 
 
+async def _is_email_address_known(email_address: str) -> bool:
+    """
+    Check if an email address is known in the system.
+    
+    An email address is considered "known" if it exists in:
+    - Users table
+    - Staff table (any company)
+    
+    Args:
+        email_address: Email address to check
+    
+    Returns:
+        True if the email address is known, False otherwise
+    """
+    if not email_address or "@" not in email_address:
+        return False
+    
+    # Check if email exists in users table
+    user = await users_repo.get_user_by_email(email_address)
+    if user:
+        return True
+    
+    # Check if email exists in staff table (any company)
+    staff_list = await staff_repo.list_staff_by_email(email_address)
+    if staff_list:
+        return True
+    
+    return False
+
+
+async def _is_any_email_address_known(email_addresses: list[str]) -> bool:
+    """
+    Check if any of the provided email addresses is known in the system.
+    
+    This function optimizes the check by returning early on the first match,
+    but still validates each address sequentially. In most cases, there will
+    only be one sender address to check.
+    
+    Args:
+        email_addresses: List of email addresses to check
+    
+    Returns:
+        True if at least one email address is known, False otherwise
+    """
+    if not email_addresses:
+        return False
+    
+    for email_addr in email_addresses:
+        if await _is_email_address_known(email_addr):
+            return True
+    
+    return False
+
+
 async def list_accounts() -> list[dict[str, Any]]:
     accounts = await imap_repo.list_accounts()
     return [_redact_account(account) for account in accounts]
@@ -605,6 +659,7 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
     schedule_cron = _normalise_string(payload.get("schedule_cron"), default="*/15 * * * *")
     process_unread_only = _normalise_bool(payload.get("process_unread_only"), default=True)
     mark_as_read = _normalise_bool(payload.get("mark_as_read"), default=True)
+    sync_known_only = _normalise_bool(payload.get("sync_known_only"), default=False)
     active = _normalise_bool(payload.get("active"), default=True)
     company_id = payload.get("company_id")
     priority = _normalise_priority(payload.get("priority"), default=100)
@@ -623,6 +678,7 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
         filter_query=filter_canonical,
         process_unread_only=process_unread_only,
         mark_as_read=mark_as_read,
+        sync_known_only=sync_known_only,
         active=active,
         company_id=int(company_id) if isinstance(company_id, int) else None,
         priority=priority,
@@ -669,6 +725,10 @@ async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[st
     if "mark_as_read" in payload:
         updates["mark_as_read"] = _normalise_bool(
             payload.get("mark_as_read"), default=existing.get("mark_as_read", True)
+        )
+    if "sync_known_only" in payload:
+        updates["sync_known_only"] = _normalise_bool(
+            payload.get("sync_known_only"), default=existing.get("sync_known_only", False)
         )
     if "active" in payload:
         updates["active"] = _normalise_bool(payload.get("active"), default=existing.get("active", True))
@@ -727,6 +787,7 @@ async def clone_account(account_id: int) -> dict[str, Any]:
         filter_query=filter_canonical,
         process_unread_only=bool(original.get("process_unread_only", True)),
         mark_as_read=bool(original.get("mark_as_read", True)),
+        sync_known_only=bool(original.get("sync_known_only", False)),
         active=bool(original.get("active", True)),
         company_id=_int_or_none(original.get("company_id")),
         scheduled_task_id=None,
@@ -1418,6 +1479,29 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         uid=uid,
                     )
                     continue
+            
+            # Check if sync_known_only is enabled and filter by known email addresses
+            sync_known_only = bool(account.get("sync_known_only", False))
+            if sync_known_only:
+                from_email_addresses = _extract_email_addresses(from_address)
+                if not from_email_addresses:
+                    log_info(
+                        "Skipping IMAP message because no valid sender email address found",
+                        account_id=account_id,
+                        uid=uid,
+                    )
+                    continue
+                
+                # Check if any of the sender addresses are known
+                if not await _is_any_email_address_known(from_email_addresses):
+                    log_info(
+                        "Skipping IMAP message from unknown sender",
+                        account_id=account_id,
+                        uid=uid,
+                        from_address=from_address,
+                    )
+                    continue
+            
             description_lines = []
             if from_address:
                 description_lines.append(f"From: {from_address}")

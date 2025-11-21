@@ -10,6 +10,7 @@ Administrators can manage mailboxes at `/admin/modules/imap`. The workspace allo
 - Selecting a source folder and optional company association
 - Setting a mailbox priority to control processing order
 - Choosing to only process unread messages and whether to mark processed mail as read
+- Enabling filtering by known email addresses (sync only emails from senders in MyPortal's user or staff records)
 - Configuring a cron schedule per mailbox
 - Defining optional JSON filters that determine which emails each mailbox processes
 - Triggering manual synchronisation or deleting existing mailboxes
@@ -49,6 +50,15 @@ update completes.
 ## Ticket association
 
 During import the sender address is analysed to automatically associate the ticket with a company. The importer compares the sender's email domain with the configured company email domains and, when a match is found, links the ticket to that company. If the sender already exists as a staff contact for the matched company the ticket requester is also set accordingly. When no domain match exists the importer falls back to the company assigned to the mailbox configuration and still attempts to link the requester by email address.
+
+## Known sender filtering
+
+Mailboxes can be configured to only process emails from known senders by enabling the `sync_known_only` option. When enabled, the importer checks whether the sender's email address exists in:
+
+- The users table (registered portal users)
+- The staff table (company contacts)
+
+Emails from addresses not found in these tables are skipped and not imported as tickets. This feature helps reduce ticket spam and ensures only validated senders can create tickets via email. The filtering occurs after any configured filter queries but before ticket creation, and skipped messages are logged for audit purposes.
 
 ## Security
 
