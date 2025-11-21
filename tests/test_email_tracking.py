@@ -105,6 +105,8 @@ def test_rewrite_links_no_links(mock_portal_url):
 
 def test_insert_tracking_pixel_without_portal_url(monkeypatch):
     """Test that tracking pixel insertion fails gracefully without portal_url."""
+    # Use monkeypatch to set portal_url to None for this test
+    from app.core.config import get_settings
     settings = get_settings()
     monkeypatch.setattr(settings, "portal_url", None)
     
@@ -120,6 +122,8 @@ def test_insert_tracking_pixel_without_portal_url(monkeypatch):
 
 def test_rewrite_links_without_portal_url(monkeypatch):
     """Test that link rewriting fails gracefully without portal_url."""
+    # Use monkeypatch to set portal_url to None for this test
+    from app.core.config import get_settings
     settings = get_settings()
     monkeypatch.setattr(settings, "portal_url", None)
     
