@@ -127,6 +127,62 @@
         }),
       },
     ],
+    smtp2go: [
+      {
+        label: 'Full SMTP2Go API payload template',
+        value: toJsonTemplate({
+          sender: '{{company.email}}',
+          to: [
+            '{{ticket.requester.email}}',
+            '{{ticket.assigned_user.email}}',
+          ],
+          cc: [
+            'manager@example.com',
+          ],
+          bcc: [
+            'archive@example.com',
+          ],
+          subject: 'Ticket #{{ticket.number}} - {{ticket.subject}}',
+          html_body: '<h1>Ticket Update</h1><p>Ticket #{{ticket.number}} has been updated.</p><p>Status: {{ticket.status}}</p>',
+          text_body: 'Ticket Update\n\nTicket #{{ticket.number}} has been updated.\n\nStatus: {{ticket.status}}',
+          attachments: [
+            {
+              filename: 'report.pdf',
+              content: 'JVBERi0xLjQKJ...',
+            },
+          ],
+          custom_headers: [
+            {
+              header: 'X-Ticket-ID',
+              value: '{{ticket.id}}',
+            },
+            {
+              header: 'X-Company-ID',
+              value: '{{company.id}}',
+            },
+          ],
+          template_id: 'your_template_id',
+          template_data: {
+            ticket_number: '{{ticket.number}}',
+            ticket_subject: '{{ticket.subject}}',
+            requester_name: '{{ticket.requester.name}}',
+            company_name: '{{company.name}}',
+          },
+        }),
+      },
+      {
+        label: 'Simple notification with tracking',
+        value: toJsonTemplate({
+          sender: '{{company.email}}',
+          to: [
+            '{{ticket.requester.email}}',
+          ],
+          subject: 'Re: Ticket #{{ticket.number}}',
+          html_body: '<p>Your ticket has been updated.</p>',
+          text_body: 'Your ticket has been updated.',
+        }),
+      },
+    ],
     ntfy: [
       {
         label: 'Publish high priority ntfy alert',
