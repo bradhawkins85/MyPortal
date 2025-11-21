@@ -248,6 +248,169 @@ SMTP2Go accounts have different limits based on your plan:
 
 Monitor your usage in the SMTP2Go dashboard to avoid hitting limits.
 
+## Email Templates
+
+MyPortal includes pre-defined email templates for common use cases. Templates provide standardized formatting and ensure consistent email structure.
+
+### Available Templates
+
+1. **password_reset** - Password reset emails with secure reset links
+2. **invoice** - Invoice notification emails
+3. **alert** - System alerts and notifications
+4. **notification** - General purpose notifications
+5. **ticket_reply** - Support ticket reply notifications
+6. **welcome** - New user welcome emails
+
+### Using Templates in Trigger Actions
+
+When configuring trigger actions for the SMTP2Go module, you can use templates instead of manually crafting payloads:
+
+```json
+{
+  "template": "password_reset",
+  "recipients": ["user@example.com"],
+  "variables": {
+    "recipient_name": "John Doe",
+    "reset_link": "https://portal.example.com/reset/abc123",
+    "expiry_time": "1 hour"
+  },
+  "sender": "noreply@example.com"
+}
+```
+
+### Template Variables
+
+Each template has recommended variables:
+
+#### password_reset
+- `recipient_name` - Name of the user
+- `reset_link` - URL to reset password
+- `expiry_time` - How long the link is valid
+
+#### invoice
+- `invoice_number` - Invoice number
+- `company_name` - Company name
+- `amount` - Invoice amount
+- `due_date` - Payment due date
+- `invoice_link` - URL to view invoice
+
+#### alert
+- `alert_type` - Type of alert
+- `alert_message` - Alert details
+- `severity` - Alert severity level
+- `timestamp` - When alert occurred
+- `action_link` - URL to take action
+
+#### notification
+- `title` - Notification title
+- `message` - Notification message
+- `action_text` - Call-to-action text
+- `action_link` - URL for action
+
+#### ticket_reply
+- `ticket_id` - Ticket number
+- `ticket_subject` - Ticket subject
+- `reply_content` - Reply content (HTML)
+- `reply_author` - Who replied
+- `ticket_link` - URL to view ticket
+
+#### welcome
+- `recipient_name` - Name of new user
+- `company_name` - Company name
+- `login_link` - URL to login
+- `support_email` - Support contact email
+
+### Programmatic Template Usage
+
+You can also use templates programmatically in Python:
+
+```python
+from app.services import smtp2go
+
+# List available templates
+templates = smtp2go.list_email_templates()
+
+# Get a specific template
+template = smtp2go.get_email_template("password_reset")
+
+# Format a template with variables
+payload = smtp2go.format_template_payload(
+    "password_reset",
+    {
+        "recipient_name": "John Doe",
+        "reset_link": "https://example.com/reset/abc123",
+        "expiry_time": "1 hour",
+    },
+    ["user@example.com"],
+    "noreply@example.com",
+)
+
+# Send the email
+result = await smtp2go.send_email_via_api(**payload)
+```
+
+### Legacy Direct Payload Format
+
+The original direct payload format is still supported for backward compatibility:
+
+```json
+{
+  "recipients": ["user@example.com"],
+  "subject": "Email Subject",
+  "html": "<p>HTML body</p>",
+  "text": "Plain text body",
+  "sender": "noreply@example.com"
+}
+```
+
+## Common Issues and Solutions
+
+### 400 Bad Request Error
+
+**Cause**: Missing required fields in API request
+
+**Solutions**:
+1. Ensure `sender` field is provided or `SMTP_USER` is configured in settings
+2. Verify all required fields are present: `to`, `subject`, `html_body` or `text_body`
+3. Check logs for detailed error information
+4. Validate email addresses are properly formatted
+
+Example error message:
+```
+API request failed with 400 Bad Request. 
+Response: {"error": "Invalid sender"}. 
+Check that all required fields are present and valid.
+```
+
+### Missing Sender Field
+
+**Cause**: The `sender` field is required by SMTP2Go but not provided
+
+**Solution**: Provide sender in one of these ways:
+1. Pass `sender` parameter to `send_email_via_api()`
+2. Configure `SMTP_USER` in environment variables
+3. Include `sender` in trigger action payload
+
+```python
+# Option 1: Explicit sender
+await smtp2go.send_email_via_api(
+    to=["user@example.com"],
+    subject="Test",
+    html_body="<p>Test</p>",
+    sender="noreply@example.com"  # ✅ Explicit sender
+)
+
+# Option 2: Use SMTP_USER from settings
+# Set SMTP_USER=noreply@example.com in .env
+await smtp2go.send_email_via_api(
+    to=["user@example.com"],
+    subject="Test",
+    html_body="<p>Test</p>"
+    # ✅ sender defaults to SMTP_USER
+)
+```
+
+
 ## Support
 
 For SMTP2Go-specific issues:

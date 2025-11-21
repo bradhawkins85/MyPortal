@@ -1411,14 +1411,71 @@ async def _invoke_smtp2go(
     *,
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
-    recipients = _ensure_list(payload.get("recipients"))
-    if not recipients:
-        raise ValueError("At least one recipient is required")
+    """Invoke SMTP2Go module to send email.
+    
+    Supports both direct payload and template-based email sending.
+    
+    Direct payload format:
+        {
+            "recipients": ["user@example.com"],
+            "subject": "Email subject",
+            "html": "<p>HTML body</p>",
+            "text": "Plain text body",
+            "sender": "sender@example.com"
+        }
+    
+    Template-based format:
+        {
+            "template": "password_reset",
+            "recipients": ["user@example.com"],
+            "variables": {
+                "recipient_name": "John Doe",
+                "reset_link": "https://...",
+                "expiry_time": "1 hour"
+            },
+            "sender": "noreply@example.com"
+        }
+    """
+    from app.services import smtp2go
+    
+    # Check if using template
+    template_type = payload.get("template")
+    if template_type:
+        # Template-based email
+        try:
+            variables = payload.get("variables", {})
+            recipients = _ensure_list(payload.get("recipients"))
+            sender = str(payload.get("sender") or "").strip() or None
+            
+            if not recipients:
+                raise ValueError("At least one recipient is required")
+            
+            # Format payload using template
+            formatted_payload = smtp2go.format_template_payload(
+                template_type,
+                variables,
+                recipients,
+                sender,
+            )
+            
+            subject = formatted_payload["subject"]
+            html_body = formatted_payload["html_body"]
+            text_body = formatted_payload.get("text_body")
+            sender = formatted_payload.get("sender")
+            
+        except ValueError as exc:
+            raise ValueError(f"Template error: {str(exc)}") from exc
+    else:
+        # Direct payload format (legacy)
+        recipients = _ensure_list(payload.get("recipients"))
+        if not recipients:
+            raise ValueError("At least one recipient is required")
 
-    subject = str(payload.get("subject") or "Automation notification")
-    html_body = str(payload.get("html") or payload.get("body") or "<p>Automation triggered.</p>")
-    text_body = payload.get("text")
-    sender = str(payload.get("sender") or "").strip() or None
+        subject = str(payload.get("subject") or "Automation notification")
+        html_body = str(payload.get("html") or payload.get("body") or "<p>Automation triggered.</p>")
+        text_body = payload.get("text")
+        sender = str(payload.get("sender") or "").strip() or None
+    
     reply_to = str(payload.get("reply_to") or "").strip() or None
 
     enable_tracking = _ensure_bool(settings.get("enable_tracking"), True)
@@ -1472,8 +1529,6 @@ async def _invoke_smtp2go(
 
     attempt_number = 1
     try:
-        from app.services import smtp2go
-
         tracking_id = smtp2go.generate_tracking_id() if enable_tracking else None
         result = await smtp2go.send_email_via_api(
             to=recipients,

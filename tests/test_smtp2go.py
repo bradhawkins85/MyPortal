@@ -16,6 +16,80 @@ def test_generate_tracking_id():
     assert isinstance(tracking_id_1, str)
 
 
+def test_list_email_templates():
+    """Test that email templates can be listed."""
+    templates = smtp2go.list_email_templates()
+    
+    assert isinstance(templates, list)
+    assert len(templates) > 0
+    
+    # Check structure of first template
+    first_template = templates[0]
+    assert "type" in first_template
+    assert "description" in first_template
+    assert "subject_template" in first_template
+    assert "recommended_fields" in first_template
+
+
+def test_get_email_template():
+    """Test getting a specific email template."""
+    template = smtp2go.get_email_template("password_reset")
+    
+    assert "subject_template" in template
+    assert "recommended_fields" in template
+    assert "example_payload" in template
+    assert "description" in template
+
+
+def test_get_email_template_invalid():
+    """Test that getting an invalid template raises ValueError."""
+    with pytest.raises(ValueError) as exc_info:
+        smtp2go.get_email_template("invalid_template")
+    
+    assert "Unknown template type" in str(exc_info.value)
+
+
+def test_format_template_payload():
+    """Test formatting a template with variables."""
+    payload = smtp2go.format_template_payload(
+        "password_reset",
+        {
+            "recipient_name": "John Doe",
+            "reset_link": "https://example.com/reset/abc123",
+            "expiry_time": "1 hour",
+        },
+        ["user@example.com"],
+        "noreply@example.com",
+    )
+    
+    assert payload["to"] == ["user@example.com"]
+    assert payload["sender"] == "noreply@example.com"
+    assert "John Doe" in payload["subject"] or "John Doe" in payload["html_body"]
+    assert "https://example.com/reset/abc123" in payload["html_body"]
+    assert "1 hour" in payload["html_body"]
+    assert "text_body" in payload
+
+
+def test_format_template_payload_escapes_html():
+    """Test that template variable substitution escapes HTML to prevent XSS."""
+    payload = smtp2go.format_template_payload(
+        "notification",
+        {
+            "title": "Test <script>alert('xss')</script>",
+            "message": "Message with <b>HTML</b>",
+            "action_text": "Click here",
+            "action_link": "https://example.com",
+        },
+        ["user@example.com"],
+    )
+    
+    # HTML should be escaped in the output
+    assert "<script>" not in payload["html_body"]
+    assert "&lt;script&gt;" in payload["html_body"]
+    assert "<b>" not in payload["subject"]  # If title appears in subject
+    # Note: The template's own HTML tags should remain, only variable content is escaped
+    
+
 @pytest.mark.asyncio
 async def test_send_email_via_api_success(monkeypatch):
     """Test successful email sending via SMTP2Go API."""
@@ -51,6 +125,7 @@ async def test_send_email_via_api_success(monkeypatch):
             assert "api_key" in json
             assert "to" in json
             assert "subject" in json
+            assert "sender" in json  # Verify sender is included
             return MockResponse()
     
     # Mock modules service
@@ -67,12 +142,13 @@ async def test_send_email_via_api_success(monkeypatch):
     import httpx
     monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
     
-    # Test sending email
+    # Test sending email with explicit sender
     result = await smtp2go.send_email_via_api(
         to=["test@example.com"],
         subject="Test Subject",
         html_body="<p>Test body</p>",
         text_body="Test body",
+        sender="sender@example.com",  # Explicitly provide sender
     )
     
     assert result["email_id"] == "test-message-id-123"
@@ -129,6 +205,7 @@ async def test_send_email_via_api_failure(monkeypatch):
             to=["test@example.com"],
             subject="Test Subject",
             html_body="<p>Test body</p>",
+            sender="sender@example.com",  # Explicitly provide sender
         )
     
     assert "Invalid API key" in str(exc_info.value)
@@ -154,6 +231,89 @@ async def test_send_email_via_api_not_configured(monkeypatch):
         )
     
     assert "not configured" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_send_email_via_api_missing_sender(monkeypatch):
+    """Test that missing sender raises appropriate error."""
+    
+    # Mock modules service
+    async def mock_get_module_settings(slug):
+        return {"api_key": "test-api-key-123"}
+    
+    from app.services import modules as modules_service
+    monkeypatch.setattr(modules_service, "get_module_settings", mock_get_module_settings)
+    
+    # Mock settings with no smtp_user
+    from app.core.config import get_settings
+    settings = get_settings()
+    original_smtp_user = settings.smtp_user
+    settings.smtp_user = None
+    
+    try:
+        # Test that error is raised when sender is missing
+        with pytest.raises(smtp2go.SMTP2GoError) as exc_info:
+            await smtp2go.send_email_via_api(
+                to=["test@example.com"],
+                subject="Test Subject",
+                html_body="<p>Test body</p>",
+            )
+        
+        assert "Sender email address is required" in str(exc_info.value)
+    finally:
+        settings.smtp_user = original_smtp_user
+
+
+@pytest.mark.asyncio
+async def test_send_email_via_api_400_error(monkeypatch):
+    """Test detailed logging for 400 Bad Request errors."""
+    
+    # Mock httpx AsyncClient with 400 response
+    class MockResponse:
+        def __init__(self):
+            self.status_code = 400
+            self.text = '{"error": "Invalid sender"}'
+        
+        def raise_for_status(self):
+            pass
+        
+        def json(self):
+            return {"error": "Invalid sender"}
+    
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+        
+        async def __aenter__(self):
+            return self
+        
+        async def __aexit__(self, *args):
+            pass
+        
+        async def post(self, url, json=None):
+            return MockResponse()
+    
+    # Mock modules service
+    async def mock_get_module_settings(slug):
+        return {"api_key": "test-api-key"}
+    
+    from app.services import modules as modules_service
+    monkeypatch.setattr(modules_service, "get_module_settings", mock_get_module_settings)
+    
+    # Mock httpx
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    
+    # Test that 400 error is properly handled
+    with pytest.raises(smtp2go.SMTP2GoError) as exc_info:
+        await smtp2go.send_email_via_api(
+            to=["test@example.com"],
+            subject="Test Subject",
+            html_body="<p>Test body</p>",
+            sender="sender@example.com",
+        )
+    
+    assert "400 Bad Request" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
