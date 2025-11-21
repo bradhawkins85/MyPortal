@@ -515,7 +515,12 @@ app.add_middleware(
     exempt_paths=("/static",),
 )
 
-app.add_middleware(CSRFMiddleware)
+app.add_middleware(
+    CSRFMiddleware,
+    exempt_paths=(
+        "/api/webhooks/smtp2go",
+    ),
+)
 
 # Add Plausible tracking middleware for authenticated pageviews
 # This middleware sends custom events to Plausible Analytics when users access pages
