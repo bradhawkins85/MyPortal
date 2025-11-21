@@ -104,6 +104,121 @@ def test_send_email_success(monkeypatch):
     assert event_metadata["response_status"] == 250
 
 
+def test_send_email_adds_tracking_when_plausible_enabled(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(settings, "smtp_port", 587)
+    monkeypatch.setattr(settings, "smtp_user", "noreply@example.com")
+    monkeypatch.setattr(settings, "smtp_password", "secret")
+    monkeypatch.setattr(settings, "smtp_use_tls", True)
+    monkeypatch.setattr(settings, "portal_url", "https://portal.example.com")
+
+    captured: dict[str, object] = {}
+    event_store: dict[int, dict[str, object]] = {}
+
+    class DummySMTP:
+        def __init__(self, host: str, port: int, timeout: float):
+            captured["host"] = host
+            captured["port"] = port
+            captured["timeout"] = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def ehlo(self):
+            captured.setdefault("ehlo", 0)
+            captured["ehlo"] = int(captured["ehlo"]) + 1
+
+        def starttls(self, context=None):
+            captured["starttls"] = True
+
+        def login(self, username: str, password: str):
+            captured["login"] = (username, password)
+
+        def send_message(self, message):
+            captured["message"] = message
+
+    monkeypatch.setattr(email_service.smtplib, "SMTP", DummySMTP)
+
+    async def fake_manual_event(**kwargs):
+        captured["enqueue_event"] = kwargs
+        event = {
+            "id": 102,
+            "status": "pending",
+            "payload": kwargs.get("payload"),
+            "target_url": kwargs.get("target_url"),
+        }
+        event_store[event["id"]] = event
+        return event
+
+    async def fake_record_manual_success(
+        event_id: int,
+        *,
+        attempt_number: int,
+        response_status: int | None,
+        response_body: str | None,
+        **_kwargs,
+    ):
+        event = dict(event_store.get(event_id, {}))
+        event.update(
+            {
+                "status": "succeeded",
+                "attempt_count": attempt_number,
+                "response_status": response_status,
+                "response_body": response_body,
+            }
+        )
+        event_store[event_id] = event
+        return event
+
+    async def fake_record_manual_failure(*_args, **_kwargs):  # pragma: no cover - success path only
+        raise AssertionError("Failure recorder should not be called in success test")
+
+    monkeypatch.setattr(email_service.webhook_monitor, "create_manual_event", fake_manual_event)
+    monkeypatch.setattr(email_service.webhook_monitor, "record_manual_success", fake_record_manual_success)
+    monkeypatch.setattr(email_service.webhook_monitor, "record_manual_failure", fake_record_manual_failure)
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        assert slug == "plausible"
+        return {"slug": slug, "enabled": True, "settings": {"track_opens": True, "track_clicks": True}}
+
+    async def fake_get_module_settings(slug: str):
+        assert slug == "plausible"
+        return {"track_opens": True, "track_clicks": True}
+
+    from app.services import modules as modules_service
+
+    monkeypatch.setattr(modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(modules_service, "get_module_settings", fake_get_module_settings)
+
+    result = asyncio.run(
+        email_service.send_email(
+            subject="Subject",
+            recipients=["user@example.com"],
+            text_body="Hello",
+            html_body="<p>Hello</p><a href=\"https://example.com\">Link</a>",
+        )
+    )
+
+    sent, event_metadata = result
+    assert sent is True
+    assert captured["host"] == "smtp.example.com"
+    assert captured["port"] == 587
+    assert captured["login"] == ("noreply@example.com", "secret")
+    message = captured["message"]
+    html_part = message.get_body(preferencelist=("html",))
+    assert html_part is not None
+    html_content = html_part.get_content()
+    assert "/api/email-tracking/pixel/" in html_content
+    assert "/api/email-tracking/click?" in html_content
+    assert captured["enqueue_event"]["payload"]["recipients"] == ["user@example.com"]
+    assert event_metadata["status"] == "succeeded"
+    assert event_metadata["response_status"] == 250
+
+
 def test_send_email_skips_without_smtp(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "smtp_host", None)
