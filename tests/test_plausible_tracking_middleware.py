@@ -75,13 +75,21 @@ async def test_middleware_skips_unauthenticated_requests(test_app):
 @pytest.mark.asyncio
 async def test_middleware_tracks_authenticated_pageviews(test_app):
     """Test that middleware tracks pageviews for authenticated users."""
+    from datetime import datetime, timezone
+    
     client = TestClient(test_app)
     
     # Mock session with authenticated user
     mock_session = SessionData(
-        id="test-session-id",
+        id=1,
         user_id=123,
+        session_token="test-token",
         csrf_token="test-csrf",
+        created_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc),
+        last_seen_at=datetime.now(timezone.utc),
+        ip_address="127.0.0.1",
+        user_agent="test-agent",
     )
     
     with patch("app.security.plausible_tracking.session_manager") as mock_session_manager:
@@ -116,12 +124,20 @@ async def test_middleware_tracks_authenticated_pageviews(test_app):
 @pytest.mark.asyncio
 async def test_middleware_skips_exempt_paths(test_app):
     """Test that middleware skips exempt paths like /api and /static."""
+    from datetime import datetime, timezone
+    
     client = TestClient(test_app)
     
     mock_session = SessionData(
-        id="test-session-id",
+        id=1,
         user_id=123,
+        session_token="test-token",
         csrf_token="test-csrf",
+        created_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc),
+        last_seen_at=datetime.now(timezone.utc),
+        ip_address="127.0.0.1",
+        user_agent="test-agent",
     )
     
     with patch("app.security.plausible_tracking.session_manager") as mock_session_manager:
@@ -142,6 +158,8 @@ async def test_middleware_skips_exempt_paths(test_app):
 @pytest.mark.asyncio
 async def test_middleware_skips_non_get_requests(test_app):
     """Test that middleware only tracks GET requests (pageviews)."""
+    from datetime import datetime, timezone
+    
     # Add a POST endpoint
     @test_app.post("/submit")
     async def submit():
@@ -150,9 +168,15 @@ async def test_middleware_skips_non_get_requests(test_app):
     client = TestClient(test_app)
     
     mock_session = SessionData(
-        id="test-session-id",
+        id=1,
         user_id=123,
+        session_token="test-token",
         csrf_token="test-csrf",
+        created_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc),
+        last_seen_at=datetime.now(timezone.utc),
+        ip_address="127.0.0.1",
+        user_agent="test-agent",
     )
     
     with patch("app.security.plausible_tracking.session_manager") as mock_session_manager:
@@ -168,6 +192,8 @@ async def test_middleware_skips_non_get_requests(test_app):
 @pytest.mark.asyncio
 async def test_middleware_skips_error_responses(test_app):
     """Test that middleware does not track failed requests."""
+    from datetime import datetime, timezone
+    
     @test_app.get("/error")
     async def error():
         from fastapi import HTTPException
@@ -176,9 +202,15 @@ async def test_middleware_skips_error_responses(test_app):
     client = TestClient(test_app)
     
     mock_session = SessionData(
-        id="test-session-id",
+        id=1,
         user_id=123,
+        session_token="test-token",
         csrf_token="test-csrf",
+        created_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc),
+        last_seen_at=datetime.now(timezone.utc),
+        ip_address="127.0.0.1",
+        user_agent="test-agent",
     )
     
     with patch("app.security.plausible_tracking.session_manager") as mock_session_manager:
@@ -194,6 +226,8 @@ async def test_middleware_skips_error_responses(test_app):
 @pytest.mark.asyncio
 async def test_middleware_when_module_disabled(test_app):
     """Test that middleware does not track when module is disabled."""
+    from datetime import datetime, timezone
+    
     # Create app with disabled module
     app = FastAPI()
     
@@ -216,9 +250,15 @@ async def test_middleware_when_module_disabled(test_app):
     client = TestClient(app)
     
     mock_session = SessionData(
-        id="test-session-id",
+        id=1,
         user_id=123,
+        session_token="test-token",
         csrf_token="test-csrf",
+        created_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc),
+        last_seen_at=datetime.now(timezone.utc),
+        ip_address="127.0.0.1",
+        user_agent="test-agent",
     )
     
     with patch("app.security.plausible_tracking.session_manager") as mock_session_manager:
@@ -234,6 +274,8 @@ async def test_middleware_when_module_disabled(test_app):
 @pytest.mark.asyncio
 async def test_middleware_handles_missing_configuration(test_app):
     """Test that middleware handles missing configuration gracefully."""
+    from datetime import datetime, timezone
+    
     app = FastAPI()
     
     def mock_get_module_settings_incomplete():
@@ -258,9 +300,15 @@ async def test_middleware_handles_missing_configuration(test_app):
     client = TestClient(app)
     
     mock_session = SessionData(
-        id="test-session-id",
+        id=1,
         user_id=123,
+        session_token="test-token",
         csrf_token="test-csrf",
+        created_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc),
+        last_seen_at=datetime.now(timezone.utc),
+        ip_address="127.0.0.1",
+        user_agent="test-agent",
     )
     
     with patch("app.security.plausible_tracking.session_manager") as mock_session_manager:
@@ -276,6 +324,8 @@ async def test_middleware_handles_missing_configuration(test_app):
 @pytest.mark.asyncio
 async def test_middleware_sends_pii_when_configured(test_app):
     """Test that middleware sends raw user ID when send_pii is enabled."""
+    from datetime import datetime, timezone
+    
     app = FastAPI()
     
     def mock_get_module_settings_with_pii():
@@ -304,9 +354,15 @@ async def test_middleware_sends_pii_when_configured(test_app):
     client = TestClient(app)
     
     mock_session = SessionData(
-        id="test-session-id",
+        id=1,
         user_id=456,
+        session_token="test-token",
         csrf_token="test-csrf",
+        created_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc),
+        last_seen_at=datetime.now(timezone.utc),
+        ip_address="127.0.0.1",
+        user_agent="test-agent",
     )
     
     with patch("app.security.plausible_tracking.session_manager") as mock_session_manager:
@@ -337,12 +393,20 @@ async def test_middleware_sends_pii_when_configured(test_app):
 @pytest.mark.asyncio
 async def test_middleware_continues_on_plausible_error(test_app):
     """Test that middleware doesn't fail the request if Plausible is down."""
+    from datetime import datetime, timezone
+    
     client = TestClient(test_app)
     
     mock_session = SessionData(
-        id="test-session-id",
+        id=1,
         user_id=123,
+        session_token="test-token",
         csrf_token="test-csrf",
+        created_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc),
+        last_seen_at=datetime.now(timezone.utc),
+        ip_address="127.0.0.1",
+        user_agent="test-agent",
     )
     
     with patch("app.security.plausible_tracking.session_manager") as mock_session_manager:
