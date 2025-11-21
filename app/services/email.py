@@ -79,29 +79,43 @@ async def send_email(
             from app.services import email_tracking
             from app.services import modules as modules_service
             
-            # Check if Plausible module is enabled and configured
-            module_settings = await modules_service.get_module_settings('plausible')
-            track_opens = module_settings.get('track_opens', True) if module_settings else True
-            track_clicks = module_settings.get('track_clicks', True) if module_settings else True
-            
-            if track_opens or track_clicks:
-                tracking_id = email_tracking.generate_tracking_id()
-                
-                # Insert tracking pixel for open tracking
-                if track_opens:
-                    modified_html_body = email_tracking.insert_tracking_pixel(modified_html_body, tracking_id)
-                
-                # Rewrite links for click tracking
-                if track_clicks:
-                    modified_html_body = email_tracking.rewrite_links_for_tracking(modified_html_body, tracking_id)
-                
-                logger.info(
-                    "Email tracking enabled",
-                    tracking_id=tracking_id,
+            # Check if portal_url is configured (required for tracking)
+            if not settings.portal_url:
+                logger.warning(
+                    "Email tracking requested but PORTAL_URL is not configured",
                     reply_id=ticket_reply_id,
-                    track_opens=track_opens,
-                    track_clicks=track_clicks,
                 )
+            else:
+                # Check if Plausible module is enabled and configured
+                module_settings = await modules_service.get_module_settings('plausible')
+                track_opens = module_settings.get('track_opens', True) if module_settings else True
+                track_clicks = module_settings.get('track_clicks', True) if module_settings else True
+                
+                if track_opens or track_clicks:
+                    tracking_id = email_tracking.generate_tracking_id()
+                    
+                    # Insert tracking pixel for open tracking
+                    if track_opens:
+                        modified_html_body = email_tracking.insert_tracking_pixel(modified_html_body, tracking_id)
+                    
+                    # Rewrite links for click tracking
+                    if track_clicks:
+                        modified_html_body = email_tracking.rewrite_links_for_tracking(modified_html_body, tracking_id)
+                    
+                    logger.info(
+                        "Email tracking enabled",
+                        tracking_id=tracking_id,
+                        reply_id=ticket_reply_id,
+                        track_opens=track_opens,
+                        track_clicks=track_clicks,
+                    )
+                else:
+                    logger.info(
+                        "Email tracking disabled by Plausible module settings",
+                        reply_id=ticket_reply_id,
+                        track_opens=track_opens,
+                        track_clicks=track_clicks,
+                    )
         except Exception as exc:
             logger.error(
                 "Failed to apply email tracking",
