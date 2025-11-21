@@ -244,7 +244,12 @@ async def send_email_via_api(
     text_body: str | None = None,
     sender: str | None = None,
     reply_to: str | None = None,
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
     custom_headers: dict[str, str] | None = None,
+    attachments: list[dict[str, str]] | None = None,
+    template_id: str | None = None,
+    template_data: dict[str, Any] | None = None,
     tracking_id: str | None = None,
 ) -> dict[str, Any]:
     """Send an email using SMTP2Go API.
@@ -256,7 +261,12 @@ async def send_email_via_api(
         text_body: Plain text version of the email (optional)
         sender: Sender email address (optional, but highly recommended)
         reply_to: Reply-to email address (optional)
+        cc: List of CC recipient email addresses (optional)
+        bcc: List of BCC recipient email addresses (optional)
         custom_headers: Additional email headers (optional)
+        attachments: List of attachment dicts with 'filename' and 'content' (base64) (optional)
+        template_id: SMTP2Go template ID to use (optional)
+        template_data: Template variables for SMTP2Go template (optional)
         tracking_id: Internal tracking ID to associate with this email (optional)
         
     Returns:
@@ -309,6 +319,25 @@ async def send_email_via_api(
         # Add optional fields
         if text_body:
             payload["text_body"] = text_body
+        
+        # Add CC recipients
+        if cc and len(cc) > 0:
+            payload["cc"] = cc
+        
+        # Add BCC recipients
+        if bcc and len(bcc) > 0:
+            payload["bcc"] = bcc
+        
+        # Add attachments
+        if attachments and len(attachments) > 0:
+            payload["attachments"] = attachments
+        
+        # Add SMTP2Go template fields
+        if template_id:
+            payload["template_id"] = template_id
+        
+        if template_data:
+            payload["template_data"] = template_data
         
         if reply_to:
             payload["custom_headers"] = payload.get("custom_headers", [])
