@@ -1859,6 +1859,15 @@
 
         // Store the final URL with prefill parameters as the data-cal-link
         button.setAttribute('data-cal-link', url.toString());
+        
+        // Add click handler to open link in new tab
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          const finalUrl = button.getAttribute('data-cal-link');
+          if (finalUrl) {
+            window.open(finalUrl, '_blank', 'noopener,noreferrer');
+          }
+        });
       } catch (error) {
         // Log error if URL construction fails, but don't break the page
         console.error('Failed to build Cal.com booking URL:', error);

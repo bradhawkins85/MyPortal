@@ -50,16 +50,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if any(path.startswith(prefix) for prefix in self.exempt_paths):
             return response
 
-        # Allowed sources for Cal.com embeds (scripts, frames, and API calls)
-        cal_embed_sources = ["https://cal.com", "https://app.cal.com"]
-
         # Build script-src directive with dynamic sources
         script_sources = [
             "'self'",
             "'unsafe-inline'",
             "'unsafe-eval'",
             "https://unpkg.com",
-            *cal_embed_sources,
         ]
 
         # Add extra script sources (e.g., Plausible analytics)
@@ -75,9 +71,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 pass
 
         # Build connect-src directive
-        connect_sources = ["'self'", *cal_embed_sources]
+        connect_sources = ["'self'"]
 
-        frame_sources = ["'self'", *cal_embed_sources]
+        frame_sources = ["'self'"]
 
         # Add extra connect sources (e.g., analytics APIs)
         if self._get_extra_connect_sources:
