@@ -2270,6 +2270,9 @@ async def _validate_plausible(
     send_to_plausible = _ensure_bool(settings.get("send_to_plausible"), False)
     track_pageviews = _ensure_bool(settings.get("track_pageviews"), False)
     pepper = str(settings.get("pepper") or "").strip()
+    env_pepper = str(os.getenv("PLAUSIBLE_PEPPER", "") or "").strip()
+    if not pepper and env_pepper:
+        pepper = env_pepper
     send_pii = _ensure_bool(settings.get("send_pii"), False)
 
     if send_to_plausible or track_pageviews:

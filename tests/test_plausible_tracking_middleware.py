@@ -461,3 +461,26 @@ def test_hash_user_id_with_default_pepper():
     pii_id = hash_user_id_for_plausible(123, "pepper", send_pii=True)
     assert pii_id == "user_123"
     assert not pii_id.startswith("hash_")
+
+
+def test_hash_user_id_uses_env_pepper(monkeypatch):
+    """Environment variable should provide pepper when settings are blank."""
+    import hashlib
+    import hmac
+
+    from app.security.plausible_tracking import (
+        _DEFAULT_PEPPER_WARNING,
+        hash_user_id_for_plausible,
+    )
+
+    monkeypatch.setenv("PLAUSIBLE_PEPPER", "env-pepper")
+
+    def _expected_hash(user_id: int, pepper: str) -> str:
+        digest = hmac.new(
+            pepper.encode("utf-8"), str(user_id).encode("utf-8"), hashlib.sha256
+        )
+        return f"hash_{digest.hexdigest()[:16]}"
+
+    hash_with_env = hash_user_id_for_plausible(123, "", send_pii=False)
+    assert hash_with_env == _expected_hash(123, "env-pepper")
+    assert hash_with_env != _expected_hash(123, _DEFAULT_PEPPER_WARNING)
