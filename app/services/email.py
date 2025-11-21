@@ -70,11 +70,76 @@ async def send_email(
         logger.warning("SMTP host not configured; email delivery skipped", subject=subject)
         return False, None
 
-    # Apply email tracking if enabled
+    # Check if SMTP2Go is enabled
+    smtp2go_enabled = False
     tracking_id: str | None = None
     modified_html_body = html_body
-
-    # Determine if tracking should be applied automatically
+    
+    try:
+        from app.services import modules as modules_service
+        
+        smtp2go_module = await modules_service.get_module("smtp2go", redact=False)
+        if smtp2go_module and smtp2go_module.get("enabled"):
+            smtp2go_enabled = True
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.debug(
+            "SMTP2Go module check failed",
+            error=str(exc),
+        )
+    
+    # Use SMTP2Go API if enabled
+    if smtp2go_enabled:
+        try:
+            from app.services import smtp2go
+            
+            # Generate tracking ID
+            tracking_id = smtp2go.generate_tracking_id()
+            
+            # Send via SMTP2Go API
+            result = await smtp2go.send_email_via_api(
+                to=to_addresses,
+                subject=subject,
+                html_body=html_body,
+                text_body=text_body,
+                sender=sender,
+                reply_to=reply_to,
+                tracking_id=tracking_id,
+            )
+            
+            # Record tracking metadata if ticket reply ID provided
+            smtp2go_message_id = result.get("email_id")
+            if tracking_id and ticket_reply_id and smtp2go_message_id:
+                await smtp2go.record_email_sent(
+                    ticket_reply_id=ticket_reply_id,
+                    tracking_id=tracking_id,
+                    smtp2go_message_id=smtp2go_message_id,
+                )
+            
+            logger.info(
+                "Email dispatched via SMTP2Go API",
+                subject=subject,
+                recipients=to_addresses,
+                smtp2go_message_id=smtp2go_message_id,
+                tracking_enabled=True,
+            )
+            
+            # Return success with SMTP2Go response
+            return True, {
+                "id": smtp2go_message_id,
+                "status": "succeeded",
+                "provider": "smtp2go",
+            }
+            
+        except Exception as exc:
+            logger.error(
+                "SMTP2Go API delivery failed, falling back to SMTP relay",
+                subject=subject,
+                recipients=to_addresses,
+                error=str(exc),
+            )
+            # Fall through to SMTP relay
+    
+    # Apply email tracking if enabled (legacy Plausible tracking)
     tracking_requested = enable_tracking
     module_settings: dict[str, Any] | None = None
     try:
