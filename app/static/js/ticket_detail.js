@@ -1841,6 +1841,24 @@
           url.searchParams.set('phone', userPhone.trim());
         }
 
+        // Add ticket-specific parameters for Cal.com
+        if (ticketId) {
+          // Add TicketNumber parameter
+          url.searchParams.set('TicketNumber', ticketId);
+          
+          // Add title parameter with format: {ticket.number} - {ticket.subject}
+          if (ticketSubject && ticketSubject.trim()) {
+            url.searchParams.set('title', `${ticketId} - ${ticketSubject.trim()}`);
+          } else {
+            url.searchParams.set('title', ticketId);
+          }
+        }
+        
+        // Add TicketURL parameter with direct link to ticket
+        if (ticketUrl) {
+          url.searchParams.set('TicketURL', ticketUrl);
+        }
+
         // Build notes with ticket information using array for cleaner handling
         const noteParts = [];
         if (ticketId && ticketSubject) {
