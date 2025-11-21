@@ -90,6 +90,9 @@ def _normalise_reply(row: dict[str, Any]) -> TicketRecord:
         if key in record and record[key] is not None:
             record[key] = int(record[key])
     record["created_at"] = _make_aware(record.get("created_at"))
+    # Normalise email tracking datetime fields
+    for key in ("email_sent_at", "email_opened_at", "email_delivered_at", "email_bounced_at"):
+        record[key] = _make_aware(record.get(key))
     if "is_billable" in record:
         record["is_billable"] = bool(record.get("is_billable"))
     labour_name = record.get("labour_type_name")
