@@ -138,7 +138,6 @@ from app.schemas.tickets import SyncroTicketImportRequest
 from app.security.cache_control import CacheControlMiddleware
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import encrypt_secret
-from app.security.plausible_tracking import PlausibleTrackingMiddleware
 from app.security.rate_limiter import (
     EndpointRateLimiter,
     EndpointRateLimiterMiddleware,
@@ -414,57 +413,12 @@ async def _get_extra_csp_script_sources() -> list[str]:
     return sources
 
 
-async def _get_plausible_config() -> dict[str, Any]:
-    """Get Plausible Analytics configuration from the integration module.
-    
-    Returns:
-        Dictionary with plausible config including:
-        - enabled: Whether plausible is enabled
-        - base_url: The plausible instance URL
-        - site_domain: The domain to track
-    """
-    config = {"enabled": False}
-    
-    try:
-        module_list = await modules_service.list_modules()
-        module_lookup = {module.get("slug"): module for module in module_list if module.get("slug")}
-        
-        plausible_module = module_lookup.get("plausible")
-        if not plausible_module or not plausible_module.get("enabled"):
-            return config
-        
-        plausible_settings = plausible_module.get("settings") or {}
-        base_url = str(plausible_settings.get("base_url") or "").strip().rstrip("/")
-        site_domain = str(plausible_settings.get("site_domain") or "").strip()
-        
-        if base_url and site_domain:
-            config = {
-                "enabled": True,
-                "base_url": base_url,
-                "site_domain": site_domain,
-            }
-    except Exception as exc:
-        # If we fail to get module config, return disabled config
-        # Log the error for debugging purposes
-        logger.error("Failed to get Plausible configuration", error=str(exc))
-    
-    return config
-
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[str(origin) for origin in settings.allowed_origins] or ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-)
-
-# Add Plausible Analytics tracking middleware
-# This injects the analytics script into HTML responses when enabled
-app.add_middleware(
-    PlausibleTrackingMiddleware,
-    exempt_paths=("/static", "/api", SWAGGER_UI_PATH, PROTECTED_OPENAPI_PATH),
-    get_plausible_config=_get_plausible_config,
 )
 
 # Add security headers middleware
