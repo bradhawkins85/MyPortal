@@ -464,6 +464,26 @@
             </div>
           </article>
 
+          {% if ticket_assigned_user and ticket_assigned_user.booking_link_url %}
+            <article class="card card--panel">
+              <header class="card__header">
+                <h2 class="card__title">Book a Call</h2>
+              </header>
+              <div class="card__body">
+                <p class="text-muted" style="margin-bottom: 1rem;">
+                  Schedule a call with {{ ticket_assigned_user.email }} to discuss this ticket.
+                </p>
+                <button
+                  data-cal-link="{{ ticket_assigned_user.booking_link_url }}"
+                  data-cal-config='{"layout":"month_view"}'
+                  class="button button--primary"
+                >
+                  Book a Call
+                </button>
+              </div>
+            </article>
+          {% endif %}
+
           {% if ticket.xero_invoice_number %}
             <article class="card card--panel">
               <header class="card__header">
@@ -1108,6 +1128,37 @@
   <script src="/static/js/admin.js" defer></script>
   <script src="/static/js/rich_text_editor.js" defer></script>
   <script src="/static/js/ticket_detail.js" defer></script>
+  {% if ticket_assigned_user and ticket_assigned_user.booking_link_url %}
+    <script>
+      (function (C, A, L) {
+        let p = function (a, ar) {
+          a.q.push(ar);
+        };
+        let d = C.document;
+        C.Cal = C.Cal || function () {
+          let cal = C.Cal;
+          let ar = arguments;
+          if (!cal.loaded) {
+            cal.ns = {};
+            cal.q = cal.q || [];
+            d.head.appendChild(d.createElement("script")).src = A;
+            cal.loaded = true;
+          }
+          if (ar[0] === L) {
+            const api = function () {
+              p(api, arguments);
+            };
+            const namespace = ar[1];
+            api.q = api.q || [];
+            typeof namespace === "string" ? (cal.ns[namespace] = api) && p(api, ar) : p(cal, ar);
+            return api;
+          }
+          p(cal, ar);
+        };
+      })(window, "https://app.cal.com/embed/embed.js", "init");
+      Cal("init", {origin:"https://cal.com"});
+    </script>
+  {% endif %}
   <script>
     async function removeTag(tagSlug) {
       if (!confirm(`Remove tag "${tagSlug.replace('-', ' ')}" from this ticket?`)) {
