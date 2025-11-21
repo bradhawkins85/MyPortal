@@ -1847,8 +1847,9 @@
           url.searchParams.set('TicketNumber', ticketId);
           
           // Add title parameter with format: {ticketId} - {ticketSubject}
-          if (ticketSubject && ticketSubject.trim()) {
-            url.searchParams.set('title', `${ticketId} - ${ticketSubject.trim()}`);
+          const trimmedSubject = ticketSubject ? ticketSubject.trim() : '';
+          if (trimmedSubject) {
+            url.searchParams.set('title', `${ticketId} - ${trimmedSubject}`);
           } else {
             url.searchParams.set('title', ticketId);
           }
