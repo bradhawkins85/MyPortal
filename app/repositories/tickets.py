@@ -754,6 +754,49 @@ async def list_replies(ticket_id: int, *, include_internal: bool = True) -> list
     return [_normalise_reply(row) for row in rows]
 
 
+async def count_time_entries(ticket_id: int) -> int:
+    """Count the number of time entries (replies with minutes_spent > 0) for a ticket."""
+    row = await db.fetch_one(
+        """
+        SELECT COUNT(*) AS count
+        FROM ticket_replies
+        WHERE ticket_id = %s AND minutes_spent IS NOT NULL AND minutes_spent > 0
+        """,
+        (ticket_id,),
+    )
+    return int(row["count"]) if row else 0
+
+
+async def validate_replies_belong_to_ticket(reply_ids: list[int], ticket_id: int) -> tuple[bool, str | None]:
+    """
+    Validate that all reply IDs belong to the specified ticket.
+    Returns (is_valid, error_message).
+    """
+    if not reply_ids:
+        return False, "No reply IDs provided"
+    
+    placeholders = ", ".join(["%s"] * len(reply_ids))
+    rows = await db.fetch_all(
+        f"""
+        SELECT id, ticket_id
+        FROM ticket_replies
+        WHERE id IN ({placeholders})
+        """,
+        tuple(reply_ids),
+    )
+    
+    if len(rows) != len(reply_ids):
+        found_ids = {row["id"] for row in rows}
+        missing_ids = set(reply_ids) - found_ids
+        return False, f"Reply IDs not found: {', '.join(map(str, missing_ids))}"
+    
+    for row in rows:
+        if row["ticket_id"] != ticket_id:
+            return False, f"Reply {row['id']} does not belong to ticket {ticket_id}"
+    
+    return True, None
+
+
 async def get_reply_by_id(reply_id: int) -> TicketRecord | None:
     row = await db.fetch_one(
         """
