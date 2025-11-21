@@ -94,7 +94,7 @@
   function initEditor(editor) {
     const surface = editor.querySelector('[data-rich-text-content]');
     const hidden = editor.querySelector('[data-rich-text-value]');
-    if (!(surface instanceof HTMLElement) || !(hidden instanceof HTMLInputElement)) {
+    if (!(surface instanceof HTMLElement) || !(hidden instanceof HTMLInputElement || hidden instanceof HTMLTextAreaElement)) {
       return;
     }
 
