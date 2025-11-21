@@ -1,5 +1,6 @@
 """Tests for email tracking functionality."""
 
+import quopri
 import pytest
 from app.services import email_tracking
 from app.core.config import get_settings
@@ -142,6 +143,84 @@ def test_rewrite_links_without_portal_url(monkeypatch):
     # Should return unchanged HTML when portal_url is not configured
     assert result == html_body
     assert "/api/email-tracking/click?" not in result
+
+
+def test_insert_tracking_pixel_word_html(mock_portal_url):
+    """Test that tracking pixel is correctly inserted into Word-generated HTML."""
+    # This is the quoted-printable encoded HTML from the problem statement
+    qp_html = b"""<html xmlns:o=3D"urn:schemas-microsoft-com:office:office" xmlns:w=3D"urn:schema=
+s-microsoft-com:office:word" xmlns:m=3D"http://schemas.microsoft.com/office/20=
+04/12/omml" xmlns=3D"http://www.w3.org/TR/REC-html40"><head><meta http-equiv=3DC=
+ontent-Type content=3D"text/html; charset=3Dutf-8"><meta name=3DGenerator content=3D=
+"Microsoft Word 15 (filtered medium)"><style><!--
+/* Font Definitions */
+@font-face
+\t{font-family:"Cambria Math";
+\tpanose-1:2 4 5 3 5 4 6 3 2 4;}
+@font-face
+\t{font-family:Calibri;
+\tpanose-1:2 15 5 2 2 2 4 3 2 4;}
+@font-face
+\t{font-family:Aptos;
+\tpanose-1:2 11 0 4 2 2 2 2 2 4;}
+@font-face
+\t{font-family:Consolas;
+\tpanose-1:2 11 6 9 2 2 4 3 2 4;}
+/* Style Definitions */
+pre
+\t{mso-style-priority:99;
+\tmso-style-link:"HTML Preformatted Char";
+\tmargin:0cm;
+\tfont-size:10.0pt;
+\tfont-family:"Courier New";}
+span.HTMLPreformattedChar
+\t{mso-style-name:"HTML Preformatted Char";
+\tmso-style-priority:99;
+\tmso-style-link:"HTML Preformatted";
+\tfont-family:Consolas;
+\tmso-ligatures:none;
+\tmso-fareast-language:EN-GB;}
+.MsoChpDefault
+\t{mso-style-type:export-only;
+\tmso-fareast-language:EN-US;}
+@page WordSection1
+\t{size:612.0pt 792.0pt;
+\tmargin:72.0pt 72.0pt 72.0pt 72.0pt;}
+div.WordSection1
+\t{page:WordSection1;}
+--></style></head><body lang=3DEN-AU link=3D"#0563C1" vlink=3D"#954F72" style=3D'wo=
+rd-wrap:break-word'><div class=3DWordSection1><pre>qwe123</pre></div></body><=
+/html>"""
+    
+    # Decode quoted-printable (this is what email.get_payload(decode=True) would do)
+    html_body = quopri.decodestring(qp_html).decode('utf-8')
+    
+    tracking_id = "test-tracking-word-123"
+    
+    result = email_tracking.insert_tracking_pixel(html_body, tracking_id)
+    
+    # Verify tracking pixel was inserted
+    assert "test-tracking-word-123.gif" in result
+    assert '<img src=' in result
+    assert 'width="1" height="1"' in result
+    assert 'display:none' in result
+    # Pixel should be before closing body tag
+    assert result.index('<img src=') < result.index('</body>')
+
+
+def test_insert_tracking_pixel_simple_html(mock_portal_url):
+    """Test that tracking pixel is correctly inserted into simple HTML without body tags."""
+    html_body = "<p>This is a simple notification message</p>"
+    tracking_id = "test-tracking-simple-456"
+    
+    result = email_tracking.insert_tracking_pixel(html_body, tracking_id)
+    
+    # Verify tracking pixel was inserted at the end
+    assert "test-tracking-simple-456.gif" in result
+    assert '<img src=' in result
+    assert 'width="1" height="1"' in result
+    assert 'display:none' in result
+    assert result.endswith('"/>')
 
 
 @pytest.mark.asyncio
