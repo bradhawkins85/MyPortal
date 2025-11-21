@@ -1821,43 +1821,49 @@
       // Build ticket URL for additional notes (use current page URL)
       const ticketUrl = window.location.href;
 
-      // Build Cal.com URL with query parameters for prefill
-      // Cal.com supports query parameters: name, email, phone, notes, etc.
-      const url = new URL(calLink);
-      
-      // Add name if available
-      if (userName && userName.trim()) {
-        url.searchParams.set('name', userName.trim());
-      }
-      
-      // Add email if available
-      if (userEmail && userEmail.trim()) {
-        url.searchParams.set('email', userEmail.trim());
-      }
+      try {
+        // Build Cal.com URL with query parameters for prefill
+        // Cal.com supports query parameters: name, email, phone, notes, etc.
+        const url = new URL(calLink);
+        
+        // Add name if available
+        if (userName && userName.trim()) {
+          url.searchParams.set('name', userName.trim());
+        }
+        
+        // Add email if available
+        if (userEmail && userEmail.trim()) {
+          url.searchParams.set('email', userEmail.trim());
+        }
 
-      // Add phone if available
-      if (userPhone && userPhone.trim()) {
-        url.searchParams.set('phone', userPhone.trim());
-      }
+        // Add phone if available
+        if (userPhone && userPhone.trim()) {
+          url.searchParams.set('phone', userPhone.trim());
+        }
 
-      // Build notes with ticket information
-      let notes = '';
-      if (ticketId) {
-        notes += `Ticket #${ticketId}`;
-      }
-      if (ticketSubject) {
-        notes += ` - ${ticketSubject}`;
-      }
-      if (ticketUrl) {
-        notes += `\n\nTicket URL: ${ticketUrl}`;
-      }
-      
-      if (notes) {
-        url.searchParams.set('notes', notes);
-      }
+        // Build notes with ticket information using array for cleaner handling
+        const noteParts = [];
+        if (ticketId) {
+          noteParts.push(`Ticket #${ticketId}`);
+        }
+        if (ticketSubject) {
+          noteParts.push(ticketSubject);
+        }
+        if (ticketUrl) {
+          noteParts.push(`\nTicket URL: ${ticketUrl}`);
+        }
+        
+        const notes = noteParts.join(' - ');
+        if (notes) {
+          url.searchParams.set('notes', notes);
+        }
 
-      // Store the final URL with prefill parameters as the data-cal-link
-      button.setAttribute('data-cal-link', url.toString());
+        // Store the final URL with prefill parameters as the data-cal-link
+        button.setAttribute('data-cal-link', url.toString());
+      } catch (error) {
+        // Log error if URL construction fails, but don't break the page
+        console.error('Failed to build Cal.com booking URL:', error);
+      }
     });
   }
 
