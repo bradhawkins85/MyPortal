@@ -73,12 +73,38 @@ async def send_email(
     # Apply email tracking if enabled
     tracking_id: str | None = None
     modified_html_body = html_body
-    
-    if enable_tracking and ticket_reply_id is not None:
+
+    # Determine if tracking should be applied automatically
+    tracking_requested = enable_tracking
+    module_settings: dict[str, Any] | None = None
+    try:
+        from app.services import modules as modules_service
+
+        plausible_module = await modules_service.get_module("plausible", redact=False)
+        if plausible_module and plausible_module.get("enabled"):
+            tracking_requested = True
+
+        # Load module settings when tracking is requested or the module is enabled
+        if tracking_requested or (plausible_module and plausible_module.get("enabled")):
+            try:
+                module_settings = await modules_service.get_module_settings("plausible")
+            except Exception as settings_exc:  # pragma: no cover - defensive logging
+                logger.warning(
+                    "Plausible settings unavailable; using tracking defaults",
+                    reply_id=ticket_reply_id,
+                    error=str(settings_exc),
+                )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning(
+            "Plausible settings unavailable; tracking fallback in use",
+            reply_id=ticket_reply_id,
+            error=str(exc),
+        )
+
+    if tracking_requested:
         try:
             from app.services import email_tracking
-            from app.services import modules as modules_service
-            
+
             # Check if portal_url is configured (required for tracking)
             if not settings.portal_url:
                 logger.warning(
@@ -86,31 +112,20 @@ async def send_email(
                     reply_id=ticket_reply_id,
                 )
             else:
-                # Check if Plausible module is enabled and configured
-                try:
-                    module_settings = await modules_service.get_module_settings('plausible')
-                except Exception as settings_exc:  # pragma: no cover - defensive logging
-                    logger.warning(
-                        "Plausible settings unavailable; using tracking defaults",
-                        reply_id=ticket_reply_id,
-                        error=str(settings_exc),
-                    )
-                    module_settings = None
+                track_opens = module_settings.get("track_opens", True) if module_settings else True
+                track_clicks = module_settings.get("track_clicks", True) if module_settings else True
 
-                track_opens = module_settings.get('track_opens', True) if module_settings else True
-                track_clicks = module_settings.get('track_clicks', True) if module_settings else True
-                
                 if track_opens or track_clicks:
                     tracking_id = email_tracking.generate_tracking_id()
-                    
+
                     # Insert tracking pixel for open tracking
                     if track_opens:
                         modified_html_body = email_tracking.insert_tracking_pixel(modified_html_body, tracking_id)
-                    
+
                     # Rewrite links for click tracking
                     if track_clicks:
                         modified_html_body = email_tracking.rewrite_links_for_tracking(modified_html_body, tracking_id)
-                    
+
                     logger.info(
                         "Email tracking enabled",
                         tracking_id=tracking_id,
