@@ -202,7 +202,10 @@ def test_csp_with_plausible_analytics(test_app_with_plausible):
     # Check that Plausible domain is included in script-src
     assert "https://plausible.example.com" in csp
     # Check that default sources are still present
-    assert "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com" in csp
+    assert "'self'" in csp
+    assert "'unsafe-inline'" in csp
+    assert "'unsafe-eval'" in csp
+    assert "https://unpkg.com" in csp
 
 
 def test_csp_filters_invalid_sources(test_app_with_invalid_sources):

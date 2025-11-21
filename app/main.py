@@ -395,10 +395,14 @@ async def _get_extra_csp_script_sources() -> list[str]:
         plausible_module = module_lookup.get("plausible")
         if plausible_module and plausible_module.get("enabled"):
             plausible_settings = plausible_module.get("settings") or {}
-            base_url = str(plausible_settings.get("base_url") or "").strip().rstrip("/")
+            base_url = (plausible_settings.get("base_url") or "")
+            if isinstance(base_url, str):
+                base_url = base_url.strip().rstrip("/")
+            else:
+                base_url = ""
             
-            # Validate base_url - must be HTTPS
-            if base_url and base_url.startswith("https://"):
+            # Validate base_url - must be HTTPS with actual content after the protocol
+            if base_url.startswith("https://") and len(base_url) > 8:  # len("https://") = 8
                 # Add the base URL as a script source (this allows loading /js/script.js from it)
                 sources.append(base_url)
     except Exception:
