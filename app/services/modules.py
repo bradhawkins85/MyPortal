@@ -1042,7 +1042,9 @@ async def trigger_module(
         try:
             result = await handler(settings, payload or {}, event_future=event_future)
         except Exception as exc:
-            logger.error("Module background task encountered an error", module=slug, error=str(exc))
+            logger.exception(
+                "Module background task encountered an error", module=slug, error=str(exc)
+            )
             if event_future and not event_future.done():
                 event_future.set_result(None)
             result = {"status": "error", "error": str(exc), "module": slug}
@@ -1473,10 +1475,8 @@ async def _invoke_smtp2go(
             raise ValueError("At least one recipient is required")
 
         subject = str(payload.get("subject") or "Automation notification")
-        # Support both 'html_body' (SMTP2Go API format) and 'html'/'body' (legacy format)
-        html_body = str(payload.get("html_body") or payload.get("html") or payload.get("body") or "<p>Automation triggered.</p>")
-        # Support both 'text_body' (SMTP2Go API format) and 'text' (legacy format)
-        text_body = payload.get("text_body") or payload.get("text")
+        html_body = str(payload.get("html") or payload.get("html_body") or payload.get("body") or "<p>Automation triggered.</p>")
+        text_body = payload.get("text") or payload.get("text_body")
         sender = str(payload.get("sender") or "").strip() or None
     
     reply_to = str(payload.get("reply_to") or "").strip() or None
