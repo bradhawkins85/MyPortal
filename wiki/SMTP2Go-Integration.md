@@ -154,7 +154,7 @@ Receives webhook events from SMTP2Go.
 Headers:
 - `X-Smtp2go-Signature`: HMAC-SHA256 signature for webhook verification
 
-Body: Array of event objects from SMTP2Go
+Body: Single event object from SMTP2Go (JSON object)
 
 ## Security
 
