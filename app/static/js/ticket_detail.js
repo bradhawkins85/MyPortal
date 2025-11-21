@@ -1864,17 +1864,21 @@
       button.addEventListener('click', function(e) {
         e.preventDefault();
         
-        // Use Cal.com modal API
-        if (window.Cal) {
-          // Initialize with namespace
-          window.Cal(namespace, {
-            calLink: finalCalLink,
-            config: {
-              layout: 'month_view',
-              theme: 'auto',
-            },
-          });
+        // Check if Cal.com library is loaded
+        if (!window.Cal) {
+          console.error('Cal.com embed library not loaded');
+          alert('Booking system is not available. Please refresh the page and try again.');
+          return;
         }
+        
+        // Initialize with namespace
+        window.Cal(namespace, {
+          calLink: finalCalLink,
+          config: {
+            layout: 'month_view',
+            theme: 'auto',
+          },
+        });
       });
     });
   }
