@@ -1042,7 +1042,9 @@ async def trigger_module(
         try:
             result = await handler(settings, payload or {}, event_future=event_future)
         except Exception as exc:
-            logger.error("Module background task encountered an error", module=slug, error=str(exc))
+            logger.exception(
+                "Module background task encountered an error", module=slug, error=str(exc)
+            )
             if event_future and not event_future.done():
                 event_future.set_result(None)
             result = {"status": "error", "error": str(exc), "module": slug}
