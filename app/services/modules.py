@@ -1234,6 +1234,39 @@ async def _invoke_smtp(
         html_body = "<p>Automation triggered.</p>"
     text_body = payload.get("text")
     sender = str(settings.get("from_address") or "") or None
+    
+    # Extract ticket reply ID from context if present, to enable email tracking
+    enable_tracking = False
+    ticket_reply_id: int | None = None
+    context = payload.get("context")
+    if isinstance(context, Mapping):
+        # Check if this is a ticket reply notification
+        # Try metadata first (for direct notification events)
+        metadata = context.get("metadata")
+        if isinstance(metadata, Mapping):
+            # Look for reply_id or ticket_reply_id in metadata
+            reply_id_value = metadata.get("reply_id") or metadata.get("ticket_reply_id")
+            if reply_id_value is not None:
+                try:
+                    ticket_reply_id = int(reply_id_value)
+                    enable_tracking = True
+                except (TypeError, ValueError):
+                    pass
+        
+        # If not found in metadata, check ticket.latest_reply.id (for automation events)
+        if ticket_reply_id is None:
+            ticket = context.get("ticket")
+            if isinstance(ticket, Mapping):
+                latest_reply = ticket.get("latest_reply")
+                if isinstance(latest_reply, Mapping):
+                    reply_id_value = latest_reply.get("id")
+                    if reply_id_value is not None:
+                        try:
+                            ticket_reply_id = int(reply_id_value)
+                            enable_tracking = True
+                        except (TypeError, ValueError):
+                            pass
+    
     event = await webhook_monitor.create_manual_event(
         name="module.smtp.send",
         target_url="smtp://send",
@@ -1243,6 +1276,8 @@ async def _invoke_smtp(
             "html": html_body,
             "text": text_body,
             "sender": sender,
+            "enable_tracking": enable_tracking,
+            "ticket_reply_id": ticket_reply_id,
         },
         headers={"X-Module": "smtp"},
         max_attempts=1,
@@ -1261,6 +1296,8 @@ async def _invoke_smtp(
             html_body=html_body,
             text_body=str(text_body) if text_body is not None else None,
             sender=sender,
+            enable_tracking=enable_tracking,
+            ticket_reply_id=ticket_reply_id,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         updated_event = await _record_failure(
