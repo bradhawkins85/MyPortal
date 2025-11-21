@@ -114,12 +114,16 @@ def test_csp_header_configuration(test_app):
     
     # Check key CSP directives
     assert "default-src 'self'" in csp
-    assert "connect-src 'self'" in csp
+    assert "connect-src 'self' https://cal.com https://app.cal.com" in csp
     assert "frame-ancestors 'none'" in csp
+    assert "frame-src 'self' https://cal.com https://app.cal.com" in csp
     assert "base-uri 'self'" in csp
     assert "form-action 'self'" in csp
     # Check that unpkg.com is allowed for loading htmx in script-src directive
-    assert "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com" in csp
+    assert (
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cal.com https://app.cal.com"
+        in csp
+    )
 
 
 def test_x_frame_options_deny(test_app):
@@ -204,7 +208,10 @@ def test_csp_with_plausible_analytics(test_app_with_plausible):
     # Check that Plausible domain is included in script-src
     assert "https://plausible.example.com" in csp
     # Plausible should also be allowed for connect-src
-    assert "connect-src 'self' https://plausible.example.com" in csp
+    assert (
+        "connect-src 'self' https://cal.com https://app.cal.com https://plausible.example.com"
+        in csp
+    )
     # Check that default sources are still present
     assert "'self'" in csp
     assert "'unsafe-inline'" in csp
