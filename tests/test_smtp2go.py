@@ -289,11 +289,7 @@ async def test_send_email_via_api_unknown_error(monkeypatch):
         )
     
     error_message = str(exc_info.value)
-    # Verify the error message contains the API error
-    assert "SMTP2Go API error [UNKNOWN]: Unknown error" in error_message
-    # Verify the error is NOT double-wrapped with "Send failed:"
-    assert not error_message.startswith("Send failed:")
-    # Verify the exact error format
+    # Verify the exact error format (not double-wrapped with "Send failed:")
     assert error_message == "SMTP2Go API error [UNKNOWN]: Unknown error"
 
 
