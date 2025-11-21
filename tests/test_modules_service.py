@@ -805,11 +805,30 @@ def test_validate_xero_reports_missing_credentials():
         "refresh_token": "test-token",
         "tenant_id": "",
     }
-    
+
     result = asyncio.run(modules._validate_xero(settings_partial, {}))
-    
+
     assert result["status"] == "ok"
     assert result["has_client_id"] is True
     assert result["has_client_secret"] is False
     assert result["has_refresh_token"] is True
     assert result["has_tenant_id"] is False
+
+
+def test_validate_plausible_uses_env_pepper(monkeypatch):
+    monkeypatch.setenv("PLAUSIBLE_PEPPER", "env-pepper")
+
+    result = asyncio.run(
+        modules._validate_plausible(
+        {
+            "base_url": "https://plausible.io",
+            "site_domain": "example.com",
+            "track_pageviews": True,
+            "send_to_plausible": True,
+            "pepper": "",
+        },
+        {},
+        )
+    )
+
+    assert result["has_pepper"] is True
