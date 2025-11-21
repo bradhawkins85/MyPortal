@@ -1861,9 +1861,7 @@
         } else if (ticketId) {
           noteParts.push(`Ticket #${ticketId}`);
         }
-        if (ticketUrl) {
-          noteParts.push(`Ticket URL: ${ticketUrl}`);
-        }
+        noteParts.push(`Ticket URL: ${ticketUrl}`);
         
         const notes = noteParts.join('\n\n');
         if (notes) {
