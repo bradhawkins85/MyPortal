@@ -1843,17 +1843,16 @@
 
         // Build notes with ticket information using array for cleaner handling
         const noteParts = [];
-        if (ticketId) {
+        if (ticketId && ticketSubject) {
+          noteParts.push(`Ticket #${ticketId} - ${ticketSubject}`);
+        } else if (ticketId) {
           noteParts.push(`Ticket #${ticketId}`);
         }
-        if (ticketSubject) {
-          noteParts.push(ticketSubject);
-        }
         if (ticketUrl) {
-          noteParts.push(`\nTicket URL: ${ticketUrl}`);
+          noteParts.push(`Ticket URL: ${ticketUrl}`);
         }
         
-        const notes = noteParts.join(' - ');
+        const notes = noteParts.join('\n\n');
         if (notes) {
           url.searchParams.set('notes', notes);
         }
