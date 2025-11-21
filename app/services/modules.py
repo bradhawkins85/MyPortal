@@ -1241,6 +1241,7 @@ async def _invoke_smtp(
     context = payload.get("context")
     if isinstance(context, Mapping):
         # Check if this is a ticket reply notification
+        # Try metadata first (for direct notification events)
         metadata = context.get("metadata")
         if isinstance(metadata, Mapping):
             # Look for reply_id or ticket_reply_id in metadata
@@ -1251,6 +1252,20 @@ async def _invoke_smtp(
                     enable_tracking = True
                 except (TypeError, ValueError):
                     pass
+        
+        # If not found in metadata, check ticket.latest_reply.id (for automation events)
+        if ticket_reply_id is None:
+            ticket = context.get("ticket")
+            if isinstance(ticket, Mapping):
+                latest_reply = ticket.get("latest_reply")
+                if isinstance(latest_reply, Mapping):
+                    reply_id_value = latest_reply.get("id")
+                    if reply_id_value is not None:
+                        try:
+                            ticket_reply_id = int(reply_id_value)
+                            enable_tracking = True
+                        except (TypeError, ValueError):
+                            pass
     
     event = await webhook_monitor.create_manual_event(
         name="module.smtp.send",
