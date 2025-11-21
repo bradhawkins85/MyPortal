@@ -209,6 +209,8 @@ async def test_send_email_via_api_failure(monkeypatch):
         )
     
     assert "Invalid API key" in str(exc_info.value)
+    # Verify the error is not double-wrapped
+    assert "Send failed:" not in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -231,6 +233,64 @@ async def test_send_email_via_api_not_configured(monkeypatch):
         )
     
     assert "not configured" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_send_email_via_api_unknown_error(monkeypatch):
+    """Test handling of SMTP2Go API unknown errors without double-wrapping."""
+    
+    # Mock httpx AsyncClient with unknown error response
+    class MockResponse:
+        def __init__(self):
+            self.status_code = 200
+        
+        def raise_for_status(self):
+            pass
+        
+        def json(self):
+            return {
+                "data": {
+                    "error_code": "UNKNOWN",
+                    "error": "Unknown error",
+                }
+            }
+    
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+        
+        async def __aenter__(self):
+            return self
+        
+        async def __aexit__(self, *args):
+            pass
+        
+        async def post(self, url, json=None):
+            return MockResponse()
+    
+    # Mock modules service
+    async def mock_get_module_settings(slug):
+        return {"api_key": "test-api-key"}
+    
+    from app.services import modules as modules_service
+    monkeypatch.setattr(modules_service, "get_module_settings", mock_get_module_settings)
+    
+    # Mock httpx
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    
+    # Test that error is raised with correct message
+    with pytest.raises(smtp2go.SMTP2GoError) as exc_info:
+        await smtp2go.send_email_via_api(
+            to=["test@example.com"],
+            subject="Test Subject",
+            html_body="<p>Test body</p>",
+            sender="sender@example.com",
+        )
+    
+    error_message = str(exc_info.value)
+    # Verify the exact error format (not double-wrapped with "Send failed:")
+    assert error_message == "SMTP2Go API error [UNKNOWN]: Unknown error"
 
 
 @pytest.mark.asyncio
