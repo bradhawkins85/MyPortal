@@ -1799,45 +1799,69 @@
   }
 
   function initialiseBookingModal() {
-    const modal = document.getElementById('booking-modal');
-    const iframe = document.getElementById('booking-iframe');
-    const trigger = document.querySelector('[data-booking-modal-trigger]');
+    // Find all booking buttons with cal.com embed
+    const bookingButtons = document.querySelectorAll('[data-cal-link]');
     
-    if (!modal || !iframe || !trigger) {
+    if (!bookingButtons.length) {
       return;
     }
 
-    function openModal() {
-      const bookingUrl = trigger.dataset.bookingLink;
-      if (bookingUrl) {
-        iframe.src = bookingUrl;
-        modal.hidden = false;
-        document.body.style.overflow = 'hidden';
+    bookingButtons.forEach((button) => {
+      const calLink = button.dataset.calLink;
+      const ticketId = button.dataset.ticketId;
+      const ticketSubject = button.dataset.ticketSubject || '';
+      const userName = button.dataset.userName || '';
+      const userEmail = button.dataset.userEmail || '';
+      const userPhone = button.dataset.userPhone || '';
+
+      if (!calLink) {
+        return;
       }
-    }
 
-    function closeModal() {
-      modal.hidden = true;
-      document.body.style.overflow = '';
-      iframe.src = '';
-    }
+      // Build ticket URL for additional notes (use current page URL)
+      const ticketUrl = window.location.href;
 
-    trigger.addEventListener('click', openModal);
+      try {
+        // Build Cal.com URL with query parameters for prefill
+        // Cal.com supports query parameters: name, email, phone, notes, etc.
+        const url = new URL(calLink);
+        
+        // Add name if available
+        if (userName && userName.trim()) {
+          url.searchParams.set('name', userName.trim());
+        }
+        
+        // Add email if available
+        if (userEmail && userEmail.trim()) {
+          url.searchParams.set('email', userEmail.trim());
+        }
 
-    const closeButtons = modal.querySelectorAll('[data-modal-close]');
-    closeButtons.forEach((button) => {
-      button.addEventListener('click', closeModal);
-    });
+        // Add phone if available
+        if (userPhone && userPhone.trim()) {
+          url.searchParams.set('phone', userPhone.trim());
+        }
 
-    modal.addEventListener('click', (event) => {
-      if (event.target === modal || event.target.classList.contains('modal__overlay')) {
-        closeModal();
-      }
-    });
+        // Build notes with ticket information using array for cleaner handling
+        const noteParts = [];
+        if (ticketId && ticketSubject) {
+          noteParts.push(`Ticket #${ticketId} - ${ticketSubject}`);
+        } else if (ticketId) {
+          noteParts.push(`Ticket #${ticketId}`);
+        }
+        if (ticketUrl) {
+          noteParts.push(`Ticket URL: ${ticketUrl}`);
+        }
+        
+        const notes = noteParts.join('\n\n');
+        if (notes) {
+          url.searchParams.set('notes', notes);
+        }
 
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && !modal.hidden) {
-        closeModal();
+        // Store the final URL with prefill parameters as the data-cal-link
+        button.setAttribute('data-cal-link', url.toString());
+      } catch (error) {
+        // Log error if URL construction fails, but don't break the page
+        console.error('Failed to build Cal.com booking URL:', error);
       }
     });
   }
