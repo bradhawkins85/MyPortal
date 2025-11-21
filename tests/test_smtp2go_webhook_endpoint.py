@@ -110,9 +110,7 @@ async def test_webhook_accepts_single_event_object(client):
         
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "ok"
-        assert data["processed"] == 1
-        assert data["failed"] == 0
+        assert data["status"] == "success"
 
 
 @pytest.mark.asyncio
@@ -258,9 +256,8 @@ async def test_webhook_processing_failure(client):
         
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "ok"
-        assert data["processed"] == 0
-        assert data["failed"] == 1
+        assert data["status"] == "failed"
+        assert "error" in data
 
 
 @pytest.mark.asyncio
@@ -280,9 +277,9 @@ async def test_webhook_processing_exception(client):
         
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "ok"
-        assert data["processed"] == 0
-        assert data["failed"] == 1
+        assert data["status"] == "failed"
+        assert "error" in data
+        assert "Database error" in data["error"]
 
 
 @pytest.mark.asyncio

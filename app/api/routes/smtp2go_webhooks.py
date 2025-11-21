@@ -109,9 +109,7 @@ async def smtp2go_webhook(
                 event_type=event_type,
             )
             return {
-                "status": "ok",
-                "processed": 1,
-                "failed": 0,
+                "status": "success",
             }
         else:
             logger.warning(
@@ -120,9 +118,8 @@ async def smtp2go_webhook(
                 event_data=event,
             )
             return {
-                "status": "ok",
-                "processed": 0,
-                "failed": 1,
+                "status": "failed",
+                "error": "Event processing returned no result",
             }
     except Exception as exc:
         logger.error(
@@ -131,7 +128,6 @@ async def smtp2go_webhook(
             error=str(exc),
         )
         return {
-            "status": "ok",
-            "processed": 0,
-            "failed": 1,
+            "status": "failed",
+            "error": str(exc),
         }
