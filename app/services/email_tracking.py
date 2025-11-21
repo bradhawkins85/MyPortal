@@ -41,6 +41,9 @@ def insert_tracking_pixel(html_body: str, tracking_id: str) -> str:
         Modified HTML with tracking pixel inserted
     """
     settings = get_settings()
+    if not settings.portal_url:
+        logger.warning("portal_url not configured, cannot insert tracking pixel")
+        return html_body
     portal_url = settings.portal_url.rstrip('/')
     pixel_url = f"{portal_url}/api/email-tracking/pixel/{tracking_id}.gif"
     
@@ -68,6 +71,9 @@ def rewrite_links_for_tracking(html_body: str, tracking_id: str) -> str:
         Modified HTML with rewritten links
     """
     settings = get_settings()
+    if not settings.portal_url:
+        logger.warning("portal_url not configured, cannot rewrite links for tracking")
+        return html_body
     portal_url = settings.portal_url.rstrip('/')
     
     # Pattern to match href attributes in anchor tags
@@ -340,6 +346,9 @@ async def send_event_to_plausible(
             return False
         
         settings = get_settings()
+        if not settings.portal_url:
+            logger.warning("portal_url not configured, cannot send event to Plausible")
+            return False
         portal_url = settings.portal_url.rstrip('/')
         
         # Build event data
