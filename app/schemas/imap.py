@@ -16,6 +16,7 @@ class IMAPAccountBase(BaseModel):
     filter_query: dict[str, Any] | None = None
     process_unread_only: bool = True
     mark_as_read: bool = True
+    sync_known_only: bool = False
     active: bool = True
     company_id: int | None = None
     priority: int = Field(100, ge=0, le=32767)
@@ -36,6 +37,7 @@ class IMAPAccountUpdate(BaseModel):
     filter_query: dict[str, Any] | None = None
     process_unread_only: bool | None = None
     mark_as_read: bool | None = None
+    sync_known_only: bool | None = None
     active: bool | None = None
     company_id: int | None = None
     priority: int | None = Field(default=None, ge=0, le=32767)
@@ -52,6 +54,7 @@ class IMAPAccountResponse(BaseModel):
     filter_query: dict[str, Any] | None
     process_unread_only: bool
     mark_as_read: bool
+    sync_known_only: bool
     active: bool
     company_id: int | None
     priority: int
