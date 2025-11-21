@@ -1799,7 +1799,7 @@
   }
 
   function initialiseBookingModal() {
-    // Find all booking buttons with cal.com embed
+    // Find all booking buttons with cal.com links and configure them to open in new tabs
     const bookingButtons = document.querySelectorAll('[data-cal-link]');
     
     if (!bookingButtons.length) {
