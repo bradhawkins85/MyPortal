@@ -14283,6 +14283,7 @@ async def login_page(request: Request):
         "app_name": settings.app_name,
         "current_year": datetime.utcnow().year,
         "title": "Sign in",
+        "plausible_config": {"enabled": False},
     }
     return templates.TemplateResponse("auth/login.html", context)
 
@@ -14307,6 +14308,7 @@ async def register_page(request: Request):
         "current_year": datetime.utcnow().year,
         "title": "Create super administrator" if is_first_user else "Create your account",
         "is_first_user": is_first_user,
+        "plausible_config": {"enabled": False},
     }
     return templates.TemplateResponse("auth/register.html", context)
 
