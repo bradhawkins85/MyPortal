@@ -1468,8 +1468,9 @@ async def _invoke_smtp2go(
         except ValueError as exc:
             raise ValueError(f"Template error: {str(exc)}") from exc
     else:
-        # Direct payload format (legacy)
-        recipients = _ensure_list(payload.get("recipients"))
+        # Direct payload format
+        # Support both 'to' (SMTP2Go API format) and 'recipients' (legacy format)
+        recipients = _ensure_list(payload.get("to") or payload.get("recipients"))
         if not recipients:
             raise ValueError("At least one recipient is required")
 
@@ -1479,6 +1480,29 @@ async def _invoke_smtp2go(
         sender = str(payload.get("sender") or "").strip() or None
     
     reply_to = str(payload.get("reply_to") or "").strip() or None
+    
+    # Extract additional SMTP2Go API fields
+    cc = _ensure_list(payload.get("cc"))
+    bcc = _ensure_list(payload.get("bcc"))
+    attachments = payload.get("attachments") if isinstance(payload.get("attachments"), list) else None
+    template_id = str(payload.get("template_id") or "").strip() or None
+    template_data = payload.get("template_data") if isinstance(payload.get("template_data"), dict) else None
+    
+    # Extract custom_headers - support both dict and list formats
+    custom_headers_input = payload.get("custom_headers")
+    custom_headers_dict: dict[str, str] | None = None
+    if isinstance(custom_headers_input, dict):
+        # Dict format: {"X-Header": "value"}
+        custom_headers_dict = {str(k): str(v) for k, v in custom_headers_input.items()}
+    elif isinstance(custom_headers_input, list):
+        # List format: [{"header": "X-Header", "value": "value"}]
+        custom_headers_dict = {}
+        for item in custom_headers_input:
+            if isinstance(item, dict):
+                header_name = str(item.get("header") or "").strip()
+                header_value = str(item.get("value") or "")
+                if header_name:
+                    custom_headers_dict[header_name] = header_value
 
     enable_tracking = _ensure_bool(settings.get("enable_tracking"), True)
     ticket_reply_id: int | None = None
@@ -1539,6 +1563,12 @@ async def _invoke_smtp2go(
             text_body=str(text_body) if text_body is not None else None,
             sender=sender,
             reply_to=reply_to,
+            cc=cc,
+            bcc=bcc,
+            custom_headers=custom_headers_dict,
+            attachments=attachments,
+            template_id=template_id,
+            template_data=template_data,
             tracking_id=tracking_id,
         )
 
