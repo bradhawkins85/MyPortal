@@ -1846,7 +1846,7 @@
           // Add TicketNumber parameter
           url.searchParams.set('TicketNumber', ticketId);
           
-          // Add title parameter with format: {ticket.number} - {ticket.subject}
+          // Add title parameter with format: {ticketId} - {ticketSubject}
           if (ticketSubject && ticketSubject.trim()) {
             url.searchParams.set('title', `${ticketId} - ${ticketSubject.trim()}`);
           } else {
@@ -1855,9 +1855,7 @@
         }
         
         // Add TicketURL parameter with direct link to ticket
-        if (ticketUrl) {
-          url.searchParams.set('TicketURL', ticketUrl);
-        }
+        url.searchParams.set('TicketURL', ticketUrl);
 
         // Build notes with ticket information using array for cleaner handling
         const noteParts = [];
