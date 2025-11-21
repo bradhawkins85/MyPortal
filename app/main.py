@@ -426,6 +426,7 @@ app.add_middleware(
     SecurityHeadersMiddleware,
     exempt_paths=("/static",),
     get_extra_script_sources=_get_extra_csp_script_sources,
+    get_extra_connect_sources=_get_extra_csp_script_sources,
 )
 
 # Add request logging middleware
