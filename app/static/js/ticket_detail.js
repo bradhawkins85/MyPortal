@@ -1818,8 +1818,8 @@
         return;
       }
 
-      // Build ticket URL for additional notes
-      const ticketUrl = ticketId ? `${window.location.origin}/tickets/${ticketId}` : '';
+      // Build ticket URL for additional notes (use current page URL)
+      const ticketUrl = window.location.href;
 
       // Build Cal.com URL with query parameters for prefill
       // Cal.com supports query parameters: name, email, phone, notes, etc.
