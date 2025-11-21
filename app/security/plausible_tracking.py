@@ -9,8 +9,9 @@ authenticated users, using privacy-conscious practices:
 
 from __future__ import annotations
 
-import hashlib
 import hmac
+import os
+import hashlib
 from typing import Callable
 
 import httpx
@@ -47,10 +48,14 @@ def hash_user_id_for_plausible(user_id: int, pepper: str | None, send_pii: bool 
     
     # Use HMAC hashing for privacy
     if not pepper:
-        logger.warning(
-            "Plausible tracking using default pepper - configure PLAUSIBLE_PEPPER for security"
-        )
-        pepper = _DEFAULT_PEPPER_WARNING
+        env_pepper = os.getenv("PLAUSIBLE_PEPPER", "").strip()
+        if env_pepper:
+            pepper = env_pepper
+        else:
+            logger.warning(
+                "Plausible tracking using default pepper - configure PLAUSIBLE_PEPPER for security"
+            )
+            pepper = _DEFAULT_PEPPER_WARNING
     
     user_data = str(user_id).encode("utf-8")
     pepper_bytes = pepper.encode("utf-8")
