@@ -11655,8 +11655,14 @@ async def _render_ticket_detail(
         email_opened_at = reply.get("email_opened_at")
         email_open_count = reply.get("email_open_count", 0)
         email_sent_at = reply.get("email_sent_at")
-        has_tracking = email_tracking_id is not None
+        email_delivered_at = reply.get("email_delivered_at")
+        email_bounced_at = reply.get("email_bounced_at")
+        smtp2go_message_id = reply.get("smtp2go_message_id")
+        
+        has_tracking = email_tracking_id is not None or smtp2go_message_id is not None
         is_email_opened = email_opened_at is not None
+        is_email_delivered = email_delivered_at is not None
+        is_email_bounced = email_bounced_at is not None
         
         enriched_replies.append(
             {
@@ -11672,8 +11678,13 @@ async def _render_ticket_detail(
                 "email_sent_at": email_sent_at,
                 "email_opened_at": email_opened_at,
                 "email_open_count": email_open_count,
+                "email_delivered_at": email_delivered_at,
+                "email_bounced_at": email_bounced_at,
+                "smtp2go_message_id": smtp2go_message_id,
                 "has_email_tracking": has_tracking,
                 "is_email_opened": is_email_opened,
+                "is_email_delivered": is_email_delivered,
+                "is_email_bounced": is_email_bounced,
             }
         )
     
