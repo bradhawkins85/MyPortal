@@ -22,7 +22,10 @@ def test_login_page_loads_without_plausible_error(client):
     if response.status_code == 200:
         assert "text/html" in response.headers.get("content-type", "")
         # Should not contain Jinja2 error about undefined plausible_config
-        assert "plausible_config" not in response.text or "undefined" not in response.text.lower()
+        response_lower = response.text.lower()
+        assert "plausible_config" not in response_lower or "undefined" not in response_lower
+        # Specifically check that we don't have the exact error message
+        assert "'plausible_config' is undefined" not in response.text
 
 
 def test_register_page_loads_without_plausible_error(client):
@@ -36,4 +39,7 @@ def test_register_page_loads_without_plausible_error(client):
     if response.status_code == 200:
         assert "text/html" in response.headers.get("content-type", "")
         # Should not contain Jinja2 error about undefined plausible_config
-        assert "plausible_config" not in response.text or "undefined" not in response.text.lower()
+        response_lower = response.text.lower()
+        assert "plausible_config" not in response_lower or "undefined" not in response_lower
+        # Specifically check that we don't have the exact error message
+        assert "'plausible_config' is undefined" not in response.text
