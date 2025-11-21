@@ -87,7 +87,16 @@ async def send_email(
                 )
             else:
                 # Check if Plausible module is enabled and configured
-                module_settings = await modules_service.get_module_settings('plausible')
+                try:
+                    module_settings = await modules_service.get_module_settings('plausible')
+                except Exception as settings_exc:  # pragma: no cover - defensive logging
+                    logger.warning(
+                        "Plausible settings unavailable; using tracking defaults",
+                        reply_id=ticket_reply_id,
+                        error=str(settings_exc),
+                    )
+                    module_settings = None
+
                 track_opens = module_settings.get('track_opens', True) if module_settings else True
                 track_clicks = module_settings.get('track_clicks', True) if module_settings else True
                 
