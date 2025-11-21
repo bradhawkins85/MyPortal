@@ -1808,7 +1808,6 @@
 
     bookingButtons.forEach((button) => {
       const calLink = button.dataset.calLink;
-      const namespace = button.dataset.calNamespace || 'default';
       const ticketId = button.dataset.ticketId;
       const ticketSubject = button.dataset.ticketSubject || '';
       const userName = button.dataset.userName || '';
@@ -1857,29 +1856,8 @@
         url.searchParams.set('notes', notes);
       }
 
-      // Store the final URL with prefill parameters
-      const finalCalLink = url.toString();
-
-      // Initialize Cal.com with the button click
-      button.addEventListener('click', function(e) {
-        e.preventDefault();
-        
-        // Check if Cal.com library is loaded
-        if (!window.Cal) {
-          console.error('Cal.com embed library not loaded');
-          alert('Booking system is not available. Please refresh the page and try again.');
-          return;
-        }
-        
-        // Initialize with namespace
-        window.Cal(namespace, {
-          calLink: finalCalLink,
-          config: {
-            layout: 'month_view',
-            theme: 'auto',
-          },
-        });
-      });
+      // Store the final URL with prefill parameters as the data-cal-link
+      button.setAttribute('data-cal-link', url.toString());
     });
   }
 
