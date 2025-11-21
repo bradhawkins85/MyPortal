@@ -516,6 +516,31 @@ app.add_middleware(
 
 app.add_middleware(CSRFMiddleware)
 
+# Add Plausible tracking middleware for authenticated pageviews
+# This middleware sends custom events to Plausible Analytics when users access pages
+# It includes privacy protections (hashed user IDs) and only tracks authenticated users
+from app.security.plausible_tracking import PlausibleTrackingMiddleware
+
+def _get_plausible_module_settings() -> dict[str, Any]:
+    """Synchronous function to get Plausible module settings for middleware."""
+    # We use a cached module lookup to avoid async issues in middleware
+    # This is populated in _build_base_context
+    return getattr(_get_plausible_module_settings, '_cached_module', {})
+
+app.add_middleware(
+    PlausibleTrackingMiddleware,
+    exempt_paths=(
+        "/static",
+        "/api",
+        "/health",
+        "/manifest.webmanifest",
+        "/service-worker.js",
+        "/ws",
+        "/mcp",
+    ),
+    get_module_settings=_get_plausible_module_settings,
+)
+
 templates = Jinja2Templates(directory=str(templates_config.template_path))
 
 # Ensure document uploads remain web-accessible using the same paths as the
@@ -1285,14 +1310,22 @@ async def _build_base_context(
             module_list = []
         module_lookup = {module.get("slug"): module for module in module_list if module.get("slug")}
         request.state.module_lookup = module_lookup
+    
+    # Cache Plausible module for middleware use
+    plausible_module = (module_lookup or {}).get("plausible")
+    if plausible_module:
+        # Store in function attribute for middleware to access
+        _get_plausible_module_settings._cached_module = plausible_module
 
     # Get Plausible analytics configuration for app-wide tracking
     plausible_config = {"enabled": False}
-    plausible_module = (module_lookup or {}).get("plausible")
     if plausible_module and plausible_module.get("enabled"):
         plausible_settings = plausible_module.get("settings") or {}
         base_url = str(plausible_settings.get("base_url") or "").strip().rstrip("/")
         site_domain = str(plausible_settings.get("site_domain") or "").strip()
+        track_pageviews = bool(plausible_settings.get("track_pageviews"))
+        pepper = str(plausible_settings.get("pepper") or "").strip()
+        send_pii = bool(plausible_settings.get("send_pii"))
         
         # Validate base_url and site_domain to prevent injection attacks
         # base_url must be a valid HTTPS URL
@@ -1323,7 +1356,18 @@ async def _build_base_context(
                 "enabled": True,
                 "base_url": base_url,
                 "site_domain": site_domain,
+                "track_pageviews": track_pageviews,
             }
+            
+            # Add hashed user ID for client-side tracking if pageview tracking enabled
+            if track_pageviews and user and user.get("id"):
+                from app.security.plausible_tracking import hash_user_id_for_plausible
+                
+                user_id = user.get("id")
+                # Hash user ID for privacy using shared utility
+                hashed_user_id = hash_user_id_for_plausible(user_id, pepper, send_pii)
+                
+                plausible_config["hashed_user_id"] = hashed_user_id
 
     context: dict[str, Any] = {
         "request": request,

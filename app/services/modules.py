@@ -392,7 +392,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
     {
         "slug": "plausible",
         "name": "Plausible Analytics",
-        "description": "Privacy-first analytics integration for email tracking.",
+        "description": "Privacy-first analytics integration for email tracking and authenticated user pageviews.",
         "icon": "📊",
         "settings": {
             "base_url": "",
@@ -401,6 +401,9 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "track_opens": True,
             "track_clicks": True,
             "send_to_plausible": False,
+            "track_pageviews": False,
+            "pepper": "",
+            "send_pii": False,
         },
     },
     {
@@ -642,6 +645,18 @@ def _coerce_settings(
                 api_key = str(existing_settings.get("api_key") or "").strip()
             else:
                 api_key = candidate
+        
+        # Handle pepper field similarly to api_key (preserve existing if not provided)
+        pepper_override = overrides.get("pepper")
+        if pepper_override is None:
+            pepper = str(merged.get("pepper") or "").strip()
+        else:
+            candidate = str(pepper_override or "").strip()
+            if not candidate and existing_settings and existing_settings.get("pepper"):
+                pepper = str(existing_settings.get("pepper") or "").strip()
+            else:
+                pepper = candidate
+        
         base_url_value = str(merged.get("base_url", "")).strip()
         base_url = base_url_value.rstrip("/") if base_url_value else ""
         merged.update(
@@ -652,6 +667,9 @@ def _coerce_settings(
                 "track_opens": _ensure_bool(merged.get("track_opens"), True),
                 "track_clicks": _ensure_bool(merged.get("track_clicks"), True),
                 "send_to_plausible": _ensure_bool(merged.get("send_to_plausible"), False),
+                "track_pageviews": _ensure_bool(merged.get("track_pageviews"), False),
+                "pepper": pepper,
+                "send_pii": _ensure_bool(merged.get("send_pii"), False),
             }
         )
     elif slug == "imap":
@@ -2250,8 +2268,11 @@ async def _validate_plausible(
     track_opens = _ensure_bool(settings.get("track_opens"), True)
     track_clicks = _ensure_bool(settings.get("track_clicks"), True)
     send_to_plausible = _ensure_bool(settings.get("send_to_plausible"), False)
+    track_pageviews = _ensure_bool(settings.get("track_pageviews"), False)
+    pepper = str(settings.get("pepper") or "").strip()
+    send_pii = _ensure_bool(settings.get("send_pii"), False)
 
-    if send_to_plausible:
+    if send_to_plausible or track_pageviews:
         if not base_url:
             raise ValueError("Plausible base URL is not configured")
         parsed = urlparse(base_url)
@@ -2259,6 +2280,14 @@ async def _validate_plausible(
             raise ValueError("Plausible base URL must include http/https and a hostname")
         if not site_domain:
             raise ValueError("Plausible site domain is not configured")
+        
+        # Warn if pageview tracking is enabled without a pepper
+        if track_pageviews and not pepper:
+            logger.warning("Plausible pageview tracking enabled without pepper - using default (not secure)")
+        
+        # Warn if PII is enabled (should only be for self-hosted, compliant instances)
+        if send_pii:
+            logger.warning("Plausible configured to send PII - ensure this is a self-hosted, compliant instance")
 
     return {
         "status": "ok",
@@ -2268,6 +2297,9 @@ async def _validate_plausible(
         "track_opens": track_opens,
         "track_clicks": track_clicks,
         "send_to_plausible": send_to_plausible,
+        "track_pageviews": track_pageviews,
+        "has_pepper": bool(pepper),
+        "send_pii": send_pii,
     }
 
 

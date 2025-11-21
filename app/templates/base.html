@@ -24,6 +24,21 @@
     {% if plausible_config.enabled %}
     <!-- Plausible Analytics -->
     <script defer data-domain="{{ plausible_config.site_domain | e }}" src="{{ plausible_config.base_url | e }}/js/script.js"></script>
+    {% if current_user and current_user.get('id') and plausible_config.get('track_pageviews') and plausible_config.get('hashed_user_id') %}
+    <!-- Plausible client-side tracking with anonymized user ID -->
+    <script>
+      window.plausible = window.plausible || function() { (window.plausible.q = window.plausible.q || []).push(arguments) };
+      document.addEventListener('DOMContentLoaded', function() {
+        if (typeof plausible !== 'undefined') {
+          plausible('pageview', {
+            props: {
+              user_id: '{{ plausible_config.hashed_user_id | e }}'
+            }
+          });
+        }
+      });
+    </script>
+    {% endif %}
     {% endif %}
     {% block extra_head %}{% endblock %}
   </head>
