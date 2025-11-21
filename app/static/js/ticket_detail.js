@@ -1799,46 +1799,105 @@
   }
 
   function initialiseBookingModal() {
-    const modal = document.getElementById('booking-modal');
-    const iframe = document.getElementById('booking-iframe');
-    const trigger = document.querySelector('[data-booking-modal-trigger]');
+    // Find all booking buttons with cal.com embed
+    const bookingButtons = document.querySelectorAll('[data-cal-link]');
     
-    if (!modal || !iframe || !trigger) {
+    if (!bookingButtons.length) {
       return;
     }
 
-    function openModal() {
-      const bookingUrl = trigger.dataset.bookingLink;
-      if (bookingUrl) {
-        iframe.src = bookingUrl;
-        modal.hidden = false;
-        document.body.style.overflow = 'hidden';
+    bookingButtons.forEach((button) => {
+      const calLink = button.dataset.calLink;
+      const namespace = button.dataset.calNamespace || 'default';
+      const ticketId = button.dataset.ticketId;
+      const ticketSubject = button.dataset.ticketSubject || '';
+      const userName = button.dataset.userName || '';
+      const userEmail = button.dataset.userEmail || '';
+      const userPhone = button.dataset.userPhone || '';
+
+      if (!calLink) {
+        return;
       }
-    }
 
-    function closeModal() {
-      modal.hidden = true;
-      document.body.style.overflow = '';
-      iframe.src = '';
-    }
+      // Build ticket URL for additional notes
+      const ticketUrl = ticketId ? `${window.location.origin}/tickets/${ticketId}` : '';
 
-    trigger.addEventListener('click', openModal);
-
-    const closeButtons = modal.querySelectorAll('[data-modal-close]');
-    closeButtons.forEach((button) => {
-      button.addEventListener('click', closeModal);
-    });
-
-    modal.addEventListener('click', (event) => {
-      if (event.target === modal || event.target.classList.contains('modal__overlay')) {
-        closeModal();
+      // Build prefill data for Cal.com
+      const prefillData = {};
+      
+      // Add name if available
+      if (userName && userName.trim()) {
+        prefillData.name = userName.trim();
       }
-    });
-
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && !modal.hidden) {
-        closeModal();
+      
+      // Add email if available
+      if (userEmail && userEmail.trim()) {
+        prefillData.email = userEmail.trim();
       }
+
+      // Add phone if available (guests.0.phone is the format for Cal.com)
+      if (userPhone && userPhone.trim()) {
+        prefillData['guests.0.phone'] = userPhone.trim();
+      }
+
+      // Add custom fields for ticket information
+      // Note: Custom field names depend on Cal.com event type configuration
+      // Common patterns: notes, customField1, customField2, etc.
+      
+      // Build notes with ticket info
+      let notes = '';
+      if (ticketId) {
+        notes += `Ticket #${ticketId}`;
+        if (ticketSubject) {
+          notes += ` - ${ticketSubject}`;
+        }
+        if (ticketUrl) {
+          notes += `\n\nTicket URL: ${ticketUrl}`;
+        }
+      }
+      
+      if (notes) {
+        prefillData.notes = notes;
+      }
+
+      // If there's a subject, also try to set it as metadata
+      if (ticketSubject) {
+        prefillData['metadata.subject'] = ticketSubject;
+      }
+
+      // Initialize Cal.com with the button click
+      button.addEventListener('click', function(e) {
+        e.preventDefault();
+        
+        // Use Cal.com modal API
+        if (window.Cal) {
+          window.Cal(namespace, {
+            calLink: calLink,
+            config: {
+              layout: 'month_view',
+              theme: 'light',
+            },
+          });
+          
+          // Apply prefill after a short delay to ensure embed is initialized
+          setTimeout(() => {
+            if (window.Cal && window.Cal.ns && window.Cal.ns[namespace]) {
+              window.Cal.ns[namespace]('ui', {
+                styles: {
+                  branding: {
+                    brandColor: '#000000'
+                  }
+                },
+                hideEventTypeDetails: false,
+                layout: 'month_view'
+              });
+              
+              // Prefill the form
+              window.Cal.ns[namespace]('prefill', prefillData);
+            }
+          }, 100);
+        }
+      });
     });
   }
 
