@@ -117,9 +117,9 @@
                   data-cal-config='{"layout":"month_view"}'
                   data-ticket-id="{{ ticket.id }}"
                   data-ticket-subject="{{ ticket.subject | e }}"
-                  data-user-name="{{ user.first_name or '' }} {{ user.last_name or '' }}"
-                  data-user-email="{{ user.email or '' }}"
-                  data-user-phone="{{ user.mobile_phone or '' }}"
+                  data-user-name="{{ (user.first_name or '') | e }} {{ (user.last_name or '') | e }}"
+                  data-user-email="{{ (user.email or '') | e }}"
+                  data-user-phone="{{ (user.mobile_phone or '') | e }}"
                 >
                   Book a call
                 </button>
