@@ -52,7 +52,7 @@ async def verify_webhook_signature(
 @router.post("/events", include_in_schema=False)
 async def smtp2go_webhook(
     request: Request,
-    event: Annotated[dict, Body()],
+    event: Annotated[dict | list[dict], Body()],
     x_smtp2go_signature: Annotated[str | None, Header()] = None,
 ) -> dict:
     """Handle webhook events from SMTP2Go.
@@ -98,38 +98,48 @@ async def smtp2go_webhook(
         )
         # Continue processing even if verification fails to avoid losing events
     
-    # Process the event
-    event_type = event.get('event')
-    email_id = event.get('email_id')
-    
+    # Normalise payload to a list to support both single events and batched events
+    events: list[dict]
+    if isinstance(event, list):
+        events = [item for item in event if isinstance(item, dict)]
+    elif isinstance(event, dict):
+        events = [event]
+    else:
+        raise HTTPException(status_code=400, detail="Invalid webhook payload")
+
+    processed_count = 0
     try:
-        result = await smtp2go.process_webhook_event(event_type, event)
-        if result:
-            logger.info(
-                "SMTP2Go webhook event processed successfully",
-                event_type=event_type,
-                email_id=email_id,
-                tracking_id=result.get('tracking_id'),
-            )
-            return {
-                "status": "success",
-            }
-        else:
-            logger.warning(
-                "Failed to process SMTP2Go webhook event",
-                event_type=event_type,
-                email_id=email_id,
-                event_data=event,
-            )
-            return {
-                "status": "failed",
-                "error": "Event processing failed - unknown email ID or message not tracked",
-            }
+        for event_item in events:
+            event_type = event_item.get('event')
+            email_id = event_item.get('email_id')
+
+            result = await smtp2go.process_webhook_event(event_type, event_item)
+            if result:
+                processed_count += 1
+                logger.info(
+                    "SMTP2Go webhook event processed successfully",
+                    event_type=event_type,
+                    email_id=email_id,
+                    tracking_id=result.get('tracking_id'),
+                )
+            else:
+                logger.warning(
+                    "Failed to process SMTP2Go webhook event",
+                    event_type=event_type,
+                    email_id=email_id,
+                    event_data=event_item,
+                )
+
+        if processed_count > 0:
+            return {"status": "success", "processed": processed_count}
+
+        return {
+            "status": "failed",
+            "error": "Event processing failed - unknown email ID or message not tracked",
+        }
     except Exception as exc:
         logger.error(
             "Error processing SMTP2Go webhook event",
-            event_type=event_type,
-            email_id=email_id,
             error=str(exc),
         )
         return {
