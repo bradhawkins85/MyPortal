@@ -1129,6 +1129,9 @@
   <script src="/static/js/rich_text_editor.js" defer></script>
   <script src="/static/js/ticket_detail.js" defer></script>
   {% if ticket_assigned_user and ticket_assigned_user.booking_link_url %}
+    <!-- Cal.com embed initialization script -->
+    <!-- This script dynamically loads the Cal.com embed library and initializes it for inline booking -->
+    <!-- Documentation: https://cal.com/docs/platform/embed/inline -->
     <script>
       (function (C, A, L) {
         let p = function (a, ar) {

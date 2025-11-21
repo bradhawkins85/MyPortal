@@ -31,47 +31,27 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-@pytest.mark.anyio("asyncio")
-async def test_ticket_detail_includes_booking_link_when_assigned_user_has_url(monkeypatch):
-    """Test that booking link appears when assigned user has booking_link_url configured."""
-    request = _make_request("/admin/tickets/1")
-    user = {"id": 1, "is_super_admin": True}
+class DummySanitized:
+    """Mock sanitized HTML response for testing."""
+    def __init__(self, html: str):
+        self.html = html
+        self.text_content = html.strip()
 
-    ticket = {
-        "id": 1,
-        "subject": "Test ticket",
-        "description": "Test description",
-        "status": "open",
-        "priority": "normal",
-        "company_id": 1,
-        "requester_id": 1,
-        "assigned_user_id": 2,  # Assigned to user 2
-        "created_at": datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc),
-        "updated_at": datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc),
-    }
 
-    assigned_user = {
-        "id": 2,
-        "email": "technician@example.com",
-        "booking_link_url": "https://cal.com/technician",
-    }
+def fake_sanitize(value: str | None) -> DummySanitized:
+    """Mock sanitization function that wraps content in paragraph tags."""
+    return DummySanitized(f"<p>{value or ''}</p>")
 
-    class DummySanitized:
-        def __init__(self, html: str):
-            self.html = html
-            self.text_content = html.strip()
 
-    def fake_sanitize(value: str | None) -> DummySanitized:
-        return DummySanitized(f"<p>{value or ''}</p>")
-
+async def _setup_ticket_detail_mocks(monkeypatch, ticket, user_lookup_override=None):
+    """Set up common mocks for ticket detail tests."""
     statuses = [
         TicketStatusDefinition(tech_status="open", tech_label="Open", public_status="Open"),
     ]
 
-    # Mock all required dependencies
     async def mock_get_user_by_id(user_id: int):
-        if user_id == 2:
-            return assigned_user
+        if user_lookup_override and user_id in user_lookup_override:
+            return user_lookup_override[user_id]
         return {"id": user_id, "email": f"user{user_id}@example.com"}
 
     monkeypatch.setattr(main, "sanitize_rich_text", fake_sanitize)
@@ -107,6 +87,36 @@ async def test_ticket_detail_includes_booking_link_when_assigned_user_has_url(mo
         "list_ticket_call_recordings",
         AsyncMock(return_value=[]),
     )
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ticket_detail_includes_booking_link_when_assigned_user_has_url(monkeypatch):
+    """Test that booking link appears when assigned user has booking_link_url configured."""
+    request = _make_request("/admin/tickets/1")
+    user = {"id": 1, "is_super_admin": True}
+
+    ticket = {
+        "id": 1,
+        "subject": "Test ticket",
+        "description": "Test description",
+        "status": "open",
+        "priority": "normal",
+        "company_id": 1,
+        "requester_id": 1,
+        "assigned_user_id": 2,  # Assigned to user 2
+        "created_at": datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc),
+        "updated_at": datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc),
+    }
+
+    assigned_user = {
+        "id": 2,
+        "email": "technician@example.com",
+        "booking_link_url": "https://cal.com/technician",
+    }
+
+    # Set up mocks using helper function
+    user_lookup = {2: assigned_user}
+    await _setup_ticket_detail_mocks(monkeypatch, ticket, user_lookup)
 
     captured: dict[str, Any] = {}
 
@@ -147,51 +157,8 @@ async def test_ticket_detail_without_booking_link_when_no_assigned_user(monkeypa
         "updated_at": datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc),
     }
 
-    class DummySanitized:
-        def __init__(self, html: str):
-            self.html = html
-            self.text_content = html.strip()
-
-    def fake_sanitize(value: str | None) -> DummySanitized:
-        return DummySanitized(f"<p>{value or ''}</p>")
-
-    statuses = [
-        TicketStatusDefinition(tech_status="open", tech_label="Open", public_status="Open"),
-    ]
-
-    monkeypatch.setattr(main, "sanitize_rich_text", fake_sanitize)
-    monkeypatch.setattr(main.tickets_repo, "get_ticket", AsyncMock(return_value=ticket))
-    monkeypatch.setattr(main.tickets_repo, "list_replies", AsyncMock(return_value=[]))
-    monkeypatch.setattr(main.tickets_repo, "list_watchers", AsyncMock(return_value=[]))
-    monkeypatch.setattr(main.tickets_repo, "list_ticket_assets", AsyncMock(return_value=[]))
-    monkeypatch.setattr(main.user_repo, "get_user_by_id", AsyncMock(return_value={"id": 1, "email": "user@example.com"}))
-    monkeypatch.setattr(main.company_repo, "get_company_by_id", AsyncMock(return_value={"id": 1, "name": "Test Company"}))
-    monkeypatch.setattr(main.modules_service, "list_modules", AsyncMock(return_value=[]))
-    monkeypatch.setattr(main.labour_types_service, "list_labour_types", AsyncMock(return_value=[]))
-    monkeypatch.setattr(main.tickets_service, "list_status_definitions", AsyncMock(return_value=statuses))
-    monkeypatch.setattr(main.company_repo, "list_companies", AsyncMock(return_value=[]))
-    monkeypatch.setattr(
-        main.membership_repo,
-        "list_users_with_permission",
-        AsyncMock(return_value=[]),
-    )
-    monkeypatch.setattr(main.staff_repo, "list_enabled_staff_users", AsyncMock(return_value=[]))
-    monkeypatch.setattr(main.assets_repo, "list_company_assets", AsyncMock(return_value=[]))
-    monkeypatch.setattr(
-        main.knowledge_base_repo,
-        "find_relevant_articles_for_ticket",
-        AsyncMock(return_value=[]),
-    )
-    monkeypatch.setattr(
-        main.service_status_service,
-        "find_relevant_services_for_ticket",
-        AsyncMock(return_value=[]),
-    )
-    monkeypatch.setattr(
-        main.call_recordings_repo,
-        "list_ticket_call_recordings",
-        AsyncMock(return_value=[]),
-    )
+    # Set up mocks using helper function
+    await _setup_ticket_detail_mocks(monkeypatch, ticket)
 
     captured: dict[str, Any] = {}
 
