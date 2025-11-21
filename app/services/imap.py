@@ -565,6 +565,30 @@ async def _is_email_address_known(email_address: str) -> bool:
     return False
 
 
+async def _is_any_email_address_known(email_addresses: list[str]) -> bool:
+    """
+    Check if any of the provided email addresses is known in the system.
+    
+    This function optimizes the check by returning early on the first match,
+    but still validates each address sequentially. In most cases, there will
+    only be one sender address to check.
+    
+    Args:
+        email_addresses: List of email addresses to check
+    
+    Returns:
+        True if at least one email address is known, False otherwise
+    """
+    if not email_addresses:
+        return False
+    
+    for email_addr in email_addresses:
+        if await _is_email_address_known(email_addr):
+            return True
+    
+    return False
+
+
 async def list_accounts() -> list[dict[str, Any]]:
     accounts = await imap_repo.list_accounts()
     return [_redact_account(account) for account in accounts]
@@ -1469,13 +1493,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     continue
                 
                 # Check if any of the sender addresses are known
-                is_known = False
-                for email_addr in from_email_addresses:
-                    if await _is_email_address_known(email_addr):
-                        is_known = True
-                        break
-                
-                if not is_known:
+                if not await _is_any_email_address_known(from_email_addresses):
                     log_info(
                         "Skipping IMAP message from unknown sender",
                         account_id=account_id,

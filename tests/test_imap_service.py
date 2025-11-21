@@ -582,3 +582,41 @@ async def test_is_email_address_known_returns_false_for_empty_email(monkeypatch)
     result = await imap._is_email_address_known("")
 
     assert result is False
+
+
+async def test_is_any_email_address_known_returns_true_for_user_email(monkeypatch):
+    async def fake_get_user_by_email(email: str):
+        if email == "user@example.com":
+            return {"id": 123, "email": "user@example.com"}
+        return None
+
+    async def fake_list_staff_by_email(email: str):
+        return []
+
+    monkeypatch.setattr(imap.users_repo, "get_user_by_email", fake_get_user_by_email)
+    monkeypatch.setattr(imap.staff_repo, "list_staff_by_email", fake_list_staff_by_email)
+
+    result = await imap._is_any_email_address_known(["unknown@example.com", "user@example.com"])
+
+    assert result is True
+
+
+async def test_is_any_email_address_known_returns_false_for_all_unknown(monkeypatch):
+    async def fake_get_user_by_email(email: str):
+        return None
+
+    async def fake_list_staff_by_email(email: str):
+        return []
+
+    monkeypatch.setattr(imap.users_repo, "get_user_by_email", fake_get_user_by_email)
+    monkeypatch.setattr(imap.staff_repo, "list_staff_by_email", fake_list_staff_by_email)
+
+    result = await imap._is_any_email_address_known(["unknown1@example.com", "unknown2@example.com"])
+
+    assert result is False
+
+
+async def test_is_any_email_address_known_returns_false_for_empty_list(monkeypatch):
+    result = await imap._is_any_email_address_known([])
+
+    assert result is False
