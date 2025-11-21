@@ -1474,8 +1474,8 @@ async def _invoke_smtp2go(
             raise ValueError("At least one recipient is required")
 
         subject = str(payload.get("subject") or "Automation notification")
-        html_body = str(payload.get("html") or payload.get("body") or "<p>Automation triggered.</p>")
-        text_body = payload.get("text")
+        html_body = str(payload.get("html") or payload.get("html_body") or payload.get("body") or "<p>Automation triggered.</p>")
+        text_body = payload.get("text") or payload.get("text_body")
         sender = str(payload.get("sender") or "").strip() or None
     
     reply_to = str(payload.get("reply_to") or "").strip() or None
