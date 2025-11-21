@@ -2,6 +2,15 @@
 
 import pytest
 from app.services import email_tracking
+from app.core.config import get_settings
+
+
+@pytest.fixture
+def mock_portal_url(monkeypatch):
+    """Mock the portal_url setting for tests."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "portal_url", "https://portal.example.com")
+    return settings
 
 
 def test_generate_tracking_id():
@@ -14,7 +23,7 @@ def test_generate_tracking_id():
     assert isinstance(tracking_id_1, str)
 
 
-def test_insert_tracking_pixel():
+def test_insert_tracking_pixel(mock_portal_url):
     """Test that tracking pixel is correctly inserted into HTML."""
     html_body = "<html><body><p>Test email</p></body></html>"
     tracking_id = "test-tracking-id-123"
@@ -29,7 +38,7 @@ def test_insert_tracking_pixel():
     assert result.index('<img src=') < result.index('</body>')
 
 
-def test_insert_tracking_pixel_no_body_tag():
+def test_insert_tracking_pixel_no_body_tag(mock_portal_url):
     """Test tracking pixel insertion when no body tag exists."""
     html_body = "<p>Test email without body tag</p>"
     tracking_id = "test-tracking-id-456"
@@ -42,7 +51,7 @@ def test_insert_tracking_pixel_no_body_tag():
     assert result.endswith('"/>')
 
 
-def test_rewrite_links_for_tracking():
+def test_rewrite_links_for_tracking(mock_portal_url):
     """Test that links are correctly rewritten for tracking."""
     html_body = """
     <html>
@@ -66,7 +75,7 @@ def test_rewrite_links_for_tracking():
     assert 'href="mailto:test@example.com"' in result
 
 
-def test_rewrite_links_preserves_tracking_pixel():
+def test_rewrite_links_preserves_tracking_pixel(mock_portal_url):
     """Test that tracking pixel URLs are not rewritten."""
     html_body = """
     <a href="https://example.com/api/email-tracking/pixel/abc123.gif">Should not rewrite</a>
@@ -83,7 +92,7 @@ def test_rewrite_links_preserves_tracking_pixel():
     assert "url=https%3A%2F%2Fother.com%2Fpage" in result
 
 
-def test_rewrite_links_no_links():
+def test_rewrite_links_no_links(mock_portal_url):
     """Test link rewriting with no links present."""
     html_body = "<html><body><p>No links here</p></body></html>"
     tracking_id = "test-id"
@@ -92,6 +101,47 @@ def test_rewrite_links_no_links():
     
     # Should return unchanged
     assert result == html_body
+
+
+def test_insert_tracking_pixel_without_portal_url(monkeypatch):
+    """Test that tracking pixel insertion fails gracefully without portal_url."""
+    # Use monkeypatch to set portal_url to None for this test
+    from app.core.config import get_settings
+    settings = get_settings()
+    monkeypatch.setattr(settings, "portal_url", None)
+    
+    html_body = "<html><body><p>Test email</p></body></html>"
+    tracking_id = "test-tracking-id-123"
+    
+    result = email_tracking.insert_tracking_pixel(html_body, tracking_id)
+    
+    # Should return unchanged HTML when portal_url is not configured
+    assert result == html_body
+    assert "test-tracking-id-123.gif" not in result
+
+
+def test_rewrite_links_without_portal_url(monkeypatch):
+    """Test that link rewriting fails gracefully without portal_url."""
+    # Use monkeypatch to set portal_url to None for this test
+    from app.core.config import get_settings
+    settings = get_settings()
+    monkeypatch.setattr(settings, "portal_url", None)
+    
+    html_body = """
+    <html>
+    <body>
+        <a href="https://example.com/page1">Link 1</a>
+        <a href='https://example.com/page2'>Link 2</a>
+    </body>
+    </html>
+    """
+    tracking_id = "test-tracking-id-789"
+    
+    result = email_tracking.rewrite_links_for_tracking(html_body, tracking_id)
+    
+    # Should return unchanged HTML when portal_url is not configured
+    assert result == html_body
+    assert "/api/email-tracking/click?" not in result
 
 
 @pytest.mark.asyncio
