@@ -440,6 +440,19 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         },
     },
     {
+        "slug": "smtp2go",
+        "name": "SMTP2Go",
+        "description": "Send email via SMTP2Go API with delivery, open, click, and bounce tracking.",
+        "icon": "📧",
+        "settings": {
+            "api_key": str(os.getenv("SMTP2GO_API_KEY", "")),
+            "enable_tracking": True,
+            "track_opens": True,
+            "track_clicks": True,
+            "webhook_secret": str(os.getenv("SMTP2GO_WEBHOOK_SECRET", "")),
+        },
+    },
+    {
         "slug": "imap",
         "name": "IMAP Mailboxes",
         "description": "Import support emails from mailboxes into the ticketing queue.",
@@ -577,6 +590,27 @@ def _coerce_settings(
                 "from_address": str(merged.get("from_address", "")).strip(),
                 "default_recipients": _ensure_list(merged.get("default_recipients")),
                 "subject_prefix": str(merged.get("subject_prefix", "")).strip(),
+            }
+        )
+    elif slug == "smtp2go":
+        overrides = payload or {}
+        api_key_override = overrides.get("api_key")
+        if api_key_override is None:
+            api_key = str(merged.get("api_key") or "").strip()
+        else:
+            candidate = str(api_key_override or "").strip()
+            if not candidate and existing_settings and existing_settings.get("api_key"):
+                api_key = str(existing_settings.get("api_key") or "").strip()
+            else:
+                api_key = candidate
+
+        merged.update(
+            {
+                "api_key": api_key,
+                "enable_tracking": _ensure_bool(merged.get("enable_tracking"), True),
+                "track_opens": _ensure_bool(merged.get("track_opens"), True),
+                "track_clicks": _ensure_bool(merged.get("track_clicks"), True),
+                "webhook_secret": str(merged.get("webhook_secret", "")).strip(),
             }
         )
     elif slug == "syncro":
@@ -984,6 +1018,7 @@ async def trigger_module(
         "syncro": _validate_syncro,
         "ollama": _invoke_ollama,
         "smtp": _invoke_smtp,
+        "smtp2go": _invoke_smtp2go,
         "tacticalrmm": _invoke_tacticalrmm,
         "ntfy": _invoke_ntfy,
         "uptimekuma": _validate_uptimekuma,
@@ -1366,6 +1401,132 @@ async def _invoke_smtp(
             "email_event_id": (email_event_metadata or {}).get("id")
             if isinstance(email_event_metadata, dict)
             else None,
+        },
+    )
+
+
+async def _invoke_smtp2go(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    recipients = _ensure_list(payload.get("recipients"))
+    if not recipients:
+        raise ValueError("At least one recipient is required")
+
+    subject = str(payload.get("subject") or "Automation notification")
+    html_body = str(payload.get("html") or payload.get("body") or "<p>Automation triggered.</p>")
+    text_body = payload.get("text")
+    sender = str(payload.get("sender") or "").strip() or None
+    reply_to = str(payload.get("reply_to") or "").strip() or None
+
+    enable_tracking = _ensure_bool(settings.get("enable_tracking"), True)
+    ticket_reply_id: int | None = None
+    context = payload.get("context")
+    if isinstance(context, Mapping):
+        metadata = context.get("metadata")
+        if isinstance(metadata, Mapping):
+            reply_id_value = metadata.get("reply_id") or metadata.get("ticket_reply_id")
+            if reply_id_value is not None:
+                try:
+                    ticket_reply_id = int(reply_id_value)
+                except (TypeError, ValueError):
+                    ticket_reply_id = None
+
+        if ticket_reply_id is None:
+            ticket = context.get("ticket")
+            if isinstance(ticket, Mapping):
+                latest_reply = ticket.get("latest_reply")
+                if isinstance(latest_reply, Mapping):
+                    reply_id_value = latest_reply.get("id")
+                    if reply_id_value is not None:
+                        try:
+                            ticket_reply_id = int(reply_id_value)
+                        except (TypeError, ValueError):
+                            ticket_reply_id = None
+
+    event = await webhook_monitor.create_manual_event(
+        name="module.smtp2go.send",
+        target_url="smtp2go://send",
+        payload={
+            "subject": subject,
+            "recipients": recipients,
+            "html": html_body,
+            "text": text_body,
+            "sender": sender,
+            "reply_to": reply_to,
+            "enable_tracking": enable_tracking,
+            "ticket_reply_id": ticket_reply_id,
+        },
+        headers={"X-Module": "smtp2go"},
+        max_attempts=1,
+        backoff_seconds=60,
+    )
+
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for SMTP2Go request")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
+
+    attempt_number = 1
+    try:
+        from app.services import smtp2go
+
+        tracking_id = smtp2go.generate_tracking_id() if enable_tracking else None
+        result = await smtp2go.send_email_via_api(
+            to=recipients,
+            subject=subject,
+            html_body=html_body,
+            text_body=str(text_body) if text_body is not None else None,
+            sender=sender,
+            reply_to=reply_to,
+            tracking_id=tracking_id,
+        )
+
+        smtp2go_message_id = result.get("email_id")
+        if enable_tracking and ticket_reply_id and smtp2go_message_id:
+            await smtp2go.record_email_sent(
+                ticket_reply_id=ticket_reply_id,
+                tracking_id=tracking_id or smtp2go.generate_tracking_id(),
+                smtp2go_message_id=smtp2go_message_id,
+            )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=str(exc),
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"recipients": recipients, "subject": subject},
+        )
+
+    response_body = json.dumps(
+        {
+            "recipients": recipients,
+            "subject": subject,
+            "smtp2go_message_id": smtp2go_message_id,
+            "tracking_id": tracking_id,
+        }
+    )
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=200,
+        response_body=response_body,
+    )
+    return _build_event_result(
+        updated_event,
+        extra={
+            "recipients": recipients,
+            "subject": subject,
+            "smtp2go_message_id": smtp2go_message_id,
+            "tracking_id": tracking_id,
         },
     )
 
