@@ -1822,48 +1822,43 @@
       // Build ticket URL for additional notes
       const ticketUrl = ticketId ? `${window.location.origin}/tickets/${ticketId}` : '';
 
-      // Build prefill data for Cal.com
-      const prefillData = {};
+      // Build Cal.com URL with query parameters for prefill
+      // Cal.com supports query parameters: name, email, phone, notes, etc.
+      const url = new URL(calLink);
       
       // Add name if available
       if (userName && userName.trim()) {
-        prefillData.name = userName.trim();
+        url.searchParams.set('name', userName.trim());
       }
       
       // Add email if available
       if (userEmail && userEmail.trim()) {
-        prefillData.email = userEmail.trim();
+        url.searchParams.set('email', userEmail.trim());
       }
 
-      // Add phone if available (guests.0.phone is the format for Cal.com)
+      // Add phone if available
       if (userPhone && userPhone.trim()) {
-        prefillData['guests.0.phone'] = userPhone.trim();
+        url.searchParams.set('phone', userPhone.trim());
       }
 
-      // Add custom fields for ticket information
-      // Note: Custom field names depend on Cal.com event type configuration
-      // Common patterns: notes, customField1, customField2, etc.
-      
-      // Build notes with ticket info
+      // Build notes with ticket information
       let notes = '';
       if (ticketId) {
         notes += `Ticket #${ticketId}`;
-        if (ticketSubject) {
-          notes += ` - ${ticketSubject}`;
-        }
-        if (ticketUrl) {
-          notes += `\n\nTicket URL: ${ticketUrl}`;
-        }
+      }
+      if (ticketSubject) {
+        notes += ticketSubject ? ` - ${ticketSubject}` : '';
+      }
+      if (ticketUrl) {
+        notes += `\n\nTicket URL: ${ticketUrl}`;
       }
       
       if (notes) {
-        prefillData.notes = notes;
+        url.searchParams.set('notes', notes);
       }
 
-      // If there's a subject, also try to set it as metadata
-      if (ticketSubject) {
-        prefillData['metadata.subject'] = ticketSubject;
-      }
+      // Store the final URL with prefill parameters
+      const finalCalLink = url.toString();
 
       // Initialize Cal.com with the button click
       button.addEventListener('click', function(e) {
@@ -1871,15 +1866,16 @@
         
         // Use Cal.com modal API
         if (window.Cal) {
+          // Initialize with namespace
           window.Cal(namespace, {
-            calLink: calLink,
+            calLink: finalCalLink,
             config: {
               layout: 'month_view',
-              theme: 'light',
+              theme: 'auto',
             },
           });
           
-          // Apply prefill after a short delay to ensure embed is initialized
+          // Open the modal
           setTimeout(() => {
             if (window.Cal && window.Cal.ns && window.Cal.ns[namespace]) {
               window.Cal.ns[namespace]('ui', {
@@ -1891,9 +1887,6 @@
                 hideEventTypeDetails: false,
                 layout: 'month_view'
               });
-              
-              // Prefill the form
-              window.Cal.ns[namespace]('prefill', prefillData);
             }
           }, 100);
         }
