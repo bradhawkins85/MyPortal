@@ -1848,11 +1848,7 @@
           
           // Add title parameter with format: {ticketId} - {ticketSubject}
           const trimmedSubject = ticketSubject ? ticketSubject.trim() : '';
-          if (trimmedSubject) {
-            url.searchParams.set('title', `${ticketId} - ${trimmedSubject}`);
-          } else {
-            url.searchParams.set('title', ticketId);
-          }
+          url.searchParams.set('title', trimmedSubject ? `${ticketId} - ${trimmedSubject}` : ticketId);
           
           // Add TicketURL parameter with direct link to ticket
           url.searchParams.set('TicketURL', ticketUrl);
