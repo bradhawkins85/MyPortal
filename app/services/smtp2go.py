@@ -494,7 +494,7 @@ async def record_email_sent(
 
 
 async def process_webhook_event(
-    event_type: str,
+    event_type: str | None,
     event_data: dict[str, Any],
 ) -> dict[str, Any] | None:
     """Process a webhook event from SMTP2Go.
@@ -506,6 +506,8 @@ async def process_webhook_event(
     Returns:
         Event record as a dict, or None if processing failed
     """
+    normalized_event_type = (event_type or "").lower()
+
     # Extract relevant fields from webhook
     smtp2go_message_id = event_data.get("email_id")
     recipient = event_data.get("recipient")
@@ -547,18 +549,18 @@ async def process_webhook_event(
         internal_event_type = None
         event_url = None
         
-        if event_type in ['delivered', 'delivery']:
+        if normalized_event_type in ['delivered', 'delivery']:
             internal_event_type = 'delivered'
-        elif event_type in ['opened', 'open']:
+        elif normalized_event_type in ['opened', 'open']:
             internal_event_type = 'open'
-        elif event_type in ['clicked', 'click']:
+        elif normalized_event_type in ['clicked', 'click']:
             internal_event_type = 'click'
             event_url = event_data.get('url')
-        elif event_type in ['bounced', 'bounce']:
+        elif normalized_event_type in ['bounced', 'bounce']:
             internal_event_type = 'bounce'
-        elif event_type in ['spam', 'spam_complaint']:
+        elif normalized_event_type in ['spam', 'spam_complaint']:
             internal_event_type = 'spam'
-        
+
         if not internal_event_type:
             logger.warning(
                 "Unknown SMTP2Go event type",
