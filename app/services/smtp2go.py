@@ -8,6 +8,7 @@ Provides functionality for:
 
 from __future__ import annotations
 
+import json
 import secrets
 from datetime import datetime, timezone
 from typing import Any
@@ -287,7 +288,7 @@ async def process_webhook_event(
             'user_agent': event_data.get('user_agent'),
             'ip_address': event_data.get('ip'),
             'occurred_at': occurred_at,
-            'smtp2go_data': str(event_data),  # Store full webhook data for debugging
+            'smtp2go_data': json.dumps(event_data) if event_data else None,  # Store full webhook data for debugging
         }
         
         event_id = await db.execute(insert_query, insert_params)
