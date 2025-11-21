@@ -74,6 +74,11 @@ async def smtp2go_webhook(
     """
     # Get webhook secret from configuration
     from app.services import modules as modules_service
+    from app.services import webhook_monitor
+    
+    # Capture request details for logging
+    source_url = str(request.url)
+    request_headers = dict(request.headers)
     
     try:
         module_settings = await modules_service.get_module_settings('smtp2go')
@@ -87,10 +92,22 @@ async def smtp2go_webhook(
                     "SMTP2Go webhook signature verification failed",
                     has_signature=x_smtp2go_signature is not None,
                 )
+                # Log the failed verification
+                await webhook_monitor.log_incoming_webhook(
+                    name="SMTP2Go Webhook - Signature Verification Failed",
+                    source_url=source_url,
+                    payload=event,
+                    headers=request_headers,
+                    response_status=401,
+                    response_body="Invalid webhook signature",
+                    error_message="Signature verification failed",
+                )
                 raise HTTPException(status_code=401, detail="Invalid webhook signature")
         else:
             logger.info("SMTP2Go webhook received without signature verification (secret not configured)")
         
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(
             "Failed to verify SMTP2Go webhook",
@@ -105,9 +122,19 @@ async def smtp2go_webhook(
     elif isinstance(event, dict):
         events = [event]
     else:
+        await webhook_monitor.log_incoming_webhook(
+            name="SMTP2Go Webhook - Invalid Payload",
+            source_url=source_url,
+            payload=event,
+            headers=request_headers,
+            response_status=400,
+            response_body="Invalid webhook payload",
+            error_message="Payload is not a dict or list",
+        )
         raise HTTPException(status_code=400, detail="Invalid webhook payload")
 
     processed_count = 0
+    error_message = None
     try:
         for event_item in events:
             event_type = event_item.get('event')
@@ -131,18 +158,47 @@ async def smtp2go_webhook(
                 )
 
         if processed_count > 0:
+            # Log successful webhook processing
+            await webhook_monitor.log_incoming_webhook(
+                name=f"SMTP2Go Webhook - {processed_count} event(s) processed",
+                source_url=source_url,
+                payload=event,
+                headers=request_headers,
+                response_status=200,
+                response_body=f"Successfully processed {processed_count} event(s)",
+            )
             return {"status": "success", "processed": processed_count}
 
-        return {
-            "status": "failed",
-            "error": "Event processing failed - unknown email ID or message not tracked",
-        }
-    except Exception as exc:
-        logger.error(
-            "Error processing SMTP2Go webhook event",
-            error=str(exc),
+        error_message = "Event processing failed - unknown email ID or message not tracked"
+        await webhook_monitor.log_incoming_webhook(
+            name="SMTP2Go Webhook - Processing Failed",
+            source_url=source_url,
+            payload=event,
+            headers=request_headers,
+            response_status=200,
+            response_body=error_message,
+            error_message=error_message,
         )
         return {
             "status": "failed",
-            "error": str(exc),
+            "error": error_message,
+        }
+    except Exception as exc:
+        error_message = str(exc)
+        logger.error(
+            "Error processing SMTP2Go webhook event",
+            error=error_message,
+        )
+        await webhook_monitor.log_incoming_webhook(
+            name="SMTP2Go Webhook - Exception",
+            source_url=source_url,
+            payload=event,
+            headers=request_headers,
+            response_status=200,
+            response_body=error_message,
+            error_message=error_message,
+        )
+        return {
+            "status": "failed",
+            "error": error_message,
         }

@@ -90,7 +90,8 @@ REJECTED_EVENT = {
 async def test_webhook_accepts_single_event_object(client):
     """Test that webhook endpoint accepts a single event object (not a list)."""
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
-         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process:
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
         
         # Mock no webhook secret configured (skip signature verification)
         mock_settings.return_value = None
@@ -117,7 +118,8 @@ async def test_webhook_accepts_single_event_object(client):
 async def test_webhook_processed_event(client):
     """Test webhook with processed event."""
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
-         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process:
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
         
         mock_settings.return_value = None
         mock_process.return_value = {'id': 123, 'event_type': 'processed'}
@@ -135,7 +137,8 @@ async def test_webhook_processed_event(client):
 async def test_webhook_delivered_event(client):
     """Test webhook with delivered event."""
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
-         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process:
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
         
         mock_settings.return_value = None
         mock_process.return_value = {'id': 123, 'event_type': 'delivered'}
@@ -153,7 +156,8 @@ async def test_webhook_delivered_event(client):
 async def test_webhook_opened_event(client):
     """Test webhook with opened event."""
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
-         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process:
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
         
         mock_settings.return_value = None
         mock_process.return_value = {'id': 123, 'event_type': 'open'}
@@ -171,7 +175,8 @@ async def test_webhook_opened_event(client):
 async def test_webhook_clicked_event(client):
     """Test webhook with clicked event."""
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
-         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process:
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
         
         mock_settings.return_value = None
         mock_process.return_value = {'id': 123, 'event_type': 'click'}
@@ -189,7 +194,8 @@ async def test_webhook_clicked_event(client):
 async def test_webhook_bounced_event(client):
     """Test webhook with bounced event."""
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
-         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process:
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
         
         mock_settings.return_value = None
         mock_process.return_value = {'id': 123, 'event_type': 'bounce'}
@@ -207,7 +213,8 @@ async def test_webhook_bounced_event(client):
 async def test_webhook_spam_event(client):
     """Test webhook with spam event."""
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
-         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process:
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
         
         mock_settings.return_value = None
         mock_process.return_value = {'id': 123, 'event_type': 'spam'}
@@ -225,7 +232,8 @@ async def test_webhook_spam_event(client):
 async def test_webhook_rejected_event(client):
     """Test webhook with rejected event."""
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
-         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process:
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
         
         mock_settings.return_value = None
         mock_process.return_value = {'id': 123, 'event_type': 'rejected'}
@@ -243,7 +251,8 @@ async def test_webhook_rejected_event(client):
 async def test_webhook_processing_failure(client):
     """Test webhook when event processing fails."""
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
-         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process:
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
         
         mock_settings.return_value = None
         # Simulate processing failure (returns None)
@@ -264,7 +273,8 @@ async def test_webhook_processing_failure(client):
 async def test_webhook_processing_exception(client):
     """Test webhook when event processing raises an exception."""
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
-         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process:
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
         
         mock_settings.return_value = None
         # Simulate processing exception
@@ -286,7 +296,8 @@ async def test_webhook_processing_exception(client):
 async def test_webhook_accepts_list_payload(client):
     """Test that webhook endpoint accepts and processes a list payload."""
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
-         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process:
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
 
         mock_settings.return_value = None
         mock_process.side_effect = [

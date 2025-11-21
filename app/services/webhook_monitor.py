@@ -68,6 +68,7 @@ async def enqueue_event(
         payload=payload,
         max_attempts=max_attempts,
         backoff_seconds=backoff_seconds,
+        direction="outgoing",
     )
     if attempt_immediately and event.get("id"):
         event_id = int(event["id"])
@@ -103,6 +104,7 @@ async def create_manual_event(
         payload=payload,
         max_attempts=max(1, max_attempts),
         backoff_seconds=max(0, backoff_seconds),
+        direction="outgoing",
     )
     if not event or event.get("id") is None:
         return event
@@ -179,6 +181,89 @@ async def record_manual_failure(
     )
     refreshed = await webhook_repo.get_event(event_id)
     return refreshed or {"id": event_id, "status": "failed", "last_error": error_message}
+
+
+async def log_incoming_webhook(
+    *,
+    name: str,
+    source_url: str,
+    payload: Any = None,
+    headers: dict[str, str] | None = None,
+    response_status: int | None = None,
+    response_body: str | None = None,
+    error_message: str | None = None,
+) -> dict[str, Any]:
+    """Log an incoming webhook request for monitoring and troubleshooting.
+    
+    Args:
+        name: Descriptive name for the webhook (e.g., "SMTP2Go Email Delivered")
+        source_url: The URL/endpoint that received the webhook
+        payload: The request body/payload received
+        headers: The request headers received (sensitive headers will be redacted)
+        response_status: HTTP status code returned to the caller
+        response_body: Response body returned to the caller
+        error_message: Any error that occurred while processing
+    
+    Returns:
+        The created webhook event record
+    """
+    # Create the event as 'succeeded' or 'failed' immediately since incoming webhooks
+    # are already processed (not queued for delivery)
+    status = "succeeded" if error_message is None else "failed"
+    
+    event = await webhook_repo.create_event(
+        name=name,
+        target_url=source_url,  # For incoming, this is where we received it
+        headers=headers,
+        payload=payload,
+        max_attempts=1,
+        backoff_seconds=0,
+        direction="incoming",
+        source_url=source_url,
+    )
+    
+    if not event or event.get("id") is None:
+        return event
+    
+    event_id = int(event["id"])
+    
+    # Record the attempt with all details
+    safe_headers = _redact_headers(headers, sensitive=_SENSITIVE_HEADERS)
+    request_body = _prepare_request_body(payload)
+    
+    await webhook_repo.record_attempt(
+        event_id=event_id,
+        attempt_number=1,
+        status=status,
+        response_status=response_status,
+        response_body=response_body,
+        error_message=error_message,
+        request_headers=safe_headers,
+        request_body=request_body,
+        response_headers=None,  # We don't typically track our own response headers
+    )
+    
+    # Mark the event as completed or failed
+    if status == "succeeded":
+        await webhook_repo.mark_event_completed(
+            event_id,
+            attempt_number=1,
+            response_status=response_status,
+            response_body=response_body,
+        )
+        log_info("Incoming webhook logged", event_id=event_id, name=name, source_url=source_url)
+    else:
+        await webhook_repo.mark_event_failed(
+            event_id,
+            attempt_number=1,
+            error_message=error_message,
+            response_status=response_status,
+            response_body=response_body,
+        )
+        log_error("Incoming webhook failed", event_id=event_id, name=name, error=error_message)
+    
+    refreshed = await webhook_repo.get_event(event_id)
+    return refreshed or event
 
 
 async def process_pending_events(limit: int = 10) -> None:
