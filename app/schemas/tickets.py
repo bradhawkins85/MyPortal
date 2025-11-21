@@ -109,6 +109,8 @@ class TicketResponse(TicketBase):
     ai_tags_status: Optional[str] = None
     ai_tags_model: Optional[str] = None
     ai_tags_updated_at: Optional[datetime] = None
+    merged_into_ticket_id: Optional[int] = None
+    split_from_ticket_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -405,3 +407,30 @@ class TicketAttachment(BaseModel):
 class TicketAttachmentListResponse(BaseModel):
     """Response containing list of ticket attachments"""
     items: list[TicketAttachment] = Field(default_factory=list)
+
+
+class TicketSplitRequest(BaseModel):
+    """Request to split selected replies into a new ticket"""
+    reply_ids: list[int] = Field(..., min_length=1, description="List of reply IDs to move to new ticket")
+    new_subject: str = Field(..., min_length=1, max_length=255, description="Subject for the new ticket")
+
+
+class TicketSplitResponse(BaseModel):
+    """Response after splitting a ticket"""
+    original_ticket: TicketResponse
+    new_ticket: TicketResponse
+    moved_reply_count: int
+
+
+class TicketMergeRequest(BaseModel):
+    """Request to merge multiple tickets into one"""
+    ticket_ids: list[int] = Field(..., min_length=2, description="List of ticket IDs to merge (at least 2)")
+    target_ticket_id: int = Field(..., description="ID of the ticket to merge into (must be in ticket_ids)")
+
+
+class TicketMergeResponse(BaseModel):
+    """Response after merging tickets"""
+    merged_ticket: TicketResponse
+    merged_ticket_ids: list[int] = Field(description="IDs of tickets that were merged")
+    moved_reply_count: int
+    moved_time_entry_count: int

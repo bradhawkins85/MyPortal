@@ -1543,3 +1543,95 @@ async def load_dashboard_state(
         company_lookup=company_lookup,
         user_lookup=user_lookup,
     )
+
+
+async def split_ticket(
+    original_ticket_id: int,
+    reply_ids: list[int],
+    new_subject: str,
+) -> tuple[TicketRecord | None, TicketRecord | None, int]:
+    """
+    Split a ticket by moving selected replies to a new ticket.
+    The new ticket will have the same company and requester as the original.
+    """
+    # Validate that all reply_ids belong to the original ticket (efficient single query)
+    is_valid, error_message = await tickets_repo.validate_replies_belong_to_ticket(
+        reply_ids, original_ticket_id
+    )
+    if not is_valid:
+        raise ValueError(error_message)
+    
+    # Split the ticket using repository method
+    original_ticket, new_ticket, moved_count = await tickets_repo.split_ticket(
+        original_ticket_id=original_ticket_id,
+        reply_ids=reply_ids,
+        new_ticket_subject=new_subject,
+        new_ticket_id=None,  # Let database auto-generate ID
+    )
+    
+    # Emit events for both tickets
+    if new_ticket:
+        await emit_ticket_updated_event(
+            new_ticket["id"],
+            actor_type="system",
+            actor={"id": 0, "email": "system"},
+        )
+        await broadcast_ticket_event(action="create", ticket_id=new_ticket["id"])
+    
+    if original_ticket:
+        await emit_ticket_updated_event(
+            original_ticket_id,
+            actor_type="system",
+            actor={"id": 0, "email": "system"},
+        )
+        await broadcast_ticket_event(action="update", ticket_id=original_ticket_id)
+    
+    return original_ticket, new_ticket, moved_count
+
+
+async def merge_tickets(
+    ticket_ids: list[int],
+    target_ticket_id: int,
+) -> tuple[TicketRecord | None, list[int], int]:
+    """
+    Merge multiple tickets into a target ticket.
+    All replies and time entries are moved to the target ticket.
+    Source tickets are marked as closed and merged.
+    """
+    if len(ticket_ids) < 2:
+        raise ValueError("At least 2 tickets are required for merging")
+    
+    if target_ticket_id not in ticket_ids:
+        raise ValueError("Target ticket must be one of the tickets being merged")
+    
+    # Validate all tickets exist
+    for ticket_id in ticket_ids:
+        ticket = await tickets_repo.get_ticket(ticket_id)
+        if not ticket:
+            raise ValueError(f"Ticket {ticket_id} not found")
+    
+    # Merge tickets using repository method
+    merged_ticket, merged_ids, moved_count = await tickets_repo.merge_tickets(
+        ticket_ids=ticket_ids,
+        target_ticket_id=target_ticket_id,
+    )
+    
+    # Emit events for merged ticket
+    if merged_ticket:
+        await emit_ticket_updated_event(
+            target_ticket_id,
+            actor_type="system",
+            actor={"id": 0, "email": "system"},
+        )
+        await broadcast_ticket_event(action="update", ticket_id=target_ticket_id)
+    
+    # Emit events for closed/merged tickets
+    for ticket_id in merged_ids:
+        await emit_ticket_updated_event(
+            ticket_id,
+            actor_type="system",
+            actor={"id": 0, "email": "system"},
+        )
+        await broadcast_ticket_event(action="update", ticket_id=ticket_id)
+    
+    return merged_ticket, merged_ids, moved_count
