@@ -147,8 +147,55 @@ def test_rewrite_links_without_portal_url(monkeypatch):
 
 def test_insert_tracking_pixel_word_html(mock_portal_url):
     """Test that tracking pixel is correctly inserted into Word-generated HTML."""
-    # This is the quoted-printable encoded HTML from the problem statement
-    qp_html = b"""<html xmlns:o=3D"urn:schemas-microsoft-com:office:office" xmlns:w=3D"urn:schema=
+    # This is quoted-printable encoded HTML bytes (as would be received in an email)
+    # The =3D represents '=' and soft line breaks are indicated by = at end of line
+    qp_encoded_bytes = b"""<html xmlns:o=3D"urn:schemas-microsoft-com:office:office" xmlns:w=3D"urn:schema=
+s-microsoft-com:office:word" xmlns:m=3D"http://schemas.microsoft.com/office/20=
+04/12/omml" xmlns=3D"http://www.w3.org/TR/REC-html40"><head><meta http-equiv=3DC=
+ontent-Type content=3D"text/html; charset=3Dutf-8"><meta name=3DGenerator content=3D=
+"Microsoft Word 15 (filtered medium)"><style><!--
+/* Font Definitions */
+@font-face
+\t{font-family:"Cambria Math";
+\tpanose-1:2 4 5 3 5 4 6 3 2 4;}
+@font-face
+\t{font-family:Calibri;
+\tpanose-1:2 15 5 2 2 2 4 3 2 4;}
+@font-face
+\t{font-family:Aptos;
+\tpanose-1:2 11 0 4 2 2 2 2 2 4;}
+@font-face
+\t{font-family:Consolas;
+\tpanose-1:2 11 6 9 2 2 4 3 2 4;}
+/* Style Definitions */
+pre
+\t{mso-style-priority:99;
+\tmso-style-link:"HTML Preformatted Char";
+\tmargin:0cm;
+\tfont-size:10.0pt;
+\tfont-family:"Courier New";}
+span.HTMLPreformattedChar
+\t{mso-style-name:"HTML Preformatted Char";
+\tmso-style-priority:99;
+\tmso-style-link:"HTML Preformatted";
+\tfont-family:Consolas;
+\tmso-ligatures:none;
+\tmso-fareast-language:EN-GB;}
+.MsoChpDefault
+\t{mso-style-type:export-only;
+\tmso-fareast-language:EN-US;}
+@page WordSection1
+\t{size:612.0pt 792.0pt;
+\tmargin:72.0pt 72.0pt 72.0pt 72.0pt;}
+div.WordSection1
+\t{page:WordSection1;}
+--></style></head><body lang=3DEN-AU link=3D"#0563C1" vlink=3D"#954F72" style=3D'wo=
+rd-wrap:break-word'><div class=3DWordSection1><pre>qwe123</pre></div></body><=
+/html>"""
+    
+    # This is quoted-printable encoded HTML bytes (as would be received in an email)
+    # The =3D represents '=' and soft line breaks are indicated by = at end of line
+    qp_encoded_bytes = b"""<html xmlns:o=3D"urn:schemas-microsoft-com:office:office" xmlns:w=3D"urn:schema=
 s-microsoft-com:office:word" xmlns:m=3D"http://schemas.microsoft.com/office/20=
 04/12/omml" xmlns=3D"http://www.w3.org/TR/REC-html40"><head><meta http-equiv=3DC=
 ontent-Type content=3D"text/html; charset=3Dutf-8"><meta name=3DGenerator content=3D=
@@ -193,7 +240,7 @@ rd-wrap:break-word'><div class=3DWordSection1><pre>qwe123</pre></div></body><=
 /html>"""
     
     # Decode quoted-printable (this is what email.get_payload(decode=True) would do)
-    html_body = quopri.decodestring(qp_html).decode('utf-8')
+    html_body = quopri.decodestring(qp_encoded_bytes).decode('utf-8')
     
     tracking_id = "test-tracking-word-123"
     
