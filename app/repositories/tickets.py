@@ -74,7 +74,7 @@ def _make_aware(value: Any) -> datetime | None:
 
 def _normalise_ticket(row: dict[str, Any]) -> TicketRecord:
     record = dict(row)
-    for key in ("id", "company_id", "requester_id", "assigned_user_id"):
+    for key in ("id", "company_id", "requester_id", "assigned_user_id", "merged_into_ticket_id", "split_from_ticket_id"):
         if key in record and record[key] is not None:
             record[key] = int(record[key])
     for key in ("created_at", "updated_at", "closed_at", "ai_summary_updated_at"):
@@ -754,6 +754,49 @@ async def list_replies(ticket_id: int, *, include_internal: bool = True) -> list
     return [_normalise_reply(row) for row in rows]
 
 
+async def count_time_entries(ticket_id: int) -> int:
+    """Count the number of time entries (replies with minutes_spent > 0) for a ticket."""
+    row = await db.fetch_one(
+        """
+        SELECT COUNT(*) AS count
+        FROM ticket_replies
+        WHERE ticket_id = %s AND minutes_spent IS NOT NULL AND minutes_spent > 0
+        """,
+        (ticket_id,),
+    )
+    return int(row["count"]) if row else 0
+
+
+async def validate_replies_belong_to_ticket(reply_ids: list[int], ticket_id: int) -> tuple[bool, str | None]:
+    """
+    Validate that all reply IDs belong to the specified ticket.
+    Returns (is_valid, error_message).
+    """
+    if not reply_ids:
+        return False, "No reply IDs provided"
+    
+    placeholders = ", ".join(["%s"] * len(reply_ids))
+    rows = await db.fetch_all(
+        f"""
+        SELECT id, ticket_id
+        FROM ticket_replies
+        WHERE id IN ({placeholders})
+        """,
+        tuple(reply_ids),
+    )
+    
+    if len(rows) != len(reply_ids):
+        found_ids = {row["id"] for row in rows}
+        missing_ids = set(reply_ids) - found_ids
+        return False, f"Reply IDs not found: {', '.join(map(str, missing_ids))}"
+    
+    for row in rows:
+        if row["ticket_id"] != ticket_id:
+            return False, f"Reply {row['id']} does not belong to ticket {ticket_id}"
+    
+    return True, None
+
+
 async def get_reply_by_id(reply_id: int) -> TicketRecord | None:
     row = await db.fetch_one(
         """
@@ -904,3 +947,146 @@ async def replace_watchers(ticket_id: int, user_ids: Iterable[int], emails: Iter
             email_normalized = email.strip().lower() if email else None
             if email_normalized:
                 await add_watcher(ticket_id, email=email_normalized)
+
+
+async def move_replies_to_ticket(reply_ids: Iterable[int], target_ticket_id: int) -> int:
+    """Move specified replies to a different ticket. Returns count of moved replies."""
+    if not reply_ids:
+        return 0
+    reply_list = list(reply_ids)
+    placeholders = ", ".join(["%s"] * len(reply_list))
+    result = await db.execute(
+        f"""
+        UPDATE ticket_replies
+        SET ticket_id = %s
+        WHERE id IN ({placeholders})
+        """,
+        (target_ticket_id, *reply_list),
+    )
+    return result
+
+
+async def split_ticket(
+    original_ticket_id: int,
+    reply_ids: list[int],
+    new_ticket_subject: str,
+    new_ticket_id: int | None = None,
+) -> tuple[TicketRecord | None, TicketRecord | None, int]:
+    """
+    Split a ticket by moving specified replies to a new ticket.
+    Returns (original_ticket, new_ticket, moved_reply_count)
+    """
+    # Get original ticket to copy company_id and requester_id
+    original_ticket = await get_ticket(original_ticket_id)
+    if not original_ticket:
+        return None, None, 0
+    
+    # Create new ticket with same company and requester
+    new_ticket = await create_ticket(
+        id=new_ticket_id,
+        subject=new_ticket_subject,
+        description=f"Split from ticket #{original_ticket_id}",
+        requester_id=original_ticket.get("requester_id"),
+        company_id=original_ticket.get("company_id"),
+        assigned_user_id=original_ticket.get("assigned_user_id"),
+        priority=original_ticket.get("priority", "normal"),
+        status=original_ticket.get("status", "open"),
+        category=original_ticket.get("category"),
+        module_slug=original_ticket.get("module_slug"),
+        external_reference=None,
+        ticket_number=None,
+    )
+    
+    # Update new ticket to mark it as split from original
+    await db.execute(
+        "UPDATE tickets SET split_from_ticket_id = %s WHERE id = %s",
+        (original_ticket_id, new_ticket["id"]),
+    )
+    
+    # Move the specified replies to the new ticket
+    moved_count = await move_replies_to_ticket(reply_ids, new_ticket["id"])
+    
+    # Refresh ticket data
+    original_ticket = await get_ticket(original_ticket_id)
+    new_ticket = await get_ticket(new_ticket["id"])
+    
+    return original_ticket, new_ticket, moved_count
+
+
+async def merge_tickets(
+    ticket_ids: list[int],
+    target_ticket_id: int,
+) -> tuple[TicketRecord | None, list[int], int]:
+    """
+    Merge multiple tickets into a target ticket.
+    Returns (merged_ticket, list_of_merged_ids, moved_reply_count)
+    """
+    if target_ticket_id not in ticket_ids:
+        raise ValueError("Target ticket ID must be in the list of ticket IDs to merge")
+    
+    # Get target ticket
+    target_ticket = await get_ticket(target_ticket_id)
+    if not target_ticket:
+        return None, [], 0
+    
+    # Get source ticket IDs (all except target)
+    source_ticket_ids = [tid for tid in ticket_ids if tid != target_ticket_id]
+    if not source_ticket_ids:
+        return target_ticket, [], 0
+    
+    moved_count = 0
+    
+    # Move all replies from source tickets to target ticket
+    for source_id in source_ticket_ids:
+        # Get all replies for this source ticket
+        replies = await list_replies(source_id, include_internal=True)
+        reply_ids = [r["id"] for r in replies]
+        if reply_ids:
+            count = await move_replies_to_ticket(reply_ids, target_ticket_id)
+            moved_count += count
+    
+    # Mark source tickets as merged into target
+    placeholders = ", ".join(["%s"] * len(source_ticket_ids))
+    await db.execute(
+        f"""
+        UPDATE tickets
+        SET merged_into_ticket_id = %s,
+            status = 'closed',
+            closed_at = NOW()
+        WHERE id IN ({placeholders})
+        """,
+        (target_ticket_id, *source_ticket_ids),
+    )
+    
+    # Refresh target ticket
+    target_ticket = await get_ticket(target_ticket_id)
+    
+    return target_ticket, source_ticket_ids, moved_count
+
+
+async def get_merged_target_ticket_id(ticket_id: int) -> int | None:
+    """
+    Get the final merged target ticket ID if this ticket has been merged.
+    Follows the chain of merged_into_ticket_id to find the final active ticket.
+    """
+    visited = set()
+    current_id = ticket_id
+    
+    while current_id and current_id not in visited:
+        visited.add(current_id)
+        row = await db.fetch_one(
+            "SELECT merged_into_ticket_id FROM tickets WHERE id = %s",
+            (current_id,),
+        )
+        if not row:
+            return None
+        
+        merged_into = row.get("merged_into_ticket_id")
+        if merged_into is None:
+            # This ticket is not merged, it's the final target
+            return current_id if current_id != ticket_id else None
+        
+        current_id = merged_into
+    
+    # Circular reference or chain too long
+    return None
