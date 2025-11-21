@@ -270,6 +270,48 @@ Protection measures:
 
 **Recommendation:** Implement automated rotation with overlap period.
 
+## Analytics and Privacy
+
+### Plausible Analytics Integration
+**Status:** ✅ Implemented
+
+**Implementation:** `app/security/plausible_tracking.py`
+
+MyPortal includes privacy-first analytics using Plausible Analytics for:
+- Email tracking (opens and clicks)
+- Authenticated user pageviews (optional)
+
+**Privacy Protection Measures:**
+- ✅ User identifiers are hashed with HMAC-SHA256
+- ✅ Secret pepper used for hashing (configured via `PLAUSIBLE_PEPPER`)
+- ✅ Raw usernames never sent to Plausible cloud instances
+- ✅ Tracking disabled by default (`PLAUSIBLE_TRACK_PAGEVIEWS=false`)
+- ✅ PII sending explicitly controlled (`PLAUSIBLE_SEND_PII=false`)
+- ✅ Tracking only for authenticated users
+- ✅ No tracking of API endpoints or static resources
+
+**Configuration Requirements:**
+1. Set `PLAUSIBLE_BASE_URL` to your Plausible instance
+2. Set `PLAUSIBLE_SITE_DOMAIN` to your portal domain
+3. Generate secure pepper: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+4. Set `PLAUSIBLE_PEPPER` in environment
+5. Enable pageview tracking: `PLAUSIBLE_TRACK_PAGEVIEWS=true` (via admin UI)
+
+**Privacy Policy Implications:**
+When pageview tracking is enabled, the following should be disclosed in your privacy policy:
+
+> "We use privacy-first analytics (Plausible Analytics) to understand how authenticated users interact with our portal. User identifiers are anonymized using cryptographic hashing before being sent to our analytics system. We do not track individual user behavior across sessions or identify specific users from analytics data. This data is used solely for improving the user experience and portal functionality."
+
+**Self-Hosted vs. Cloud:**
+- **Cloud (plausible.io):** User identifiers MUST be hashed (`PLAUSIBLE_SEND_PII=false`)
+- **Self-Hosted:** May optionally send unhashed identifiers if compliant with privacy regulations (`PLAUSIBLE_SEND_PII=true`)
+
+**Compliance Notes:**
+- GDPR compliant when using hashed identifiers
+- No cookies required for tracking
+- Data minimization principle applied
+- User consent requirements vary by jurisdiction
+
 ## Security Testing
 
 ### Automated Tests
