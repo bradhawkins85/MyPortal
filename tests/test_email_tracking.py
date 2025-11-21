@@ -223,6 +223,38 @@ def test_insert_tracking_pixel_simple_html(mock_portal_url):
     assert result.endswith('"/>')
 
 
+def test_email_tracking_with_full_html_document(mock_portal_url):
+    """Test tracking with a complete HTML document including DOCTYPE and all tags."""
+    html_body = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Email Subject</title>
+    <meta charset="UTF-8">
+</head>
+<body>
+    <h1>Hello World</h1>
+    <p>This is a complete HTML document.</p>
+    <a href="https://example.com/page">Click here</a>
+</body>
+</html>"""
+    tracking_id = "test-full-doc-789"
+    
+    # Test pixel insertion
+    result = email_tracking.insert_tracking_pixel(html_body, tracking_id)
+    assert "test-full-doc-789.gif" in result
+    # Pixel should be before </body>
+    pixel_pos = result.find('<img src=')
+    body_end_pos = result.find('</body>')
+    assert pixel_pos < body_end_pos
+    assert pixel_pos > 0
+    
+    # Test link rewriting
+    result = email_tracking.rewrite_links_for_tracking(html_body, tracking_id)
+    assert "/api/email-tracking/click?" in result
+    assert "tid=test-full-doc-789" in result
+    assert "url=https%3A%2F%2Fexample.com%2Fpage" in result
+
+
 @pytest.mark.asyncio
 async def test_record_email_sent(db_connection):
     """Test recording email sent metadata."""
@@ -584,3 +616,67 @@ async def test_emit_notification_with_ticket_reply_metadata(monkeypatch):
     # Verify tracking was enabled
     assert captured_email_params.get("enable_tracking") is True
     assert captured_email_params.get("ticket_reply_id") == 789
+
+
+def test_send_email_warns_when_portal_url_not_configured(monkeypatch):
+    """Test that send_email warns when tracking is enabled but PORTAL_URL is not configured."""
+    import asyncio
+    from app.services import email as email_service
+    from app.services import webhook_monitor
+    from app.core.config import get_settings
+    from unittest.mock import patch
+    
+    settings = get_settings()
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(settings, "smtp_port", 587)
+    monkeypatch.setattr(settings, "portal_url", None)  # No portal URL configured
+    
+    # Mock SMTP
+    class DummySMTP:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def ehlo(self):
+            pass
+        def starttls(self, **kwargs):
+            pass
+        def login(self, *args):
+            pass
+        def send_message(self, message):
+            pass
+    
+    monkeypatch.setattr(email_service.smtplib, "SMTP", DummySMTP)
+    
+    # Mock webhook monitor
+    async def mock_create_manual_event(**kwargs):
+        return {"id": 123}
+    
+    async def mock_record_manual_success(*args, **kwargs):
+        return {"id": 123, "status": "succeeded"}
+    
+    monkeypatch.setattr(webhook_monitor, "create_manual_event", mock_create_manual_event)
+    monkeypatch.setattr(webhook_monitor, "record_manual_success", mock_record_manual_success)
+    
+    # Capture logger warnings
+    logged_warnings = []
+    
+    def capture_warning(*args, **kwargs):
+        logged_warnings.append({"args": args, "kwargs": kwargs})
+    
+    # Mock logger.warning
+    with patch('app.services.email.logger.warning', side_effect=capture_warning):
+        # Send email with tracking enabled
+        asyncio.run(email_service.send_email(
+            subject="Test Email",
+            recipients=["test@example.com"],
+            html_body="<p>Test content</p>",
+            enable_tracking=True,
+            ticket_reply_id=123,
+        ))
+    
+    # Verify warning was logged
+    assert len(logged_warnings) > 0
+    assert any("PORTAL_URL" in str(w) or "portal_url" in str(w) for w in logged_warnings)
