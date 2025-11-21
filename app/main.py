@@ -375,6 +375,44 @@ async def _shutdown_integrations() -> None:
 SWAGGER_UI_PATH = settings.swagger_ui_url or "/docs"
 PROTECTED_OPENAPI_PATH = "/internal/openapi.json"
 
+
+async def _get_extra_csp_script_sources() -> list[str]:
+    """Get additional CSP script sources from enabled modules.
+    
+    This function retrieves script sources that need to be allowed in the
+    Content-Security-Policy, such as analytics scripts from enabled modules.
+    
+    Returns:
+        List of valid HTTPS URLs to allow as script sources
+    """
+    sources = []
+    
+    try:
+        # Check for Plausible analytics module
+        module_list = await modules_service.list_modules()
+        module_lookup = {module.get("slug"): module for module in module_list if module.get("slug")}
+        
+        plausible_module = module_lookup.get("plausible")
+        if plausible_module and plausible_module.get("enabled"):
+            plausible_settings = plausible_module.get("settings") or {}
+            base_url = (plausible_settings.get("base_url") or "")
+            if isinstance(base_url, str):
+                base_url = base_url.strip().rstrip("/")
+            else:
+                base_url = ""
+            
+            # Validate base_url - must be HTTPS with actual content after the protocol
+            if base_url.startswith("https://") and len(base_url) > 8:  # len("https://") = 8
+                # Add the base URL as a script source (this allows loading /js/script.js from it)
+                sources.append(base_url)
+    except Exception:
+        # If we fail to get module config, return empty list
+        # The CSP will still work with default sources
+        pass
+    
+    return sources
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[str(origin) for origin in settings.allowed_origins] or ["*"],
@@ -387,6 +425,7 @@ app.add_middleware(
 app.add_middleware(
     SecurityHeadersMiddleware,
     exempt_paths=("/static",),
+    get_extra_script_sources=_get_extra_csp_script_sources,
 )
 
 # Add request logging middleware

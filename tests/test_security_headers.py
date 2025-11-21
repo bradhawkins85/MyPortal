@@ -12,6 +12,27 @@ from fastapi.testclient import TestClient
 from app.security.security_headers import SecurityHeadersMiddleware
 
 
+async def _mock_extra_sources_none():
+    """Mock function that returns no extra sources."""
+    return []
+
+
+async def _mock_extra_sources_plausible():
+    """Mock function that returns a Plausible analytics source."""
+    return ["https://plausible.example.com"]
+
+
+async def _mock_extra_sources_invalid():
+    """Mock function that returns invalid sources that should be filtered."""
+    return [
+        "https://valid.example.com",
+        "http://invalid-http.example.com",  # HTTP not allowed
+        "https://invalid with spaces.com",  # Spaces not allowed
+        "javascript:alert(1)",  # JavaScript protocol not allowed
+        "",  # Empty string
+    ]
+
+
 @pytest.fixture
 def test_app():
     """Create a test FastAPI application with security headers middleware."""
@@ -27,6 +48,44 @@ def test_app():
     
     # Add middleware (note: middleware is applied in reverse order)
     app.add_middleware(SecurityHeadersMiddleware, exempt_paths=("/static",))
+    
+    return app
+
+
+@pytest.fixture
+def test_app_with_plausible():
+    """Create a test FastAPI application with Plausible analytics configured."""
+    app = FastAPI()
+    
+    @app.get("/test")
+    async def test_endpoint(request: Request):
+        return JSONResponse({"status": "ok"})
+    
+    # Add middleware with Plausible source
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        exempt_paths=("/static",),
+        get_extra_script_sources=_mock_extra_sources_plausible,
+    )
+    
+    return app
+
+
+@pytest.fixture
+def test_app_with_invalid_sources():
+    """Create a test FastAPI application with invalid sources to test filtering."""
+    app = FastAPI()
+    
+    @app.get("/test")
+    async def test_endpoint(request: Request):
+        return JSONResponse({"status": "ok"})
+    
+    # Add middleware with mixed valid/invalid sources
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        exempt_paths=("/static",),
+        get_extra_script_sources=_mock_extra_sources_invalid,
+    )
     
     return app
 
@@ -131,3 +190,60 @@ def test_xss_protection_header_present(test_app):
     response = client.get("/test")
     
     assert response.headers["X-XSS-Protection"] == "1; mode=block"
+
+
+def test_csp_with_plausible_analytics(test_app_with_plausible):
+    """Test that Plausible analytics source is added to CSP."""
+    client = TestClient(test_app_with_plausible)
+    response = client.get("/test")
+    
+    csp = response.headers["Content-Security-Policy"]
+    
+    # Check that Plausible domain is included in script-src
+    assert "https://plausible.example.com" in csp
+    # Check that default sources are still present
+    assert "'self'" in csp
+    assert "'unsafe-inline'" in csp
+    assert "'unsafe-eval'" in csp
+    assert "https://unpkg.com" in csp
+
+
+def test_csp_filters_invalid_sources(test_app_with_invalid_sources):
+    """Test that invalid CSP sources are filtered out."""
+    client = TestClient(test_app_with_invalid_sources)
+    response = client.get("/test")
+    
+    csp = response.headers["Content-Security-Policy"]
+    
+    # Valid HTTPS source should be included
+    assert "https://valid.example.com" in csp
+    # Invalid sources should NOT be included
+    assert "http://invalid-http.example.com" not in csp
+    assert "invalid with spaces" not in csp
+    assert "javascript:" not in csp
+
+
+def test_csp_source_validation():
+    """Test the _is_valid_csp_source method directly."""
+    from app.security.security_headers import SecurityHeadersMiddleware
+    
+    # Create a mock app for testing
+    class MockApp:
+        pass
+    
+    middleware = SecurityHeadersMiddleware(MockApp())
+    
+    # Valid sources
+    assert middleware._is_valid_csp_source("https://example.com") is True
+    assert middleware._is_valid_csp_source("https://subdomain.example.com") is True
+    assert middleware._is_valid_csp_source("https://example.com:8080") is True
+    assert middleware._is_valid_csp_source("https://example-with-dash.com") is True
+    
+    # Invalid sources
+    assert middleware._is_valid_csp_source("http://example.com") is False  # HTTP not allowed
+    assert middleware._is_valid_csp_source("https://example.com with spaces") is False
+    assert middleware._is_valid_csp_source("https://example.com;") is False
+    assert middleware._is_valid_csp_source("https://example.com'") is False
+    assert middleware._is_valid_csp_source("javascript:alert(1)") is False
+    assert middleware._is_valid_csp_source("") is False
+    assert middleware._is_valid_csp_source(None) is False
