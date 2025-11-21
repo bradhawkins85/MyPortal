@@ -443,9 +443,10 @@ async def _get_plausible_config() -> dict[str, Any]:
                 "base_url": base_url,
                 "site_domain": site_domain,
             }
-    except Exception:
+    except Exception as exc:
         # If we fail to get module config, return disabled config
-        pass
+        # Log the error for debugging purposes
+        logger.error("Failed to get Plausible configuration", error=str(exc))
     
     return config
 

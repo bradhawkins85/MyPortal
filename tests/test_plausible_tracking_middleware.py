@@ -4,11 +4,15 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.testclient import TestClient
 
-# Import the middleware directly without triggering full app initialization
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent / "app"))
-from security.plausible_tracking import PlausibleTrackingMiddleware
+# This import pattern matches other security middleware tests in the project
+try:
+    from app.security.plausible_tracking import PlausibleTrackingMiddleware
+except ImportError:
+    # Fallback for test environments with missing dependencies
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent / "app"))
+    from security.plausible_tracking import PlausibleTrackingMiddleware
 
 
 @pytest.fixture

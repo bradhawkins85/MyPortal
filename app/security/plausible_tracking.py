@@ -163,7 +163,7 @@ class PlausibleTrackingMiddleware(BaseHTTPMiddleware):
         if not url or not isinstance(url, str):
             return False
         
-        # Must be HTTPS
+        # Must be HTTP or HTTPS (HTTPS is strongly recommended)
         if not url.startswith("https://") and not url.startswith("http://"):
             return False
         
