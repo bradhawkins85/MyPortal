@@ -2710,12 +2710,25 @@ async def webhook_start_incident(request: Request):
     """
     import json
     from datetime import datetime
+    from app.services import webhook_monitor
+    
+    source_url = str(request.url)
+    request_headers = dict(request.headers)
     
     # Parse JSON payload
     try:
         body = await request.body()
         payload = json.loads(body.decode("utf-8"))
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
+        await webhook_monitor.log_incoming_webhook(
+            name="BCP Incident Webhook - Invalid JSON",
+            source_url=source_url,
+            payload=body.decode("utf-8", errors="replace"),
+            headers=request_headers,
+            response_status=400,
+            response_body="Invalid JSON payload",
+            error_message=str(exc),
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid JSON payload"
@@ -2728,6 +2741,15 @@ async def webhook_start_incident(request: Request):
     api_key = payload.get("api_key")
     
     if not company_id:
+        await webhook_monitor.log_incoming_webhook(
+            name="BCP Incident Webhook - Missing company_id",
+            source_url=source_url,
+            payload=payload,
+            headers=request_headers,
+            response_status=400,
+            response_body="company_id is required",
+            error_message="Missing required field: company_id",
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="company_id is required"
@@ -2736,6 +2758,15 @@ async def webhook_start_incident(request: Request):
     # TODO: Validate API key against stored keys
     # For now, we'll just check if it's provided
     if not api_key:
+        await webhook_monitor.log_incoming_webhook(
+            name="BCP Incident Webhook - Missing API key",
+            source_url=source_url,
+            payload=payload,
+            headers=request_headers,
+            response_status=401,
+            response_body="api_key is required",
+            error_message="Missing API key",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="api_key is required"
@@ -2744,6 +2775,15 @@ async def webhook_start_incident(request: Request):
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
+        await webhook_monitor.log_incoming_webhook(
+            name="BCP Incident Webhook - Plan not found",
+            source_url=source_url,
+            payload=payload,
+            headers=request_headers,
+            response_status=404,
+            response_body=f"No BCP plan found for company_id {company_id}",
+            error_message=f"No BCP plan found for company_id {company_id}",
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No BCP plan found for company_id {company_id}"
@@ -2752,11 +2792,20 @@ async def webhook_start_incident(request: Request):
     # Check if there's already an active incident
     active_incident = await bcp_repo.get_active_incident(plan["id"])
     if active_incident:
-        return {
+        response_data = {
             "status": "already_active",
             "incident_id": active_incident["id"],
             "message": "An incident is already active for this plan"
         }
+        await webhook_monitor.log_incoming_webhook(
+            name=f"BCP Incident Webhook - {source}",
+            source_url=source_url,
+            payload=payload,
+            headers=request_headers,
+            response_status=200,
+            response_body=json.dumps(response_data),
+        )
+        return response_data
     
     # Create new incident
     now = datetime.utcnow()
@@ -2778,13 +2827,24 @@ async def webhook_start_incident(request: Request):
     # TODO: Send portal alert to distribution list
     # This would require implementing a notification/alert system
     
-    return {
+    response_data = {
         "status": "started",
         "incident_id": incident["id"],
         "plan_id": plan["id"],
         "started_at": incident["started_at"].isoformat() if incident["started_at"] else None,
         "message": "Incident started successfully"
     }
+    
+    await webhook_monitor.log_incoming_webhook(
+        name=f"BCP Incident Started - {source}",
+        source_url=source_url,
+        payload=payload,
+        headers=request_headers,
+        response_status=200,
+        response_body=json.dumps(response_data),
+    )
+    
+    return response_data
 
 
 # ============================================================================
