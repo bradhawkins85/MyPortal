@@ -1852,10 +1852,10 @@
           } else {
             url.searchParams.set('title', ticketId);
           }
+          
+          // Add TicketURL parameter with direct link to ticket
+          url.searchParams.set('TicketURL', ticketUrl);
         }
-        
-        // Add TicketURL parameter with direct link to ticket
-        url.searchParams.set('TicketURL', ticketUrl);
 
         // Build notes with ticket information using array for cleaner handling
         const noteParts = [];
