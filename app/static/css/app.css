@@ -3424,6 +3424,11 @@ button.header-title-menu__link {
   color: #bbf7d0;
 }
 
+.badge--info {
+  background: rgba(96, 165, 250, 0.2);
+  color: #bfdbfe;
+}
+
 .badge--warning {
   background: rgba(253, 224, 71, 0.18);
   color: #fef3c7;

@@ -887,10 +887,14 @@
                               <span class="badge badge--muted">Internal</span>
                             {% endif %}
                             {% if reply.has_email_tracking %}
-                              {% if reply.is_email_opened %}
-                                <span class="badge badge--success" title="Email opened {{ reply.email_open_count }} time{{ 's' if reply.email_open_count > 1 else '' }}">✓ Read</span>
+                              {% if reply.is_email_bounced %}
+                                <span class="badge badge--danger" title="Email bounced on {{ reply.email_bounced_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_bounced_at else 'unknown' }}">✗ Bounced</span>
+                              {% elif reply.is_email_opened %}
+                                <span class="badge badge--success" title="Email opened {{ reply.email_open_count }} time{{ 's' if reply.email_open_count > 1 else '' }}{% if reply.email_opened_at %} · First opened: {{ reply.email_opened_at.astimezone().strftime('%Y-%m-%d %H:%M') }}{% endif %}">✓ Read</span>
+                              {% elif reply.is_email_delivered %}
+                                <span class="badge badge--info" title="Email delivered on {{ reply.email_delivered_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_delivered_at else 'unknown' }}">✓ Delivered</span>
                               {% else %}
-                                <span class="badge badge--muted" title="Email sent, not yet opened">📧 Sent</span>
+                                <span class="badge badge--muted" title="Email sent{% if reply.email_sent_at %} on {{ reply.email_sent_at.astimezone().strftime('%Y-%m-%d %H:%M') }}{% endif %}, not yet delivered">📧 Sent</span>
                               {% endif %}
                             {% endif %}
                           </span>
