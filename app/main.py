@@ -414,7 +414,7 @@ async def _get_extra_csp_script_sources() -> list[str]:
     return sources
 
 
-async def _get_plausible_config() -> dict[str, any]:
+async def _get_plausible_config() -> dict[str, Any]:
     """Get Plausible Analytics configuration from the integration module.
     
     Returns:

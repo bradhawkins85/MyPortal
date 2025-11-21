@@ -6,7 +6,7 @@ into HTML responses when the Plausible module is enabled.
 from __future__ import annotations
 
 import re
-from typing import Awaitable, Callable, Iterable
+from typing import Any, Awaitable, Callable, Iterable
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -32,7 +32,7 @@ class PlausibleTrackingMiddleware(BaseHTTPMiddleware):
         app,
         *,
         exempt_paths: Iterable[str] | None = None,
-        get_plausible_config: Callable[[], Awaitable[dict[str, any]]] | None = None,
+        get_plausible_config: Callable[[], Awaitable[dict[str, Any]]] | None = None,
     ) -> None:
         super().__init__(app)
         self.exempt_paths = tuple(exempt_paths or ())
