@@ -1554,11 +1554,12 @@ async def split_ticket(
     Split a ticket by moving selected replies to a new ticket.
     The new ticket will have the same company and requester as the original.
     """
-    # Validate that all reply_ids belong to the original ticket
-    for reply_id in reply_ids:
-        reply = await tickets_repo.get_reply_by_id(reply_id)
-        if not reply or reply.get("ticket_id") != original_ticket_id:
-            raise ValueError(f"Reply {reply_id} does not belong to ticket {original_ticket_id}")
+    # Validate that all reply_ids belong to the original ticket (efficient single query)
+    is_valid, error_message = await tickets_repo.validate_replies_belong_to_ticket(
+        reply_ids, original_ticket_id
+    )
+    if not is_valid:
+        raise ValueError(error_message)
     
     # Split the ticket using repository method
     original_ticket, new_ticket, moved_count = await tickets_repo.split_ticket(

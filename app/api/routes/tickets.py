@@ -1231,21 +1231,7 @@ async def split_ticket(
     if not original_ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     
-    # Validate all reply_ids belong to this ticket
-    for reply_id in payload.reply_ids:
-        reply = await tickets_repo.get_reply_by_id(reply_id)
-        if not reply:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Reply {reply_id} not found"
-            )
-        if reply.get("ticket_id") != ticket_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Reply {reply_id} does not belong to ticket {ticket_id}"
-            )
-    
-    # Perform the split
+    # Perform the split (validation happens in service layer)
     try:
         original, new_ticket, moved_count = await tickets_service.split_ticket(
             original_ticket_id=ticket_id,
@@ -1279,23 +1265,7 @@ async def merge_tickets(
     Source tickets are marked as closed and merged.
     Requires helpdesk technician permission.
     """
-    # Validate all tickets exist
-    for ticket_id in payload.ticket_ids:
-        ticket = await tickets_repo.get_ticket(ticket_id)
-        if not ticket:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Ticket {ticket_id} not found"
-            )
-    
-    # Validate target ticket is in the list
-    if payload.target_ticket_id not in payload.ticket_ids:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Target ticket must be one of the tickets being merged"
-        )
-    
-    # Perform the merge
+    # Perform the merge (validation happens in service layer)
     try:
         merged_ticket, merged_ids, moved_count = await tickets_service.merge_tickets(
             ticket_ids=payload.ticket_ids,
@@ -1310,9 +1280,8 @@ async def merge_tickets(
             detail="Failed to merge tickets"
         )
     
-    # Count time entries (replies with minutes_spent)
-    all_replies = await tickets_repo.list_replies(payload.target_ticket_id, include_internal=True)
-    time_entry_count = sum(1 for r in all_replies if r.get("minutes_spent") and r.get("minutes_spent") > 0)
+    # Count time entries efficiently using database query
+    time_entry_count = await tickets_repo.count_time_entries(payload.target_ticket_id)
     
     return TicketMergeResponse(
         merged_ticket=TicketResponse(**merged_ticket),
