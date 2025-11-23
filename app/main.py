@@ -13404,11 +13404,19 @@ def _automation_to_form_values(automation: Mapping[str, Any]) -> dict[str, Any]:
         "status": str(automation.get("status") or "inactive"),
         "cadence": str(automation.get("cadence") or ""),
         "cronExpression": str(automation.get("cron_expression") or ""),
+        "runOnce": bool(automation.get("run_once", False)),
+        "scheduledTime": "",
         "triggerEvent": str(automation.get("trigger_event") or ""),
         "triggerFiltersRaw": "",
         "actionModule": str(automation.get("action_module") or ""),
         "actionPayloadRaw": "",
     }
+    scheduled_time = automation.get("scheduled_time")
+    if scheduled_time and isinstance(scheduled_time, datetime):
+        # Format as HTML datetime-local input format (YYYY-MM-DDTHH:MM)
+        # Convert to local timezone for display
+        local_time = scheduled_time.astimezone()
+        values["scheduledTime"] = local_time.strftime("%Y-%m-%dT%H:%M")
     filters = automation.get("trigger_filters")
     if filters is not None:
         try:
@@ -13436,6 +13444,9 @@ def _parse_automation_form_submission(
     status_value = "active" if status_raw == "active" else "inactive"
     cadence_raw = str(form.get("cadence", "")).strip()
     cron_raw = str(form.get("cronExpression", "")).strip()
+    run_once_raw = str(form.get("runOnce", "")).strip().lower()
+    run_once = run_once_raw in ("true", "1", "yes", "on")
+    scheduled_time_raw = str(form.get("scheduledTime", "")).strip()
     trigger_event_raw = str(form.get("triggerEvent", "")).strip()
     trigger_filters_raw = str(form.get("triggerFilters", "")).strip()
     action_module_raw = str(form.get("actionModule", "")).strip()
@@ -13447,6 +13458,8 @@ def _parse_automation_form_submission(
         "status": status_value,
         "cadence": cadence_raw,
         "cronExpression": cron_raw,
+        "runOnce": run_once,
+        "scheduledTime": scheduled_time_raw,
         "triggerEvent": trigger_event_raw,
         "triggerFiltersRaw": trigger_filters_raw,
         "actionModule": action_module_raw,
@@ -13460,6 +13473,25 @@ def _parse_automation_form_submission(
     cron_expression = cron_raw or None
     trigger_event = trigger_event_raw or None
     action_module = action_module_raw or None
+    
+    # Parse scheduled_time if provided
+    scheduled_time = None
+    if scheduled_time_raw and kind_normalised == "scheduled" and run_once:
+        try:
+            # Parse datetime-local format (YYYY-MM-DDTHH:MM)
+            scheduled_time = datetime.fromisoformat(scheduled_time_raw)
+            # Treat as local time, convert to UTC for storage
+            if scheduled_time.tzinfo is None:
+                # Assume local timezone
+                local_tz = datetime.now().astimezone().tzinfo
+                scheduled_time = scheduled_time.replace(tzinfo=local_tz).astimezone(timezone.utc)
+        except (ValueError, TypeError):
+            return (
+                None,
+                form_state,
+                "Invalid scheduled time format. Use YYYY-MM-DDTHH:MM format.",
+                status.HTTP_400_BAD_REQUEST,
+            )
 
     try:
         trigger_filters = json.loads(trigger_filters_raw) if trigger_filters_raw else None
@@ -13529,6 +13561,8 @@ def _parse_automation_form_submission(
         "kind": kind_normalised,
         "cadence": cadence if kind_normalised == "scheduled" else None,
         "cron_expression": cron_expression if kind_normalised == "scheduled" else None,
+        "scheduled_time": scheduled_time,
+        "run_once": run_once,
         "trigger_event": trigger_event,
         "trigger_filters": trigger_filters,
         "action_module": action_module,

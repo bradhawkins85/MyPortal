@@ -1272,6 +1272,11 @@
   function setupScheduleVisibility() {
     const kindField = document.getElementById('automation-kind');
     const scheduleFields = document.querySelector('[data-schedule-fields]');
+    const cadenceSelect = document.querySelector('[data-cadence-select]');
+    const cronField = document.querySelector('[data-cron-field]');
+    const onetimeField = document.querySelector('[data-onetime-field]');
+    const runOnceHidden = document.getElementById('automation-run-once');
+    
     if (!kindField || !scheduleFields) {
       return;
     }
@@ -1280,7 +1285,35 @@
       scheduleFields.hidden = kindField.value === 'event';
     };
 
+    const toggleCadenceFields = () => {
+      if (!cadenceSelect || !cronField || !onetimeField) {
+        return;
+      }
+      
+      const isOnetime = cadenceSelect.value === 'once';
+      
+      // Show/hide fields based on cadence selection
+      if (isOnetime) {
+        cronField.style.display = 'none';
+        onetimeField.style.display = 'block';
+        if (runOnceHidden) {
+          runOnceHidden.value = 'true';
+        }
+      } else {
+        cronField.style.display = 'block';
+        onetimeField.style.display = 'none';
+        if (runOnceHidden) {
+          runOnceHidden.value = 'false';
+        }
+      }
+    };
+
     kindField.addEventListener('change', toggleSchedule);
+    if (cadenceSelect) {
+      cadenceSelect.addEventListener('change', toggleCadenceFields);
+      // Initialize on page load
+      toggleCadenceFields();
+    }
     toggleSchedule();
   }
 
