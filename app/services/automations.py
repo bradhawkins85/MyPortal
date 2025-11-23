@@ -171,6 +171,25 @@ def calculate_next_run(
     kind = str(automation.get("kind") or "").strip().lower()
     if kind != "scheduled":
         return None
+    
+    # Handle one-time scheduling
+    run_once = automation.get("run_once")
+    if run_once:
+        scheduled_time = automation.get("scheduled_time")
+        last_run_at = automation.get("last_run_at")
+        
+        # If already run, don't schedule again
+        if last_run_at is not None:
+            return None
+        
+        # Return the scheduled time if set (even if in the past, to run ASAP)
+        if scheduled_time:
+            if isinstance(scheduled_time, datetime):
+                scheduled_utc = scheduled_time.astimezone(timezone.utc) if scheduled_time.tzinfo else scheduled_time.replace(tzinfo=timezone.utc)
+                return scheduled_utc
+        return None
+    
+    # Handle recurring scheduling
     cron_expression = str(automation.get("cron_expression") or "").strip()
     if cron_expression:
         try:

@@ -65,19 +65,32 @@
                 </div>
                 <div class="form-field">
                   <label class="form-label" for="automation-cadence">Cadence</label>
-                  <select id="automation-cadence" name="cadence" class="form-input">
+                  <select id="automation-cadence" name="cadence" class="form-input" data-cadence-select>
                     <option value="" {% if not values.get('cadence') %}selected{% endif %}>Custom</option>
                     <option value="hourly" {% if values.get('cadence') == 'hourly' %}selected{% endif %}>Hourly</option>
                     <option value="daily" {% if values.get('cadence') == 'daily' %}selected{% endif %}>Daily</option>
                     <option value="weekly" {% if values.get('cadence') == 'weekly' %}selected{% endif %}>Weekly</option>
                     <option value="monthly" {% if values.get('cadence') == 'monthly' %}selected{% endif %}>Monthly</option>
+                    <option value="once" {% if values.get('cadence') == 'once' or values.get('runOnce') %}selected{% endif %}>One-time</option>
                   </select>
                 </div>
               </div>
-              <div class="form-field">
+              <div class="form-field" data-cron-field>
                 <label class="form-label" for="automation-cron">Cron expression</label>
                 <input id="automation-cron" name="cronExpression" class="form-input" placeholder="0 0 * * *" value="{{ values.get('cronExpression', '') }}" />
                 <p class="form-help">When provided, the cron expression overrides the cadence selection and should be supplied in UTC.</p>
+              </div>
+              <div class="form-field" data-onetime-field style="display: none;">
+                <input type="hidden" id="automation-run-once" name="runOnce" value="{{ 'true' if values.get('runOnce') else 'false' }}" />
+                <label class="form-label" for="automation-scheduled-time">Scheduled date and time</label>
+                <input 
+                  id="automation-scheduled-time" 
+                  name="scheduledTime" 
+                  type="datetime-local" 
+                  class="form-input" 
+                  value="{{ values.get('scheduledTime', '') }}" 
+                />
+                <p class="form-help">Select the date and time when this automation should run. The automation will run once and will not repeat.</p>
               </div>
               <div class="form-field">
                 <label class="form-label" for="automation-trigger-select">Trigger event</label>
