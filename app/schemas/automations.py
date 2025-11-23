@@ -10,6 +10,8 @@ class AutomationBase(BaseModel):
     kind: str = Field(..., pattern=r"^(scheduled|event)$")
     cadence: Optional[str] = Field(default=None, max_length=64)
     cron_expression: Optional[str] = Field(default=None, max_length=255)
+    scheduled_time: Optional[datetime] = None
+    run_once: bool = False
     trigger_event: Optional[str] = Field(default=None, max_length=128)
     trigger_filters: Optional[dict[str, Any]] = None
     action_module: Optional[str] = Field(default=None, max_length=64)
@@ -27,6 +29,8 @@ class AutomationUpdate(BaseModel):
     kind: Optional[str] = Field(default=None, pattern=r"^(scheduled|event)$")
     cadence: Optional[str] = Field(default=None, max_length=64)
     cron_expression: Optional[str] = Field(default=None, max_length=255)
+    scheduled_time: Optional[datetime] = None
+    run_once: Optional[bool] = None
     trigger_event: Optional[str] = Field(default=None, max_length=128)
     trigger_filters: Optional[dict[str, Any]] = None
     action_module: Optional[str] = Field(default=None, max_length=64)
@@ -36,6 +40,8 @@ class AutomationUpdate(BaseModel):
 
 class AutomationResponse(AutomationBase):
     id: int
+    scheduled_time: Optional[datetime]
+    run_once: bool
     next_run_at: Optional[datetime]
     last_run_at: Optional[datetime]
     last_error: Optional[str]
