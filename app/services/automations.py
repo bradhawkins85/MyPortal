@@ -182,13 +182,10 @@ def calculate_next_run(
         if last_run_at is not None:
             return None
         
-        # Return the scheduled time if it's set and in the future
+        # Return the scheduled time if set (even if in the past, to run ASAP)
         if scheduled_time:
             if isinstance(scheduled_time, datetime):
                 scheduled_utc = scheduled_time.astimezone(timezone.utc) if scheduled_time.tzinfo else scheduled_time.replace(tzinfo=timezone.utc)
-                if scheduled_utc > reference_time:
-                    return scheduled_utc
-                # If scheduled time is in the past but hasn't run yet, schedule it now
                 return scheduled_utc
         return None
     

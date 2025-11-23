@@ -13476,7 +13476,15 @@ def _parse_automation_form_submission(
     
     # Parse scheduled_time if provided
     scheduled_time = None
-    if scheduled_time_raw and kind_normalised == "scheduled" and run_once:
+    if kind_normalised == "scheduled" and run_once:
+        # One-time scheduling requires a scheduled time
+        if not scheduled_time_raw:
+            return (
+                None,
+                form_state,
+                "Scheduled time is required for one-time automations.",
+                status.HTTP_400_BAD_REQUEST,
+            )
         try:
             # Parse datetime-local format (YYYY-MM-DDTHH:MM)
             scheduled_time = datetime.fromisoformat(scheduled_time_raw)
