@@ -552,7 +552,9 @@ async def process_webhook_event(
         internal_event_type = None
         event_url = None
         
-        if normalized_event_type in ['delivered', 'delivery']:
+        if normalized_event_type in ['processed']:
+            internal_event_type = 'processed'
+        elif normalized_event_type in ['delivered', 'delivery']:
             internal_event_type = 'delivered'
         elif normalized_event_type in ['opened', 'open']:
             internal_event_type = 'open'
@@ -563,6 +565,8 @@ async def process_webhook_event(
             internal_event_type = 'bounce'
         elif normalized_event_type in ['spam', 'spam_complaint']:
             internal_event_type = 'spam'
+        elif normalized_event_type in ['rejected']:
+            internal_event_type = 'rejected'
 
         if not internal_event_type:
             logger.warning(
@@ -591,7 +595,14 @@ async def process_webhook_event(
         event_id = await db.execute(insert_query, insert_params)
         
         # Update ticket_replies based on event type
-        if internal_event_type == 'delivered':
+        if internal_event_type == 'processed':
+            update_query = """
+                UPDATE ticket_replies
+                SET email_processed_at = COALESCE(email_processed_at, :occurred_at)
+                WHERE id = :reply_id
+            """
+            await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
+        elif internal_event_type == 'delivered':
             update_query = """
                 UPDATE ticket_replies
                 SET email_delivered_at = COALESCE(email_delivered_at, :occurred_at)
@@ -610,6 +621,13 @@ async def process_webhook_event(
             update_query = """
                 UPDATE ticket_replies
                 SET email_bounced_at = COALESCE(email_bounced_at, :occurred_at)
+                WHERE id = :reply_id
+            """
+            await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
+        elif internal_event_type == 'rejected':
+            update_query = """
+                UPDATE ticket_replies
+                SET email_rejected_at = COALESCE(email_rejected_at, :occurred_at)
                 WHERE id = :reply_id
             """
             await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
@@ -653,10 +671,12 @@ async def get_email_stats(reply_id: int) -> dict[str, Any] | None:
             email_tracking_id,
             smtp2go_message_id,
             email_sent_at,
+            email_processed_at,
             email_delivered_at,
             email_opened_at,
             email_open_count,
-            email_bounced_at
+            email_bounced_at,
+            email_rejected_at
         FROM ticket_replies
         WHERE id = :reply_id
         LIMIT 1
@@ -690,10 +710,12 @@ async def get_email_stats(reply_id: int) -> dict[str, Any] | None:
             'tracking_id': row['email_tracking_id'],
             'smtp2go_message_id': row['smtp2go_message_id'],
             'sent_at': row['email_sent_at'].isoformat() if row['email_sent_at'] else None,
+            'processed_at': row['email_processed_at'].isoformat() if row['email_processed_at'] else None,
             'delivered_at': row['email_delivered_at'].isoformat() if row['email_delivered_at'] else None,
             'opened_at': row['email_opened_at'].isoformat() if row['email_opened_at'] else None,
             'open_count': row['email_open_count'],
             'bounced_at': row['email_bounced_at'].isoformat() if row['email_bounced_at'] else None,
+            'rejected_at': row['email_rejected_at'].isoformat() if row['email_rejected_at'] else None,
             'clicks': clicks,
             'has_tracking': row['email_tracking_id'] is not None,
         }
