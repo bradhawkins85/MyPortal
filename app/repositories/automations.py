@@ -70,8 +70,11 @@ def _normalise_automation(row: dict[str, Any]) -> AutomationRecord:
     for key in ("id",):
         if key in record and record[key] is not None:
             record[key] = int(record[key])
-    for key in ("created_at", "updated_at", "next_run_at", "last_run_at"):
+    for key in ("created_at", "updated_at", "next_run_at", "last_run_at", "scheduled_time"):
         record[key] = _make_aware(record.get(key))
+    for key in ("run_once",):
+        if key in record:
+            record[key] = bool(record[key])
     record["trigger_filters"] = _deserialise(record.get("trigger_filters"))
     record["action_payload"] = _deserialise(record.get("action_payload"))
     return record
@@ -95,6 +98,8 @@ async def create_automation(
     kind: str,
     cadence: str | None,
     cron_expression: str | None,
+    scheduled_time: datetime | None,
+    run_once: bool,
     trigger_event: str | None,
     trigger_filters: Any,
     action_module: str | None,
@@ -116,9 +121,11 @@ async def create_automation(
             action_module,
             action_payload,
             status,
-            next_run_at
+            next_run_at,
+            scheduled_time,
+            run_once
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             name,
@@ -132,6 +139,8 @@ async def create_automation(
             _serialise(action_payload),
             status,
             _prepare_for_storage(next_run_at),
+            _prepare_for_storage(scheduled_time),
+            run_once,
         ),
     )
     row = await db.fetch_one("SELECT * FROM automations WHERE id = %s", (automation_id,))
@@ -149,6 +158,8 @@ async def create_automation(
             "action_payload": action_payload,
             "status": status,
             "next_run_at": next_run_at,
+            "scheduled_time": scheduled_time,
+            "run_once": run_once,
             "last_run_at": None,
             "last_error": None,
             "created_at": None,
