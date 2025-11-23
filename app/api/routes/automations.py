@@ -48,6 +48,8 @@ async def create_automation(
         kind=data["kind"],
         cadence=data.get("cadence"),
         cron_expression=data.get("cron_expression"),
+        scheduled_time=data.get("scheduled_time"),
+        run_once=data.get("run_once", False),
         trigger_event=data.get("trigger_event"),
         trigger_filters=data.get("trigger_filters"),
         action_module=data.get("action_module"),
