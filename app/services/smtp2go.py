@@ -401,6 +401,15 @@ async def send_email_via_api(
         if not isinstance(data, dict):
             data = result if isinstance(result, dict) else {}
 
+        # Some responses further nest identifiers under a "response" object
+        # inside the "data" envelope. Flatten these so message/tracking IDs are
+        # available for storage.
+        nested_response = data.get("response") if isinstance(data, dict) else None
+        if isinstance(nested_response, dict):
+            # Preserve any top-level keys already present on data
+            merged_data = {**nested_response, **data}
+            data = merged_data
+
         # Normalise message ID field for downstream tracking logic
         message_id = (
             data.get("smtp2go_message_id")
