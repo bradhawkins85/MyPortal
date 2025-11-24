@@ -10,7 +10,7 @@ def configure_logging() -> None:
     from app.core.config import get_settings
 
     logger.remove()
-    log_format = "{time:YYYY-MM-DDTHH:mm:ss.SSSZ} | {level} | {message}"
+    log_format = "{time:YYYY-MM-DDTHH:mm:ss.SSSZ} | {level} | {message}\n{exception}"
     logger.add(sink=lambda msg: print(msg, end=""), format=log_format)
 
     settings = get_settings()
