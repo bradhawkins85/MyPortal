@@ -505,13 +505,18 @@ async def send_email_via_api(
         raise SMTP2GoError(f"Send failed: {str(exc)}") from exc
 
 
-async def record_email_sent(
+async def record_smtp2go_message_id(
     *,
     ticket_reply_id: int,
     tracking_id: str,
-    smtp2go_message_id: str | None = None,
+    smtp2go_message_id: str,
 ) -> None:
-    """Record that an email was sent with SMTP2Go tracking enabled.
+    """Record the SMTP2Go message ID for webhook correlation.
+    
+    This function stores the smtp2go_message_id and tracking_id immediately after
+    the API send succeeds, so that webhooks can correlate events back to the
+    ticket reply. The email_sent_at timestamp is NOT set here - it will be set
+    when the 'processed' webhook event arrives, confirming SMTP2Go accepted the email.
     
     Args:
         ticket_reply_id: ID of the ticket reply that was sent
@@ -521,8 +526,56 @@ async def record_email_sent(
     query = """
         UPDATE ticket_replies
         SET email_tracking_id = :tracking_id,
-            email_sent_at = :sent_at,
             smtp2go_message_id = :smtp2go_message_id
+        WHERE id = :reply_id
+    """
+    params = {
+        'tracking_id': tracking_id,
+        'smtp2go_message_id': smtp2go_message_id,
+        'reply_id': ticket_reply_id,
+    }
+    
+    try:
+        await db.execute(query, params)
+        logger.info(
+            "Recorded SMTP2Go message ID for webhook correlation",
+            reply_id=ticket_reply_id,
+            tracking_id=tracking_id,
+            smtp2go_message_id=smtp2go_message_id,
+        )
+    except Exception as exc:
+        logger.opt(exception=True).error(
+            "Failed to record SMTP2Go message ID",
+            reply_id=ticket_reply_id,
+            tracking_id=tracking_id,
+            smtp2go_message_id=smtp2go_message_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+
+
+async def record_email_sent(
+    *,
+    ticket_reply_id: int,
+    tracking_id: str,
+    smtp2go_message_id: str | None = None,
+) -> None:
+    """Record that an email was sent with SMTP2Go tracking enabled.
+    
+    This is called when the 'processed' webhook event is received, confirming
+    that SMTP2Go accepted the email for delivery. This sets the email_sent_at
+    timestamp.
+    
+    Args:
+        ticket_reply_id: ID of the ticket reply that was sent
+        tracking_id: Unique tracking ID for this email
+        smtp2go_message_id: SMTP2Go message ID returned from API (optional)
+    """
+    query = """
+        UPDATE ticket_replies
+        SET email_tracking_id = :tracking_id,
+            email_sent_at = COALESCE(email_sent_at, :sent_at),
+            smtp2go_message_id = COALESCE(smtp2go_message_id, :smtp2go_message_id)
         WHERE id = :reply_id
     """
     params = {
@@ -664,9 +717,11 @@ async def process_webhook_event(
         # Update ticket_replies based on event type when a reply is found
         if reply_id is not None:
             if internal_event_type == 'processed':
+                # 'processed' event confirms SMTP2Go accepted the email, so set email_sent_at
                 update_query = """
                     UPDATE ticket_replies
-                    SET email_processed_at = COALESCE(email_processed_at, :occurred_at)
+                    SET email_processed_at = COALESCE(email_processed_at, :occurred_at),
+                        email_sent_at = COALESCE(email_sent_at, :occurred_at)
                     WHERE id = :reply_id
                 """
                 await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
