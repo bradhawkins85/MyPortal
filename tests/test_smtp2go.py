@@ -345,6 +345,60 @@ async def test_send_email_via_api_unknown_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_send_email_via_api_success_without_error_code(monkeypatch):
+    """Ensure successful responses without error_code are treated as success."""
+
+    class MockResponse:
+        def __init__(self):
+            self.status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "data": {
+                    "request_id": "abc123",
+                    "succeeded": 1,
+                    "failed": 0,
+                    "errors": [],
+                }
+            }
+
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, url, json=None):
+            return MockResponse()
+
+    async def mock_get_module_settings(slug):
+        return {"api_key": "test-api-key"}
+
+    from app.services import modules as modules_service
+    monkeypatch.setattr(modules_service, "get_module_settings", mock_get_module_settings)
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+    result = await smtp2go.send_email_via_api(
+        to=["test@example.com"],
+        subject="Test Subject",
+        html_body="<p>Test body</p>",
+        sender="sender@example.com",
+    )
+
+    assert result["email_id"] == "abc123"
+
+
+@pytest.mark.asyncio
 async def test_send_email_via_api_missing_sender(monkeypatch):
     """Test that missing sender raises appropriate error."""
     
