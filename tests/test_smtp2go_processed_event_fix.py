@@ -107,33 +107,36 @@ async def test_rejected_event_creates_tracking_entry(client):
 
 
 @pytest.mark.asyncio
-async def test_processed_event_not_found_returns_failure(client):
-    """Test that a 'processed' event for unknown email returns failure (not error)."""
+async def test_processed_event_not_found_is_recorded(client):
+    """Test that a 'processed' event for unknown email is still recorded."""
     processed_event = {
         "email_id": "unknown-smtp2go-id",
         "event": "processed",
         "timestamp": "2024-01-15T10:32:00Z"
     }
-    
+
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
          patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
          patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
-        
+
         # Mock no webhook secret configured
         mock_settings.return_value = None
-        
-        # Mock processing failure - email not found
-        mock_process.return_value = None
-        
+
+        # Mock successful recording even without a matching ticket reply
+        mock_process.return_value = {
+            'id': 321,
+            'tracking_id': 'unknown-smtp2go-id',
+            'event_type': 'processed',
+        }
+
         # Send the processed event
         response = client.post(
             "/api/webhooks/smtp2go/events",
             json=processed_event,
         )
-        
-        # Verify graceful failure (not a 500 error)
+
+        # Verify successful processing
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "failed"
-        assert "error" in data
-        assert "unknown email ID or message not tracked" in data["error"]
+        assert data["status"] == "success"
+        assert data["processed"] == 1
