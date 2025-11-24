@@ -150,8 +150,66 @@ async def test_send_email_via_api_success(monkeypatch):
         text_body="Test body",
         sender="sender@example.com",  # Explicitly provide sender
     )
-    
+
     assert result["email_id"] == "test-message-id-123"
+    assert result["error_code"] == "SUCCESS"
+
+
+@pytest.mark.asyncio
+async def test_send_email_via_api_flattens_response_envelope(monkeypatch):
+    """Ensure nested response envelopes expose tracking identifiers."""
+
+    class MockResponse:
+        def __init__(self):
+            self.status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "data": {
+                    "result": "success",
+                    "response": {
+                        "email_id": "nested-email-id-789",
+                        "tracking_id": "nested-track-id-456",
+                        "error_code": "SUCCESS",
+                    },
+                }
+            }
+
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, url, json=None):
+            return MockResponse()
+
+    async def mock_get_module_settings(slug):
+        return {"api_key": "test-api-key-123"}
+
+    from app.services import modules as modules_service
+
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    monkeypatch.setattr(modules_service, "get_module_settings", mock_get_module_settings)
+
+    result = await smtp2go.send_email_via_api(
+        to=["recipient@example.com"],
+        subject="Nested Response Test",
+        html_body="<p>Test body</p>",
+        text_body="Test body",
+        sender="sender@example.com",
+    )
+
+    assert result["email_id"] == "nested-email-id-789"
+    assert result["tracking_id"] == "nested-track-id-456"
     assert result["error_code"] == "SUCCESS"
 
 
