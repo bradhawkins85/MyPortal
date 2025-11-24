@@ -86,18 +86,23 @@ async def test_record_email_sent_with_only_tracking_id(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_modules_invoke_smtp2go_records_without_message_id(monkeypatch):
-    """Test that _invoke_smtp2go records tracking even when smtp2go_message_id is missing."""
+    """Test that _invoke_smtp2go does NOT record tracking when smtp2go_message_id is missing.
+    
+    With the updated tracking flow, smtp2go_message_id is required for webhook correlation.
+    If smtp2go_message_id is not available, tracking data is not stored immediately
+    (it will be set when the webhook 'processed' event arrives).
+    """
     from app.services import modules as modules_service
     from app.services import smtp2go
     
     # Track what was recorded
     record_calls = []
     
-    async def mock_record_email_sent(**kwargs):
+    async def mock_record_smtp2go_message_id(**kwargs):
         record_calls.append(kwargs)
     
     # Mock the record function
-    monkeypatch.setattr(smtp2go, "record_email_sent", mock_record_email_sent)
+    monkeypatch.setattr(smtp2go, "record_smtp2go_message_id", mock_record_smtp2go_message_id)
     
     # Mock send_email_via_api to return a result WITHOUT smtp2go_message_id
     async def mock_send_email_via_api(**kwargs):
@@ -137,16 +142,19 @@ async def test_modules_invoke_smtp2go_records_without_message_id(monkeypatch):
     
     result = await modules_service._invoke_smtp2go(settings, payload)
     
-    # Verify that record_email_sent was called even without smtp2go_message_id
-    assert len(record_calls) == 1
-    assert record_calls[0]['ticket_reply_id'] == 789
-    assert record_calls[0]['tracking_id'] == "generated-tracking-id"
-    assert record_calls[0]['smtp2go_message_id'] is None
+    # With the new tracking flow, record_smtp2go_message_id should NOT be called
+    # when smtp2go_message_id is missing (nothing to correlate with webhooks)
+    assert len(record_calls) == 0
 
 
 @pytest.mark.asyncio
 async def test_email_service_records_without_message_id(monkeypatch):
-    """Test that send_email records tracking even when smtp2go_message_id is missing."""
+    """Test that send_email does NOT record tracking when smtp2go_message_id is missing.
+    
+    With the updated tracking flow, smtp2go_message_id is required for webhook correlation.
+    If smtp2go_message_id is not available, tracking data is not stored immediately
+    (it will be set when the webhook 'processed' event arrives).
+    """
     from app.services import email as email_service
     from app.services import smtp2go
     from app.services import modules as modules_service
@@ -154,10 +162,10 @@ async def test_email_service_records_without_message_id(monkeypatch):
     # Track what was recorded
     record_calls = []
     
-    async def mock_record_email_sent(**kwargs):
+    async def mock_record_smtp2go_message_id(**kwargs):
         record_calls.append(kwargs)
     
-    monkeypatch.setattr(smtp2go, "record_email_sent", mock_record_email_sent)
+    monkeypatch.setattr(smtp2go, "record_smtp2go_message_id", mock_record_smtp2go_message_id)
     
     # Mock send_email_via_api to return a result WITHOUT smtp2go_message_id
     async def mock_send_email_via_api(**kwargs):
@@ -192,13 +200,10 @@ async def test_email_service_records_without_message_id(monkeypatch):
         ticket_reply_id=999,
     )
     
-    # Verify that record_email_sent was called even without smtp2go_message_id
+    # With the new tracking flow, record_smtp2go_message_id should NOT be called
+    # when smtp2go_message_id is missing (nothing to correlate with webhooks)
     assert success is True
-    assert len(record_calls) == 1
-    assert record_calls[0]['ticket_reply_id'] == 999
-    assert record_calls[0]['tracking_id'] == "email-tracking-id"
-    # smtp2go_message_id should be None since it wasn't in the API response
-    assert record_calls[0]['smtp2go_message_id'] is None
+    assert len(record_calls) == 0
 
 
 @pytest.mark.asyncio

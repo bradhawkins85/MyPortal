@@ -109,19 +109,20 @@ async def send_email(
             # Record tracking metadata if ticket reply ID provided
             smtp2go_message_id = result.get("smtp2go_message_id") or result.get("email_id")
             response_tracking_id = result.get("tracking_id") or tracking_id
-            # Store tracking data if we have at least the ticket_reply_id and tracking_id
-            # smtp2go_message_id is optional but should be stored if available
-            if ticket_reply_id and response_tracking_id:
-                await smtp2go.record_email_sent(
+            # Store smtp2go_message_id and tracking_id for webhook correlation
+            # email_sent_at will be set when the 'processed' webhook event arrives
+            if ticket_reply_id and response_tracking_id and smtp2go_message_id:
+                await smtp2go.record_smtp2go_message_id(
                     ticket_reply_id=ticket_reply_id,
                     tracking_id=response_tracking_id,
                     smtp2go_message_id=smtp2go_message_id,
                 )
             elif ticket_reply_id:
                 logger.warning(
-                    "SMTP2Go email sent but tracking ID not available for storage",
+                    "SMTP2Go email sent but tracking data not available for storage",
                     ticket_reply_id=ticket_reply_id,
                     has_smtp2go_message_id=smtp2go_message_id is not None,
+                    has_tracking_id=response_tracking_id is not None,
                 )
             
             logger.info(

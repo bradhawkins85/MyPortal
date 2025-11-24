@@ -759,13 +759,13 @@ def test_send_email_records_response_tracking(monkeypatch):
 
     monkeypatch.setattr(modules_service, "get_module", mock_get_module)
 
-    # Capture metadata passed to record_email_sent
+    # Capture metadata passed to record_smtp2go_message_id
     recorded_metadata = {}
 
-    async def mock_record_sent(**kwargs):
+    async def mock_record_message_id(**kwargs):
         recorded_metadata.update(kwargs)
 
-    monkeypatch.setattr(smtp2go, "record_email_sent", mock_record_sent)
+    monkeypatch.setattr(smtp2go, "record_smtp2go_message_id", mock_record_message_id)
 
     # Mock SMTP2Go send_email_via_api to return response IDs
     async def mock_smtp2go_send(**kwargs):
@@ -797,7 +797,8 @@ def test_send_email_records_response_tracking(monkeypatch):
     sent, metadata = result
     assert sent is True
     assert metadata["provider"] == "smtp2go"
-    # Ensure the response tracking values were persisted
+    # Ensure the response tracking values were persisted via record_smtp2go_message_id
+    # Note: email_sent_at is now set when the 'processed' webhook arrives, not at send time
     assert recorded_metadata == {
         "ticket_reply_id": 42,
         "tracking_id": "resp-track-456",
