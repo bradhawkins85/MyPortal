@@ -199,6 +199,26 @@ If webhook verification fails:
 3. Ensure webhooks are properly configured in SMTP2Go
 4. Review email_tracking_events table for recorded events
 
+### Tracking Data Not Being Saved
+
+If emails are sent successfully but tracking data is not persisted in the database:
+
+1. **Check Migration Status**: Ensure migration `143_smtp2go_tracking.sql` has been applied
+   - Verify these columns exist in `ticket_replies` table:
+     - `email_tracking_id`
+     - `smtp2go_message_id`
+     - `email_sent_at`
+     - `email_delivered_at`
+     - `email_bounced_at`
+2. **Review Application Logs**: Search for errors with "Failed to record SMTP2Go email metadata"
+   - With improved logging (Nov 2025+), logs now include full exception details
+   - Look for database errors like "Unknown column" or "field list" errors
+3. **Verify Database Permissions**: Ensure the application has UPDATE permissions on `ticket_replies`
+4. **Check for Silent Failures**: 
+   - If using older versions, database errors may be logged but not surfaced
+   - Upgrade to latest version for improved error visibility
+5. **Note**: As of the latest update, tracking is persisted even if SMTP2Go doesn't return a message ID in the API response
+
 ### Fallback to SMTP Relay
 
 If SMTP2Go API fails, the system automatically falls back to SMTP relay:
