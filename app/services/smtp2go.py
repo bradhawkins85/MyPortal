@@ -394,10 +394,17 @@ async def send_email_via_api(
             response.raise_for_status()
             result = response.json()
         
+        data = result.get("data", {})
+
+        # Normalize message ID field for downstream tracking logic
+        message_id = data.get("email_id") or data.get("message_id") or data.get("messageid")
+        if message_id and not data.get("email_id"):
+            data["email_id"] = message_id
+
         # Check if request was successful
-        if result.get("data", {}).get("error_code") != "SUCCESS":
-            error_msg = result.get("data", {}).get("error", "Unknown error")
-            error_code = result.get("data", {}).get("error_code", "UNKNOWN")
+        if data.get("error_code") != "SUCCESS":
+            error_msg = data.get("error", "Unknown error")
+            error_code = data.get("error_code", "UNKNOWN")
             logger.error(
                 "SMTP2Go API returned error",
                 subject=subject,
@@ -406,17 +413,17 @@ async def send_email_via_api(
                 error_message=error_msg,
             )
             raise SMTP2GoError(f"SMTP2Go API error [{error_code}]: {error_msg}")
-        
+
         logger.info(
             "Email sent via SMTP2Go API",
             subject=subject,
             recipients=to,
             sender=sender_address,
-            message_id=result.get("data", {}).get("email_id"),
+            message_id=data.get("email_id"),
             tracking_id=tracking_id,
         )
-        
-        return result.get("data", {})
+
+        return data
         
     except SMTP2GoError:
         # Re-raise SMTP2GoError exceptions without wrapping

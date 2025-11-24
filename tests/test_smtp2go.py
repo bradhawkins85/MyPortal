@@ -156,6 +156,57 @@ async def test_send_email_via_api_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_send_email_via_api_normalizes_message_id(monkeypatch):
+    """Ensure message_id responses are normalized to email_id for tracking."""
+
+    class MockResponse:
+        def __init__(self):
+            self.status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "data": {
+                    "error_code": "SUCCESS",
+                    "message_id": "legacy-message-id-456",
+                }
+            }
+
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, url, json=None):
+            return MockResponse()
+
+    async def mock_get_module_settings(slug):
+        return {"api_key": "test-api-key-123"}
+
+    from app.services import modules as modules_service
+    monkeypatch.setattr(modules_service, "get_module_settings", mock_get_module_settings)
+
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+    result = await smtp2go.send_email_via_api(
+        to=["user@example.com"],
+        subject="Subject",
+        html_body="<p>Body</p>",
+    )
+
+    assert result["email_id"] == "legacy-message-id-456"
+    assert result.get("message_id") == "legacy-message-id-456"
+
+
+@pytest.mark.asyncio
 async def test_send_email_via_api_failure(monkeypatch):
     """Test handling of SMTP2Go API errors."""
     
