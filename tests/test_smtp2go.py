@@ -200,6 +200,7 @@ async def test_send_email_via_api_normalizes_message_id(monkeypatch):
         to=["user@example.com"],
         subject="Subject",
         html_body="<p>Body</p>",
+        sender="noreply@example.com",  # Add sender to fix test
     )
 
     assert result["email_id"] == "legacy-message-id-456"
