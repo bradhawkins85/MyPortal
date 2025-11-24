@@ -397,14 +397,38 @@ async def send_email_via_api(
         data = result.get("data", {})
 
         # Normalize message ID field for downstream tracking logic
-        message_id = data.get("email_id") or data.get("message_id") or data.get("messageid")
+        message_id = (
+            data.get("email_id")
+            or data.get("message_id")
+            or data.get("messageid")
+            or data.get("request_id")
+        )
         if message_id and not data.get("email_id"):
             data["email_id"] = message_id
 
-        # Check if request was successful
-        if data.get("error_code") != "SUCCESS":
-            error_msg = data.get("error", "Unknown error")
-            error_code = data.get("error_code", "UNKNOWN")
+        # Check if request was successful. SMTP2Go returns different shapes for
+        # successful responses: some include error_code="SUCCESS", others just
+        # return succeeded/failed counts with no error_code field. Treat any 200
+        # response without explicit errors or failures as success.
+        error_code = data.get("error_code")
+        error_msg = data.get("error")
+        errors_list = data.get("errors")
+        failed_count = data.get("failed")
+        result_status = data.get("result")
+
+        success_response = (
+            (error_code is None or error_code == "SUCCESS")
+            and not error_msg
+            and (not errors_list or len(errors_list) == 0)
+            and (failed_count is None or failed_count == 0)
+            and (result_status is None or str(result_status).lower() == "success")
+        )
+
+        if not success_response:
+            error_msg = error_msg or (
+                errors_list[0] if isinstance(errors_list, list) and errors_list else "Unknown error"
+            )
+            error_code = error_code or "UNKNOWN"
             logger.error(
                 "SMTP2Go API returned error",
                 subject=subject,
