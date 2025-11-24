@@ -61,7 +61,7 @@ async def test_record_email_sent_without_smtp2go_message_id(monkeypatch):
     await smtp2go.record_email_sent(
         ticket_reply_id=42,
         tracking_id="test-tracking-id-123",
-        smtp2go_message_id=None,  # Explicitly None
+        smtp2go_message_id=None,
     )
     
     # Verify the database was updated
