@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -75,10 +76,11 @@ async def verify_webhook_signature(
     is_valid = hmac.compare_digest(signature_to_check, expected)
     
     if not is_valid:
+        # Log truncated signatures to avoid exposing sensitive data
         logger.warning(
             "Signature mismatch",
-            expected_full=expected,
-            received_full=signature_to_check,
+            expected_prefix=expected[:16] + "...",
+            received_prefix=signature_to_check[:16] + "...",
             payload_sample=payload[:200].decode('utf-8', errors='replace') if len(payload) > 0 else "",
         )
     
@@ -156,7 +158,6 @@ async def smtp2go_webhook(
     
     # Parse the JSON body manually now that signature is verified
     try:
-        import json
         event = json.loads(raw_body)
     except json.JSONDecodeError as exc:
         logger.error("Failed to parse SMTP2Go webhook JSON", error=str(exc))
