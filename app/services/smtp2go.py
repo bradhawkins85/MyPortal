@@ -590,24 +590,32 @@ async def process_webhook_event(
         WHERE smtp2go_message_id = :smtp2go_message_id
         LIMIT 1
     """
-    
+
     try:
         reply = await db.fetch_one(lookup_query, {'smtp2go_message_id': smtp2go_message_id})
-        if not reply:
+        tracking_id = None
+        reply_id = None
+
+        if reply:
+            tracking_id = reply['email_tracking_id']
+            reply_id = reply['id']
+        else:
+            # Record the webhook event even if we cannot find a matching ticket reply
+            # Use the SMTP2Go email/message ID as a fallback tracking identifier
+            fallback_tracking_id = smtp2go_message_id or event_data.get('message-id') or event_data.get('id')
+            if isinstance(fallback_tracking_id, str):
+                tracking_id = fallback_tracking_id[:64]  # Ensure it fits the column size
+
             logger.warning(
-                "Webhook received for unknown SMTP2Go message",
+                "Webhook received for unknown SMTP2Go message; recording event without ticket reply link",
                 smtp2go_message_id=smtp2go_message_id,
                 event_type=event_type,
             )
-            return None
-        
-        tracking_id = reply['email_tracking_id']
-        reply_id = reply['id']
-        
+
         # Map SMTP2Go event types to our event types
         internal_event_type = None
         event_url = None
-        
+
         if normalized_event_type in ['processed']:
             internal_event_type = 'processed'
         elif normalized_event_type in ['delivered', 'delivery']:
@@ -631,7 +639,11 @@ async def process_webhook_event(
                 smtp2go_message_id=smtp2go_message_id,
             )
             return None
-        
+
+        # If we still don't have a tracking ID, fall back to a generated value to satisfy NOT NULL constraint
+        if not tracking_id:
+            tracking_id = f"smtp2go-{smtp2go_message_id or 'unknown'}"
+
         # Insert tracking event
         insert_query = """
             INSERT INTO email_tracking_events
@@ -647,47 +659,48 @@ async def process_webhook_event(
             'occurred_at': occurred_at,
             'smtp2go_data': json.dumps(event_data) if event_data else None,  # Store full webhook data for debugging
         }
-        
+
         event_id = await db.execute(insert_query, insert_params)
-        
-        # Update ticket_replies based on event type
-        if internal_event_type == 'processed':
-            update_query = """
-                UPDATE ticket_replies
-                SET email_processed_at = COALESCE(email_processed_at, :occurred_at)
-                WHERE id = :reply_id
-            """
-            await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
-        elif internal_event_type == 'delivered':
-            update_query = """
-                UPDATE ticket_replies
-                SET email_delivered_at = COALESCE(email_delivered_at, :occurred_at)
-                WHERE id = :reply_id
-            """
-            await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
-        elif internal_event_type == 'open':
-            update_query = """
-                UPDATE ticket_replies
-                SET email_opened_at = COALESCE(email_opened_at, :occurred_at),
-                    email_open_count = email_open_count + 1
-                WHERE id = :reply_id
-            """
-            await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
-        elif internal_event_type == 'bounce':
-            update_query = """
-                UPDATE ticket_replies
-                SET email_bounced_at = COALESCE(email_bounced_at, :occurred_at)
-                WHERE id = :reply_id
-            """
-            await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
-        elif internal_event_type == 'rejected':
-            update_query = """
-                UPDATE ticket_replies
-                SET email_rejected_at = COALESCE(email_rejected_at, :occurred_at)
-                WHERE id = :reply_id
-            """
-            await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
-        
+
+        # Update ticket_replies based on event type when a reply is found
+        if reply_id is not None:
+            if internal_event_type == 'processed':
+                update_query = """
+                    UPDATE ticket_replies
+                    SET email_processed_at = COALESCE(email_processed_at, :occurred_at)
+                    WHERE id = :reply_id
+                """
+                await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
+            elif internal_event_type == 'delivered':
+                update_query = """
+                    UPDATE ticket_replies
+                    SET email_delivered_at = COALESCE(email_delivered_at, :occurred_at)
+                    WHERE id = :reply_id
+                """
+                await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
+            elif internal_event_type == 'open':
+                update_query = """
+                    UPDATE ticket_replies
+                    SET email_opened_at = COALESCE(email_opened_at, :occurred_at),
+                        email_open_count = email_open_count + 1
+                    WHERE id = :reply_id
+                """
+                await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
+            elif internal_event_type == 'bounce':
+                update_query = """
+                    UPDATE ticket_replies
+                    SET email_bounced_at = COALESCE(email_bounced_at, :occurred_at)
+                    WHERE id = :reply_id
+                """
+                await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
+            elif internal_event_type == 'rejected':
+                update_query = """
+                    UPDATE ticket_replies
+                    SET email_rejected_at = COALESCE(email_rejected_at, :occurred_at)
+                    WHERE id = :reply_id
+                """
+                await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
+
         logger.info(
             "Processed SMTP2Go webhook event",
             event_id=event_id,
@@ -695,14 +708,14 @@ async def process_webhook_event(
             event_type=internal_event_type,
             smtp2go_message_id=smtp2go_message_id,
         )
-        
+
         return {
             'id': event_id,
             'tracking_id': tracking_id,
             'event_type': internal_event_type,
             'occurred_at': occurred_at,
         }
-        
+
     except Exception as exc:
         logger.error(
             "Failed to process SMTP2Go webhook",
