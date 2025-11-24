@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from loguru import logger
 
 from app.services import smtp2go
@@ -37,6 +38,7 @@ async def verify_webhook_signature(
         True if signature is valid, False otherwise
     """
     if not signature or not secret:
+        logger.debug("Signature verification skipped - missing signature or secret")
         return False
     
     # SMTP2Go uses HMAC-SHA256 for webhook signatures
@@ -46,13 +48,48 @@ async def verify_webhook_signature(
         hashlib.sha256
     ).hexdigest()
     
-    return hmac.compare_digest(signature, expected)
+    # Some webhook providers prefix their signatures (e.g., "sha256=...")
+    # Try both with and without prefix
+    signature_to_check = signature
+    if '=' in signature:
+        # Extract the actual signature after the prefix
+        parts = signature.split('=', 1)
+        if len(parts) == 2:
+            signature_to_check = parts[1]
+            logger.debug(
+                "Signature has prefix, extracting",
+                prefix=parts[0],
+                extracted_signature=signature_to_check[:16] + "..."
+            )
+    
+    # Log signature details for debugging
+    logger.debug(
+        "Webhook signature verification details",
+        payload_length=len(payload),
+        payload_preview=payload[:100].decode('utf-8', errors='replace') if len(payload) > 0 else "",
+        signature_length=len(signature_to_check),
+        expected_signature=expected[:16] + "..." if len(expected) > 16 else expected,
+        received_signature=signature_to_check[:16] + "..." if len(signature_to_check) > 16 else signature_to_check,
+    )
+    
+    # Compare signatures using constant-time comparison
+    is_valid = hmac.compare_digest(signature_to_check, expected)
+    
+    if not is_valid:
+        # Log truncated signatures to avoid exposing sensitive data
+        logger.warning(
+            "Signature mismatch",
+            expected_prefix=expected[:16] + "...",
+            received_prefix=signature_to_check[:16] + "...",
+            payload_sample=payload[:200].decode('utf-8', errors='replace') if len(payload) > 0 else "",
+        )
+    
+    return is_valid
 
 
 @router.post("/events", include_in_schema=False)
 async def smtp2go_webhook(
     request: Request,
-    event: Annotated[dict | list[dict], Body()],
     x_smtp2go_signature: Annotated[str | None, Header()] = None,
 ) -> dict:
     """Handle webhook events from SMTP2Go.
@@ -66,7 +103,6 @@ async def smtp2go_webhook(
     
     Args:
         request: FastAPI request object
-        event: Single event object from SMTP2Go
         x_smtp2go_signature: Webhook signature for verification
         
     Returns:
@@ -80,23 +116,28 @@ async def smtp2go_webhook(
     source_url = str(request.url)
     request_headers = dict(request.headers)
     
+    # Read raw body FIRST before any parsing
+    # This ensures we have the exact bytes that SMTP2Go signed
+    raw_body = await request.body()
+    
     try:
         module_settings = await modules_service.get_module_settings('smtp2go')
         webhook_secret = module_settings.get('webhook_secret') if module_settings else None
         
         # Verify webhook signature if secret is configured
         if webhook_secret:
-            body = await request.body()
-            if not await verify_webhook_signature(body, x_smtp2go_signature, webhook_secret):
+            if not await verify_webhook_signature(raw_body, x_smtp2go_signature, webhook_secret):
                 logger.warning(
                     "SMTP2Go webhook signature verification failed",
                     has_signature=x_smtp2go_signature is not None,
+                    signature_preview=x_smtp2go_signature[:16] + "..." if x_smtp2go_signature and len(x_smtp2go_signature) > 16 else x_smtp2go_signature,
+                    body_length=len(raw_body),
                 )
                 # Log the failed verification
                 await webhook_monitor.log_incoming_webhook(
                     name="SMTP2Go Webhook - Signature Verification Failed",
                     source_url=source_url,
-                    payload=event,
+                    payload=raw_body.decode('utf-8', errors='replace')[:1000],  # Log truncated body
                     headers=request_headers,
                     response_status=401,
                     response_body="Invalid webhook signature",
@@ -114,6 +155,22 @@ async def smtp2go_webhook(
             error=str(exc),
         )
         # Continue processing even if verification fails to avoid losing events
+    
+    # Parse the JSON body manually now that signature is verified
+    try:
+        event = json.loads(raw_body)
+    except json.JSONDecodeError as exc:
+        logger.error("Failed to parse SMTP2Go webhook JSON", error=str(exc))
+        await webhook_monitor.log_incoming_webhook(
+            name="SMTP2Go Webhook - Invalid JSON",
+            source_url=source_url,
+            payload=raw_body.decode('utf-8', errors='replace')[:1000],
+            headers=request_headers,
+            response_status=400,
+            response_body="Invalid JSON payload",
+            error_message=str(exc),
+        )
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
     
     # Normalise payload to a list to support both single events and batched events
     events: list[dict]
