@@ -545,7 +545,10 @@ async def record_email_sent(
             "Failed to record SMTP2Go email metadata",
             reply_id=ticket_reply_id,
             tracking_id=tracking_id,
+            smtp2go_message_id=smtp2go_message_id,
             error=str(exc),
+            error_type=type(exc).__name__,
+            exc_info=True,
         )
 
 
