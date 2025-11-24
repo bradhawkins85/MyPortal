@@ -1572,11 +1572,12 @@ async def _invoke_smtp2go(
             tracking_id=tracking_id,
         )
 
-        smtp2go_message_id = result.get("email_id")
-        if enable_tracking and ticket_reply_id and smtp2go_message_id:
+        smtp2go_message_id = result.get("smtp2go_message_id") or result.get("email_id")
+        response_tracking_id = result.get("tracking_id") or tracking_id
+        if enable_tracking and ticket_reply_id and smtp2go_message_id and response_tracking_id:
             await smtp2go.record_email_sent(
                 ticket_reply_id=ticket_reply_id,
-                tracking_id=tracking_id or smtp2go.generate_tracking_id(),
+                tracking_id=response_tracking_id,
                 smtp2go_message_id=smtp2go_message_id,
             )
     except Exception as exc:  # pragma: no cover - defensive logging
@@ -1598,7 +1599,7 @@ async def _invoke_smtp2go(
             "recipients": recipients,
             "subject": subject,
             "smtp2go_message_id": smtp2go_message_id,
-            "tracking_id": tracking_id,
+            "tracking_id": response_tracking_id,
         }
     )
     updated_event = await _record_success(
@@ -1613,7 +1614,7 @@ async def _invoke_smtp2go(
             "recipients": recipients,
             "subject": subject,
             "smtp2go_message_id": smtp2go_message_id,
-            "tracking_id": tracking_id,
+            "tracking_id": response_tracking_id,
         },
     )
 

@@ -680,3 +680,67 @@ def test_send_email_uses_smtp2go_when_enabled(monkeypatch):
     assert metadata["provider"] == "smtp2go"
     assert captured_smtp2go_call["subject"] == "Test Subject"
     assert "called" not in captured_smtp_call  # SMTP relay not called
+
+
+def test_send_email_records_response_tracking(monkeypatch):
+    """Ensure SMTP2Go response tracking IDs are persisted when provided."""
+
+    from app.services import email as email_service
+    from app.services import modules as modules_service
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+
+    # Mock SMTP2Go module as enabled
+    async def mock_get_module(slug, *, redact=True):
+        if slug == "smtp2go":
+            return {"slug": slug, "enabled": True}
+        return None
+
+    monkeypatch.setattr(modules_service, "get_module", mock_get_module)
+
+    # Capture metadata passed to record_email_sent
+    recorded_metadata = {}
+
+    async def mock_record_sent(**kwargs):
+        recorded_metadata.update(kwargs)
+
+    monkeypatch.setattr(smtp2go, "record_email_sent", mock_record_sent)
+
+    # Mock SMTP2Go send_email_via_api to return response IDs
+    async def mock_smtp2go_send(**kwargs):
+        return {
+            "smtp2go_message_id": "smtp2go-123",
+            "tracking_id": "resp-track-456",
+            "error_code": "SUCCESS",
+        }
+
+    monkeypatch.setattr(smtp2go, "send_email_via_api", mock_smtp2go_send)
+
+    # Mock SMTP to ensure it is not used
+    class DummySMTP:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("SMTP relay should not be called when SMTP2Go is enabled")
+
+    monkeypatch.setattr(email_service.smtplib, "SMTP", DummySMTP)
+
+    result = asyncio.run(
+        email_service.send_email(
+            subject="Test Subject",
+            recipients=["test@example.com"],
+            html_body="<p>Test body</p>",
+            text_body="Test body",
+            ticket_reply_id=42,
+        )
+    )
+
+    sent, metadata = result
+    assert sent is True
+    assert metadata["provider"] == "smtp2go"
+    # Ensure the response tracking values were persisted
+    assert recorded_metadata == {
+        "ticket_reply_id": 42,
+        "tracking_id": "resp-track-456",
+        "smtp2go_message_id": "smtp2go-123",
+    }
