@@ -105,13 +105,14 @@ async def send_email(
                 reply_to=reply_to,
                 tracking_id=tracking_id,
             )
-            
+
             # Record tracking metadata if ticket reply ID provided
-            smtp2go_message_id = result.get("email_id")
-            if tracking_id and ticket_reply_id and smtp2go_message_id:
+            smtp2go_message_id = result.get("smtp2go_message_id") or result.get("email_id")
+            response_tracking_id = result.get("tracking_id") or tracking_id
+            if response_tracking_id and ticket_reply_id and smtp2go_message_id:
                 await smtp2go.record_email_sent(
                     ticket_reply_id=ticket_reply_id,
-                    tracking_id=tracking_id,
+                    tracking_id=response_tracking_id,
                     smtp2go_message_id=smtp2go_message_id,
                 )
             

@@ -393,18 +393,31 @@ async def send_email_via_api(
             
             response.raise_for_status()
             result = response.json()
-        
-        data = result.get("data", {})
 
-        # Normalize message ID field for downstream tracking logic
+        # SMTP2Go responses may include the data directly at the top level or
+        # within a "data" envelope. Normalise this so downstream logic has a
+        # consistent dict to work with.
+        data = result.get("data") if isinstance(result, dict) else None
+        if not isinstance(data, dict):
+            data = result if isinstance(result, dict) else {}
+
+        # Normalise message ID field for downstream tracking logic
         message_id = (
-            data.get("email_id")
+            data.get("smtp2go_message_id")
+            or data.get("email_id")
             or data.get("message_id")
             or data.get("messageid")
             or data.get("request_id")
         )
         if message_id and not data.get("email_id"):
             data["email_id"] = message_id
+        if message_id and not data.get("smtp2go_message_id"):
+            data["smtp2go_message_id"] = message_id
+
+        # Normalise tracking ID so callers can persist it
+        response_tracking_id = data.get("tracking_id") or tracking_id
+        if response_tracking_id and not data.get("tracking_id"):
+            data["tracking_id"] = response_tracking_id
 
         # Check if request was successful. SMTP2Go returns different shapes for
         # successful responses: some include error_code="SUCCESS", others just
@@ -444,7 +457,7 @@ async def send_email_via_api(
             recipients=to,
             sender=sender_address,
             message_id=data.get("email_id"),
-            tracking_id=tracking_id,
+            tracking_id=response_tracking_id,
         )
 
         return data
