@@ -13,9 +13,9 @@ ADD INDEX IF NOT EXISTS idx_tickets_split_from (split_from_ticket_id);
 
 -- Add foreign key constraints
 ALTER TABLE tickets
-ADD CONSTRAINT IF NOT EXISTS fk_tickets_merged_into
+ADD CONSTRAINT fk_tickets_merged_into
     FOREIGN KEY (merged_into_ticket_id) REFERENCES tickets(id) ON DELETE SET NULL;
 
 ALTER TABLE tickets
-ADD CONSTRAINT IF NOT EXISTS fk_tickets_split_from
+ADD CONSTRAINT fk_tickets_split_from
     FOREIGN KEY (split_from_ticket_id) REFERENCES tickets(id) ON DELETE SET NULL;
