@@ -9,6 +9,7 @@ Handles webhook callbacks from SMTP2Go for:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -41,26 +42,29 @@ async def verify_webhook_signature(
         logger.debug("Signature verification skipped - missing signature or secret")
         return False
     
-    # SMTP2Go uses HMAC-SHA256 for webhook signatures
-    expected = hmac.new(
+    # SMTP2Go uses HMAC-SHA256 for webhook signatures. The signature header may
+    # be provided either as a hex digest or base64 encoded value depending on
+    # the caller, so we validate against both encodings to avoid false
+    # negatives when SMTP2Go changes format or integrations proxy webhooks.
+    hmac_bytes = hmac.new(
         secret.encode('utf-8'),
         payload,
         hashlib.sha256
-    ).hexdigest()
+    ).digest()
+    expected_hex = hmac_bytes.hex()
+    expected_base64 = base64.b64encode(hmac_bytes).decode('ascii')
     
-    # Some webhook providers prefix their signatures (e.g., "sha256=...")
-    # Try both with and without prefix
-    signature_to_check = signature
-    if '=' in signature:
-        # Extract the actual signature after the prefix
-        parts = signature.split('=', 1)
-        if len(parts) == 2:
-            signature_to_check = parts[1]
-            logger.debug(
-                "Signature has prefix, extracting",
-                prefix=parts[0],
-                extracted_signature=signature_to_check[:16] + "..."
-            )
+    # Some webhook providers prefix their signatures (e.g., "sha256=..."). Only
+    # strip a known prefix to avoid corrupting base64 signatures that include
+    # padding characters.
+    signature_to_check = signature.strip()
+    if signature_to_check.lower().startswith("sha256="):
+        signature_to_check = signature_to_check.split('=', 1)[1]
+        logger.debug(
+            "Signature has prefix, extracting",
+            prefix="sha256",
+            extracted_signature=signature_to_check[:16] + "..."
+        )
     
     # Log signature details for debugging
     logger.debug(
@@ -68,18 +72,26 @@ async def verify_webhook_signature(
         payload_length=len(payload),
         payload_preview=payload[:100].decode('utf-8', errors='replace') if len(payload) > 0 else "",
         signature_length=len(signature_to_check),
-        expected_signature=expected[:16] + "..." if len(expected) > 16 else expected,
+        expected_signature_hex=expected_hex[:16] + "..." if len(expected_hex) > 16 else expected_hex,
+        expected_signature_base64=expected_base64[:16] + "..." if len(expected_base64) > 16 else expected_base64,
         received_signature=signature_to_check[:16] + "..." if len(signature_to_check) > 16 else signature_to_check,
     )
-    
-    # Compare signatures using constant-time comparison
-    is_valid = hmac.compare_digest(signature_to_check, expected)
+
+    # Compare signatures using constant-time comparison against both supported
+    # encodings. Hex digests from SMTP2Go can be upper or lower case, so we
+    # normalise when comparing.
+    is_valid = (
+        hmac.compare_digest(signature_to_check.lower(), expected_hex)
+        or hmac.compare_digest(signature_to_check.upper(), expected_hex.upper())
+        or hmac.compare_digest(signature_to_check, expected_base64)
+    )
     
     if not is_valid:
         # Log truncated signatures to avoid exposing sensitive data
         logger.warning(
             "Signature mismatch",
-            expected_prefix=expected[:16] + "...",
+            expected_hex_prefix=expected_hex[:16] + "...",
+            expected_base64_prefix=expected_base64[:16] + "...",
             received_prefix=signature_to_check[:16] + "...",
             payload_sample=payload[:200].decode('utf-8', errors='replace') if len(payload) > 0 else "",
         )
