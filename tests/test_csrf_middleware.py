@@ -84,3 +84,33 @@ def test_exempt_path_allows_post_without_csrf():
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_authorization_header_skips_csrf_validation():
+    token_app = FastAPI()
+    token_app.add_middleware(CSRFMiddleware, manager=_dummy_manager)
+
+    @token_app.post("/api/tickets")
+    async def create_ticket():
+        return JSONResponse({"status": "created"})
+
+    token_client = TestClient(token_app)
+    response = token_client.post("/api/tickets", headers={"Authorization": "Bearer abc123"})
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "created"}
+
+
+def test_api_key_header_skips_csrf_validation():
+    key_app = FastAPI()
+    key_app.add_middleware(CSRFMiddleware, manager=_dummy_manager)
+
+    @key_app.post("/api/tickets")
+    async def create_ticket_with_key():
+        return JSONResponse({"status": "created"})
+
+    key_client = TestClient(key_app)
+    response = key_client.post("/api/tickets", headers={"x-api-key": "test-key"})
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "created"}

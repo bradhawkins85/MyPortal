@@ -37,6 +37,16 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         if not self._settings.enable_csrf:
             return await call_next(request)
 
+        # API clients that authenticate with bearer tokens or API keys are not
+        # vulnerable to CSRF because browsers will not automatically attach
+        # those credentials. Skip CSRF validation when an explicit auth header
+        # is present to avoid rejecting legitimate token-based API requests.
+        authorization_header = request.headers.get("authorization", "")
+        if authorization_header.lower().startswith("bearer ") or request.headers.get(
+            "x-api-key"
+        ):
+            return await call_next(request)
+
         if request.method.upper() in SAFE_METHODS:
             return await call_next(request)
 
