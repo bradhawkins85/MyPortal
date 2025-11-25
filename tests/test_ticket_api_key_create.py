@@ -50,7 +50,8 @@ def test_create_ticket_with_api_key_authentication(monkeypatch):
     """Test that POST /api/tickets/ works with API key authentication."""
     now = datetime.now(timezone.utc)
     
-    from app.api.dependencies import api_keys as api_key_deps
+    from app.api.dependencies.api_keys import get_optional_api_key
+    from app.api.dependencies.auth import get_optional_user
     from app.api.dependencies import database as database_deps
     
     # Create a mock API key record
@@ -142,9 +143,10 @@ def test_create_ticket_with_api_key_authentication(monkeypatch):
         return []
     monkeypatch.setattr(attachments_repo, "list_attachments", mock_list_attachments)
     
-    # Override the dependencies
+    # Override the dependencies using the actual imported functions
     app.dependency_overrides[database_deps.require_database] = lambda: None
-    app.dependency_overrides[api_key_deps.get_optional_api_key] = lambda: mock_api_key_record
+    app.dependency_overrides[get_optional_api_key] = lambda: mock_api_key_record
+    app.dependency_overrides[get_optional_user] = lambda: None
     
     try:
         client = TestClient(app)
@@ -172,7 +174,8 @@ def test_create_ticket_with_api_key_authentication(monkeypatch):
 def test_create_ticket_with_api_key_requires_requester_id(monkeypatch):
     """Test that POST /api/tickets/ with API key requires requester_id."""
     
-    from app.api.dependencies import api_keys as api_key_deps
+    from app.api.dependencies.api_keys import get_optional_api_key
+    from app.api.dependencies.auth import get_optional_user
     from app.api.dependencies import database as database_deps
     
     # Create a mock API key record
@@ -185,9 +188,10 @@ def test_create_ticket_with_api_key_requires_requester_id(monkeypatch):
         "ip_restrictions": [],
     }
     
-    # Override the dependencies
+    # Override the dependencies using the actual imported functions
     app.dependency_overrides[database_deps.require_database] = lambda: None
-    app.dependency_overrides[api_key_deps.get_optional_api_key] = lambda: mock_api_key_record
+    app.dependency_overrides[get_optional_api_key] = lambda: mock_api_key_record
+    app.dependency_overrides[get_optional_user] = lambda: None
     
     try:
         client = TestClient(app)
