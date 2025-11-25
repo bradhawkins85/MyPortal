@@ -13208,6 +13208,10 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
                     status_code=status.HTTP_400_BAD_REQUEST,
                 )
             labour_type_id = labour_candidate
+    if minutes_spent and minutes_spent > 0 and labour_type_id is None:
+        default_labour = await labour_types_service.get_default_labour_type()
+        if default_labour:
+            labour_type_id = default_labour.get("id")
     if not sanitized_body.has_rich_content:
         return await _render_ticket_detail(
             request,
