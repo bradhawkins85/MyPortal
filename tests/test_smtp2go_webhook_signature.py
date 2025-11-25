@@ -35,6 +35,27 @@ def compute_signature(payload_bytes: bytes, secret: str) -> str:
     ).hexdigest()
 
 
+def compute_timestamp_signature(payload_bytes: bytes, secret: str, timestamp: str) -> str:
+    """Compute SMTP2Go's timestamp-based signature format.
+    
+    Args:
+        payload_bytes: Raw request body bytes
+        secret: Webhook secret
+        timestamp: Unix timestamp string
+        
+    Returns:
+        Signature in format: t=<timestamp>,v1=<hex_signature>
+    """
+    # SMTP2Go computes: HMAC-SHA256(secret, "<timestamp>.<payload>")
+    signed_payload = f"{timestamp}.".encode('utf-8') + payload_bytes
+    signature = hmac.new(
+        secret.encode('utf-8'),
+        signed_payload,
+        hashlib.sha256
+    ).hexdigest()
+    return f"t={timestamp},v1={signature}"
+
+
 def test_webhook_with_valid_signature(client):
     """Test webhook with valid signature."""
     webhook_secret = "test-secret-key-12345"
@@ -292,16 +313,8 @@ def test_webhook_with_timestamp_signature(client):
     payload_bytes = payload_str.encode('utf-8')
     timestamp = "1700000000"
     
-    # Compute signature the way SMTP2Go does: HMAC-SHA256(secret, "<timestamp>.<payload>")
-    signed_payload = f"{timestamp}.".encode('utf-8') + payload_bytes
-    signature = hmac.new(
-        webhook_secret.encode('utf-8'),
-        signed_payload,
-        hashlib.sha256
-    ).hexdigest()
-    
-    # Format: t=<timestamp>,v1=<signature>
-    timestamp_signature = f"t={timestamp},v1={signature}"
+    # Use helper function to compute timestamp-based signature
+    timestamp_signature = compute_timestamp_signature(payload_bytes, webhook_secret, timestamp)
 
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
          patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
@@ -332,6 +345,10 @@ def test_webhook_with_timestamp_signature(client):
         assert data["status"] == "success"
 
 
+# Invalid signature constant for testing - 64 hex zeros (SHA256 produces 64 hex chars)
+INVALID_HEX_SIGNATURE = "0" * 64
+
+
 def test_webhook_with_invalid_timestamp_signature(client):
     """Test webhook rejection with invalid timestamp-based signature."""
     webhook_secret = "test-secret-key-12345"
@@ -339,7 +356,7 @@ def test_webhook_with_invalid_timestamp_signature(client):
     payload_bytes = payload_str.encode('utf-8')
     
     # Invalid signature in timestamp format
-    invalid_timestamp_signature = "t=1700000000,v1=" + ("0" * 64)
+    invalid_timestamp_signature = f"t=1700000000,v1={INVALID_HEX_SIGNATURE}"
 
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
          patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
@@ -369,15 +386,11 @@ def test_webhook_with_timestamp_signature_uppercase(client):
     payload_bytes = payload_str.encode('utf-8')
     timestamp = "1700000000"
     
-    # Compute signature and convert to uppercase
-    signed_payload = f"{timestamp}.".encode('utf-8') + payload_bytes
-    signature = hmac.new(
-        webhook_secret.encode('utf-8'),
-        signed_payload,
-        hashlib.sha256
-    ).hexdigest().upper()
-    
-    timestamp_signature = f"t={timestamp},v1={signature}"
+    # Compute timestamp signature and convert to uppercase
+    timestamp_signature = compute_timestamp_signature(payload_bytes, webhook_secret, timestamp)
+    # Extract the signature part and uppercase it
+    parts = timestamp_signature.split(',v1=')
+    timestamp_signature = f"{parts[0]},v1={parts[1].upper()}"
 
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
          patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
