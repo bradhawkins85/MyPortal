@@ -289,6 +289,15 @@ async def smtp2go_webhook(
                     tracking_id=result.get('tracking_id'),
                 )
             else:
+                fallback_result = await smtp2go.record_raw_webhook_event(event_type, event_item)
+                if fallback_result:
+                    processed_count += 1
+                    logger.info(
+                        "SMTP2Go webhook event recorded via fallback handler",
+                        event_type=event_type,
+                        email_id=email_id,
+                        tracking_id=fallback_result.get('tracking_id'),
+                    )
                 logger.warning(
                     "Failed to process SMTP2Go webhook event",
                     event_type=event_type,
