@@ -283,3 +283,126 @@ def test_webhook_with_uppercase_hex_signature(client):
         assert response.status_code == 200, f"Response: {response.text}"
         data = response.json()
         assert data["status"] == "success"
+
+
+def test_webhook_with_timestamp_signature(client):
+    """Test webhook verification with SMTP2Go's timestamp-based signature format."""
+    webhook_secret = "test-secret-key-12345"
+    payload_str = json.dumps(DELIVERED_EVENT, separators=(',', ':'))
+    payload_bytes = payload_str.encode('utf-8')
+    timestamp = "1700000000"
+    
+    # Compute signature the way SMTP2Go does: HMAC-SHA256(secret, "<timestamp>.<payload>")
+    signed_payload = f"{timestamp}.".encode('utf-8') + payload_bytes
+    signature = hmac.new(
+        webhook_secret.encode('utf-8'),
+        signed_payload,
+        hashlib.sha256
+    ).hexdigest()
+    
+    # Format: t=<timestamp>,v1=<signature>
+    timestamp_signature = f"t={timestamp},v1={signature}"
+
+    with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
+
+        mock_settings.return_value = {
+            'api_key': 'test-api-key',
+            'webhook_secret': webhook_secret,
+        }
+
+        mock_process.return_value = {
+            'id': 123,
+            'tracking_id': 'test-tracking-id',
+            'event_type': 'delivered',
+        }
+
+        response = client.post(
+            "/api/webhooks/smtp2go/events",
+            content=payload_bytes,
+            headers={
+                "X-Smtp2go-Signature": timestamp_signature,
+                "Content-Type": "application/json",
+            },
+        )
+
+        assert response.status_code == 200, f"Response: {response.text}"
+        data = response.json()
+        assert data["status"] == "success"
+
+
+def test_webhook_with_invalid_timestamp_signature(client):
+    """Test webhook rejection with invalid timestamp-based signature."""
+    webhook_secret = "test-secret-key-12345"
+    payload_str = json.dumps(DELIVERED_EVENT, separators=(',', ':'))
+    payload_bytes = payload_str.encode('utf-8')
+    
+    # Invalid signature in timestamp format
+    invalid_timestamp_signature = "t=1700000000,v1=" + ("0" * 64)
+
+    with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
+
+        mock_settings.return_value = {
+            'api_key': 'test-api-key',
+            'webhook_secret': webhook_secret,
+        }
+
+        response = client.post(
+            "/api/webhooks/smtp2go/events",
+            content=payload_bytes,
+            headers={
+                "X-Smtp2go-Signature": invalid_timestamp_signature,
+                "Content-Type": "application/json",
+            },
+        )
+
+        assert response.status_code == 401
+        assert "Invalid webhook signature" in response.json()["detail"]
+
+
+def test_webhook_with_timestamp_signature_uppercase(client):
+    """Test webhook verification with uppercase timestamp-based signature."""
+    webhook_secret = "test-secret-key-12345"
+    payload_str = json.dumps(DELIVERED_EVENT, separators=(',', ':'))
+    payload_bytes = payload_str.encode('utf-8')
+    timestamp = "1700000000"
+    
+    # Compute signature and convert to uppercase
+    signed_payload = f"{timestamp}.".encode('utf-8') + payload_bytes
+    signature = hmac.new(
+        webhook_secret.encode('utf-8'),
+        signed_payload,
+        hashlib.sha256
+    ).hexdigest().upper()
+    
+    timestamp_signature = f"t={timestamp},v1={signature}"
+
+    with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
+
+        mock_settings.return_value = {
+            'api_key': 'test-api-key',
+            'webhook_secret': webhook_secret,
+        }
+
+        mock_process.return_value = {
+            'id': 123,
+            'tracking_id': 'test-tracking-id',
+            'event_type': 'delivered',
+        }
+
+        response = client.post(
+            "/api/webhooks/smtp2go/events",
+            content=payload_bytes,
+            headers={
+                "X-Smtp2go-Signature": timestamp_signature,
+                "Content-Type": "application/json",
+            },
+        )
+
+        assert response.status_code == 200, f"Response: {response.text}"
+        data = response.json()
+        assert data["status"] == "success"
