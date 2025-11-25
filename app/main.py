@@ -710,6 +710,9 @@ async def authenticated_swagger_ui(request: Request) -> Response:
         openapi_url=PROTECTED_OPENAPI_PATH,
         title=f"{settings.app_name} API Docs",
         oauth2_redirect_url=None,
+        swagger_js_url="/static/js/swagger-ui-bundle.js",
+        swagger_css_url="/static/css/swagger-ui.css",
+        swagger_favicon_url="/static/favicon.svg",
     )
 
 app.include_router(auth.router)
