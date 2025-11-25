@@ -23,12 +23,42 @@ from app.services import smtp2go
 router = APIRouter(prefix="/api/webhooks/smtp2go", tags=["SMTP2Go Webhooks"])
 
 
+def _parse_timestamp_signature(signature: str) -> tuple[str | None, str | None]:
+    """Parse SMTP2Go timestamp-based signature format: t=<timestamp>,v1=<signature>.
+    
+    Args:
+        signature: Raw signature header value
+        
+    Returns:
+        Tuple of (timestamp, signature_value) or (None, None) if not in this format
+    """
+    parts = {}
+    for part in signature.split(','):
+        if '=' in part:
+            key, value = part.split('=', 1)
+            parts[key.strip()] = value.strip()
+    
+    timestamp = parts.get('t')
+    sig_value = parts.get('v1')
+    
+    if timestamp and sig_value:
+        return timestamp, sig_value
+    return None, None
+
+
 async def verify_webhook_signature(
     payload: bytes,
     signature: str | None,
     secret: str,
 ) -> bool:
     """Verify SMTP2Go webhook signature.
+    
+    Supports multiple signature formats:
+    1. Timestamp-based: t=<timestamp>,v1=<signature> (SMTP2Go's current format)
+       - Signature is HMAC-SHA256(secret, "<timestamp>.<payload>")
+    2. Plain hex digest: HMAC-SHA256 of payload only
+    3. Base64 encoded: Base64 of HMAC-SHA256 digest
+    4. sha256= prefixed: "sha256=<hex_digest>"
     
     Args:
         payload: Raw request body bytes
@@ -42,10 +72,46 @@ async def verify_webhook_signature(
         logger.debug("Signature verification skipped - missing signature or secret")
         return False
     
-    # SMTP2Go uses HMAC-SHA256 for webhook signatures. The signature header may
-    # be provided either as a hex digest or base64 encoded value depending on
-    # the caller, so we validate against both encodings to avoid false
-    # negatives when SMTP2Go changes format or integrations proxy webhooks.
+    signature_to_check = signature.strip()
+    
+    # Check for SMTP2Go's timestamp-based signature format: t=<timestamp>,v1=<signature>
+    # This is the primary format used by SMTP2Go for webhook verification
+    timestamp, sig_value = _parse_timestamp_signature(signature_to_check)
+    if timestamp and sig_value:
+        # SMTP2Go computes: HMAC-SHA256(secret, "<timestamp>.<payload>")
+        signed_payload = f"{timestamp}.".encode('utf-8') + payload
+        expected_sig = hmac.new(
+            secret.encode('utf-8'),
+            signed_payload,
+            hashlib.sha256
+        ).hexdigest()
+        
+        logger.debug(
+            "Verifying timestamp-based signature",
+            timestamp=timestamp,
+            payload_length=len(payload),
+            received_signature_prefix=sig_value[:16] + "..." if len(sig_value) > 16 else sig_value,
+            expected_signature_prefix=expected_sig[:16] + "..." if len(expected_sig) > 16 else expected_sig,
+        )
+        
+        # Compare signatures case-insensitively (hex can be upper or lower case)
+        is_valid = hmac.compare_digest(sig_value.lower(), expected_sig.lower())
+        
+        if is_valid:
+            return True
+        
+        # Log mismatch for debugging
+        logger.warning(
+            "Timestamp-based signature mismatch",
+            timestamp=timestamp,
+            received_prefix=sig_value[:16] + "...",
+            expected_prefix=expected_sig[:16] + "...",
+            payload_sample=payload[:200].decode('utf-8', errors='replace') if len(payload) > 0 else "",
+        )
+        # Fall through to try legacy formats
+    
+    # Legacy format support: HMAC-SHA256 of payload only (no timestamp)
+    # This supports older implementations and testing scenarios
     hmac_bytes = hmac.new(
         secret.encode('utf-8'),
         payload,
@@ -57,7 +123,6 @@ async def verify_webhook_signature(
     # Some webhook providers prefix their signatures (e.g., "sha256=..."). Only
     # strip a known prefix to avoid corrupting base64 signatures that include
     # padding characters.
-    signature_to_check = signature.strip()
     if signature_to_check.lower().startswith("sha256="):
         signature_to_check = signature_to_check.split('=', 1)[1]
         logger.debug(
@@ -68,7 +133,7 @@ async def verify_webhook_signature(
     
     # Log signature details for debugging
     logger.debug(
-        "Webhook signature verification details",
+        "Webhook signature verification details (legacy format)",
         payload_length=len(payload),
         payload_preview=payload[:100].decode('utf-8', errors='replace') if len(payload) > 0 else "",
         signature_length=len(signature_to_check),
@@ -89,7 +154,7 @@ async def verify_webhook_signature(
     if not is_valid:
         # Log truncated signatures to avoid exposing sensitive data
         logger.warning(
-            "Signature mismatch",
+            "Signature mismatch (legacy format)",
             expected_hex_prefix=expected_hex[:16] + "...",
             expected_base64_prefix=expected_base64[:16] + "...",
             received_prefix=signature_to_check[:16] + "...",
