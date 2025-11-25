@@ -398,7 +398,7 @@
             </header>
             <div class="card__body">
               {% if ticket_replies %}
-                <div class="timeline" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
+                <div class="timeline timeline--conversation" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
                   {% for reply in ticket_replies %}
                     {% if reply.type == 'call_recording' %}
                     <article class="timeline__event timeline__event--call-recording" data-recording-id="{{ reply.id }}">
@@ -415,7 +415,19 @@
                             <strong>📞 Call Recording:</strong> {{ reply.caller_name }} → {{ reply.callee_name }}
                           </span>
                           {% if reply.time_summary %}
-                            <span class="timeline__meta text-muted">{{ reply.time_summary }}</span>
+                            <span class="timeline__meta timeline__meta-group" aria-label="Time spent details">
+                              {% if reply.minutes_spent is not none %}
+                                <span class="timeline__chip timeline__chip--time">
+                                  ⏱️ {{ reply.minutes_spent }} minute{{ 's' if reply.minutes_spent != 1 else '' }}
+                                </span>
+                              {% endif %}
+                              <span class="timeline__chip {{ 'timeline__chip--billable' if reply.is_billable else 'timeline__chip--nonbillable' }}">
+                                {{ 'Billable' if reply.is_billable else 'Non-billable' }}
+                              </span>
+                              {% if reply.labour_type_name %}
+                                <span class="timeline__chip timeline__chip--labour">{{ reply.labour_type_name }}</span>
+                              {% endif %}
+                            </span>
                           {% endif %}
                         </div>
                       </header>
@@ -472,7 +484,19 @@
                             {% endif %}
                           </span>
                           {% if reply.time_summary %}
-                            <span class="timeline__meta text-muted">{{ reply.time_summary }}</span>
+                            <span class="timeline__meta timeline__meta-group" aria-label="Time spent details">
+                              {% if reply.minutes_spent is not none %}
+                                <span class="timeline__chip timeline__chip--time">
+                                  ⏱️ {{ reply.minutes_spent }} minute{{ 's' if reply.minutes_spent != 1 else '' }}
+                                </span>
+                              {% endif %}
+                              <span class="timeline__chip {{ 'timeline__chip--billable' if reply.is_billable else 'timeline__chip--nonbillable' }}">
+                                {{ 'Billable' if reply.is_billable else 'Non-billable' }}
+                              </span>
+                              {% if reply.labour_type_name %}
+                                <span class="timeline__chip timeline__chip--labour">{{ reply.labour_type_name }}</span>
+                              {% endif %}
+                            </span>
                           {% endif %}
                         </div>
                       </header>

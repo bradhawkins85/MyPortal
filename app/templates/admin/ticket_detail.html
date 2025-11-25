@@ -866,7 +866,7 @@
             </header>
             <div class="card__body">
               {% if ticket_replies or ticket_call_recordings %}
-                <div class="timeline" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
+                <div class="timeline timeline--conversation" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
                   {% for reply in ticket_replies %}
                     <article
                       class="timeline__event"
@@ -909,11 +909,22 @@
                             {% endif %}
                           </span>
                           <span
-                            class="timeline__meta text-muted"
+                            class="timeline__meta timeline__meta-group"
                             data-reply-time-summary
                             {% if not reply.time_summary %}hidden{% endif %}
+                            aria-label="Time spent details"
                           >
-                            {{ reply.time_summary or '' }}
+                            {% if reply.minutes_spent is not none %}
+                              <span class="timeline__chip timeline__chip--time">
+                                ⏱️ {{ reply.minutes_spent }} minute{{ 's' if reply.minutes_spent != 1 else '' }}
+                              </span>
+                            {% endif %}
+                            <span class="timeline__chip {{ 'timeline__chip--billable' if reply.is_billable else 'timeline__chip--nonbillable' }}">
+                              {{ 'Billable' if reply.is_billable else 'Non-billable' }}
+                            </span>
+                            {% if reply.labour_type_name %}
+                              <span class="timeline__chip timeline__chip--labour">{{ reply.labour_type_name }}</span>
+                            {% endif %}
                           </span>
                         </div>
                         <div class="timeline__header-controls">
@@ -979,11 +990,22 @@
                             <strong>📞 Call Recording:</strong> {{ recording.caller_name or 'Unknown' }} → {{ recording.callee_name or 'Unknown' }}
                           </span>
                           <span
-                            class="timeline__meta text-muted"
+                            class="timeline__meta timeline__meta-group"
                             data-recording-time-summary
                             {% if not recording.time_summary %}hidden{% endif %}
+                            aria-label="Time spent details"
                           >
-                            {{ recording.time_summary or '' }}
+                            {% if recording.minutes_spent is not none %}
+                              <span class="timeline__chip timeline__chip--time">
+                                ⏱️ {{ recording.minutes_spent }} minute{{ 's' if recording.minutes_spent != 1 else '' }}
+                              </span>
+                            {% endif %}
+                            <span class="timeline__chip {{ 'timeline__chip--billable' if recording.is_billable else 'timeline__chip--nonbillable' }}">
+                              {{ 'Billable' if recording.is_billable else 'Non-billable' }}
+                            </span>
+                            {% if recording.labour_type_name %}
+                              <span class="timeline__chip timeline__chip--labour">{{ recording.labour_type_name }}</span>
+                            {% endif %}
                           </span>
                         </div>
                         <div class="timeline__header-controls">
