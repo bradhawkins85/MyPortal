@@ -333,7 +333,11 @@
       }
       const serialNumber = typeof option.serial_number === 'string' ? option.serial_number.trim() : '';
       const statusValue = typeof option.status === 'string' ? option.status.trim() : '';
-      const tacticalId = typeof option.tactical_asset_id === 'string' ? option.tactical_asset_id.trim() : '';
+      const tacticalIdRaw = option.tactical_asset_id ?? option.tactical_asset ?? option.tactical_id;
+      const tacticalId =
+        typeof tacticalIdRaw === 'string' || typeof tacticalIdRaw === 'number'
+          ? String(tacticalIdRaw).trim()
+          : '';
       let name = '';
       if (typeof option.name === 'string' && option.name.trim() !== '') {
         name = option.name.trim();
@@ -393,10 +397,10 @@
     }
 
     function buildTacticalUrl(tacticalId) {
-      if (!tacticalBaseUrl || typeof tacticalId !== 'string') {
+      if (!tacticalBaseUrl || (typeof tacticalId !== 'string' && typeof tacticalId !== 'number')) {
         return null;
       }
-      const trimmed = tacticalId.trim();
+      const trimmed = String(tacticalId).trim();
       if (!trimmed) {
         return null;
       }
@@ -674,16 +678,46 @@
 
     linkedContainer.addEventListener('click', (event) => {
       const target = event.target instanceof Element ? event.target : null;
-      const removeButton = target ? target.closest('[data-linked-asset-remove]') : null;
-      if (!removeButton) {
+      if (!target) {
         return;
       }
-      const parent = removeButton.closest('[data-linked-asset]');
-      if (!parent) {
+
+      const removeButton = target.closest('[data-linked-asset-remove]');
+      if (removeButton) {
+        const parent = removeButton.closest('[data-linked-asset]');
+        if (!parent) {
+          return;
+        }
+        const assetId = parent.getAttribute('data-asset-id');
+        removeLinkedAssetById(assetId);
         return;
       }
-      const assetId = parent.getAttribute('data-asset-id');
-      removeLinkedAssetById(assetId);
+
+      const assetElement = target.closest('[data-linked-asset]');
+      if (!assetElement) {
+        return;
+      }
+      const tacticalId = assetElement.getAttribute('data-tactical-id');
+      const tacticalUrl = buildTacticalUrl(tacticalId);
+      if (!tacticalUrl) {
+        return;
+      }
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+      if (target.closest('a[href]')) {
+        return;
+      }
+
+      event.preventDefault();
+      window.open(tacticalUrl, '_blank', 'noreferrer');
     });
 
     companySelect.addEventListener('change', () => {
