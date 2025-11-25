@@ -392,18 +392,36 @@ async def delete_ticket_view(
 @router.post("/", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
 async def create_ticket(
     payload: TicketCreate,
-    session: SessionData = Depends(get_current_session),
-    current_user: dict = Depends(get_current_user),
+    actor: dict = Depends(_resolve_ticket_actor),
 ) -> TicketDetail:
-    has_helpdesk_access = await _has_helpdesk_permission(current_user)
-    requester_id = session.user_id
-    company_id = payload.company_id if has_helpdesk_access else current_user.get("company_id")
-    if has_helpdesk_access and payload.requester_id is not None:
-        if company_id is None:
+    current_user: dict | None = actor.get("user")
+    api_key_record: dict | None = actor.get("api_key")
+
+    # API key requests get full helpdesk access; user requests check permissions
+    if api_key_record:
+        has_helpdesk_access = True
+        # API key requests must provide requester_id since there's no session user
+        if payload.requester_id is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Link the ticket to a company before selecting a requester.",
+                detail="requester_id is required when using API key authentication.",
             )
+        requester_id = payload.requester_id
+        author_id: int | None = None  # No author for API key requests
+    elif current_user:
+        has_helpdesk_access = await _has_helpdesk_permission(current_user)
+        requester_id = int(current_user["id"])
+        author_id = int(current_user["id"])
+        # Helpdesk users can specify a different requester
+        if has_helpdesk_access and payload.requester_id is not None:
+            requester_id = payload.requester_id
+    else:  # pragma: no cover - defensive guard
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    company_id = payload.company_id if has_helpdesk_access else (current_user.get("company_id") if current_user else None)
+
+    # Validate requester is an enabled staff member for the company (when company is specified)
+    if has_helpdesk_access and payload.requester_id is not None and company_id is not None:
         allowed_requesters = await staff_repo.list_enabled_staff_users(company_id)
         allowed_ids = {
             int(option.get("id"))
@@ -415,7 +433,7 @@ async def create_ticket(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Requester must be an enabled staff member for the linked company.",
             )
-        requester_id = payload.requester_id
+
     assigned_user_id = payload.assigned_user_id if has_helpdesk_access else None
     priority = payload.priority if has_helpdesk_access else "normal"
     if has_helpdesk_access:
@@ -446,15 +464,19 @@ async def create_ticket(
         module_slug=module_slug,
         external_reference=external_reference,
         trigger_automations=True,
-        initial_reply_author_id=session.user_id,
+        initial_reply_author_id=author_id,
     )
-    await tickets_repo.add_watcher(ticket["id"], session.user_id)
+    # Add the requester as a watcher (if we have a valid requester_id)
+    if requester_id is not None:
+        await tickets_repo.add_watcher(ticket["id"], requester_id)
     try:
         await tickets_service.refresh_ticket_ai_summary(ticket["id"])
     except RuntimeError:
         pass
     await tickets_service.refresh_ticket_ai_tags(ticket["id"])
-    return await _build_ticket_detail(ticket["id"], current_user)
+    # For API key requests, pass a minimal user dict for building ticket detail
+    detail_user = current_user or {"id": requester_id, "is_super_admin": False}
+    return await _build_ticket_detail(ticket["id"], detail_user)
 
 
 @router.get("/{ticket_id}", response_model=TicketDetail)
