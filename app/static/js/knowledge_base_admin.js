@@ -1002,34 +1002,32 @@
     
     // Create modal
     const modal = document.createElement('div');
-    modal.className = 'modal';
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;';
-    
+    modal.className = 'modal kb-admin__section-modal';
+
     const modalContent = document.createElement('div');
-    modalContent.className = 'modal__content';
-    modalContent.style.cssText = 'background: white; padding: 2rem; border-radius: 8px; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;';
-    
+    modalContent.className = 'modal__content kb-admin__section-modal-content';
+
     const modalHeader = document.createElement('h3');
+    modalHeader.className = 'kb-admin__section-modal-title';
     modalHeader.textContent = 'Select Companies with Access to This Section';
-    modalHeader.style.cssText = 'margin-top: 0; margin-bottom: 1rem;';
-    
+
     const modalHelp = document.createElement('p');
+    modalHelp.className = 'kb-admin__section-modal-help';
     modalHelp.textContent = 'Leave empty to allow all companies to view this section. Select specific companies to restrict access.';
-    modalHelp.style.cssText = 'font-size: 0.9rem; color: #666; margin-bottom: 1rem;';
-    
+
     const companyList = document.createElement('div');
-    companyList.style.cssText = 'max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 0.5rem; margin-bottom: 1rem;';
+    companyList.className = 'kb-admin__section-modal-list';
     
     // Add checkboxes for each company
     companyOptions.forEach(company => {
       const label = document.createElement('label');
-      label.style.cssText = 'display: block; padding: 0.5rem; cursor: pointer;';
-      
+      label.className = 'kb-admin__section-modal-option';
+
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.value = company.id;
       checkbox.checked = currentCompanyIds.includes(company.id);
-      checkbox.style.cssText = 'margin-right: 0.5rem;';
+      checkbox.className = 'kb-admin__section-modal-checkbox';
       
       label.appendChild(checkbox);
       label.appendChild(document.createTextNode(company.name));
@@ -1037,7 +1035,7 @@
     });
     
     const buttonGroup = document.createElement('div');
-    buttonGroup.style.cssText = 'display: flex; gap: 0.5rem; justify-content: flex-end;';
+    buttonGroup.className = 'kb-admin__section-modal-actions';
     
     const cancelButton = document.createElement('button');
     cancelButton.type = 'button';
