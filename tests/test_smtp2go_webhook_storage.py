@@ -47,3 +47,37 @@ async def test_process_webhook_event_records_without_ticket_reply(monkeypatch):
     assert insert_params["event_type"] == "delivered"
     assert insert_params["smtp2go_data"] is not None
 
+
+@pytest.mark.asyncio
+async def test_process_webhook_event_uses_message_id_when_email_id_missing(monkeypatch):
+    """Ensure webhook processing uses Message-Id when email_id is absent."""
+    from app.services import smtp2go
+
+    class DummyDB:
+        def __init__(self):
+            self.fetch_one_calls = []
+            self.execute_calls = []
+
+        async def fetch_one(self, query, params):
+            self.fetch_one_calls.append({"query": query, "params": params})
+            return None  # No matching ticket reply
+
+        async def execute(self, query, params):
+            self.execute_calls.append({"query": query, "params": params})
+            return len(self.execute_calls)
+
+    db_stub = DummyDB()
+    monkeypatch.setattr(smtp2go, "db", db_stub)
+
+    event_data = {
+        "Message-Id": "<mail.1392590358.22776@example.org>",
+        "event": "bounce",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    }
+
+    result = await smtp2go.process_webhook_event("bounce", event_data)
+
+    assert result is not None
+    assert result["tracking_id"] == "<mail.1392590358.22776@example.org>"
+    assert db_stub.execute_calls, "Expected insert to be executed"
+
