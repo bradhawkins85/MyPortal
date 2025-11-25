@@ -162,6 +162,8 @@ Body: Single event object from SMTP2Go (JSON object)
 
 All webhook requests are verified using HMAC-SHA256 signatures. The webhook secret must be configured in both MyPortal and SMTP2Go for verification to work.
 
+If you need to ingest events from environments that cannot send signatures (for example, during testing with a mock forwarder), you can temporarily disable verification via the **Disable webhook signature verification** toggle in the SMTP2Go module settings. Only use this option in trusted environments because it bypasses signature checks.
+
 MyPortal supports multiple signature formats:
 
 1. **Timestamp-based format** (SMTP2Go's current format):
