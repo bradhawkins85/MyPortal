@@ -8,9 +8,11 @@ from fastapi.responses import FileResponse
 from app.api.dependencies.auth import (
     get_current_session,
     get_current_user,
+    get_optional_user,
     require_helpdesk_technician,
     require_super_admin,
 )
+from app.api.dependencies.api_keys import get_optional_api_key
 from app.core.logging import log_error
 from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
@@ -82,6 +84,17 @@ async def _has_helpdesk_permission(current_user: dict) -> bool:
         )
     except RuntimeError:
         return False
+
+
+async def _resolve_ticket_actor(
+    optional_user: dict | None = Depends(get_optional_user),
+    api_key_record: dict | None = Depends(get_optional_api_key),
+) -> dict[str, Any]:
+    if api_key_record:
+        return {"user": None, "api_key": api_key_record}
+    if optional_user:
+        return {"user": optional_user, "api_key": None}
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
 
 async def _build_ticket_detail(ticket_id: int, current_user: dict) -> TicketDetail:
@@ -157,27 +170,16 @@ async def list_tickets(
     search: str | None = Query(default=None, min_length=1),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-    current_user: dict = Depends(get_current_user),
+    actor: dict = Depends(_resolve_ticket_actor),
 ) -> TicketListResponse:
-    has_helpdesk_access = await _has_helpdesk_permission(current_user)
-    if not has_helpdesk_access:
-        try:
-            current_user_id = int(current_user["id"])
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
-        tickets = await tickets_repo.list_tickets_for_user(
-            current_user_id,
-            search=search,
-            status=status_filter,
-            limit=limit,
-            offset=offset,
-        )
-        total = await tickets_repo.count_tickets_for_user(
-            current_user_id,
-            search=search,
-            status=status_filter,
-        )
-    else:
+    current_user: dict | None = actor.get("user")
+    api_key_record = actor.get("api_key")
+
+    has_helpdesk_access = bool(api_key_record)
+    if current_user:
+        has_helpdesk_access = has_helpdesk_access or await _has_helpdesk_permission(current_user)
+
+    if has_helpdesk_access:
         tickets = await tickets_repo.list_tickets(
             status=status_filter,
             module_slug=module_slug,
@@ -196,6 +198,25 @@ async def list_tickets(
             search=search,
             requester_id=None,
         )
+    elif current_user:
+        try:
+            current_user_id = int(current_user["id"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
+        tickets = await tickets_repo.list_tickets_for_user(
+            current_user_id,
+            search=search,
+            status=status_filter,
+            limit=limit,
+            offset=offset,
+        )
+        total = await tickets_repo.count_tickets_for_user(
+            current_user_id,
+            search=search,
+            status=status_filter,
+        )
+    else:  # pragma: no cover - defensive guard
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     return TicketListResponse(
         items=[TicketResponse(**ticket) for ticket in tickets],
         total=total,
