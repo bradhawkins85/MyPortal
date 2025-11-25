@@ -94,11 +94,8 @@ async def verify_webhook_signature(
             expected_signature_prefix=expected_sig[:16] + "..." if len(expected_sig) > 16 else expected_sig,
         )
         
-        # Compare signatures (case-insensitive for hex)
-        is_valid = (
-            hmac.compare_digest(sig_value.lower(), expected_sig.lower())
-            or hmac.compare_digest(sig_value.upper(), expected_sig.upper())
-        )
+        # Compare signatures case-insensitively (hex can be upper or lower case)
+        is_valid = hmac.compare_digest(sig_value.lower(), expected_sig.lower())
         
         if is_valid:
             return True
