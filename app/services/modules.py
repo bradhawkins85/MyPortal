@@ -450,6 +450,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "track_opens": True,
             "track_clicks": True,
             "webhook_secret": str(os.getenv("SMTP2GO_WEBHOOK_SECRET", "")),
+            "disable_webhook_signature_verification": False,
         },
     },
     {
@@ -611,6 +612,9 @@ def _coerce_settings(
                 "track_opens": _ensure_bool(merged.get("track_opens"), True),
                 "track_clicks": _ensure_bool(merged.get("track_clicks"), True),
                 "webhook_secret": str(merged.get("webhook_secret", "")).strip(),
+                "disable_webhook_signature_verification": _ensure_bool(
+                    merged.get("disable_webhook_signature_verification"), False
+                ),
             }
         )
     elif slug == "syncro":
