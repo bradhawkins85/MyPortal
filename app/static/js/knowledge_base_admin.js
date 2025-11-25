@@ -931,7 +931,13 @@
       content: composeSectionsHtml(sections),
       permission_scope: scope,
       is_published: Boolean(publishedField.checked),
-      sections: sections.map((section) => ({ heading: section.heading, content: section.content })),
+      sections: sections.map((section) => ({
+        heading: section.heading,
+        content: section.content,
+        allowed_company_ids: Array.isArray(section.allowed_company_ids)
+          ? section.allowed_company_ids
+          : [],
+      })),
     };
     if (scope === 'user') {
       payload.allowed_user_ids = getSelectedValues(userSelect);
