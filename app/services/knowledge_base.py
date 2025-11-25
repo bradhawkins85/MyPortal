@@ -112,6 +112,7 @@ def _prepare_sections(
             content = _sanitise_html(content)
             heading = section.get("heading")
             heading_text = str(heading).strip() if isinstance(heading, str) else ""
+            allowed_company_ids = _normalise_ids(section.get("allowed_company_ids", []))
             if heading_text:
                 heading_text = heading_text[:255]
             else:
@@ -121,6 +122,7 @@ def _prepare_sections(
                     "heading": heading_text or None,
                     "content": content,
                     "position": index,
+                    "allowed_company_ids": allowed_company_ids,
                 }
             )
     if not prepared and fallback_content:
