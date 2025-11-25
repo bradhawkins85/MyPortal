@@ -76,6 +76,51 @@
     return summary;
   }
 
+  function renderTimeSummary(container, minutes, isBillable, labourName, fallbackText = '') {
+    if (!(container instanceof HTMLElement)) {
+      return;
+    }
+
+    const summaryText = fallbackText || formatTimeSummary(minutes, isBillable, labourName);
+    const hasSummary = typeof summaryText === 'string' && summaryText.trim() !== '';
+
+    container.hidden = !hasSummary;
+    container.replaceChildren();
+
+    if (!hasSummary) {
+      return;
+    }
+
+    const chips = [];
+    const hasMinutes = typeof minutes === 'number' && !Number.isNaN(minutes) && minutes >= 0;
+    if (hasMinutes) {
+      const timeChip = document.createElement('span');
+      timeChip.className = 'timeline__chip timeline__chip--time';
+      const unit = minutes === 1 ? 'minute' : 'minutes';
+      timeChip.textContent = `⏱️ ${minutes} ${unit}`;
+      chips.push(timeChip);
+    }
+
+    const billableChip = document.createElement('span');
+    billableChip.className = `timeline__chip ${isBillable ? 'timeline__chip--billable' : 'timeline__chip--nonbillable'}`;
+    billableChip.textContent = isBillable ? 'Billable' : 'Non-billable';
+    chips.push(billableChip);
+
+    if (typeof labourName === 'string' && labourName.trim() !== '') {
+      const labourChip = document.createElement('span');
+      labourChip.className = 'timeline__chip timeline__chip--labour';
+      labourChip.textContent = labourName.trim();
+      chips.push(labourChip);
+    }
+
+    if (chips.length === 0) {
+      container.textContent = summaryText;
+      return;
+    }
+
+    chips.forEach((chip) => container.appendChild(chip));
+  }
+
   function getCookie(name) {
     const pattern = `(?:^|; )${name.replace(/([.$?*|{}()\[\]\\\/\+^])/g, '\\$1')}=([^;]*)`;
     const matches = document.cookie.match(new RegExp(pattern));
@@ -788,13 +833,7 @@
       const summaryElement = replyArticle.querySelector('[data-reply-time-summary]');
       if (summaryElement) {
         const text = summary || formatTimeSummary(minutes, billable, labourTypeName);
-        if (text) {
-          summaryElement.textContent = text;
-          summaryElement.hidden = false;
-        } else {
-          summaryElement.textContent = '';
-          summaryElement.hidden = true;
-        }
+        renderTimeSummary(summaryElement, minutes, billable, labourTypeName, text);
       }
     }
 
@@ -1329,13 +1368,7 @@
       const summaryElement = recordingArticle.querySelector('[data-recording-time-summary]');
       if (summaryElement) {
         const text = summary || formatTimeSummary(minutes, billable, labourTypeName);
-        if (text) {
-          summaryElement.textContent = text;
-          summaryElement.hidden = false;
-        } else {
-          summaryElement.textContent = '';
-          summaryElement.hidden = true;
-        }
+        renderTimeSummary(summaryElement, minutes, billable, labourTypeName, text);
       }
     }
 

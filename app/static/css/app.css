@@ -2424,6 +2424,56 @@ button.header-title-menu__link {
   font-size: 0.9rem;
 }
 
+.timeline__meta-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.timeline__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  font-weight: 650;
+  font-size: 0.9rem;
+  background: rgba(148, 163, 184, 0.12);
+  color: rgba(226, 232, 240, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.timeline__chip svg,
+.timeline__chip-icon {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.timeline__chip--time {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: #e0f2fe;
+}
+
+.timeline__chip--billable {
+  background: rgba(74, 222, 128, 0.18);
+  border-color: rgba(74, 222, 128, 0.32);
+  color: #dcfce7;
+}
+
+.timeline__chip--nonbillable {
+  background: rgba(251, 113, 133, 0.14);
+  border-color: rgba(251, 113, 133, 0.32);
+  color: #ffe4e6;
+}
+
+.timeline__chip--labour {
+  background: rgba(129, 140, 248, 0.16);
+  border-color: rgba(129, 140, 248, 0.32);
+  color: #e0e7ff;
+}
+
 .timeline__body {
   color: rgba(226, 232, 240, 0.85);
   font-size: 0.95rem;
@@ -6284,6 +6334,15 @@ dialog.dialog::backdrop {
 .timeline__marker--active {
   background: #38bdf8;
   box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.25);
+}
+
+.timeline--conversation {
+  position: static;
+  padding-left: 0;
+}
+
+.timeline--conversation::before {
+  display: none;
 }
 
 .version-card,
