@@ -101,6 +101,60 @@
                   <label class="form-label" for="smtp-prefix">Subject prefix</label>
                   <input id="smtp-prefix" name="settings.subject_prefix" class="form-input" value="{{ settings.subject_prefix or '' }}" />
                 </div>
+              {% elif module.slug == 'smtp2go' %}
+                <div class="form-field">
+                  <label class="form-label" for="smtp2go-api-key">API key</label>
+                  <input
+                    id="smtp2go-api-key"
+                    name="settings.api_key"
+                    class="form-input"
+                    type="password"
+                    autocomplete="off"
+                    placeholder="Enter a new API key"
+                  />
+                  <p class="form-help">Keys are stored securely. Leave blank to keep the existing value.</p>
+                </div>
+                <fieldset class="form-field">
+                  <legend class="form-label">Tracking options</legend>
+                  <div class="form-field__group form-field__group--stacked">
+                    <label class="checkbox">
+                      <input type="checkbox" name="settings.enable_tracking" value="true" {% if settings.enable_tracking is not defined or settings.enable_tracking %}checked{% endif %} />
+                      <span>Enable SMTP2Go tracking for sent emails</span>
+                    </label>
+                    <label class="checkbox">
+                      <input type="checkbox" name="settings.track_opens" value="true" {% if settings.track_opens is not defined or settings.track_opens %}checked{% endif %} />
+                      <span>Track opens</span>
+                    </label>
+                    <label class="checkbox">
+                      <input type="checkbox" name="settings.track_clicks" value="true" {% if settings.track_clicks is not defined or settings.track_clicks %}checked{% endif %} />
+                      <span>Track clicks</span>
+                    </label>
+                  </div>
+                </fieldset>
+                <div class="form-field">
+                  <label class="form-label" for="smtp2go-webhook-url">Webhook URL</label>
+                  <input id="smtp2go-webhook-url" class="form-input" value="{{ request.url_for('smtp2go_webhook') }}" readonly />
+                  <p class="form-help">Configure this endpoint for SMTP2Go events (delivered, opened, clicked, bounced, spam).</p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="smtp2go-webhook-secret">Webhook secret</label>
+                  <input
+                    id="smtp2go-webhook-secret"
+                    name="settings.webhook_secret"
+                    class="form-input"
+                    type="password"
+                    autocomplete="off"
+                    placeholder="Enter a new webhook secret"
+                  />
+                  <p class="form-help">Secrets are stored securely. Leave blank to keep the existing value.</p>
+                </div>
+                <div class="form-field form-field--checkbox">
+                  <label class="toggle">
+                    <input type="checkbox" name="settings.disable_webhook_signature_verification" value="true" {% if settings.disable_webhook_signature_verification %}checked{% endif %} />
+                    <span>Disable webhook signature verification</span>
+                  </label>
+                  <p class="form-help">Process webhook events even when signature verification fails or cannot be configured.</p>
+                </div>
               {% elif module.slug == 'imap' %}
                 <p class="form-help">Manage mailbox credentials, folders, and schedules from the dedicated IMAP workspace.</p>
                 <div class="form-actions">
