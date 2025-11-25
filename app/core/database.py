@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator, Iterable, Any
+import re
 
 import aiomysql
 import aiosqlite
@@ -185,7 +186,8 @@ class Database:
         else:
             async with self.acquire() as conn:
                 async with conn.cursor() as cursor:
-                    await cursor.execute(sql, params)
+                    adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
+                    await cursor.execute(adapted_sql, adapted_params)
 
     async def execute_returning_lastrowid(
         self, sql: str, params: tuple | dict | None = None
@@ -199,7 +201,8 @@ class Database:
         else:
             async with self.acquire() as conn:
                 async with conn.cursor() as cursor:
-                    await cursor.execute(sql, params)
+                    adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
+                    await cursor.execute(adapted_sql, adapted_params)
                     last_row_id = cursor.lastrowid
             return int(last_row_id) if last_row_id is not None else 0
 
@@ -214,7 +217,8 @@ class Database:
         else:
             async with self.acquire() as conn:
                 async with conn.cursor(aiomysql.DictCursor) as cursor:
-                    await cursor.execute(sql, params)
+                    adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
+                    await cursor.execute(adapted_sql, adapted_params)
                     return await cursor.fetchone()
 
     async def fetch_all(self, sql: str, params: tuple | dict | None = None):
@@ -228,8 +232,18 @@ class Database:
         else:
             async with self.acquire() as conn:
                 async with conn.cursor(aiomysql.DictCursor) as cursor:
-                    await cursor.execute(sql, params)
+                    adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
+                    await cursor.execute(adapted_sql, adapted_params)
                     return await cursor.fetchall()
+
+    def _adapt_params_for_mysql(self, sql: str, params: tuple | dict | None) -> tuple[str, tuple | dict | None]:
+        """Translate SQLite-style named params to MySQL pyformat style when needed."""
+
+        if params is None or not isinstance(params, dict):
+            return sql, params
+
+        adapted_sql = re.sub(r":(\w+)", r"%(\1)s", sql)
+        return adapted_sql, params
 
     def _get_migrations_dir(self) -> Path:
         return Path(__file__).resolve().parent.parent.parent / "migrations"
