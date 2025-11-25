@@ -200,9 +200,12 @@ async def smtp2go_webhook(
     try:
         module_settings = await modules_service.get_module_settings('smtp2go')
         webhook_secret = module_settings.get('webhook_secret') if module_settings else None
-        
+        disable_signature_verification = bool(
+            module_settings.get('disable_webhook_signature_verification')
+        ) if module_settings else False
+
         # Verify webhook signature if secret is configured
-        if webhook_secret:
+        if webhook_secret and not disable_signature_verification:
             if not await verify_webhook_signature(raw_body, x_smtp2go_signature, webhook_secret):
                 logger.warning(
                     "SMTP2Go webhook signature verification failed",
@@ -221,6 +224,8 @@ async def smtp2go_webhook(
                     error_message="Signature verification failed",
                 )
                 raise HTTPException(status_code=401, detail="Invalid webhook signature")
+        elif disable_signature_verification:
+            logger.info("SMTP2Go webhook signature verification disabled by configuration")
         else:
             logger.info("SMTP2Go webhook received without signature verification (secret not configured)")
         

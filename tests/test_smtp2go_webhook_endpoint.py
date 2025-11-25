@@ -115,6 +115,36 @@ async def test_webhook_accepts_single_event_object(client):
 
 
 @pytest.mark.asyncio
+async def test_webhook_signature_verification_can_be_disabled(client):
+    """Ensure signature checks can be disabled even when a secret is configured."""
+    with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
+         patch('app.api.routes.smtp2go_webhooks.verify_webhook_signature', new_callable=AsyncMock) as mock_verify, \
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
+
+        mock_settings.return_value = {
+            'webhook_secret': 'super-secret',
+            'disable_webhook_signature_verification': True,
+        }
+        mock_process.return_value = {
+            'id': 123,
+            'tracking_id': 'test-tracking-id',
+            'event_type': 'processed',
+        }
+
+        response = client.post(
+            "/api/webhooks/smtp2go/events",
+            json=PROCESSED_EVENT,
+            headers={"X-Smtp2go-Signature": "invalid"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        mock_verify.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_webhook_processed_event(client):
     """Test webhook with processed event."""
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
