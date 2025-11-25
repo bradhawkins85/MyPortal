@@ -202,6 +202,32 @@ async def test_webhook_opened_event(client):
 
 
 @pytest.mark.asyncio
+async def test_webhook_records_events_when_processing_fails(client):
+    """Ensure webhook events are persisted via fallback when processing fails."""
+    with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
+         patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
+         patch('app.services.smtp2go.record_raw_webhook_event', new_callable=AsyncMock) as mock_fallback, \
+         patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
+
+        mock_settings.return_value = None
+        mock_process.return_value = None  # Simulate failure to process
+        mock_fallback.return_value = {'id': 456, 'tracking_id': 'fallback-id', 'event_type': 'bounce'}
+
+        response = client.post(
+            "/api/webhooks/smtp2go/events",
+            json=BOUNCED_EVENT,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["processed"] == 1
+
+        mock_process.assert_called_once_with('bounced', BOUNCED_EVENT)
+        mock_fallback.assert_called_once_with('bounced', BOUNCED_EVENT)
+
+
+@pytest.mark.asyncio
 async def test_webhook_clicked_event(client):
     """Test webhook with clicked event."""
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \

@@ -114,6 +114,35 @@ def generate_tracking_id() -> str:
     return secrets.token_urlsafe(32)
 
 
+def _extract_tracking_identifier(event_data: dict[str, Any] | None) -> str | None:
+    """Extract a best-effort tracking identifier from webhook data.
+
+    SMTP2Go may send different identifier keys depending on the webhook event
+    type. This helper looks for the most common keys, including mixed-case
+    variants, and returns a truncated value that fits within the database
+    column limits.
+    """
+    if not isinstance(event_data, dict):
+        return None
+
+    candidate_keys = (
+        "email_id",
+        "emailid",
+        "message-id",
+        "Message-Id",
+        "message_id",
+        "Message-ID",
+        "id",
+    )
+
+    for key in candidate_keys:
+        value = event_data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:64]
+
+    return None
+
+
 def get_email_template(template_type: EmailTemplateType) -> dict[str, Any]:
     """Get an email template by type.
     
@@ -620,7 +649,7 @@ async def process_webhook_event(
     normalized_event_type = (event_type or "").lower()
 
     # Extract relevant fields from webhook
-    smtp2go_message_id = event_data.get("email_id")
+    smtp2go_message_id = _extract_tracking_identifier(event_data)
     recipient = event_data.get("recipient")
     timestamp_str = event_data.get("timestamp")
     
@@ -654,7 +683,7 @@ async def process_webhook_event(
         else:
             # Record the webhook event even if we cannot find a matching ticket reply
             # Use the SMTP2Go email/message ID as a fallback tracking identifier
-            fallback_tracking_id = smtp2go_message_id or event_data.get('message-id') or event_data.get('id')
+            fallback_tracking_id = smtp2go_message_id or _extract_tracking_identifier(event_data) or event_data.get('id')
             if isinstance(fallback_tracking_id, str):
                 tracking_id = fallback_tracking_id[:64]  # Ensure it fits the column size
 
@@ -775,6 +804,74 @@ async def process_webhook_event(
             "Failed to process SMTP2Go webhook",
             event_type=event_type,
             smtp2go_message_id=smtp2go_message_id,
+            error=str(exc),
+        )
+        return None
+
+
+async def record_raw_webhook_event(
+    event_type: str | None,
+    event_data: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Persist a webhook event even when it cannot be fully processed.
+
+    This is used as a fallback to ensure we never drop inbound SMTP2Go webhook
+    payloads, even when the email ID is unknown or processing raises an error.
+    """
+    normalized_event_type = (event_type or (event_data or {}).get("event") or "unknown").lower()
+
+    occurred_at = datetime.now(timezone.utc)
+    timestamp_str = None
+    if isinstance(event_data, dict):
+        timestamp_str = event_data.get("timestamp") or event_data.get("time")
+
+    if timestamp_str:
+        try:
+            occurred_at = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        except (ValueError, AttributeError):
+            logger.warning(
+                "Failed to parse webhook timestamp in fallback logger",
+                timestamp=timestamp_str,
+            )
+
+    tracking_id = _extract_tracking_identifier(event_data) or f"smtp2go-{secrets.token_hex(8)}"
+
+    try:
+        insert_query = """
+            INSERT INTO email_tracking_events
+            (tracking_id, event_type, event_url, user_agent, ip_address, occurred_at, smtp2go_data)
+            VALUES (:tracking_id, :event_type, :event_url, :user_agent, :ip_address, :occurred_at, :smtp2go_data)
+        """
+
+        insert_params = {
+            'tracking_id': tracking_id,
+            'event_type': normalized_event_type or 'unknown',
+            'event_url': (event_data or {}).get('url') if isinstance(event_data, dict) else None,
+            'user_agent': (event_data or {}).get('user_agent') if isinstance(event_data, dict) else None,
+            'ip_address': (event_data or {}).get('ip') if isinstance(event_data, dict) else None,
+            'occurred_at': occurred_at,
+            'smtp2go_data': json.dumps(event_data) if event_data else None,
+        }
+
+        event_id = await db.execute(insert_query, insert_params)
+
+        logger.info(
+            "Recorded raw SMTP2Go webhook event after processing failure",
+            event_id=event_id,
+            tracking_id=tracking_id,
+            event_type=normalized_event_type,
+        )
+
+        return {
+            'id': event_id,
+            'tracking_id': tracking_id,
+            'event_type': normalized_event_type,
+            'occurred_at': occurred_at,
+        }
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error(
+            "Failed to record raw SMTP2Go webhook event",
+            event_type=event_type,
             error=str(exc),
         )
         return None
