@@ -1,4 +1,4 @@
-# MyPortal is ~99% Vibr Coded
+# MyPortal is ~99% Vibe Coded
 
 # Note
 MyPortal is build primarily for internal use to suit what I need, you are welcome to use the app and create issues which I will look at when I have time, PR's are not accepted at this time but that may change in the furture. Many features work but have limited testing, many other features work but not as well as they should for example api POST requests my behave as GET requests.
