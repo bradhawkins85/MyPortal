@@ -146,3 +146,92 @@ def test_bcp_menu_replaces_business_continuity(company_admin_context):
     assert compliance_pos > 0, "Compliance menu not found"
     assert bcp_pos > 0, "BCP menu not found"
     assert bcp_pos > compliance_pos, "BCP should appear after Compliance in the menu"
+
+
+@pytest.fixture
+def public_knowledge_base_context(monkeypatch):
+    """Fixture to simulate an unauthenticated user viewing the knowledge base."""
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class FakeArticleAccessContext:
+        user: None = None
+        user_id: None = None
+        is_super_admin: bool = False
+        memberships: dict = field(default_factory=dict)
+
+    async def fake_get_optional_user(request):
+        return None, None
+
+    async def fake_list_articles_for_context(context, *, include_unpublished=False):
+        return []
+
+    async def fake_build_access_context(user):
+        return FakeArticleAccessContext()
+
+    async def fake_build_public_context(request, *, extra=None):
+        from decimal import Decimal
+        context = {
+            "request": request,
+            "app_name": "MyPortal",
+            "current_year": 2025,
+            "user": None,
+            "current_user": None,
+            "available_companies": [],
+            "active_company": None,
+            "active_company_id": None,
+            "active_membership": None,
+            "csrf_token": None,
+            "staff_permission": 0,
+            "is_super_admin": False,
+            "is_helpdesk_technician": False,
+            "is_company_admin": False,
+            "can_access_shop": False,
+            "can_access_cart": False,
+            "can_access_orders": False,
+            "can_access_forms": False,
+            "can_manage_assets": False,
+            "can_manage_licenses": False,
+            "can_manage_invoices": False,
+            "can_manage_staff": False,
+            "can_view_compliance": False,
+            "plausible_config": {"enabled": False},
+            "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
+            "notification_unread_count": 0,
+            "enable_auto_refresh": False,
+        }
+        if extra:
+            context.update(extra)
+        return context
+
+    monkeypatch.setattr(main_module, "_get_optional_user", fake_get_optional_user)
+    monkeypatch.setattr(
+        main_module.knowledge_base_service,
+        "list_articles_for_context",
+        fake_list_articles_for_context,
+    )
+    monkeypatch.setattr(
+        main_module.knowledge_base_service,
+        "build_access_context",
+        fake_build_access_context,
+    )
+    monkeypatch.setattr(main_module, "_build_public_context", fake_build_public_context)
+
+    yield
+
+
+def test_public_knowledge_base_shows_login_menu(public_knowledge_base_context):
+    """Ensure unauthenticated users see the sign in and knowledge base menu on /knowledge-base."""
+    with TestClient(app) as client:
+        response = client.get("/knowledge-base")
+
+    assert response.status_code == 200
+    html = response.text
+
+    # Should show the Sign in link
+    assert 'href="/login"' in html
+    assert "Sign in" in html
+
+    # Should show the Knowledge base link
+    assert 'href="/knowledge-base"' in html
+    assert "Knowledge base" in html
