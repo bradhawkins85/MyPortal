@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import json
 import os
 import string
@@ -3332,9 +3333,10 @@ async def _invoke_update_ticket(
     
     # Status
     if "status" in payload:
-        status_value = str(payload["status"]).strip().lower()
+        status_value = str(payload["status"]).strip()
         if status_value:
-            update_fields["status"] = status_value
+            normalised_status = re.sub(r"[^a-z0-9]+", "_", status_value.lower()).strip("_")
+            update_fields["status"] = normalised_status
     
     # Priority
     if "priority" in payload:
