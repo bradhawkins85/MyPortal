@@ -1,0 +1,92 @@
+# CodeQL Code Scanning Workflow
+# 
+# This workflow performs automated security analysis using GitHub CodeQL.
+# It scans the repository for security vulnerabilities and code quality issues,
+# uploads results to GitHub's Security tab, and exports SARIF artifacts for
+# programmatic consumption or import into external tools.
+#
+# Documentation: https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors
+
+name: CodeQL Scan
+
+on:
+  # Run on push to any branch
+  push:
+    branches:
+      - '**'
+  # Run on pull requests targeting the default branch
+  pull_request:
+    branches:
+      - main
+  # Weekly scheduled scan for ongoing security monitoring (runs every Sunday at 3:00 AM UTC)
+  schedule:
+    - cron: '0 3 * * 0'
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    
+    permissions:
+      # Required for CodeQL to upload results to Security tab
+      actions: read
+      contents: read
+      security-events: write
+    
+    strategy:
+      fail-fast: false
+      # Define matrix of languages to scan
+      # CodeQL supports: cpp, csharp, go, java, javascript, python, ruby, swift, typescript
+      # Using common languages; CodeQL will skip if not present in the repository
+      matrix:
+        language:
+          - python
+          - javascript-typescript
+        # Uncomment additional languages if present in your repository:
+        # - go
+        # - java
+        # - csharp
+    
+    steps:
+      # Checkout repository with minimal depth to reduce clone time
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 2
+      
+      # Initialize CodeQL tools for scanning
+      # The init action sets up the CodeQL CLI and creates a database for analysis
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: ${{ matrix.language }}
+          # Use security-and-quality queries for comprehensive scanning
+          queries: security-and-quality
+      
+      # Autobuild attempts to build any compiled languages (C/C++, C#, Go, Java)
+      # For interpreted languages (Python, JavaScript), this step completes quickly
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v2
+      
+      # Perform CodeQL Analysis and upload results to GitHub Security tab
+      # The analyze action runs the queries and generates SARIF results
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+        with:
+          category: "/language:${{ matrix.language }}"
+          # Output SARIF file for artifact upload
+          output: sarif-results
+          upload: true
+      
+      # Upload SARIF results as workflow artifact for programmatic access
+      # The artifact can be downloaded from the workflow run's Artifacts section
+      - name: Upload SARIF as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: codeql-scan-results-${{ matrix.language }}
+          path: sarif-results/*.sarif
+          retention-days: 30
+          if-no-files-found: warn
