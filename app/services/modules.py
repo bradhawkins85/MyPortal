@@ -40,6 +40,9 @@ _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 # Module slug constants
 XERO_MODULE_SLUG = "xero"
 
+# Truncation limits for webhook payload logging
+WEBHOOK_PAYLOAD_DESCRIPTION_MAX_LENGTH = 200
+
 DEFAULT_CHATGPT_TOOLS = [
     "listTickets",
     "getTicket",
@@ -299,6 +302,20 @@ def _coerce_int(value: Any, *, minimum: int | None = None, maximum: int | None =
     if maximum is not None:
         integer = min(maximum, integer)
     return integer
+
+
+def _parse_nullable_int(value: Any) -> int | None:
+    """Parse an optional integer value from automation payload.
+    
+    Handles None, empty string, and the literal string "null" as null values.
+    Returns the parsed integer or None if the value is null or cannot be parsed.
+    """
+    if value is None or value == "" or value == "null":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalise_tool_names(value: Any) -> list[str]:
@@ -3315,36 +3332,27 @@ async def _invoke_update_ticket(
     
     # Assigned user
     if "assigned_user_id" in payload:
-        assigned_value = payload["assigned_user_id"]
-        if assigned_value is None or assigned_value == "" or assigned_value == "null":
+        parsed_assigned = _parse_nullable_int(payload["assigned_user_id"])
+        if payload["assigned_user_id"] is None or payload["assigned_user_id"] == "" or payload["assigned_user_id"] == "null":
             update_fields["assigned_user_id"] = None
-        else:
-            try:
-                update_fields["assigned_user_id"] = int(assigned_value)
-            except (TypeError, ValueError):
-                pass
+        elif parsed_assigned is not None:
+            update_fields["assigned_user_id"] = parsed_assigned
     
     # Requester
     if "requester_id" in payload:
-        requester_value = payload["requester_id"]
-        if requester_value is None or requester_value == "" or requester_value == "null":
+        parsed_requester = _parse_nullable_int(payload["requester_id"])
+        if payload["requester_id"] is None or payload["requester_id"] == "" or payload["requester_id"] == "null":
             update_fields["requester_id"] = None
-        else:
-            try:
-                update_fields["requester_id"] = int(requester_value)
-            except (TypeError, ValueError):
-                pass
+        elif parsed_requester is not None:
+            update_fields["requester_id"] = parsed_requester
     
     # Company
     if "company_id" in payload:
-        company_value = payload["company_id"]
-        if company_value is None or company_value == "" or company_value == "null":
+        parsed_company = _parse_nullable_int(payload["company_id"])
+        if payload["company_id"] is None or payload["company_id"] == "" or payload["company_id"] == "null":
             update_fields["company_id"] = None
-        else:
-            try:
-                update_fields["company_id"] = int(company_value)
-            except (TypeError, ValueError):
-                pass
+        elif parsed_company is not None:
+            update_fields["company_id"] = parsed_company
     
     # Category
     if "category" in payload:
@@ -3467,7 +3475,7 @@ async def _invoke_update_ticket_description(
     event = await webhook_monitor.create_manual_event(
         name="module.update-ticket-description.update",
         target_url=f"internal://tickets/{ticket_id_int}/description",
-        payload={"ticket_id": ticket_id_int, "description": description[:200] if description else None},
+        payload={"ticket_id": ticket_id_int, "description": description[:WEBHOOK_PAYLOAD_DESCRIPTION_MAX_LENGTH] if description else None},
         headers={"X-Module": "update-ticket-description"},
         max_attempts=1,
         backoff_seconds=60,
@@ -3673,33 +3681,15 @@ async def _invoke_add_ticket_reply(
     # Get optional fields
     is_internal = _ensure_bool(payload.get("is_internal"), False)
     
-    author_id: int | None = None
-    author_value = payload.get("author_id")
-    if author_value is not None and author_value != "" and author_value != "null":
-        try:
-            author_id = int(author_value)
-        except (TypeError, ValueError):
-            pass
+    author_id = _parse_nullable_int(payload.get("author_id"))
     
-    minutes_spent: int | None = None
-    minutes_value = payload.get("minutes_spent")
-    if minutes_value is not None and minutes_value != "" and minutes_value != "null":
-        try:
-            minutes_spent = int(minutes_value)
-            if minutes_spent < 0:
-                minutes_spent = None
-        except (TypeError, ValueError):
-            pass
+    minutes_spent = _parse_nullable_int(payload.get("minutes_spent"))
+    if minutes_spent is not None and minutes_spent < 0:
+        minutes_spent = None
     
     is_billable = _ensure_bool(payload.get("is_billable"), False)
     
-    labour_type_id: int | None = None
-    labour_value = payload.get("labour_type_id")
-    if labour_value is not None and labour_value != "" and labour_value != "null":
-        try:
-            labour_type_id = int(labour_value)
-        except (TypeError, ValueError):
-            pass
+    labour_type_id = _parse_nullable_int(payload.get("labour_type_id"))
     
     send_notification = _ensure_bool(payload.get("send_notification"), False)
     
