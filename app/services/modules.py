@@ -552,6 +552,34 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "port": 22,
         },
     },
+    {
+        "slug": "update-ticket",
+        "name": "Update Ticket",
+        "description": "Update ticket fields such as status, priority, assigned user, category, and requester.",
+        "icon": "✏️",
+        "settings": {},
+    },
+    {
+        "slug": "update-ticket-description",
+        "name": "Update Ticket Description",
+        "description": "Change the description field of an existing ticket.",
+        "icon": "📝",
+        "settings": {},
+    },
+    {
+        "slug": "reprocess-ai",
+        "name": "Reprocess AI",
+        "description": "Re-trigger AI processing to regenerate ticket summary and tags using the Ollama model.",
+        "icon": "🔄",
+        "settings": {},
+    },
+    {
+        "slug": "add-ticket-reply",
+        "name": "Add Ticket Reply",
+        "description": "Add a reply to an existing ticket. Supports public replies, internal notes, and optional time tracking with billable/non-billable hours.",
+        "icon": "💬",
+        "settings": {},
+    },
 ]
 
 
@@ -1035,6 +1063,10 @@ async def trigger_module(
         "call-recordings": _validate_call_recordings,
         "unifi-talk": _invoke_unifi_talk,
         "plausible": _validate_plausible,
+        "update-ticket": _invoke_update_ticket,
+        "update-ticket-description": _invoke_update_ticket_description,
+        "reprocess-ai": _invoke_reprocess_ai,
+        "add-ticket-reply": _invoke_add_ticket_reply,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -3224,3 +3256,548 @@ async def push_companies_to_tacticalrmm(
             )
 
     return summary
+
+
+async def _invoke_update_ticket(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Update ticket fields from automation payload.
+    
+    Accepts a JSON payload with ticket_id and any combination of:
+    status, priority, assigned_user_id, requester_id, company_id, category.
+    
+    The ticket_id can be provided directly or via context.ticket.id or context.ticket_id.
+    """
+    from app.repositories import tickets as tickets_repo
+    
+    raw_context = payload.get("context")
+    context = raw_context if isinstance(raw_context, Mapping) else {}
+    
+    # Resolve ticket_id from payload or context
+    ticket_id = payload.get("ticket_id")
+    if ticket_id is None:
+        ticket_id = context.get("ticket_id")
+    if ticket_id is None:
+        ticket_context = context.get("ticket")
+        if isinstance(ticket_context, Mapping):
+            ticket_id = ticket_context.get("id")
+    
+    if ticket_id is None:
+        raise ValueError("ticket_id is required")
+    
+    try:
+        ticket_id_int = int(ticket_id)
+    except (TypeError, ValueError):
+        raise ValueError("ticket_id must be a valid integer")
+    
+    # Check ticket exists
+    existing = await tickets_repo.get_ticket(ticket_id_int)
+    if not existing:
+        raise ValueError(f"Ticket {ticket_id_int} not found")
+    
+    # Build update dict from allowed fields
+    update_fields: dict[str, Any] = {}
+    
+    # Status
+    if "status" in payload:
+        status_value = str(payload["status"]).strip().lower()
+        if status_value:
+            update_fields["status"] = status_value
+    
+    # Priority
+    if "priority" in payload:
+        priority_value = str(payload["priority"]).strip().lower()
+        if priority_value:
+            update_fields["priority"] = priority_value
+    
+    # Assigned user
+    if "assigned_user_id" in payload:
+        assigned_value = payload["assigned_user_id"]
+        if assigned_value is None or assigned_value == "" or assigned_value == "null":
+            update_fields["assigned_user_id"] = None
+        else:
+            try:
+                update_fields["assigned_user_id"] = int(assigned_value)
+            except (TypeError, ValueError):
+                pass
+    
+    # Requester
+    if "requester_id" in payload:
+        requester_value = payload["requester_id"]
+        if requester_value is None or requester_value == "" or requester_value == "null":
+            update_fields["requester_id"] = None
+        else:
+            try:
+                update_fields["requester_id"] = int(requester_value)
+            except (TypeError, ValueError):
+                pass
+    
+    # Company
+    if "company_id" in payload:
+        company_value = payload["company_id"]
+        if company_value is None or company_value == "" or company_value == "null":
+            update_fields["company_id"] = None
+        else:
+            try:
+                update_fields["company_id"] = int(company_value)
+            except (TypeError, ValueError):
+                pass
+    
+    # Category
+    if "category" in payload:
+        category_value = payload.get("category")
+        if category_value is None:
+            update_fields["category"] = None
+        else:
+            update_fields["category"] = str(category_value).strip() or None
+    
+    if not update_fields:
+        return {
+            "status": "skipped",
+            "reason": "No update fields provided",
+            "ticket_id": ticket_id_int,
+        }
+    
+    # Create webhook event for tracking
+    event = await webhook_monitor.create_manual_event(
+        name="module.update-ticket.update",
+        target_url=f"internal://tickets/{ticket_id_int}",
+        payload={"ticket_id": ticket_id_int, **update_fields},
+        headers={"X-Module": "update-ticket"},
+        max_attempts=1,
+        backoff_seconds=60,
+    )
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for ticket update")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
+    
+    attempt_number = 1
+    try:
+        updated_ticket = await tickets_repo.update_ticket(ticket_id_int, **update_fields)
+        
+        # Emit ticket updated event
+        await tickets_service.emit_ticket_updated_event(
+            ticket_id_int,
+            actor_type="automation",
+            trigger_automations=False,
+        )
+    except Exception as exc:
+        logger.error(
+            "Ticket update failed",
+            error=str(exc),
+            ticket_id=ticket_id_int,
+        )
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=str(exc),
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"ticket_id": ticket_id_int},
+        )
+    
+    response_body = json.dumps({
+        "ticket_id": ticket_id_int,
+        "updated_fields": list(update_fields.keys()),
+    })
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=200,
+        response_body=response_body,
+    )
+    return _build_event_result(
+        updated_event,
+        extra={
+            "ticket_id": ticket_id_int,
+            "updated_fields": list(update_fields.keys()),
+        },
+    )
+
+
+async def _invoke_update_ticket_description(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Update ticket description from automation payload.
+    
+    Accepts a JSON payload with ticket_id and description.
+    The ticket_id can be provided directly or via context.ticket.id or context.ticket_id.
+    """
+    raw_context = payload.get("context")
+    context = raw_context if isinstance(raw_context, Mapping) else {}
+    
+    # Resolve ticket_id from payload or context
+    ticket_id = payload.get("ticket_id")
+    if ticket_id is None:
+        ticket_id = context.get("ticket_id")
+    if ticket_id is None:
+        ticket_context = context.get("ticket")
+        if isinstance(ticket_context, Mapping):
+            ticket_id = ticket_context.get("id")
+    
+    if ticket_id is None:
+        raise ValueError("ticket_id is required")
+    
+    try:
+        ticket_id_int = int(ticket_id)
+    except (TypeError, ValueError):
+        raise ValueError("ticket_id must be a valid integer")
+    
+    # Get description (allow empty string to clear description)
+    if "description" not in payload:
+        raise ValueError("description is required")
+    
+    description = payload.get("description")
+    if description is not None:
+        description = str(description)
+    
+    # Create webhook event for tracking
+    event = await webhook_monitor.create_manual_event(
+        name="module.update-ticket-description.update",
+        target_url=f"internal://tickets/{ticket_id_int}/description",
+        payload={"ticket_id": ticket_id_int, "description": description[:200] if description else None},
+        headers={"X-Module": "update-ticket-description"},
+        max_attempts=1,
+        backoff_seconds=60,
+    )
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for ticket description update")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
+    
+    attempt_number = 1
+    try:
+        updated_ticket = await tickets_service.update_ticket_description(ticket_id_int, description)
+        if not updated_ticket:
+            raise ValueError(f"Ticket {ticket_id_int} not found")
+    except Exception as exc:
+        logger.error(
+            "Ticket description update failed",
+            error=str(exc),
+            ticket_id=ticket_id_int,
+        )
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=str(exc),
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"ticket_id": ticket_id_int},
+        )
+    
+    response_body = json.dumps({"ticket_id": ticket_id_int, "description_updated": True})
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=200,
+        response_body=response_body,
+    )
+    return _build_event_result(
+        updated_event,
+        extra={"ticket_id": ticket_id_int, "description_updated": True},
+    )
+
+
+async def _invoke_reprocess_ai(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Re-trigger AI processing for a ticket.
+    
+    This will regenerate the AI summary and tags using the Ollama model.
+    The ticket_id can be provided directly or via context.ticket.id or context.ticket_id.
+    
+    Optional parameters:
+    - refresh_summary: bool (default: True) - Whether to refresh the AI summary
+    - refresh_tags: bool (default: True) - Whether to refresh the AI tags
+    """
+    raw_context = payload.get("context")
+    context = raw_context if isinstance(raw_context, Mapping) else {}
+    
+    # Resolve ticket_id from payload or context
+    ticket_id = payload.get("ticket_id")
+    if ticket_id is None:
+        ticket_id = context.get("ticket_id")
+    if ticket_id is None:
+        ticket_context = context.get("ticket")
+        if isinstance(ticket_context, Mapping):
+            ticket_id = ticket_context.get("id")
+    
+    if ticket_id is None:
+        raise ValueError("ticket_id is required")
+    
+    try:
+        ticket_id_int = int(ticket_id)
+    except (TypeError, ValueError):
+        raise ValueError("ticket_id must be a valid integer")
+    
+    # Check options
+    refresh_summary = _ensure_bool(payload.get("refresh_summary"), True)
+    refresh_tags = _ensure_bool(payload.get("refresh_tags"), True)
+    
+    if not refresh_summary and not refresh_tags:
+        return {
+            "status": "skipped",
+            "reason": "No AI processing requested (both refresh_summary and refresh_tags are false)",
+            "ticket_id": ticket_id_int,
+        }
+    
+    # Create webhook event for tracking
+    event = await webhook_monitor.create_manual_event(
+        name="module.reprocess-ai.process",
+        target_url=f"internal://tickets/{ticket_id_int}/ai",
+        payload={
+            "ticket_id": ticket_id_int,
+            "refresh_summary": refresh_summary,
+            "refresh_tags": refresh_tags,
+        },
+        headers={"X-Module": "reprocess-ai"},
+        max_attempts=1,
+        backoff_seconds=60,
+    )
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for AI reprocessing")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
+    
+    attempt_number = 1
+    processed = []
+    try:
+        if refresh_summary:
+            await tickets_service.refresh_ticket_ai_summary(ticket_id_int)
+            processed.append("summary")
+        if refresh_tags:
+            await tickets_service.refresh_ticket_ai_tags(ticket_id_int)
+            processed.append("tags")
+    except Exception as exc:
+        logger.error(
+            "AI reprocessing failed",
+            error=str(exc),
+            ticket_id=ticket_id_int,
+        )
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=str(exc),
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"ticket_id": ticket_id_int, "processed": processed},
+        )
+    
+    response_body = json.dumps({
+        "ticket_id": ticket_id_int,
+        "processed": processed,
+    })
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=200,
+        response_body=response_body,
+    )
+    return _build_event_result(
+        updated_event,
+        extra={"ticket_id": ticket_id_int, "processed": processed},
+    )
+
+
+async def _invoke_add_ticket_reply(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Add a reply to a ticket from automation payload.
+    
+    Accepts a JSON payload with:
+    - ticket_id: Required (can come from context.ticket.id)
+    - body: Required - The reply content (HTML or plain text)
+    - is_internal: Optional (default: false) - Whether this is an internal note
+    - author_id: Optional - User ID of the author
+    - minutes_spent: Optional - Time tracking in minutes
+    - is_billable: Optional (default: false) - Whether time is billable
+    - labour_type_id: Optional - Labour type for billing
+    - send_notification: Optional (default: false) - Whether to send email notification
+    """
+    from app.repositories import tickets as tickets_repo
+    
+    raw_context = payload.get("context")
+    context = raw_context if isinstance(raw_context, Mapping) else {}
+    
+    # Resolve ticket_id from payload or context
+    ticket_id = payload.get("ticket_id")
+    if ticket_id is None:
+        ticket_id = context.get("ticket_id")
+    if ticket_id is None:
+        ticket_context = context.get("ticket")
+        if isinstance(ticket_context, Mapping):
+            ticket_id = ticket_context.get("id")
+    
+    if ticket_id is None:
+        raise ValueError("ticket_id is required")
+    
+    try:
+        ticket_id_int = int(ticket_id)
+    except (TypeError, ValueError):
+        raise ValueError("ticket_id must be a valid integer")
+    
+    # Get reply body
+    body = payload.get("body")
+    if body is None or str(body).strip() == "":
+        raise ValueError("body is required and cannot be empty")
+    body_str = str(body)
+    
+    # Get optional fields
+    is_internal = _ensure_bool(payload.get("is_internal"), False)
+    
+    author_id: int | None = None
+    author_value = payload.get("author_id")
+    if author_value is not None and author_value != "" and author_value != "null":
+        try:
+            author_id = int(author_value)
+        except (TypeError, ValueError):
+            pass
+    
+    minutes_spent: int | None = None
+    minutes_value = payload.get("minutes_spent")
+    if minutes_value is not None and minutes_value != "" and minutes_value != "null":
+        try:
+            minutes_spent = int(minutes_value)
+            if minutes_spent < 0:
+                minutes_spent = None
+        except (TypeError, ValueError):
+            pass
+    
+    is_billable = _ensure_bool(payload.get("is_billable"), False)
+    
+    labour_type_id: int | None = None
+    labour_value = payload.get("labour_type_id")
+    if labour_value is not None and labour_value != "" and labour_value != "null":
+        try:
+            labour_type_id = int(labour_value)
+        except (TypeError, ValueError):
+            pass
+    
+    send_notification = _ensure_bool(payload.get("send_notification"), False)
+    
+    # Create webhook event for tracking
+    event = await webhook_monitor.create_manual_event(
+        name="module.add-ticket-reply.create",
+        target_url=f"internal://tickets/{ticket_id_int}/replies",
+        payload={
+            "ticket_id": ticket_id_int,
+            "is_internal": is_internal,
+            "has_body": bool(body_str),
+            "minutes_spent": minutes_spent,
+            "is_billable": is_billable,
+            "send_notification": send_notification,
+        },
+        headers={"X-Module": "add-ticket-reply"},
+        max_attempts=1,
+        backoff_seconds=60,
+    )
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for ticket reply")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
+    
+    attempt_number = 1
+    try:
+        # Check ticket exists
+        existing = await tickets_repo.get_ticket(ticket_id_int)
+        if not existing:
+            raise ValueError(f"Ticket {ticket_id_int} not found")
+        
+        # Create the reply
+        reply = await tickets_repo.create_reply(
+            ticket_id=ticket_id_int,
+            author_id=author_id,
+            body=body_str,
+            is_internal=is_internal,
+            minutes_spent=minutes_spent,
+            is_billable=is_billable,
+            labour_type_id=labour_type_id,
+        )
+        
+        # Emit ticket updated event
+        await tickets_service.emit_ticket_updated_event(
+            ticket_id_int,
+            actor_type="automation",
+            trigger_automations=False,
+        )
+        
+        reply_id = reply.get("id") if reply else None
+        
+        # Optionally send notification (future enhancement)
+        if send_notification and not is_internal and reply_id:
+            # Note: Email notification would be triggered here
+            # This is a placeholder for future notification integration
+            logger.info(
+                "Reply notification requested",
+                ticket_id=ticket_id_int,
+                reply_id=reply_id,
+            )
+    except Exception as exc:
+        logger.error(
+            "Ticket reply creation failed",
+            error=str(exc),
+            ticket_id=ticket_id_int,
+        )
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=str(exc),
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"ticket_id": ticket_id_int},
+        )
+    
+    response_body = json.dumps({
+        "ticket_id": ticket_id_int,
+        "reply_id": reply_id,
+        "is_internal": is_internal,
+        "minutes_spent": minutes_spent,
+        "is_billable": is_billable,
+    })
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=200,
+        response_body=response_body,
+    )
+    return _build_event_result(
+        updated_event,
+        extra={
+            "ticket_id": ticket_id_int,
+            "reply_id": reply_id,
+            "is_internal": is_internal,
+        },
+    )

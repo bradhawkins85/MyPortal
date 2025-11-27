@@ -340,6 +340,135 @@
         }),
       },
     ],
+    'update-ticket': [
+      {
+        label: 'Change ticket status to resolved',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          status: 'resolved',
+        }),
+      },
+      {
+        label: 'Escalate ticket to high priority',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          priority: 'high',
+        }),
+      },
+      {
+        label: 'Assign ticket to specific technician',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          assigned_user_id: 1,
+        }),
+      },
+      {
+        label: 'Update multiple ticket fields',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          status: 'in_progress',
+          priority: 'high',
+          assigned_user_id: '{{ staff.id }}',
+          category: 'escalation',
+        }),
+      },
+      {
+        label: 'Unassign ticket',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          assigned_user_id: null,
+        }),
+      },
+    ],
+    'update-ticket-description': [
+      {
+        label: 'Append escalation note to description',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          description: '{{ ticket.description }}\n\n---\nEscalated by automation on {{ now }}.',
+        }),
+      },
+      {
+        label: 'Set new description',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          description: 'Updated description content goes here.',
+        }),
+      },
+    ],
+    'reprocess-ai': [
+      {
+        label: 'Refresh AI summary and tags',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          refresh_summary: true,
+          refresh_tags: true,
+        }),
+      },
+      {
+        label: 'Refresh AI summary only',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          refresh_summary: true,
+          refresh_tags: false,
+        }),
+      },
+      {
+        label: 'Refresh AI tags only',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          refresh_summary: false,
+          refresh_tags: true,
+        }),
+      },
+    ],
+    'add-ticket-reply': [
+      {
+        label: 'Add public reply',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          body: '<p>Thank you for contacting support. We are looking into this issue.</p>',
+          is_internal: false,
+        }),
+      },
+      {
+        label: 'Add internal note',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          body: 'Internal investigation note: Checking system logs for related errors.',
+          is_internal: true,
+        }),
+      },
+      {
+        label: 'Add billable time entry',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          body: 'Completed remote troubleshooting session.',
+          is_internal: false,
+          minutes_spent: 30,
+          is_billable: true,
+        }),
+      },
+      {
+        label: 'Add non-billable internal note with time',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          body: 'Initial triage and assessment completed.',
+          is_internal: true,
+          minutes_spent: 15,
+          is_billable: false,
+        }),
+      },
+      {
+        label: 'Add automated resolution reply',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          body: '<p>This issue has been automatically resolved. Please contact us if you experience any further problems.</p>',
+          is_internal: false,
+          author_id: null,
+        }),
+      },
+    ],
   };
 
   function getCookie(name) {

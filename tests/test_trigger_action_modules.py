@@ -24,6 +24,10 @@ async def test_list_trigger_action_modules_excludes_non_triggerable(monkeypatch)
             {"slug": "ntfy", "name": "ntfy", "enabled": True, "settings": {}},
             {"slug": "create-ticket", "name": "Create Ticket", "enabled": True, "settings": {}},
             {"slug": "create-task", "name": "Create Task", "enabled": True, "settings": {}},
+            {"slug": "update-ticket", "name": "Update Ticket", "enabled": True, "settings": {}},
+            {"slug": "update-ticket-description", "name": "Update Ticket Description", "enabled": True, "settings": {}},
+            {"slug": "reprocess-ai", "name": "Reprocess AI", "enabled": True, "settings": {}},
+            {"slug": "add-ticket-reply", "name": "Add Ticket Reply", "enabled": True, "settings": {}},
         ]
     
     monkeypatch.setattr(module_repo, "list_modules", fake_list_modules)
@@ -39,8 +43,11 @@ async def test_list_trigger_action_modules_excludes_non_triggerable(monkeypatch)
     for slug in excluded_slugs:
         assert slug not in result_slugs, f"{slug} should be excluded from trigger action modules"
     
-    # Check that included modules are in the result
-    included_slugs = {"smtp", "sms-gateway", "tacticalrmm", "ntfy", "create-ticket", "create-task"}
+    # Check that included modules are in the result (including new ticket action modules)
+    included_slugs = {
+        "smtp", "sms-gateway", "tacticalrmm", "ntfy", "create-ticket", "create-task",
+        "update-ticket", "update-ticket-description", "reprocess-ai", "add-ticket-reply"
+    }
     for slug in included_slugs:
         assert slug in result_slugs, f"{slug} should be included in trigger action modules"
     
@@ -61,6 +68,8 @@ async def test_list_trigger_action_modules_excludes_disabled(monkeypatch):
             {"slug": "create-ticket", "name": "Create Ticket", "enabled": False, "settings": {}},
             {"slug": "create-task", "name": "Create Task", "enabled": True, "settings": {}},
             {"slug": "tacticalrmm", "name": "Tactical RMM", "enabled": False, "settings": {}},
+            {"slug": "update-ticket", "name": "Update Ticket", "enabled": True, "settings": {}},
+            {"slug": "add-ticket-reply", "name": "Add Ticket Reply", "enabled": False, "settings": {}},
         ]
     
     monkeypatch.setattr(module_repo, "list_modules", fake_list_modules)
@@ -72,15 +81,15 @@ async def test_list_trigger_action_modules_excludes_disabled(monkeypatch):
     result_slugs = {module["slug"] for module in result}
     
     # Check that only enabled modules are in the result
-    assert result_slugs == {"smtp", "create-task"}, f"Expected only enabled modules, got {result_slugs}"
+    assert result_slugs == {"smtp", "create-task", "update-ticket"}, f"Expected only enabled modules, got {result_slugs}"
     
     # Verify disabled modules are not in the result
-    disabled_slugs = {"ntfy", "create-ticket", "tacticalrmm"}
+    disabled_slugs = {"ntfy", "create-ticket", "tacticalrmm", "add-ticket-reply"}
     for slug in disabled_slugs:
         assert slug not in result_slugs, f"Disabled module {slug} should not be in trigger action modules"
     
     # Verify the count
-    assert len(result) == 2, f"Expected 2 enabled modules, got {len(result)}"
+    assert len(result) == 3, f"Expected 3 enabled modules, got {len(result)}"
 
 
 @pytest.mark.asyncio
