@@ -565,12 +565,8 @@ except OSError:
     pass
 
 
-def _resolve_private_upload(file_path: str) -> Path:
-    """Resolve ``/uploads`` paths to the secured private uploads directory.
-
-    Supports legacy nested directory structures while preventing path traversal
-    outside the uploads root.
-    """
+def _sanitize_upload_path(file_path: str) -> PurePosixPath:
+    """Normalise an upload path and guard against traversal attacks."""
 
     if not file_path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
@@ -593,7 +589,19 @@ def _resolve_private_upload(file_path: str) -> Path:
     if not sanitized_parts:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    candidate = (_private_uploads_path.joinpath(*sanitized_parts)).resolve()
+    return PurePosixPath(*sanitized_parts)
+
+
+def _resolve_private_upload(file_path: str | PurePosixPath) -> Path:
+    """Resolve ``/uploads`` paths to the secured private uploads directory.
+
+    Supports legacy nested directory structures while preventing path traversal
+    outside the uploads root.
+    """
+
+    sanitized_path = _sanitize_upload_path(file_path) if isinstance(file_path, str) else file_path
+
+    candidate = (_private_uploads_path.joinpath(*sanitized_path.parts)).resolve()
     uploads_root = _private_uploads_path.resolve()
 
     try:
@@ -912,10 +920,15 @@ async def _require_administration_access(
 async def serve_private_upload(file_path: str, request: Request):
     """Serve product images stored in the legacy private uploads directory."""
 
-    _, redirect = await _require_authenticated_user(request)
-    if redirect:
-        return redirect
-    resolved_path = _resolve_private_upload(file_path)
+    sanitized_path = _sanitize_upload_path(file_path)
+    is_public_kb_image = sanitized_path.parts and sanitized_path.parts[0] == "knowledge-base"
+
+    if not is_public_kb_image:
+        _, redirect = await _require_authenticated_user(request)
+        if redirect:
+            return redirect
+
+    resolved_path = _resolve_private_upload(sanitized_path)
     headers = {"Cache-Control": "public, max-age=86400"}
     return FileResponse(resolved_path, headers=headers)
 
