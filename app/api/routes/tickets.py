@@ -471,8 +471,8 @@ async def create_ticket(
         await tickets_repo.add_watcher(ticket["id"], requester_id)
     try:
         await tickets_service.refresh_ticket_ai_summary(ticket["id"])
-    except RuntimeError:
-        pass
+    except RuntimeError as exc:
+        log_error(f"Failed to refresh AI summary for ticket {ticket['id']}: {exc}", exc_info=True)
     await tickets_service.refresh_ticket_ai_tags(ticket["id"])
     # For API key requests, pass a minimal user dict for building ticket detail
     detail_user = current_user or {"id": requester_id, "is_super_admin": False}
