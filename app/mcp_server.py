@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from collections import deque
 from typing import Any
@@ -30,6 +31,27 @@ from app.core.database import db
 
 
 settings = get_settings()
+
+
+# Pattern for valid SQL identifiers (alphanumeric and underscore, not starting with digit)
+_VALID_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _is_valid_identifier(name: str) -> bool:
+    """Validate that a string is a safe SQL identifier.
+    
+    Only allows alphanumeric characters and underscores, and must start with
+    a letter or underscore. This prevents SQL injection through field names.
+    
+    Args:
+        name: The identifier to validate
+        
+    Returns:
+        True if the identifier is safe to use in SQL queries
+    """
+    if not name or len(name) > 128:
+        return False
+    return _VALID_IDENTIFIER_PATTERN.match(name) is not None
 
 
 # Define sensitive fields to exclude from all responses
@@ -145,6 +167,9 @@ async def _handle_list_action(
     where_params = []
     
     for field, value in filters.items():
+        # Validate field name to prevent SQL injection
+        if not _is_valid_identifier(field):
+            raise ValueError(f"Invalid filter field name: {field}")
         # Simple equality filter only for security
         where_clauses.append(f"{field} = %s")
         where_params.append(value)
