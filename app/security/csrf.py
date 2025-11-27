@@ -17,6 +17,7 @@ DEFAULT_EXEMPT_PREFIXES = (
     "/auth/register",
     "/auth/password/forgot",
     "/auth/password/reset",
+    "/api/knowledge-base/search",
 )
 
 
