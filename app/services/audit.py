@@ -4,7 +4,15 @@ from typing import Any
 
 from fastapi import Request
 
+from app.core.logging import log_audit_event
 from app.repositories import audit_logs as audit_repo
+
+
+def _determine_event_type(action: str) -> str:
+    """Determine the event type category based on the action prefix."""
+    if action.startswith("bcp."):
+        return "BCP ACTION"
+    return "API OPERATION"
 
 
 async def log_action(
@@ -26,6 +34,8 @@ async def log_action(
             ip_address = forwarded.split(",")[0].strip()
         elif request.client:
             ip_address = request.client.host
+
+    # Log to database
     await audit_repo.create_audit_log(
         user_id=user_id,
         action=action,
@@ -36,4 +46,24 @@ async def log_action(
         metadata=metadata,
         api_key=api_key,
         ip_address=ip_address,
+    )
+
+    # Log to disk for external tools (Fail2ban, SIEM platforms)
+    event_type = _determine_event_type(action)
+    extra_meta: dict[str, Any] = {}
+    if api_key:
+        extra_meta["api_key"] = api_key
+    if metadata:
+        # Include company_id if present in metadata for easier filtering
+        if "company_id" in metadata:
+            extra_meta["company_id"] = metadata["company_id"]
+
+    log_audit_event(
+        event_type,
+        action,
+        user_id=user_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        ip_address=ip_address,
+        **extra_meta,
     )
