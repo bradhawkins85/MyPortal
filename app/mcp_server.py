@@ -33,7 +33,10 @@ from app.core.database import db
 settings = get_settings()
 
 
-# Pattern for valid SQL identifiers (alphanumeric and underscore, not starting with digit)
+# Maximum length for SQL identifier names to prevent abuse
+_MAX_IDENTIFIER_LENGTH = 128
+
+# Pattern for valid SQL identifiers (alphanumeric and underscore, starting with letter or underscore)
 _VALID_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
@@ -49,7 +52,7 @@ def _is_valid_identifier(name: str) -> bool:
     Returns:
         True if the identifier is safe to use in SQL queries
     """
-    if not name or len(name) > 128:
+    if not name or len(name) > _MAX_IDENTIFIER_LENGTH:
         return False
     return _VALID_IDENTIFIER_PATTERN.match(name) is not None
 
