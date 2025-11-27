@@ -13444,20 +13444,26 @@ def _parse_automation_form_submission(
     *,
     kind: str,
 ) -> tuple[dict[str, Any] | None, dict[str, Any], str | None, int]:
+    def _get_str_value(key: str) -> str:
+        value = form.get(key)
+        if value is None:
+            return ""
+        return str(value)
+
     kind_normalised = "event" if str(kind).lower() == "event" else "scheduled"
-    name = str(form.get("name", "")).strip()
-    description_value = str(form.get("description", "")).strip()
-    status_raw = str(form.get("status", "")).strip().lower()
+    name = _get_str_value("name").strip()
+    description_value = _get_str_value("description").strip()
+    status_raw = _get_str_value("status").strip().lower()
     status_value = "active" if status_raw == "active" else "inactive"
-    cadence_raw = str(form.get("cadence", "")).strip()
-    cron_raw = str(form.get("cronExpression", "")).strip()
-    run_once_raw = str(form.get("runOnce", "")).strip().lower()
+    cadence_raw = _get_str_value("cadence").strip()
+    cron_raw = _get_str_value("cronExpression").strip()
+    run_once_raw = _get_str_value("runOnce").strip().lower()
     run_once = run_once_raw in ("true", "1", "yes", "on")
-    scheduled_time_raw = str(form.get("scheduledTime", "")).strip()
-    trigger_event_raw = str(form.get("triggerEvent", "")).strip()
-    trigger_filters_raw = str(form.get("triggerFilters", "")).strip()
-    action_module_raw = str(form.get("actionModule", "")).strip()
-    action_payload_raw = str(form.get("actionPayload", "")).strip()
+    scheduled_time_raw = _get_str_value("scheduledTime").strip()
+    trigger_event_raw = _get_str_value("triggerEvent").strip()
+    trigger_filters_raw = _get_str_value("triggerFilters").strip()
+    action_module_raw = _get_str_value("actionModule").strip()
+    action_payload_raw = _get_str_value("actionPayload").strip()
 
     form_state = {
         "name": name,
