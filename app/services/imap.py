@@ -1590,6 +1590,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         reply_created_at = received_at or datetime.now(timezone.utc)
                         # Determine the author - use requester_id if available
                         reply_author_id = requester_id if requester_id is not None else None
+                        reply_added = False
                         try:
                             await tickets_repo.create_reply(
                                 ticket_id=int(ticket_id),
@@ -1599,6 +1600,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 external_reference=message_id if message_id else None,
                                 created_at=reply_created_at,
                             )
+                            reply_added = True
                             log_info(
                                 "Added email reply to existing ticket",
                                 account_id=account_id,
@@ -1613,6 +1615,26 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 ticket_id=ticket_id,
                                 error=str(exc),
                             )
+                        
+                        # Trigger ticket updated event for email replies
+                        # This allows automations to fire when requestor/watcher replies via email
+                        if reply_added:
+                            try:
+                                actor_info: dict[str, Any] | None = None
+                                if reply_author_id is not None:
+                                    actor_info = {"id": reply_author_id}
+                                await tickets_service.emit_ticket_updated_event(
+                                    ticket_id,
+                                    actor=actor_info,
+                                )
+                            except Exception as exc:  # pragma: no cover - defensive logging
+                                log_error(
+                                    "Failed to trigger automation for email reply",
+                                    account_id=account_id,
+                                    uid=uid,
+                                    ticket_id=ticket_id,
+                                    error=str(exc),
+                                )
                 
                 # Save non-image attachments with restricted access
                 for attachment_info in email_attachments:
