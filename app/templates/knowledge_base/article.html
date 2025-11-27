@@ -14,6 +14,12 @@
   <span class="header__title-text">{{ kb_article.title }}</span>
 {% endblock %}
 
+{% block sidebar_menu %}
+  {% if has_authenticated_user %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}
+
 {% block header_actions %}
   <form id="knowledge-base-search-form" class="header-search" data-knowledge-base-search>
     <label for="knowledge-base-search" class="visually-hidden">Search knowledge base</label>
