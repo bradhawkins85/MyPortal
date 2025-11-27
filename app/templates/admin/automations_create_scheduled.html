@@ -36,6 +36,16 @@
       </header>
 
       <div class="management__body">
+        {% if error_message %}
+        <div class="alert alert--error" role="alert">
+          {{ error_message }}
+        </div>
+        {% endif %}
+        {% if success_message %}
+        <div class="alert alert--success" role="status">
+          {{ success_message }}
+        </div>
+        {% endif %}
         <section class="card card--panel">
           <header class="card__header card__header--stacked">
             <h2 class="card__title">Workflow definition</h2>
