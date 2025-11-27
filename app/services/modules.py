@@ -869,7 +869,8 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "xero": ("client_secret", "refresh_token", "access_token"),
         "sms-gateway": ("authorization",),
         "unifi-talk": ("password",),
-        "plausible": ("api_key",),
+        "plausible": ("api_key", "pepper"),
+        "smtp2go": ("api_key", "webhook_secret"),
     }
     targets = fields_to_redact.get(slug)
     if not targets:
