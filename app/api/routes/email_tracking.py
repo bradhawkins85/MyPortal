@@ -11,10 +11,11 @@ from __future__ import annotations
 import base64
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from loguru import logger
 
+from app.api.dependencies.auth import get_current_user
 from app.services import email_tracking
 
 router = APIRouter(prefix="/api/email-tracking", tags=["Email Tracking"])
@@ -160,7 +161,10 @@ async def tracking_click(
 
 
 @router.get("/status/{tracking_id}")
-async def tracking_status(tracking_id: str) -> dict:
+async def tracking_status(
+    tracking_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     """Get tracking status for an email.
     
     Args:
