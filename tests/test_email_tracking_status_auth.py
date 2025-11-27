@@ -40,6 +40,19 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(main_module.settings, "enable_csrf", False)
 
 
+@pytest.fixture
+def mock_authenticated_user():
+    """Fixture to override auth dependency with a mock authenticated user."""
+    mock_user = {
+        "id": 1,
+        "email": "user@example.com",
+        "is_super_admin": False,
+    }
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: mock_user
+    yield mock_user
+    app.dependency_overrides.clear()
+
+
 def test_tracking_status_requires_authentication(monkeypatch):
     """Test that unauthenticated requests are rejected with 401."""
     with TestClient(app) as client:
@@ -52,7 +65,7 @@ def test_tracking_status_requires_authentication(monkeypatch):
     assert response.json()["detail"] == "Not authenticated"
 
 
-def test_tracking_status_returns_data_when_authenticated(monkeypatch):
+def test_tracking_status_returns_data_when_authenticated(monkeypatch, mock_authenticated_user):
     """Test that authenticated requests can access tracking status."""
     async def fake_get_tracking_status(tracking_id: str):
         return {
@@ -64,18 +77,8 @@ def test_tracking_status_returns_data_when_authenticated(monkeypatch):
 
     monkeypatch.setattr(email_tracking, "get_tracking_status", fake_get_tracking_status)
 
-    # Override auth dependency to simulate authenticated user
-    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
-        "id": 1,
-        "email": "user@example.com",
-        "is_super_admin": False,
-    }
-
-    try:
-        with TestClient(app) as client:
-            response = client.get("/api/email-tracking/status/test-tracking-id")
-    finally:
-        app.dependency_overrides.clear()
+    with TestClient(app) as client:
+        response = client.get("/api/email-tracking/status/test-tracking-id")
 
     assert response.status_code == 200
     data = response.json()
@@ -83,25 +86,15 @@ def test_tracking_status_returns_data_when_authenticated(monkeypatch):
     assert data["found"] is True
 
 
-def test_tracking_status_not_found_when_authenticated(monkeypatch):
+def test_tracking_status_not_found_when_authenticated(monkeypatch, mock_authenticated_user):
     """Test that authenticated user gets proper 'not found' response for missing tracking ID."""
     async def fake_get_tracking_status(tracking_id: str):
         return None
 
     monkeypatch.setattr(email_tracking, "get_tracking_status", fake_get_tracking_status)
 
-    # Override auth dependency to simulate authenticated user
-    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
-        "id": 1,
-        "email": "user@example.com",
-        "is_super_admin": False,
-    }
-
-    try:
-        with TestClient(app) as client:
-            response = client.get("/api/email-tracking/status/nonexistent-id")
-    finally:
-        app.dependency_overrides.clear()
+    with TestClient(app) as client:
+        response = client.get("/api/email-tracking/status/nonexistent-id")
 
     assert response.status_code == 200
     data = response.json()
