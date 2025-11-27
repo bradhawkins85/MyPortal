@@ -389,3 +389,64 @@ def test_mcp_get_without_id_param_fails(client):
         assert response["id"] == "test-11"
         assert response["status"] == "error"
         assert "id" in response["error"].lower()
+
+
+@pytest.mark.parametrize("malicious_field", [
+    "id; DROP TABLE users; --",
+    "status OR 1=1 --",
+    "' OR '1'='1",
+    "id=1; DELETE FROM users WHERE 1=1; --",
+    "1 UNION SELECT * FROM passwords --",
+    "column`; INSERT INTO users --",
+    "field\"; DROP TABLE --",
+    "col\nDROP TABLE users",
+    "status--",
+    "id/**/OR/**/1=1",
+])
+def test_mcp_sql_injection_via_filter_field_blocked(malicious_field, client):
+    """Test that SQL injection attempts via filter field names are blocked."""
+    with client.websocket_connect(
+        "/mcp/ws",
+        headers={"X-MCP-Token": TEST_MCP_TOKEN}
+    ) as websocket:
+        request = {
+            "id": "test-sqli-field",
+            "action": "list",
+            "model": "users",
+            "params": {
+                "filters": {malicious_field: "test_value"}
+            }
+        }
+        websocket.send_json(request)
+        
+        response = websocket.receive_json()
+        assert response["id"] == "test-sqli-field"
+        assert response["status"] == "error"
+        assert "invalid filter field" in response["error"].lower()
+
+
+@patch("app.mcp_server.db.fetch_all")
+def test_mcp_valid_filter_field_allowed(mock_fetch_all, client):
+    """Test that valid filter field names are allowed."""
+    mock_fetch_all.return_value = [
+        {"id": 1, "email": "user@example.com", "status": "active"}
+    ]
+    
+    with client.websocket_connect(
+        "/mcp/ws",
+        headers={"X-MCP-Token": TEST_MCP_TOKEN}
+    ) as websocket:
+        request = {
+            "id": "test-valid-field",
+            "action": "list",
+            "model": "users",
+            "params": {
+                "filters": {"status": "active", "company_id": "1"}
+            }
+        }
+        websocket.send_json(request)
+        
+        response = websocket.receive_json()
+        assert response["id"] == "test-valid-field"
+        assert response["status"] == "ok"
+        assert "data" in response
