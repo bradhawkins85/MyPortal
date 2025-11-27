@@ -94,7 +94,7 @@ def log_audit_event(
     via FAIL2BAN_LOG_PATH. Events are logged in a structured format compatible
     with tools like Fail2ban or SIEM platforms.
 
-    Format: ``{event_type} {action} user_id={...} entity_type={...} entity_id={...} ip={...} [extra_meta]``
+    Format: ``{event_type} {action} | user_id={...} entity_type={...} entity_id={...} ip={...} [extra_meta]``
 
     Args:
         event_type: Category of the event (e.g., "API OPERATION", "BCP ACTION")
