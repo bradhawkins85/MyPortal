@@ -1,5 +1,7 @@
 """Test ticket automation action modules."""
 import json
+from typing import Any
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -73,6 +75,38 @@ async def test_invoke_update_ticket_changes_status(monkeypatch, mock_webhook_mon
     assert result["status"] == "succeeded"
     assert result["ticket_id"] == 1
     assert "status" in result["updated_fields"]
+
+
+@pytest.mark.asyncio
+async def test_invoke_update_ticket_normalises_status(monkeypatch, mock_webhook_monitor, mock_record_success):
+    """Status values are normalised to slug format for consistency."""
+    from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
+
+    async def fake_get_ticket(ticket_id):
+        return {"id": ticket_id, "status": "open"}
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", fake_get_ticket)
+
+    captured_updates: dict[str, Any] = {}
+
+    async def fake_update_ticket(ticket_id, **kwargs):
+        captured_updates.update(kwargs)
+        return {"id": ticket_id, **kwargs}
+
+    monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
+
+    mock_emit = AsyncMock()
+    monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", mock_emit)
+
+    result = await modules._invoke_update_ticket(
+        {},
+        {"ticket_id": 7, "status": "Customer Replied"},
+        event_future=None,
+    )
+
+    assert result["status"] == "succeeded"
+    assert captured_updates.get("status") == "customer_replied"
 
 
 @pytest.mark.asyncio
