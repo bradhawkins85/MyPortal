@@ -98,11 +98,14 @@
       return;
     }
 
+    editor.classList.add('rich-text-editor--enhanced');
+
     if (hidden.value) {
       surface.innerHTML = hidden.value;
     } else {
       surface.innerHTML = '';
     }
+
     updateSurfaceState(surface, hidden);
 
     const form = editor.closest('form');
