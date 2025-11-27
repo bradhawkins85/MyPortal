@@ -499,6 +499,18 @@ html {
   pointer-events: none;
 }
 
+.rich-text-editor [data-rich-text-content] {
+  display: none;
+}
+
+.rich-text-editor--enhanced [data-rich-text-content] {
+  display: block;
+}
+
+.rich-text-editor--enhanced [data-rich-text-fallback] {
+  display: none;
+}
+
 .rich-text-editor__surface {
   min-height: 10.5rem;
   padding: var(--space-gap-base);
@@ -509,6 +521,17 @@ html {
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.rich-text-editor__fallback {
+  min-height: 10.5rem;
+  font: inherit;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.3);
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  padding: 0.85rem 1rem;
+  resize: vertical;
 }
 
 .rich-text-editor__surface a {
