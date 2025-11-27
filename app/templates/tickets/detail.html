@@ -359,15 +359,15 @@
                         data-placeholder="Write your reply..."
                       >{{ reply_body }}</div>
                     </div>
-                    <textarea
+                    <input
+                      type="hidden"
                       id="ticket-reply-body-hidden"
                       name="body"
-                      class="form-input rich-text-editor__fallback"
                       data-rich-text-value
                       data-rich-text-fallback
-                      rows="6"
+                      value="{{ reply_body | e }}"
                       required
-                    >{{ reply_body }}</textarea>
+                    />
                   </div>
                   <div class="form-field">
                     <label class="form-label" for="ticket-reply-attachments">Attachments (optional)</label>
