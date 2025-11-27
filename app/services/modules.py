@@ -538,6 +538,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "description": "Create a new support ticket with customizable details.",
         "icon": "🎫",
         "settings": {},
+        "enabled": True,  # Internal action module - no external configuration required
     },
     {
         "slug": "create-task",
@@ -545,6 +546,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "description": "Create a new task for a ticket.",
         "icon": "✓",
         "settings": {},
+        "enabled": True,  # Internal action module - no external configuration required
     },
     {
         "slug": "call-recordings",
@@ -575,6 +577,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "description": "Update ticket fields such as status, priority, assigned user, category, and requester.",
         "icon": "✏️",
         "settings": {},
+        "enabled": True,  # Internal action module - no external configuration required
     },
     {
         "slug": "update-ticket-description",
@@ -582,6 +585,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "description": "Change the description field of an existing ticket.",
         "icon": "📝",
         "settings": {},
+        "enabled": True,  # Internal action module - no external configuration required
     },
     {
         "slug": "reprocess-ai",
@@ -589,6 +593,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "description": "Re-trigger AI processing to regenerate ticket summary and tags using the Ollama model.",
         "icon": "🔄",
         "settings": {},
+        "enabled": True,  # Internal action module - no external configuration required
     },
     {
         "slug": "add-ticket-reply",
@@ -596,6 +601,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "description": "Add a reply to an existing ticket. Supports public replies, internal notes, and optional time tracking with billable/non-billable hours.",
         "icon": "💬",
         "settings": {},
+        "enabled": True,  # Internal action module - no external configuration required
     },
 ]
 
@@ -946,13 +952,15 @@ async def ensure_default_modules() -> None:
     existing_by_slug = {module["slug"]: module for module in existing}
     for default in DEFAULT_MODULES:
         current = existing_by_slug.get(default["slug"])
+        # Use the enabled value from DEFAULT_MODULES if specified, otherwise default to False
+        default_enabled = default.get("enabled", False)
         if not current:
             await module_repo.upsert_module(
                 slug=default["slug"],
                 name=default["name"],
                 description=default["description"],
                 icon=default["icon"],
-                enabled=False,
+                enabled=default_enabled,
                 settings=default["settings"],
             )
             continue
@@ -963,6 +971,10 @@ async def ensure_default_modules() -> None:
             updates["description"] = default["description"]
         if current.get("icon") != default["icon"]:
             updates["icon"] = default["icon"]
+        # If the default specifies enabled=True and the module is currently disabled,
+        # enable it (for internal action modules that should always be available)
+        if default_enabled and not current.get("enabled", False):
+            updates["enabled"] = True
         if updates:
             await module_repo.update_module(default["slug"], **updates)
 
