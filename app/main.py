@@ -139,6 +139,7 @@ from app.schemas.tickets import SyncroTicketImportRequest
 from app.security.cache_control import CacheControlMiddleware
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import encrypt_secret
+from app.security.ip_whitelist import IPWhitelistMiddleware
 from app.security.rate_limiter import (
     EndpointRateLimiter,
     EndpointRateLimiterMiddleware,
@@ -414,13 +415,67 @@ async def _get_extra_csp_script_sources() -> list[str]:
     return sources
 
 
+# Configure CORS with security-first defaults
+# If ALLOWED_ORIGINS is not configured, only allow same-origin requests (empty list)
+allowed_origins = [str(origin) for origin in settings.allowed_origins] if settings.allowed_origins else []
+
+# Log warning if wildcard CORS is detected (should never happen with current config)
+if "*" in allowed_origins:
+    logger.warning(
+        "SECURITY WARNING: Wildcard CORS origin (*) detected. "
+        "This allows any website to make requests to this API. "
+        "Configure ALLOWED_ORIGINS in .env for production use."
+    )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[str(origin) for origin in settings.allowed_origins] or ["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=["*"],
 )
+
+# Add IP whitelisting middleware for sensitive endpoints
+# This provides an additional layer of security by restricting access based on IP address
+if settings.ip_whitelist_enabled and settings.ip_whitelist:
+    whitelist_entries = [entry.strip() for entry in settings.ip_whitelist.split(",") if entry.strip()]
+    
+    # Determine which paths to protect
+    protected_paths = ["/admin"]
+    if not settings.ip_whitelist_admin_only:
+        protected_paths.append("/api")
+    
+    # Exempt public endpoints from IP whitelisting
+    exempt_paths = [
+        "/static",
+        "/health",
+        "/login",
+        "/register",
+        "/api/auth/login",
+        "/api/auth/register",
+        "/api/webhooks",  # Webhooks use signature verification instead
+        "/manifest.webmanifest",
+        "/service-worker.js",
+    ]
+    
+    app.add_middleware(
+        IPWhitelistMiddleware,
+        whitelist=whitelist_entries,
+        protected_paths=protected_paths,
+        exempt_paths=exempt_paths,
+        enabled=True,
+    )
+    
+    logger.info(
+        "IP whitelist enabled",
+        whitelist_count=len(whitelist_entries),
+        protected_paths=protected_paths,
+    )
+elif settings.ip_whitelist_enabled:
+    logger.warning(
+        "IP whitelist enabled but no IP addresses configured. "
+        "Set IP_WHITELIST in .env to enable IP-based access control."
+    )
 
 # Add security headers middleware
 app.add_middleware(

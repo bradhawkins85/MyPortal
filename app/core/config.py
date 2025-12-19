@@ -127,6 +127,20 @@ class Settings(BaseSettings):
         default=60,
         validation_alias="MCP_RATE_LIMIT",
     )
+    
+    # IP Whitelisting Configuration
+    ip_whitelist_enabled: bool = Field(
+        default=False,
+        validation_alias="IP_WHITELIST_ENABLED",
+    )
+    ip_whitelist: str = Field(
+        default="",
+        validation_alias="IP_WHITELIST",
+    )
+    ip_whitelist_admin_only: bool = Field(
+        default=True,
+        validation_alias="IP_WHITELIST_ADMIN_ONLY",
+    )
 
     @field_validator(
         "syncro_webhook_url",
