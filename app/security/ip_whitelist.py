@@ -123,15 +123,12 @@ class IPWhitelistMiddleware(BaseHTTPMiddleware):
             logger.warning("Invalid client IP address", ip=client_ip_str)
             return False
         
-        # Check if client IP is in any whitelisted range
-        for allowed in self._whitelist:
-            try:
-                if client_ip in allowed:  # type: ignore[operator]
-                    return True
-            except TypeError:
-                # Single IP address comparison
-                if client_ip == allowed:
-                    return True
+        # Check if client IP is in any whitelisted network/range
+        # Both single IPs and CIDR ranges are stored as ip_network objects
+        # which support the 'in' operator
+        for network in self._whitelist:
+            if client_ip in network:  # type: ignore[operator]
+                return True
         
         return False
 
