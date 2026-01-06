@@ -31,8 +31,8 @@ class Settings(BaseSettings):
         default="myportal_session",
         validation_alias=AliasChoices("SESSION_COOKIE_NAME", "SESSION_COOKIE"),
     )
-    allowed_origins: List[AnyHttpUrl] = Field(
-        default_factory=list,
+    allowed_origins: str = Field(
+        default="",
         validation_alias="ALLOWED_ORIGINS",
     )
     smtp_host: str | None = Field(default=None, validation_alias="SMTP_HOST")
