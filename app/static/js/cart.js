@@ -195,12 +195,12 @@
               window.location.href = response.url;
             } else {
               // Fallback: just reload the current page
-              window.location.reload(true);
+              window.location.reload();
             }
           })
           .catch(() => {
             // On error, try to reload the page anyway
-            window.location.reload(true);
+            window.location.reload();
           });
       });
     });
@@ -212,6 +212,7 @@
     handleFormSubmitAndReload();
 
     const modal = document.getElementById('cart-product-details-modal');
+    const modalTitle = document.getElementById('cart-product-details-title');
     const modalBody = document.getElementById('cart-product-details-body');
     if (!modal || !modalBody) {
       return;
