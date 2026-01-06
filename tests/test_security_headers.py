@@ -26,7 +26,7 @@ async def _mock_extra_sources_invalid():
     """Mock function that returns invalid sources that should be filtered."""
     return [
         "https://valid.example.com",
-        "http://invalid-http.example.com",  # HTTP not allowed
+        "http://valid-http.example.com",  # HTTP is allowed for development
         "https://invalid with spaces.com",  # Spaces not allowed
         "javascript:alert(1)",  # JavaScript protocol not allowed
         "",  # Empty string
@@ -228,8 +228,9 @@ def test_csp_filters_invalid_sources(test_app_with_invalid_sources):
     
     # Valid HTTPS source should be included
     assert "https://valid.example.com" in csp
+    # Valid HTTP source should also be included (allowed for development)
+    assert "http://valid-http.example.com" in csp
     # Invalid sources should NOT be included
-    assert "http://invalid-http.example.com" not in csp
     assert "invalid with spaces" not in csp
     assert "javascript:" not in csp
 
@@ -265,17 +266,19 @@ def test_csp_source_validation():
     
     middleware = SecurityHeadersMiddleware(MockApp())
     
-    # Valid sources
+    # Valid sources (both HTTPS and HTTP)
     assert middleware._is_valid_csp_source("https://example.com") is True
     assert middleware._is_valid_csp_source("https://subdomain.example.com") is True
     assert middleware._is_valid_csp_source("https://example.com:8080") is True
     assert middleware._is_valid_csp_source("https://example-with-dash.com") is True
+    assert middleware._is_valid_csp_source("http://example.com") is True  # HTTP is allowed for development
+    assert middleware._is_valid_csp_source("http://localhost:8000") is True  # HTTP localhost is common in dev
     
     # Invalid sources
-    assert middleware._is_valid_csp_source("http://example.com") is False  # HTTP not allowed
     assert middleware._is_valid_csp_source("https://example.com with spaces") is False
     assert middleware._is_valid_csp_source("https://example.com;") is False
     assert middleware._is_valid_csp_source("https://example.com'") is False
     assert middleware._is_valid_csp_source("javascript:alert(1)") is False
+    assert middleware._is_valid_csp_source("ftp://example.com") is False  # Only HTTP/HTTPS allowed
     assert middleware._is_valid_csp_source("") is False
     assert middleware._is_valid_csp_source(None) is False
