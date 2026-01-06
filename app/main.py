@@ -5231,41 +5231,143 @@ async def view_cart(
 
     items = await cart_repo.list_items(session.id)
     cart_items: list[dict[str, Any]] = []
-    total = Decimal("0")
     cart_items_payload: list[dict[str, Any]] = []
     cart_product_ids: list[int] = []
+    total = Decimal("0")
+    removed_product_ids: list[int] = []
+    price_updates = 0
+    cart_message_parts = [cart_message] if cart_message else []
+    cart_error_parts = [cart_error] if cart_error else []
+
+    try:
+        is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
+    except (TypeError, ValueError):
+        is_vip = False
+
+    product_lookup: dict[int, dict[str, Any]] = {}
+    if items:
+        product_ids = []
+        for item in items:
+            try:
+                product_ids.append(int(item.get("product_id") or 0))
+            except (TypeError, ValueError):
+                continue
+        if product_ids:
+            base_products = await shop_repo.list_products_by_ids(
+                product_ids,
+                company_id=company_id,
+            )
+            product_lookup = {
+                int(product.get("id") or 0): product for product in base_products if product.get("id") is not None
+            }
+
+    def _resolve_product_price(product: Mapping[str, Any]) -> Decimal:
+        price_source = product.get("price")
+        if is_vip and product.get("vip_price") is not None:
+            price_source = product.get("vip_price")
+        try:
+            value = Decimal(str(price_source or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except (InvalidOperation, TypeError, ValueError):
+            value = Decimal("0.00")
+        return value
+
+    def _normalise_price(value: Any) -> Decimal:
+        if isinstance(value, Decimal):
+            return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        try:
+            return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except (InvalidOperation, TypeError, ValueError):
+            return Decimal("0.00")
+
     for item in items:
-        unit_price = item.get("unit_price")
-        if not isinstance(unit_price, Decimal):
-            unit_price = Decimal(str(unit_price or 0))
         quantity = int(item.get("quantity") or 0)
-        line_total = unit_price * quantity
-        total += line_total
-        hydrated = dict(item)
-        hydrated["unit_price"] = unit_price
-        hydrated["line_total"] = line_total
-        hydrated["available_stock"] = 0
-        cart_items.append(hydrated)
-        product_identifier = hydrated.get("product_id")
+        product_identifier = item.get("product_id")
         try:
             resolved_product_id = int(product_identifier)
         except (TypeError, ValueError):
             resolved_product_id = 0
-        if resolved_product_id > 0:
-            cart_product_ids.append(resolved_product_id)
+
+        product = product_lookup.get(resolved_product_id)
+        if not product or resolved_product_id <= 0:
+            if resolved_product_id > 0:
+                removed_product_ids.append(resolved_product_id)
+            continue
+
+        current_price = _resolve_product_price(product)
+        stored_price = _normalise_price(item.get("unit_price"))
+        if current_price != stored_price:
+            price_updates += 1
+
+        name = str(product.get("name") or item.get("product_name") or "")
+        sku = str(product.get("sku") or item.get("product_sku") or "")
+        vendor_sku = product.get("vendor_sku")
+        description = product.get("description")
+        image_url = product.get("image_url")
+        line_total = current_price * quantity
+        total += line_total
+
+        cart_product_ids.append(resolved_product_id)
+
+        hydrated = dict(item)
+        hydrated.update(
+            {
+                "unit_price": current_price,
+                "line_total": line_total,
+                "available_stock": int(product.get("stock") or 0),
+                "product_name": name,
+                "product_sku": sku,
+                "product_vendor_sku": vendor_sku,
+                "product_description": description,
+                "product_image_url": image_url,
+            }
+        )
+        cart_items.append(hydrated)
+
+        if any(
+            [
+                current_price != stored_price,
+                name != item.get("product_name"),
+                sku != item.get("product_sku"),
+                vendor_sku != item.get("product_vendor_sku"),
+                description != item.get("product_description"),
+                image_url != item.get("product_image_url"),
+            ]
+        ):
+            await cart_repo.upsert_item(
+                session_id=session.id,
+                product_id=resolved_product_id,
+                quantity=quantity,
+                unit_price=current_price,
+                name=name,
+                sku=sku,
+                vendor_sku=vendor_sku,
+                description=description,
+                image_url=image_url,
+            )
+
+        line_total = current_price * quantity
+        total += line_total
+
         cart_items_payload.append(
             {
-                "product_id": hydrated.get("product_id"),
-                "name": hydrated.get("product_name"),
-                "sku": hydrated.get("product_sku"),
-                "vendor_sku": hydrated.get("product_vendor_sku"),
-                "description": hydrated.get("product_description"),
-                "image_url": hydrated.get("product_image_url"),
-                "unit_price": f"{unit_price:.2f}",
+                "product_id": resolved_product_id,
+                "name": name,
+                "sku": sku,
+                "vendor_sku": vendor_sku,
+                "description": description,
+                "image_url": image_url,
+                "unit_price": f"{current_price:.2f}",
                 "quantity": quantity,
                 "line_total": f"{line_total:.2f}",
             }
         )
+
+    if removed_product_ids:
+        await cart_repo.remove_items(session.id, removed_product_ids)
+        cart_error_parts.append("Some items were removed because they are no longer available.")
+
+    if price_updates:
+        cart_message_parts.append("Prices updated to reflect the latest catalog.")
 
     recommendations: dict[str, list[dict[str, Any]]] = {"cross_sell": [], "upsell": []}
     if cart_product_ids:
@@ -5393,13 +5495,16 @@ async def view_cart(
             for bucket in recommendations.values():
                 bucket.sort(key=lambda item: str(item.get("name") or "").lower())
 
+    normalised_cart_message = " ".join(filter(None, cart_message_parts)) or None
+    normalised_cart_error = " ".join(filter(None, cart_error_parts)) or None
+
     extra = {
         "title": "Cart",
         "cart_items": cart_items,
         "cart_total": total,
         "order_message": order_message,
-        "cart_error": cart_error,
-        "cart_message": cart_message,
+        "cart_error": normalised_cart_error,
+        "cart_message": normalised_cart_message,
         "cart_items_payload": cart_items_payload,
         "cart_recommendations": recommendations,
         "low_stock_threshold": SHOP_LOW_STOCK_THRESHOLD,
