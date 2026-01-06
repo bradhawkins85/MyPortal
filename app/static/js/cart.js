@@ -1,4 +1,16 @@
 (function () {
+  /**
+   * Cart functionality for MyPortal shop.
+   * 
+   * This script handles:
+   * - Stock limit validation on quantity inputs
+   * - Product detail modal interactions
+   * 
+   * Form submissions (update, remove, place order) are handled natively by the browser.
+   * The server returns 303 redirects with query parameters for flash messages (cartMessage, cartError).
+   * All forms include CSRF tokens via the csrf.html partial for security.
+   */
+
   function parseJson(elementId) {
     const element = document.getElementById(elementId);
     if (!element) {
