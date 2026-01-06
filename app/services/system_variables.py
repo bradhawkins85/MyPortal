@@ -76,7 +76,7 @@ def _static_variables() -> dict[str, str]:
     portal_url = str(settings.portal_url) if settings.portal_url else ""
     portal_origin, portal_hostname = _portal_origin(portal_url)
 
-    allowed_origins = [str(origin) for origin in settings.allowed_origins]
+    allowed_origins = [origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()] if settings.allowed_origins else []
 
     version = _read_version()
 
