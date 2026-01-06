@@ -150,7 +150,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         """Validate that a CSP source is safe to include.
         
         This prevents CSP injection attacks by ensuring the source:
-        - Is a valid HTTPS URL
+        - Is a valid HTTP or HTTPS URL
         - Contains no whitespace or special characters that could break CSP
         - Matches expected URL format
         
@@ -170,8 +170,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if any(char in source for char in [" ", ";", "'", '"', "\n", "\r", "\t"]):
             return False
         
-        # Must be HTTPS URL
-        if not source.startswith("https://"):
+        # Must be HTTP or HTTPS URL
+        if not (source.startswith("https://") or source.startswith("http://")):
             return False
         
         try:
