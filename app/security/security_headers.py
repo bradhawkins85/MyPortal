@@ -56,6 +56,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "'unsafe-inline'",
             "'unsafe-eval'",
             "https://unpkg.com",
+            "https://cal.com",
+            "https://app.cal.com",
         ]
 
         # Add extra script sources (e.g., Plausible analytics)
@@ -71,9 +73,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 pass
 
         # Build connect-src directive
-        connect_sources = ["'self'"]
+        connect_sources = ["'self'", "https://cal.com", "https://app.cal.com"]
 
-        frame_sources = ["'self'"]
+        frame_sources = ["'self'", "https://cal.com", "https://app.cal.com"]
 
         # Add extra connect sources (e.g., analytics APIs)
         if self._get_extra_connect_sources:
@@ -85,6 +87,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             except Exception:
                 # If we fail to get extra sources, continue with defaults
                 pass
+        
+        form_action_sources = ["'self'"]
+        if self._settings.portal_url:
+            portal_url = str(self._settings.portal_url).rstrip("/")
+            if self._is_valid_csp_source(portal_url):
+                form_action_sources.append(portal_url)
         
         # Content-Security-Policy: Restrict resource loading to same origin
         # Allow 'unsafe-inline' for styles and scripts that are inline in templates
@@ -101,7 +109,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             f"frame-src {' '.join(frame_sources)}",
             "frame-ancestors 'none'",
             "base-uri 'self'",
-            "form-action 'self'",
+            f"form-action {' '.join(form_action_sources)}",
         ]
         response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
 
