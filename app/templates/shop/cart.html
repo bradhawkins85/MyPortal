@@ -38,7 +38,7 @@
   {% endif %}
 
   {% if cart_items %}
-    <form action="{{ request.url_for('cart_update_items') }}" method="post" class="cart-items-form">
+    <form action="/cart/update" method="post" class="cart-items-form">
       {% include "partials/csrf.html" %}
       <div class="table-wrapper">
         <table class="table" id="cart-table" data-table>
@@ -111,14 +111,14 @@
         <button
           type="submit"
           class="button button--ghost"
-          formaction="{{ request.url_for('cart_remove_items') }}"
+          formaction="/cart/remove"
         >
           Remove selected
         </button>
       </div>
     </form>
 
-    <form action="{{ request.url_for('cart_place_order') }}" method="post" class="cart-checkout form-grid">
+    <form action="/cart/place-order" method="post" class="cart-checkout form-grid">
       {% include "partials/csrf.html" %}
       <div class="form-field">
         <label class="form-label" for="cart-po-number">PO number</label>
@@ -175,7 +175,7 @@
               {% if item.source_names %}
                 <p class="cart-recommendations__meta">Upgrade for {{ item.source_names | join(', ') }}</p>
               {% endif %}
-              <form action="{{ request.url_for('add_to_cart') }}" method="post" class="cart-recommendations__form">
+              <form action="/cart/add" method="post" class="cart-recommendations__form">
                 {% include "partials/csrf.html" %}
                 <input type="hidden" name="productId" value="{{ item.product_id }}" />
                 <input type="hidden" name="quantity" value="1" />
@@ -206,7 +206,7 @@
               {% if item.source_names %}
                 <p class="cart-recommendations__meta">Pairs with {{ item.source_names | join(', ') }}</p>
               {% endif %}
-              <form action="{{ request.url_for('add_to_cart') }}" method="post" class="cart-recommendations__form">
+              <form action="/cart/add" method="post" class="cart-recommendations__form">
                 {% include "partials/csrf.html" %}
                 <input type="hidden" name="productId" value="{{ item.product_id }}" />
                 <input type="hidden" name="quantity" value="1" />
