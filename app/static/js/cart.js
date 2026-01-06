@@ -163,53 +163,10 @@
         });
     }
   }
-  }
-
-  function handleFormSubmitAndReload() {
-    // Find all forms that modify cart state
-    const forms = document.querySelectorAll(
-      'form[action="/cart/update"], form[action="/cart/remove"], form[action="/cart/add"], form[action="/cart/place-order"]'
-    );
-
-    forms.forEach((form) => {
-      form.addEventListener('submit', (event) => {
-        event.preventDefault();
-
-        // Submit the form using fetch to intercept the redirect
-        const formData = new FormData(form);
-        const action = form.getAttribute('action');
-
-        fetch(action, {
-          method: 'POST',
-          body: formData,
-          redirect: 'manual', // Don't follow redirects automatically
-        })
-          .then((response) => {
-            // The server returns a 303 redirect, which fetch sees as an opaque redirect response
-            // We want to follow the redirect manually and reload the page
-            if (response.type === 'opaqueredirect' || response.status === 303 || response.status === 302 || response.status === 301) {
-              // Force a full page reload to the current cart page with cache bust
-              window.location.href = window.location.pathname + '?_=' + Date.now();
-            } else if (response.redirected) {
-              // If fetch followed a redirect automatically (shouldn't happen with redirect: 'manual')
-              window.location.href = response.url;
-            } else {
-              // Fallback: just reload the current page
-              window.location.reload();
-            }
-          })
-          .catch(() => {
-            // On error, try to reload the page anyway
-            window.location.reload();
-          });
-      });
-    });
-  }
 
   document.addEventListener('DOMContentLoaded', () => {
     const container = document.body;
     bindStockLimitInputs(container);
-    handleFormSubmitAndReload();
 
     const modal = document.getElementById('cart-product-details-modal');
     const modalTitle = document.getElementById('cart-product-details-title');
