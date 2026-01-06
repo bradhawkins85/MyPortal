@@ -5345,9 +5345,6 @@ async def view_cart(
                 image_url=image_url,
             )
 
-        line_total = current_price * quantity
-        total += line_total
-
         cart_items_payload.append(
             {
                 "product_id": resolved_product_id,
@@ -5509,7 +5506,11 @@ async def view_cart(
         "cart_recommendations": recommendations,
         "low_stock_threshold": SHOP_LOW_STOCK_THRESHOLD,
     }
-    return await _render_template("shop/cart.html", request, user, extra=extra)
+    response = await _render_template("shop/cart.html", request, user, extra=extra)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 def _normalise_status_badge(label: str) -> str:
