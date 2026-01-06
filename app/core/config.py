@@ -142,6 +142,33 @@ class Settings(BaseSettings):
     )
 
     @field_validator(
+        "smtp_use_tls",
+        "enable_csrf",
+        "enable_auto_refresh",
+        "disable_caching",
+        "bcp_enabled",
+        "enable_hsts",
+        "mcp_enabled",
+        "mcp_readonly",
+        "ip_whitelist_enabled",
+        "ip_whitelist_admin_only",
+        mode="before",
+    )
+    @classmethod
+    def _strip_inline_comments(cls, value: bool | str) -> bool | str:
+        """Strip inline comments from boolean fields in environment variables.
+        
+        Environment files may contain inline comments like:
+            IP_WHITELIST_ADMIN_ONLY=true  # admin routes only
+        
+        This validator removes the comment portion to allow proper boolean parsing.
+        """
+        if isinstance(value, str):
+            # Split on '#' and take the first part, then strip whitespace
+            value = value.split("#")[0].strip()
+        return value
+
+    @field_validator(
         "syncro_webhook_url",
         "verify_webhook_url",
         "portal_url",
