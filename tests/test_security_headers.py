@@ -234,6 +234,27 @@ def test_csp_filters_invalid_sources(test_app_with_invalid_sources):
     assert "javascript:" not in csp
 
 
+def test_form_action_allows_portal_url():
+    """Test that form-action allows configured portal URL."""
+    with patch.dict(os.environ, {"PORTAL_URL": "https://portal.example.com"}):
+        from app.core.config import get_settings
+        get_settings.cache_clear()
+
+        app = FastAPI()
+
+        @app.get("/test")
+        async def test_endpoint(request: Request):
+            return JSONResponse({"status": "ok"})
+
+        app.add_middleware(SecurityHeadersMiddleware, exempt_paths=("/static",))
+        client = TestClient(app)
+        response = client.get("/test")
+
+        csp = response.headers["Content-Security-Policy"]
+        assert "form-action 'self' https://portal.example.com" in csp
+
+        get_settings.cache_clear()
+
 def test_csp_source_validation():
     """Test the _is_valid_csp_source method directly."""
     from app.security.security_headers import SecurityHeadersMiddleware
