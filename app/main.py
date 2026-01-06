@@ -417,7 +417,7 @@ async def _get_extra_csp_script_sources() -> list[str]:
 
 # Configure CORS with security-first defaults
 # If ALLOWED_ORIGINS is not configured, only allow same-origin requests (empty list)
-allowed_origins = [str(origin) for origin in settings.allowed_origins] if settings.allowed_origins else []
+allowed_origins = [origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()] if settings.allowed_origins else []
 
 # Log warning if wildcard CORS is detected (should never happen with current config)
 if "*" in allowed_origins:
