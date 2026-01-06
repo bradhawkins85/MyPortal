@@ -31,7 +31,6 @@ async def test_http_url_validation():
 async def test_csp_includes_portal_url(monkeypatch):
     """Test that portal_url is included in CSP form-action directive."""
     from pydantic import AnyHttpUrl
-    from app.core.config import Settings
     
     # Mock settings with a portal URL
     class MockSettings:
@@ -42,9 +41,8 @@ async def test_csp_includes_portal_url(monkeypatch):
     middleware._settings = MockSettings()
     
     # Create a mock request and response
-    from starlette.requests import Request
     from starlette.responses import Response
-    from starlette.datastructures import URL, Headers
+    from starlette.datastructures import URL
     
     class MockRequest:
         url = URL("https://portal.hawkinsit.au/cart")
