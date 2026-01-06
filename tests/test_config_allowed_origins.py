@@ -4,6 +4,14 @@ import pytest
 from unittest.mock import patch
 
 
+def parse_allowed_origins(value: str) -> list[str]:
+    """Parse ALLOWED_ORIGINS string into list of URLs.
+    
+    This matches the parsing logic used in main.py and system_variables.py.
+    """
+    return [origin.strip() for origin in value.split(",") if origin.strip()] if value else []
+
+
 def test_allowed_origins_empty_string():
     """Test that empty ALLOWED_ORIGINS string results in empty list."""
     from app.core.config import Settings
@@ -73,21 +81,21 @@ def test_allowed_origins_parsing_in_main():
     """Test that the parsing logic in main.py works correctly."""
     # Test empty string
     allowed_origins = ""
-    result = [origin.strip() for origin in allowed_origins.split(",") if origin.strip()] if allowed_origins else []
+    result = parse_allowed_origins(allowed_origins)
     assert result == []
     
     # Test single URL
     allowed_origins = "https://example.com"
-    result = [origin.strip() for origin in allowed_origins.split(",") if origin.strip()] if allowed_origins else []
+    result = parse_allowed_origins(allowed_origins)
     assert result == ["https://example.com"]
     
     # Test multiple URLs
     allowed_origins = "https://example.com,https://app.example.com"
-    result = [origin.strip() for origin in allowed_origins.split(",") if origin.strip()] if allowed_origins else []
+    result = parse_allowed_origins(allowed_origins)
     assert result == ["https://example.com", "https://app.example.com"]
     
     # Test URLs with spaces
     allowed_origins = "https://example.com, https://app.example.com , https://dashboard.example.com"
-    result = [origin.strip() for origin in allowed_origins.split(",") if origin.strip()] if allowed_origins else []
+    result = parse_allowed_origins(allowed_origins)
     assert result == ["https://example.com", "https://app.example.com", "https://dashboard.example.com"]
 
