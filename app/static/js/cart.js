@@ -186,7 +186,8 @@
           .then((response) => {
             // The server returns a 303 redirect, which fetch sees as an opaque redirect response
             // We want to follow the redirect manually and reload the page
-            if (response.type === 'opaqueredirect' || response.status === 303 || response.status === 302 || response.status === 301) {
+            const redirectStatuses = [301, 302, 303];
+            if (response.type === 'opaqueredirect' || redirectStatuses.includes(response.status)) {
               // Force a full page reload to the current cart page with cache bust
               window.location.href = window.location.pathname + '?_=' + Date.now();
             } else if (response.redirected) {
@@ -231,7 +232,7 @@
         const product = itemsData.find((item) => item.product_id === productId);
         
         if (product) {
-          modalTitle.textContent = product.product_name;
+          modalTitle.textContent = product.name || 'Product details';
           renderProductDetails(modalBody, product);
           openModal(modal);
         }
