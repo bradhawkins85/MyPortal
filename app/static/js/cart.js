@@ -1,16 +1,4 @@
 (function () {
-  /**
-   * Cart functionality for MyPortal shop.
-   * 
-   * This script handles:
-   * - Stock limit validation on quantity inputs
-   * - Product detail modal interactions
-   * 
-   * Form submissions (update, remove, place order) are handled natively by the browser.
-   * The server returns 303 redirects with query parameters for flash messages (cartMessage, cartError).
-   * All forms include CSRF tokens via the csrf.html partial for security.
-   */
-
   function parseJson(elementId) {
     const element = document.getElementById(elementId);
     if (!element) {
@@ -176,9 +164,52 @@
     }
   }
 
+  function handleFormSubmitAndReload() {
+    // Find all forms that modify cart state
+    const forms = document.querySelectorAll(
+      'form[action="/cart/update"], form[action="/cart/remove"], form[action="/cart/add"], form[action="/cart/place-order"]'
+    );
+
+    forms.forEach((form) => {
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+
+        // Submit the form using fetch to intercept the redirect
+        const formData = new FormData(form);
+        const action = form.getAttribute('action');
+
+        fetch(action, {
+          method: 'POST',
+          body: formData,
+          redirect: 'manual', // Don't follow redirects automatically
+        })
+          .then((response) => {
+            // The server returns a 303 redirect, which fetch sees as an opaque redirect response
+            // We want to follow the redirect manually and reload the page
+            const redirectStatuses = [301, 302, 303];
+            if (response.type === 'opaqueredirect' || redirectStatuses.includes(response.status)) {
+              // Force a full page reload to the current cart page with cache bust
+              window.location.href = window.location.pathname + '?_=' + Date.now();
+            } else if (response.redirected) {
+              // If fetch followed a redirect automatically (shouldn't happen with redirect: 'manual')
+              window.location.href = response.url;
+            } else {
+              // Fallback: just reload the current page
+              window.location.reload();
+            }
+          })
+          .catch(() => {
+            // On error, try to reload the page anyway
+            window.location.reload();
+          });
+      });
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const container = document.body;
     bindStockLimitInputs(container);
+    handleFormSubmitAndReload();
 
     const modal = document.getElementById('cart-product-details-modal');
     const modalTitle = document.getElementById('cart-product-details-title');
@@ -187,33 +218,24 @@
       return;
     }
 
-    const products = parseJson('cart-items-data');
-    if (!products.length) {
-      return;
-    }
-
-    const itemsById = new Map();
-    products.forEach((product) => {
-      if (product && product.product_id !== undefined) {
-        itemsById.set(Number(product.product_id), product);
-      }
-    });
-
-    if (!itemsById.size) {
-      return;
-    }
-
+    // Bind modal dismissal
     bindModalDismissal(modal);
 
+    const itemsData = parseJson('cart-items-data');
+    if (!Array.isArray(itemsData) || itemsData.length === 0) {
+      return;
+    }
+
     document.querySelectorAll('[data-cart-product-modal]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const id = Number(button.getAttribute('data-cart-product-modal'));
-        const product = itemsById.get(id);
-        if (modalTitle) {
-          modalTitle.textContent = product?.name || 'Product details';
+      button.addEventListener('click', (event) => {
+        const productId = Number(button.getAttribute('data-cart-product-modal'));
+        const product = itemsData.find((item) => item.product_id === productId);
+        
+        if (product) {
+          modalTitle.textContent = product.name || 'Product details';
+          renderProductDetails(modalBody, product);
+          openModal(modal);
         }
-        renderProductDetails(modalBody, product);
-        openModal(modal);
       });
     });
   });
