@@ -1,5 +1,9 @@
 """Test CSP form-action directive configuration."""
 import pytest
+from pydantic import AnyHttpUrl
+from starlette.responses import Response
+from starlette.datastructures import URL
+
 from app.security.security_headers import SecurityHeadersMiddleware
 
 
@@ -30,8 +34,6 @@ async def test_http_url_validation():
 @pytest.mark.asyncio
 async def test_csp_includes_portal_url(monkeypatch):
     """Test that portal_url is included in CSP form-action directive."""
-    from pydantic import AnyHttpUrl
-    
     # Mock settings with a portal URL
     class MockSettings:
         portal_url = AnyHttpUrl("https://portal.hawkinsit.au")
@@ -41,9 +43,6 @@ async def test_csp_includes_portal_url(monkeypatch):
     middleware._settings = MockSettings()
     
     # Create a mock request and response
-    from starlette.responses import Response
-    from starlette.datastructures import URL
-    
     class MockRequest:
         url = URL("https://portal.hawkinsit.au/cart")
         
@@ -60,8 +59,6 @@ async def test_csp_includes_portal_url(monkeypatch):
 @pytest.mark.asyncio
 async def test_csp_with_http_portal_url(monkeypatch):
     """Test that HTTP portal URLs are included in CSP."""
-    from pydantic import AnyHttpUrl
-    
     # Mock settings with an HTTP portal URL (for development)
     class MockSettings:
         portal_url = AnyHttpUrl("http://localhost:8000")
@@ -71,9 +68,6 @@ async def test_csp_with_http_portal_url(monkeypatch):
     middleware._settings = MockSettings()
     
     # Create a mock request and response
-    from starlette.responses import Response
-    from starlette.datastructures import URL
-    
     class MockRequest:
         url = URL("http://localhost:8000/cart")
         
@@ -85,3 +79,31 @@ async def test_csp_with_http_portal_url(monkeypatch):
     # Check that the CSP header includes both 'self' and the HTTP portal URL
     csp_header = response.headers.get("Content-Security-Policy", "")
     assert "form-action 'self' http://localhost:8000" in csp_header
+
+
+@pytest.mark.asyncio
+async def test_csp_connect_src_includes_portal_url(monkeypatch):
+    """Test that portal URL is included in connect-src directive for fetch() API calls."""
+    
+    # Mock settings with a portal URL
+    class MockSettings:
+        portal_url = AnyHttpUrl("https://portal.hawkinsit.au")
+        enable_hsts = False
+    
+    middleware = SecurityHeadersMiddleware(None)
+    middleware._settings = MockSettings()
+    
+    # Create a mock request and response
+    class MockRequest:
+        url = URL("https://portal.hawkinsit.au/cart")
+        
+    async def call_next(request):
+        return Response(content="test", status_code=200)
+    
+    response = await middleware.dispatch(MockRequest(), call_next)
+    
+    # Check that the CSP header includes the portal URL in connect-src
+    # This is needed because JavaScript on pages like cart.html uses fetch() API
+    # which is governed by connect-src, not form-action
+    csp_header = response.headers.get("Content-Security-Policy", "")
+    assert "connect-src 'self' https://cal.com https://app.cal.com https://portal.hawkinsit.au" in csp_header
