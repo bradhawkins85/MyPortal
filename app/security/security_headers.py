@@ -50,6 +50,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if any(path.startswith(prefix) for prefix in self.exempt_paths):
             return response
 
+        # Get validated portal URL once for reuse in multiple CSP directives
+        validated_portal_url = None
+        if self._settings.portal_url:
+            portal_url = str(self._settings.portal_url).rstrip("/")
+            if self._is_valid_csp_source(portal_url):
+                validated_portal_url = portal_url
+
         # Build script-src directive with dynamic sources
         script_sources = [
             "'self'",
@@ -80,10 +87,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Add portal URL to connect-src to support fetch() API calls from JavaScript
         # This is needed because forms on pages like cart.html use fetch() instead of
         # native form submission, and fetch() is governed by connect-src not form-action
-        if self._settings.portal_url:
-            portal_url = str(self._settings.portal_url).rstrip("/")
-            if self._is_valid_csp_source(portal_url):
-                connect_sources.append(portal_url)
+        if validated_portal_url:
+            connect_sources.append(validated_portal_url)
 
         # Add extra connect sources (e.g., analytics APIs)
         if self._get_extra_connect_sources:
@@ -97,10 +102,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 pass
         
         form_action_sources = ["'self'"]
-        if self._settings.portal_url:
-            portal_url = str(self._settings.portal_url).rstrip("/")
-            if self._is_valid_csp_source(portal_url):
-                form_action_sources.append(portal_url)
+        if validated_portal_url:
+            form_action_sources.append(validated_portal_url)
         
         # Content-Security-Policy: Restrict resource loading to same origin
         # Allow 'unsafe-inline' for styles and scripts that are inline in templates
