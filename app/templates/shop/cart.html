@@ -10,7 +10,7 @@
   <header class="card__header card__header--stacked">
     <div>
       <h2 class="card__title">Cart</h2>
-      <p class="card__subtitle">Review quantities, remove items, and submit a purchase order.</p>
+      <p class="card__subtitle">Review and adjust quantities, then submit a purchase order.</p>
     </div>
     {% if cart_items %}
     <div class="card__controls">
@@ -108,13 +108,6 @@
       </div>
       <div class="form-actions form-actions--inline">
         <button type="submit" class="button">Update quantities</button>
-        <button
-          type="submit"
-          class="button button--ghost"
-          formaction="/cart/remove"
-        >
-          Remove selected
-        </button>
       </div>
     </form>
 
