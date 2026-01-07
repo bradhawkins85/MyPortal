@@ -176,7 +176,13 @@
 
         // Submit the form using fetch to intercept the redirect
         const formData = new FormData(form);
-        const action = form.getAttribute('action');
+        
+        // Get the action URL - check if the submit button has a formaction attribute
+        let action = form.getAttribute('action');
+        const submitter = event.submitter;
+        if (submitter && submitter.hasAttribute('formaction')) {
+          action = submitter.getAttribute('formaction');
+        }
 
         fetch(action, {
           method: 'POST',
