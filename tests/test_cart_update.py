@@ -457,3 +457,76 @@ def test_add_to_cart_upgrade_does_not_remove_other_items(
     assert recorded_removals == [(active_session.id, {7})]
     assert recorded_sources == [{7, 11}]
     assert get_item_calls == [5, 7]
+
+
+def test_remove_cart_items(monkeypatch, active_session, cart_context):
+    recorded_removals: list[tuple[int, set[int]]] = []
+
+    async def fake_remove_items(session_id, product_ids):
+        recorded_removals.append((session_id, set(product_ids)))
+
+    monkeypatch.setattr(main_module.cart_repo, "remove_items", fake_remove_items)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/cart/remove",
+            data={
+                "remove": ["3", "5", "7"],
+                "_csrf": active_session.csrf_token,
+            },
+        )
+
+    assert response.status_code == 303
+    location = response.headers.get("location")
+    assert location is not None
+    parsed = urlparse(location)
+    assert parsed.path == "/cart"
+    assert recorded_removals == [(active_session.id, {3, 5, 7})]
+
+
+def test_remove_cart_items_single(monkeypatch, active_session, cart_context):
+    recorded_removals: list[tuple[int, set[int]]] = []
+
+    async def fake_remove_items(session_id, product_ids):
+        recorded_removals.append((session_id, set(product_ids)))
+
+    monkeypatch.setattr(main_module.cart_repo, "remove_items", fake_remove_items)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/cart/remove",
+            data={
+                "remove": "10",
+                "_csrf": active_session.csrf_token,
+            },
+        )
+
+    assert response.status_code == 303
+    location = response.headers.get("location")
+    assert location is not None
+    parsed = urlparse(location)
+    assert parsed.path == "/cart"
+    assert recorded_removals == [(active_session.id, {10})]
+
+
+def test_remove_cart_items_none(monkeypatch, active_session, cart_context):
+    recorded_removals: list[tuple[int, set[int]]] = []
+
+    async def fake_remove_items(session_id, product_ids):
+        recorded_removals.append((session_id, set(product_ids)))
+
+    monkeypatch.setattr(main_module.cart_repo, "remove_items", fake_remove_items)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/cart/remove",
+            data={"_csrf": active_session.csrf_token},
+        )
+
+    assert response.status_code == 303
+    location = response.headers.get("location")
+    assert location is not None
+    parsed = urlparse(location)
+    assert parsed.path == "/cart"
+    # remove_items is called even with empty list (it returns early)
+    assert recorded_removals == [(active_session.id, set())]
