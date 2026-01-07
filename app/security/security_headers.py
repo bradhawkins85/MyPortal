@@ -77,6 +77,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         frame_sources = ["'self'", "https://cal.com", "https://app.cal.com"]
 
+        # Add portal URL to connect-src to support fetch() API calls from JavaScript
+        # This is needed because forms on pages like cart.html use fetch() instead of
+        # native form submission, and fetch() is governed by connect-src not form-action
+        if self._settings.portal_url:
+            portal_url = str(self._settings.portal_url).rstrip("/")
+            if self._is_valid_csp_source(portal_url):
+                connect_sources.append(portal_url)
+
         # Add extra connect sources (e.g., analytics APIs)
         if self._get_extra_connect_sources:
             try:
