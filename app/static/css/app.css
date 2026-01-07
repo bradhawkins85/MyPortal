@@ -708,6 +708,25 @@ html {
   line-height: 1.4;
 }
 
+.form-checkboxes--grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-gap-base);
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 768px) {
+  .form-checkboxes--grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .form-checkboxes--grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .form-error {
   border-radius: 0.85rem;
   padding: var(--space-gap-tight) var(--space-gap-base);
