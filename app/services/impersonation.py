@@ -64,7 +64,7 @@ def _membership_grants_permissions(membership: dict[str, Any]) -> bool:
 
 
 async def user_is_impersonatable(user_id: int) -> bool:
-    memberships = await membership_repo.list_memberships_for_user(user_id, status="active")
+    memberships = await membership_repo.list_memberships_for_user(user_id, status=None)
     for membership in memberships:
         if _membership_grants_permissions(membership):
             return True
