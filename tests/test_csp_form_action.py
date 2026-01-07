@@ -1,5 +1,9 @@
 """Test CSP form-action directive configuration."""
 import pytest
+from pydantic import AnyHttpUrl
+from starlette.responses import Response
+from starlette.datastructures import URL
+
 from app.security.security_headers import SecurityHeadersMiddleware
 
 
@@ -30,8 +34,6 @@ async def test_http_url_validation():
 @pytest.mark.asyncio
 async def test_csp_includes_portal_url(monkeypatch):
     """Test that portal_url is included in CSP form-action directive."""
-    from pydantic import AnyHttpUrl
-    
     # Mock settings with a portal URL
     class MockSettings:
         portal_url = AnyHttpUrl("https://portal.hawkinsit.au")
@@ -41,9 +43,6 @@ async def test_csp_includes_portal_url(monkeypatch):
     middleware._settings = MockSettings()
     
     # Create a mock request and response
-    from starlette.responses import Response
-    from starlette.datastructures import URL
-    
     class MockRequest:
         url = URL("https://portal.hawkinsit.au/cart")
         
@@ -60,8 +59,6 @@ async def test_csp_includes_portal_url(monkeypatch):
 @pytest.mark.asyncio
 async def test_csp_with_http_portal_url(monkeypatch):
     """Test that HTTP portal URLs are included in CSP."""
-    from pydantic import AnyHttpUrl
-    
     # Mock settings with an HTTP portal URL (for development)
     class MockSettings:
         portal_url = AnyHttpUrl("http://localhost:8000")
@@ -71,9 +68,6 @@ async def test_csp_with_http_portal_url(monkeypatch):
     middleware._settings = MockSettings()
     
     # Create a mock request and response
-    from starlette.responses import Response
-    from starlette.datastructures import URL
-    
     class MockRequest:
         url = URL("http://localhost:8000/cart")
         
@@ -90,7 +84,6 @@ async def test_csp_with_http_portal_url(monkeypatch):
 @pytest.mark.asyncio
 async def test_csp_connect_src_includes_portal_url(monkeypatch):
     """Test that portal URL is included in connect-src directive for fetch() API calls."""
-    from pydantic import AnyHttpUrl
     
     # Mock settings with a portal URL
     class MockSettings:
@@ -101,9 +94,6 @@ async def test_csp_connect_src_includes_portal_url(monkeypatch):
     middleware._settings = MockSettings()
     
     # Create a mock request and response
-    from starlette.responses import Response
-    from starlette.datastructures import URL
-    
     class MockRequest:
         url = URL("https://portal.hawkinsit.au/cart")
         
