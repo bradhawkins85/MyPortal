@@ -289,6 +289,7 @@ async def test_list_impersonatable_users_includes_invited_users(monkeypatch):
                 "permissions": ["portal.access"],
                 "is_super_admin": 0,
                 "status": "invited",
+                "is_admin": 0,
             }
         ]
 
@@ -309,3 +310,82 @@ async def test_list_impersonatable_users_includes_invited_users(monkeypatch):
     assert results[0]["email"] == "invited@example.com"
     assert results[0]["has_permissions"]
     assert results[0]["memberships"][0]["company_name"] == "Test Company"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_list_impersonatable_users_includes_pending_staff_with_accounts(monkeypatch):
+    """Test that pending staff with user accounts and permissions are included in impersonatable users list."""
+    async def fake_list_memberships():
+        return [
+            {
+                "user_id": 4,
+                "email": "pending@example.com",
+                "first_name": "Pending",
+                "last_name": "Staff",
+                "company_id": 11,
+                "company_name": "Another Company",
+                "role_name": "Department Manager",
+                "permissions": ["staff.manage", "portal.access"],
+                "is_super_admin": 0,
+                "status": "pending",
+                "is_admin": 0,
+            }
+        ]
+
+    async def fake_list_users():
+        return [
+            {"id": 4, "email": "pending@example.com", "is_super_admin": False},
+        ]
+
+    monkeypatch.setattr(
+        impersonation_service.membership_repo,
+        "list_impersonatable_memberships",
+        fake_list_memberships,
+    )
+    monkeypatch.setattr(impersonation_service.user_repo, "list_users", fake_list_users)
+
+    results = await impersonation_service.list_impersonatable_users()
+    assert len(results) == 1
+    assert results[0]["email"] == "pending@example.com"
+    assert results[0]["has_permissions"]
+    assert results[0]["memberships"][0]["company_name"] == "Another Company"
+    assert "staff.manage" in results[0]["memberships"][0]["permissions"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_list_impersonatable_users_includes_pending_staff_with_admin_flag(monkeypatch):
+    """Test that pending staff with is_admin flag are included even without explicit permissions."""
+    async def fake_list_memberships():
+        return [
+            {
+                "user_id": 5,
+                "email": "adminpending@example.com",
+                "first_name": "Admin",
+                "last_name": "Pending",
+                "company_id": 12,
+                "company_name": "Admin Company",
+                "role_name": None,
+                "permissions": None,
+                "is_super_admin": 0,
+                "status": "pending",
+                "is_admin": 1,
+            }
+        ]
+
+    async def fake_list_users():
+        return [
+            {"id": 5, "email": "adminpending@example.com", "is_super_admin": False},
+        ]
+
+    monkeypatch.setattr(
+        impersonation_service.membership_repo,
+        "list_impersonatable_memberships",
+        fake_list_memberships,
+    )
+    monkeypatch.setattr(impersonation_service.user_repo, "list_users", fake_list_users)
+
+    results = await impersonation_service.list_impersonatable_users()
+    assert len(results) == 1
+    assert results[0]["email"] == "adminpending@example.com"
+    assert results[0]["has_permissions"]
+    assert results[0]["memberships"][0]["is_admin"] is True
