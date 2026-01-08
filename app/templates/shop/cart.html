@@ -140,6 +140,14 @@
         </div>
       </div>
     </form>
+
+    {% if can_access_quotes %}
+    <div class="cart-checkout">
+      <div class="form-actions">
+        <button type="button" id="save-quote-button" class="button button--ghost">Save as Quote</button>
+      </div>
+    </div>
+    {% endif %}
   {% else %}
     <p class="text-muted">Your cart is empty.</p>
   {% endif %}
@@ -215,6 +223,53 @@
     {% endif %}
   </section>
 {% endif %}
+
+<div
+  class="modal"
+  id="save-quote-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="save-quote-title"
+  hidden
+>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close aria-label="Close save quote dialog">
+      <span aria-hidden="true">&times;</span>
+    </button>
+    <h2 class="modal__title" id="save-quote-title">Save as Quote</h2>
+    <div class="modal__body">
+      <form action="/cart/save-as-quote" method="post" id="save-quote-form">
+        {% include "partials/csrf.html" %}
+        <div class="form-field">
+          <label class="form-label" for="quote-name">Quote name <span class="text-danger">*</span></label>
+          <input
+            class="form-input"
+            id="quote-name"
+            name="quoteName"
+            maxlength="255"
+            placeholder="Enter a name for this quote"
+            required
+            autofocus
+          />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="quote-po-number">PO number (optional)</label>
+          <input
+            class="form-input"
+            id="quote-po-number"
+            name="poNumber"
+            maxlength="100"
+            placeholder="Optional purchase order reference"
+          />
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button">Save Quote</button>
+          <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 
 <div
   class="modal"
