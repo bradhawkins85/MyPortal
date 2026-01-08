@@ -248,6 +248,7 @@ async def list_users_with_permission(permission: str) -> List[dict[str, Any]]:
 
 
 async def list_impersonatable_memberships() -> list[dict[str, Any]]:
+    # Get users with active memberships
     rows = await db.fetch_all(
         """
         SELECT
@@ -261,12 +262,37 @@ async def list_impersonatable_memberships() -> list[dict[str, Any]]:
             u.is_super_admin,
             c.name AS company_name,
             r.name AS role_name,
-            r.permissions
+            r.permissions,
+            0 AS is_admin
         FROM company_memberships AS m
         INNER JOIN users AS u ON u.id = m.user_id
         INNER JOIN roles AS r ON r.id = m.role_id
         LEFT JOIN companies AS c ON c.id = m.company_id
-        ORDER BY LOWER(u.email), u.id, c.name
+        
+        UNION
+        
+        -- Also include users with pending staff access who have registered
+        SELECT
+            NULL AS membership_id,
+            u.id AS user_id,
+            p.company_id,
+            'pending' AS status,
+            u.email,
+            u.first_name,
+            u.last_name,
+            u.is_super_admin,
+            c.name AS company_name,
+            r.name AS role_name,
+            r.permissions,
+            p.is_admin
+        FROM pending_staff_access AS p
+        INNER JOIN staff AS s ON s.id = p.staff_id
+        INNER JOIN users AS u ON LOWER(u.email) = LOWER(s.email)
+        LEFT JOIN companies AS c ON c.id = p.company_id
+        LEFT JOIN roles AS r ON r.id = p.role_id
+        WHERE p.role_id IS NOT NULL OR p.is_admin = 1
+        
+        ORDER BY LOWER(email), user_id, company_name
         """,
     )
     return [dict(row) for row in rows]
