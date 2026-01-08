@@ -1682,3 +1682,199 @@ def _normalise_order_item(row: dict[str, Any]) -> dict[str, Any]:
     normalised["stock_vic"] = _coerce_optional_int(row.get("stock_vic"))
     normalised["stock_sa"] = _coerce_optional_int(row.get("stock_sa"))
     return normalised
+
+
+# Quote functions
+async def create_quote(
+    *,
+    user_id: int,
+    company_id: int,
+    product_id: int,
+    quantity: int,
+    quote_number: str,
+    status: str,
+    po_number: str | None,
+    expires_at: datetime,
+) -> int:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                """
+                INSERT INTO shop_quotes (
+                    user_id,
+                    company_id,
+                    product_id,
+                    quantity,
+                    quote_number,
+                    status,
+                    notes,
+                    po_number,
+                    expires_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    user_id,
+                    company_id,
+                    product_id,
+                    quantity,
+                    quote_number,
+                    status,
+                    None,
+                    po_number,
+                    expires_at,
+                ),
+            )
+            quote_id = int(cursor.lastrowid)
+    return quote_id
+
+
+async def list_quote_summaries(company_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT
+            quote_number,
+            company_id,
+            MAX(created_at) AS created_at,
+            MAX(expires_at) AS expires_at,
+            MAX(status) AS status,
+            MAX(notes) AS notes,
+            MAX(po_number) AS po_number
+        FROM shop_quotes
+        WHERE company_id = %s
+        GROUP BY quote_number, company_id
+        ORDER BY created_at DESC
+        """,
+        (company_id,),
+    )
+    return [_normalise_quote_summary(row) for row in rows]
+
+
+async def get_quote_summary(quote_number: str, company_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        """
+        SELECT
+            quote_number,
+            company_id,
+            MAX(created_at) AS created_at,
+            MAX(expires_at) AS expires_at,
+            MAX(status) AS status,
+            MAX(notes) AS notes,
+            MAX(po_number) AS po_number
+        FROM shop_quotes
+        WHERE quote_number = %s AND company_id = %s
+        GROUP BY quote_number, company_id
+        """,
+        (quote_number, company_id),
+    )
+    if not row:
+        return None
+    return _normalise_quote_summary(row)
+
+
+async def update_quote(
+    quote_number: str,
+    company_id: int,
+    **updates: Any,
+) -> dict[str, Any] | None:
+    existing = await get_quote_summary(quote_number, company_id)
+    if not existing:
+        return None
+
+    if not updates:
+        return existing
+
+    allowed_fields = {
+        "status",
+        "notes",
+        "po_number",
+    }
+    updates = {key: value for key, value in updates.items() if key in allowed_fields}
+    if not updates:
+        return existing
+
+    set_clause = ", ".join(f"{column} = %s" for column in updates)
+    params: list[Any] = list(updates.values())
+    params.extend([quote_number, company_id])
+    await db.execute(
+        f"UPDATE shop_quotes SET {set_clause} WHERE quote_number = %s AND company_id = %s",
+        tuple(params),
+    )
+
+    return await get_quote_summary(quote_number, company_id)
+
+
+async def delete_quote(quote_number: str, company_id: int) -> None:
+    await db.execute(
+        "DELETE FROM shop_quotes WHERE quote_number = %s AND company_id = %s",
+        (quote_number, company_id),
+    )
+
+
+async def list_quote_items(quote_number: str, company_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT
+            q.*, 
+            p.name AS product_name,
+            p.sku,
+            p.description,
+            p.image_url,
+            p.stock,
+            p.stock_nsw,
+            p.stock_qld,
+            p.stock_vic,
+            p.stock_sa,
+            IF(c.is_vip = 1 AND p.vip_price IS NOT NULL, p.vip_price, p.price) AS price
+        FROM shop_quotes AS q
+        INNER JOIN shop_products AS p ON p.id = q.product_id
+        INNER JOIN companies AS c ON c.id = q.company_id
+        WHERE q.quote_number = %s AND q.company_id = %s
+        ORDER BY q.id ASC
+        """,
+        (quote_number, company_id),
+    )
+    return [_normalise_quote_item(row) for row in rows]
+
+
+def _normalise_quote_summary(row: dict[str, Any]) -> dict[str, Any]:
+    summary = dict(row)
+    summary["quote_number"] = str(row.get("quote_number") or "").strip()
+    summary["company_id"] = _coerce_optional_int(row.get("company_id"))
+    summary["status"] = str(row.get("status") or "").strip()
+    summary["notes"] = row.get("notes")
+    summary["po_number"] = row.get("po_number")
+    summary["created_at"] = _normalise_datetime(row.get("created_at"))
+    summary["expires_at"] = _normalise_datetime(row.get("expires_at"))
+    return summary
+
+
+def _normalise_quote_item(row: dict[str, Any]) -> dict[str, Any]:
+    normalised = dict(row)
+    normalised["id"] = _coerce_optional_int(row.get("id"))
+    normalised["company_id"] = _coerce_optional_int(row.get("company_id"))
+    normalised["user_id"] = _coerce_optional_int(row.get("user_id"))
+    normalised["product_id"] = _coerce_optional_int(row.get("product_id"))
+    normalised["quantity"] = _coerce_int(row.get("quantity"), default=0)
+    price = row.get("price")
+    if isinstance(price, Decimal):
+        normalised["price"] = price
+    elif price is None:
+        normalised["price"] = Decimal("0")
+    else:
+        normalised["price"] = Decimal(str(price))
+    normalised["product_name"] = row.get("product_name")
+    normalised["sku"] = row.get("sku")
+    normalised["description"] = row.get("description")
+    normalised["image_url"] = row.get("image_url")
+    normalised["status"] = str(row.get("status") or "").strip()
+    normalised["notes"] = row.get("notes")
+    normalised["po_number"] = row.get("po_number")
+    normalised["quote_number"] = str(row.get("quote_number") or "").strip()
+    normalised["created_at"] = _normalise_datetime(row.get("created_at"))
+    normalised["expires_at"] = _normalise_datetime(row.get("expires_at"))
+    normalised["stock"] = _coerce_optional_int(row.get("stock"))
+    normalised["stock_nsw"] = _coerce_optional_int(row.get("stock_nsw"))
+    normalised["stock_qld"] = _coerce_optional_int(row.get("stock_qld"))
+    normalised["stock_vic"] = _coerce_optional_int(row.get("stock_vic"))
+    normalised["stock_sa"] = _coerce_optional_int(row.get("stock_sa"))
+    return normalised
