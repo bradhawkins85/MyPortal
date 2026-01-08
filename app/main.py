@@ -5816,7 +5816,7 @@ async def load_quote_to_cart(request: Request, quote_number: str) -> RedirectRes
     # Add quote items to cart
     for item in quote_items:
         product_id = int(item.get("product_id"))
-        product = await shop_repo.get_product(product_id, company_id=company_id)
+        product = await shop_repo.get_product_by_id(product_id, company_id=company_id)
         if not product:
             continue
         
