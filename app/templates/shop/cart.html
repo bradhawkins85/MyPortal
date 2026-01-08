@@ -137,6 +137,27 @@
         </div>
       </div>
     </form>
+
+    {% if can_access_quotes %}
+    <form action="/cart/save-as-quote" method="post" class="cart-checkout form-grid">
+      {% include "partials/csrf.html" %}
+      <div class="form-field">
+        <label class="form-label" for="cart-quote-po-number">PO number (optional)</label>
+        <input
+          class="form-input"
+          id="cart-quote-po-number"
+          name="poNumber"
+          maxlength="100"
+          placeholder="Optional purchase order reference"
+        />
+      </div>
+      <div class="cart-checkout__actions">
+        <div class="form-actions">
+          <button type="submit" class="button button--ghost">Save as Quote</button>
+        </div>
+      </div>
+    </form>
+    {% endif %}
   {% else %}
     <p class="text-muted">Your cart is empty.</p>
   {% endif %}

@@ -210,6 +210,16 @@
               </a>
             </li>
           {% endif %}
+          {% if can_access_quotes %}
+            <li class="menu__item">
+              <a href="/quotes" {% if current_path.startswith('/quotes') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 2l5 5h-5V4zM8 12h8v2H8v-2zm0 4h5v2H8v-2z"/></svg>
+                </span>
+                <span class="menu__label">Quotes</span>
+              </a>
+            </li>
+          {% endif %}
           {% if can_access_forms %}
             <li class="menu__item">
               <a href="/myforms" {% if current_path.startswith('/myforms') or current_path.startswith('/forms') %}aria-current="page"{% endif %}>
