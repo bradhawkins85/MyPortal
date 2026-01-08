@@ -169,7 +169,7 @@ async def assign_quote(
 ) -> QuoteDetailResponse:
     """Assign a quote to a specific user or unassign it.
     
-    Only admins and technicians (super admins or company admins) can assign quotes.
+    Only super admins and company admins can assign quotes.
     The assigned user must be a member of the company.
     """
     resolved_company_id = await _resolve_company_id(company_id, company_id_alt)
@@ -179,7 +179,7 @@ async def assign_quote(
     if not await _can_assign_quotes(current_user, resolved_company_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins and technicians can assign quotes"
+            detail="Only super admins and company admins can assign quotes"
         )
     
     # Check if quote exists

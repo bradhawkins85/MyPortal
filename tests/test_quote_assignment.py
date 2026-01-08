@@ -248,7 +248,7 @@ async def test_assign_quote_permission_denied(monkeypatch, active_session):
                 json={"assignedUserId": 2}
             )
             assert response.status_code == 403
-            assert "admins and technicians" in response.json()["detail"].lower()
+            assert "super admins and company admins" in response.json()["detail"].lower()
     finally:
         app.dependency_overrides.clear()
 
