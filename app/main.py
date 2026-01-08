@@ -79,6 +79,7 @@ from app.api.routes import (
     notifications,
     orders as orders_api,
     ports,
+    quotes as quotes_api,
     scheduler as scheduler_api,
     roles,
     service_status as service_status_api,
@@ -800,6 +801,7 @@ app.include_router(message_templates_api.router)
 app.include_router(ports.router)
 app.include_router(notifications.router)
 app.include_router(orders_api.router)
+app.include_router(quotes_api.router)
 app.include_router(staff_api.router)
 app.include_router(invoices_api.router)
 app.include_router(issues_api.router)
@@ -1364,6 +1366,7 @@ async def _build_base_context(
         "can_access_shop": is_super_admin or _has_permission("can_access_shop"),
         "can_access_cart": is_super_admin or _has_permission("can_access_cart"),
         "can_access_orders": is_super_admin or _has_permission("can_access_orders"),
+        "can_access_quotes": is_super_admin or _has_permission("can_access_quotes"),
         "can_access_forms": is_super_admin or _has_permission("can_access_forms"),
         "can_manage_assets": is_super_admin or _has_permission("can_manage_assets"),
         "can_manage_licenses": is_super_admin or _has_permission("can_manage_licenses"),
@@ -1551,6 +1554,7 @@ async def _build_public_context(
         "can_access_shop": False,
         "can_access_cart": False,
         "can_access_orders": False,
+        "can_access_quotes": False,
         "can_access_forms": False,
         "can_manage_assets": False,
         "can_manage_licenses": False,
@@ -2720,6 +2724,7 @@ _COMPANY_PERMISSION_COLUMNS: list[dict[str, str]] = [
     {"field": "can_access_shop", "label": "Shop"},
     {"field": "can_access_cart", "label": "Cart"},
     {"field": "can_access_orders", "label": "Orders"},
+    {"field": "can_access_quotes", "label": "Quotes"},
     {"field": "can_access_forms", "label": "Forms"},
     {"field": "can_manage_assets", "label": "Assets"},
     {"field": "can_manage_licenses", "label": "Licenses"},
@@ -5687,6 +5692,147 @@ async def orders_page(
     return await _render_template("shop/orders.html", request, user, extra=extra)
 
 
+@app.get("/quotes", response_class=HTMLResponse)
+async def quotes_page(
+    request: Request,
+    status_filter: str | None = Query(None, alias="status"),
+):
+    (
+        user,
+        membership,
+        company,
+        company_id,
+        redirect,
+    ) = await _load_company_section_context(
+        request,
+        permission_field="can_access_quotes",
+    )
+    if redirect:
+        return redirect
+
+    quotes_raw = await shop_repo.list_quote_summaries(company_id)
+
+    def _label(value: str | None) -> str:
+        text = (value or "").strip()
+        return text if text else "Active"
+
+    def _is_expired(expires_at: datetime | None) -> bool:
+        if not expires_at:
+            return False
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return expires_at < datetime.now(timezone.utc)
+
+    enriched_quotes: list[dict[str, Any]] = []
+    for quote in quotes_raw:
+        label = _label(quote.get("status"))
+        is_expired = _is_expired(quote.get("expires_at"))
+        if is_expired and label.lower() == "active":
+            label = "Expired"
+        record = dict(quote)
+        record["status_label"] = label
+        record["status_value"] = label.lower()
+        record["status_badge"] = _normalise_status_badge(label)
+        record["created_at_iso"] = quote.get("created_at")
+        record["expires_at_iso"] = quote.get("expires_at")
+        record["is_expired"] = is_expired
+        enriched_quotes.append(record)
+
+    status_options = sorted(
+        { (quote["status_value"], quote["status_label"]) for quote in enriched_quotes },
+        key=lambda item: item[1].lower(),
+    )
+
+    status_option_map = {value: label for value, label in status_options}
+
+    status_key = (status_filter or "").strip().lower() or None
+    if status_key not in status_option_map:
+        status_key = None
+
+    filtered_quotes = [
+        quote
+        for quote in enriched_quotes
+        if (status_key is None or quote["status_value"] == status_key)
+    ]
+
+    total_quotes = len(enriched_quotes)
+    visible_quotes = len(filtered_quotes)
+
+    status_summary = _summarise_orders(filtered_quotes, attribute="status_label")
+
+    extra = {
+        "title": "Quotes",
+        "quotes": filtered_quotes,
+        "status_options": [
+            {"value": value, "label": label} for value, label in status_options
+        ],
+        "status_filter": status_key,
+        "status_summary": status_summary,
+        "quotes_total": visible_quotes,
+        "quotes_total_all": total_quotes,
+        "filters_active": bool(status_key),
+    }
+    return await _render_template("shop/quotes.html", request, user, extra=extra)
+
+
+@app.post("/quotes/load/{quote_number}", response_class=RedirectResponse, name="load_quote", include_in_schema=False)
+async def load_quote_to_cart(request: Request, quote_number: str) -> RedirectResponse:
+    (
+        user,
+        membership,
+        company,
+        company_id,
+        redirect,
+    ) = await _load_company_section_context(
+        request,
+        permission_field="can_access_quotes",
+    )
+    if redirect:
+        return redirect
+
+    session = await session_manager.load_session(request)
+    if not session:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    # Get quote items
+    quote_items = await shop_repo.list_quote_items(quote_number, company_id)
+    if not quote_items:
+        message = quote("Quote not found or has no items.")
+        return RedirectResponse(
+            url=f"/quotes?quoteMessage={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    # Clear current cart
+    await cart_repo.clear_cart(session.id)
+
+    # Add quote items to cart
+    for item in quote_items:
+        product_id = int(item.get("product_id"))
+        product = await shop_repo.get_product(product_id, company_id=company_id)
+        if not product:
+            continue
+        
+        await cart_repo.upsert_item(
+            session_id=session.id,
+            product_id=product_id,
+            quantity=int(item.get("quantity")),
+            unit_price=item.get("price"),
+            name=str(item.get("product_name")),
+            sku=str(item.get("sku") or ""),
+            vendor_sku=product.get("vendor_sku"),
+            description=product.get("description"),
+            image_url=product.get("image_url"),
+        )
+
+    success = quote("Quote loaded to cart successfully.")
+    return RedirectResponse(
+        url=f"{request.url_for('cart_page')}?cartMessage={success}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+
 @app.post(
     "/cart/update",
     response_class=RedirectResponse,
@@ -6007,6 +6153,64 @@ async def place_order(request: Request) -> RedirectResponse:
     success = quote("Your order is being processed.")
     return RedirectResponse(
         url=f"{request.url_for('cart_page')}?orderMessage={success}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/cart/save-as-quote", response_class=RedirectResponse, name="cart_save_quote", include_in_schema=False)
+async def save_as_quote(request: Request) -> RedirectResponse:
+    (
+        user,
+        membership,
+        company,
+        company_id,
+        redirect,
+    ) = await _load_company_section_context(
+        request,
+        permission_field="can_access_quotes",
+    )
+    if redirect:
+        return redirect
+
+    session = await session_manager.load_session(request)
+    if not session:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
+
+    form = await request.form()
+    po_number_raw = form.get("poNumber")
+    po_number = (str(po_number_raw).strip() or None) if po_number_raw is not None else None
+    if po_number and len(po_number) > 100:
+        po_number = po_number[:100]
+
+    items = await cart_repo.list_items(session.id)
+    if not items:
+        return RedirectResponse(url=request.url_for("cart_page"), status_code=status.HTTP_303_SEE_OTHER)
+
+    quote_number = "QUO" + "".join(secrets.choice("0123456789") for _ in range(12))
+    
+    # Calculate expiry date
+    expiry_days = settings.quote_expiry_days
+    expires_at = datetime.now(timezone.utc) + timedelta(days=expiry_days)
+
+    for item in items:
+        await shop_repo.create_quote(
+            user_id=int(user["id"]),
+            company_id=company_id,
+            product_id=int(item.get("product_id")),
+            quantity=int(item.get("quantity")),
+            quote_number=quote_number,
+            status="active",
+            po_number=po_number,
+            expires_at=expires_at.replace(tzinfo=None),
+        )
+
+    await cart_repo.clear_cart(session.id)
+    
+    success = quote("Your quote has been saved successfully.")
+    return RedirectResponse(
+        url=f"/quotes?quoteMessage={success}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -7688,6 +7892,7 @@ async def admin_assign_user_to_company(request: Request):
                 can_access_shop=permission_values.get("can_access_shop", False),
                 can_access_cart=permission_values.get("can_access_cart", False),
                 can_access_orders=permission_values.get("can_access_orders", False),
+                can_access_quotes=permission_values.get("can_access_quotes", False),
                 can_access_forms=permission_values.get("can_access_forms", False),
                 is_admin=permission_values.get("is_admin", False),
                 role_id=role_id_value,
