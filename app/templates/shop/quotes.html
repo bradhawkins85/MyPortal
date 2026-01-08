@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block header_actions %}
+  <a class="button button--ghost" href="/shop">Browse products</a>
+{% endblock %}
+
+{% block content %}
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Quote overview</h2>
+        <p class="card__subtitle">Review saved quotes and load them to your cart for quick ordering.</p>
+      </div>
+    </header>
+    {% if quotes_total_all == 0 %}
+      <p class="text-muted">No quotes have been created yet. Save items from your cart as a quote to see them here.</p>
+    {% else %}
+      <div class="orders-summary">
+        <div class="orders-summary__panel orders-summary__panel--total">
+          <div class="orders-summary__heading">Total quotes</div>
+          <div class="orders-summary__count">{{ quotes_total }}</div>
+          {% if filters_active %}
+            <p class="orders-summary__meta">Filtered from {{ quotes_total_all }} saved quotes.</p>
+          {% else %}
+            <p class="orders-summary__meta">Tracking {{ quotes_total_all }} quotes for the selected company.</p>
+          {% endif %}
+        </div>
+        {% if status_summary %}
+          <div class="orders-summary__panel">
+            <div class="orders-summary__heading">Quote status</div>
+            <ul class="orders-summary__list">
+              {% for item in status_summary %}
+                <li class="orders-summary__item">
+                  <span class="orders-summary__label">{{ item.label }}</span>
+                  <span class="orders-summary__value">{{ item.count }} <span class="orders-summary__percentage">({{ '%.1f'|format(item.percentage) }}%)</span></span>
+                </li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Saved quotes</h2>
+        <p class="card__subtitle">Search and filter saved quotes, then load them to your cart for ordering.</p>
+      </div>
+      <div class="card__controls orders-toolbar">
+        <form method="get" class="orders-toolbar__form">
+          <div class="orders-toolbar__field">
+            <label class="form-label" for="quote-status-filter">Status</label>
+            <select id="quote-status-filter" name="status" class="form-input">
+              <option value="">All statuses</option>
+              {% for option in status_options %}
+                <option value="{{ option.value }}" {% if status_filter and status_filter == option.value %}selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="orders-toolbar__actions">
+            <button type="submit" class="button">Apply filters</button>
+            {% if filters_active %}
+              <a href="{{ request.url.path }}" class="button button--ghost">Clear</a>
+            {% endif %}
+          </div>
+        </form>
+        <input
+          type="search"
+          class="form-input orders-toolbar__search"
+          placeholder="Quick filter quotes"
+          aria-label="Filter quotes"
+          data-table-filter="quotes-table"
+        />
+      </div>
+    </header>
+    {% if filters_active and quotes_total == 0 %}
+      <div class="alert alert--info" role="status">No quotes match the selected filters. Try adjusting the status options.</div>
+    {% endif %}
+    <div class="table-wrapper">
+      <table class="table" id="quotes-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">Quote</th>
+            <th scope="col" data-sort="string" data-mobile-priority="supporting">PO Number</th>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">Status</th>
+            <th scope="col" data-sort="date" data-mobile-priority="essential">Created</th>
+            <th scope="col" data-sort="date" data-mobile-priority="supporting">Expires</th>
+            <th scope="col" data-sort="string" data-mobile-priority="supporting">Notes</th>
+            <th scope="col" class="table__actions">Actions</th>
+            {% if current_user and current_user.is_super_admin %}
+              <th scope="col" class="table__actions">Admin</th>
+            {% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for quote in quotes %}
+            <tr data-status="{{ quote.status_value }}">
+              <td data-label="Quote">
+                <button type="button" class="button-link" data-quote-view data-quote-number="{{ quote.quote_number }}" data-company-id="{{ quote.company_id }}">
+                  {{ quote.quote_number }}
+                </button>
+              </td>
+              <td data-label="PO Number">{{ quote.po_number or '—' }}</td>
+              <td data-label="Status">
+                <span class="badge {{ quote.status_badge }}">{{ quote.status_label }}</span>
+              </td>
+              <td data-label="Created" data-value="{{ quote.created_at_iso or '' }}">
+                {% if quote.created_at_iso %}
+                  <span data-utc="{{ quote.created_at_iso }}"></span>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="Expires" data-value="{{ quote.expires_at_iso or '' }}">
+                {% if quote.expires_at_iso %}
+                  <span data-utc="{{ quote.expires_at_iso }}"></span>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="Notes">{{ quote.notes or '—' }}</td>
+              <td class="table__actions">
+                {% if not quote.is_expired %}
+                <form action="/quotes/load/{{ quote.quote_number }}" method="post" style="display: inline;">
+                  {% include "partials/csrf.html" %}
+                  <button type="submit" class="button button--ghost">Load to Cart</button>
+                </form>
+                {% else %}
+                  <span class="text-muted">Expired</span>
+                {% endif %}
+              </td>
+              {% if current_user and current_user.is_super_admin %}
+                <td class="table__actions">
+                  <button 
+                    type="button" 
+                    class="button button--ghost button--danger" 
+                    data-quote-delete
+                    data-quote-number="{{ quote.quote_number }}"
+                    data-company-id="{{ quote.company_id }}"
+                  >
+                    Delete
+                  </button>
+                </td>
+              {% endif %}
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="{% if current_user and current_user.is_super_admin %}8{% else %}7{% endif %}" class="table__empty">No quotes available.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Quote Details Modal -->
+  <div class="modal" id="quote-details-modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-modal-close>
+        <span aria-hidden="true">&times;</span>
+      </button>
+      <h2 class="modal__title" id="modal-quote-title">Quote Details</h2>
+      <div class="modal__body">
+        <div id="modal-quote-loading" class="text-center">
+          <p>Loading quote details...</p>
+        </div>
+        <div id="modal-quote-content" style="display: none;">
+          <div class="table-wrapper">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Product</th>
+                  <th scope="col">SKU</th>
+                  <th scope="col">Quantity</th>
+                  <th scope="col">Price</th>
+                  {% if current_user and current_user.is_super_admin %}
+                    <th scope="col">Stock (Total)</th>
+                    <th scope="col">Stock NSW</th>
+                    <th scope="col">Stock QLD</th>
+                    <th scope="col">Stock VIC</th>
+                    <th scope="col">Stock SA</th>
+                  {% endif %}
+                </tr>
+              </thead>
+              <tbody id="modal-quote-items">
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div id="modal-quote-error" style="display: none;" class="alert alert--danger" role="alert">
+          Failed to load quote details. Please try again.
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="/static/js/tables.js" defer></script>
+  <script src="/static/js/admin.js" defer></script>
+  <script src="/static/js/quotes.js" defer></script>
+{% endblock %}

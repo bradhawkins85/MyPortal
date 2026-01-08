@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     shop_webhook_api_key: str | None = Field(
         default=None, validation_alias="SHOP_WEBHOOK_API_KEY"
     )
+    quote_expiry_days: int = Field(
+        default=7, validation_alias="QUOTE_EXPIRY_DAYS", ge=1
+    )
     m365_admin_client_id: str | None = Field(
         default=None, validation_alias="M365_ADMIN_CLIENT_ID"
     )
