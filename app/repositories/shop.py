@@ -1792,14 +1792,13 @@ async def update_quote(
     if not updates:
         return existing
 
-    if updates:
-        set_clause = ", ".join(f"{column} = %s" for column in updates)
-        params: list[Any] = list(updates.values())
-        params.extend([quote_number, company_id])
-        await db.execute(
-            f"UPDATE shop_quotes SET {set_clause} WHERE quote_number = %s AND company_id = %s",
-            tuple(params),
-        )
+    set_clause = ", ".join(f"{column} = %s" for column in updates)
+    params: list[Any] = list(updates.values())
+    params.extend([quote_number, company_id])
+    await db.execute(
+        f"UPDATE shop_quotes SET {set_clause} WHERE quote_number = %s AND company_id = %s",
+        tuple(params),
+    )
 
     return await get_quote_summary(quote_number, company_id)
 
