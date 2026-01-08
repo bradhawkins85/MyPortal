@@ -5716,9 +5716,16 @@ async def quotes_page(
         text = (value or "").strip()
         return text if text else "Active"
 
-    def _is_expired(expires_at: datetime | None) -> bool:
+    def _is_expired(expires_at: datetime | str | None) -> bool:
         if not expires_at:
             return False
+        # Handle string datetime (ISO format from _normalise_datetime)
+        if isinstance(expires_at, str):
+            try:
+                expires_at = datetime.fromisoformat(expires_at)
+            except (ValueError, AttributeError):
+                return False
+        # Ensure datetime has timezone info
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         return expires_at < datetime.now(timezone.utc)
