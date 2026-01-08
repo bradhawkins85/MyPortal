@@ -86,11 +86,12 @@
             <th scope="col" data-sort="string" data-mobile-priority="essential">Name</th>
             <th scope="col" data-sort="string" data-mobile-priority="supporting">PO Number</th>
             <th scope="col" data-sort="string" data-mobile-priority="essential">Status</th>
+            <th scope="col" data-sort="string" data-mobile-priority="supporting">Assigned To</th>
             <th scope="col" data-sort="date" data-mobile-priority="essential">Created</th>
             <th scope="col" data-sort="date" data-mobile-priority="supporting">Expires</th>
             <th scope="col" data-sort="string" data-mobile-priority="supporting">Notes</th>
             <th scope="col" class="table__actions">Actions</th>
-            {% if current_user and current_user.is_super_admin %}
+            {% if current_user and (current_user.is_super_admin or membership.is_admin) %}
               <th scope="col" class="table__actions">Admin</th>
             {% endif %}
           </tr>
@@ -108,6 +109,7 @@
               <td data-label="Status">
                 <span class="badge {{ quote.status_badge }}">{{ quote.status_label }}</span>
               </td>
+              <td data-label="Assigned To">{{ quote.assigned_user_email or '—' }}</td>
               <td data-label="Created" data-value="{{ quote.created_at_iso or '' }}">
                 {% if quote.created_at_iso %}
                   <span data-utc="{{ quote.created_at_iso }}"></span>
@@ -133,23 +135,35 @@
                   <span class="text-muted">Expired</span>
                 {% endif %}
               </td>
-              {% if current_user and current_user.is_super_admin %}
+              {% if current_user and (current_user.is_super_admin or membership.is_admin) %}
                 <td class="table__actions">
                   <button 
                     type="button" 
-                    class="button button--ghost button--danger" 
-                    data-quote-delete
+                    class="button button--ghost" 
+                    data-quote-assign
                     data-quote-number="{{ quote.quote_number }}"
                     data-company-id="{{ quote.company_id }}"
+                    data-assigned-user-id="{{ quote.assigned_user_id or '' }}"
                   >
-                    Delete
+                    Assign
                   </button>
+                  {% if current_user.is_super_admin %}
+                    <button 
+                      type="button" 
+                      class="button button--ghost button--danger" 
+                      data-quote-delete
+                      data-quote-number="{{ quote.quote_number }}"
+                      data-company-id="{{ quote.company_id }}"
+                    >
+                      Delete
+                    </button>
+                  {% endif %}
                 </td>
               {% endif %}
             </tr>
           {% else %}
             <tr>
-              <td colspan="{% if current_user and current_user.is_super_admin %}9{% else %}8{% endif %}" class="table__empty">No quotes available.</td>
+              <td colspan="{% if current_user and (current_user.is_super_admin or membership.is_admin) %}10{% else %}9{% endif %}" class="table__empty">No quotes available.</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -193,6 +207,36 @@
         </div>
         <div id="modal-quote-error" style="display: none;" class="alert alert--danger" role="alert">
           Failed to load quote details. Please try again.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quote Assignment Modal -->
+  <div class="modal" id="quote-assign-modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-modal-close>
+        <span aria-hidden="true">&times;</span>
+      </button>
+      <h2 class="modal__title" id="modal-assign-title">Assign Quote</h2>
+      <div class="modal__body">
+        <form id="quote-assign-form">
+          <div class="form-group">
+            <label for="assign-user-select" class="form-label">Assign to User</label>
+            <select id="assign-user-select" class="form-input" required>
+              <option value="">Select a user...</option>
+            </select>
+            <button type="button" id="unassign-button" class="button button--ghost" style="margin-top: 0.5rem;">
+              Unassign Quote
+            </button>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="button">Assign Quote</button>
+            <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+          </div>
+        </form>
+        <div id="modal-assign-error" style="display: none; margin-top: 1rem;" class="alert alert--danger" role="alert">
+          Failed to assign quote. Please try again.
         </div>
       </div>
     </div>

@@ -5731,6 +5731,21 @@ async def quotes_page(
         return expires_at < datetime.now(timezone.utc)
 
     enriched_quotes: list[dict[str, Any]] = []
+    
+    # Collect all unique user IDs for batch fetching
+    user_ids_to_fetch = set()
+    for quote in quotes_raw:
+        assigned_user_id = quote.get("assigned_user_id")
+        if assigned_user_id:
+            user_ids_to_fetch.add(assigned_user_id)
+    
+    # Fetch user emails for assigned users
+    user_emails = {}
+    for user_id in user_ids_to_fetch:
+        user_data = await user_repo.get_user_by_id(user_id)
+        if user_data:
+            user_emails[user_id] = user_data.get("email")
+    
     for quote in quotes_raw:
         label = _label(quote.get("status"))
         is_expired = _is_expired(quote.get("expires_at"))
@@ -5743,6 +5758,11 @@ async def quotes_page(
         record["created_at_iso"] = quote.get("created_at")
         record["expires_at_iso"] = quote.get("expires_at")
         record["is_expired"] = is_expired
+        
+        # Add assigned user email
+        assigned_user_id = quote.get("assigned_user_id")
+        record["assigned_user_email"] = user_emails.get(assigned_user_id) if assigned_user_id else None
+        
         enriched_quotes.append(record)
 
     status_options = sorted(
