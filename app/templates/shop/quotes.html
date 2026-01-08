@@ -83,6 +83,7 @@
         <thead>
           <tr>
             <th scope="col" data-sort="string" data-mobile-priority="essential">Quote</th>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">Name</th>
             <th scope="col" data-sort="string" data-mobile-priority="supporting">PO Number</th>
             <th scope="col" data-sort="string" data-mobile-priority="essential">Status</th>
             <th scope="col" data-sort="date" data-mobile-priority="essential">Created</th>
@@ -102,6 +103,7 @@
                   {{ quote.quote_number }}
                 </button>
               </td>
+              <td data-label="Name">{{ quote.name or '—' }}</td>
               <td data-label="PO Number">{{ quote.po_number or '—' }}</td>
               <td data-label="Status">
                 <span class="badge {{ quote.status_badge }}">{{ quote.status_label }}</span>
@@ -147,7 +149,7 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="{% if current_user and current_user.is_super_admin %}8{% else %}7{% endif %}" class="table__empty">No quotes available.</td>
+              <td colspan="{% if current_user and current_user.is_super_admin %}9{% else %}8{% endif %}" class="table__empty">No quotes available.</td>
             </tr>
           {% endfor %}
         </tbody>

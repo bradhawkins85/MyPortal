@@ -6190,6 +6190,11 @@ async def save_as_quote(request: Request) -> RedirectResponse:
     po_number = (str(po_number_raw).strip() or None) if po_number_raw is not None else None
     if po_number and len(po_number) > 100:
         po_number = po_number[:100]
+    
+    quote_name_raw = form.get("quoteName")
+    quote_name = (str(quote_name_raw).strip() or None) if quote_name_raw is not None else None
+    if quote_name and len(quote_name) > 255:
+        quote_name = quote_name[:255]
 
     items = await cart_repo.list_items(session.id)
     if not items:
@@ -6211,6 +6216,7 @@ async def save_as_quote(request: Request) -> RedirectResponse:
             status="active",
             po_number=po_number,
             expires_at=expires_at.replace(tzinfo=None),
+            name=quote_name,
         )
 
     await cart_repo.clear_cart(session.id)
