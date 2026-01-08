@@ -1695,6 +1695,7 @@ async def create_quote(
     status: str,
     po_number: str | None,
     expires_at: datetime,
+    name: str | None = None,
 ) -> int:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -1709,8 +1710,9 @@ async def create_quote(
                     status,
                     notes,
                     po_number,
-                    expires_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    expires_at,
+                    name
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     user_id,
@@ -1722,6 +1724,7 @@ async def create_quote(
                     None,
                     po_number,
                     expires_at,
+                    name,
                 ),
             )
             quote_id = int(cursor.lastrowid)
@@ -1738,7 +1741,8 @@ async def list_quote_summaries(company_id: int) -> list[dict[str, Any]]:
             MAX(expires_at) AS expires_at,
             MAX(status) AS status,
             MAX(notes) AS notes,
-            MAX(po_number) AS po_number
+            MAX(po_number) AS po_number,
+            MAX(name) AS name
         FROM shop_quotes
         WHERE company_id = %s
         GROUP BY quote_number, company_id
@@ -1759,7 +1763,8 @@ async def get_quote_summary(quote_number: str, company_id: int) -> dict[str, Any
             MAX(expires_at) AS expires_at,
             MAX(status) AS status,
             MAX(notes) AS notes,
-            MAX(po_number) AS po_number
+            MAX(po_number) AS po_number,
+            MAX(name) AS name
         FROM shop_quotes
         WHERE quote_number = %s AND company_id = %s
         GROUP BY quote_number, company_id
@@ -1787,6 +1792,7 @@ async def update_quote(
         "status",
         "notes",
         "po_number",
+        "name",
     }
     updates = {key: value for key, value in updates.items() if key in allowed_fields}
     if not updates:
@@ -1843,6 +1849,7 @@ def _normalise_quote_summary(row: dict[str, Any]) -> dict[str, Any]:
     summary["status"] = str(row.get("status") or "").strip()
     summary["notes"] = row.get("notes")
     summary["po_number"] = row.get("po_number")
+    summary["name"] = row.get("name")
     summary["created_at"] = _normalise_datetime(row.get("created_at"))
     summary["expires_at"] = _normalise_datetime(row.get("expires_at"))
     return summary
