@@ -1,6 +1,5 @@
 """Test for load quote to cart functionality."""
-from unittest.mock import AsyncMock, MagicMock, patch
-from decimal import Decimal
+import inspect
 
 import pytest
 
@@ -53,10 +52,12 @@ def test_shop_repo_has_correct_function_signature():
     # Check required positional parameter
     assert 'product_id' in params, "get_product_by_id should have product_id parameter"
     
-    # Check that company_id is a keyword parameter
+    # Check that company_id is a keyword-only parameter (after the * in the function signature)
     assert 'company_id' in params, "get_product_by_id should have company_id parameter"
     company_id_param = params['company_id']
     assert company_id_param.kind == inspect.Parameter.KEYWORD_ONLY, "company_id should be keyword-only"
+    # Also verify it has the correct default value
+    assert company_id_param.default is None, "company_id should have default value of None"
     
     # Verify the function signature matches our usage pattern
     # This ensures calling: get_product_by_id(product_id, company_id=company_id)
