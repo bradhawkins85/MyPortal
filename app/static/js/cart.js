@@ -244,5 +244,16 @@
         }
       });
     });
+
+    // Handle save quote modal
+    const saveQuoteButton = document.getElementById('save-quote-button');
+    const saveQuoteModal = document.getElementById('save-quote-modal');
+    if (saveQuoteButton && saveQuoteModal) {
+      bindModalDismissal(saveQuoteModal);
+      
+      saveQuoteButton.addEventListener('click', () => {
+        openModal(saveQuoteModal);
+      });
+    }
   });
 })();

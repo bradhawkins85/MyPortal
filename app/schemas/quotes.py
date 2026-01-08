@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class QuoteSummaryResponse(BaseModel):
     quote_number: str = Field(alias="quoteNumber")
     company_id: int = Field(alias="companyId")
+    name: str | None = None
     status: str = Field(default="", max_length=50)
     notes: str | None = None
     po_number: str | None = Field(default=None, alias="poNumber", max_length=100)
@@ -52,6 +53,7 @@ class QuoteDetailResponse(QuoteSummaryResponse):
 
 
 class QuoteUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
     status: str | None = Field(default=None, min_length=1, max_length=50)
     notes: str | None = Field(default=None, max_length=2000)
     po_number: str | None = Field(default=None, alias="poNumber", max_length=100)
