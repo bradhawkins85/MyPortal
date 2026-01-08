@@ -560,7 +560,17 @@
                     <td class="table__actions">
                       {% if assignment.is_pending %}
                         <div class="stacked">
-                          <span class="text-muted">Pending sign-up</span>
+                          {% if assignment.pending_requires_account %}
+                            <span class="text-muted">Awaiting sign-up</span>
+                          {% elif assignment.user_id and assignment.user_id != current_user.id %}
+                            <form action="/admin/impersonation" method="post" class="inline-form" style="margin-bottom: 0.5rem;">
+                              {% include "partials/csrf.html" %}
+                              <input type="hidden" name="userId" value="{{ assignment.user_id }}" />
+                              <button type="submit" class="button button--small">
+                                Impersonate
+                              </button>
+                            </form>
+                          {% endif %}
                           {% if assignment.staff_id %}
                             <button
                               type="button"
@@ -575,6 +585,15 @@
                         </div>
                       {% else %}
                         <div class="table__action-buttons">
+                          {% if assignment.user_id and assignment.user_id != current_user.id %}
+                            <form action="/admin/impersonation" method="post" class="inline-form">
+                              {% include "partials/csrf.html" %}
+                              <input type="hidden" name="userId" value="{{ assignment.user_id }}" />
+                              <button type="submit" class="button button--ghost">
+                                Impersonate
+                              </button>
+                            </form>
+                          {% endif %}
                           {% if assignment.membership_id %}
                             <button
                               type="button"
