@@ -23,7 +23,6 @@ async def test_load_quote_to_cart_uses_correct_shop_repo_function():
     assert not hasattr(shop_repo, 'get_product'), "shop_repo should NOT have get_product function"
     
     # Verify the function signature is correct
-    import inspect
     sig = inspect.signature(shop_repo.get_product_by_id)
     params = list(sig.parameters.keys())
     assert 'product_id' in params, "get_product_by_id should have product_id parameter"
@@ -37,7 +36,6 @@ def test_shop_repo_has_correct_function_signature():
     to be called with the parameters used in load_quote_to_cart.
     """
     from app.repositories import shop as shop_repo
-    import inspect
     
     # Verify the function exists
     assert hasattr(shop_repo, 'get_product_by_id'), "shop_repo should have get_product_by_id function"
