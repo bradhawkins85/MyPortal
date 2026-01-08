@@ -11,7 +11,7 @@ class QuoteSummaryResponse(BaseModel):
     company_id: int = Field(alias="companyId")
     status: str = Field(default="", max_length=50)
     notes: str | None = None
-    po_number: str | None = Field(default=None, alias="poNumber", max_length=50)
+    po_number: str | None = Field(default=None, alias="poNumber", max_length=100)
     created_at: datetime | None = Field(default=None, alias="createdAt")
     expires_at: datetime | None = Field(default=None, alias="expiresAt")
 
@@ -31,7 +31,7 @@ class QuoteItemResponse(BaseModel):
     price: Decimal
     status: str = Field(default="", max_length=50)
     notes: str | None = None
-    po_number: str | None = Field(default=None, alias="poNumber", max_length=50)
+    po_number: str | None = Field(default=None, alias="poNumber", max_length=100)
     quote_number: str = Field(alias="quoteNumber")
     created_at: datetime | None = Field(default=None, alias="createdAt")
     expires_at: datetime | None = Field(default=None, alias="expiresAt")
@@ -54,6 +54,6 @@ class QuoteDetailResponse(QuoteSummaryResponse):
 class QuoteUpdateRequest(BaseModel):
     status: str | None = Field(default=None, min_length=1, max_length=50)
     notes: str | None = Field(default=None, max_length=2000)
-    po_number: str | None = Field(default=None, alias="poNumber", max_length=50)
+    po_number: str | None = Field(default=None, alias="poNumber", max_length=100)
 
     model_config = {"populate_by_name": True, "str_strip_whitespace": True}

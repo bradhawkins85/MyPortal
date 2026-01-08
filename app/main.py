@@ -6167,7 +6167,7 @@ async def save_as_quote(request: Request) -> RedirectResponse:
         redirect,
     ) = await _load_company_section_context(
         request,
-        permission_field="can_access_cart",
+        permission_field="can_access_quotes",
     )
     if redirect:
         return redirect
