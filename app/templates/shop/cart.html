@@ -114,7 +114,7 @@
     <form action="/cart/place-order" method="post" class="cart-checkout form-grid">
       {% include "partials/csrf.html" %}
       <div class="form-field">
-        <label class="form-label" for="cart-po-number">PO number</label>
+        <label class="form-label" for="cart-po-number">PO number (optional)</label>
         <input
           class="form-input"
           id="cart-po-number"
@@ -134,6 +134,9 @@
         </div>
         <div class="form-actions">
           <button type="submit" class="button">Place order</button>
+          {% if can_access_quotes %}
+          <button type="submit" formaction="/cart/save-as-quote" class="button button--ghost">Save as Quote</button>
+          {% endif %}
         </div>
       </div>
     </form>
