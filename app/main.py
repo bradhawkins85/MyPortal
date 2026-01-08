@@ -5810,20 +5810,25 @@ async def load_quote_to_cart(request: Request, quote_number: str) -> RedirectRes
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    # Clear current cart
-    await cart_repo.clear_cart(session.id)
-
-    # Add quote items to cart
+    # Add quote items to cart (keeping existing cart items)
     for item in quote_items:
         product_id = int(item.get("product_id"))
         product = await shop_repo.get_product_by_id(product_id, company_id=company_id)
         if not product:
             continue
         
+        # Check if item already exists in cart
+        existing_item = await cart_repo.get_item(session.id, product_id)
+        new_quantity = int(item.get("quantity"))
+        
+        if existing_item:
+            # Add to existing quantity
+            new_quantity += existing_item.get("quantity", 0)
+        
         await cart_repo.upsert_item(
             session_id=session.id,
             product_id=product_id,
-            quantity=int(item.get("quantity")),
+            quantity=new_quantity,
             unit_price=item.get("price"),
             name=str(item.get("product_name")),
             sku=str(item.get("sku") or ""),
