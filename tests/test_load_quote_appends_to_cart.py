@@ -98,15 +98,17 @@ async def test_load_quote_to_cart_appends_items():
         # Verify upsert_item was called twice
         assert mock_cart_repo.upsert_item.call_count == 2
         
-        # Check that Product A was added with combined quantity (2 existing + 5 from quote = 7)
-        first_call = mock_cart_repo.upsert_item.call_args_list[0]
-        assert first_call[1]["product_id"] == 1
-        assert first_call[1]["quantity"] == 7  # 2 + 5
+        # Check that both products were added with correct quantities (order-independent)
+        upsert_calls = {
+            call[1]["product_id"]: call[1]["quantity"]
+            for call in mock_cart_repo.upsert_item.call_args_list
+        }
         
-        # Check that Product B was added with original quantity (no existing item)
-        second_call = mock_cart_repo.upsert_item.call_args_list[1]
-        assert second_call[1]["product_id"] == 2
-        assert second_call[1]["quantity"] == 3
+        # Product A should have combined quantity (2 existing + 5 from quote = 7)
+        assert upsert_calls[1] == 7
+        
+        # Product B should have original quantity (no existing item)
+        assert upsert_calls[2] == 3
 
 
 @pytest.mark.asyncio
