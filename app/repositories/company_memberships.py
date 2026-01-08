@@ -272,6 +272,7 @@ async def list_impersonatable_memberships() -> list[dict[str, Any]]:
         UNION
         
         -- Also include users with pending staff access who have registered
+        -- but exclude if they already have a membership record
         SELECT
             NULL AS membership_id,
             u.id AS user_id,
@@ -290,7 +291,11 @@ async def list_impersonatable_memberships() -> list[dict[str, Any]]:
         INNER JOIN users AS u ON LOWER(u.email) = LOWER(s.email)
         LEFT JOIN companies AS c ON c.id = p.company_id
         LEFT JOIN roles AS r ON r.id = p.role_id
-        WHERE p.role_id IS NOT NULL OR p.is_admin = 1
+        WHERE (p.role_id IS NOT NULL OR p.is_admin = 1)
+        AND NOT EXISTS (
+            SELECT 1 FROM company_memberships AS m2
+            WHERE m2.user_id = u.id AND m2.company_id = p.company_id
+        )
         
         ORDER BY LOWER(email), user_id, company_name
         """,
