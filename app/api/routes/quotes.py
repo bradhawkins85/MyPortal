@@ -93,6 +93,9 @@ async def update_quote(
     if "po_number" in data:
         value = data["po_number"]
         updates["po_number"] = value.strip() if isinstance(value, str) else value
+    if "name" in data:
+        value = data["name"]
+        updates["name"] = value.strip() if isinstance(value, str) else value
 
     summary = await shop_repo.update_quote(quote_number, resolved_company_id, **updates)
     if not summary:
