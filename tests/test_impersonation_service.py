@@ -13,9 +13,9 @@ def anyio_backend():
 
 @pytest.mark.anyio("asyncio")
 async def test_user_is_impersonatable_checks_membership(monkeypatch):
-    async def fake_list_memberships(user_id, *, status="active"):
+    async def fake_list_memberships(user_id, *, status=None):
         assert user_id == 5
-        assert status == "active"
+        assert status is None
         return [
             {"permissions": ["tickets.view"], "is_admin": False},
         ]
@@ -39,7 +39,7 @@ async def test_user_is_impersonatable_checks_membership(monkeypatch):
 
 @pytest.mark.anyio("asyncio")
 async def test_user_is_impersonatable_super_admin(monkeypatch):
-    async def fake_list_memberships(user_id, *, status="active"):
+    async def fake_list_memberships(user_id, *, status=None):
         assert user_id == 7
         return []
 
@@ -244,3 +244,68 @@ async def test_end_impersonation_restores_original_session(monkeypatch):
     assert restored_session.id == 22
     assert calls["deactivate"] == [50]
     assert calls["log"]["entity_id"] == 42
+
+
+@pytest.mark.anyio("asyncio")
+async def test_user_is_impersonatable_invited_user_with_permissions(monkeypatch):
+    """Test that users with 'invited' status but with permissions can be impersonated."""
+    async def fake_list_memberships(user_id, *, status=None):
+        assert user_id == 10
+        assert status is None
+        return [
+            {"permissions": ["tickets.view"], "is_admin": False, "status": "invited"},
+        ]
+
+    async def fake_get_user(user_id):
+        return {"id": user_id, "is_super_admin": False}
+
+    monkeypatch.setattr(
+        impersonation_service.membership_repo,
+        "list_memberships_for_user",
+        fake_list_memberships,
+    )
+    monkeypatch.setattr(
+        impersonation_service.user_repo,
+        "get_user_by_id",
+        fake_get_user,
+    )
+
+    assert await impersonation_service.user_is_impersonatable(10)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_list_impersonatable_users_includes_invited_users(monkeypatch):
+    """Test that invited users with permissions are included in impersonatable users list."""
+    async def fake_list_memberships():
+        return [
+            {
+                "user_id": 3,
+                "email": "invited@example.com",
+                "first_name": "Invited",
+                "last_name": "User",
+                "company_id": 10,
+                "company_name": "Test Company",
+                "role_name": "Member",
+                "permissions": ["portal.access"],
+                "is_super_admin": 0,
+                "status": "invited",
+            }
+        ]
+
+    async def fake_list_users():
+        return [
+            {"id": 3, "email": "invited@example.com", "is_super_admin": False},
+        ]
+
+    monkeypatch.setattr(
+        impersonation_service.membership_repo,
+        "list_impersonatable_memberships",
+        fake_list_memberships,
+    )
+    monkeypatch.setattr(impersonation_service.user_repo, "list_users", fake_list_users)
+
+    results = await impersonation_service.list_impersonatable_users()
+    assert len(results) == 1
+    assert results[0]["email"] == "invited@example.com"
+    assert results[0]["has_permissions"]
+    assert results[0]["memberships"][0]["company_name"] == "Test Company"
