@@ -266,7 +266,6 @@ async def list_impersonatable_memberships() -> list[dict[str, Any]]:
         INNER JOIN users AS u ON u.id = m.user_id
         INNER JOIN roles AS r ON r.id = m.role_id
         LEFT JOIN companies AS c ON c.id = m.company_id
-        WHERE LOWER(m.status) = 'active'
         ORDER BY LOWER(u.email), u.id, c.name
         """,
     )
