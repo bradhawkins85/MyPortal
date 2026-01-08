@@ -9,10 +9,12 @@ from pydantic import BaseModel, Field
 class QuoteSummaryResponse(BaseModel):
     quote_number: str = Field(alias="quoteNumber")
     company_id: int = Field(alias="companyId")
+    user_id: int | None = Field(default=None, alias="userId")
     name: str | None = None
     status: str = Field(default="", max_length=50)
     notes: str | None = None
     po_number: str | None = Field(default=None, alias="poNumber", max_length=100)
+    assigned_user_id: int | None = Field(default=None, alias="assignedUserId")
     created_at: datetime | None = Field(default=None, alias="createdAt")
     expires_at: datetime | None = Field(default=None, alias="expiresAt")
 
@@ -57,5 +59,12 @@ class QuoteUpdateRequest(BaseModel):
     status: str | None = Field(default=None, min_length=1, max_length=50)
     notes: str | None = Field(default=None, max_length=2000)
     po_number: str | None = Field(default=None, alias="poNumber", max_length=100)
+    assigned_user_id: int | None = Field(default=None, alias="assignedUserId")
 
     model_config = {"populate_by_name": True, "str_strip_whitespace": True}
+
+
+class QuoteAssignRequest(BaseModel):
+    assigned_user_id: int | None = Field(alias="assignedUserId")
+
+    model_config = {"populate_by_name": True}
