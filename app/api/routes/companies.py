@@ -4,10 +4,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.dependencies.auth import require_super_admin, require_helpdesk_technician
+from app.api.dependencies.auth import require_super_admin, get_current_user, require_super_admin, require_helpdesk_technician
 from app.api.dependencies.database import require_database
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
+from app.repositories import company_memberships as membership_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import staff as staff_repo
 from app.schemas.assets import AssetResponse
@@ -162,6 +163,36 @@ async def list_company_staff_users(
     return [UserResponse.model_validate(user) for user in users]
 
 
+
+
+@router.get("/{company_id}/members")
+async def list_company_members(
+    company_id: int,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    """Get company members (users with active memberships).
+    
+    This endpoint returns users who are members of the company,
+    which can be used for assigning quotes and other company-specific tasks.
+    Returns a list in the format: {"members": [{"user_id": X, "email": "..."}]}
+    """
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    
+    # Get all memberships for this company
+    memberships = await membership_repo.list_company_memberships(company_id)
+    
+    # Transform to the format expected by the frontend
+    members = []
+    for membership in memberships:
+        members.append({
+            "user_id": membership.get("user_id"),
+            "email": membership.get("user_email"),
+        })
+    
+    return {"members": members}
 @router.get("/{company_id}/assets", response_model=list[AssetResponse])
 async def list_company_assets(
     company_id: int,
