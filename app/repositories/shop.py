@@ -1737,12 +1737,14 @@ async def list_quote_summaries(company_id: int) -> list[dict[str, Any]]:
         SELECT
             quote_number,
             company_id,
+            MAX(user_id) AS user_id,
             MAX(created_at) AS created_at,
             MAX(expires_at) AS expires_at,
             MAX(status) AS status,
             MAX(notes) AS notes,
             MAX(po_number) AS po_number,
-            MAX(name) AS name
+            MAX(name) AS name,
+            MAX(assigned_user_id) AS assigned_user_id
         FROM shop_quotes
         WHERE company_id = %s
         GROUP BY quote_number, company_id
@@ -1759,12 +1761,14 @@ async def get_quote_summary(quote_number: str, company_id: int) -> dict[str, Any
         SELECT
             quote_number,
             company_id,
+            MAX(user_id) AS user_id,
             MAX(created_at) AS created_at,
             MAX(expires_at) AS expires_at,
             MAX(status) AS status,
             MAX(notes) AS notes,
             MAX(po_number) AS po_number,
-            MAX(name) AS name
+            MAX(name) AS name,
+            MAX(assigned_user_id) AS assigned_user_id
         FROM shop_quotes
         WHERE quote_number = %s AND company_id = %s
         GROUP BY quote_number, company_id
@@ -1793,6 +1797,7 @@ async def update_quote(
         "notes",
         "po_number",
         "name",
+        "assigned_user_id",
     }
     updates = {key: value for key, value in updates.items() if key in allowed_fields}
     if not updates:
@@ -1804,6 +1809,33 @@ async def update_quote(
     await db.execute(
         f"UPDATE shop_quotes SET {set_clause} WHERE quote_number = %s AND company_id = %s",
         tuple(params),
+    )
+
+    return await get_quote_summary(quote_number, company_id)
+
+
+async def assign_quote(
+    quote_number: str,
+    company_id: int,
+    assigned_user_id: int | None,
+) -> dict[str, Any] | None:
+    """Assign or unassign a quote to a specific user.
+    
+    Args:
+        quote_number: The quote number to assign
+        company_id: The company ID that owns the quote
+        assigned_user_id: The user ID to assign the quote to, or None to unassign
+        
+    Returns:
+        Updated quote summary if successful, None if quote not found
+    """
+    existing = await get_quote_summary(quote_number, company_id)
+    if not existing:
+        return None
+
+    await db.execute(
+        "UPDATE shop_quotes SET assigned_user_id = %s WHERE quote_number = %s AND company_id = %s",
+        (assigned_user_id, quote_number, company_id),
     )
 
     return await get_quote_summary(quote_number, company_id)
@@ -1846,10 +1878,12 @@ def _normalise_quote_summary(row: dict[str, Any]) -> dict[str, Any]:
     summary = dict(row)
     summary["quote_number"] = str(row.get("quote_number") or "").strip()
     summary["company_id"] = _coerce_optional_int(row.get("company_id"))
+    summary["user_id"] = _coerce_optional_int(row.get("user_id"))
     summary["status"] = str(row.get("status") or "").strip()
     summary["notes"] = row.get("notes")
     summary["po_number"] = row.get("po_number")
     summary["name"] = row.get("name")
+    summary["assigned_user_id"] = _coerce_optional_int(row.get("assigned_user_id"))
     summary["created_at"] = _normalise_datetime(row.get("created_at"))
     summary["expires_at"] = _normalise_datetime(row.get("expires_at"))
     return summary
