@@ -485,6 +485,31 @@ async def get_ticket_by_external_reference(external_reference: str) -> TicketRec
     return _normalise_ticket(row) if row else None
 
 
+async def list_tickets_by_requester_phone(phone_number: str, limit: int = 100) -> list[TicketRecord]:
+    """
+    Search for tickets by the requester's phone number.
+    Returns tickets ordered by most recently updated first.
+    """
+    if not phone_number or not phone_number.strip():
+        return []
+    
+    # Normalize phone number by removing common formatting characters
+    normalized_phone = re.sub(r'[\s\-\(\)\+]', '', phone_number.strip())
+    
+    rows = await db.fetch_all(
+        """
+        SELECT t.*
+        FROM tickets AS t
+        INNER JOIN users AS u ON u.id = t.requester_id
+        WHERE u.mobile_phone LIKE %s
+        ORDER BY t.updated_at DESC
+        LIMIT %s
+        """,
+        (f"%{normalized_phone}%", limit),
+    )
+    return [_normalise_ticket(row) for row in rows]
+
+
 async def list_ticket_assets(ticket_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """
