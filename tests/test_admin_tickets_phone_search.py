@@ -171,7 +171,9 @@ def test_admin_tickets_page_with_phone_search(monkeypatch, active_session, helpd
     
     # Check response
     assert response.status_code == status.HTTP_200_OK
-    assert b"Test Ticket 1" in response.content or b"Found 1 ticket(s)" in response.content
+    # Check for either the ticket title or the success message
+    content = response.content.decode('utf-8')
+    assert "Test Ticket 1" in content or "Found 1 ticket(s)" in content
 
 
 def test_admin_tickets_page_with_empty_phone_search(monkeypatch, active_session, helpdesk_user):
