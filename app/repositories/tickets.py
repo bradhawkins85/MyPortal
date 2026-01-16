@@ -488,6 +488,7 @@ async def get_ticket_by_external_reference(external_reference: str) -> TicketRec
 async def list_tickets_by_requester_phone(phone_number: str, limit: int = 100) -> list[TicketRecord]:
     """
     Search for tickets by the requester's phone number.
+    Searches both users.mobile_phone and staff.mobile_phone tables.
     Returns tickets ordered by most recently updated first.
     """
     if not phone_number or not phone_number.strip():
@@ -501,11 +502,15 @@ async def list_tickets_by_requester_phone(phone_number: str, limit: int = 100) -
         SELECT t.*
         FROM tickets AS t
         INNER JOIN users AS u ON u.id = t.requester_id
-        WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(u.mobile_phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE %s
+        LEFT JOIN staff AS s ON s.email = u.email AND s.company_id = u.company_id
+        WHERE (
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(u.mobile_phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE %s
+            OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(s.mobile_phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE %s
+        )
         ORDER BY t.updated_at DESC
         LIMIT %s
         """,
-        (f"%{normalized_phone}%", limit),
+        (f"%{normalized_phone}%", f"%{normalized_phone}%", limit),
     )
     return [_normalise_ticket(row) for row in rows]
 
