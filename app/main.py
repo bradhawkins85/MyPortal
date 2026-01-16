@@ -11950,13 +11950,47 @@ async def _render_tickets_dashboard(
     *,
     success_message: str | None = None,
     error_message: str | None = None,
+    phone_number: str | None = None,
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
-    dashboard = await tickets_service.load_dashboard_state(
-        status_filter=None,
-        module_filter=None,
-        limit=200,
-    )
+    # If phone number is provided, search by phone
+    if phone_number and phone_number.strip():
+        try:
+            phone_tickets = await tickets_repo.list_tickets_by_requester_phone(
+                phone_number.strip(), 
+                limit=_PHONE_SEARCH_LIMIT
+            )
+            # Get minimal dashboard state with only the phone search results
+            dashboard = await tickets_service.load_dashboard_state(
+                status_filter=None,
+                module_filter=None,
+                limit=0,  # Don't load default tickets, we'll use phone search results
+            )
+            # Replace the tickets with phone search results
+            dashboard.tickets = phone_tickets
+            dashboard.total = len(phone_tickets)
+            
+            # Add info message about phone search
+            if phone_tickets:
+                success_message = f"Found {len(phone_tickets)} ticket(s) for phone number {phone_number}"
+            else:
+                error_message = f"No tickets found for phone number {phone_number}"
+        except Exception as exc:
+            log_error("Error searching tickets by phone number", error=str(exc), exc_info=True)
+            error_message = "Failed to search tickets by phone number. Please try again."
+            # Load normal dashboard on error
+            dashboard = await tickets_service.load_dashboard_state(
+                status_filter=None,
+                module_filter=None,
+                limit=200,
+            )
+    else:
+        # Normal dashboard load without phone search
+        dashboard = await tickets_service.load_dashboard_state(
+            status_filter=None,
+            module_filter=None,
+            limit=200,
+        )
     dashboard_endpoint = "/api/tickets/dashboard"
     status_definitions_payload = [
         {
@@ -12801,6 +12835,7 @@ async def admin_tickets_page(
     request: Request,
     success: str | None = Query(default=None),
     error: str | None = Query(default=None),
+    phoneNumber: str | None = Query(default=None),
 ):
     current_user, redirect = await _require_helpdesk_page(request)
     if redirect:
@@ -12810,6 +12845,7 @@ async def admin_tickets_page(
         current_user,
         success_message=_sanitize_message(success),
         error_message=_sanitize_message(error),
+        phone_number=phoneNumber,
     )
 
 
