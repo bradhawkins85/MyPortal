@@ -5480,7 +5480,121 @@ dialog.modal:not([open]) {
   margin-left: auto;
 }
 
-/* Status filter controls */
+/* Ticket Filters - Redesigned Layout */
+.ticket-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.ticket-filters__section {
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+}
+
+.ticket-filters__section-title {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.95);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* View Controls */
+.ticket-filters__view-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ticket-filters__view-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ticket-filters__view-selector .form-label {
+  font-size: 0.85rem;
+  margin-bottom: 0;
+}
+
+.ticket-filters__view-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Status Filter Grid */
+.ticket-filters__status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.65rem;
+}
+
+.ticket-filters__status-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ticket-filters__status-item:hover {
+  background: rgba(15, 23, 42, 0.6);
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+.ticket-filters__status-item input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  cursor: pointer;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.ticket-filters__status-label {
+  font-size: 0.875rem;
+  color: rgba(226, 232, 240, 0.9);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Horizontal Section for Grouping and Search */
+.ticket-filters__section--horizontal {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+}
+
+.ticket-filters__group-control,
+.ticket-filters__search-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ticket-filters__group-control .form-label,
+.ticket-filters__search-control .form-label {
+  font-size: 0.85rem;
+  margin-bottom: 0;
+}
+
+/* Compact button variant */
+.button--compact {
+  padding: 0.5rem 0.875rem;
+  font-size: 0.875rem;
+}
+
+/* Legacy styles for backwards compatibility */
 .status-filter-group {
   display: flex;
   flex-direction: column;
@@ -5522,7 +5636,6 @@ dialog.modal:not([open]) {
   cursor: pointer;
 }
 
-/* View management controls */
 .view-controls {
   display: flex;
   align-items: center;

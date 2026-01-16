@@ -91,55 +91,72 @@
 
       <div class="management__body" data-ticket-view-manager>
         <div class="ticket-dashboard__overview">
-          <!-- View Controls -->
-          <div class="view-controls">
-            <div class="view-controls__selector">
-              <label class="visually-hidden" for="ticket-view-select">Saved View</label>
-              <select id="ticket-view-select" class="form-input" data-view-select>
-                <option value="">Select a view...</option>
-              </select>
-            </div>
-            <div class="view-controls__actions">
-              <button type="button" class="button button--ghost" data-save-view title="Save current view">
-                Save View
-              </button>
-              <button type="button" class="button button--ghost" data-delete-view title="Delete current view">
-                Delete View
-              </button>
-            </div>
-          </div>
-
-          <!-- Status Filter Group -->
-          <div class="status-filter-group">
-            <div class="status-filter-group__title">Show/Hide by Status:</div>
-            <div class="status-filter-group__options">
-              {% for status_option in ticket_status_definitions %}
-                <div class="status-filter-option">
-                  <input 
-                    type="checkbox" 
-                    id="status-filter-{{ status_option.tech_status }}"
-                    value="{{ status_option.tech_status }}"
-                    data-status-filter
-                    checked
-                  />
-                  <label for="status-filter-{{ status_option.tech_status }}">
-                    {{ status_option.tech_label }}
-                  </label>
+          <!-- Filters and Controls Container -->
+          <div class="ticket-filters">
+            <!-- View Management Section -->
+            <div class="ticket-filters__section">
+              <h3 class="ticket-filters__section-title">Saved Views</h3>
+              <div class="ticket-filters__view-controls">
+                <div class="ticket-filters__view-selector">
+                  <label class="form-label" for="ticket-view-select">Select saved view</label>
+                  <select id="ticket-view-select" class="form-input" data-view-select>
+                    <option value="">Select a view...</option>
+                  </select>
                 </div>
-              {% endfor %}
+                <div class="ticket-filters__view-actions">
+                  <button type="button" class="button button--ghost button--compact" data-save-view title="Save current view">
+                    Save View
+                  </button>
+                  <button type="button" class="button button--ghost button--compact" data-delete-view title="Delete current view">
+                    Delete View
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
 
-          <!-- Grouping Control -->
-          <div class="form-field" data-grouping-container>
-            <label class="form-label" for="ticket-grouping">Group by</label>
-            <select id="ticket-grouping" name="grouping" class="form-input" data-grouping-select>
-              <option value="">No grouping</option>
-              <option value="status">Status</option>
-              <option value="priority">Priority</option>
-              <option value="company">Company</option>
-              <option value="assigned">Assigned user</option>
-            </select>
+            <!-- Filters Section -->
+            <div class="ticket-filters__section">
+              <h3 class="ticket-filters__section-title">Filter by Status</h3>
+              <div class="ticket-filters__status-grid">
+                {% for status_option in ticket_status_definitions %}
+                  <label class="ticket-filters__status-item">
+                    <input 
+                      type="checkbox" 
+                      id="status-filter-{{ status_option.tech_status }}"
+                      value="{{ status_option.tech_status }}"
+                      data-status-filter
+                      checked
+                    />
+                    <span class="ticket-filters__status-label">{{ status_option.tech_label }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            </div>
+
+            <!-- Grouping and Search Section -->
+            <div class="ticket-filters__section ticket-filters__section--horizontal">
+              <div class="ticket-filters__group-control">
+                <label class="form-label" for="ticket-grouping">Group by</label>
+                <select id="ticket-grouping" name="grouping" class="form-input" data-grouping-select>
+                  <option value="">No grouping</option>
+                  <option value="status">Status</option>
+                  <option value="priority">Priority</option>
+                  <option value="company">Company</option>
+                  <option value="assigned">Assigned user</option>
+                </select>
+              </div>
+              <div class="ticket-filters__search-control">
+                <label class="form-label" for="ticket-quick-filter">Quick search</label>
+                <input 
+                  id="ticket-quick-filter"
+                  type="search" 
+                  class="form-input" 
+                  placeholder="Filter tickets" 
+                  aria-label="Filter tickets" 
+                  data-table-filter="tickets-table" 
+                />
+              </div>
+            </div>
           </div>
 
           <div class="ticket-dashboard__stats management__stats" data-ticket-stats>
@@ -168,10 +185,7 @@
 
         <div class="management__toolbar">
           <div class="management__toolbar-search">
-            <input type="search" class="form-input" placeholder="Filter tickets" aria-label="Filter tickets" data-table-filter="tickets-table" />
-          </div>
-          <div class="management__toolbar-search">
-            <form method="get" action="/admin/tickets" class="inline-form" style="display: flex; gap: 0.5rem;">
+            <form method="get" action="/admin/tickets" class="inline-form" style="display: flex; gap: 0.5rem; flex: 1;">
               <input 
                 type="search" 
                 name="phoneNumber" 
