@@ -3388,6 +3388,11 @@ button.header-title-menu__link {
   font-size: 0.85rem;
 }
 
+.button--compact {
+  padding: 0.5rem 0.875rem;
+  font-size: 0.875rem;
+}
+
 .button--disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -5588,13 +5593,8 @@ dialog.modal:not([open]) {
   margin-bottom: 0;
 }
 
-/* Compact button variant */
-.button--compact {
-  padding: 0.5rem 0.875rem;
-  font-size: 0.875rem;
-}
-
 /* Legacy styles for backwards compatibility */
+/* TODO: These can be removed after verifying no other templates use them */
 .status-filter-group {
   display: flex;
   flex-direction: column;
