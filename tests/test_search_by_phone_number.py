@@ -65,7 +65,7 @@ async def test_list_tickets_by_requester_phone_normalizes_phone_number(monkeypat
     assert "SELECT t.*" in dummy_db.fetch_sql
     assert "FROM tickets AS t" in dummy_db.fetch_sql
     assert "INNER JOIN users AS u ON u.id = t.requester_id" in dummy_db.fetch_sql
-    assert "WHERE u.mobile_phone LIKE %s" in dummy_db.fetch_sql
+    assert "WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(u.mobile_phone" in dummy_db.fetch_sql
     assert "ORDER BY t.updated_at DESC" in dummy_db.fetch_sql
     assert "LIMIT %s" in dummy_db.fetch_sql
     
