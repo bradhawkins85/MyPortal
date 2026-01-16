@@ -6427,6 +6427,60 @@ async def notifications_dashboard(request: Request):
     return await _render_template("notifications/index.html", request, user, extra=extra)
 
 
+@app.get("/search/", response_class=HTMLResponse)
+async def search_by_phone_number(request: Request):
+    """
+    Search for tickets by requester's phone number.
+    Example: /search/?phoneNumber=%2B61412345678
+    """
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    
+    # Get phone number from query parameter
+    phone_number = request.query_params.get("phoneNumber", "").strip()
+    
+    if not phone_number:
+        # No phone number provided, redirect to tickets page
+        return RedirectResponse(url="/tickets", status_code=status.HTTP_303_SEE_OTHER)
+    
+    # Search for tickets by requester's phone number
+    try:
+        tickets = await tickets_repo.list_tickets_by_requester_phone(phone_number, limit=100)
+    except Exception as e:
+        log_error(f"Error searching tickets by phone number: {e}", exc_info=True)
+        # On error, redirect to tickets page with error message
+        error_msg = quote("Failed to search tickets by phone number")
+        return RedirectResponse(
+            url=f"/tickets?error={error_msg}",
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+    
+    if not tickets:
+        # No tickets found, redirect to tickets page with a message
+        error_msg = quote(f"No tickets found for phone number {phone_number}")
+        return RedirectResponse(
+            url=f"/tickets?error={error_msg}",
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+    
+    if len(tickets) == 1:
+        # Exactly one ticket found, redirect directly to it
+        ticket_id = tickets[0].get("id")
+        return RedirectResponse(
+            url=f"/tickets/{ticket_id}",
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+    
+    # Multiple tickets found, redirect to tickets page with search
+    # We'll use the phone number as a search term
+    search_param = quote(phone_number)
+    return RedirectResponse(
+        url=f"/tickets?q={search_param}",
+        status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
 @app.get("/tickets", response_class=HTMLResponse)
 async def portal_tickets_page(request: Request):
     user, redirect = await _require_authenticated_user(request)
