@@ -494,7 +494,7 @@ async def list_tickets_by_requester_phone(phone_number: str, limit: int = 100) -
         return []
     
     # Normalize phone number by removing common formatting characters
-    normalized_phone = phone_number.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    normalized_phone = phone_number.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "").replace("+", "")
     
     rows = await db.fetch_all(
         """
