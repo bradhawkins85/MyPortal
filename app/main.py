@@ -824,6 +824,9 @@ app.include_router(tag_exclusions.router)
 HELPDESK_PERMISSION_KEY = tickets_service.HELPDESK_PERMISSION_KEY
 ISSUE_TRACKER_PERMISSION_KEY = issues_service.ISSUE_TRACKER_PERMISSION_KEY
 
+# Search configuration
+_PHONE_SEARCH_LIMIT = 100
+
 
 
 async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
@@ -6446,7 +6449,7 @@ async def search_by_phone_number(request: Request):
     
     # Search for tickets by requester's phone number
     try:
-        tickets = await tickets_repo.list_tickets_by_requester_phone(phone_number, limit=100)
+        tickets = await tickets_repo.list_tickets_by_requester_phone(phone_number, limit=_PHONE_SEARCH_LIMIT)
     except Exception as e:
         log_error(f"Error searching tickets by phone number: {e}", exc_info=True)
         # On error, redirect to tickets page with error message
@@ -6467,6 +6470,13 @@ async def search_by_phone_number(request: Request):
     if len(tickets) == 1:
         # Exactly one ticket found, redirect directly to it
         ticket_id = tickets[0].get("id")
+        if ticket_id is None:
+            # Handle case where ticket doesn't have an ID (defensive)
+            error_msg = quote("Invalid ticket data received")
+            return RedirectResponse(
+                url=f"/tickets?error={error_msg}",
+                status_code=status.HTTP_303_SEE_OTHER
+            )
         return RedirectResponse(
             url=f"/tickets/{ticket_id}",
             status_code=status.HTTP_303_SEE_OTHER
