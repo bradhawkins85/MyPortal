@@ -11954,31 +11954,40 @@ async def _render_tickets_dashboard(
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     # If phone number is provided, search by phone
-    if phone_number and phone_number.strip():
-        try:
-            phone_tickets = await tickets_repo.list_tickets_by_requester_phone(
-                phone_number.strip(), 
-                limit=_PHONE_SEARCH_LIMIT
-            )
-            # Get minimal dashboard state with only the phone search results
-            dashboard = await tickets_service.load_dashboard_state(
-                status_filter=None,
-                module_filter=None,
-                limit=0,  # Don't load default tickets, we'll use phone search results
-            )
-            # Replace the tickets with phone search results
-            dashboard.tickets = phone_tickets
-            dashboard.total = len(phone_tickets)
-            
-            # Add info message about phone search
-            if phone_tickets:
-                success_message = f"Found {len(phone_tickets)} ticket(s) for phone number {phone_number}"
-            else:
-                error_message = f"No tickets found for phone number {phone_number}"
-        except Exception as exc:
-            log_error("Error searching tickets by phone number", error=str(exc), exc_info=True)
-            error_message = "Failed to search tickets by phone number. Please try again."
-            # Load normal dashboard on error
+    if phone_number:
+        phone_number_stripped = phone_number.strip()
+        if phone_number_stripped:
+            try:
+                phone_tickets = await tickets_repo.list_tickets_by_requester_phone(
+                    phone_number_stripped, 
+                    limit=_PHONE_SEARCH_LIMIT
+                )
+                # Get minimal dashboard state with only the phone search results
+                dashboard = await tickets_service.load_dashboard_state(
+                    status_filter=None,
+                    module_filter=None,
+                    limit=0,  # Don't load default tickets, we'll use phone search results
+                )
+                # Replace the tickets with phone search results
+                dashboard.tickets = phone_tickets
+                dashboard.total = len(phone_tickets)
+                
+                # Add info message about phone search
+                if phone_tickets:
+                    success_message = f"Found {len(phone_tickets)} ticket(s) for phone number {phone_number_stripped}"
+                else:
+                    error_message = f"No tickets found for phone number {phone_number_stripped}"
+            except Exception as exc:
+                log_error("Error searching tickets by phone number", error=str(exc), exc_info=True)
+                error_message = "Failed to search tickets by phone number. Please try again."
+                # Load normal dashboard on error
+                dashboard = await tickets_service.load_dashboard_state(
+                    status_filter=None,
+                    module_filter=None,
+                    limit=200,
+                )
+        else:
+            # Empty phone number after stripping, load normal dashboard
             dashboard = await tickets_service.load_dashboard_state(
                 status_filter=None,
                 module_filter=None,
