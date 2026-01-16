@@ -11978,7 +11978,12 @@ async def _render_tickets_dashboard(
                 else:
                     error_message = f"No tickets found for phone number {phone_number_stripped}"
             except Exception as exc:
-                log_error("Error searching tickets by phone number", error=str(exc), exc_info=True)
+                log_error(
+                    "Error searching tickets by phone number",
+                    phone_number=phone_number_stripped,
+                    error=str(exc),
+                    exc_info=True
+                )
                 error_message = "Failed to search tickets by phone number. Please try again."
                 # Load normal dashboard on error
                 dashboard = await tickets_service.load_dashboard_state(
