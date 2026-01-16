@@ -501,7 +501,7 @@ async def list_tickets_by_requester_phone(phone_number: str, limit: int = 100) -
         SELECT t.*
         FROM tickets AS t
         INNER JOIN users AS u ON u.id = t.requester_id
-        WHERE u.mobile_phone LIKE %s
+        WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(u.mobile_phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE %s
         ORDER BY t.updated_at DESC
         LIMIT %s
         """,
