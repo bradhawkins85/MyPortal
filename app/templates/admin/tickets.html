@@ -170,6 +170,22 @@
           <div class="management__toolbar-search">
             <input type="search" class="form-input" placeholder="Filter tickets" aria-label="Filter tickets" data-table-filter="tickets-table" />
           </div>
+          <div class="management__toolbar-search">
+            <form method="get" action="/admin/tickets" class="inline-form" style="display: flex; gap: 0.5rem;">
+              <input 
+                type="search" 
+                name="phoneNumber" 
+                class="form-input" 
+                placeholder="Search by phone number" 
+                aria-label="Search by phone number"
+                value="{{ request.query_params.get('phoneNumber', '') }}"
+              />
+              <button type="submit" class="button button--primary">Search Phone</button>
+              {% if request.query_params.get('phoneNumber') %}
+                <a href="/admin/tickets" class="button button--ghost">Clear</a>
+              {% endif %}
+            </form>
+          </div>
           {% if can_bulk_delete_tickets %}
             {% set current_query = request.url.query %}
             <form
