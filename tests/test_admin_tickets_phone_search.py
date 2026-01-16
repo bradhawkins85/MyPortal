@@ -75,7 +75,38 @@ def helpdesk_user() -> dict[str, Any]:
     }
 
 
-def test_admin_tickets_page_with_phone_search(monkeypatch, active_session, helpdesk_user):
+@pytest.fixture
+def sample_ticket() -> dict[str, Any]:
+    """Shared sample ticket fixture to reduce duplication"""
+    now = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
+    return {
+        "id": 1,
+        "company_id": 10,
+        "requester_id": 5,
+        "assigned_user_id": None,
+        "subject": "Test Ticket 1",
+        "description": "First ticket",
+        "status": "open",
+        "priority": "normal",
+        "category": None,
+        "module_slug": None,
+        "external_reference": None,
+        "ai_summary": None,
+        "ai_summary_status": None,
+        "ai_summary_model": None,
+        "ai_resolution_state": None,
+        "ai_summary_updated_at": None,
+        "ai_tags": [],
+        "ai_tags_status": None,
+        "ai_tags_model": None,
+        "ai_tags_updated_at": None,
+        "created_at": now,
+        "updated_at": now,
+        "closed_at": None,
+    }
+
+
+def test_admin_tickets_page_with_phone_search(monkeypatch, active_session, helpdesk_user, sample_ticket):
     """Test that admin tickets page accepts phoneNumber query parameter and searches tickets"""
     
     # Mock session lookup
@@ -99,34 +130,8 @@ def test_admin_tickets_page_with_phone_search(monkeypatch, active_session, helpd
     
     monkeypatch.setattr(main_module, "_is_helpdesk_technician", fake_is_helpdesk_technician)
     
-    # Mock ticket search by phone
-    sample_tickets = [
-        {
-            "id": 1,
-            "company_id": 10,
-            "requester_id": 5,
-            "assigned_user_id": None,
-            "subject": "Test Ticket 1",
-            "description": "First ticket",
-            "status": "open",
-            "priority": "normal",
-            "category": None,
-            "module_slug": None,
-            "external_reference": None,
-            "ai_summary": None,
-            "ai_summary_status": None,
-            "ai_summary_model": None,
-            "ai_resolution_state": None,
-            "ai_summary_updated_at": None,
-            "ai_tags": [],
-            "ai_tags_status": None,
-            "ai_tags_model": None,
-            "ai_tags_updated_at": None,
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
-            "closed_at": None,
-        }
-    ]
+    # Mock ticket search by phone using the shared sample ticket
+    sample_tickets = [sample_ticket]
     
     async def fake_list_tickets_by_phone(phone_number: str, limit: int = 100):
         return sample_tickets
@@ -247,7 +252,7 @@ def test_admin_tickets_page_with_empty_phone_search(monkeypatch, active_session,
     assert b"No tickets found" in response.content
 
 
-def test_admin_tickets_page_without_phone_search(monkeypatch, active_session, helpdesk_user):
+def test_admin_tickets_page_without_phone_search(monkeypatch, active_session, helpdesk_user, sample_ticket):
     """Test that admin tickets page works normally without phone search parameter"""
     
     # Mock session lookup
@@ -271,37 +276,11 @@ def test_admin_tickets_page_without_phone_search(monkeypatch, active_session, he
     
     monkeypatch.setattr(main_module, "_is_helpdesk_technician", fake_is_helpdesk_technician)
     
-    # Mock dashboard service
+    # Mock dashboard service using the shared sample ticket
     from app.services import tickets as tickets_service
     from types import SimpleNamespace
     
-    sample_tickets = [
-        {
-            "id": 1,
-            "company_id": 10,
-            "requester_id": 5,
-            "assigned_user_id": None,
-            "subject": "Test Ticket 1",
-            "description": "First ticket",
-            "status": "open",
-            "priority": "normal",
-            "category": None,
-            "module_slug": None,
-            "external_reference": None,
-            "ai_summary": None,
-            "ai_summary_status": None,
-            "ai_summary_model": None,
-            "ai_resolution_state": None,
-            "ai_summary_updated_at": None,
-            "ai_tags": [],
-            "ai_tags_status": None,
-            "ai_tags_model": None,
-            "ai_tags_updated_at": None,
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
-            "closed_at": None,
-        }
-    ]
+    sample_tickets = [sample_ticket]
     
     async def fake_load_dashboard_state(status_filter=None, module_filter=None, limit=200):
         return SimpleNamespace(
