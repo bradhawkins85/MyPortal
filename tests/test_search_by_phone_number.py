@@ -65,13 +65,17 @@ async def test_list_tickets_by_requester_phone_normalizes_phone_number(monkeypat
     assert "SELECT t.*" in dummy_db.fetch_sql
     assert "FROM tickets AS t" in dummy_db.fetch_sql
     assert "INNER JOIN users AS u ON u.id = t.requester_id" in dummy_db.fetch_sql
-    assert "WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(u.mobile_phone" in dummy_db.fetch_sql
+    assert "LEFT JOIN staff AS s ON s.email = u.email AND s.company_id = u.company_id" in dummy_db.fetch_sql
+    assert "WHERE (" in dummy_db.fetch_sql
+    assert "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(u.mobile_phone" in dummy_db.fetch_sql
+    assert "OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(s.mobile_phone" in dummy_db.fetch_sql
     assert "ORDER BY t.updated_at DESC" in dummy_db.fetch_sql
     assert "LIMIT %s" in dummy_db.fetch_sql
     
-    # Check that phone number is normalized (spaces and + removed)
+    # Check that phone number is normalized (spaces and + removed) and used twice (users and staff)
     assert dummy_db.fetch_params[0] == "%61412345678%"
-    assert dummy_db.fetch_params[1] == 100
+    assert dummy_db.fetch_params[1] == "%61412345678%"
+    assert dummy_db.fetch_params[2] == 100
 
 
 @pytest.mark.anyio
@@ -84,9 +88,10 @@ async def test_list_tickets_by_requester_phone_removes_formatting(monkeypatch):
     # Search with phone number containing brackets and dashes
     await tickets.list_tickets_by_requester_phone("(02) 1234-5678", limit=50)
 
-    # Check that formatting characters are removed
+    # Check that formatting characters are removed and used twice (users and staff)
     assert dummy_db.fetch_params[0] == "%0212345678%"
-    assert dummy_db.fetch_params[1] == 50
+    assert dummy_db.fetch_params[1] == "%0212345678%"
+    assert dummy_db.fetch_params[2] == 50
 
 
 @pytest.mark.anyio
