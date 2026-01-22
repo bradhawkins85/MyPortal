@@ -645,6 +645,15 @@
         return row.dataset.filterHidden !== 'true';
       });
 
+    const uncheckHiddenCheckboxes = () => {
+      getRowCheckboxes().forEach((checkbox) => {
+        const row = checkbox.closest('tr');
+        if (row && row.dataset.filterHidden === 'true') {
+          checkbox.checked = false;
+        }
+      });
+    };
+
     const updateState = () => {
       const visible = getVisibleCheckboxes();
       const selected = visible.filter((checkbox) => checkbox.checked);
@@ -693,12 +702,7 @@
       filterInputs.forEach((input) => {
         input.addEventListener('input', () => {
           // Uncheck hidden checkboxes when filter changes
-          getRowCheckboxes().forEach((checkbox) => {
-            const row = checkbox.closest('tr');
-            if (row && row.dataset.filterHidden === 'true') {
-              checkbox.checked = false;
-            }
-          });
+          uncheckHiddenCheckboxes();
           window.requestAnimationFrame(updateState);
         });
       });
@@ -706,17 +710,12 @@
 
     table.addEventListener('table:rows-updated', () => {
       // Uncheck hidden checkboxes when table rows are updated
-      getRowCheckboxes().forEach((checkbox) => {
-        const row = checkbox.closest('tr');
-        if (row && row.dataset.filterHidden === 'true') {
-          checkbox.checked = false;
-        }
-      });
+      uncheckHiddenCheckboxes();
       window.requestAnimationFrame(updateState);
     });
 
     form.addEventListener('submit', (event) => {
-      const selected = getRowCheckboxes().filter((checkbox) => checkbox.checked);
+      const selected = getVisibleCheckboxes().filter((checkbox) => checkbox.checked);
       const count = selected.length;
       if (!count) {
         event.preventDefault();
