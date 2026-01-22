@@ -289,6 +289,6 @@
 {% block scripts %}
   {{ super() }}
   <script type="application/json" id="cart-items-data">{{ cart_items_payload | tojson }}</script>
-  <script src="{{ static_url(\'/static/js/tables.js\') }}" defer></script>
-  <script src="{{ static_url(\'/static/js/cart.js\') }}" defer></script>
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/cart.js') }}" defer></script>
 {% endblock %}

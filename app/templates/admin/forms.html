@@ -194,8 +194,8 @@
 
 {% block scripts %}
   {{ super() }}
-  <script src="{{ static_url(\'/static/js/tables.js\') }}" defer></script>
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script type="application/json" id="forms-admin-permissions">{{ form_permissions_map | tojson }}</script>
   <script type="application/json" id="forms-admin-companies">{{ company_user_options | tojson }}</script>
-  <script src="{{ static_url(\'/static/js/forms_admin.js\') }}" defer></script>
+  <script src="{{ static_url('/static/js/forms_admin.js') }}" defer></script>
 {% endblock %}
