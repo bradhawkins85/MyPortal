@@ -646,8 +646,8 @@
       });
 
     const updateState = () => {
-      const selected = getRowCheckboxes().filter((checkbox) => checkbox.checked);
       const visible = getVisibleCheckboxes();
+      const selected = visible.filter((checkbox) => checkbox.checked);
       if (submitButton) {
         submitButton.disabled = selected.length === 0;
       }
