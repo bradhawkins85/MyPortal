@@ -293,6 +293,6 @@
 
 {% block scripts %}
   {{ super() }}
-  <script src="/static/js/tables.js" defer></script>
-  <script src="/static/js/staff.js" defer></script>
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/staff.js') }}" defer></script>
 {% endblock %}

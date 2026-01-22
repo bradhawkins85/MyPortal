@@ -114,5 +114,5 @@
 
 {% block scripts %}
   {{ super() }}
-  <script src="/static/js/asset-custom-fields-settings.js" defer></script>
+  <script src="{{ static_url('/static/js/asset-custom-fields-settings.js') }}" defer></script>
 {% endblock %}

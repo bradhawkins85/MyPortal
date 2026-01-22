@@ -1165,9 +1165,9 @@
 
 {% block scripts %}
   {{ super() }}
-  <script src="/static/js/admin.js" defer></script>
-  <script src="/static/js/rich_text_editor.js" defer></script>
-  <script src="/static/js/ticket_detail.js" defer></script>
+  <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/ticket_detail.js') }}" defer></script>
   <script>
     async function removeTag(tagSlug) {
       if (!confirm(`Remove tag "${tagSlug.replace('-', ' ')}" from this ticket?`)) {

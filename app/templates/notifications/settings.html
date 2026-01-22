@@ -341,7 +341,7 @@
 
 {% block scripts %}
   {{ super() }}
-  <script src="/static/js/tables.js" defer></script>
-  <script src="/static/js/notification-preferences.js" defer></script>
-  <script src="/static/js/notification-event-settings.js" defer></script>
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/notification-preferences.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/notification-event-settings.js') }}" defer></script>
 {% endblock %}
