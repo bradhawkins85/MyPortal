@@ -202,6 +202,16 @@ xero_oauth_state_serializer = URLSafeSerializer(settings.secret_key, salt="xero-
 PWA_THEME_COLOR = "#0f172a"
 PWA_BACKGROUND_COLOR = "#0f172a"
 SHOP_LOW_STOCK_THRESHOLD = 5
+
+# Load app version for cache busting static files
+_APP_VERSION = ""
+_version_file = Path(__file__).resolve().parent.parent / "version.txt"
+if _version_file.is_file():
+    try:
+        _APP_VERSION = _version_file.read_text().strip()
+    except Exception:
+        pass
+
 _PWA_SERVICE_WORKER_PATH = templates_config.static_path / "service-worker.js"
 _PWA_ICON_SOURCES = [
     {
@@ -604,6 +614,22 @@ app.add_middleware(
 )
 
 templates = Jinja2Templates(directory=str(templates_config.template_path))
+
+
+def _static_url(path: str) -> str:
+    """Generate cache-busted URL for static files.
+    
+    Appends version query string to force browsers (especially Edge) to fetch
+    new versions when files change, preventing stale cached content.
+    """
+    if _APP_VERSION:
+        separator = "&" if "?" in path else "?"
+        return f"{path}{separator}v={_APP_VERSION}"
+    return path
+
+
+# Add cache-busting helper to Jinja2 globals
+templates.env.globals["static_url"] = _static_url
 
 # Ensure document uploads remain web-accessible using the same paths as the
 # previous portal stack.  Product images continue to live in the

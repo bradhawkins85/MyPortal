@@ -218,7 +218,7 @@
 {% block scripts %}
   {{ super() }}
   {% if ollama_enabled %}
-  <script src="/static/js/agent.js" defer></script>
+  <script src="{{ static_url(\'/static/js/agent.js\') }}" defer></script>
   <script>
     // Simple modal handler for dashboard ticket creation
     document.addEventListener('DOMContentLoaded', () => {

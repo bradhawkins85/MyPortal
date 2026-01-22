@@ -150,5 +150,5 @@
   <script type="application/json" id="kb-admin-user-options">{{ kb_user_options | tojson }}</script>
   <script type="application/json" id="kb-admin-company-options">{{ kb_company_options | tojson }}</script>
   <script type="application/json" id="kb-admin-active-article">{{ kb_initial_article | tojson }}</script>
-  <script src="/static/js/knowledge_base_admin.js" defer></script>
+  <script src="{{ static_url(\'/static/js/knowledge_base_admin.js\') }}" defer></script>
 {% endblock %}
