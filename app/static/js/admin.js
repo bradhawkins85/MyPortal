@@ -645,9 +645,18 @@
         return row.dataset.filterHidden !== 'true';
       });
 
+    const uncheckHiddenCheckboxes = () => {
+      getRowCheckboxes().forEach((checkbox) => {
+        const row = checkbox.closest('tr');
+        if (row && row.dataset.filterHidden === 'true') {
+          checkbox.checked = false;
+        }
+      });
+    };
+
     const updateState = () => {
-      const selected = getRowCheckboxes().filter((checkbox) => checkbox.checked);
       const visible = getVisibleCheckboxes();
+      const selected = visible.filter((checkbox) => checkbox.checked);
       if (submitButton) {
         submitButton.disabled = selected.length === 0;
       }
@@ -692,17 +701,21 @@
     if (filterInputs.length) {
       filterInputs.forEach((input) => {
         input.addEventListener('input', () => {
+          // Uncheck hidden checkboxes when filter changes
+          uncheckHiddenCheckboxes();
           window.requestAnimationFrame(updateState);
         });
       });
     }
 
     table.addEventListener('table:rows-updated', () => {
+      // Uncheck hidden checkboxes when table rows are updated
+      uncheckHiddenCheckboxes();
       window.requestAnimationFrame(updateState);
     });
 
     form.addEventListener('submit', (event) => {
-      const selected = getRowCheckboxes().filter((checkbox) => checkbox.checked);
+      const selected = getVisibleCheckboxes().filter((checkbox) => checkbox.checked);
       const count = selected.length;
       if (!count) {
         event.preventDefault();
