@@ -128,7 +128,7 @@
 
 {% block scripts %}
   {{ super() }}
-  <script src="{{ static_url(\'/static/js/shop_admin.js\') }}" defer></script>
+  <script src="{{ static_url('/static/js/shop_admin.js') }}" defer></script>
   <script>
     // Use event delegation for better security and CSP compliance
     document.addEventListener('DOMContentLoaded', function() {
