@@ -156,9 +156,31 @@
                 />
               </div>
             </div>
+
+            <!-- Phone Number Search Section -->
+            <div class="ticket-filters__section">
+              <h3 class="ticket-filters__section-title">Search by Phone Number</h3>
+              <form method="get" action="/admin/tickets" class="ticket-filters__phone-search">
+                <input 
+                  type="search" 
+                  name="phoneNumber" 
+                  class="form-input" 
+                  placeholder="Search by phone number" 
+                  aria-label="Search by phone number"
+                  value="{{ request.query_params.get('phoneNumber', '') }}"
+                />
+                <div class="ticket-filters__phone-search-actions">
+                  <button type="submit" class="button button--primary button--compact">Search Phone</button>
+                  {% if request.query_params.get('phoneNumber') %}
+                    <a href="/admin/tickets" class="button button--ghost button--compact">Clear</a>
+                  {% endif %}
+                </div>
+              </form>
+            </div>
           </div>
 
-          <div class="ticket-dashboard__stats management__stats" data-ticket-stats>
+          <div class="ticket-dashboard__right-column">
+            <div class="ticket-dashboard__stats management__stats" data-ticket-stats>
             <article class="stat-card">
               <h3 class="stat-card__title">Open tickets</h3>
               <p class="stat-card__value" data-ticket-stat="open">{{ ticket_status_counts.get('open', 0) }}</p>
@@ -180,55 +202,38 @@
               <p class="stat-card__value" data-ticket-stat="total">{{ ticket_total }}</p>
             </article>
           </div>
-        </div>
 
-        <div class="management__toolbar">
-          <div class="management__toolbar-search">
-            <form method="get" action="/admin/tickets" class="inline-form" style="display: flex; gap: 0.5rem; flex: 1;">
-              <input 
-                type="search" 
-                name="phoneNumber" 
-                class="form-input" 
-                placeholder="Search by phone number" 
-                aria-label="Search by phone number"
-                value="{{ request.query_params.get('phoneNumber', '') }}"
-              />
-              <button type="submit" class="button button--primary">Search Phone</button>
-              {% if request.query_params.get('phoneNumber') %}
-                <a href="/admin/tickets" class="button button--ghost">Clear</a>
-              {% endif %}
-            </form>
+          <div class="management__toolbar">
+            {% if can_bulk_delete_tickets %}
+              {% set current_query = request.url.query %}
+              <form
+                id="tickets-bulk-delete-form"
+                action="/admin/tickets/bulk-delete"
+                method="post"
+                class="management__bulk-delete"
+                data-bulk-delete-form
+              >
+                {% if csrf_token %}
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                {% endif %}
+                <input
+                  type="hidden"
+                  name="returnUrl"
+                  value="{{ request.url.path }}{% if current_query %}?{{ current_query }}{% endif %}"
+                />
+                <button type="submit" class="button button--danger" data-bulk-delete-submit disabled>
+                  Delete selected
+                </button>
+                <span class="text-muted" data-bulk-delete-count hidden>0 selected</span>
+              </form>
+            {% endif %}
           </div>
-          {% if can_bulk_delete_tickets %}
-            {% set current_query = request.url.query %}
-            <form
-              id="tickets-bulk-delete-form"
-              action="/admin/tickets/bulk-delete"
-              method="post"
-              class="management__bulk-delete"
-              data-bulk-delete-form
-            >
-              {% if csrf_token %}
-                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-              {% endif %}
-              <input
-                type="hidden"
-                name="returnUrl"
-                value="{{ request.url.path }}{% if current_query %}?{{ current_query }}{% endif %}"
-              />
-              <button type="submit" class="button button--danger" data-bulk-delete-submit disabled>
-                Delete selected
-              </button>
-              <span class="text-muted" data-bulk-delete-count hidden>0 selected</span>
-            </form>
-          {% endif %}
-        </div>
 
-        <div class="management__toolbar-info">
-          <span data-table-info>Showing {{ tickets|length }} tickets</span>
-        </div>
+          <div class="management__toolbar-info">
+            <span data-table-info>Showing {{ tickets|length }} tickets</span>
+          </div>
 
-        <div class="table-wrapper">
+          <div class="table-wrapper">
           <table
             class="table tickets-table"
             id="tickets-table"
@@ -358,6 +363,8 @@
               {% endif %}
             </tbody>
           </table>
+        </div>
+        </div>
         </div>
       </div>
     </section>
