@@ -692,12 +692,26 @@
     if (filterInputs.length) {
       filterInputs.forEach((input) => {
         input.addEventListener('input', () => {
+          // Uncheck hidden checkboxes when filter changes
+          getRowCheckboxes().forEach((checkbox) => {
+            const row = checkbox.closest('tr');
+            if (row && row.dataset.filterHidden === 'true') {
+              checkbox.checked = false;
+            }
+          });
           window.requestAnimationFrame(updateState);
         });
       });
     }
 
     table.addEventListener('table:rows-updated', () => {
+      // Uncheck hidden checkboxes when table rows are updated
+      getRowCheckboxes().forEach((checkbox) => {
+        const row = checkbox.closest('tr');
+        if (row && row.dataset.filterHidden === 'true') {
+          checkbox.checked = false;
+        }
+      });
       window.requestAnimationFrame(updateState);
     });
 
