@@ -5593,6 +5593,39 @@ dialog.modal:not([open]) {
   margin-bottom: 0;
 }
 
+/* Phone Number Search */
+.ticket-filters__phone-search {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ticket-filters__phone-search-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Right Column Layout */
+.ticket-dashboard__right-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0;
+}
+
+.ticket-dashboard__right-column .management__toolbar {
+  margin-top: -0.5rem;
+}
+
+.ticket-dashboard__right-column .management__toolbar-info {
+  margin-bottom: 0.5rem;
+}
+
+.ticket-dashboard__right-column .table-wrapper {
+  margin-top: 0;
+}
+
 /* Legacy styles for backwards compatibility */
 /* TODO: These can be removed after verifying no other templates use them */
 .status-filter-group {
