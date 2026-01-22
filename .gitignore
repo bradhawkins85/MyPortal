@@ -12,6 +12,7 @@ var/
 .pytest_cache/
 venv/
 test_venv/
+test_env/
 changes/*.json
 myportal.egg-info/
 myportal.db
