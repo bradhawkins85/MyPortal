@@ -715,6 +715,9 @@
     });
 
     form.addEventListener('submit', (event) => {
+      // Uncheck hidden checkboxes before validation and submission
+      uncheckHiddenCheckboxes();
+      
       const selected = getVisibleCheckboxes().filter((checkbox) => checkbox.checked);
       const count = selected.length;
       if (!count) {
