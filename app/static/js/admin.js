@@ -636,19 +636,39 @@
     const getRowCheckboxes = () =>
       Array.from(table.querySelectorAll('input[type="checkbox"][data-bulk-delete-checkbox]'));
 
+    const isRowVisible = (row) => {
+      if (!row) {
+        return false;
+      }
+      if (row.dataset.filterHidden === 'true' || row.dataset.pageHidden === 'true') {
+        return false;
+      }
+      if (
+        row.classList.contains('ticket-filtered-hidden') ||
+        row.classList.contains('ticket-group-hidden') ||
+        row.classList.contains('table-search-hidden')
+      ) {
+        return false;
+      }
+      if (row.hidden || row.style.display === 'none') {
+        return false;
+      }
+      return true;
+    };
+
     const getVisibleCheckboxes = () =>
       getRowCheckboxes().filter((checkbox) => {
         const row = checkbox.closest('tr');
         if (!row || checkbox.disabled) {
           return false;
         }
-        return row.dataset.filterHidden !== 'true';
+        return isRowVisible(row);
       });
 
     const uncheckHiddenCheckboxes = () => {
       getRowCheckboxes().forEach((checkbox) => {
         const row = checkbox.closest('tr');
-        if (row && row.dataset.filterHidden === 'true') {
+        if (row && !isRowVisible(row)) {
           checkbox.checked = false;
         }
       });
