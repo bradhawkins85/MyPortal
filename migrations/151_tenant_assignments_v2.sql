@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS tenant_assignments_v2 (
+    id VARCHAR(36) NOT NULL,
+    tenant_id VARCHAR(36) NOT NULL,
+    chore_id VARCHAR(36) NOT NULL,
+    child_id VARCHAR(36) NOT NULL,
+    assigned_at BIGINT,
+    assigned_for BIGINT,
+    start_date BIGINT,
+    end_date BIGINT,
+    days_of_week TEXT,
+    repeat_pattern TEXT,
+    time_of_day VARCHAR(50),
+    time_window TEXT,
+    point_overrides TEXT,
+    category_point_overrides TEXT,
+    rotation_state TEXT,
+    status INT NOT NULL DEFAULT 0,
+    points INT NOT NULL DEFAULT 0,
+    sort_order INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    INDEX idx_tenant_assignments_tenant_id (tenant_id)
+);
