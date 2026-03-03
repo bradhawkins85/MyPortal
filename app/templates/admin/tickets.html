@@ -263,6 +263,46 @@
                     <input type="checkbox" class="ticket-column-toggle" data-column="updated" checked />
                     <span>Updated</span>
                   </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="category" />
+                    <span>Category</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="requester" />
+                    <span>Requester</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="module" />
+                    <span>Module</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="external-ref" />
+                    <span>External Ref</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="created" />
+                    <span>Created</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="closed" />
+                    <span>Closed</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="ai-status" />
+                    <span>AI Status</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="ai-tags" />
+                    <span>AI Tags</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="billable-minutes" />
+                    <span>Billable Minutes</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="non-billable-minutes" />
+                    <span>Non-Billable Minutes</span>
+                  </label>
                 </div>
               </div>
             </div>
@@ -316,6 +356,16 @@
                 <th scope="col" data-sort="string" data-column="company" class="tickets-table__column tickets-table__column--company">Company</th>
                 <th scope="col" data-sort="string" data-column="assigned" class="tickets-table__column tickets-table__column--assigned">Assigned</th>
                 <th scope="col" data-sort="string" data-column="updated" class="tickets-table__column tickets-table__column--updated">Updated</th>
+                <th scope="col" data-sort="string" data-column="category" class="tickets-table__column tickets-table__column--category">Category</th>
+                <th scope="col" data-sort="string" data-column="requester" class="tickets-table__column tickets-table__column--requester">Requester</th>
+                <th scope="col" data-sort="string" data-column="module" class="tickets-table__column tickets-table__column--module">Module</th>
+                <th scope="col" data-sort="string" data-column="external-ref" class="tickets-table__column tickets-table__column--external-ref">External Ref</th>
+                <th scope="col" data-sort="string" data-column="created" class="tickets-table__column tickets-table__column--created">Created</th>
+                <th scope="col" data-sort="string" data-column="closed" class="tickets-table__column tickets-table__column--closed">Closed</th>
+                <th scope="col" data-sort="string" data-column="ai-status" class="tickets-table__column tickets-table__column--ai-status">AI Status</th>
+                <th scope="col" data-sort="string" data-column="ai-tags" class="tickets-table__column tickets-table__column--ai-tags">AI Tags</th>
+                <th scope="col" data-sort="int" data-column="billable-minutes" class="tickets-table__column tickets-table__column--billable-minutes">Billable Mins</th>
+                <th scope="col" data-sort="int" data-column="non-billable-minutes" class="tickets-table__column tickets-table__column--non-billable-minutes">Non-Billable Mins</th>
                 <th scope="col" class="table__actions tickets-table__column tickets-table__column--actions">Actions</th>
               </tr>
             </thead>
@@ -392,6 +442,19 @@
                     <td data-label="Company" data-column="company" class="tickets-table__cell tickets-table__cell--company">{{ company.name if company else (ticket.company_id or '—') }}</td>
                     <td data-label="Assigned" data-column="assigned" class="tickets-table__cell tickets-table__cell--assigned">{{ assigned.email if assigned else '—' }}</td>
                     <td data-label="Updated" data-column="updated" class="tickets-table__cell tickets-table__cell--updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
+                    <td data-label="Category" data-column="category" class="tickets-table__cell tickets-table__cell--category">{{ ticket.category or '—' }}</td>
+                    {% set requester = user_lookup.get(ticket.requester_id) %}
+                    <td data-label="Requester" data-column="requester" class="tickets-table__cell tickets-table__cell--requester">{{ requester.email if requester else '—' }}</td>
+                    <td data-label="Module" data-column="module" class="tickets-table__cell tickets-table__cell--module">{{ ticket.module_slug or '—' }}</td>
+                    <td data-label="External Ref" data-column="external-ref" class="tickets-table__cell tickets-table__cell--external-ref">{{ ticket.external_reference or '—' }}</td>
+                    <td data-label="Created" data-column="created" class="tickets-table__cell tickets-table__cell--created">{{ ticket.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.created_at else '—' }}</td>
+                    <td data-label="Closed" data-column="closed" class="tickets-table__cell tickets-table__cell--closed">{{ ticket.closed_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.closed_at else '—' }}</td>
+                    {% set resolution_label_map = {'likely_resolved': 'Likely Resolved', 'likely_in_progress': 'Likely In Progress'} %}
+                    <td data-label="AI Status" data-column="ai-status" class="tickets-table__cell tickets-table__cell--ai-status">{{ resolution_label_map.get(ticket.ai_resolution_state, ticket.ai_resolution_state.replace('_', ' ').title() if ticket.ai_resolution_state else '—') }}</td>
+                    <td data-label="AI Tags" data-column="ai-tags" class="tickets-table__cell tickets-table__cell--ai-tags">{{ (ticket.ai_tags or []) | join(', ') or '—' }}</td>
+                    {% set time_data = (ticket_time_lookup or {}).get(ticket.id, {}) %}
+                    <td data-label="Billable Mins" data-column="billable-minutes" class="tickets-table__cell tickets-table__cell--billable-minutes">{{ time_data.get('billable_minutes', 0) }}</td>
+                    <td data-label="Non-Billable Mins" data-column="non-billable-minutes" class="tickets-table__cell tickets-table__cell--non-billable-minutes">{{ time_data.get('non_billable_minutes', 0) }}</td>
                     <td class="table__actions tickets-table__cell tickets-table__cell--actions">
                       <a href="/admin/tickets/{{ ticket.id }}" class="button button--ghost">Open</a>
                     </td>
@@ -399,7 +462,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="{{ 9 + (1 if can_bulk_delete_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
+                  <td colspan="{{ 19 + (1 if can_bulk_delete_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
                 </tr>
               {% endif %}
             </tbody>
