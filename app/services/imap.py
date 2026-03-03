@@ -688,8 +688,8 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
     account = await _ensure_scheduled_task(account)
     try:
         await modules_service.update_module("imap", enabled=True)
-    except Exception:
-        pass
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to enable IMAP module after account creation", error=str(exc))
     return _redact_account(account)
 
 
