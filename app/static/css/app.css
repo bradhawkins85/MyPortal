@@ -1939,6 +1939,71 @@ button.header-title-menu__link {
   transform: rotate(180deg);
 }
 
+.ticket-columns {
+  position: relative;
+}
+
+.ticket-columns__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ticket-columns__chevron {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.ticket-columns__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.5rem);
+  min-width: 220px;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.35);
+  z-index: 20;
+}
+
+.ticket-columns__panel[hidden] {
+  display: none;
+}
+
+.ticket-columns__title {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.9);
+}
+
+.ticket-columns__options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ticket-columns__option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.ticket-columns__option input[type='checkbox'] {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.ticket-columns--open .ticket-columns__toggle {
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.ticket-columns--open .ticket-columns__chevron {
+  transform: rotate(180deg);
+}
+
 .invoice-row--overdue td {
   background: rgba(248, 113, 113, 0.08);
 }
