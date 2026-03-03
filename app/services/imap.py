@@ -482,6 +482,51 @@ def _extract_message_ids(header_value: str | None) -> list[str]:
     return unique_ids
 
 
+def _search_message_uids(
+    mailbox: imaplib.IMAP4 | imaplib.IMAP4_SSL,
+    *,
+    criterion: str,
+) -> tuple[list[bytes], str | None]:
+    """Search mailbox for message UIDs with compatibility fallbacks.
+
+    Some IMAP servers reject `UID SEARCH` requests when an explicit `None`
+    charset argument is provided. Try common variants before surfacing an error.
+    """
+
+    attempts: list[tuple[Any, ...]] = [
+        (None, criterion),
+        (criterion,),
+    ]
+    last_error: str | None = None
+
+    for args in attempts:
+        try:
+            result, data = mailbox.uid("search", *args)
+        except Exception as exc:  # pragma: no cover - network interaction
+            last_error = str(exc)
+            continue
+
+        if result == "OK" and data:
+            payload = data[0] if isinstance(data, list) else b""
+            if isinstance(payload, bytes):
+                return payload.split(), None
+            if isinstance(payload, str):
+                return payload.encode("utf-8", errors="ignore").split(), None
+            return [], None
+
+        if result != "OK":
+            details = ""
+            if data:
+                first = data[0]
+                if isinstance(first, bytes):
+                    details = first.decode("utf-8", errors="ignore")
+                else:
+                    details = str(first)
+            last_error = details or f"IMAP search returned {result}"
+
+    return [], last_error
+
+
 async def _resolve_ticket_entities(
     from_header: str | None,
     *,
@@ -1376,10 +1421,18 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         mailbox.login(username, password)
         mailbox.select(folder, readonly=not mark_as_read)
         criterion = "UNSEEN" if process_unread_only else "ALL"
-        result, data = mailbox.uid("search", None, criterion)
-        if result != "OK" or not data:
+        uids, search_error = _search_message_uids(mailbox, criterion=criterion)
+        if search_error:
+            log_error(
+                "IMAP message search failed",
+                account_id=account_id,
+                criterion=criterion,
+                error=search_error,
+            )
+            errors.append({"error": f"Unable to search mailbox: {search_error}"})
+            return {"status": "completed_with_errors", "processed": 0, "errors": errors}
+        if not uids:
             return {"status": "succeeded", "processed": 0, "errors": []}
-        uids = data[0].split()
         for raw_uid in uids:
             uid = raw_uid.decode("utf-8", errors="ignore")
             if not uid:
