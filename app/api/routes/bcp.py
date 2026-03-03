@@ -194,12 +194,8 @@ async def bcp_overview(request: Request):
     distribution_list = await bcp_repo.list_distribution_list(plan["id"])
     
     # Import template rendering from main
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    from app.main import _build_base_context, templates
+
     
     context = await _build_base_context(
         request,
@@ -221,12 +217,8 @@ async def bcp_glossary(request: Request):
     """BCP Glossary page."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+    from app.main import _build_base_context, templates
+
     
     # Define glossary terms
     glossary_terms = [
@@ -290,9 +282,7 @@ async def bcp_risks(request: Request, severity: str = Query(None), heatmap_filte
     """BCP Risks page with list, heatmap, and legend."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     from app.services.risk_calculator import (
         get_severity_band_info,
         get_likelihood_scale,
@@ -322,9 +312,7 @@ async def bcp_risks(request: Request, severity: str = Query(None), heatmap_filte
     
     # Get heatmap data
     heatmap_data = await bcp_repo.get_risk_heatmap_data(plan["id"])
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -351,8 +339,7 @@ async def bcp_risks_heatmap_partial(request: Request):
     """Return just the heatmap HTML for HTMX updates."""
     user, company_id = await _require_bcp_view(request)
     
-    from fastapi.templating import Jinja2Templates
-    from app.core.config import get_templates_config
+    from app.main import templates
     from app.services.risk_calculator import get_severity_band_info
     
     # Get or create plan for this company
@@ -363,9 +350,7 @@ async def bcp_risks_heatmap_partial(request: Request):
     
     # Get heatmap data
     heatmap_data = await bcp_repo.get_risk_heatmap_data(plan["id"])
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = {
         "request": request,
@@ -381,9 +366,7 @@ async def bcp_bia(request: Request, sort_by: str = Query("importance")):
     """BCP Business Impact Analysis page with critical activities list."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     from app.services.time_utils import humanize_hours
     
     # Get or create plan for this company
@@ -406,9 +389,7 @@ async def bcp_bia(request: Request, sort_by: str = Query("importance")):
             activity["impact"]["rto_humanized"] = humanize_hours(activity["impact"]["rto_hours"])
         else:
             activity["impact_rto_humanized"] = "-" if not activity.get("impact") else None
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -430,9 +411,7 @@ async def bcp_incident(request: Request, tab: str = Query("checklist")):
     """BCP Incident Console with tabs for Checklist, Contacts, and Event Log."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -485,9 +464,7 @@ async def bcp_incident(request: Request, tab: str = Query("checklist")):
     event_log = []
     if active_incident:
         event_log = await bcp_repo.list_event_log_entries(plan["id"], incident_id=active_incident["id"])
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -519,9 +496,7 @@ async def bcp_recovery(
     """BCP Recovery Actions page with filters."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     from app.repositories import users as user_repo
     from app.services.time_utils import humanize_hours
     from datetime import datetime
@@ -563,9 +538,7 @@ async def bcp_recovery(
     
     # Get all critical activities for activity filter
     activities = await bcp_repo.list_critical_activities(plan["id"], sort_by="name")
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -592,9 +565,7 @@ async def bcp_contacts(request: Request):
     """BCP Contacts & Claims page."""
     user, company_id = await _require_bcp_view(request)
 
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
 
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -612,8 +583,6 @@ async def bcp_contacts(request: Request):
     recovery_contacts = await bcp_repo.list_recovery_contacts(plan["id"])
     insurance_claims = await bcp_repo.list_insurance_claims(plan["id"])
 
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
 
     context = await _build_base_context(
         request,
@@ -719,9 +688,7 @@ async def bcp_schedules(request: Request):
     """BCP Training & Review Schedules page."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -732,9 +699,7 @@ async def bcp_schedules(request: Request):
     # Get training and review items
     training_items = await bcp_repo.list_training_items(plan["id"])
     review_items = await bcp_repo.list_review_items(plan["id"])
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -940,9 +905,7 @@ async def bcp_roles(request: Request):
     """BCP Roles & Responsibilities page."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     from app.repositories import users as user_repo
     
     # Get or create plan for this company
@@ -962,9 +925,7 @@ async def bcp_roles(request: Request):
     
     # Get all users for assignment dropdown
     all_users = await user_repo.list_users()
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -1120,12 +1081,8 @@ async def bcp_export(request: Request):
     """BCP Export landing page with download options."""
     user, company_id = await _require_bcp_export(request)
 
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
 
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
 
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
@@ -1651,9 +1608,7 @@ async def bcp_insurance(request: Request):
     """BCP Insurance page with policies table."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -1663,9 +1618,7 @@ async def bcp_insurance(request: Request):
     
     # Get all insurance policies
     policies = await bcp_repo.list_insurance_policies(plan["id"])
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -1855,9 +1808,7 @@ async def bcp_backups(request: Request):
     """BCP Backups page with backup items table."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -1867,9 +1818,7 @@ async def bcp_backups(request: Request):
     
     # Get all backup items
     backups = await bcp_repo.list_backup_items(plan["id"])
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -2031,16 +1980,12 @@ async def bcp_bia_new(request: Request):
     """New critical activity page."""
     user, company_id = await _require_bcp_edit(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -2061,9 +2006,7 @@ async def bcp_bia_edit(request: Request, activity_id: int):
     """Edit page for a critical activity."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     from app.services.time_utils import humanize_hours
     
     # Get the activity
@@ -2075,9 +2018,7 @@ async def bcp_bia_edit(request: Request, activity_id: int):
     plan = await bcp_repo.get_plan_by_id(activity["plan_id"])
     if not plan or plan["company_id"] != company_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -2857,9 +2798,7 @@ async def bcp_evacuation(request: Request):
     """BCP Evacuation Procedures page."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -2871,9 +2810,7 @@ async def bcp_evacuation(request: Request):
     evacuation = await bcp_repo.get_evacuation_plan(plan["id"])
     if not evacuation:
         evacuation = await bcp_repo.create_evacuation_plan(plan["id"])
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -2930,9 +2867,7 @@ async def bcp_emergency_kit(request: Request, tab: str = Query("documents")):
     """BCP Emergency Kit page with Documents and Equipment tabs."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -2949,9 +2884,7 @@ async def bcp_emergency_kit(request: Request, tab: str = Query("documents")):
     # Filter items by category
     document_items = [item for item in all_items if item["category"] == "Document"]
     equipment_items = [item for item in all_items if item["category"] == "Equipment"]
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -3345,9 +3278,7 @@ async def bcp_recovery_checklist(request: Request):
     """BCP Recovery Checklist page for Crisis & Recovery phase."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3399,9 +3330,7 @@ async def bcp_recovery_checklist(request: Request):
     else:
         # No active incident, just show items without ticks
         checklist_with_ticks = [{**item, "tick": None} for item in checklist_items]
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -3428,9 +3357,7 @@ async def bcp_recovery_contacts(request: Request):
     """BCP Recovery Contacts page with contact type, organisation, contact, title, phone/mobile."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3440,9 +3367,7 @@ async def bcp_recovery_contacts(request: Request):
     
     # Get all recovery contacts
     contacts = await bcp_repo.list_recovery_contacts(plan["id"])
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -3598,9 +3523,7 @@ async def bcp_insurance_claims(request: Request):
     """BCP Insurance Claims page with insurer, date, claim details, follow-up actions."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3610,9 +3533,7 @@ async def bcp_insurance_claims(request: Request):
     
     # Get all insurance claims
     claims = await bcp_repo.list_insurance_claims(plan["id"])
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -3786,9 +3707,7 @@ async def bcp_market_changes(request: Request):
     """BCP Market Changes page with market change, impact to business, business options."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3798,9 +3717,7 @@ async def bcp_market_changes(request: Request):
     
     # Get all market changes
     changes = await bcp_repo.list_market_changes(plan["id"])
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
@@ -3950,18 +3867,14 @@ async def bcp_wellbeing(request: Request):
     """BCP Staff Wellbeing informational page with admin-editable links/phone numbers."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
         plan = await bcp_repo.create_plan(company_id)
         await bcp_repo.seed_default_objectives(plan["id"])
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     # Default wellbeing resources
     wellbeing_resources = [
@@ -4027,9 +3940,7 @@ async def bcp_seed_info(request: Request):
     """BCP Seeding Info page - shows what defaults are seeded and how to manage them."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context
-    from app.core.config import get_templates_config
-    from fastapi.templating import Jinja2Templates
+    from app.main import _build_base_context, templates
     from app.services.bcp_seeding import get_seeding_documentation
     
     # Get or create plan for this company
@@ -4041,9 +3952,7 @@ async def bcp_seed_info(request: Request):
     
     # Get seeding documentation
     seed_docs = get_seeding_documentation()
-    
-    templates_config = get_templates_config()
-    templates = Jinja2Templates(directory=str(templates_config.template_path))
+
     
     context = await _build_base_context(
         request,
