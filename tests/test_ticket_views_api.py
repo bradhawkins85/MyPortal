@@ -116,3 +116,45 @@ async def test_normalise_ticket_view_discards_invalid_filters():
 
     assert result["filters"] is None
 
+
+def test_ticket_view_filters_status_roundtrip():
+    """Status filter values survive a save/load cycle via TicketViewFilters schema."""
+    from app.schemas.tickets import TicketViewFilters
+
+    statuses = ["open", "in_progress", "pending"]
+    filters = TicketViewFilters(status=statuses, priority=[])
+    dumped = filters.model_dump()
+
+    assert dumped["status"] == statuses
+
+    stored = json.dumps(dumped)
+    loaded = json.loads(stored)
+
+    assert loaded["status"] == statuses
+
+
+@pytest.mark.anyio
+async def test_normalise_ticket_view_preserves_status_filter():
+    """Status filters stored in JSON are correctly parsed and returned."""
+    from datetime import datetime, timezone
+
+    statuses = ["open", "pending"]
+    row = {
+        "id": 5,
+        "user_id": 20,
+        "name": "Status View",
+        "description": None,
+        "filters": json.dumps({"status": statuses, "priority": [], "company_id": None}),
+        "grouping_field": None,
+        "sort_field": None,
+        "sort_direction": None,
+        "is_default": 0,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+    }
+
+    result = ticket_views._normalise_ticket_view(row)
+
+    assert isinstance(result["filters"], dict)
+    assert result["filters"]["status"] == statuses
+

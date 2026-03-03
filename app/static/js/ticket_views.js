@@ -7,6 +7,20 @@
 
   const API_BASE = '/api/tickets';
 
+  function getCookie(name) {
+    const pattern = `(?:^|; )${name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1')}=([^;]*)`;
+    const matches = document.cookie.match(new RegExp(pattern));
+    return matches ? decodeURIComponent(matches[1]) : '';
+  }
+
+  function getCsrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta && meta.getAttribute('content')) {
+      return meta.getAttribute('content');
+    }
+    return getCookie('myportal_session_csrf');
+  }
+
   /**
    * TicketViewManager - Manages ticket views with filters, grouping, and sorting
    */
@@ -465,10 +479,12 @@
       };
 
       try {
+        const csrfToken = getCsrfToken();
         const response = await fetch(`${API_BASE}/views`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
           },
           body: JSON.stringify(payload)
         });
@@ -494,8 +510,12 @@
       }
 
       try {
+        const csrfToken = getCsrfToken();
         const response = await fetch(`${API_BASE}/views/${this.currentView.id}`, {
-          method: 'DELETE'
+          method: 'DELETE',
+          headers: {
+            'X-CSRF-Token': csrfToken,
+          },
         });
 
         if (response.ok) {
