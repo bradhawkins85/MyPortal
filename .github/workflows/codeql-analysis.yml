@@ -41,7 +41,7 @@ jobs:
           find . -type f -name '*.sarif' -print || true
 
       - name: Upload SARIF artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: codeql-scan-results
           path: '**/*.sarif'
