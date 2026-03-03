@@ -275,3 +275,4 @@ async def list_event_types(*, user_id: int | None = None) -> list[str]:
         if isinstance(event_type, str):
             values.append(event_type)
     return values
+# test_marker_xyz
