@@ -797,6 +797,33 @@ async def count_time_entries(ticket_id: int) -> int:
     return int(row["count"]) if row else 0
 
 
+async def get_time_totals_by_ticket_ids(ticket_ids: list[int]) -> dict[int, dict[str, int]]:
+    """Return billable and non-billable minute totals keyed by ticket ID."""
+    if not ticket_ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(ticket_ids))
+    rows = await db.fetch_all(
+        f"""
+        SELECT
+            ticket_id,
+            SUM(CASE WHEN is_billable = 1 AND minutes_spent IS NOT NULL THEN minutes_spent ELSE 0 END) AS billable_minutes,
+            SUM(CASE WHEN is_billable = 0 AND minutes_spent IS NOT NULL THEN minutes_spent ELSE 0 END) AS non_billable_minutes
+        FROM ticket_replies
+        WHERE ticket_id IN ({placeholders}) AND minutes_spent IS NOT NULL AND minutes_spent > 0
+        GROUP BY ticket_id
+        """,
+        tuple(ticket_ids),
+    )
+    result: dict[int, dict[str, int]] = {}
+    for row in rows:
+        tid = int(row["ticket_id"])
+        result[tid] = {
+            "billable_minutes": int(row["billable_minutes"] or 0),
+            "non_billable_minutes": int(row["non_billable_minutes"] or 0),
+        }
+    return result
+
+
 async def validate_replies_belong_to_ticket(reply_ids: list[int], ticket_id: int) -> tuple[bool, str | None]:
     """
     Validate that all reply IDs belong to the specified ticket.
