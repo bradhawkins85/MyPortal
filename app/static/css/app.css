@@ -521,6 +521,7 @@ html {
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
+  resize: vertical;
 }
 
 .rich-text-editor__fallback {
