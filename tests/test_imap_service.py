@@ -856,3 +856,79 @@ async def test_is_any_email_address_known_returns_false_for_empty_list(monkeypat
     result = await imap._is_any_email_address_known([])
 
     assert result is False
+
+
+def test_search_message_uids_falls_back_when_charset_variant_fails():
+    class FallbackMailbox:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        def uid(self, command: str, *args):
+            self.calls.append((command, args))
+            if len(self.calls) == 1:
+                return "NO", [b"BAD unsupported charset"]
+            return "OK", [b"101 102"]
+
+    mailbox = FallbackMailbox()
+
+    uids, error = imap._search_message_uids(mailbox, criterion="UNSEEN")
+
+    assert error is None
+    assert uids == [b"101", b"102"]
+    assert mailbox.calls == [
+        ("search", (None, "UNSEEN")),
+        ("search", ("UNSEEN",)),
+    ]
+
+
+async def test_sync_account_reports_search_error(monkeypatch):
+    async def fake_get_module(slug: str, *, redact: bool = False):
+        return {"slug": slug, "enabled": True}
+
+    async def fake_get_account(account_id: int):
+        assert account_id == 12
+        return {
+            "id": account_id,
+            "host": "mail.example.com",
+            "port": 993,
+            "username": "inbox",
+            "password_encrypted": "encrypted",
+            "folder": "INBOX",
+            "process_unread_only": True,
+            "mark_as_read": False,
+            "active": True,
+        }
+
+    class SearchErrorMailbox:
+        def __init__(self) -> None:
+            self.logged_out = False
+
+        def login(self, username: str, password: str) -> None:
+            assert username == "inbox"
+            assert password == "password"
+
+        def select(self, folder: str, readonly: bool = False):
+            assert folder == "INBOX"
+            assert readonly is True
+            return "OK", []
+
+        def uid(self, command: str, *args):
+            assert command == "search"
+            return "NO", [b"SEARCH failed"]
+
+        def logout(self) -> None:
+            self.logged_out = True
+
+    mailbox = SearchErrorMailbox()
+    monkeypatch.setattr(imap.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(imap.imap_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(imap.imaplib, "IMAP4_SSL", lambda host, port: mailbox)
+    monkeypatch.setattr(imap, "decrypt_secret", lambda value: "password")
+
+    result = await imap.sync_account(12)
+
+    assert result["status"] == "completed_with_errors"
+    assert result["processed"] == 0
+    assert result["errors"]
+    assert "Unable to search mailbox" in result["errors"][0]["error"]
+    assert mailbox.logged_out
