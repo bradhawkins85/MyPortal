@@ -280,7 +280,11 @@
 
   function removeNotificationRow(notificationId) {
     const row = document.querySelector(`[data-notification-row="${notificationId}"]`);
-    if (row) { const wasUnread = row.getAttribute('data-unread') === '1'; row.remove(); return wasUnread; }
+    if (row) {
+      const wasUnread = row.getAttribute('data-unread') === '1';
+      row.remove();
+      return wasUnread;
+    }
     return false;
   }
 
@@ -426,10 +430,15 @@
         try {
           await deleteNotification(notificationId);
           removeNotificationRow(notificationId);
-          try { await refreshNotificationSummary(); } catch (e) { console.warn(e); }
+          try {
+            await refreshNotificationSummary();
+          } catch (e) {
+            console.warn(e);
+          }
           updateSelectionState();
         } catch (error) {
-          button.disabled = false; button.textContent = originalText;
+          button.disabled = false;
+          button.textContent = originalText;
           window.alert(error.message || 'Unable to delete notification');
         }
       });
@@ -450,7 +459,11 @@
       try {
         await Promise.all(selected.map((id) => deleteNotification(id)));
         selected.forEach((id) => removeNotificationRow(id));
-        try { await refreshNotificationSummary(); } catch (e) { console.warn(e); }
+        try {
+          await refreshNotificationSummary();
+        } catch (e) {
+          console.warn(e);
+        }
       } catch (error) { window.alert(error.message || 'Unable to delete notifications'); }
       actionButton.textContent = originalText;
       updateSelectionState();
