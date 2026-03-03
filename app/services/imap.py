@@ -686,6 +686,10 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not account:
         raise RuntimeError("Failed to create IMAP account")
     account = await _ensure_scheduled_task(account)
+    try:
+        await modules_service.update_module("imap", enabled=True)
+    except Exception:
+        pass
     return _redact_account(account)
 
 
@@ -1561,7 +1565,10 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             await tickets_service.refresh_ticket_ai_summary(int(ticket_id))
                         except RuntimeError:
                             pass
-                        await tickets_service.refresh_ticket_ai_tags(int(ticket_id))
+                        try:
+                            await tickets_service.refresh_ticket_ai_tags(int(ticket_id))
+                        except Exception:
+                            pass
             except Exception as exc:  # pragma: no cover - defensive logging
                 error_text = str(exc)
                 errors.append({"uid": uid, "error": error_text})
