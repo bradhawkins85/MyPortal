@@ -373,6 +373,7 @@
               {% if tickets %}
                 {% set company_lookup = ticket_company_lookup or {} %}
                 {% set user_lookup = ticket_user_lookup or {} %}
+                {% set resolution_label_map = {'likely_resolved': 'Likely Resolved', 'likely_in_progress': 'Likely In Progress'} %}
                 {% for ticket in tickets %}
                   {% set company = company_lookup.get(ticket.company_id) %}
                   {% set assigned = user_lookup.get(ticket.assigned_user_id) %}
@@ -449,8 +450,8 @@
                     <td data-label="External Ref" data-column="external-ref" class="tickets-table__cell tickets-table__cell--external-ref">{{ ticket.external_reference or '—' }}</td>
                     <td data-label="Created" data-column="created" class="tickets-table__cell tickets-table__cell--created">{{ ticket.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.created_at else '—' }}</td>
                     <td data-label="Closed" data-column="closed" class="tickets-table__cell tickets-table__cell--closed">{{ ticket.closed_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.closed_at else '—' }}</td>
-                    {% set resolution_label_map = {'likely_resolved': 'Likely Resolved', 'likely_in_progress': 'Likely In Progress'} %}
-                    <td data-label="AI Status" data-column="ai-status" class="tickets-table__cell tickets-table__cell--ai-status">{{ resolution_label_map.get(ticket.ai_resolution_state, ticket.ai_resolution_state.replace('_', ' ').title() if ticket.ai_resolution_state else '—') }}</td>
+                    {% set ai_status_label = resolution_label_map.get(ticket.ai_resolution_state) or (ticket.ai_resolution_state.replace('_', ' ').title() if ticket.ai_resolution_state else '—') %}
+                    <td data-label="AI Status" data-column="ai-status" class="tickets-table__cell tickets-table__cell--ai-status">{{ ai_status_label }}</td>
                     <td data-label="AI Tags" data-column="ai-tags" class="tickets-table__cell tickets-table__cell--ai-tags">{{ (ticket.ai_tags or []) | join(', ') or '—' }}</td>
                     {% set time_data = (ticket_time_lookup or {}).get(ticket.id, {}) %}
                     <td data-label="Billable Mins" data-column="billable-minutes" class="tickets-table__cell tickets-table__cell--billable-minutes">{{ time_data.get('billable_minutes', 0) }}</td>
