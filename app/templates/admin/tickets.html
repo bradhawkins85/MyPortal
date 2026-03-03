@@ -227,6 +227,45 @@
                 <span class="text-muted" data-bulk-delete-count hidden>0 selected</span>
               </form>
             {% endif %}
+            <div class="ticket-columns" data-ticket-columns>
+              <button type="button" class="button button--ghost ticket-columns__toggle" data-columns-toggle aria-haspopup="true">
+                <span>Columns</span>
+                <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
+              </button>
+              <div class="ticket-columns__panel" data-columns-panel hidden>
+                <p class="ticket-columns__title">Toggle columns</p>
+                <div class="ticket-columns__options">
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="id" checked />
+                    <span>ID</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="subject" checked disabled />
+                    <span>Subject</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="status" checked />
+                    <span>Status</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="priority" checked />
+                    <span>Priority</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="company" checked />
+                    <span>Company</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="assigned" checked />
+                    <span>Assigned</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="updated" checked />
+                    <span>Updated</span>
+                  </label>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="management__toolbar-info">
@@ -262,20 +301,21 @@
                     />
                   </th>
                 {% endif %}
-                <th scope="col" data-sort="int" class="tickets-table__column tickets-table__column--id">ID</th>
+                <th scope="col" data-sort="int" data-column="id" class="tickets-table__column tickets-table__column--id">ID</th>
                 <th
                   scope="col"
                   data-sort="string"
+                  data-column="subject"
                   data-mobile-priority="essential"
                   class="tickets-table__column tickets-table__column--subject"
                 >
                   Subject
                 </th>
-                <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--status">Status</th>
-                <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--priority">Priority</th>
-                <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--company">Company</th>
-                <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--assigned">Assigned</th>
-                <th scope="col" data-sort="string" class="tickets-table__column tickets-table__column--updated">Updated</th>
+                <th scope="col" data-sort="string" data-column="status" class="tickets-table__column tickets-table__column--status">Status</th>
+                <th scope="col" data-sort="string" data-column="priority" class="tickets-table__column tickets-table__column--priority">Priority</th>
+                <th scope="col" data-sort="string" data-column="company" class="tickets-table__column tickets-table__column--company">Company</th>
+                <th scope="col" data-sort="string" data-column="assigned" class="tickets-table__column tickets-table__column--assigned">Assigned</th>
+                <th scope="col" data-sort="string" data-column="updated" class="tickets-table__column tickets-table__column--updated">Updated</th>
                 <th scope="col" class="table__actions tickets-table__column tickets-table__column--actions">Actions</th>
               </tr>
             </thead>
@@ -299,9 +339,10 @@
                         />
                       </td>
                     {% endif %}
-                    <td data-label="ID" class="tickets-table__cell tickets-table__cell--id">{{ ticket.id }}</td>
+                    <td data-label="ID" data-column="id" class="tickets-table__cell tickets-table__cell--id">{{ ticket.id }}</td>
                     <td
                       data-label="Subject"
+                      data-column="subject"
                       data-mobile-priority="essential"
                       class="tickets-table__cell tickets-table__cell--subject"
                     >
@@ -316,7 +357,7 @@
                       'resolved': 'badge--success',
                       'closed': 'badge--muted'
                     } %}
-                    <td data-label="Status" data-value="{{ ticket_status }}" class="tickets-table__cell tickets-table__cell--status">
+                    <td data-label="Status" data-column="status" data-value="{{ ticket_status }}" class="tickets-table__cell tickets-table__cell--status">
                       <div class="ticket-status">
                         <span class="visually-hidden" id="ticket-status-label-{{ ticket.id }}">Ticket status</span>
                         <form
@@ -347,10 +388,10 @@
                         </form>
                       </div>
                     </td>
-                    <td data-label="Priority" class="tickets-table__cell tickets-table__cell--priority">{{ ticket.priority or 'normal' }}</td>
-                    <td data-label="Company" class="tickets-table__cell tickets-table__cell--company">{{ company.name if company else (ticket.company_id or '—') }}</td>
-                    <td data-label="Assigned" class="tickets-table__cell tickets-table__cell--assigned">{{ assigned.email if assigned else '—' }}</td>
-                    <td data-label="Updated" class="tickets-table__cell tickets-table__cell--updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
+                    <td data-label="Priority" data-column="priority" class="tickets-table__cell tickets-table__cell--priority">{{ ticket.priority or 'normal' }}</td>
+                    <td data-label="Company" data-column="company" class="tickets-table__cell tickets-table__cell--company">{{ company.name if company else (ticket.company_id or '—') }}</td>
+                    <td data-label="Assigned" data-column="assigned" class="tickets-table__cell tickets-table__cell--assigned">{{ assigned.email if assigned else '—' }}</td>
+                    <td data-label="Updated" data-column="updated" class="tickets-table__cell tickets-table__cell--updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
                     <td class="table__actions tickets-table__cell tickets-table__cell--actions">
                       <a href="/admin/tickets/{{ ticket.id }}" class="button button--ghost">Open</a>
                     </td>
@@ -839,6 +880,7 @@
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/ticket_views.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/ticket_columns.js') }}" defer></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
 {% endblock %}
 
