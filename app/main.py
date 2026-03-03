@@ -12048,6 +12048,8 @@ async def _render_tickets_dashboard(
         definition.tech_status: definition.public_status for definition in dashboard.status_definitions
     }
     labour_types = await labour_types_service.list_labour_types()
+    ticket_ids = [int(t.get("id")) for t in dashboard.tickets if t.get("id") is not None]
+    ticket_time_lookup = await tickets_repo.get_time_totals_by_ticket_ids(ticket_ids)
     extra = {
         "title": "Ticketing workspace",
         "tickets": dashboard.tickets,
@@ -12063,6 +12065,7 @@ async def _render_tickets_dashboard(
         "ticket_company_lookup": dashboard.company_lookup,
         "ticket_user_lookup": dashboard.user_lookup,
         "ticket_labour_types": labour_types,
+        "ticket_time_lookup": ticket_time_lookup,
         "can_bulk_delete_tickets": bool(user.get("is_super_admin")),
         "success_message": success_message,
         "error_message": error_message,

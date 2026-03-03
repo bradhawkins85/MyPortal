@@ -80,7 +80,7 @@
       }
     });
 
-    const defaultColumns = toggles.map((input) => input.dataset.column).filter(Boolean);
+    const defaultColumns = toggles.filter((input) => input.checked).map((input) => input.dataset.column).filter(Boolean);
     let visibleColumns = loadVisibleColumns(defaultColumns);
     if (!visibleColumns.includes('subject')) {
       visibleColumns.push('subject');
