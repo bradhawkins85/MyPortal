@@ -498,3 +498,84 @@ def test_event_types_endpoint_merges_sources(monkeypatch, active_session):
     assert "webhook.failed" not in data
     assert "webhook.retried" not in data
     assert len(data) == len(set(data))
+
+
+def test_delete_notification_denies_other_users(monkeypatch, active_session):
+    calls = {"deleted": False}
+
+    async def fake_get_notification(notification_id):
+        return _make_notification_record(id=notification_id, user_id=999)
+
+    async def fake_delete_notification(notification_id):
+        calls["deleted"] = True
+
+    monkeypatch.setattr(notifications_repo, "get_notification", fake_get_notification)
+    monkeypatch.setattr(notifications_repo, "delete_notification", fake_delete_notification)
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {"id": active_session.user_id, "email": "user@example.com"}
+    try:
+        with TestClient(app) as client:
+            response = client.delete("/api/notifications/77", headers={"X-CSRF-Token": active_session.csrf_token})
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 403
+    assert calls["deleted"] is False
+
+
+def test_delete_notification_returns_no_content(monkeypatch, active_session):
+    calls = {"deleted": None}
+
+    async def fake_get_notification(notification_id):
+        return _make_notification_record(id=notification_id, user_id=active_session.user_id)
+
+    async def fake_delete_notification(notification_id):
+        calls["deleted"] = notification_id
+
+    monkeypatch.setattr(notifications_repo, "get_notification", fake_get_notification)
+    monkeypatch.setattr(notifications_repo, "delete_notification", fake_delete_notification)
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {"id": active_session.user_id, "email": "user@example.com"}
+    try:
+        with TestClient(app) as client:
+            response = client.delete("/api/notifications/77", headers={"X-CSRF-Token": active_session.csrf_token})
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 204
+    assert calls["deleted"] == 77
+
+
+def test_delete_notification_returns_404_when_not_found(monkeypatch, active_session):
+    async def fake_get_notification(notification_id):
+        return None
+
+    monkeypatch.setattr(notifications_repo, "get_notification", fake_get_notification)
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {"id": active_session.user_id, "email": "user@example.com"}
+    try:
+        with TestClient(app) as client:
+            response = client.delete("/api/notifications/999", headers={"X-CSRF-Token": active_session.csrf_token})
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 404
+
+
+def test_delete_notification_allows_broadcast_notification(monkeypatch, active_session):
+    calls = {"deleted": None}
+
+    async def fake_get_notification(notification_id):
+        return _make_notification_record(id=notification_id, user_id=None)
+
+    async def fake_delete_notification(notification_id):
+        calls["deleted"] = notification_id
+
+    monkeypatch.setattr(notifications_repo, "get_notification", fake_get_notification)
+    monkeypatch.setattr(notifications_repo, "delete_notification", fake_delete_notification)
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {"id": active_session.user_id, "email": "user@example.com"}
+    try:
+        with TestClient(app) as client:
+            response = client.delete("/api/notifications/55", headers={"X-CSRF-Token": active_session.csrf_token})
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 204
+    assert calls["deleted"] == 55

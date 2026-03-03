@@ -280,6 +280,25 @@ async def mark_notification_read(
     return updated
 
 
+@router.delete(
+    "/{notification_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a notification",
+    response_description="The notification has been permanently deleted.",
+)
+async def delete_notification(
+    notification_id: int,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    record = await notifications_repo.get_notification(notification_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
+    if record.get("user_id") not in (None, current_user.get("id")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted to delete this notification")
+    await notifications_repo.delete_notification(notification_id)
+
+
 @router.post(
     "/acknowledge",
     response_model=list[NotificationResponse],

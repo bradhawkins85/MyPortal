@@ -261,6 +261,13 @@ async def count_notifications(
         return 0
 
 
+async def delete_notification(notification_id: int) -> None:
+    await db.execute(
+        "DELETE FROM notifications WHERE id = %s",
+        (notification_id,),
+    )
+
+
 async def list_event_types(*, user_id: int | None = None) -> list[str]:
     clauses = ["1=1"]
     params: list[Any] = []

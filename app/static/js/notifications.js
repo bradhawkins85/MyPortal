@@ -19,6 +19,8 @@
     selection: '[data-notification-select]',
     markButtons: '[data-notification-mark]',
     markSelected: '[data-notification-mark-selected]',
+    deleteButtons: '[data-notification-delete]',
+    deleteSelected: '[data-notification-delete-selected]',
     filtersForm: '#notification-filters',
     resetButton: '[data-notification-reset]',
     pageField: '[data-notification-page-field]',
@@ -263,14 +265,41 @@
     return response.json();
   }
 
+
+  async function deleteNotification(notificationId) {
+    const response = await fetch(`/api/notifications/${notificationId}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: { 'X-CSRF-Token': getCsrfToken() },
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.detail || 'Failed to delete notification');
+    }
+  }
+
+  function removeNotificationRow(notificationId) {
+    const row = document.querySelector(`[data-notification-row="${notificationId}"]`);
+    if (row) {
+      const wasUnread = row.getAttribute('data-unread') === '1';
+      row.remove();
+      return wasUnread;
+    }
+    return false;
+  }
+
   function updateSelectionState() {
     const selectAll = document.querySelector(notificationSelectors.selectAll);
     const checkboxes = Array.from(document.querySelectorAll(notificationSelectors.selection));
     const markSelected = document.querySelector(notificationSelectors.markSelected);
+    const deleteSelected = document.querySelector(notificationSelectors.deleteSelected);
 
     const selected = checkboxes.filter((checkbox) => checkbox.checked && !checkbox.disabled);
     if (markSelected) {
       markSelected.disabled = selected.length === 0;
+    }
+    if (deleteSelected) {
+      deleteSelected.disabled = selected.length === 0;
     }
 
     if (!selectAll) {
@@ -389,6 +418,58 @@
     });
   }
 
+  function bindDeleteActions() {
+    document.querySelectorAll(notificationSelectors.deleteButtons).forEach((button) => {
+      button.addEventListener('click', async () => {
+        const notificationId = button.getAttribute('data-notification-delete');
+        if (!notificationId) return;
+        if (!window.confirm('Are you sure you want to delete this notification?')) return;
+        button.disabled = true;
+        const originalText = button.textContent;
+        button.textContent = 'Deleting…';
+        try {
+          await deleteNotification(notificationId);
+          removeNotificationRow(notificationId);
+          try {
+            await refreshNotificationSummary();
+          } catch (e) {
+            console.warn(e);
+          }
+          updateSelectionState();
+        } catch (error) {
+          button.disabled = false;
+          button.textContent = originalText;
+          window.alert(error.message || 'Unable to delete notification');
+        }
+      });
+    });
+  }
+
+  function bindBulkDeleteActions() {
+    const actionButton = document.querySelector(notificationSelectors.deleteSelected);
+    if (!actionButton) return;
+    actionButton.addEventListener('click', async () => {
+      const selected = Array.from(document.querySelectorAll(notificationSelectors.selection))
+        .filter((cb) => cb.checked && !cb.disabled).map((cb) => Number(cb.value)).filter((v) => !Number.isNaN(v));
+      if (!selected.length) { actionButton.disabled = true; return; }
+      if (!window.confirm(`Are you sure you want to delete ${selected.length} notification(s)?`)) return;
+      actionButton.disabled = true;
+      const originalText = actionButton.textContent;
+      actionButton.textContent = 'Deleting…';
+      try {
+        await Promise.all(selected.map((id) => deleteNotification(id)));
+        selected.forEach((id) => removeNotificationRow(id));
+        try {
+          await refreshNotificationSummary();
+        } catch (e) {
+          console.warn(e);
+        }
+      } catch (error) { window.alert(error.message || 'Unable to delete notifications'); }
+      actionButton.textContent = originalText;
+      updateSelectionState();
+    });
+  }
+
   function bindFilters() {
     const form = document.querySelector(notificationSelectors.filtersForm);
     if (!form) {
@@ -442,6 +523,8 @@
     bindSelectionControls();
     bindInlineActions();
     bindBulkActions();
+    bindDeleteActions();
+    bindBulkDeleteActions();
     updateSelectionState();
 
     const visibleCounter = document.querySelector(notificationSelectors.unreadVisible);

@@ -21,6 +21,7 @@
         <span class="tag tag--info" data-unread-visible data-label="Unread in view">Unread in view: {{ filtered_unread_count }}</span>
         <span class="tag tag--muted" data-unread-total data-label="Unread overall">Unread overall: {{ notification_unread_count }}</span>
         <button type="button" class="button button--ghost" data-notification-mark-selected disabled>Mark selected as read</button>
+        <button type="button" class="button button--ghost button--danger" data-notification-delete-selected disabled>Delete selected</button>
       </div>
     </header>
 
@@ -176,6 +177,13 @@
                   {% if not notification.is_unread %}disabled{% endif %}
                 >
                   {% if notification.is_unread %}Mark as read{% else %}Read{% endif %}
+                </button>
+                <button
+                  type="button"
+                  class="button button--ghost button--small button--danger"
+                  data-notification-delete="{{ notification.id }}"
+                >
+                  Delete
                 </button>
               </div>
             </td>
