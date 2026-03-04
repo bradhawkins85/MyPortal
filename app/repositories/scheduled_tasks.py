@@ -3,7 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Iterable, Sequence
 
+import aiomysql
+import aiosqlite
+
 from app.core.database import db
+from app.core.logging import log_warning
 
 
 def _make_aware(dt: Any) -> datetime | None:
@@ -161,20 +165,27 @@ async def record_task_run(
     duration_ms: int | None,
     details: str | None = None,
 ) -> None:
-    await db.execute(
-        """
-        INSERT INTO scheduled_task_runs (task_id, status, started_at, finished_at, duration_ms, details)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        """,
-        (
-            task_id,
-            status,
-            started_at.replace(tzinfo=None),
-            finished_at.replace(tzinfo=None) if finished_at else None,
-            duration_ms,
-            details,
-        ),
-    )
+    try:
+        await db.execute(
+            """
+            INSERT INTO scheduled_task_runs (task_id, status, started_at, finished_at, duration_ms, details)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                task_id,
+                status,
+                started_at.replace(tzinfo=None),
+                finished_at.replace(tzinfo=None) if finished_at else None,
+                duration_ms,
+                details,
+            ),
+        )
+    except (aiomysql.IntegrityError, aiosqlite.IntegrityError):
+        log_warning(
+            "Could not record run for task: task no longer exists",
+            task_id=task_id,
+        )
+        return
     await db.execute(
         """
         UPDATE scheduled_tasks
