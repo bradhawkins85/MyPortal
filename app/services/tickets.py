@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, Sequence
 
+from app.core.config import get_settings
 from app.core.database import db
 from app.core.logging import log_error
 from app.repositories import tickets as tickets_repo
@@ -19,6 +20,8 @@ from app.repositories.tickets import TicketRecord
 from app.services import automations as automations_service
 from app.repositories import users as user_repo
 from app.services import modules as modules_service
+from app.services import email as email_service
+from app.services import notifications as notifications_service
 from app.services.tagging import filter_helpful_slugs, get_all_excluded_tags, is_helpful_slug, slugify_tag
 from app.services.sanitization import sanitize_rich_text
 from app.services.realtime import RefreshNotifier, refresh_notifier
@@ -934,6 +937,91 @@ async def refresh_ticket_ai_tags(ticket_id: int) -> None:
         await emit_ticket_updated_event(ticket_id, actor_type="system")
 
 
+async def _send_ticket_creation_email(
+    enriched_ticket: Mapping[str, Any],
+    *,
+    requester_email_fallback: str | None = None,
+) -> None:
+    """Send a confirmation email to the ticket requester.
+
+    Uses the notification service when the requester has a user account so that
+    their in-app and email preferences are respected.  Falls back to a direct
+    email send when only an email address is available (e.g. IMAP tickets whose
+    sender is not a registered user).
+    """
+    requester_id: int | None = enriched_ticket.get("requester_id")  # type: ignore[assignment]
+    requester_email: str | None = enriched_ticket.get("requester_email") or requester_email_fallback  # type: ignore[assignment]
+
+    if not requester_email and not requester_id:
+        return
+
+    ticket_number = str(enriched_ticket.get("ticket_number") or enriched_ticket.get("id") or "")
+    subject_text = str(enriched_ticket.get("subject") or "")
+
+    if requester_id is not None:
+        # Use the notification service so user preferences are respected and an
+        # in-app notification is also recorded.
+        try:
+            await notifications_service.emit_notification(
+                event_type="tickets.created",
+                user_id=requester_id,
+                metadata={"ticket": dict(enriched_ticket)},
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to emit ticket creation notification",
+                ticket_id=enriched_ticket.get("id"),
+                requester_id=requester_id,
+                error=str(exc),
+            )
+        return
+
+    # No user account – send a direct email to the known email address.
+    if not requester_email:
+        return
+
+    settings = get_settings()
+    app_name = settings.app_name or "Support"
+    email_subject = f"Ticket #{ticket_number} created: {subject_text}" if ticket_number else f"Ticket created: {subject_text}"
+
+    portal_url = str(settings.portal_url).rstrip("/") if settings.portal_url else None
+    ticket_id_val = enriched_ticket.get("id")
+    ticket_link = f"{portal_url}/tickets/{ticket_id_val}" if portal_url and ticket_id_val else None
+
+    html_parts = [
+        "<p>Your support ticket has been created. A member of our team will be in touch shortly.</p>",
+        f"<p><strong>Ticket number:</strong> #{html.escape(ticket_number)}</p>" if ticket_number else "",
+        f"<p><strong>Subject:</strong> {html.escape(subject_text)}</p>" if subject_text else "",
+        f'<p><a href="{ticket_link}">View your ticket</a></p>' if ticket_link else "",
+        f"<p>{html.escape(app_name)}</p>",
+    ]
+    html_body = "\n".join(p for p in html_parts if p)
+
+    text_parts = [
+        "Your support ticket has been created. A member of our team will be in touch shortly.",
+        f"Ticket number: #{ticket_number}" if ticket_number else "",
+        f"Subject: {subject_text}" if subject_text else "",
+        ticket_link or "",
+        app_name,
+    ]
+    text_body = "\n".join(p for p in text_parts if p)
+
+    try:
+        await email_service.send_email(
+            subject=email_subject,
+            recipients=[requester_email],
+            html_body=html_body,
+            text_body=text_body,
+        )
+    except email_service.EmailDispatchError as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to send ticket creation email",
+            ticket_id=enriched_ticket.get("id"),
+            requester_email=requester_email,
+            error=str(exc),
+        )
+
+
 async def create_ticket(
     *,
     subject: str,
@@ -950,6 +1038,7 @@ async def create_ticket(
     trigger_automations: bool = True,
     initial_reply_author_id: int | None = None,
     id: int | None = None,
+    requester_email: str | None = None,
 ) -> TicketRecord:
     """Create a ticket and emit the corresponding automation event."""
 
@@ -1008,6 +1097,18 @@ async def create_ticket(
             )
 
     enriched_ticket = await _enrich_ticket_context(ticket)
+
+    try:
+        await _send_ticket_creation_email(
+            enriched_ticket,
+            requester_email_fallback=requester_email,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to send ticket creation email",
+            ticket_id=ticket.get("id"),
+            error=str(exc),
+        )
 
     if trigger_automations:
         try:
