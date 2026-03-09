@@ -1610,6 +1610,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         category="email",
                         module_slug="imap",
                         external_reference=message_id,
+                        requester_email=from_email_addr if requester_id is None else None,
                     )
                     is_new_ticket = True
                     ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
