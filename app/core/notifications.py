@@ -68,6 +68,19 @@ DEFAULT_NOTIFICATION_EVENTS: dict[str, dict[str, object]] = {
         "is_user_visible": True,
         "module_actions": [],
     },
+    "tickets.created": {
+        "display_name": "Ticket created",
+        "description": "Sent to the requester when a new support ticket is opened.",
+        "message_template": "Your ticket #{{ ticket.ticket_number }} has been created: {{ ticket.subject }}",
+        "allow_channel_in_app": True,
+        "allow_channel_email": True,
+        "allow_channel_sms": False,
+        "default_channel_in_app": True,
+        "default_channel_email": True,
+        "default_channel_sms": False,
+        "is_user_visible": True,
+        "module_actions": [],
+    },
 }
 
 DEFAULT_NOTIFICATION_EVENT_TYPES: list[str] = list(DEFAULT_NOTIFICATION_EVENTS.keys())
