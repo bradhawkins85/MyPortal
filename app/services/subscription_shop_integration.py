@@ -9,6 +9,7 @@ from loguru import logger
 
 from app.repositories import shop as shop_repo
 from app.repositories import subscriptions as subscriptions_repo
+from app.services import shop as shop_service
 from app.services import subscription_pricing
 
 
@@ -71,7 +72,7 @@ async def create_subscriptions_from_order(
         # In a full implementation, we'd check cart_repo for coterm settings
         
         quantity = int(item.get("quantity", 1))
-        unit_price = Decimal(str(item.get("price", 0)))
+        unit_price = shop_service.get_product_price(product)
         
         # Determine term length based on commitment type
         commitment_type = product.get("commitment_type")
