@@ -91,3 +91,4 @@ class UptimeKumaAlertIngestResponse(BaseModel):
     status: str
     alert_id: int
     service_status_updated: bool = False
+    service_status_updated: bool = False

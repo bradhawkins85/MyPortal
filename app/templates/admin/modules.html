@@ -204,7 +204,7 @@
                   />
                   <p class="form-help">Tokens are stored securely. Leave blank to keep the existing value.</p>
                 </div>
-                            {% elif module.slug == 'uptimekuma' %}
+                                          {% elif module.slug == 'uptimekuma' %}
                 <div class="form-field">
                   <label class="form-label" for="uptimekuma-webhook">Webhook URL</label>
                   <input id="uptimekuma-webhook" class="form-input" value="{{ request.url_for('uptimekuma_receive_alert') }}" readonly />
