@@ -377,6 +377,8 @@
                 {% for ticket in tickets %}
                   {% set company = company_lookup.get(ticket.company_id) %}
                   {% set assigned = user_lookup.get(ticket.assigned_user_id) %}
+                  {% set assigned_name = ([assigned.first_name, assigned.last_name] | select | join(' ')) | trim if assigned else '' %}
+                  {% set assigned_label = assigned_name or (assigned.email if assigned else '—') %}
                   <tr>
                     {% if can_bulk_delete_tickets %}
                       <td data-label="Select" class="table__select tickets-table__cell tickets-table__cell--select">
@@ -441,11 +443,13 @@
                     </td>
                     <td data-label="Priority" data-column="priority" class="tickets-table__cell tickets-table__cell--priority">{{ ticket.priority or 'normal' }}</td>
                     <td data-label="Company" data-column="company" class="tickets-table__cell tickets-table__cell--company">{{ company.name if company else (ticket.company_id or '—') }}</td>
-                    <td data-label="Assigned" data-column="assigned" class="tickets-table__cell tickets-table__cell--assigned">{{ assigned.email if assigned else '—' }}</td>
+                    <td data-label="Assigned" data-column="assigned" class="tickets-table__cell tickets-table__cell--assigned">{{ assigned_label }}</td>
                     <td data-label="Updated" data-column="updated" class="tickets-table__cell tickets-table__cell--updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
                     <td data-label="Category" data-column="category" class="tickets-table__cell tickets-table__cell--category">{{ ticket.category or '—' }}</td>
                     {% set requester = user_lookup.get(ticket.requester_id) %}
-                    <td data-label="Requester" data-column="requester" class="tickets-table__cell tickets-table__cell--requester">{{ requester.email if requester else '—' }}</td>
+                    {% set requester_name = ([requester.first_name, requester.last_name] | select | join(' ')) | trim if requester else '' %}
+                    {% set requester_label = requester_name or (requester.email if requester else '—') %}
+                    <td data-label="Requester" data-column="requester" class="tickets-table__cell tickets-table__cell--requester">{{ requester_label }}</td>
                     <td data-label="Module" data-column="module" class="tickets-table__cell tickets-table__cell--module">{{ ticket.module_slug or '—' }}</td>
                     <td data-label="External Ref" data-column="external-ref" class="tickets-table__cell tickets-table__cell--external-ref">{{ ticket.external_reference or '—' }}</td>
                     <td data-label="Created" data-column="created" class="tickets-table__cell tickets-table__cell--created">{{ ticket.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.created_at else '—' }}</td>
@@ -947,4 +951,3 @@
   <script src="{{ static_url('/static/js/ticket_columns.js') }}" defer></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
 {% endblock %}
-
