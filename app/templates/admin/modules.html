@@ -204,7 +204,7 @@
                   />
                   <p class="form-help">Tokens are stored securely. Leave blank to keep the existing value.</p>
                 </div>
-              {% elif module.slug == 'uptimekuma' %}
+                                          {% elif module.slug == 'uptimekuma' %}
                 <div class="form-field">
                   <label class="form-label" for="uptimekuma-webhook">Webhook URL</label>
                   <input id="uptimekuma-webhook" class="form-input" value="{{ request.url_for('uptimekuma_receive_alert') }}" readonly />
@@ -214,6 +214,13 @@
                   <label class="form-label" for="uptimekuma-secret">Shared secret</label>
                   <input id="uptimekuma-secret" name="settings.shared_secret" class="form-input" type="password" autocomplete="off" placeholder="Enter a new shared secret" />
                   <p class="form-help">Secrets are stored as SHA-256 hashes. Provide the same value as a <code>Bearer</code> token or <code>?token=</code> query in Uptime Kuma.</p>
+                </div>
+                <div class="form-field form-field--checkbox">
+                  <label class="toggle">
+                    <input type="checkbox" name="settings.sync_service_status" value="true" {% if settings.sync_service_status != false %}checked{% endif %} />
+                    <span>Sync service page status from alerts</span>
+                  </label>
+                  <p class="form-help">When enabled, incoming alerts automatically update the matching service on the Services page. The monitor name in Uptime Kuma must match the service name exactly (case-insensitive).</p>
                 </div>
               {% elif module.slug == 'chatgpt-mcp' %}
                 <div class="form-field">

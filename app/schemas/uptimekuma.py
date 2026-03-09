@@ -40,7 +40,8 @@ class UptimeKumaAlertPayload(BaseModel):
     importance: bool | None = Field(default=None, validation_alias=AliasChoices("important"))
     alert_type: str | None = Field(default=None, validation_alias=AliasChoices("type", "alertType"))
     reason: str | None = Field(default=None, validation_alias=AliasChoices("reason", "downtimeReason"))
-    message: str | None = Field(default=None, validation_alias=AliasChoices("msg", "message"))
+    title: str | None = Field(default=None, validation_alias=AliasChoices("title"))
+    message: str | None = Field(default=None, validation_alias=AliasChoices("msg", "message", "body"))
     duration: float | int | None = Field(default=None, validation_alias=AliasChoices("duration"))
     ping: float | int | None = Field(default=None, validation_alias=AliasChoices("ping", "avgPing", "monitorPing"))
     time: datetime | float | int | str | None = Field(default=None, validation_alias=AliasChoices("time", "timestamp"))
@@ -89,3 +90,5 @@ class UptimeKumaAlertResponse(BaseModel):
 class UptimeKumaAlertIngestResponse(BaseModel):
     status: str
     alert_id: int
+    service_status_updated: bool = False
+    service_status_updated: bool = False

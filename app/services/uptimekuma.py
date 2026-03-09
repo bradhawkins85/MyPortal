@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from loguru import logger
 
+from app.repositories import service_status as service_status_repo
 from app.repositories import uptimekuma_alerts as alerts_repo
 from app.schemas.uptimekuma import UptimeKumaAlertPayload
 from app.services import modules as modules_service
@@ -18,6 +20,29 @@ class ModuleDisabledError(RuntimeError):
 
 class AuthenticationError(RuntimeError):
     """Raised when the provided webhook token is invalid."""
+
+
+# Maps Uptime Kuma alert statuses and Apprise notification types to
+# service_status_services status values.
+_ALERT_STATUS_TO_SERVICE_STATUS: dict[str, str] = {
+    # Standard Uptime Kuma webhook statuses
+    "up": "operational",
+    "down": "outage",
+    "pending": "degraded",
+    "maintenance": "maintenance",
+    # Apprise notification types
+    "success": "operational",
+    "failure": "outage",
+    "warning": "degraded",
+    "info": "maintenance",
+}
+
+# Pattern to strip status prefix from Uptime Kuma Apprise titles such as
+# "[UP] My Service" or "[DOWN] My Service".
+_TITLE_PREFIX_RE = re.compile(
+    r"^\s*\[(?:UP|DOWN|PENDING|MAINTENANCE)[^\]]*\]\s*",
+    re.IGNORECASE,
+)
 
 
 def _hash_secret(secret: str) -> str:
@@ -109,6 +134,45 @@ def _normalise_status(value: str) -> str:
     return (value or "unknown").strip().lower()
 
 
+def _extract_monitor_name_from_title(title: str) -> str | None:
+    """Extract the monitor name from an Uptime Kuma Apprise notification title.
+
+    Uptime Kuma formats Apprise titles as ``[UP] Monitor Name`` or
+    ``[DOWN] Monitor Name``.  This function strips any leading status
+    prefix so only the bare name is returned.
+    """
+    stripped = _TITLE_PREFIX_RE.sub("", title).strip()
+    return stripped or None
+
+
+def _resolve_monitor_name(payload: UptimeKumaAlertPayload) -> str | None:
+    """Return the best available monitor name from a payload.
+
+    Prefers the explicit ``monitor_name`` field.  Falls back to extracting
+    the name from the Apprise ``title`` field when the former is absent.
+    """
+    if payload.monitor_name:
+        return payload.monitor_name.strip() or None
+    if payload.title:
+        return _extract_monitor_name_from_title(payload.title)
+    return None
+
+
+def _map_alert_status_to_service_status(alert_status: str, alert_type: str | None) -> str | None:
+    """Map an Uptime Kuma alert status (or Apprise type) to a service status value.
+
+    Returns ``None`` when no mapping can be determined.
+    """
+    normalised = (alert_status or "").strip().lower()
+    service_status = _ALERT_STATUS_TO_SERVICE_STATUS.get(normalised)
+    if service_status:
+        return service_status
+    if alert_type:
+        normalised_type = alert_type.strip().lower()
+        return _ALERT_STATUS_TO_SERVICE_STATUS.get(normalised_type)
+    return None
+
+
 async def _load_module_configuration() -> dict[str, Any]:
     module = await modules_service.get_module("uptimekuma", redact=False)
     if not module:
@@ -120,6 +184,50 @@ async def _load_module_configuration() -> dict[str, Any]:
     if not isinstance(settings, Mapping):
         settings = {}
     return dict(settings)
+
+
+async def _sync_service_status_from_alert(
+    monitor_name: str,
+    alert_status: str,
+    alert_type: str | None,
+    alert_message: str | None,
+) -> bool:
+    """Find a matching service by name and update its status.
+
+    Returns ``True`` when a service was found and its status updated,
+    ``False`` otherwise.
+    """
+    service_status = _map_alert_status_to_service_status(alert_status, alert_type)
+    if not service_status:
+        logger.debug(
+            "No service status mapping for alert status",
+            alert_status=alert_status,
+            alert_type=alert_type,
+        )
+        return False
+
+    service = await service_status_repo.find_service_by_name(monitor_name)
+    if not service:
+        logger.debug(
+            "No matching service found for Uptime Kuma monitor",
+            monitor_name=monitor_name,
+        )
+        return False
+
+    service_id = service.get("id")
+    updates: dict[str, Any] = {
+        "status": service_status,
+        "status_message": alert_message or None,
+    }
+    await service_status_repo.update_service(service_id, updates)
+    logger.info(
+        "Updated service status from Uptime Kuma alert",
+        service_id=service_id,
+        service_name=service.get("name"),
+        old_status=service.get("status"),
+        new_status=service_status,
+    )
+    return True
 
 
 async def ingest_alert(
@@ -139,10 +247,12 @@ async def ingest_alert(
     duration_seconds = _coerce_float(payload.duration)
     ping_ms = _coerce_float(payload.ping)
 
+    monitor_name = _resolve_monitor_name(payload)
+
     record = await alerts_repo.create_alert(
         event_uuid=_choose_event_identifier(payload),
         monitor_id=payload.monitor_id,
-        monitor_name=payload.monitor_name.strip() if payload.monitor_name else None,
+        monitor_name=monitor_name,
         monitor_url=payload.monitor_url.strip() if payload.monitor_url else None,
         monitor_type=payload.monitor_type.strip() if payload.monitor_type else None,
         monitor_hostname=payload.monitor_hostname.strip() if payload.monitor_hostname else None,
@@ -160,6 +270,24 @@ async def ingest_alert(
         user_agent=user_agent,
         payload=raw_payload,
     )
+
+    sync_enabled = _coerce_bool(settings.get("sync_service_status", True))
+    service_status_updated = False
+    if sync_enabled and monitor_name:
+        try:
+            service_status_updated = await _sync_service_status_from_alert(
+                monitor_name=monitor_name,
+                alert_status=payload.status,
+                alert_type=payload.alert_type,
+                alert_message=payload.message.strip() if payload.message else None,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to sync service status from Uptime Kuma alert",
+                monitor_name=monitor_name,
+            )
+
+    record["service_status_updated"] = service_status_updated
     return record
 
 
