@@ -372,6 +372,7 @@ def _default_uptimekuma_settings() -> dict[str, Any]:
     shared_secret_hash = _hash_secret(shared_secret) if shared_secret else ""
     return {
         "shared_secret_hash": shared_secret_hash,
+        "sync_service_status": True,
     }
 
 
@@ -815,6 +816,7 @@ def _coerce_settings(
                 merged["shared_secret_hash"] = _hash_secret(candidate_str)
         merged["shared_secret_hash"] = str(merged.get("shared_secret_hash", "")).strip()
         merged.pop("shared_secret", None)
+        merged["sync_service_status"] = _ensure_bool(merged.get("sync_service_status"), True)
     elif slug == "xero":
         overrides = payload or {}
 
