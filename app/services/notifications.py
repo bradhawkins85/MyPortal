@@ -122,12 +122,20 @@ async def emit_notification(
     context["message"] = final_message
 
     if should_record:
-        await notifications_repo.create_notification(
-            event_type=event_type,
-            message=final_message,
-            user_id=user_id,
-            metadata=metadata_payload,
-        )
+        try:
+            await notifications_repo.create_notification(
+                event_type=event_type,
+                message=final_message,
+                user_id=user_id,
+                metadata=metadata_payload,
+            )
+        except Exception as exc:  # pragma: no cover - defensive: don't block email delivery
+            logger.warning(
+                "Failed to store in-app notification; continuing with other delivery channels",
+                event_type=event_type,
+                user_id=user_id,
+                error=str(exc),
+            )
 
     user: dict[str, Any] | None = None
     if user_id is not None and (channels["channel_email"] or channels["channel_sms"]):
