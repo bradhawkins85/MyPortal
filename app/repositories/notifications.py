@@ -8,10 +8,17 @@ from typing import Any
 from app.core.database import db
 
 
+def _json_default(obj: Any) -> Any:
+    """Fallback JSON serialiser for types not handled by the standard encoder."""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 def _serialise_metadata(metadata: dict[str, Any] | None) -> str | None:
     if metadata is None:
         return None
-    return json.dumps(metadata)
+    return json.dumps(metadata, default=_json_default)
 
 
 def _deserialise_metadata(value: Any) -> dict[str, Any] | None:
