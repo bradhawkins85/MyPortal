@@ -39,12 +39,15 @@ async def test_handle_event_executes_matching_automations(monkeypatch):
     contexts: list[tuple[int, dict[str, object] | None]] = []
 
     async def fake_list_event_automations(trigger_event: str, *, limit: int | None = None):
-        assert trigger_event == "tickets.created"
         assert limit is None
-        return [
-            {"id": 1, "trigger_filters": {"match": {"ticket.status": "open"}}},
-            {"id": 2, "trigger_filters": {"match": {"ticket.status": "closed"}}},
-        ]
+        if trigger_event == "tickets.created":
+            return [
+                {"id": 1, "trigger_filters": {"match": {"ticket.status": "open"}}},
+                {"id": 2, "trigger_filters": {"match": {"ticket.status": "closed"}}},
+            ]
+        if trigger_event == "ticket.created":
+            return []
+        raise AssertionError(f"Unexpected trigger event: {trigger_event}")
 
     async def fake_execute(automation, *, context=None):
         contexts.append((int(automation["id"]), context))
@@ -92,6 +95,95 @@ async def test_handle_event_executes_matching_automations(monkeypatch):
     assert len(results) == 1
     assert results[0]["automation_id"] == 1
     assert results[0]["status"] == "queued"
+
+
+@pytest.mark.anyio
+async def test_handle_event_includes_legacy_alias_automations(monkeypatch):
+    contexts: list[tuple[int, dict[str, object] | None]] = []
+    requested_events: list[str] = []
+
+    async def fake_list_event_automations(trigger_event: str, *, limit: int | None = None):
+        assert limit is None
+        requested_events.append(trigger_event)
+        if trigger_event == "tickets.created":
+            return [{"id": 10, "trigger_filters": None}]
+        if trigger_event == "ticket.created":
+            return [{"id": 20, "trigger_filters": None}]
+        return []
+
+    async def fake_execute(automation, *, context=None):
+        contexts.append((int(automation["id"]), context))
+        now = datetime.now(timezone.utc)
+        return {
+            "status": "succeeded",
+            "result": None,
+            "error": None,
+            "started_at": now,
+            "finished_at": now,
+            "next_run_at": None,
+        }
+
+    scheduled_tasks: list[tuple[int, asyncio.Task[dict[str, object]]]] = []
+
+    def fake_schedule(coro, *, automation_id: int):
+        task = asyncio.create_task(coro)
+        scheduled_tasks.append((automation_id, task))
+        return task
+
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "list_event_automations",
+        fake_list_event_automations,
+    )
+    monkeypatch.setattr(automations_service, "_execute_automation", fake_execute)
+    monkeypatch.setattr(automations_service, "_schedule_background_execution", fake_schedule)
+
+    results = await automations_service.handle_event("tickets.created", {"ticket": {"id": 1}})
+
+    await asyncio.gather(*(task for _, task in scheduled_tasks))
+
+    assert requested_events == ["tickets.created", "ticket.created"]
+    assert contexts == [(10, {"ticket": {"id": 1}}), (20, {"ticket": {"id": 1}})]
+    assert [item["automation_id"] for item in results] == [10, 20]
+
+
+@pytest.mark.anyio
+async def test_handle_event_deduplicates_same_automation_from_aliases(monkeypatch):
+    async def fake_list_event_automations(trigger_event: str, *, limit: int | None = None):
+        if trigger_event in {"tickets.created", "ticket.created"}:
+            return [{"id": 42, "trigger_filters": None}]
+        return []
+
+    async def fake_execute(automation, *, context=None):
+        now = datetime.now(timezone.utc)
+        return {
+            "status": "succeeded",
+            "result": None,
+            "error": None,
+            "started_at": now,
+            "finished_at": now,
+            "next_run_at": None,
+        }
+
+    scheduled_ids: list[int] = []
+
+    def fake_schedule(coro, *, automation_id: int):
+        scheduled_ids.append(automation_id)
+        return asyncio.create_task(coro)
+
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "list_event_automations",
+        fake_list_event_automations,
+    )
+    monkeypatch.setattr(automations_service, "_execute_automation", fake_execute)
+    monkeypatch.setattr(automations_service, "_schedule_background_execution", fake_schedule)
+
+    results = await automations_service.handle_event("tickets.created", {"ticket": {"id": 1}})
+
+    assert scheduled_ids == [42]
+    assert len(results) == 1
+    assert results[0]["automation_id"] == 42
 
 
 @pytest.mark.anyio
