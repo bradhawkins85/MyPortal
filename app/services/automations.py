@@ -25,6 +25,14 @@ TRIGGER_EVENTS: list[dict[str, str]] = [
     {"value": "webhook.delivered", "label": "Webhook delivered"},
 ]
 
+_EVENT_ALIASES: dict[str, tuple[str, ...]] = {
+    # Backward compatibility for legacy singular ticket event names.
+    "tickets.created": ("ticket.created",),
+    "tickets.updated": ("ticket.updated",),
+    "tickets.closed": ("ticket.closed",),
+    "tickets.assigned": ("ticket.assigned",),
+}
+
 
 def list_trigger_events() -> list[dict[str, str]]:
     """Return the available automation trigger event options."""
@@ -449,12 +457,30 @@ async def handle_event(
 ) -> list[dict[str, Any]]:
     """Trigger event-based automations for the supplied event."""
 
-    event_key = str(event_name or "").strip()
+    event_key = str(event_name or "").strip().lower()
     if not event_key:
         return []
 
+    event_keys: list[str] = [event_key]
+    for alias in _EVENT_ALIASES.get(event_key, ()):
+        alias_key = str(alias or "").strip().lower()
+        if alias_key and alias_key not in event_keys:
+            event_keys.append(alias_key)
+
+    automations: list[Mapping[str, Any]] = []
+    seen_ids: set[int] = set()
     try:
-        automations = await automation_repo.list_event_automations(event_key)
+        for key in event_keys:
+            records = await automation_repo.list_event_automations(key)
+            for record in records:
+                try:
+                    automation_id = int(record.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                if automation_id in seen_ids:
+                    continue
+                seen_ids.add(automation_id)
+                automations.append(record)
     except RuntimeError as exc:
         logger.warning(
             "Failed to load event automations",
@@ -479,4 +505,3 @@ async def handle_event(
             "status": "queued",
         })
     return matched
-
