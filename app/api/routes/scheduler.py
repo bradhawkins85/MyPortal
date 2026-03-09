@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.database import require_database
@@ -153,6 +153,7 @@ async def run_task_now(
 @router.get("/tasks/{task_id}/runs", response_model=list[ScheduledTaskRunResponse])
 async def list_task_runs(
     task_id: int,
+    response: Response,
     limit: int = Query(default=20, ge=1, le=200),
     _: None = Depends(require_database),
     __: dict[str, Any] = Depends(require_super_admin),
@@ -160,6 +161,7 @@ async def list_task_runs(
     existing = await scheduled_tasks_repo.get_task(task_id)
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    response.headers["Cache-Control"] = "no-store"
     runs = await scheduled_tasks_repo.list_recent_runs(task_ids=[task_id], limit=limit)
     return [ScheduledTaskRunResponse.model_validate(run) for run in runs]
 
