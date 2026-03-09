@@ -136,6 +136,24 @@ async def update_service(
     return await get_service(service_id)
 
 
+async def find_service_by_name(name: str) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        """
+        SELECT id, name, description, status, status_message, display_order, is_active,
+               tags, created_at, updated_at, updated_by
+        FROM service_status_services
+        WHERE LOWER(name) = LOWER(%s) AND is_active = 1
+        LIMIT 1
+        """,
+        (name,),
+    )
+    if not row:
+        return None
+    service_id = row.get("id")
+    assignments = await _load_company_assignments([int(service_id)] if service_id else [])
+    return _normalise_service(row, assignments)
+
+
 async def delete_service(service_id: int) -> None:
     await db.execute("DELETE FROM service_status_services WHERE id = %s", (service_id,))
 

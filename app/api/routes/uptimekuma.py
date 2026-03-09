@@ -49,7 +49,11 @@ async def receive_alert(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    return UptimeKumaAlertIngestResponse(status="accepted", alert_id=record["id"])
+    return UptimeKumaAlertIngestResponse(
+        status="accepted",
+        alert_id=record["id"],
+        service_status_updated=bool(record.get("service_status_updated", False)),
+    )
 
 
 @router.get("/alerts", response_model=list[UptimeKumaAlertResponse])
