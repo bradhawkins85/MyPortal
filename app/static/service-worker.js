@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'myportal-static-v2';
+const CACHE_VERSION = 'myportal-static-v3';
 const STATIC_CACHE = CACHE_VERSION;
 const PRECACHE_URLS = [
   '/static/css/app.css',
@@ -71,6 +71,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Only cache static assets. API endpoints and other dynamic responses must
+  // always be fetched from the network so that fresh data is returned, even
+  // when the fetch caller uses cache: 'no-store'. The service worker cache is
+  // separate from the browser HTTP cache and would otherwise override it.
+  if (!url.pathname.startsWith('/static/')) {
+    return;
+  }
+
   if (PRECACHE_URLS.includes(url.pathname)) {
     event.respondWith(
       caches.match(request).then((cachedResponse) =>
@@ -133,4 +141,3 @@ async function handleNavigationRequest(request) {
     return OFFLINE_RESPONSE.clone();
   }
 }
-
