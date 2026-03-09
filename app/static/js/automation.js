@@ -1018,7 +1018,7 @@
     setLogsPlaceholder('Loading recent runs…');
     openModal(logsModal);
     try {
-      const runs = await requestJson(`/scheduler/tasks/${task.id}/runs?limit=50`);
+      const runs = await requestJson(`/scheduler/tasks/${task.id}/runs?limit=50`, { cache: 'no-store' });
       renderTaskLogs(Array.isArray(runs) ? runs : []);
     } catch (error) {
       setLogsPlaceholder(`Unable to load task runs: ${error.message}`);
