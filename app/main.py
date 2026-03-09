@@ -5112,10 +5112,7 @@ async def add_to_cart(request: Request) -> RedirectResponse:
         )
 
     is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
-    price_source = product.get("price")
-    if is_vip and product.get("vip_price") is not None:
-        price_source = product.get("vip_price")
-    unit_price = Decimal(str(price_source or 0))
+    unit_price = shop_service.get_product_price(product, is_vip=is_vip)
     new_quantity = existing_quantity + requested_quantity
 
     if selected_upgrade_source is not None:
@@ -5254,10 +5251,7 @@ async def add_package_to_cart(request: Request) -> RedirectResponse:
                 status_code=status.HTTP_303_SEE_OTHER,
             )
 
-        price_source = product.get("price")
-        if is_vip and product.get("vip_price") is not None:
-            price_source = product.get("vip_price")
-        unit_price = Decimal(str(price_source or 0))
+        unit_price = shop_service.get_product_price(product, is_vip=is_vip)
         new_quantity = existing_quantity + required_quantity
         cart_updates.append(
             (
@@ -5351,11 +5345,10 @@ async def view_cart(
             }
 
     def _resolve_product_price(product: Mapping[str, Any]) -> Decimal:
-        price_source = product.get("price")
-        if is_vip and product.get("vip_price") is not None:
-            price_source = product.get("vip_price")
         try:
-            value = Decimal(str(price_source or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            value = shop_service.get_product_price(product, is_vip=is_vip).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
         except (InvalidOperation, TypeError, ValueError):
             value = Decimal("0.00")
         return value
@@ -5535,11 +5528,8 @@ async def view_cart(
                     stock_level = 0
                 if stock_level <= 0:
                     return
-                price_source = product.get("price")
-                if is_vip and product.get("vip_price") is not None:
-                    price_source = product.get("vip_price")
                 try:
-                    price_value = Decimal(str(price_source or 0)).quantize(
+                    price_value = shop_service.get_product_price(product, is_vip=is_vip).quantize(
                         Decimal("0.01"),
                         rounding=ROUND_HALF_UP,
                     )
