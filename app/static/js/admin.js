@@ -628,8 +628,8 @@
       return;
     }
 
-    const submitButton = form.querySelector('[data-bulk-delete-submit]');
-    const countLabel = form.querySelector('[data-bulk-delete-count]');
+    const submitButton = document.querySelector('[data-bulk-delete-submit]');
+    const countLabel = document.querySelector('[data-bulk-delete-count]');
     const selectAll = table.querySelector('[data-bulk-select-all]');
     const filterInputs = document.querySelectorAll('[data-table-filter="tickets-table"]');
 

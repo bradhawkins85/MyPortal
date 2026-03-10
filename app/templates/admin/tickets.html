@@ -6,7 +6,7 @@
   {% set show_ticket_status_editor = is_super_admin %}
   {% set show_labour_type_editor = is_super_admin %}
   {% set show_tag_exclusions = is_super_admin %}
-  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor or show_tag_exclusions %}
+  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor or show_tag_exclusions or can_bulk_delete_tickets %}
   <div class="header-title-menu">
     <span class="header-title-menu__label">Ticketing workspace</span>
     {% if show_ticket_tools %}
@@ -60,6 +60,21 @@
           {% if show_tag_exclusions %}
             <li class="header-title-menu__item" role="none">
               <a href="/admin/tag-exclusions" class="header-title-menu__link" role="menuitem">AI tag exclusions</a>
+            </li>
+          {% endif %}
+          {% if can_bulk_delete_tickets %}
+            <li class="header-title-menu__item" role="none">
+              <button
+                type="submit"
+                form="tickets-bulk-delete-form"
+                class="header-title-menu__link header-title-menu__link--danger"
+                role="menuitem"
+                data-bulk-delete-submit
+                disabled
+              >
+                Delete selected
+                <span data-bulk-delete-count hidden>(0)</span>
+              </button>
             </li>
           {% endif %}
         </ul>
@@ -210,8 +225,8 @@
                 id="tickets-bulk-delete-form"
                 action="/admin/tickets/bulk-delete"
                 method="post"
-                class="management__bulk-delete"
                 data-bulk-delete-form
+                hidden
               >
                 {% if csrf_token %}
                   <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
@@ -221,10 +236,6 @@
                   name="returnUrl"
                   value="{{ request.url.path }}{% if current_query %}?{{ current_query }}{% endif %}"
                 />
-                <button type="submit" class="button button--danger" data-bulk-delete-submit disabled>
-                  Delete selected
-                </button>
-                <span class="text-muted" data-bulk-delete-count hidden>0 selected</span>
               </form>
             {% endif %}
             <div class="ticket-columns" data-ticket-columns>
