@@ -213,6 +213,35 @@ def test_get_alert_not_found(monkeypatch):
     assert response.status_code == 404
     assert response.json()["detail"] == "Alert not found"
 
+def test_receive_alert_unexpected_error_logs_webhook(monkeypatch):
+    """Unexpected exceptions from ingest_alert must still be logged as failed webhooks."""
+    logged_calls = []
+
+    async def fake_ingest_alert(**_kwargs):
+        raise RuntimeError("Unexpected DB failure")
+
+    async def fake_log_incoming_webhook(**kwargs):
+        logged_calls.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(uptime_service, "ingest_alert", fake_ingest_alert)
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", fake_log_incoming_webhook)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/api/integration-modules/uptimekuma/alerts",
+            json={"status": "down"},
+        )
+
+    assert response.status_code == 500
+
+    assert len(logged_calls) == 1
+    log = logged_calls[0]
+    assert "Error" in log["name"]
+    assert log["response_status"] == 500
+    assert log["error_message"] == "Unexpected DB failure"
+
+
 def test_receive_alert_apprise_payload_accepted(monkeypatch):
     """Apprise-format payloads (no 'status' field, only 'type') must return 202."""
     logged_calls = []

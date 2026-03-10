@@ -95,6 +95,17 @@ async def receive_alert(
             error_message=str(exc),
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        await webhook_monitor.log_incoming_webhook(
+            name="Uptime Kuma Webhook - Error",
+            source_url=source_url,
+            payload=raw_payload,
+            headers=request_headers,
+            response_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            response_body=str(exc),
+            error_message=str(exc),
+        )
+        raise
 
     monitor_name = record.get("monitor_name") or "Unknown Monitor"
     await webhook_monitor.log_incoming_webhook(
