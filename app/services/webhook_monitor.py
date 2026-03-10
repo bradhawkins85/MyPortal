@@ -211,10 +211,13 @@ async def log_incoming_webhook(
     # are already processed (not queued for delivery)
     status = "succeeded" if error_message is None else "failed"
     
+    # Redact sensitive headers before storing anywhere
+    safe_headers = _redact_headers(headers, sensitive=_SENSITIVE_HEADERS)
+
     event = await webhook_repo.create_event(
         name=name,
         target_url=source_url,  # For incoming, this is where we received it
-        headers=headers,
+        headers=safe_headers,
         payload=payload,
         max_attempts=1,
         backoff_seconds=0,
@@ -228,7 +231,6 @@ async def log_incoming_webhook(
     event_id = int(event["id"])
     
     # Record the attempt with all details
-    safe_headers = _redact_headers(headers, sensitive=_SENSITIVE_HEADERS)
     request_body = _prepare_request_body(payload)
     
     await webhook_repo.record_attempt(
