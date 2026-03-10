@@ -6,12 +6,28 @@ import pytest
 from app.services import tickets as tickets_service
 from app.services import notifications as notifications_service
 from app.services import email as email_service
+from app.services import notification_event_settings
 
 
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
 
+
+def _default_tickets_created_setting(event_type: str) -> dict:
+    """Return a representative tickets.created event setting for tests."""
+    return {
+        "event_type": event_type,
+        "display_name": "Ticket created",
+        "message_template": "Your ticket #{{ ticket.ticket_number }} has been created: {{ ticket.subject }}",
+        "module_actions": [],
+        "allow_channel_in_app": True,
+        "allow_channel_email": True,
+        "allow_channel_sms": False,
+        "default_channel_in_app": True,
+        "default_channel_email": True,
+        "default_channel_sms": False,
+    }
 
 # ---------------------------------------------------------------------------
 # _send_ticket_creation_email – requester with user account
@@ -82,6 +98,12 @@ async def test_send_creation_email_sends_direct_when_no_requester_id(monkeypatch
     """A direct email is sent when only an email address is available."""
     captured: dict[str, object] = {}
 
+    monkeypatch.setattr(
+        notification_event_settings,
+        "get_event_setting",
+        lambda event_type: _default_tickets_created_setting(event_type),
+    )
+
     async def fake_send_email(*, subject, recipients, html_body, text_body=None, **kwargs):
         captured["subject"] = subject
         captured["recipients"] = recipients
@@ -113,6 +135,12 @@ async def test_send_creation_email_sends_direct_when_no_requester_id(monkeypatch
 async def test_send_creation_email_uses_enriched_email_when_no_user_id(monkeypatch):
     """Uses requester_email from enriched ticket when there is no requester_id."""
     captured_recipients: list[str] = []
+
+    monkeypatch.setattr(
+        notification_event_settings,
+        "get_event_setting",
+        lambda event_type: _default_tickets_created_setting(event_type),
+    )
 
     async def fake_send_email(*, recipients, **kwargs):
         captured_recipients.extend(recipients)
@@ -270,3 +298,87 @@ async def test_create_ticket_passes_requester_email_fallback(monkeypatch):
     )
 
     assert captured["requester_email_fallback"] == "sender@example.com"
+
+
+# ---------------------------------------------------------------------------
+# _send_ticket_creation_email – template rendering for external requester
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_send_creation_email_uses_event_template_for_external_requester(monkeypatch):
+    """When the requester has no account, the email body uses the notification event template."""
+    captured: dict[str, object] = {}
+
+    async def fake_get_event_setting(event_type: str):
+        return {
+            "event_type": event_type,
+            "display_name": "Ticket created",
+            "message_template": "Custom template: ticket #{{ ticket.ticket_number }} - {{ ticket.subject }}",
+            "module_actions": [],
+            "allow_channel_in_app": True,
+            "allow_channel_email": True,
+            "allow_channel_sms": False,
+            "default_channel_in_app": True,
+            "default_channel_email": True,
+            "default_channel_sms": False,
+        }
+
+    async def fake_send_email(*, subject, recipients, html_body, text_body=None, **kwargs):
+        captured["subject"] = subject
+        captured["recipients"] = recipients
+        captured["html_body"] = html_body
+        captured["text_body"] = text_body
+        return True, None
+
+    monkeypatch.setattr(notification_event_settings, "get_event_setting", fake_get_event_setting)
+    monkeypatch.setattr(email_service, "send_email", fake_send_email)
+
+    enriched = {
+        "id": 40,
+        "ticket_number": "400",
+        "subject": "Custom template test",
+        "requester_id": None,
+        "requester_email": "external@example.com",
+    }
+
+    await tickets_service._send_ticket_creation_email(enriched)
+
+    # The rendered template should appear in the email body and subject
+    expected_message = "Custom template: ticket #400 - Custom template test"
+    assert captured["text_body"] == expected_message
+    assert f"<p>{expected_message}</p>" == captured["html_body"]
+    assert "Custom template: ticket #400" in captured["subject"]
+
+
+@pytest.mark.anyio
+async def test_send_creation_email_falls_back_when_template_unavailable(monkeypatch):
+    """When event setting lookup fails, a sensible fallback message is used."""
+    captured: dict[str, object] = {}
+
+    async def failing_get_event_setting(event_type: str):
+        raise RuntimeError("Database unavailable")
+
+    async def fake_send_email(*, subject, recipients, html_body, text_body=None, **kwargs):
+        captured["subject"] = subject
+        captured["recipients"] = recipients
+        captured["text_body"] = text_body
+        return True, None
+
+    monkeypatch.setattr(notification_event_settings, "get_event_setting", failing_get_event_setting)
+    monkeypatch.setattr(email_service, "send_email", fake_send_email)
+
+    enriched = {
+        "id": 41,
+        "ticket_number": "401",
+        "subject": "Fallback test",
+        "requester_id": None,
+        "requester_email": "fallback@example.com",
+    }
+
+    await tickets_service._send_ticket_creation_email(enriched)
+
+    assert captured["recipients"] == ["fallback@example.com"]
+    assert "#401" in captured["subject"]
+    assert "Fallback test" in captured["subject"]
+    assert "#401" in captured["text_body"]
+    assert "Fallback test" in captured["text_body"]

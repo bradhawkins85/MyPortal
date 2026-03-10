@@ -21,7 +21,9 @@ from app.services import automations as automations_service
 from app.repositories import users as user_repo
 from app.services import modules as modules_service
 from app.services import email as email_service
+from app.services import notification_event_settings
 from app.services import notifications as notifications_service
+from app.services import value_templates
 from app.services.tagging import filter_helpful_slugs, get_all_excluded_tags, is_helpful_slug, slugify_tag
 from app.services.sanitization import sanitize_rich_text
 from app.services.realtime import RefreshNotifier, refresh_notifier
@@ -982,29 +984,39 @@ async def _send_ticket_creation_email(
 
     settings = get_settings()
     app_name = settings.app_name or "Support"
-    email_subject = f"Ticket #{ticket_number} created: {subject_text}" if ticket_number else f"Ticket created: {subject_text}"
 
-    portal_url = str(settings.portal_url).rstrip("/") if settings.portal_url else None
-    ticket_id_val = enriched_ticket.get("id")
-    ticket_link = f"{portal_url}/tickets/{ticket_id_val}" if portal_url and ticket_id_val else None
+    # Render the email body using the configured notification template so that
+    # admin-configured JSON templates are honoured for external requesters too.
+    context: dict[str, Any] = {"ticket": dict(enriched_ticket)}
+    rendered_message: str | None = None
+    try:
+        event_setting = await notification_event_settings.get_event_setting("tickets.created")
+        template = str(event_setting.get("message_template") or "")
+        if template:
+            rendered_message = str(await value_templates.render_string_async(template, context))
+    except Exception as exc:
+        log_error(
+            "Failed to render ticket creation notification template; using fallback",
+            ticket_id=enriched_ticket.get("id"),
+            error=str(exc),
+        )
+        rendered_message = None
 
-    html_parts = [
-        "<p>Your support ticket has been created. A member of our team will be in touch shortly.</p>",
-        f"<p><strong>Ticket number:</strong> #{html.escape(ticket_number)}</p>" if ticket_number else "",
-        f"<p><strong>Subject:</strong> {html.escape(subject_text)}</p>" if subject_text else "",
-        f'<p><a href="{ticket_link}">View your ticket</a></p>' if ticket_link else "",
-        f"<p>{html.escape(app_name)}</p>",
-    ]
-    html_body = "\n".join(p for p in html_parts if p)
+    if not rendered_message:
+        # Fallback when the template cannot be loaded or rendered.
+        rendered_message = (
+            f"Your ticket #{ticket_number} has been created: {subject_text}"
+            if ticket_number
+            else f"Your ticket has been created: {subject_text}"
+        )
 
-    text_parts = [
-        "Your support ticket has been created. A member of our team will be in touch shortly.",
-        f"Ticket number: #{ticket_number}" if ticket_number else "",
-        f"Subject: {subject_text}" if subject_text else "",
-        ticket_link or "",
-        app_name,
-    ]
-    text_body = "\n".join(p for p in text_parts if p)
+    message_preview = rendered_message[:50].strip()
+    if len(rendered_message) > 50:
+        message_preview += "..."
+    email_subject = f"{app_name} notification: {message_preview}"
+
+    text_body = rendered_message
+    html_body = f"<p>{html.escape(rendered_message)}</p>"
 
     try:
         await email_service.send_email(
