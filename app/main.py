@@ -45,6 +45,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.exception_handlers import http_exception_handler
+from fastapi.exceptions import RequestValidationError
 from itsdangerous import BadSignature, URLSafeSerializer
 from pydantic import ValidationError
 from starlette.datastructures import FormData, URL
@@ -1270,6 +1271,23 @@ async def _render_error_page(
         "errors/error.html",
         context,
         status_code=status_code,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_request_validation_error(request: Request, exc: RequestValidationError):
+    path = request.url.path
+    if path.startswith("/api/integration-modules/"):
+        logger.warning(
+            "Webhook payload validation failed",
+            path=path,
+            errors=exc.errors(),
+            content_type=request.headers.get("content-type"),
+            user_agent=request.headers.get("user-agent"),
+        )
+    return JSONResponse(
+        content=jsonable_encoder({"detail": exc.errors()}),
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     )
 
 
