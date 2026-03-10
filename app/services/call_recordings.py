@@ -969,6 +969,7 @@ async def create_ticket_from_recording(
         Created ticket dict
     """
     from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
 
     recording = await call_recordings_repo.get_call_recording_by_id(recording_id)
     if not recording:
@@ -1018,12 +1019,12 @@ async def create_ticket_from_recording(
 [View Full Transcript](#transcript-{recording_id})
 """
 
-    # Create the ticket
-    ticket = await tickets_repo.create_ticket(
-        company_id=company_id,
+    # Create the ticket via the service layer so that automation events fire
+    ticket = await tickets_service.create_ticket(
         subject=subject,
         description=description,
         requester_id=user_id,
+        company_id=company_id,
         assigned_user_id=None,
         priority="normal",
         status="open",
