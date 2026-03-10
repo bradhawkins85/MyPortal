@@ -658,3 +658,67 @@ async def test_ingest_alert_apprise_body_captured_as_message(monkeypatch):
     )
 
     assert captured["message"] == "Service is unreachable"
+
+# ---------------------------------------------------------------------------
+# _resolve_status helper
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_status_uses_explicit_status():
+    payload = UptimeKumaAlertPayload(status="down", alert_type="success")
+    assert uptime_service._resolve_status(payload) == "down"
+
+
+def test_resolve_status_falls_back_to_alert_type():
+    payload = UptimeKumaAlertPayload(alert_type="failure")
+    assert uptime_service._resolve_status(payload) == "failure"
+
+
+def test_resolve_status_defaults_to_unknown_when_both_absent():
+    payload = UptimeKumaAlertPayload()
+    assert uptime_service._resolve_status(payload) == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ingest_alert_apprise_only_payload(monkeypatch):
+    """Apprise payloads with no 'status' field should be accepted and stored
+    using alert_type as the status value."""
+    secret_hash = hashlib.sha256("tok".encode()).hexdigest()
+    captured: dict = {}
+
+    async def fake_get_module(slug, *, redact=True):
+        return {"enabled": True, "settings": {"shared_secret_hash": secret_hash}}
+
+    async def fake_create_alert(**kwargs):
+        captured.update(kwargs)
+        return {"id": 100, **kwargs}
+
+    async def fake_find_service_by_name(name):
+        return None
+
+    monkeypatch.setattr(uptime_service.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(uptime_service.alerts_repo, "create_alert", fake_create_alert)
+    monkeypatch.setattr(uptime_service.service_status_repo, "find_service_by_name", fake_find_service_by_name)
+
+    # Pure Apprise payload - no status field, only type/title/message
+    payload = UptimeKumaAlertPayload.model_validate(
+        {
+            "version": "1.0",
+            "title": "[DOWN] My API",
+            "message": "My API is unreachable",
+            "type": "failure",
+        }
+    )
+    record = await uptime_service.ingest_alert(
+        payload=payload,
+        raw_payload={"title": "[DOWN] My API", "message": "My API is unreachable", "type": "failure"},
+        provided_secret="tok",
+        remote_addr="192.0.2.1",
+        user_agent="Apprise/1.0",
+    )
+
+    assert record["id"] == 100
+    assert captured["status"] == "failure"
+    assert captured["monitor_name"] == "My API"
+    assert captured["message"] == "My API is unreachable"
+    assert captured["alert_type"] == "failure"
