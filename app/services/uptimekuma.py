@@ -130,8 +130,28 @@ def _choose_event_identifier(payload: UptimeKumaAlertPayload) -> str | None:
     return None
 
 
-def _normalise_status(value: str) -> str:
+def _normalise_status(value: str | None) -> str:
     return (value or "unknown").strip().lower()
+
+
+def _resolve_status(payload: UptimeKumaAlertPayload) -> str:
+    """Return the best available status string from a payload.
+
+    Prefers the explicit ``status`` field.  When absent (e.g. Apprise-only
+    payloads from Uptime Kuma) the Apprise ``alert_type`` field (``type``) is
+    used as a fallback so that ``success``/``failure``/``warning``/``info``
+    values are preserved for downstream service-status mapping.
+    """
+    if payload.status:
+        return _normalise_status(payload.status)
+    if payload.alert_type:
+        logger.debug(
+            "No 'status' field in payload; falling back to alert_type",
+            alert_type=payload.alert_type,
+        )
+        return _normalise_status(payload.alert_type)
+    logger.warning("Payload contained neither 'status' nor 'alert_type'; defaulting to 'unknown'")
+    return "unknown"
 
 
 def _extract_monitor_name_from_title(title: str) -> str | None:
@@ -238,6 +258,16 @@ async def ingest_alert(
     remote_addr: str | None,
     user_agent: str | None,
 ) -> dict[str, Any]:
+    logger.debug(
+        "Received Uptime Kuma alert",
+        remote_addr=remote_addr,
+        user_agent=user_agent,
+        status=payload.status,
+        alert_type=payload.alert_type,
+        monitor_name=payload.monitor_name,
+        title=payload.title,
+        raw_keys=list(raw_payload.keys()) if raw_payload else [],
+    )
     settings = await _load_module_configuration()
     secret_hash = str(settings.get("shared_secret_hash") or "").strip()
     if not _verify_secret(provided_secret, secret_hash):
@@ -248,6 +278,7 @@ async def ingest_alert(
     ping_ms = _coerce_float(payload.ping)
 
     monitor_name = _resolve_monitor_name(payload)
+    resolved_status = _resolve_status(payload)
 
     record = await alerts_repo.create_alert(
         event_uuid=_choose_event_identifier(payload),
@@ -257,7 +288,7 @@ async def ingest_alert(
         monitor_type=payload.monitor_type.strip() if payload.monitor_type else None,
         monitor_hostname=payload.monitor_hostname.strip() if payload.monitor_hostname else None,
         monitor_port=_coerce_port(payload.monitor_port),
-        status=_normalise_status(payload.status),
+        status=resolved_status,
         previous_status=_normalise_status(payload.previous_status) if payload.previous_status else None,
         importance=_coerce_bool(payload.importance),
         alert_type=payload.alert_type.strip() if payload.alert_type else None,
@@ -277,7 +308,7 @@ async def ingest_alert(
         try:
             service_status_updated = await _sync_service_status_from_alert(
                 monitor_name=monitor_name,
-                alert_status=payload.status,
+                alert_status=resolved_status,
                 alert_type=payload.alert_type,
                 alert_message=payload.message.strip() if payload.message else None,
             )
