@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     smtp_host: str | None = Field(default=None, validation_alias="SMTP_HOST")
     smtp_port: int = Field(default=587, validation_alias="SMTP_PORT")
     smtp_user: str | None = Field(default=None, validation_alias="SMTP_USER")
+    smtp_from: str | None = Field(default=None, validation_alias="SMTP_FROM")
     smtp_password: str | None = Field(default=None, validation_alias="SMTP_PASS")
     smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_SECURE")
     stock_feed_url: AnyHttpUrl | None = Field(

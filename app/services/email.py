@@ -227,7 +227,7 @@ async def send_email(
 
     message = EmailMessage()
     message["Subject"] = subject
-    from_address = sender or settings.smtp_user or "no-reply@localhost"
+    from_address = sender or settings.smtp_from or settings.smtp_user or "no-reply@localhost"
     message["From"] = from_address
     message["To"] = ", ".join(to_addresses)
     if reply_to:

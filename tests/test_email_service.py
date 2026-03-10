@@ -104,6 +104,62 @@ def test_send_email_success(monkeypatch):
     assert event_metadata["response_status"] == 250
 
 
+def test_send_email_uses_smtp_from_as_sender(monkeypatch):
+    """smtp_from takes precedence over smtp_user as the From address."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(settings, "smtp_port", 587)
+    monkeypatch.setattr(settings, "smtp_user", "user@example.com")
+    monkeypatch.setattr(settings, "smtp_from", "noreply@myportal.example.com")
+    monkeypatch.setattr(settings, "smtp_password", "secret")
+    monkeypatch.setattr(settings, "smtp_use_tls", False)
+
+    captured: dict[str, object] = {}
+
+    class DummySMTP:
+        def __init__(self, host: str, port: int, timeout: float):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def ehlo(self):
+            pass
+
+        def login(self, username: str, password: str):
+            captured["login"] = username
+
+        def send_message(self, message):
+            captured["message"] = message
+
+    monkeypatch.setattr(email_service.smtplib, "SMTP", DummySMTP)
+
+    async def fake_manual_event(**kwargs):
+        return {"id": None}
+
+    async def fake_record_manual_success(*_args, **_kwargs):
+        pass
+
+    monkeypatch.setattr(email_service.webhook_monitor, "create_manual_event", fake_manual_event)
+    monkeypatch.setattr(email_service.webhook_monitor, "record_manual_success", fake_record_manual_success)
+
+    asyncio.run(
+        email_service.send_email(
+            subject="From test",
+            recipients=["user@example.com"],
+            html_body="<p>Hello</p>",
+        )
+    )
+
+    message = captured["message"]
+    assert message["From"] == "noreply@myportal.example.com"
+    # smtp_user is still used for authentication
+    assert captured["login"] == "user@example.com"
+
+
 def test_send_email_adds_tracking_when_plausible_enabled(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
