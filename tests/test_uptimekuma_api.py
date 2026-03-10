@@ -7,6 +7,7 @@ from app.api.dependencies import auth as auth_dependencies
 from app.core.database import db
 from app.main import app, scheduler_service
 from app.services import uptimekuma as uptime_service
+from app.services import webhook_monitor
 
 
 @pytest.fixture(autouse=True)
@@ -35,11 +36,18 @@ def mock_startup(monkeypatch):
 
 
 def test_receive_alert_returns_accepted(monkeypatch):
+    logged_calls = []
+
     async def fake_ingest_alert(**kwargs):
         assert kwargs["provided_secret"] == "secret-token"
-        return {"id": 77}
+        return {"id": 77, "monitor_name": "My Server"}
+
+    async def fake_log_incoming_webhook(**kwargs):
+        logged_calls.append(kwargs)
+        return {}
 
     monkeypatch.setattr(uptime_service, "ingest_alert", fake_ingest_alert)
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", fake_log_incoming_webhook)
 
     with TestClient(app) as client:
         response = client.post(
@@ -53,12 +61,25 @@ def test_receive_alert_returns_accepted(monkeypatch):
     assert payload["status"] == "accepted"
     assert payload["alert_id"] == 77
 
+    assert len(logged_calls) == 1
+    log = logged_calls[0]
+    assert log["name"] == "Uptime Kuma Webhook - My Server"
+    assert log["response_status"] == 202
+    assert log.get("error_message") is None
+
 
 def test_receive_alert_unauthorised(monkeypatch):
+    logged_calls = []
+
     async def fake_ingest_alert(**_kwargs):
         raise uptime_service.AuthenticationError("Invalid token")
 
+    async def fake_log_incoming_webhook(**kwargs):
+        logged_calls.append(kwargs)
+        return {}
+
     monkeypatch.setattr(uptime_service, "ingest_alert", fake_ingest_alert)
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", fake_log_incoming_webhook)
 
     with TestClient(app) as client:
         response = client.post(
@@ -68,6 +89,68 @@ def test_receive_alert_unauthorised(monkeypatch):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid token"
+
+    assert len(logged_calls) == 1
+    log = logged_calls[0]
+    assert "Authentication Failed" in log["name"]
+    assert log["response_status"] == 401
+    assert log["error_message"] == "Invalid token"
+
+
+def test_receive_alert_module_disabled(monkeypatch):
+    logged_calls = []
+
+    async def fake_ingest_alert(**_kwargs):
+        raise uptime_service.ModuleDisabledError("Module is disabled")
+
+    async def fake_log_incoming_webhook(**kwargs):
+        logged_calls.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(uptime_service, "ingest_alert", fake_ingest_alert)
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", fake_log_incoming_webhook)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/integration-modules/uptimekuma/alerts",
+            json={"status": "down"},
+        )
+
+    assert response.status_code == 503
+
+    assert len(logged_calls) == 1
+    log = logged_calls[0]
+    assert "Module Disabled" in log["name"]
+    assert log["response_status"] == 503
+    assert log["error_message"] == "Module is disabled"
+
+
+def test_receive_alert_invalid_payload_logs_error(monkeypatch):
+    logged_calls = []
+
+    async def fake_ingest_alert(**_kwargs):
+        raise ValueError("Bad data")
+
+    async def fake_log_incoming_webhook(**kwargs):
+        logged_calls.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(uptime_service, "ingest_alert", fake_ingest_alert)
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", fake_log_incoming_webhook)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/integration-modules/uptimekuma/alerts",
+            json={"status": "down"},
+        )
+
+    assert response.status_code == 400
+
+    assert len(logged_calls) == 1
+    log = logged_calls[0]
+    assert "Invalid Payload" in log["name"]
+    assert log["response_status"] == 400
+    assert log["error_message"] == "Bad data"
 
 
 def test_list_alerts_returns_records(monkeypatch):
