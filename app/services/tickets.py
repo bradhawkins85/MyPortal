@@ -1003,21 +1003,59 @@ async def _send_ticket_creation_email(
         )
         rendered_message = None
 
-    # Skip the generic direct email when module_actions already include an
-    # email-delivery module (smtp2go or smtp). This prevents sending a duplicate
-    # generic notification email alongside the custom action email.
+    # Fire any configured module_actions for the defined ticket creation notification.
+    # This honours admin-configured integrations (e.g. smtp2go, ntfy) for external
+    # requesters.  The fallback direct email is only sent when no email-delivery
+    # module action is configured, or when the email-delivery module action fails.
     _module_actions = event_setting.get("module_actions") or [] if event_setting else []
     _has_email_action = any(
         str(action.get("module") or "").strip() in notifications_service._EMAIL_DELIVERY_MODULES
         for action in _module_actions
         if isinstance(action, Mapping)
     )
-    if _has_email_action:
-        # Let the module_actions handle email delivery instead
+    _email_action_failed = False
+    if _module_actions:
+        _notification_context: dict[str, Any] = {
+            "event_type": "tickets.created",
+            "metadata": {"ticket": dict(enriched_ticket)},
+            "message": rendered_message,
+            "ticket": dict(enriched_ticket),
+        }
+        for _action in _module_actions:
+            _slug = str(_action.get("module") or "").strip()
+            if not _slug:
+                continue
+            _payload_source = _action.get("payload")
+            if isinstance(_payload_source, Mapping):
+                _payload_source = dict(_payload_source)
+            else:
+                _payload_source = _payload_source or {}
+            try:
+                _rendered_payload = await value_templates.render_value_async(
+                    _payload_source, _notification_context
+                )
+                if isinstance(_rendered_payload, Mapping):
+                    _payload_data: dict[str, Any] = dict(_rendered_payload)
+                else:
+                    _payload_data = {"value": _rendered_payload}
+                _payload_data.setdefault("context", _notification_context)
+                await modules_service.trigger_module(_slug, _payload_data, background=False)
+            except Exception as exc:
+                log_error(
+                    "Ticket creation notification module action failed",
+                    ticket_id=enriched_ticket.get("id"),
+                    module=_slug,
+                    error=str(exc),
+                )
+                if _slug in notifications_service._EMAIL_DELIVERY_MODULES:
+                    _email_action_failed = True
+
+    if _has_email_action and not _email_action_failed:
+        # The defined notification handled email delivery; skip the fallback.
         return
 
     if not rendered_message:
-        # Fallback when the template cannot be loaded or rendered.
+        # Fallback when the defined notification did not deliver an email.
         rendered_message = (
             f"Your ticket #{ticket_number} has been created: {subject_text}"
             if ticket_number
