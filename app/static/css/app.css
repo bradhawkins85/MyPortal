@@ -1116,6 +1116,21 @@ button.header-title-menu__link {
   width: 100%;
 }
 
+.header-title-menu__link--danger {
+  color: #fecaca;
+}
+
+.header-title-menu__link--danger:hover,
+.header-title-menu__link--danger:focus-visible {
+  background: rgba(248, 113, 113, 0.18);
+  color: #fecaca;
+}
+
+.header-title-menu__link--danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .header-title-menu__link:hover,
 .header-title-menu__link:focus-visible {
   background: rgba(148, 163, 184, 0.18);
