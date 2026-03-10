@@ -150,6 +150,7 @@ async def list_due_events(limit: int = 25) -> list[dict[str, Any]]:
         SELECT *
         FROM webhook_events
         WHERE status = 'pending'
+          AND direction = 'outgoing'
           AND (next_attempt_at IS NULL OR next_attempt_at <= %s)
         ORDER BY created_at ASC
         LIMIT %s
