@@ -1,5 +1,32 @@
 {% extends "base.html" %}
 
+{% block header_title %}
+<div class="header-title-menu">
+  <span class="header-title-menu__label">Webhook Monitor</span>
+  <details class="header-title-menu__dropdown" data-header-menu>
+    <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+      Webhook tools
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+        <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
+      </svg>
+      <span class="visually-hidden">Toggle webhook tools menu</span>
+    </summary>
+    <ul class="header-title-menu__list" role="menu">
+      <li class="header-title-menu__item" role="none">
+        <button type="button" class="header-title-menu__link" role="menuitem" data-webhook-delete-status="failed">
+          Delete all failed
+        </button>
+      </li>
+      <li class="header-title-menu__item" role="none">
+        <button type="button" class="header-title-menu__link" role="menuitem" data-webhook-delete-status="succeeded">
+          Delete all successful
+        </button>
+      </li>
+    </ul>
+  </details>
+</div>
+{% endblock %}
+
 {% block content %}
 <section class="card card--panel">
   <header class="card__header card__header--actions">
@@ -10,22 +37,6 @@
       </p>
     </div>
     <div class="card__controls">
-      <div class="button-group">
-        <button
-          type="button"
-          class="button button--danger"
-          data-webhook-delete-status="failed"
-        >
-          Delete all failed
-        </button>
-        <button
-          type="button"
-          class="button button--danger"
-          data-webhook-delete-status="succeeded"
-        >
-          Delete all successful
-        </button>
-      </div>
       <input
         type="search"
         class="form-input"
