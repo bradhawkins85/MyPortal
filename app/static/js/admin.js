@@ -2992,6 +2992,7 @@
     const slugsSeen = new Set();
     buttons.forEach((button) => {
       const slug = button.dataset.editModuleOpen;
+      if (slugsSeen.has(slug)) {
         return;
       }
       slugsSeen.add(slug);
