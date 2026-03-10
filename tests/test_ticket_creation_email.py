@@ -6,6 +6,7 @@ import pytest
 from app.services import tickets as tickets_service
 from app.services import notifications as notifications_service
 from app.services import email as email_service
+from app.services import modules as modules_service
 from app.services import notification_event_settings
 
 
@@ -382,3 +383,153 @@ async def test_send_creation_email_falls_back_when_template_unavailable(monkeypa
     assert "Fallback test" in captured["subject"]
     assert "#401" in captured["text_body"]
     assert "Fallback test" in captured["text_body"]
+
+
+# ---------------------------------------------------------------------------
+# _send_ticket_creation_email – module_actions for external requester
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_send_creation_email_skips_direct_send_when_email_module_action_succeeds(monkeypatch):
+    """When an email-delivery module action succeeds, no fallback direct email is sent."""
+    direct_send_called = False
+    module_triggered: list[str] = []
+
+    async def fake_get_event_setting(event_type: str):
+        return {
+            "event_type": event_type,
+            "display_name": "Ticket created",
+            "message_template": "Ticket #{{ ticket.ticket_number }} created",
+            "module_actions": [{"module": "smtp2go", "payload": {"to": ["{{ ticket.requester_email }}"]}}],
+            "allow_channel_in_app": True,
+            "allow_channel_email": True,
+            "allow_channel_sms": False,
+            "default_channel_in_app": True,
+            "default_channel_email": True,
+            "default_channel_sms": False,
+        }
+
+    async def fake_trigger_module(slug, payload, *, background=True, **kwargs):
+        module_triggered.append(slug)
+        return {"status": "success"}
+
+    async def fake_send_email(**kwargs):
+        nonlocal direct_send_called
+        direct_send_called = True
+        return True, None
+
+    monkeypatch.setattr(notification_event_settings, "get_event_setting", fake_get_event_setting)
+    monkeypatch.setattr(modules_service, "trigger_module", fake_trigger_module)
+    monkeypatch.setattr(email_service, "send_email", fake_send_email)
+
+    enriched = {
+        "id": 50,
+        "ticket_number": "500",
+        "subject": "Module action test",
+        "requester_id": None,
+        "requester_email": "ext@example.com",
+    }
+
+    await tickets_service._send_ticket_creation_email(enriched)
+
+    # smtp2go module should have been triggered
+    assert "smtp2go" in module_triggered
+    # Direct fallback email should NOT have been sent
+    assert not direct_send_called
+
+
+@pytest.mark.anyio
+async def test_send_creation_email_uses_fallback_when_email_module_action_fails(monkeypatch):
+    """When the email-delivery module action fails, the fallback direct email is sent."""
+    captured: dict[str, object] = {}
+
+    async def fake_get_event_setting(event_type: str):
+        return {
+            "event_type": event_type,
+            "display_name": "Ticket created",
+            "message_template": "Ticket #{{ ticket.ticket_number }} created: {{ ticket.subject }}",
+            "module_actions": [{"module": "smtp2go", "payload": {}}],
+            "allow_channel_in_app": True,
+            "allow_channel_email": True,
+            "allow_channel_sms": False,
+            "default_channel_in_app": True,
+            "default_channel_email": True,
+            "default_channel_sms": False,
+        }
+
+    async def failing_trigger_module(slug, payload, *, background=True, **kwargs):
+        raise RuntimeError("smtp2go API unreachable")
+
+    async def fake_send_email(*, subject, recipients, html_body, text_body=None, **kwargs):
+        captured["recipients"] = recipients
+        captured["text_body"] = text_body
+        return True, None
+
+    monkeypatch.setattr(notification_event_settings, "get_event_setting", fake_get_event_setting)
+    monkeypatch.setattr(modules_service, "trigger_module", failing_trigger_module)
+    monkeypatch.setattr(email_service, "send_email", fake_send_email)
+
+    enriched = {
+        "id": 51,
+        "ticket_number": "501",
+        "subject": "Fallback on failure",
+        "requester_id": None,
+        "requester_email": "ext2@example.com",
+    }
+
+    await tickets_service._send_ticket_creation_email(enriched)
+
+    # Fallback direct email should have been sent
+    assert captured.get("recipients") == ["ext2@example.com"]
+    assert "501" in str(captured.get("text_body"))
+    assert "Fallback on failure" in str(captured.get("text_body"))
+
+
+@pytest.mark.anyio
+async def test_send_creation_email_fires_module_and_fallback_for_non_email_action(monkeypatch):
+    """Non-email module actions fire AND the fallback direct email is also sent."""
+    module_triggered: list[str] = []
+    direct_send_called = False
+
+    async def fake_get_event_setting(event_type: str):
+        return {
+            "event_type": event_type,
+            "display_name": "Ticket created",
+            "message_template": "Ticket #{{ ticket.ticket_number }} created",
+            "module_actions": [{"module": "ntfy", "payload": {"topic": "tickets"}}],
+            "allow_channel_in_app": True,
+            "allow_channel_email": True,
+            "allow_channel_sms": False,
+            "default_channel_in_app": True,
+            "default_channel_email": True,
+            "default_channel_sms": False,
+        }
+
+    async def fake_trigger_module(slug, payload, *, background=True, **kwargs):
+        module_triggered.append(slug)
+        return {"status": "success"}
+
+    async def fake_send_email(**kwargs):
+        nonlocal direct_send_called
+        direct_send_called = True
+        return True, None
+
+    monkeypatch.setattr(notification_event_settings, "get_event_setting", fake_get_event_setting)
+    monkeypatch.setattr(modules_service, "trigger_module", fake_trigger_module)
+    monkeypatch.setattr(email_service, "send_email", fake_send_email)
+
+    enriched = {
+        "id": 52,
+        "ticket_number": "502",
+        "subject": "Non-email module test",
+        "requester_id": None,
+        "requester_email": "ext3@example.com",
+    }
+
+    await tickets_service._send_ticket_creation_email(enriched)
+
+    # ntfy module should have been triggered
+    assert "ntfy" in module_triggered
+    # Direct email should also be sent (ntfy is not an email-delivery module)
+    assert direct_send_called
