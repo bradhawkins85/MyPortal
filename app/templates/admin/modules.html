@@ -10,496 +10,516 @@
         </div>
       </header>
 
-      <div class="management__body management__body--cards">
-        {% for module in modules %}
-          {% set settings = module.settings or {} %}
-          {% set module_feedback = ((success_message or '') ~ ' ' ~ (error_message or '')).lower() %}
-          {% set highlight_module = module.slug == 'syncro' and 'syncro' in module_feedback %}
-          <details class="card card--panel card-collapsible" data-module-card id="module-{{ module.slug }}" {% if highlight_module %}open{% endif %}>
-            <summary class="card__header card__header--collapsible card__header--module-summary">
-              <span class="card__module-icon card__module-icon--summary" aria-hidden="true">
-                {{ module.icon or '🔌' }}
-              </span>
-              <h2 class="card__title">{{ module.name }}</h2>
-              <div class="card__collapsible-meta">
-                <span
-                  class="badge {{ 'badge--success' if module.enabled else 'badge--danger' }}"
-                  aria-label="Module status"
-                >
-                  {{ 'Enabled' if module.enabled else 'Disabled' }}
-                </span>
-                <span class="card__toggle-icon" aria-hidden="true"></span>
+      {% if success_message %}
+        <div class="alert alert--success" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--error" role="alert">{{ error_message }}</div>
+      {% endif %}
+
+      <section class="card card--panel">
+        <div class="table-wrapper">
+          <table class="table" id="modules-table" data-table>
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string">Module</th>
+                <th scope="col" data-sort="string" data-mobile-hidden="true">Description</th>
+                <th scope="col" data-sort="string">Status</th>
+                <th scope="col" class="table__actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for module in modules %}
+                {% set is_internal = module.slug in ['create-ticket', 'create-task', 'update-ticket', 'update-ticket-description', 'add-ticket-reply', 'reprocess-ai'] %}
+                <tr>
+                  <td data-label="Module">
+                    <span aria-hidden="true">{{ module.icon or '\U0001f50c' }}</span>
+                    <strong>{{ module.name }}</strong>
+                  </td>
+                  <td data-label="Description" data-mobile-hidden="true">{{ module.description }}</td>
+                  <td data-label="Status">
+                    <span class="badge {{ 'badge--success' if module.enabled else 'badge--danger' }}">
+                      {{ 'Enabled' if module.enabled else 'Disabled' }}
+                    </span>
+                  </td>
+                  <td class="table__actions">
+                    <div class="table__action-buttons">
+                      {% if not is_internal %}
+                        <form action="/admin/modules/{{ module.slug }}" method="post" class="inline-form">
+                          {% if csrf_token %}
+                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                          {% endif %}
+                          {% if module.enabled %}
+                            <button type="submit" name="enabled" value="0" class="button button--ghost button--small">Disable</button>
+                          {% else %}
+                            <button type="submit" name="enabled" value="1" class="button button--ghost button--small">Enable</button>
+                          {% endif %}
+                        </form>
+                        <form action="/admin/modules/{{ module.slug }}/test" method="post" class="inline-form">
+                          {% if csrf_token %}
+                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                          {% endif %}
+                          <button type="submit" class="button button--ghost button--small">Test</button>
+                        </form>
+                        {% if module.slug == 'imap' %}
+                          <a href="/admin/modules/imap" class="button button--ghost button--small">Manage</a>
+                        {% else %}
+                          <button
+                            type="button"
+                            class="button button--ghost button--small"
+                            data-edit-module-open="{{ module.slug }}"
+                            aria-haspopup="dialog"
+                            aria-controls="module-settings-modal-{{ module.slug }}"
+                          >Settings</button>
+                        {% endif %}
+                      {% else %}
+                        <span class="text-muted">System module</span>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="table-pagination" data-pagination="modules-table">
+          <div class="table-pagination__group">
+            <button type="button" class="button button--ghost table-pagination__button" data-page-prev disabled>Previous</button>
+            <button type="button" class="button button--ghost table-pagination__button" data-page-next>Next</button>
+          </div>
+          <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+        </div>
+      </section>
+    </section>
+  </div>
+
+  {% set internal_slugs = ['create-ticket', 'create-task', 'update-ticket', 'update-ticket-description', 'add-ticket-reply', 'reprocess-ai'] %}
+
+  {% for module in modules %}
+    {% set settings = module.settings or {} %}
+    {% if module.slug not in internal_slugs and module.slug != 'imap' %}
+      <div
+        class="modal"
+        id="module-settings-modal-{{ module.slug }}"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="module-settings-title-{{ module.slug }}"
+        aria-hidden="true"
+        hidden
+      >
+        <div class="modal__content" role="document">
+          <button type="button" class="modal__close" data-modal-close>
+            <span class="visually-hidden">Close {{ module.name }} settings</span>
+            &times;
+          </button>
+          <h2 class="modal__title" id="module-settings-title-{{ module.slug }}">
+            {{ module.icon or '\U0001f50c' }} {{ module.name }}
+          </h2>
+          <p class="modal__text text-muted">{{ module.description }}</p>
+
+          {% if module.slug == 'syncro' %}
+            {% set syncro_is_ready = module.enabled %}
+            <div class="alert-stack" data-syncro-company-import-status hidden></div>
+          {% endif %}
+
+          <form action="/admin/modules/{{ module.slug }}" method="post" class="form card__form">
+            {% if csrf_token %}
+              <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+            {% endif %}
+            <input type="hidden" name="enabled" value="{{ '1' if module.enabled else '0' }}" />
+
+            {% if module.slug == 'syncro' %}
+              <div class="form-field">
+                <label class="form-label" for="syncro-base-url">Base URL</label>
+                <input id="syncro-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="https://example.syncromsp.com" />
+                <p class="form-help">Enter the Syncro tenant base URL without the trailing <code>/api/v1</code>.</p>
               </div>
-            </summary>
-            <div class="card-collapsible__content">
-              {% if module.slug == 'syncro' %}
-                {% set syncro_is_ready = module.enabled %}
-                <div class="alert-stack" data-syncro-company-import-status hidden></div>
-              {% endif %}
-              <header class="card__header card__header--module card__header--module-expanded">
-                <div class="card__module-info">
-                  <p class="card__subtitle">{{ module.description }}</p>
+              <div class="form-field">
+                <label class="form-label" for="syncro-api-key">API key</label>
+                <input id="syncro-api-key" name="settings.api_key" class="form-input" type="password" autocomplete="off" placeholder="Enter a new API key" />
+                <p class="form-help">Keys are stored securely. Leave blank to keep the existing value.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="syncro-rate-limit">Rate limit (requests per minute)</label>
+                <input id="syncro-rate-limit" name="settings.rate_limit_per_minute" class="form-input" type="number" min="1" max="600" value="{{ settings.rate_limit_per_minute or 180 }}" />
+              </div>
+            {% elif module.slug == 'ollama' %}
+              <div class="form-field">
+                <label class="form-label" for="ollama-base-url">Base URL</label>
+                <input id="ollama-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="http://127.0.0.1:11434" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ollama-model">Model</label>
+                <input id="ollama-model" name="settings.model" class="form-input" value="{{ settings.model or '' }}" placeholder="llama3" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ollama-prompt">Prompt</label>
+                <textarea id="ollama-prompt" name="settings.prompt" class="form-input" rows="3" placeholder="Override summary instructions">{{ settings.prompt or '' }}</textarea>
+              </div>
+            {% elif module.slug == 'smtp' %}
+              <div class="form-field">
+                <label class="form-label" for="smtp-from">From address</label>
+                <input id="smtp-from" name="settings.from_address" class="form-input" value="{{ settings.from_address or '' }}" placeholder="no-reply@example.com" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="smtp-recipients">Default recipients (comma separated)</label>
+                <input id="smtp-recipients" name="settings.default_recipients" class="form-input" value="{{ ', '.join(settings.default_recipients) if settings.default_recipients else '' }}" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="smtp-prefix">Subject prefix</label>
+                <input id="smtp-prefix" name="settings.subject_prefix" class="form-input" value="{{ settings.subject_prefix or '' }}" />
+              </div>
+            {% elif module.slug == 'smtp2go' %}
+              <div class="form-field">
+                <label class="form-label" for="smtp2go-api-key">API key</label>
+                <input id="smtp2go-api-key" name="settings.api_key" class="form-input" type="password" autocomplete="off" placeholder="Enter a new API key" />
+                <p class="form-help">Keys are stored securely. Leave blank to keep the existing value.</p>
+              </div>
+              <fieldset class="form-field">
+                <legend class="form-label">Tracking options</legend>
+                <div class="form-field__group form-field__group--stacked">
+                  <label class="checkbox">
+                    <input type="checkbox" name="settings.enable_tracking" value="true" {% if settings.enable_tracking is not defined or settings.enable_tracking %}checked{% endif %} />
+                    <span>Enable SMTP2Go tracking for sent emails</span>
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" name="settings.track_opens" value="true" {% if settings.track_opens is not defined or settings.track_opens %}checked{% endif %} />
+                    <span>Track opens</span>
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" name="settings.track_clicks" value="true" {% if settings.track_clicks is not defined or settings.track_clicks %}checked{% endif %} />
+                    <span>Track clicks</span>
+                  </label>
                 </div>
-                <div class="card__module-actions">
-                  <form action="/admin/modules/{{ module.slug }}/test" method="post" class="card__module-test">
-                    {% if csrf_token %}
-                      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                    {% endif %}
-                    <button type="submit" class="button button--ghost button--small">Run test</button>
-                  </form>
+              </fieldset>
+              <div class="form-field">
+                <label class="form-label" for="smtp2go-webhook-url">Webhook URL</label>
+                <input id="smtp2go-webhook-url" class="form-input" value="{{ request.url_for('smtp2go_webhook') }}" readonly />
+                <p class="form-help">Configure this endpoint for SMTP2Go events (delivered, opened, clicked, bounced, spam).</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="smtp2go-webhook-secret">Webhook secret</label>
+                <input id="smtp2go-webhook-secret" name="settings.webhook_secret" class="form-input" type="password" autocomplete="off" placeholder="Enter a new webhook secret" />
+                <p class="form-help">Secrets are stored securely. Leave blank to keep the existing value.</p>
+              </div>
+              <div class="form-field form-field--checkbox">
+                <label class="toggle">
+                  <input type="checkbox" name="settings.disable_webhook_signature_verification" value="true" {% if settings.disable_webhook_signature_verification %}checked{% endif %} />
+                  <span>Disable webhook signature verification</span>
+                </label>
+                <p class="form-help">Process webhook events even when signature verification fails or cannot be configured.</p>
+              </div>
+            {% elif module.slug == 'tacticalrmm' %}
+              <div class="form-field">
+                <label class="form-label" for="rmm-base-url">Base URL</label>
+                <input id="rmm-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="https://rmm.example.com" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="rmm-api-key">API key</label>
+                <input id="rmm-api-key" name="settings.api_key" class="form-input" type="password" autocomplete="off" placeholder="Enter a new API key" />
+                <p class="form-help">Keys are stored securely. Leave blank to keep the existing value.</p>
+              </div>
+              <div class="form-field form-field--checkbox">
+                <label class="checkbox">
+                  <input type="checkbox" name="settings.verify_ssl" value="true" {% if settings.verify_ssl is not defined or settings.verify_ssl %}checked{% endif %} />
+                  <span>Verify SSL certificates</span>
+                </label>
+              </div>
+            {% elif module.slug == 'ntfy' %}
+              <div class="form-field">
+                <label class="form-label" for="ntfy-base-url">Base URL</label>
+                <input id="ntfy-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="https://ntfy.sh" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ntfy-topic">Topic</label>
+                <input id="ntfy-topic" name="settings.topic" class="form-input" value="{{ settings.topic or '' }}" placeholder="service-alerts" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ntfy-token">Auth token</label>
+                <input id="ntfy-token" name="settings.auth_token" class="form-input" type="password" autocomplete="off" placeholder="Enter a new auth token" />
+                <p class="form-help">Tokens are stored securely. Leave blank to keep the existing value.</p>
+              </div>
+            {% elif module.slug == 'apprise' %}
+              <div class="form-field">
+                <label class="form-label" for="apprise-urls">Notification URLs</label>
+                <textarea id="apprise-urls" name="settings.urls" class="form-input" rows="5" placeholder="slack://tokenA/tokenB/tokenC">{{ '\n'.join(settings.urls) if settings.urls else '' }}</textarea>
+                <p class="form-help">Enter one Apprise notification URL per line. See the <a href="https://github.com/caronc/apprise/wiki" target="_blank" rel="noopener noreferrer">Apprise documentation</a> for supported URL formats.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="apprise-title">Default title</label>
+                <input id="apprise-title" name="settings.title" class="form-input" value="{{ settings.title or '' }}" placeholder="MyPortal" />
+              </div>
+            {% elif module.slug == 'uptimekuma' %}
+              <div class="form-field">
+                <label class="form-label" for="uptimekuma-webhook">Webhook URL</label>
+                <input id="uptimekuma-webhook" class="form-input" value="{{ request.url_for('uptimekuma_receive_alert') }}" readonly />
+                <p class="form-help">Configure this endpoint as the HTTP POST target inside Uptime Kuma.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="uptimekuma-secret">Shared secret</label>
+                <input id="uptimekuma-secret" name="settings.shared_secret" class="form-input" type="password" autocomplete="off" placeholder="Enter a new shared secret" />
+                <p class="form-help">Secrets are stored as SHA-256 hashes. Leave blank to keep the existing value.</p>
+              </div>
+              <div class="form-field form-field--checkbox">
+                <label class="toggle">
+                  <input type="checkbox" name="settings.sync_service_status" value="true" {% if settings.sync_service_status != false %}checked{% endif %} />
+                  <span>Sync service page status from alerts</span>
+                </label>
+                <p class="form-help">When enabled, incoming alerts automatically update the matching service on the Services page.</p>
+              </div>
+            {% elif module.slug == 'chatgpt-mcp' %}
+              <div class="form-field">
+                <label class="form-label" for="chatgpt-secret">Shared secret</label>
+                <input id="chatgpt-secret" name="settings.shared_secret" class="form-input" type="password" autocomplete="off" placeholder="Enter a new shared secret" />
+                <p class="form-help">Secrets are stored as SHA-256 hashes. Leave blank to keep the existing value.</p>
+              </div>
+              <fieldset class="form-field">
+                <legend class="form-label">Enabled tools</legend>
+                <div class="form-field__group form-field__group--stacked">
+                  {% set available_tools = ['listTickets', 'getTicket', 'createTicketReply', 'updateTicket'] %}
+                  {% for tool in available_tools %}
+                    <label class="checkbox">
+                      <input type="checkbox" name="settings.allowed_actions" value="{{ tool }}" {% if settings.allowed_actions and tool in settings.allowed_actions %}checked{% endif %} />
+                      <span>{{ tool }}</span>
+                    </label>
+                  {% endfor %}
                 </div>
-              </header>
-              <form action="/admin/modules/{{ module.slug }}" method="post" class="form card__form">
+              </fieldset>
+              <div class="form-field">
+                <label class="form-label" for="chatgpt-max-results">Maximum tickets returned</label>
+                <input id="chatgpt-max-results" name="settings.max_results" class="form-input" type="number" min="1" max="200" value="{{ settings.max_results or 50 }}" />
+              </div>
+              <div class="form-field form-field--checkbox">
+                <label class="toggle">
+                  <input type="checkbox" name="settings.allow_ticket_updates" value="true" {% if settings.allow_ticket_updates %}checked{% endif %} />
+                  <span>Allow ChatGPT to update tickets</span>
+                </label>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="chatgpt-statuses">Allowed ticket statuses</label>
+                <input id="chatgpt-statuses" name="settings.allowed_statuses" class="form-input" value="{{ settings.allowed_statuses|join(', ') if settings.allowed_statuses else '' }}" placeholder="open, pending, in_progress" />
+                <p class="form-help">Comma-separated list used to validate update requests.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="chatgpt-system-user">Default reply author (user ID)</label>
+                <input id="chatgpt-system-user" name="settings.system_user_id" class="form-input" value="{{ settings.system_user_id or '' }}" placeholder="123" />
+              </div>
+            {% elif module.slug == 'xero' %}
+              <div class="form-field">
+                <label class="form-label" for="xero-callback-url">Callback URL</label>
+                <input id="xero-callback-url" class="form-input" value="{{ request.url_for('xero_receive_callback') }}" readonly />
+                <p class="form-help">Provide this URL as the redirect/callback endpoint inside your Xero app configuration.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="xero-client-id">Client ID</label>
+                <input id="xero-client-id" name="settings.client_id" class="form-input" value="{{ settings.client_id or '' }}" autocomplete="off" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="xero-client-secret">Client secret</label>
+                <input id="xero-client-secret" name="settings.client_secret" class="form-input" type="password" autocomplete="off" value="{{ settings.client_secret or '' }}" placeholder="Enter a new client secret" />
+                <p class="form-help">Secrets are stored securely. Leave blank or enter ******** to keep the existing value.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="xero-refresh-token">Refresh token</label>
+                <input id="xero-refresh-token" name="settings.refresh_token" class="form-input" type="password" autocomplete="off" value="{{ settings.refresh_token or '' }}" placeholder="Enter a new refresh token" />
+                <p class="form-help">Tokens are encrypted before storage. Leave blank or enter ******** to keep the existing value.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="xero-tenant-id">Xero Tenant</label>
+                <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
+                  <div style="flex: 1;">
+                    <select id="xero-tenant-id" name="settings.tenant_id" class="form-input" style="width: 100%;">
+                      <option value="">-- Select a Xero organization --</option>
+                      {% if settings.tenant_id %}
+                        <option value="{{ settings.tenant_id }}" selected>{{ settings.tenant_id }}</option>
+                      {% endif %}
+                    </select>
+                  </div>
+                  <button type="button" id="xero-load-tenants" class="button button--ghost" style="white-space: nowrap;" title="Refresh Xero organizations">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: inline-block; vertical-align: middle;">
+                      <path d="M13.65 2.35C12.2 0.9 10.21 0 8 0 3.58 0 0.01 3.58 0.01 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35z" fill="currentColor"/>
+                    </svg>
+                  </button>
+                </div>
+                <p class="form-help">Select your Xero organization from the list.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="xero-line-amount-type">Line amount type</label>
+                <select id="xero-line-amount-type" name="settings.line_amount_type" class="form-input">
+                  {% set amount_type = (settings.line_amount_type or 'Exclusive') %}
+                  {% for option in ['Exclusive', 'Inclusive', 'NoTax'] %}
+                    <option value="{{ option }}" {% if amount_type == option %}selected{% endif %}>{{ option }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="xero-reference-prefix">Reference prefix</label>
+                <input id="xero-reference-prefix" name="settings.reference_prefix" class="form-input" value="{{ settings.reference_prefix or '' }}" placeholder="Support" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="xero-billable-statuses">Billable ticket statuses</label>
+                <input id="xero-billable-statuses" name="settings.billable_statuses" class="form-input" value="{{ settings.billable_statuses|join(', ') if settings.billable_statuses else '' }}" placeholder="resolved, closed" />
+                <p class="form-help">Tickets must match one of these technical status values. Separate with commas.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="xero-description-template">Line item description template</label>
+                <input id="xero-description-template" name="settings.line_item_description_template" class="form-input" value="{{ settings.line_item_description_template or '' }}" placeholder="Ticket #{ticket_id} - {ticket_subject}" />
+                <p class="form-help">Available placeholders: {ticket_id}, {ticket_subject}, {ticket_status}, {labour_name}, {labour_code}, {labour_minutes}, {labour_hours}, {labour_suffix}. Default: "Ticket {ticket_id}: {ticket_subject}{labour_suffix}"</p>
+              </div>
+            {% elif module.slug == 'sms-gateway' %}
+              <div class="form-field">
+                <label class="form-label" for="sms-gateway-url">Gateway URL</label>
+                <input id="sms-gateway-url" name="settings.gateway_url" class="form-input" value="{{ settings.gateway_url or '' }}" placeholder="https://sms.example.com/api/send" />
+                <p class="form-help">Enter the HTTP POST endpoint for your SMS gateway.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="sms-gateway-auth">Authorization header</label>
+                <input id="sms-gateway-auth" name="settings.authorization" class="form-input" type="password" autocomplete="off" placeholder="Enter authorization header value" />
+                <p class="form-help">Authorization header value (e.g., "Bearer token123"). Leave blank to keep the existing value.</p>
+              </div>
+            {% elif module.slug == 'whisperx' %}
+              <div class="form-field">
+                <label class="form-label" for="whisperx-base-url">Base URL</label>
+                <input id="whisperx-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="http://whisperx-server:8000" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="whisperx-api-key">API Key (optional)</label>
+                <input id="whisperx-api-key" name="settings.api_key" class="form-input" type="password" autocomplete="off" placeholder="Enter a new API key" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="whisperx-language">Default Language</label>
+                <input id="whisperx-language" name="settings.language" class="form-input" value="{{ settings.language or 'en' }}" placeholder="en" />
+              </div>
+            {% elif module.slug == 'call-recordings' %}
+              <div class="form-field">
+                <label class="form-label" for="call-recordings-path">Recordings Path</label>
+                <input id="call-recordings-path" name="settings.recordings_path" class="form-input" value="{{ settings.recordings_path or '/var/lib/myportal/call_recordings' }}" placeholder="/var/lib/myportal/call_recordings" />
+                <p class="form-help">The base directory path where call recording files are stored.</p>
+              </div>
+            {% elif module.slug == 'unifi-talk' %}
+              <div class="form-field">
+                <label class="form-label" for="unifi-talk-host">Remote host</label>
+                <input id="unifi-talk-host" name="settings.remote_host" class="form-input" value="{{ settings.remote_host or '' }}" placeholder="192.168.1.100" />
+                <p class="form-help">Hostname or IP address of the Unifi Talk SFTP server.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="unifi-talk-port">Port</label>
+                <input id="unifi-talk-port" name="settings.port" class="form-input" type="number" min="1" max="65535" value="{{ settings.port or 22 }}" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="unifi-talk-username">Username</label>
+                <input id="unifi-talk-username" name="settings.username" class="form-input" value="{{ settings.username or '' }}" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="unifi-talk-password">Password</label>
+                <input id="unifi-talk-password" name="settings.password" class="form-input" type="password" autocomplete="off" placeholder="Enter a new password" />
+                <p class="form-help">Passwords are stored securely. Leave blank to keep the existing value.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="unifi-talk-remote-path">Remote path</label>
+                <input id="unifi-talk-remote-path" name="settings.remote_path" class="form-input" value="{{ settings.remote_path or '/volume1/.srv/unifi-talk/recordings' }}" placeholder="/volume1/.srv/unifi-talk/recordings" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="unifi-talk-local-path">Local path</label>
+                <input id="unifi-talk-local-path" name="settings.local_path" class="form-input" value="{{ settings.local_path or '/var/lib/myportal/call_recordings' }}" placeholder="/var/lib/myportal/call_recordings" />
+              </div>
+            {% elif module.slug == 'plausible' %}
+              <div class="form-field">
+                <label class="form-label" for="plausible-base-url">Base URL</label>
+                <input id="plausible-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="https://plausible.io" />
+                <p class="form-help">Your Plausible instance URL. Leave blank to use the default cloud instance.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="plausible-site-domain">Site domain</label>
+                <input id="plausible-site-domain" name="settings.site_domain" class="form-input" value="{{ settings.site_domain or '' }}" placeholder="example.com" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="plausible-api-key">API key</label>
+                <input id="plausible-api-key" name="settings.api_key" class="form-input" type="password" autocomplete="off" placeholder="Enter a new API key" />
+                <p class="form-help">Keys are stored securely. Leave blank to keep the existing value.</p>
+              </div>
+              <fieldset class="form-field">
+                <legend class="form-label">Tracking options</legend>
+                <div class="form-field__group form-field__group--stacked">
+                  <label class="checkbox">
+                    <input type="checkbox" name="settings.track_opens" value="true" {% if settings.track_opens is not defined or settings.track_opens %}checked{% endif %} />
+                    <span>Track email opens</span>
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" name="settings.track_clicks" value="true" {% if settings.track_clicks is not defined or settings.track_clicks %}checked{% endif %} />
+                    <span>Track email link clicks</span>
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" name="settings.track_pageviews" value="true" {% if settings.track_pageviews %}checked{% endif %} />
+                    <span>Track authenticated user pageviews</span>
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" name="settings.send_to_plausible" value="true" {% if settings.send_to_plausible %}checked{% endif %} />
+                    <span>Forward events to Plausible</span>
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" name="settings.send_pii" value="true" {% if settings.send_pii %}checked{% endif %} />
+                    <span>Include user identifiers (PII) in events</span>
+                  </label>
+                </div>
+              </fieldset>
+            {% else %}
+              {% for key, value in settings.items() %}
+                <div class="form-field">
+                  <label class="form-label">{{ key }}</label>
+                  <input class="form-input" name="settings.{{ key }}" value="{{ value }}" />
+                </div>
+              {% endfor %}
+            {% endif %}
+
+            <div class="form-actions">
+              <button type="submit" class="button">Save settings</button>
+            </div>
+          </form>
+
+          {% if module.slug == 'syncro' %}
+            <form action="/admin/syncro/import-companies" method="post" class="form card__form" data-syncro-company-import>
               {% if csrf_token %}
                 <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
               {% endif %}
-              <div class="form-field form-field--checkbox">
-                <label class="toggle">
-                  <input type="checkbox" name="enabled" value="1" {% if module.enabled %}checked{% endif %} />
-                  <span>Module enabled</span>
-                </label>
+              <div class="form-field">
+                <p class="form-help">Pull the complete Syncro customer list. Existing companies are matched by Syncro ID or name and updated in place.</p>
               </div>
-
-              {% if module.slug == 'syncro' %}
+              {% if not syncro_is_ready %}
                 <div class="form-field">
-                  <label class="form-label" for="syncro-base-url">Base URL</label>
-                  <input id="syncro-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="https://example.syncromsp.com" />
-                  <p class="form-help">Enter the Syncro tenant base URL without the trailing <code>/api/v1</code>.</p>
+                  <p class="form-help form-help--error">Enable the Syncro module and configure the base URL and API key before running imports.</p>
                 </div>
-                <div class="form-field">
-                  <label class="form-label" for="syncro-api-key">API key</label>
-                  <input id="syncro-api-key" name="settings.api_key" class="form-input" type="password" autocomplete="off" placeholder="Enter a new API key" />
-                  <p class="form-help">Keys are stored securely. Leave blank to keep the existing value.</p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="syncro-rate-limit">Rate limit (requests per minute)</label>
-                  <input id="syncro-rate-limit" name="settings.rate_limit_per_minute" class="form-input" type="number" min="1" max="600" value="{{ settings.rate_limit_per_minute or 180 }}" />
-                </div>
-              {% elif module.slug == 'ollama' %}
-                <div class="form-field">
-                  <label class="form-label" for="ollama-base-url">Base URL</label>
-                  <input id="ollama-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="http://127.0.0.1:11434" />
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="ollama-model">Model</label>
-                  <input id="ollama-model" name="settings.model" class="form-input" value="{{ settings.model or '' }}" placeholder="llama3" />
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="ollama-prompt">Prompt</label>
-                  <textarea id="ollama-prompt" name="settings.prompt" class="form-input" rows="3" placeholder="Override summary instructions">{{ settings.prompt or '' }}</textarea>
-                </div>
-              {% elif module.slug == 'smtp' %}
-                <div class="form-field">
-                  <label class="form-label" for="smtp-from">From address</label>
-                  <input id="smtp-from" name="settings.from_address" class="form-input" value="{{ settings.from_address or '' }}" placeholder="no-reply@example.com" />
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="smtp-recipients">Default recipients (comma separated)</label>
-                  <input id="smtp-recipients" name="settings.default_recipients" class="form-input" value="{{ ', '.join(settings.default_recipients) if settings.default_recipients else '' }}" />
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="smtp-prefix">Subject prefix</label>
-                  <input id="smtp-prefix" name="settings.subject_prefix" class="form-input" value="{{ settings.subject_prefix or '' }}" />
-                </div>
-              {% elif module.slug == 'smtp2go' %}
-                <div class="form-field">
-                  <label class="form-label" for="smtp2go-api-key">API key</label>
-                  <input
-                    id="smtp2go-api-key"
-                    name="settings.api_key"
-                    class="form-input"
-                    type="password"
-                    autocomplete="off"
-                    placeholder="Enter a new API key"
-                  />
-                  <p class="form-help">Keys are stored securely. Leave blank to keep the existing value.</p>
-                </div>
-                <fieldset class="form-field">
-                  <legend class="form-label">Tracking options</legend>
-                  <div class="form-field__group form-field__group--stacked">
-                    <label class="checkbox">
-                      <input type="checkbox" name="settings.enable_tracking" value="true" {% if settings.enable_tracking is not defined or settings.enable_tracking %}checked{% endif %} />
-                      <span>Enable SMTP2Go tracking for sent emails</span>
-                    </label>
-                    <label class="checkbox">
-                      <input type="checkbox" name="settings.track_opens" value="true" {% if settings.track_opens is not defined or settings.track_opens %}checked{% endif %} />
-                      <span>Track opens</span>
-                    </label>
-                    <label class="checkbox">
-                      <input type="checkbox" name="settings.track_clicks" value="true" {% if settings.track_clicks is not defined or settings.track_clicks %}checked{% endif %} />
-                      <span>Track clicks</span>
-                    </label>
-                  </div>
-                </fieldset>
-                <div class="form-field">
-                  <label class="form-label" for="smtp2go-webhook-url">Webhook URL</label>
-                  <input id="smtp2go-webhook-url" class="form-input" value="{{ request.url_for('smtp2go_webhook') }}" readonly />
-                  <p class="form-help">Configure this endpoint for SMTP2Go events (delivered, opened, clicked, bounced, spam).</p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="smtp2go-webhook-secret">Webhook secret</label>
-                  <input
-                    id="smtp2go-webhook-secret"
-                    name="settings.webhook_secret"
-                    class="form-input"
-                    type="password"
-                    autocomplete="off"
-                    placeholder="Enter a new webhook secret"
-                  />
-                  <p class="form-help">Secrets are stored securely. Leave blank to keep the existing value.</p>
-                </div>
-                <div class="form-field form-field--checkbox">
-                  <label class="toggle">
-                    <input type="checkbox" name="settings.disable_webhook_signature_verification" value="true" {% if settings.disable_webhook_signature_verification %}checked{% endif %} />
-                    <span>Disable webhook signature verification</span>
-                  </label>
-                  <p class="form-help">Process webhook events even when signature verification fails or cannot be configured.</p>
-                </div>
-              {% elif module.slug == 'imap' %}
-                <p class="form-help">Manage mailbox credentials, folders, and schedules from the dedicated IMAP workspace.</p>
-                <div class="form-actions">
-                  <a class="button" href="{{ settings.manage_url or '/admin/modules/imap' }}">Open IMAP workspace</a>
-                </div>
-              {% elif module.slug == 'tacticalrmm' %}
-                <div class="form-field">
-                  <label class="form-label" for="rmm-base-url">Base URL</label>
-                  <input id="rmm-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="https://rmm.example.com" />
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="rmm-api-key">API key</label>
-                  <input
-                    id="rmm-api-key"
-                    name="settings.api_key"
-                    class="form-input"
-                    type="password"
-                    autocomplete="off"
-                    placeholder="Enter a new API key"
-                  />
-                  <p class="form-help">Keys are stored securely. Leave blank to keep the existing value.</p>
-                </div>
-                <div class="form-field form-field--checkbox">
-                  <label class="checkbox">
-                    <input type="checkbox" name="settings.verify_ssl" value="true" {% if settings.verify_ssl is not defined or settings.verify_ssl %}checked{% endif %} />
-                    <span>Verify SSL certificates</span>
-                  </label>
-                </div>
-              {% elif module.slug == 'ntfy' %}
-                <div class="form-field">
-                  <label class="form-label" for="ntfy-base-url">Base URL</label>
-                  <input id="ntfy-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="https://ntfy.sh" />
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="ntfy-topic">Topic</label>
-                  <input id="ntfy-topic" name="settings.topic" class="form-input" value="{{ settings.topic or '' }}" placeholder="service-alerts" />
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="ntfy-token">Auth token</label>
-                  <input
-                    id="ntfy-token"
-                    name="settings.auth_token"
-                    class="form-input"
-                    type="password"
-                    autocomplete="off"
-                    placeholder="Enter a new auth token"
-                  />
-                  <p class="form-help">Tokens are stored securely. Leave blank to keep the existing value.</p>
-                </div>
-              {% elif module.slug == 'apprise' %}
-                <div class="form-field">
-                  <label class="form-label" for="apprise-urls">Notification URLs</label>
-                  <textarea
-                    id="apprise-urls"
-                    name="settings.urls"
-                    class="form-input"
-                    rows="5"
-                    placeholder="slack://tokenA/tokenB/tokenC&#10;discord://webhookid/webhooktoken&#10;mailto://user:password@gmail.com"
-                  >{{ '\n'.join(settings.urls) if settings.urls else '' }}</textarea>
-                  <p class="form-help">Enter one Apprise notification URL per line. Supports 80+ services including Slack, Discord, email, and more. See the <a href="https://github.com/caronc/apprise/wiki" target="_blank" rel="noopener noreferrer">Apprise documentation</a> for supported URL formats.</p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="apprise-title">Default title</label>
-                  <input id="apprise-title" name="settings.title" class="form-input" value="{{ settings.title or '' }}" placeholder="MyPortal" />
-                  <p class="form-help">Default notification title used when no title is provided in the automation payload.</p>
-                </div>
-              {% elif module.slug == 'uptimekuma' %}
-                <div class="form-field">
-                  <label class="form-label" for="uptimekuma-webhook">Webhook URL</label>
-                  <input id="uptimekuma-webhook" class="form-input" value="{{ request.url_for('uptimekuma_receive_alert') }}" readonly />
-                  <p class="form-help">Configure this endpoint as the HTTP POST target inside Uptime Kuma.</p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="uptimekuma-secret">Shared secret</label>
-                  <input id="uptimekuma-secret" name="settings.shared_secret" class="form-input" type="password" autocomplete="off" placeholder="Enter a new shared secret" />
-                  <p class="form-help">Secrets are stored as SHA-256 hashes. Provide the same value as a <code>Bearer</code> token or <code>?token=</code> query in Uptime Kuma.</p>
-                </div>
-                <div class="form-field form-field--checkbox">
-                  <label class="toggle">
-                    <input type="checkbox" name="settings.sync_service_status" value="true" {% if settings.sync_service_status != false %}checked{% endif %} />
-                    <span>Sync service page status from alerts</span>
-                  </label>
-                  <p class="form-help">When enabled, incoming alerts automatically update the matching service on the Services page. The monitor name in Uptime Kuma must match the service name exactly (case-insensitive).</p>
-                </div>
-              {% elif module.slug == 'chatgpt-mcp' %}
-                <div class="form-field">
-                  <label class="form-label" for="chatgpt-secret">Shared secret</label>
-                  <input id="chatgpt-secret" name="settings.shared_secret" class="form-input" type="password" autocomplete="off" placeholder="Enter a new shared secret" />
-                  <p class="form-help">Secrets are stored as SHA-256 hashes. Leave blank to keep the existing value.</p>
-                </div>
-                <fieldset class="form-field">
-                  <legend class="form-label">Enabled tools</legend>
-                  <div class="form-field__group form-field__group--stacked">
-                    {% set available_tools = ['listTickets', 'getTicket', 'createTicketReply', 'updateTicket'] %}
-                    {% for tool in available_tools %}
-                      <label class="checkbox">
-                        <input type="checkbox" name="settings.allowed_actions" value="{{ tool }}" {% if settings.allowed_actions and tool in settings.allowed_actions %}checked{% endif %} />
-                        <span>{{ tool }}</span>
-                      </label>
-                    {% endfor %}
-                  </div>
-                </fieldset>
-                <div class="form-field">
-                  <label class="form-label" for="chatgpt-max-results">Maximum tickets returned</label>
-                  <input id="chatgpt-max-results" name="settings.max_results" class="form-input" type="number" min="1" max="200" value="{{ settings.max_results or 50 }}" />
-                </div>
-                <div class="form-field form-field--checkbox">
-                  <label class="toggle">
-                    <input type="checkbox" name="settings.allow_ticket_updates" value="true" {% if settings.allow_ticket_updates %}checked{% endif %} />
-                    <span>Allow ChatGPT to update tickets</span>
-                  </label>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="chatgpt-statuses">Allowed ticket statuses</label>
-                  <input id="chatgpt-statuses" name="settings.allowed_statuses" class="form-input" value="{{ settings.allowed_statuses|join(', ') if settings.allowed_statuses else '' }}" placeholder="open, pending, in_progress" />
-                  <p class="form-help">Comma-separated list used to validate update requests.</p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="chatgpt-system-user">Default reply author (user ID)</label>
-                  <input id="chatgpt-system-user" name="settings.system_user_id" class="form-input" value="{{ settings.system_user_id or '' }}" placeholder="123" />
-                  <p class="form-help">The ticket reply author when ChatGPT posts updates. Override per request by sending author_id.</p>
-                </div>
-              {% elif module.slug == 'xero' %}
-                <div class="form-field">
-                  <label class="form-label" for="xero-callback-url">Callback URL</label>
-                  <input id="xero-callback-url" class="form-input" value="{{ request.url_for('xero_receive_callback') }}" readonly />
-                  <p class="form-help">Provide this URL as the redirect/callback endpoint inside your Xero app configuration.</p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="xero-client-id">Client ID</label>
-                  <input id="xero-client-id" name="settings.client_id" class="form-input" value="{{ settings.client_id or '' }}" autocomplete="off" />
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="xero-client-secret">Client secret</label>
-                  <input
-                    id="xero-client-secret"
-                    name="settings.client_secret"
-                    class="form-input"
-                    type="password"
-                    autocomplete="off"
-                    value="{{ settings.client_secret or '' }}"
-                    placeholder="Enter a new client secret"
-                  />
-                  <p class="form-help">Secrets are stored securely. Leave blank or enter ******** to keep the existing value.</p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="xero-refresh-token">Refresh token</label>
-                  <input
-                    id="xero-refresh-token"
-                    name="settings.refresh_token"
-                    class="form-input"
-                    type="password"
-                    autocomplete="off"
-                    value="{{ settings.refresh_token or '' }}"
-                    placeholder="Enter a new refresh token"
-                  />
-                  <p class="form-help">Tokens are encrypted before storage. Leave blank or enter ******** to keep the existing value.</p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="xero-tenant-id">Xero Tenant</label>
-                  <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
-                    <div style="flex: 1;">
-                      <select id="xero-tenant-id" name="settings.tenant_id" class="form-input" style="width: 100%;">
-                        <option value="">-- Select a Xero organization --</option>
-                        {% if settings.tenant_id %}
-                          <option value="{{ settings.tenant_id }}" selected>{{ settings.tenant_id }}</option>
-                        {% endif %}
-                      </select>
-                    </div>
-                    <button
-                      type="button"
-                      id="xero-load-tenants"
-                      class="button button--ghost"
-                      style="white-space: nowrap;"
-                      title="Refresh Xero organizations"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: inline-block; vertical-align: middle;">
-                        <path d="M13.65 2.35C12.2 0.9 10.21 0 8 0 3.58 0 0.01 3.58 0.01 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35z" fill="currentColor"/>
-                      </svg>
-                    </button>
-                  </div>
-                  <p class="form-help">Select your Xero organization from the list.</p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="xero-line-amount-type">Line amount type</label>
-                  <select id="xero-line-amount-type" name="settings.line_amount_type" class="form-input">
-                    {% set amount_type = (settings.line_amount_type or 'Exclusive') %}
-                    {% for option in ['Exclusive', 'Inclusive', 'NoTax'] %}
-                      <option value="{{ option }}" {% if amount_type == option %}selected{% endif %}>{{ option }}</option>
-                    {% endfor %}
-                  </select>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="xero-reference-prefix">Reference prefix</label>
-                  <input id="xero-reference-prefix" name="settings.reference_prefix" class="form-input" value="{{ settings.reference_prefix or '' }}" placeholder="Support" />
-                  <p class="form-help">Prefixes are prepended to generated invoice references.</p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="xero-billable-statuses">Billable ticket statuses</label>
-                  <input
-                    id="xero-billable-statuses"
-                    name="settings.billable_statuses"
-                    class="form-input"
-                    value="{{ settings.billable_statuses|join(', ') if settings.billable_statuses else '' }}"
-                    placeholder="resolved, closed"
-                  />
-                  <p class="form-help">
-                    Tickets must match one of these technical status values to be synchronised. Separate multiple statuses with
-                    commas.
-                  </p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="xero-description-template">Line item description template</label>
-                  <input
-                    id="xero-description-template"
-                    name="settings.line_item_description_template"
-                    class="form-input"
-                    value="{{ settings.line_item_description_template or '' }}"
-                    placeholder="Ticket #{ticket_id} - {ticket_subject} - {labour_name}"
-                  />
-                  <p class="form-help">
-                    Template for invoice line item descriptions when syncing billable tickets to Xero. 
-                    Available placeholders: {ticket_id}, {ticket_subject}, {ticket_status}, {labour_name}, {labour_code},
-                    {labour_minutes}, {labour_hours}, and {labour_suffix}. 
-                    Default: "Ticket {ticket_id}: {ticket_subject}{labour_suffix}"
-                  </p>
-                </div>
-              {% elif module.slug == 'sms-gateway' %}
-                <div class="form-field">
-                  <label class="form-label" for="sms-gateway-url">Gateway URL</label>
-                  <input id="sms-gateway-url" name="settings.gateway_url" class="form-input" value="{{ settings.gateway_url or '' }}" placeholder="https://sms.example.com/api/send" />
-                  <p class="form-help">Enter the HTTP POST endpoint for your SMS gateway.</p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="sms-gateway-auth">Authorization header</label>
-                  <input
-                    id="sms-gateway-auth"
-                    name="settings.authorization"
-                    class="form-input"
-                    type="password"
-                    autocomplete="off"
-                    placeholder="Enter authorization header value"
-                  />
-                  <p class="form-help">Authorization header value (e.g., "Bearer token123"). Leave blank to keep the existing value.</p>
-                </div>
-              {% elif module.slug == 'whisperx' %}
-                <div class="form-field">
-                  <label class="form-label" for="whisperx-base-url">Base URL</label>
-                  <input id="whisperx-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="http://whisperx-server:8000" />
-                  <p class="form-help">The WhisperX server endpoint for transcription requests.</p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="whisperx-api-key">API Key (optional)</label>
-                  <input id="whisperx-api-key" name="settings.api_key" class="form-input" type="password" autocomplete="off" placeholder="Enter a new API key" />
-                  <p class="form-help">Bearer token for authentication. Leave blank to keep existing value or if no auth required.</p>
-                </div>
-                <div class="form-field">
-                  <label class="form-label" for="whisperx-language">Default Language</label>
-                  <input id="whisperx-language" name="settings.language" class="form-input" value="{{ settings.language or 'en' }}" placeholder="en" />
-                  <p class="form-help">Language code for transcription (e.g., en, es, fr, de).</p>
-                </div>
-              {% elif module.slug == 'call-recordings' %}
-                <div class="form-field">
-                  <label class="form-label" for="call-recordings-path">Recordings Path</label>
-                  <input id="call-recordings-path" name="settings.recordings_path" class="form-input" value="{{ settings.recordings_path or '/var/lib/myportal/call_recordings' }}" placeholder="/var/lib/myportal/call_recordings" />
-                  <p class="form-help">The base directory path where call recording files are stored. Ensure the application has read/write permissions to this location.</p>
-                </div>
-              {% else %}
-                {% for key, value in settings.items() %}
-                  <div class="form-field">
-                    <label class="form-label">{{ key }}</label>
-                    <input class="form-input" name="settings.{{ key }}" value="{{ value }}" />
-                  </div>
-                {% endfor %}
               {% endif %}
               <div class="form-actions">
-                <button type="submit" class="button">Save settings</button>
+                <button type="submit" class="button button--secondary" {% if not syncro_is_ready %}disabled{% endif %}>
+                  Import Syncro companies
+                </button>
               </div>
             </form>
-            {% if module.slug == 'syncro' %}
-              <form
-                action="/admin/syncro/import-companies"
-                method="post"
-                class="form card__form"
-                data-syncro-company-import
-              >
-                {% if csrf_token %}
-                  <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                {% endif %}
-                <div class="form-field">
-                  <p class="form-help">
-                    Pull the complete Syncro customer list. Existing companies are matched by Syncro ID or name
-                    and updated in place.
-                  </p>
-                </div>
-                <div class="form-field">
-                  <p class="form-help">
-                    The importer will create new companies, update addresses, and attach Syncro identifiers where
-                    missing.
-                  </p>
-                </div>
-                {% if not syncro_is_ready %}
-                  <div class="form-field">
-                    <p class="form-help form-help--error">
-                      Enable the Syncro module and configure the base URL and API key before running imports.
-                    </p>
-                  </div>
-                {% endif %}
-                <div class="form-actions">
-                  <button
-                    type="submit"
-                    class="button button--secondary"
-                    {% if not syncro_is_ready %}disabled{% endif %}
-                  >
-                    Import Syncro companies
-                  </button>
-                </div>
-              </form>
-            {% endif %}
-            {% if module.slug == 'tacticalrmm' %}
-              <form action="/admin/modules/tacticalrmm/push-companies" method="post" class="form card__form">
-                {% if csrf_token %}
-                  <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                {% endif %}
-                <div class="form-field">
-                  <p class="form-help">
-                    Push all companies from My Portal to Tactical RMM. Missing clients will be created with a
-                    <strong>Default</strong> site, and existing clients gain the Default site when absent.
-                  </p>
-                </div>
-                <div class="form-actions">
-                  <button type="submit" class="button button--secondary">Push companies to Tactical RMM</button>
-                </div>
-              </form>
-            {% endif %}
-            </div>
-          </details>
-        {% endfor %}
+          {% endif %}
+
+          {% if module.slug == 'tacticalrmm' %}
+            <form action="/admin/modules/tacticalrmm/push-companies" method="post" class="form card__form">
+              {% if csrf_token %}
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+              {% endif %}
+              <div class="form-field">
+                <p class="form-help">Push all companies from My Portal to Tactical RMM. Missing clients will be created with a <strong>Default</strong> site, and existing clients gain the Default site when absent.</p>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button button--secondary">Push companies to Tactical RMM</button>
+              </div>
+            </form>
+          {% endif %}
+
+        </div>
       </div>
-    </section>
-  </div>
+    {% endif %}
+  {% endfor %}
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
 {% endblock %}
-
