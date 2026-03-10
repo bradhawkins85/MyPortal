@@ -315,17 +315,18 @@ async def _execute_automation(
                             background=False,
                         )
                     except Exception as exc:  # pragma: no cover - network/runtime guard
+                        exc_message = str(exc)
                         status = "failed"
                         if not error_message:
-                            error_message = str(exc)
+                            error_message = exc_message
                         results.append(
-                            {"module": module_slug, "status": "failed", "error": str(exc)}
+                            {"module": module_slug, "status": "failed", "error": exc_message}
                         )
                         logger.error(
                             "Automation action failed",
                             automation_id=automation_id,
                             module=module_slug,
-                            error=str(exc),
+                            error=exc_message,
                         )
                         continue
 
