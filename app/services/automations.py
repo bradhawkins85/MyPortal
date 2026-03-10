@@ -315,18 +315,20 @@ async def _execute_automation(
                             background=False,
                         )
                     except Exception as exc:  # pragma: no cover - network/runtime guard
+                        exc_message = str(exc)
                         status = "failed"
-                        error_message = str(exc)
+                        if not error_message:
+                            error_message = exc_message
                         results.append(
-                            {"module": module_slug, "status": "failed", "error": str(exc)}
+                            {"module": module_slug, "status": "failed", "error": exc_message}
                         )
                         logger.error(
-                            "Automation execution failed",
+                            "Automation action failed",
                             automation_id=automation_id,
                             module=module_slug,
-                            error=str(exc),
+                            error=exc_message,
                         )
-                        break
+                        continue
 
                     if isinstance(action_result, Mapping):
                         action_status_raw = action_result.get("status") or action_result.get("event_status")
@@ -360,7 +362,6 @@ async def _execute_automation(
                         status = "failed"
                         if not error_message:
                             error_message = str(action_error or "Module action failed")
-                        break
                 if status == "failed" and not error_message:
                     error_message = "One or more trigger actions failed"
                 result_payload = results
