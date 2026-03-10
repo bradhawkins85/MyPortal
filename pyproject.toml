@@ -35,6 +35,7 @@ dependencies = [
     "weasyprint>=60.0",
     "paramiko",
     "defusedxml",
+    "apprise>=1.9.8",
 ]
 
 [project.optional-dependencies]
