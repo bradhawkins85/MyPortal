@@ -2987,6 +2987,21 @@
     });
   }
 
+  function bindModuleSettingsModals() {
+    const buttons = document.querySelectorAll('[data-edit-module-open]');
+    const slugsSeen = new Set();
+    buttons.forEach((button) => {
+      const slug = button.dataset.editModuleOpen;
+        return;
+      }
+      slugsSeen.add(slug);
+      bindModal({
+        modalId: `module-settings-modal-${slug}`,
+        triggerSelector: `[data-edit-module-open="${slug}"]`,
+      });
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     bindSyncroTicketImportForms();
     bindSyncroCompanyImportForm();
@@ -3015,6 +3030,7 @@
     bindCompanyUnarchiveButtons();
     bindOrderDeleteButtons();
     bindXeroTenantSelector();
+    bindModuleSettingsModals();
     bindModal({ modalId: 'add-company-modal', triggerSelector: '[data-add-company-modal-open]' });
     bindModal({ modalId: 'create-ticket-modal', triggerSelector: '[data-create-ticket-modal-open]' });
     bindModal({ modalId: 'create-api-key-modal', triggerSelector: '[data-create-api-key-modal-open]' });
