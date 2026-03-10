@@ -13,10 +13,10 @@
 
   const FILTER_SNIPPETS = [
     {
-      label: 'Match status equals "open"',
+      label: 'Match ticket status equals "open"',
       value: toJsonTemplate({
         match: {
-          status: 'open',
+          'ticket.status': 'open',
         },
       }),
     },
@@ -29,29 +29,29 @@
       }),
     },
     {
-      label: 'Match any status open or pending',
+      label: 'Match any ticket status open or pending',
       value: toJsonTemplate({
         any: [
-          { match: { status: 'open' } },
-          { match: { status: 'pending' } },
+          { match: { 'ticket.status': 'open' } },
+          { match: { 'ticket.status': 'pending' } },
         ],
       }),
     },
     {
-      label: 'Require status open and priority high',
+      label: 'Require ticket status open and priority high',
       value: toJsonTemplate({
         all: [
-          { match: { status: 'open' } },
+          { match: { 'ticket.status': 'open' } },
           { match: { 'ticket.priority': 'high' } },
         ],
       }),
     },
     {
-      label: 'Exclude cancelled status',
+      label: 'Exclude cancelled ticket status',
       value: toJsonTemplate({
         not: {
           match: {
-            status: 'cancelled',
+            'ticket.status': 'cancelled',
           },
         },
       }),

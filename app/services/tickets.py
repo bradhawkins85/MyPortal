@@ -989,6 +989,7 @@ async def _send_ticket_creation_email(
     # admin-configured JSON templates are honoured for external requesters too.
     context: dict[str, Any] = {"ticket": dict(enriched_ticket)}
     rendered_message: str | None = None
+    event_setting: dict[str, Any] = {}
     try:
         event_setting = await notification_event_settings.get_event_setting("tickets.created")
         template = str(event_setting.get("message_template") or "")
@@ -1001,6 +1002,19 @@ async def _send_ticket_creation_email(
             error=str(exc),
         )
         rendered_message = None
+
+    # Skip the generic direct email when module_actions already include an
+    # email-delivery module (smtp2go or smtp). This prevents sending a duplicate
+    # generic notification email alongside the custom action email.
+    _module_actions = event_setting.get("module_actions") or [] if event_setting else []
+    _has_email_action = any(
+        str(action.get("module") or "").strip() in notifications_service._EMAIL_DELIVERY_MODULES
+        for action in _module_actions
+        if isinstance(action, Mapping)
+    )
+    if _has_email_action:
+        # Let the module_actions handle email delivery instead
+        return
 
     if not rendered_message:
         # Fallback when the template cannot be loaded or rendered.

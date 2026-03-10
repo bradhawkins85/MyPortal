@@ -159,6 +159,16 @@ def _filters_match(filters: Mapping[str, Any] | None, context: Mapping[str, Any]
     for key, expected in matchers.items():
         lookup_key = str(key)
         actual = _resolve_context_value(context, lookup_key)
+        # Backward-compatible fallback: bare keys (no dot) that don't resolve at
+        # the top level are re-tried under "ticket" when that sub-context exists.
+        # This makes filters like {"status": "new"} equivalent to
+        # {"ticket.status": "new"} for ticket events.
+        if actual is None and "." not in lookup_key and isinstance(context, Mapping):
+            ticket_ctx = context.get("ticket")
+            if isinstance(ticket_ctx, Mapping):
+                fallback = _resolve_context_value(ticket_ctx, lookup_key)
+                if fallback is not None:
+                    actual = fallback
         if isinstance(expected, Mapping):
             if not isinstance(actual, Mapping):
                 return False
