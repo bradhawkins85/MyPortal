@@ -32,7 +32,14 @@ class UptimeKumaAlertPayload(BaseModel):
         default=None,
         validation_alias=AliasChoices("monitorPort", "monitor_port"),
     )
-    status: str = Field(..., description="Current status reported by Uptime Kuma (e.g. up, down).")
+    status: str | None = Field(
+        default=None,
+        description=(
+            "Current status reported by Uptime Kuma (e.g. up, down). "
+            "May be omitted when the alert is delivered via Apprise, in which case "
+            "the value is derived from the ``type`` / ``alert_type`` field."
+        ),
+    )
     previous_status: str | None = Field(
         default=None,
         validation_alias=AliasChoices("previousStatus", "previous_status"),
@@ -90,5 +97,4 @@ class UptimeKumaAlertResponse(BaseModel):
 class UptimeKumaAlertIngestResponse(BaseModel):
     status: str
     alert_id: int
-    service_status_updated: bool = False
     service_status_updated: bool = False

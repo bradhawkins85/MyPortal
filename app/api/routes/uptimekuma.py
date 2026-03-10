@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from loguru import logger
 
 from app.api.dependencies.auth import require_super_admin
 from app.schemas.uptimekuma import (
@@ -25,6 +26,20 @@ async def receive_alert(
     payload: UptimeKumaAlertPayload,
     token: str | None = Query(default=None, description="Optional token fallback when Authorization header is unavailable."),
 ) -> UptimeKumaAlertIngestResponse:
+    logger.debug(
+        "Uptime Kuma webhook request received",
+        method=request.method,
+        url=str(request.url),
+        content_type=request.headers.get("content-type"),
+        user_agent=request.headers.get("user-agent"),
+        remote_addr=request.client.host if request.client else None,
+        has_auth_header=bool(request.headers.get("authorization")),
+        has_token_param=bool(token),
+        payload_status=payload.status,
+        payload_alert_type=payload.alert_type,
+        payload_title=payload.title,
+        payload_monitor_name=payload.monitor_name,
+    )
     auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
     provided_secret: str | None = None
     if auth_header and auth_header.lower().startswith("bearer "):

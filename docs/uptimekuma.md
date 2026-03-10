@@ -23,12 +23,40 @@ searchable through the admin API, and available for automations.
 
 ## Payload Handling
 
-The ingestion endpoint accepts the default JSON schema emitted by Uptime Kuma
-and records the following fields for search and filtering:
+The ingestion endpoint accepts both the native JSON webhook schema emitted by
+Uptime Kuma and the condensed Apprise notification format.
+
+### Native Uptime Kuma webhook
+
+Configure the Uptime Kuma notification type as **Webhook** with JSON body.
+Uptime Kuma populates fields such as `status`, `monitorName`, `monitorID`,
+`msg`, `duration`, `ping`, and `time`.
+
+### Apprise notification
+
+When Uptime Kuma is configured to send alerts via the **Apprise** notification
+type pointing at this endpoint, Apprise delivers a simplified payload:
+
+```json
+{
+  "version": "1.0",
+  "title": "[UP] My Service",
+  "message": "My Service is back online",
+  "type": "success"
+}
+```
+
+The `type` field (`success`, `failure`, `warning`, `info`) is used as the
+alert status when no explicit `status` value is present, and the monitor name
+is extracted from the `title` prefix (e.g. `[UP] My Service` → `My Service`).
+
+### Recorded fields
+
+The following fields are parsed and stored for search and filtering:
 
 - `monitor_id`, `monitor_name`, `monitor_url`
 - `status` and `previousStatus`
-- `alert type`, `reason`, and `msg`
+- `alert_type`, `reason`, and `msg`/`message`
 - Duration and ping metrics
 - Event identifiers (`uuid`, `incidentId`, or the provided ID field)
 - Remote address and user agent of the caller

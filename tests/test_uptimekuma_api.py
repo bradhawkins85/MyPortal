@@ -212,3 +212,37 @@ def test_get_alert_not_found(monkeypatch):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Alert not found"
+
+def test_receive_alert_apprise_payload_accepted(monkeypatch):
+    """Apprise-format payloads (no 'status' field, only 'type') must return 202."""
+    logged_calls = []
+
+    async def fake_ingest_alert(**kwargs):
+        return {"id": 42, "monitor_name": "My API"}
+
+    async def fake_log_incoming_webhook(**kwargs):
+        logged_calls.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(uptime_service, "ingest_alert", fake_ingest_alert)
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", fake_log_incoming_webhook)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/integration-modules/uptimekuma/alerts",
+            json={
+                "version": "1.0",
+                "title": "[DOWN] My API",
+                "message": "My API is unreachable",
+                "type": "failure",
+            },
+            headers={"Authorization": "Bearer secret-token"},
+        )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "accepted"
+    assert payload["alert_id"] == 42
+
+    assert len(logged_calls) == 1
+    assert logged_calls[0]["response_status"] == 202
