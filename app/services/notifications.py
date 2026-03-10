@@ -16,6 +16,11 @@ from app.services import sms as sms_service
 from app.services import value_templates
 
 
+# Modules that deliver email - when these are configured as module_actions,
+# the generic channel_email send is skipped to prevent duplicate emails.
+_EMAIL_DELIVERY_MODULES: frozenset[str] = frozenset({"smtp2go", "smtp"})
+
+
 async def emit_notification(
     *,
     event_type: str,
@@ -150,7 +155,18 @@ async def emit_notification(
             )
             user = None
 
-    if channels["channel_email"]:
+    # Skip the generic channel_email send when module_actions already include
+    # an email-delivery module (smtp2go or smtp). This prevents duplicate emails
+    # where both the generic notification email and the custom action email would
+    # otherwise be sent via the same SMTP2Go backend.
+    _module_actions = event_setting.get("module_actions") or []
+    _has_email_action = any(
+        str(action.get("module") or "").strip() in _EMAIL_DELIVERY_MODULES
+        for action in _module_actions
+        if isinstance(action, Mapping)
+    )
+
+    if channels["channel_email"] and not _has_email_action:
         if user_id is None:
             logger.warning(
                 "Email delivery requested for notification but no user_id provided",
