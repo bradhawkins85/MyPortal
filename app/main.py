@@ -1286,7 +1286,7 @@ async def handle_request_validation_error(request: Request, exc: RequestValidati
             user_agent=request.headers.get("user-agent"),
         )
     return JSONResponse(
-        {"detail": exc.errors()},
+        content=jsonable_encoder({"detail": exc.errors()}),
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     )
 
