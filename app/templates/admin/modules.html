@@ -29,11 +29,12 @@
               </tr>
             </thead>
             <tbody>
+              {% set internal_slugs = ['create-ticket', 'create-task', 'update-ticket', 'update-ticket-description', 'add-ticket-reply', 'reprocess-ai'] %}
               {% for module in modules %}
-                {% set is_internal = module.slug in ['create-ticket', 'create-task', 'update-ticket', 'update-ticket-description', 'add-ticket-reply', 'reprocess-ai'] %}
+                {% set is_internal = module.slug in internal_slugs %}
                 <tr>
                   <td data-label="Module">
-                    <span aria-hidden="true">{{ module.icon or '\U0001f50c' }}</span>
+                    <span aria-hidden="true">{{ module.icon or '🔌' }}</span>
                     <strong>{{ module.name }}</strong>
                   </td>
                   <td data-label="Description" data-mobile-hidden="true">{{ module.description }}</td>
@@ -93,8 +94,6 @@
     </section>
   </div>
 
-  {% set internal_slugs = ['create-ticket', 'create-task', 'update-ticket', 'update-ticket-description', 'add-ticket-reply', 'reprocess-ai'] %}
-
   {% for module in modules %}
     {% set settings = module.settings or {} %}
     {% if module.slug not in internal_slugs and module.slug != 'imap' %}
@@ -113,7 +112,7 @@
             &times;
           </button>
           <h2 class="modal__title" id="module-settings-title-{{ module.slug }}">
-            {{ module.icon or '\U0001f50c' }} {{ module.name }}
+            {{ module.icon or '🔌' }} {{ module.name }}
           </h2>
           <p class="modal__text text-muted">{{ module.description }}</p>
 
