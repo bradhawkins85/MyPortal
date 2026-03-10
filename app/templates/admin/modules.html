@@ -6,7 +6,7 @@
       <header class="management__header">
         <div>
           <h1 class="management__title">Integration modules</h1>
-          <p class="management__subtitle">Synchronise credentials and delivery endpoints for Syncro, Ollama, SMTP, TacticalRMM, ntfy, Uptime Kuma, ChatGPT, and SMS Gateway.</p>
+          <p class="management__subtitle">Synchronise credentials and delivery endpoints for Syncro, Ollama, SMTP, TacticalRMM, ntfy, Apprise, Uptime Kuma, ChatGPT, and SMS Gateway.</p>
         </div>
       </header>
 
@@ -204,7 +204,24 @@
                   />
                   <p class="form-help">Tokens are stored securely. Leave blank to keep the existing value.</p>
                 </div>
-                                          {% elif module.slug == 'uptimekuma' %}
+              {% elif module.slug == 'apprise' %}
+                <div class="form-field">
+                  <label class="form-label" for="apprise-urls">Notification URLs</label>
+                  <textarea
+                    id="apprise-urls"
+                    name="settings.urls"
+                    class="form-input"
+                    rows="5"
+                    placeholder="slack://tokenA/tokenB/tokenC&#10;discord://webhookid/webhooktoken&#10;mailto://user:password@gmail.com"
+                  >{{ '\n'.join(settings.urls) if settings.urls else '' }}</textarea>
+                  <p class="form-help">Enter one Apprise notification URL per line. Supports 80+ services including Slack, Discord, email, and more. See the <a href="https://github.com/caronc/apprise/wiki" target="_blank" rel="noopener noreferrer">Apprise documentation</a> for supported URL formats.</p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="apprise-title">Default title</label>
+                  <input id="apprise-title" name="settings.title" class="form-input" value="{{ settings.title or '' }}" placeholder="MyPortal" />
+                  <p class="form-help">Default notification title used when no title is provided in the automation payload.</p>
+                </div>
+              {% elif module.slug == 'uptimekuma' %}
                 <div class="form-field">
                   <label class="form-label" for="uptimekuma-webhook">Webhook URL</label>
                   <input id="uptimekuma-webhook" class="form-input" value="{{ request.url_for('uptimekuma_receive_alert') }}" readonly />
