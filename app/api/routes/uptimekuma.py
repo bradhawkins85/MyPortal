@@ -9,6 +9,7 @@ from app.schemas.uptimekuma import (
     UptimeKumaAlertResponse,
 )
 from app.services import uptimekuma as uptimekuma_service
+from app.services import webhook_monitor
 
 router = APIRouter(prefix="/api/integration-modules/uptimekuma", tags=["Uptime Kuma"])
 
@@ -34,20 +35,61 @@ async def receive_alert(
     remote_addr = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent") or request.headers.get("User-Agent")
 
+    source_url = str(request.url)
+    request_headers = dict(request.headers)
+    raw_payload = payload.model_dump(mode="json", by_alias=True)
+
     try:
         record = await uptimekuma_service.ingest_alert(
             payload=payload,
-            raw_payload=payload.model_dump(mode="json", by_alias=True),
+            raw_payload=raw_payload,
             provided_secret=provided_secret,
             remote_addr=remote_addr,
             user_agent=user_agent,
         )
     except uptimekuma_service.AuthenticationError as exc:
+        await webhook_monitor.log_incoming_webhook(
+            name="Uptime Kuma Webhook - Authentication Failed",
+            source_url=source_url,
+            payload=raw_payload,
+            headers=request_headers,
+            response_status=status.HTTP_401_UNAUTHORIZED,
+            response_body=str(exc),
+            error_message=str(exc),
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     except uptimekuma_service.ModuleDisabledError as exc:
+        await webhook_monitor.log_incoming_webhook(
+            name="Uptime Kuma Webhook - Module Disabled",
+            source_url=source_url,
+            payload=raw_payload,
+            headers=request_headers,
+            response_status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            response_body=str(exc),
+            error_message=str(exc),
+        )
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except ValueError as exc:
+        await webhook_monitor.log_incoming_webhook(
+            name="Uptime Kuma Webhook - Invalid Payload",
+            source_url=source_url,
+            payload=raw_payload,
+            headers=request_headers,
+            response_status=status.HTTP_400_BAD_REQUEST,
+            response_body=str(exc),
+            error_message=str(exc),
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    monitor_name = record.get("monitor_name") or "Unknown Monitor"
+    await webhook_monitor.log_incoming_webhook(
+        name=f"Uptime Kuma Webhook - {monitor_name}",
+        source_url=source_url,
+        payload=raw_payload,
+        headers=request_headers,
+        response_status=status.HTTP_202_ACCEPTED,
+        response_body="accepted",
+    )
 
     return UptimeKumaAlertIngestResponse(
         status="accepted",
