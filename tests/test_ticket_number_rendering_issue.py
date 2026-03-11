@@ -156,3 +156,43 @@ async def test_ticket_number_id_fallback_renders_in_template():
     )
     assert rendered == "Ticket #99", \
         "{{ticket.ticket_number}} should render the id when ticket_number is NULL in the DB"
+
+
+# ---------------------------------------------------------------------------
+# Verify {{ ticket.id }} always displays something
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_ticket_id_renders_standalone():
+    """{{ ticket.id }} should render the integer database id."""
+    context = {"ticket": {"id": 7, "subject": "Test"}}
+    rendered = await value_templates.render_string_async("{{ticket.id}}", context)
+    assert rendered == 7, \
+        "{{ticket.id}} (standalone single-token) should return the integer id"
+
+
+@pytest.mark.anyio
+async def test_ticket_id_renders_in_mixed_string():
+    """{{ ticket.id }} embedded in a string should stringify to the id."""
+    context = {"ticket": {"id": 55, "subject": "Test"}}
+    rendered = await value_templates.render_string_async("Ticket #{{ticket.id}}", context)
+    assert rendered == "Ticket #55", \
+        "{{ticket.id}} in a mixed string should render as the id digits"
+
+
+@pytest.mark.anyio
+async def test_ticket_id_renders_after_enrichment():
+    """{{ ticket.id }} still works correctly after _enrich_ticket_context is called."""
+    raw_ticket = {
+        "id": 101,
+        "ticket_number": None,
+        "subject": "Network down",
+    }
+    enriched = await _enrich_ticket_context(raw_ticket)
+    context = {"ticket": enriched}
+
+    rendered = await value_templates.render_string_async(
+        "id={{ticket.id}} number={{ticket.ticket_number}}", context
+    )
+    assert rendered == "id=101 number=101", \
+        "Both {{ticket.id}} and {{ticket.ticket_number}} should render the same db id"
