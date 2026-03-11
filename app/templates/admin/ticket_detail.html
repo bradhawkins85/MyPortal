@@ -87,6 +87,7 @@
                   id="ticket-requester-detail"
                   name="requesterId"
                   class="form-input"
+                  data-ticket-requester-select
                   {% if not ticket.company_id %}disabled aria-disabled="true"{% endif %}
                 >
                   <option value="">Not set</option>
@@ -96,11 +97,19 @@
                     </option>
                   {% endfor %}
                 </select>
-                {% if not ticket.company_id %}
-                  <p class="form-help">Link a company before selecting a requester.</p>
-                {% elif not ticket_requester_options %}
-                  <p class="form-help">No enabled staff members are available for the linked company.</p>
-                {% endif %}
+                <p
+                  class="form-help"
+                  data-ticket-requester-help
+                  data-help-disabled="Link a company before selecting a requester."
+                  data-help-empty="No enabled staff members are available for the linked company."
+                  {% if ticket.company_id and ticket_requester_options %}hidden{% endif %}
+                >
+                  {% if not ticket.company_id %}
+                    Link a company before selecting a requester.
+                  {% elif not ticket_requester_options %}
+                    No enabled staff members are available for the linked company.
+                  {% endif %}
+                </p>
               </div>
               <div class="form-field">
                 <label class="form-label" for="ticket-assigned-detail">Assigned to</label>
