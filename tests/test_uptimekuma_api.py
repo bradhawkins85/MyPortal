@@ -275,3 +275,64 @@ def test_receive_alert_apprise_payload_accepted(monkeypatch):
 
     assert len(logged_calls) == 1
     assert logged_calls[0]["response_status"] == 202
+
+
+def test_receive_alert_apprise_form_encoded_payload_accepted(monkeypatch):
+    """Apprise can deliver as form data; endpoint should parse and accept it."""
+    logged_calls = []
+
+    async def fake_ingest_alert(**kwargs):
+        payload = kwargs["payload"]
+        assert payload.alert_type == "failure"
+        assert payload.title == "[DOWN] Branch Firewall"
+        return {"id": 88, "monitor_name": "Branch Firewall"}
+
+    async def fake_log_incoming_webhook(**kwargs):
+        logged_calls.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(uptime_service, "ingest_alert", fake_ingest_alert)
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", fake_log_incoming_webhook)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/integration-modules/uptimekuma/alerts",
+            data={
+                "title": "[DOWN] Branch Firewall",
+                "message": "Branch firewall is down",
+                "type": "failure",
+            },
+            headers={
+                "Authorization": "Bearer secret-token",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["status"] == "accepted"
+    assert body["alert_id"] == 88
+    assert len(logged_calls) == 1
+    assert logged_calls[0]["response_status"] == 202
+
+
+def test_receive_alert_invalid_json_logs_webhook(monkeypatch):
+    logged_calls = []
+
+    async def fake_log_incoming_webhook(**kwargs):
+        logged_calls.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", fake_log_incoming_webhook)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/integration-modules/uptimekuma/alerts",
+            data='{"status":',
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert len(logged_calls) == 1
+    assert "Invalid JSON" in logged_calls[0]["name"]
+    assert logged_calls[0]["response_status"] == 400
