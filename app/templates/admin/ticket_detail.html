@@ -20,6 +20,7 @@
             'closed': 'badge--muted'
           } %}
           {% set ai_badge_map = {'succeeded': 'badge--success', 'error': 'badge--danger', 'skipped': 'badge--muted', 'unknown': 'badge--muted'} %}
+          {% set ai_date_color_map = {'succeeded': '#bbf7d0', 'error': '#fecaca', 'skipped': 'rgba(226, 232, 240, 0.75)', 'unknown': 'rgba(226, 232, 240, 0.75)'} %}
           {% set resolution_label_map = {'likely_resolved': 'Likely Resolved', 'likely_in_progress': 'Likely In Progress'} %}
           {% set resolution_badge_map = {'likely_resolved': 'badge--success', 'likely_in_progress': 'badge--warning'} %}
           {% set ai_status_value = ticket.ai_summary_status if ticket.ai_summary_status is not none else 'skipped' %}
@@ -600,17 +601,11 @@
           {% if ticket.ai_summary or ticket.ai_summary_status %}
             <details class="card card--panel card-collapsible" data-ticket-ai-card open>
               <summary class="card__header card__header--collapsible">
-                <div>
+                <div style="display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap;">
                   <h2 class="card__title">AI Summary</h2>
-                  <p class="card__subtitle">
-                    <span class="badge {{ ai_badge_map.get(ai_status_lower, 'badge--warning') }}">{{ ai_status_label }}</span>
-                    {% if ticket.ai_summary_model %}
-                      <span>{{ ticket.ai_summary_model }}</span>
-                    {% endif %}
-                    {% if ticket.ai_summary_updated_at %}
-                      <span>Updated {{ ticket.ai_summary_updated_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</span>
-                    {% endif %}
-                  </p>
+                  {% if ticket.ai_summary_updated_at %}
+                    <span class="card__subtitle" style="margin: 0; color: {{ ai_date_color_map.get(ai_status_lower, 'rgba(226, 232, 240, 0.75)') }}">Updated {{ ticket.ai_summary_updated_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</span>
+                  {% endif %}
                 </div>
                 <div class="card__collapsible-meta">
                   <div class="button-group">
