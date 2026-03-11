@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block extra_head %}
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/suneditor@2.47.0/dist/css/suneditor.min.css" />
+  <link rel="stylesheet" href="{{ static_url('/static/css/suneditor.min.css') }}" />
 {% endblock %}
 
 {% block header_title %}
@@ -35,7 +35,7 @@
           id="message-template-slug"
           name="slug"
           maxlength="120"
-          pattern="^[a-z0-9](?:[a-z0-9._-]{0,118}[a-z0-9])?$"
+          pattern="^[a-z0-9](?:[a-z0-9._\-]{0,118}[a-z0-9])?$"
           required
           placeholder="welcome.email"
           aria-describedby="message-template-slug-help"
@@ -121,6 +121,6 @@
 
 {% block scripts %}
   {{ super() }}
-  <script src="https://cdn.jsdelivr.net/npm/suneditor@2.47.0/dist/suneditor.min.js"></script>
+  <script src="{{ static_url('/static/js/suneditor.min.js') }}"></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
 {% endblock %}
