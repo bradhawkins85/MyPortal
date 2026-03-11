@@ -1365,7 +1365,8 @@ async def _invoke_smtp(
     *,
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
-    recipients = _ensure_list(payload.get("recipients")) or _ensure_list(settings.get("default_recipients"))
+    # Support both 'to' (SMTP2Go API format) and 'recipients' (legacy format)
+    recipients = _ensure_list(payload.get("to") or payload.get("recipients")) or _ensure_list(settings.get("default_recipients"))
     subject_prefix = str(settings.get("subject_prefix") or "").strip()
     # Use payload value if key exists, even if empty string (template may have rendered to empty)
     if "subject" in payload:
@@ -1375,14 +1376,19 @@ async def _invoke_smtp(
     if subject_prefix:
         subject = f"{subject_prefix} {subject}".strip()
     # Use payload value if key exists, even if empty string (template may have rendered to empty)
+    # Support 'html', 'html_body', and 'body' keys for compatibility with SMTP2Go format
     if "html" in payload:
         html_body = str(payload["html"])
+    elif "html_body" in payload:
+        html_body = str(payload["html_body"])
     elif "body" in payload:
         html_body = str(payload["body"])
     else:
         html_body = "<p>Automation triggered.</p>"
-    text_body = payload.get("text")
-    sender = str(settings.get("from_address") or "") or None
+    # Support both 'text' and 'text_body' keys
+    text_body = payload.get("text") or payload.get("text_body")
+    # Payload sender takes precedence over settings from_address
+    sender = str(payload.get("sender") or settings.get("from_address") or "") or None
     
     # Extract ticket reply ID from context if present, to enable email tracking
     enable_tracking = False
