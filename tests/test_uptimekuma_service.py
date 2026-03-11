@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.schemas.uptimekuma import UptimeKumaAlertPayload
+from app.schemas.uptimekuma import UptimeKumaAlertPayload, UptimeKumaTag
 from app.services import uptimekuma as uptime_service
 
 
@@ -936,3 +936,267 @@ async def test_ingest_alert_syncs_up_from_message_body(monkeypatch):
     assert record["service_status_updated"] is True
     assert len(update_calls) == 1
     assert update_calls[0]["status"] == "operational"
+
+
+# ---------------------------------------------------------------------------
+# Tag schema - UptimeKumaTag
+# ---------------------------------------------------------------------------
+
+
+def test_uptimekuma_tag_parses_full_object():
+    tag = UptimeKumaTag(tag_id=1, monitor_id=52, value="ESDS Website", name="MyPortal Service", color="#059669")
+    assert tag.tag_id == 1
+    assert tag.monitor_id == 52
+    assert tag.value == "ESDS Website"
+    assert tag.name == "MyPortal Service"
+    assert tag.color == "#059669"
+
+
+def test_uptimekuma_tag_allows_missing_fields():
+    tag = UptimeKumaTag(name="MyPortal Service", value="Some Service")
+    assert tag.tag_id is None
+    assert tag.monitor_id is None
+
+
+def test_payload_coerces_structured_tags():
+    payload = UptimeKumaAlertPayload.model_validate(
+        {
+            "status": "up",
+            "tags": [
+                {"tag_id": 1, "monitor_id": 52, "value": "ESDS Website", "name": "MyPortal Service", "color": "#059669"}
+            ],
+        }
+    )
+    assert payload.tags is not None
+    assert len(payload.tags) == 1
+    assert payload.tags[0].name == "MyPortal Service"
+    assert payload.tags[0].value == "ESDS Website"
+
+
+def test_payload_coerces_plain_string_tags():
+    payload = UptimeKumaAlertPayload.model_validate({"status": "up", "tags": ["production", "critical"]})
+    assert payload.tags is not None
+    assert len(payload.tags) == 2
+    assert payload.tags[0].name == "production"
+    assert payload.tags[1].name == "critical"
+
+
+def test_payload_tags_none_when_empty_list():
+    payload = UptimeKumaAlertPayload.model_validate({"status": "up", "tags": []})
+    assert payload.tags is None
+
+
+# ---------------------------------------------------------------------------
+# _resolve_myportal_service_name_from_tags helper
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_myportal_tag_returns_value():
+    tags = [
+        UptimeKumaTag(tag_id=1, monitor_id=52, value="ESDS Website", name="MyPortal Service", color="#059669")
+    ]
+    assert uptime_service._resolve_myportal_service_name_from_tags(tags) == "ESDS Website"
+
+
+def test_resolve_myportal_tag_case_insensitive_name():
+    tags = [UptimeKumaTag(name="myportal service", value="My Service")]
+    assert uptime_service._resolve_myportal_service_name_from_tags(tags) == "My Service"
+
+
+def test_resolve_myportal_tag_ignores_other_tags():
+    tags = [
+        UptimeKumaTag(name="environment", value="production"),
+        UptimeKumaTag(name="MyPortal Service", value="API Gateway"),
+    ]
+    assert uptime_service._resolve_myportal_service_name_from_tags(tags) == "API Gateway"
+
+
+def test_resolve_myportal_tag_returns_none_when_no_matching_tag():
+    tags = [UptimeKumaTag(name="environment", value="production")]
+    assert uptime_service._resolve_myportal_service_name_from_tags(tags) is None
+
+
+def test_resolve_myportal_tag_returns_none_when_tags_is_none():
+    assert uptime_service._resolve_myportal_service_name_from_tags(None) is None
+
+
+def test_resolve_myportal_tag_returns_none_when_value_is_empty():
+    tags = [UptimeKumaTag(name="MyPortal Service", value="")]
+    assert uptime_service._resolve_myportal_service_name_from_tags(tags) is None
+
+
+def test_resolve_myportal_tag_strips_whitespace_from_value():
+    tags = [UptimeKumaTag(name="MyPortal Service", value="  ESDS Website  ")]
+    assert uptime_service._resolve_myportal_service_name_from_tags(tags) == "ESDS Website"
+
+
+# ---------------------------------------------------------------------------
+# Service sync using tags (integration-style with monkeypatching)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ingest_alert_syncs_from_myportal_service_tag(monkeypatch):
+    """When the payload contains a 'MyPortal Service' tag, its value should
+    be used to look up and update the corresponding service."""
+    secret_hash = hashlib.sha256("tok".encode()).hexdigest()
+    update_calls: list[dict] = []
+
+    async def fake_get_module(slug, *, redact=True):
+        return {
+            "enabled": True,
+            "settings": {"shared_secret_hash": secret_hash, "sync_service_status": True},
+        }
+
+    async def fake_create_alert(**kwargs):
+        return {"id": 40, **kwargs}
+
+    async def fake_find_service_by_name(name: str):
+        if name.lower() == "esds website":
+            return {"id": 70, "name": "ESDS Website", "status": "operational"}
+        return None
+
+    async def fake_update_service(service_id, updates, *, company_ids=None):
+        update_calls.append({"service_id": service_id, **updates})
+        return {}
+
+    monkeypatch.setattr(uptime_service.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(uptime_service.alerts_repo, "create_alert", fake_create_alert)
+    monkeypatch.setattr(uptime_service.service_status_repo, "find_service_by_name", fake_find_service_by_name)
+    monkeypatch.setattr(uptime_service.service_status_repo, "update_service", fake_update_service)
+
+    payload = UptimeKumaAlertPayload.model_validate(
+        {
+            "status": "down",
+            "monitorName": "monitor-52",
+            "tags": [
+                {
+                    "tag_id": 1,
+                    "monitor_id": 52,
+                    "value": "ESDS Website",
+                    "name": "MyPortal Service",
+                    "color": "#059669",
+                }
+            ],
+        }
+    )
+    record = await uptime_service.ingest_alert(
+        payload=payload,
+        raw_payload={},
+        provided_secret="tok",
+        remote_addr=None,
+        user_agent=None,
+    )
+
+    assert record["service_status_updated"] is True
+    assert len(update_calls) == 1
+    assert update_calls[0]["service_id"] == 70
+    assert update_calls[0]["status"] == "outage"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ingest_alert_tag_takes_priority_over_monitor_name(monkeypatch):
+    """The 'MyPortal Service' tag value should be preferred over the monitor
+    name when looking up the service to update."""
+    secret_hash = hashlib.sha256("tok".encode()).hexdigest()
+    lookup_names: list[str] = []
+    update_calls: list[dict] = []
+
+    async def fake_get_module(slug, *, redact=True):
+        return {
+            "enabled": True,
+            "settings": {"shared_secret_hash": secret_hash, "sync_service_status": True},
+        }
+
+    async def fake_create_alert(**kwargs):
+        return {"id": 41, **kwargs}
+
+    async def fake_find_service_by_name(name: str):
+        lookup_names.append(name)
+        if name.lower() == "portal service name":
+            return {"id": 80, "name": "Portal Service Name", "status": "operational"}
+        return None
+
+    async def fake_update_service(service_id, updates, *, company_ids=None):
+        update_calls.append({"service_id": service_id, **updates})
+        return {}
+
+    monkeypatch.setattr(uptime_service.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(uptime_service.alerts_repo, "create_alert", fake_create_alert)
+    monkeypatch.setattr(uptime_service.service_status_repo, "find_service_by_name", fake_find_service_by_name)
+    monkeypatch.setattr(uptime_service.service_status_repo, "update_service", fake_update_service)
+
+    payload = UptimeKumaAlertPayload.model_validate(
+        {
+            "status": "up",
+            # monitor_name differs from the tag value
+            "monitorName": "kuma-monitor-name",
+            "tags": [
+                {"tag_id": 2, "monitor_id": 10, "value": "Portal Service Name", "name": "MyPortal Service"}
+            ],
+        }
+    )
+    record = await uptime_service.ingest_alert(
+        payload=payload,
+        raw_payload={},
+        provided_secret="tok",
+        remote_addr=None,
+        user_agent=None,
+    )
+
+    # The service lookup should have used the tag value, not the monitor name
+    assert "portal service name" in [n.lower() for n in lookup_names]
+    assert "kuma-monitor-name" not in [n.lower() for n in lookup_names]
+    assert record["service_status_updated"] is True
+    assert update_calls[0]["service_id"] == 80
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ingest_alert_falls_back_to_monitor_name_when_no_tag(monkeypatch):
+    """When no 'MyPortal Service' tag is present, the monitor name should
+    still be used for the service lookup."""
+    secret_hash = hashlib.sha256("tok".encode()).hexdigest()
+    update_calls: list[dict] = []
+
+    async def fake_get_module(slug, *, redact=True):
+        return {
+            "enabled": True,
+            "settings": {"shared_secret_hash": secret_hash, "sync_service_status": True},
+        }
+
+    async def fake_create_alert(**kwargs):
+        return {"id": 42, **kwargs}
+
+    async def fake_find_service_by_name(name: str):
+        if name.lower() == "my api":
+            return {"id": 90, "name": "My API", "status": "operational"}
+        return None
+
+    async def fake_update_service(service_id, updates, *, company_ids=None):
+        update_calls.append({"service_id": service_id, **updates})
+        return {}
+
+    monkeypatch.setattr(uptime_service.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(uptime_service.alerts_repo, "create_alert", fake_create_alert)
+    monkeypatch.setattr(uptime_service.service_status_repo, "find_service_by_name", fake_find_service_by_name)
+    monkeypatch.setattr(uptime_service.service_status_repo, "update_service", fake_update_service)
+
+    # Tags present but no "MyPortal Service" tag
+    payload = UptimeKumaAlertPayload.model_validate(
+        {
+            "status": "down",
+            "monitorName": "My API",
+            "tags": [{"tag_id": 3, "monitor_id": 5, "value": "prod", "name": "environment"}],
+        }
+    )
+    record = await uptime_service.ingest_alert(
+        payload=payload,
+        raw_payload={},
+        provided_secret="tok",
+        remote_addr=None,
+        user_agent=None,
+    )
+
+    assert record["service_status_updated"] is True
+    assert update_calls[0]["service_id"] == 90
+    assert update_calls[0]["status"] == "outage"

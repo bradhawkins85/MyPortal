@@ -10,7 +10,7 @@ from loguru import logger
 
 from app.repositories import service_status as service_status_repo
 from app.repositories import uptimekuma_alerts as alerts_repo
-from app.schemas.uptimekuma import UptimeKumaAlertPayload
+from app.schemas.uptimekuma import UptimeKumaAlertPayload, UptimeKumaTag
 from app.services import modules as modules_service
 
 
@@ -51,6 +51,11 @@ _MESSAGE_SERVICE_STATUS_RE = re.compile(
     r"^\s*\[([^\]]+)\]\s*\[[^\]]*?(UP|DOWN|PENDING|MAINTENANCE)[^\]]*\]",
     re.IGNORECASE,
 )
+
+# The name of the Uptime Kuma tag whose value identifies the corresponding
+# MyPortal service.  Tags with this name take priority over the monitor name
+# when resolving which service to update.
+_MYPORTAL_SERVICE_TAG_NAME = "MyPortal Service"
 
 
 def _hash_secret(secret: str) -> str:
@@ -220,6 +225,25 @@ def _resolve_monitor_name(payload: UptimeKumaAlertPayload) -> str | None:
     return None
 
 
+def _resolve_myportal_service_name_from_tags(tags: list[UptimeKumaTag] | None) -> str | None:
+    """Return the MyPortal service name from Uptime Kuma tags.
+
+    Searches the tags list for a tag whose ``name`` matches
+    ``_MYPORTAL_SERVICE_TAG_NAME`` (case-insensitive) and returns its
+    ``value``.  Returns ``None`` when no matching tag is found or the
+    matched tag has no value.
+    """
+    if not tags:
+        return None
+    target = _MYPORTAL_SERVICE_TAG_NAME.lower()
+    for tag in tags:
+        tag_name = tag.name
+        if tag_name and tag_name.strip().lower() == target:
+            tag_value = tag.value
+            return tag_value.strip() if tag_value else None
+    return None
+
+
 def _map_alert_status_to_service_status(alert_status: str, alert_type: str | None) -> str | None:
     """Map an Uptime Kuma alert status (or Apprise type) to a service status value.
 
@@ -249,7 +273,7 @@ async def _load_module_configuration() -> dict[str, Any]:
 
 
 async def _sync_service_status_from_alert(
-    monitor_name: str,
+    service_name: str,
     alert_status: str,
     alert_type: str | None,
     alert_message: str | None,
@@ -268,11 +292,11 @@ async def _sync_service_status_from_alert(
         )
         return False
 
-    service = await service_status_repo.find_service_by_name(monitor_name)
+    service = await service_status_repo.find_service_by_name(service_name)
     if not service:
         logger.debug(
             "No matching service found for Uptime Kuma monitor",
-            monitor_name=monitor_name,
+            service_name=service_name,
         )
         return False
 
@@ -322,6 +346,11 @@ async def ingest_alert(
     monitor_name = _resolve_monitor_name(payload)
     resolved_status = _resolve_status(payload)
 
+    # Determine which service name to use for the MyPortal service status sync.
+    # Tags take priority: look for a tag named "MyPortal Service" and use its
+    # value.  Fall back to the resolved monitor name when no such tag is present.
+    service_name = _resolve_myportal_service_name_from_tags(payload.tags) or monitor_name
+
     record = await alerts_repo.create_alert(
         event_uuid=_choose_event_identifier(payload),
         monitor_id=payload.monitor_id,
@@ -346,10 +375,10 @@ async def ingest_alert(
 
     sync_enabled = _coerce_bool(settings.get("sync_service_status", True))
     service_status_updated = False
-    if sync_enabled and monitor_name:
+    if sync_enabled and service_name:
         try:
             service_status_updated = await _sync_service_status_from_alert(
-                monitor_name=monitor_name,
+                service_name=service_name,
                 alert_status=resolved_status,
                 alert_type=payload.alert_type,
                 alert_message=payload.message.strip() if payload.message else None,
@@ -357,7 +386,7 @@ async def ingest_alert(
         except Exception:
             logger.exception(
                 "Failed to sync service status from Uptime Kuma alert",
-                monitor_name=monitor_name,
+                monitor_name=service_name,
             )
 
     record["service_status_updated"] = service_status_updated
