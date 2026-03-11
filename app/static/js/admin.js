@@ -1926,11 +1926,11 @@
     });
   }
 
-  function bindModal({ modalId, triggerSelector, onOpen }) {
+  function bindModal({ modalId, triggerSelector, triggerElements, onOpen }) {
     const modal = document.getElementById(modalId);
-    const triggerButtons = triggerSelector
-      ? Array.from(document.querySelectorAll(triggerSelector))
-      : [];
+    const triggerButtons = Array.isArray(triggerElements)
+      ? triggerElements.filter((element) => element instanceof HTMLElement)
+      : (triggerSelector ? Array.from(document.querySelectorAll(triggerSelector)) : []);
 
     if (!modal || triggerButtons.length === 0) {
       return;
@@ -2989,16 +2989,22 @@
 
   function bindModuleSettingsModals() {
     const buttons = document.querySelectorAll('[data-edit-module-open]');
-    const slugsSeen = new Set();
+    const buttonGroups = new Map();
+
     buttons.forEach((button) => {
       const slug = button.dataset.editModuleOpen;
-      if (slugsSeen.has(slug)) {
+      if (!slug) {
         return;
       }
-      slugsSeen.add(slug);
+      const group = buttonGroups.get(slug) || [];
+      group.push(button);
+      buttonGroups.set(slug, group);
+    });
+
+    buttonGroups.forEach((group, slug) => {
       bindModal({
         modalId: `module-settings-modal-${slug}`,
-        triggerSelector: `[data-edit-module-open="${slug}"]`,
+        triggerElements: group,
       });
     });
   }
