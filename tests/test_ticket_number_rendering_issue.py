@@ -74,25 +74,28 @@ async def test_exact_problem_statement_scenario():
 
 
 @pytest.mark.anyio
-async def test_ticket_number_without_enrichment():
-    """Test that ticket.number doesn't exist without the enrichment step."""
-    # This simulates what would happen if _enrich_ticket_context wasn't called
-    context_without_enrichment = {
+async def test_ticket_number_without_explicit_number_key():
+    """Test that ticket.number resolves via ticket_number even without an explicit 'number' key.
+
+    The template resolver uses _FIELD_ALIASES so that ``{{ ticket.number }}``
+    falls back to ``ticket_number`` automatically, regardless of whether
+    _enrich_ticket_context has been called.
+    """
+    context_without_number_alias = {
         "ticket": {
             "id": 123,
             "ticket_number": "TKT-789",
-            # Note: NO "number" alias here
+            # Note: NO explicit "number" key – relies on the alias fallback
             "subject": "Test",
         }
     }
-    
+
     template = "Ticket: {{ticket.number}}"
-    rendered = await value_templates.render_string_async(template, context_without_enrichment)
-    
-    # Without the enrichment, ticket.number would be empty
-    # This test documents that enrichment is necessary
-    assert rendered == "Ticket: ", \
-        "Without enrichment, ticket.number should not resolve"
+    rendered = await value_templates.render_string_async(template, context_without_number_alias)
+
+    # The alias fallback (number → ticket_number) should resolve the value.
+    assert rendered == "Ticket: TKT-789", \
+        "ticket.number should resolve via ticket_number alias even without explicit enrichment"
 
 
 @pytest.mark.anyio
