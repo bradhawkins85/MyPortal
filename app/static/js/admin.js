@@ -1235,6 +1235,7 @@
       sunTextarea.id = 'message-template-content-sun';
       editorContainer.appendChild(sunTextarea);
       sunEditor = SUNEDITOR.create(sunTextarea, {
+        width: '100%',
         height: '300',
         buttonList: [
           ['undo', 'redo'],
