@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 
+{% block extra_head %}
+  {{ super() }}
+  <link rel="stylesheet" href="{{ static_url('/static/css/suneditor.min.css') }}" />
+{% endblock %}
+
 {% block content %}
   <div class="management management--single" data-layout>
     <section class="management__content">
@@ -571,7 +576,7 @@
                   The ticket description does not contain displayable content.
                 </p>
               </div>
-              <form action="/admin/tickets/{{ ticket.id }}/description" method="post" class="form card__form">
+              <form action="/admin/tickets/{{ ticket.id }}/description" method="post" class="form card__form" data-ticket-description-form>
                 {% if csrf_token %}
                   <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
                 {% endif %}
@@ -580,8 +585,7 @@
                   <textarea
                     id="ticket-description-editor"
                     name="description"
-                    class="form-input form-input--textarea"
-                    rows="8"
+                    class="form-input"
                     data-ticket-description-input
                   >{{- (ticket.description or '')|replace('\r\n', '\n')|replace('\r', '\n') -}}</textarea>
                   <p class="form-help">Share customer notes, troubleshooting steps, or context for technicians.</p>
@@ -1174,10 +1178,51 @@
 
 {% block scripts %}
   {{ super() }}
+  <script src="{{ static_url('/static/js/suneditor.min.js') }}"></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
   <script src="{{ static_url('/static/js/ticket_detail.js') }}" defer></script>
   <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const descriptionField = document.getElementById('ticket-description-editor');
+      const descriptionForm = document.querySelector('[data-ticket-description-form]');
+
+      if (!descriptionField || typeof SUNEDITOR === 'undefined') {
+        return;
+      }
+
+      const descriptionEditor = SUNEDITOR.create(descriptionField, {
+        width: '100%',
+        height: '240',
+        buttonList: [
+          ['undo', 'redo'],
+          ['bold', 'underline', 'italic', 'strike'],
+          ['fontColor', 'hiliteColor'],
+          ['outdent', 'indent'],
+          ['align', 'horizontalRule', 'list', 'lineHeight'],
+          ['link'],
+          ['removeFormat'],
+          ['codeView'],
+        ],
+      });
+
+      const syncDescriptionField = () => {
+        descriptionField.value = descriptionEditor.getContents();
+      };
+
+      if (descriptionForm) {
+        descriptionForm.addEventListener('submit', () => {
+          syncDescriptionField();
+        });
+      }
+
+      document.addEventListener('ticket:description-updated', (event) => {
+        const raw = event && event.detail && typeof event.detail.raw === 'string' ? event.detail.raw : '';
+        descriptionEditor.setContents(raw);
+        syncDescriptionField();
+      });
+    });
+
     async function removeTag(tagSlug) {
       if (!confirm(`Remove tag "${tagSlug.replace('-', ' ')}" from this ticket?`)) {
         return;
