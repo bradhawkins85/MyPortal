@@ -20,6 +20,7 @@ from app.services import value_templates
 TRIGGER_EVENTS: list[dict[str, str]] = [
     {"value": "tickets.created", "label": "Ticket created"},
     {"value": "tickets.updated", "label": "Ticket updated"},
+    {"value": "tickets.details_updated", "label": "Ticket Details Updated"},
     {"value": "tickets.closed", "label": "Ticket closed"},
     {"value": "tickets.assigned", "label": "Ticket assigned"},
     {"value": "webhook.delivered", "label": "Webhook delivered"},
