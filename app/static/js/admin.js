@@ -375,6 +375,13 @@
     if (input) {
       input.value = rawValue;
     }
+
+    document.dispatchEvent(new CustomEvent('ticket:description-updated', {
+      detail: {
+        html: safeHtml,
+        raw: rawValue,
+      },
+    }));
   }
 
   function bindTicketAiRefresh() {
