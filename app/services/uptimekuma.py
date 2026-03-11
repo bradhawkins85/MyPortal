@@ -44,6 +44,14 @@ _TITLE_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Pattern to extract service name and status from UptimeKuma message bodies
+# formatted as "[Service Name] [<optional emoji> Status] optional details",
+# e.g. "[ESDS Website] [✅ Up] 200 - OK" or "[ESDS Website] [🔴 Down] Error".
+_MESSAGE_SERVICE_STATUS_RE = re.compile(
+    r"^\s*\[([^\]]+)\]\s*\[[^\]]*?(UP|DOWN|PENDING|MAINTENANCE)[^\]]*\]",
+    re.IGNORECASE,
+)
+
 
 def _hash_secret(secret: str) -> str:
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
@@ -140,7 +148,9 @@ def _resolve_status(payload: UptimeKumaAlertPayload) -> str:
     Prefers the explicit ``status`` field.  When absent (e.g. Apprise-only
     payloads from Uptime Kuma) the Apprise ``alert_type`` field (``type``) is
     used as a fallback so that ``success``/``failure``/``warning``/``info``
-    values are preserved for downstream service-status mapping.
+    values are preserved for downstream service-status mapping.  As a last
+    resort the ``message`` body is parsed for an embedded status keyword such
+    as ``[✅ Up]`` or ``[🔴 Down]``.
     """
     if payload.status:
         return _normalise_status(payload.status)
@@ -150,6 +160,14 @@ def _resolve_status(payload: UptimeKumaAlertPayload) -> str:
             alert_type=payload.alert_type,
         )
         return _normalise_status(payload.alert_type)
+    if payload.message:
+        _, status = _parse_message_for_name_and_status(payload.message)
+        if status:
+            logger.debug(
+                "No 'status' or 'alert_type' field; extracted status from message",
+                status=status,
+            )
+            return _normalise_status(status)
     logger.warning("Payload contained neither 'status' nor 'alert_type'; defaulting to 'unknown'")
     return "unknown"
 
@@ -165,16 +183,40 @@ def _extract_monitor_name_from_title(title: str) -> str | None:
     return stripped or None
 
 
+def _parse_message_for_name_and_status(message: str) -> tuple[str | None, str | None]:
+    """Extract monitor name and status from a UptimeKuma message body.
+
+    Handles the format ``[Service Name] [<optional emoji> Status] optional details``,
+    for example::
+
+        "[ESDS Website] [✅ Up] 200 - OK"
+        "[ESDS Website] [🔴 Down] Some Error Message"
+
+    Returns a ``(name, status)`` tuple.  Either element may be ``None`` when
+    the message does not match the expected pattern.
+    """
+    m = _MESSAGE_SERVICE_STATUS_RE.match(message)
+    if not m:
+        return None, None
+    name = m.group(1).strip() or None
+    status = m.group(2).strip().lower() or None
+    return name, status
+
+
 def _resolve_monitor_name(payload: UptimeKumaAlertPayload) -> str | None:
     """Return the best available monitor name from a payload.
 
     Prefers the explicit ``monitor_name`` field.  Falls back to extracting
-    the name from the Apprise ``title`` field when the former is absent.
+    the name from the Apprise ``title`` field, and finally attempts to
+    parse the ``message`` body when both of the above are absent.
     """
     if payload.monitor_name:
         return payload.monitor_name.strip() or None
     if payload.title:
         return _extract_monitor_name_from_title(payload.title)
+    if payload.message:
+        name, _ = _parse_message_for_name_and_status(payload.message)
+        return name
     return None
 
 
