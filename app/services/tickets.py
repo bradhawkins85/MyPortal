@@ -554,14 +554,15 @@ def _auto_detect_ticket_update_actor(
     return "system"
 
 
-async def emit_ticket_updated_event(
+async def _emit_ticket_event(
+    event_name: str,
     ticket: Mapping[str, Any] | int,
     *,
     actor_type: str | None = None,
     actor: Mapping[str, Any] | None = None,
     trigger_automations: bool = True,
 ) -> None:
-    """Emit a ``tickets.updated`` automation event with actor metadata."""
+    """Shared helper that builds ticket context and fires an automation event."""
 
     ticket_record: Mapping[str, Any] | None
     if isinstance(ticket, Mapping):
@@ -615,7 +616,43 @@ async def emit_ticket_updated_event(
     if not trigger_automations:
         return
 
-    await automations_service.handle_event("tickets.updated", context)
+    await automations_service.handle_event(event_name, context)
+
+
+async def emit_ticket_updated_event(
+    ticket: Mapping[str, Any] | int,
+    *,
+    actor_type: str | None = None,
+    actor: Mapping[str, Any] | None = None,
+    trigger_automations: bool = True,
+) -> None:
+    """Emit a ``tickets.updated`` automation event with actor metadata."""
+
+    await _emit_ticket_event(
+        "tickets.updated",
+        ticket,
+        actor_type=actor_type,
+        actor=actor,
+        trigger_automations=trigger_automations,
+    )
+
+
+async def emit_ticket_details_updated_event(
+    ticket: Mapping[str, Any] | int,
+    *,
+    actor_type: str | None = None,
+    actor: Mapping[str, Any] | None = None,
+    trigger_automations: bool = True,
+) -> None:
+    """Emit a ``tickets.details_updated`` automation event with actor metadata."""
+
+    await _emit_ticket_event(
+        "tickets.details_updated",
+        ticket,
+        actor_type=actor_type,
+        actor=actor,
+        trigger_automations=trigger_automations,
+    )
 
 
 def _normalise_reply_marker_line(value: str) -> str:
