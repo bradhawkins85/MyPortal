@@ -32,6 +32,7 @@
               {% set internal_slugs = ['create-ticket', 'create-task', 'update-ticket', 'update-ticket-description', 'add-ticket-reply', 'reprocess-ai'] %}
               {% for module in modules %}
                 {% set is_internal = module.slug in internal_slugs %}
+                {% if not is_internal %}
                 <tr>
                   <td data-label="Module">
                     <span aria-hidden="true">{{ module.icon or '🔌' }}</span>
@@ -45,8 +46,7 @@
                   </td>
                   <td class="table__actions">
                     <div class="table__action-buttons">
-                      {% if not is_internal %}
-                        <form action="/admin/modules/{{ module.slug }}" method="post" class="inline-form">
+                      <form action="/admin/modules/{{ module.slug }}" method="post" class="inline-form">
                           {% if csrf_token %}
                             <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
                           {% endif %}
@@ -73,12 +73,10 @@
                             aria-controls="module-settings-modal-{{ module.slug }}"
                           >Settings</button>
                         {% endif %}
-                      {% else %}
-                        <span class="text-muted">System module</span>
-                      {% endif %}
                     </div>
                   </td>
                 </tr>
+                {% endif %}
               {% endfor %}
             </tbody>
           </table>
