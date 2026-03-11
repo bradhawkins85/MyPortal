@@ -738,6 +738,87 @@
     });
   }
 
+  function initialiseRequesterSelector() {
+    const companySelect = document.getElementById('ticket-company-detail');
+    if (!(companySelect instanceof HTMLSelectElement)) {
+      return;
+    }
+
+    const requesterSelect = document.querySelector('[data-ticket-requester-select]');
+    if (!(requesterSelect instanceof HTMLSelectElement)) {
+      return;
+    }
+
+    const helpElement = document.querySelector('[data-ticket-requester-help]');
+
+    function setRequesterHelpState(state) {
+      if (!helpElement) {
+        return;
+      }
+      if (state === 'disabled') {
+        helpElement.textContent = helpElement.dataset.helpDisabled || 'Link a company before selecting a requester.';
+        helpElement.removeAttribute('hidden');
+      } else if (state === 'empty') {
+        helpElement.textContent = helpElement.dataset.helpEmpty || 'No enabled staff members are available for the linked company.';
+        helpElement.removeAttribute('hidden');
+      } else {
+        helpElement.textContent = '';
+        helpElement.setAttribute('hidden', '');
+      }
+    }
+
+    async function reloadRequesterOptions(companyId) {
+      requesterSelect.value = '';
+      Array.from(requesterSelect.options).forEach((opt) => {
+        if (opt.value !== '') {
+          opt.remove();
+        }
+      });
+
+      if (!companyId) {
+        requesterSelect.disabled = true;
+        requesterSelect.setAttribute('aria-disabled', 'true');
+        setRequesterHelpState('disabled');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/companies/${encodeURIComponent(companyId)}/staff-users`, {
+          credentials: 'same-origin',
+        });
+        if (!response.ok) {
+          setRequesterHelpState('empty');
+          return;
+        }
+        const users = await response.json();
+        if (!Array.isArray(users) || users.length === 0) {
+          requesterSelect.disabled = false;
+          requesterSelect.removeAttribute('aria-disabled');
+          setRequesterHelpState('empty');
+          return;
+        }
+        users.forEach((user) => {
+          if (!user || !user.id || !user.email) {
+            return;
+          }
+          const option = document.createElement('option');
+          option.value = String(user.id);
+          option.textContent = user.email;
+          requesterSelect.appendChild(option);
+        });
+        requesterSelect.disabled = false;
+        requesterSelect.removeAttribute('aria-disabled');
+        setRequesterHelpState('hidden');
+      } catch (_err) {
+        setRequesterHelpState('empty');
+      }
+    }
+
+    companySelect.addEventListener('change', () => {
+      reloadRequesterOptions(companySelect.value);
+    });
+  }
+
   function initialiseReplyTimeEditing() {
     const modal = document.getElementById('reply-time-modal');
     const timeline = document.querySelector('[data-ticket-timeline]');
@@ -1860,6 +1941,7 @@
     initialiseReplyTimeEditing();
     initialiseCallRecordingTimeEditing();
     initialiseAssetSelector();
+    initialiseRequesterSelector();
     initialiseTaskManagement();
     initialiseWatcherManagement();
     initialiseBookingModal();
