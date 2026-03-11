@@ -6,6 +6,18 @@ from typing import Any
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 
+class UptimeKumaTag(BaseModel):
+    """Represents a single tag object from an Uptime Kuma webhook payload."""
+
+    tag_id: int | None = Field(default=None)
+    monitor_id: int | None = Field(default=None)
+    value: str | None = Field(default=None)
+    name: str | None = Field(default=None)
+    color: str | None = Field(default=None)
+
+    model_config = {"extra": "allow", "populate_by_name": True}
+
+
 class UptimeKumaAlertPayload(BaseModel):
     monitor_id: int | None = Field(
         default=None,
@@ -54,18 +66,30 @@ class UptimeKumaAlertPayload(BaseModel):
     time: datetime | float | int | str | None = Field(default=None, validation_alias=AliasChoices("time", "timestamp"))
     incident_id: str | None = Field(default=None, validation_alias=AliasChoices("incidentID", "incidentId", "incident_id"))
     uuid: str | None = Field(default=None, validation_alias=AliasChoices("uuid", "id"))
-    tags: list[str] | None = Field(default=None, validation_alias=AliasChoices("tags"))
+    tags: list[UptimeKumaTag] | None = Field(default=None, validation_alias=AliasChoices("tags"))
 
     model_config = {"extra": "allow", "populate_by_name": True}
 
     @field_validator("tags", mode="before")
     @classmethod
-    def _coerce_tags(cls, value: Any) -> list[str] | None:
+    def _coerce_tags(cls, value: Any) -> list[dict[str, Any]] | None:
         if value in (None, "", []):
             return None
         if isinstance(value, list):
-            return [str(item) for item in value if str(item)] or None
-        return [str(value)]
+            coerced = []
+            for item in value:
+                if isinstance(item, dict):
+                    coerced.append(item)
+                elif isinstance(item, str) and item:
+                    coerced.append({"name": item})
+                else:
+                    raw = str(item)
+                    if raw:
+                        coerced.append({"name": raw})
+            return coerced or None
+        if isinstance(value, dict):
+            return [value]
+        return [{"name": str(value)}]
 
 
 class UptimeKumaAlertResponse(BaseModel):
