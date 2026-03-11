@@ -154,13 +154,24 @@ def _stringify_template_value(value: Any) -> str:
     return str(coerced)
 
 
+# Field aliases: when a key is not found in a Mapping context, try the aliased key instead.
+# This allows templates to use short names (e.g. ``ticket.number``) even when the underlying
+# data only carries the longer canonical name (e.g. ``ticket_number``).
+_FIELD_ALIASES: dict[str, str] = {
+    "number": "ticket_number",
+}
+
+
 def _resolve_context_value(context: Mapping[str, Any] | None, path: str) -> Any:
     if not context or not path:
         return None
     current: Any = context
     for segment in path.split('.'):
         if isinstance(current, Mapping):
-            current = current.get(segment)
+            value = current.get(segment)
+            if value is None and segment not in current and segment in _FIELD_ALIASES:
+                value = current.get(_FIELD_ALIASES[segment])
+            current = value
         elif isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)):
             try:
                 index = int(segment)
