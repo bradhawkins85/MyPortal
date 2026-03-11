@@ -336,3 +336,29 @@ def test_receive_alert_invalid_json_logs_webhook(monkeypatch):
     assert len(logged_calls) == 1
     assert "Invalid JSON" in logged_calls[0]["name"]
     assert logged_calls[0]["response_status"] == 400
+
+
+def test_receive_alert_csrf_exempt_with_query_token(monkeypatch):
+    """Webhook must not be blocked by CSRF middleware when token is sent as a query param
+    (i.e. no Authorization: Bearer header that would auto-bypass CSRF)."""
+
+    async def fake_ingest_alert(**kwargs):
+        assert kwargs["provided_secret"] == "query-token"
+        return {"id": 55, "monitor_name": "My Monitor"}
+
+    async def fake_log_incoming_webhook(**kwargs):
+        return {}
+
+    monkeypatch.setattr(uptime_service, "ingest_alert", fake_ingest_alert)
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", fake_log_incoming_webhook)
+    monkeypatch.setattr(main_module.settings, "enable_csrf", True)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/integration-modules/uptimekuma/alerts",
+            params={"token": "query-token"},
+            json={"status": "up"},
+        )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "accepted"
