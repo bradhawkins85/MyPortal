@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'myportal-static-v3';
+const CACHE_VERSION = 'myportal-static-v4';
 const STATIC_CACHE = CACHE_VERSION;
 const PRECACHE_URLS = [
   '/static/css/app.css',
@@ -95,8 +95,8 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(request).then((cachedResponse) =>
-      cachedResponse || fetch(request).then((networkResponse) => {
+    caches.match(request).then((cachedResponse) => {
+      const networkFetch = fetch(request).then((networkResponse) => {
         if (
           networkResponse &&
           networkResponse.status === 200 &&
@@ -107,8 +107,13 @@ self.addEventListener('fetch', (event) => {
           caches.open(STATIC_CACHE).then((cache) => cache.put(request, responseClone));
         }
         return networkResponse;
-      })
-    )
+      });
+      if (cachedResponse) {
+        event.waitUntil(networkFetch);
+        return cachedResponse;
+      }
+      return networkFetch;
+    })
   );
 });
 self.addEventListener('message', (event) => {
