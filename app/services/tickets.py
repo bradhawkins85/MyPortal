@@ -405,10 +405,14 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
 
     # Normalise ticket number fields so templates always have access.
     # Prefer an explicitly-stored ticket_number; fall back to any pre-existing
-    # "number" alias (e.g. set by a caller) but do NOT invent a value from the
-    # database row id – that would be misleading for tickets that genuinely
-    # have no assigned number.
-    ticket_number = enriched.get("ticket_number") or enriched.get("number")
+    # "number" alias (e.g. set by a caller), then to the database row id so
+    # that locally-created tickets (which have no external ticket_number) still
+    # render correctly in templates.
+    ticket_number = (
+        enriched.get("ticket_number")
+        or enriched.get("number")
+        or (str(enriched["id"]) if enriched.get("id") is not None else None)
+    )
 
     # Expose both names so {{ticket.number}} and {{ticket.ticket_number}} work.
     enriched["ticket_number"] = ticket_number
