@@ -13536,7 +13536,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
     await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
-    await tickets_service.emit_ticket_updated_event(
+    await tickets_service.emit_ticket_details_updated_event(
         ticket_id,
         actor_type="technician",
         actor=current_user,
