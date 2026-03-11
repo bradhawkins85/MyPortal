@@ -586,6 +586,7 @@ app.add_middleware(
     CSRFMiddleware,
     exempt_paths=(
         "/api/webhooks/smtp2go",
+        "/api/integration-modules/uptimekuma/alerts",
     ),
 )
 
