@@ -1071,12 +1071,14 @@ def test_admin_update_ticket_description_updates_service(monkeypatch, active_ses
     update_mock = AsyncMock(return_value={"id": 42, "description": "Line one\nLine two"})
     summary_mock = AsyncMock(return_value=None)
     tags_mock = AsyncMock(return_value=None)
+    emit_mock = AsyncMock(return_value=None)
 
     monkeypatch.setattr(main_module, "_require_helpdesk_page", fake_require_helpdesk)
     monkeypatch.setattr(main_module.tickets_repo, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(main_module.tickets_service, "update_ticket_description", update_mock)
     monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_summary", summary_mock)
     monkeypatch.setattr(main_module.tickets_service, "refresh_ticket_ai_tags", tags_mock)
+    monkeypatch.setattr(main_module.tickets_service, "emit_ticket_updated_event", emit_mock)
     monkeypatch.setattr(session_manager, "load_session", AsyncMock(return_value=active_session))
 
     app.dependency_overrides[database_dependencies.require_database] = lambda: None
@@ -1101,6 +1103,7 @@ def test_admin_update_ticket_description_updates_service(monkeypatch, active_ses
     update_mock.assert_awaited_once_with(42, "Line one\nLine two")
     summary_mock.assert_awaited_once_with(42)
     tags_mock.assert_awaited_once_with(42)
+    emit_mock.assert_not_awaited()
 
 
 def test_admin_replace_ticket_description_returns_json(monkeypatch, active_session):
