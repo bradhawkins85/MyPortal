@@ -13518,16 +13518,8 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
         for asset_id in selected_asset_ids:
             asset = await assets_repo.get_asset_by_id(asset_id)
             if not asset or asset.get("company_id") != final_company_id:
-                return await _render_ticket_detail(
-                    request,
-                    current_user,
-                    ticket_id=ticket_id,
-                    error_message="Assets must belong to the linked company.",
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
+                continue
             validated_asset_ids.append(asset_id)
-    elif not selected_asset_ids:
-        validated_asset_ids = []
 
     await tickets_repo.update_ticket(ticket_id, **update_fields)
     await tickets_repo.set_ticket_status(ticket_id, status_value)
