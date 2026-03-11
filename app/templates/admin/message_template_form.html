@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 
+{% block extra_head %}
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/suneditor@2.47.0/dist/css/suneditor.min.css" />
+{% endblock %}
+
 {% block header_title %}
   <div class="header__title-content header__title-content--spread">
     <span class="header__title-text">{{ page_title }}</span>
@@ -79,6 +83,7 @@
           required
           aria-describedby="message-template-content-help"
         >{{ template.content or '' }}</textarea>
+        <div id="message-template-content-editor" style="display:none;"></div>
         <p class="form-help" id="message-template-content-help">
           Supports template variables like <code>{{ '{{ user.first_name }}' }}</code> and <code>{{ '{{ company.name }}' }}</code>.
         </p>
@@ -116,5 +121,6 @@
 
 {% block scripts %}
   {{ super() }}
+  <script src="https://cdn.jsdelivr.net/npm/suneditor@2.47.0/dist/suneditor.min.js"></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
 {% endblock %}
