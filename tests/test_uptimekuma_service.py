@@ -722,3 +722,217 @@ async def test_ingest_alert_apprise_only_payload(monkeypatch):
     assert captured["monitor_name"] == "My API"
     assert captured["message"] == "My API is unreachable"
     assert captured["alert_type"] == "failure"
+
+
+# ---------------------------------------------------------------------------
+# Message body parsing helpers
+# ---------------------------------------------------------------------------
+
+
+def test_parse_message_up_with_emoji():
+    name, status = uptime_service._parse_message_for_name_and_status(
+        "[ESDS Website] [✅ Up] 200 - OK"
+    )
+    assert name == "ESDS Website"
+    assert status == "up"
+
+
+def test_parse_message_down_with_emoji():
+    name, status = uptime_service._parse_message_for_name_and_status(
+        "[ESDS Website] [🔴 Down] Some Error Message"
+    )
+    assert name == "ESDS Website"
+    assert status == "down"
+
+
+def test_parse_message_up_no_emoji():
+    name, status = uptime_service._parse_message_for_name_and_status(
+        "[My Service] [Up] 200 - OK"
+    )
+    assert name == "My Service"
+    assert status == "up"
+
+
+def test_parse_message_down_no_emoji():
+    name, status = uptime_service._parse_message_for_name_and_status(
+        "[My Service] [Down] Connection refused"
+    )
+    assert name == "My Service"
+    assert status == "down"
+
+
+def test_parse_message_pending():
+    name, status = uptime_service._parse_message_for_name_and_status(
+        "[Health Check] [Pending] Waiting for response"
+    )
+    assert name == "Health Check"
+    assert status == "pending"
+
+
+def test_parse_message_maintenance():
+    name, status = uptime_service._parse_message_for_name_and_status(
+        "[API Gateway] [Maintenance] Scheduled window"
+    )
+    assert name == "API Gateway"
+    assert status == "maintenance"
+
+
+def test_parse_message_case_insensitive():
+    name, status = uptime_service._parse_message_for_name_and_status(
+        "[My Service] [DOWN] Error"
+    )
+    assert name == "My Service"
+    assert status == "down"
+
+
+def test_parse_message_no_match_returns_none_pair():
+    name, status = uptime_service._parse_message_for_name_and_status(
+        "Plain message without brackets"
+    )
+    assert name is None
+    assert status is None
+
+
+def test_parse_message_missing_status_bracket_returns_none():
+    name, status = uptime_service._parse_message_for_name_and_status(
+        "[My Service] No status bracket here"
+    )
+    assert name is None
+    assert status is None
+
+
+def test_resolve_monitor_name_falls_back_to_message():
+    payload = UptimeKumaAlertPayload(
+        message="[ESDS Website] [✅ Up] 200 - OK"
+    )
+    assert uptime_service._resolve_monitor_name(payload) == "ESDS Website"
+
+
+def test_resolve_monitor_name_prefers_title_over_message():
+    payload = UptimeKumaAlertPayload(
+        title="[DOWN] Title Service",
+        message="[Message Service] [🔴 Down] Error",
+    )
+    assert uptime_service._resolve_monitor_name(payload) == "Title Service"
+
+
+def test_resolve_monitor_name_prefers_explicit_over_message():
+    payload = UptimeKumaAlertPayload(
+        monitor_name="Explicit Service",
+        message="[Message Service] [🔴 Down] Error",
+    )
+    assert uptime_service._resolve_monitor_name(payload) == "Explicit Service"
+
+
+def test_resolve_status_falls_back_to_message_up():
+    payload = UptimeKumaAlertPayload(
+        message="[ESDS Website] [✅ Up] 200 - OK"
+    )
+    assert uptime_service._resolve_status(payload) == "up"
+
+
+def test_resolve_status_falls_back_to_message_down():
+    payload = UptimeKumaAlertPayload(
+        message="[ESDS Website] [🔴 Down] Some Error Message"
+    )
+    assert uptime_service._resolve_status(payload) == "down"
+
+
+def test_resolve_status_prefers_explicit_over_message():
+    payload = UptimeKumaAlertPayload(
+        status="up",
+        message="[ESDS Website] [🔴 Down] Some Error",
+    )
+    assert uptime_service._resolve_status(payload) == "up"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ingest_alert_syncs_from_message_body(monkeypatch):
+    """Service name and status extracted from the message body should be used
+    when monitor_name, title and status fields are all absent."""
+    secret_hash = hashlib.sha256("tok".encode()).hexdigest()
+    update_calls: list[dict] = []
+
+    async def fake_get_module(slug, *, redact=True):
+        return {
+            "enabled": True,
+            "settings": {"shared_secret_hash": secret_hash, "sync_service_status": True},
+        }
+
+    async def fake_create_alert(**kwargs):
+        return {"id": 30, **kwargs}
+
+    async def fake_find_service_by_name(name: str):
+        if name.lower() == "esds website":
+            return {"id": 50, "name": "ESDS Website", "status": "operational"}
+        return None
+
+    async def fake_update_service(service_id, updates, *, company_ids=None):
+        update_calls.append({"service_id": service_id, **updates})
+        return {}
+
+    monkeypatch.setattr(uptime_service.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(uptime_service.alerts_repo, "create_alert", fake_create_alert)
+    monkeypatch.setattr(uptime_service.service_status_repo, "find_service_by_name", fake_find_service_by_name)
+    monkeypatch.setattr(uptime_service.service_status_repo, "update_service", fake_update_service)
+
+    payload = UptimeKumaAlertPayload.model_validate(
+        {"message": "[ESDS Website] [🔴 Down] Some Error Message"}
+    )
+    record = await uptime_service.ingest_alert(
+        payload=payload,
+        raw_payload={"message": "[ESDS Website] [🔴 Down] Some Error Message"},
+        provided_secret="tok",
+        remote_addr=None,
+        user_agent=None,
+    )
+
+    assert record["service_status_updated"] is True
+    assert len(update_calls) == 1
+    assert update_calls[0]["service_id"] == 50
+    assert update_calls[0]["status"] == "outage"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ingest_alert_syncs_up_from_message_body(monkeypatch):
+    """Up status in message body should resolve to 'operational'."""
+    secret_hash = hashlib.sha256("tok".encode()).hexdigest()
+    update_calls: list[dict] = []
+
+    async def fake_get_module(slug, *, redact=True):
+        return {
+            "enabled": True,
+            "settings": {"shared_secret_hash": secret_hash, "sync_service_status": True},
+        }
+
+    async def fake_create_alert(**kwargs):
+        return {"id": 31, **kwargs}
+
+    async def fake_find_service_by_name(name: str):
+        if name.lower() == "esds website":
+            return {"id": 50, "name": "ESDS Website", "status": "outage"}
+        return None
+
+    async def fake_update_service(service_id, updates, *, company_ids=None):
+        update_calls.append({"service_id": service_id, **updates})
+        return {}
+
+    monkeypatch.setattr(uptime_service.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(uptime_service.alerts_repo, "create_alert", fake_create_alert)
+    monkeypatch.setattr(uptime_service.service_status_repo, "find_service_by_name", fake_find_service_by_name)
+    monkeypatch.setattr(uptime_service.service_status_repo, "update_service", fake_update_service)
+
+    payload = UptimeKumaAlertPayload.model_validate(
+        {"message": "[ESDS Website] [✅ Up] 200 - OK"}
+    )
+    record = await uptime_service.ingest_alert(
+        payload=payload,
+        raw_payload={"message": "[ESDS Website] [✅ Up] 200 - OK"},
+        provided_secret="tok",
+        remote_addr=None,
+        user_agent=None,
+    )
+
+    assert record["service_status_updated"] is True
+    assert len(update_calls) == 1
+    assert update_calls[0]["status"] == "operational"
