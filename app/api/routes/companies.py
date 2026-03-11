@@ -197,7 +197,7 @@ async def list_company_members(
 async def list_company_assets(
     company_id: int,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    __: dict = Depends(require_helpdesk_technician),
 ):
     company = await company_repo.get_company_by_id(company_id)
     if not company:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import status
@@ -110,8 +110,18 @@ async def test_render_ticket_detail_with_tactical_module_and_ai_tags(monkeypatch
 
     monkeypatch.setattr(main, "_render_template", fake_render_template)
 
-    # This should not raise AttributeError anymore
-    response = await main._render_ticket_detail(request, user, ticket_id=1)
+    # Use patch() for the two lazy-imported DB calls inside _render_ticket_detail
+    with (
+        patch(
+            "app.repositories.call_recordings.list_ticket_call_recordings",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.services.service_status.find_relevant_services_for_ticket",
+            new=AsyncMock(return_value=[]),
+        ),
+    ):
+        response = await main._render_ticket_detail(request, user, ticket_id=1)
 
     assert isinstance(response, HTMLResponse)
     assert response.status_code == status.HTTP_200_OK
