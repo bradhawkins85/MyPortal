@@ -29,13 +29,28 @@ async def receive_alert(
     request: Request,
     token: str | None = Query(default=None, description="Optional token fallback when Authorization header is unavailable."),
 ) -> UptimeKumaAlertIngestResponse:
+    def _extract_secret_from_payload(payload_data: dict[str, object]) -> str | None:
+        for key in ("token", "shared_secret", "sharedSecret", "secret"):
+            value = payload_data.get(key)
+            if value is None:
+                continue
+            token_value = str(value).strip()
+            if token_value:
+                return token_value
+        return None
+
     request_headers = dict(request.headers)
     source_url = str(request.url)
-    raw_body = await request.body()
-    decoded_body = raw_body.decode("utf-8", errors="replace") if raw_body else ""
-
     content_type = (request.headers.get("content-type") or "").lower()
     raw_payload: dict[str, object]
+
+    if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+        form_data = await request.form()
+        raw_payload = {key: value for key, value in form_data.items()}
+        decoded_body = "&".join(f"{key}={value}" for key, value in raw_payload.items())
+    else:
+        raw_body = await request.body()
+        decoded_body = raw_body.decode("utf-8", errors="replace") if raw_body else ""
     if decoded_body and "application/json" in content_type:
         try:
             candidate_payload = json.loads(decoded_body)
@@ -91,6 +106,8 @@ async def receive_alert(
         provided_secret = auth_header.split(" ", 1)[1].strip()
     if not provided_secret and token:
         provided_secret = token.strip() or None
+    if not provided_secret:
+        provided_secret = _extract_secret_from_payload(raw_payload)
 
     remote_addr = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent") or request.headers.get("User-Agent")
