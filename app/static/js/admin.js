@@ -1200,9 +1200,81 @@
     const descriptionField = form.querySelector('#message-template-description');
     const contentTypeField = form.querySelector('#message-template-content-type');
     const contentField = form.querySelector('#message-template-content');
+    const editorContainer = form.querySelector('#message-template-content-editor');
     const submitButton = form.querySelector('[data-template-submit]');
     const formTitle = document.querySelector('[data-template-form-title]');
     const resetButton = document.querySelector('[data-template-reset]');
+
+    let sunEditor = null;
+
+    function destroySunEditor() {
+      if (sunEditor) {
+        try {
+          sunEditor.destroy();
+        } catch (_) {}
+        sunEditor = null;
+      }
+    }
+
+    function initSunEditor(initialContent) {
+      destroySunEditor();
+      if (!editorContainer) {
+        return;
+      }
+      if (typeof SUNEDITOR === 'undefined') {
+        console.warn('SunEditor failed to load. HTML content editing is unavailable.');
+        contentField.style.display = '';
+        contentField.setAttribute('required', '');
+        if (editorContainer) {
+          editorContainer.style.display = 'none';
+        }
+        return;
+      }
+      editorContainer.innerHTML = '';
+      const sunTextarea = document.createElement('textarea');
+      sunTextarea.id = 'message-template-content-sun';
+      editorContainer.appendChild(sunTextarea);
+      sunEditor = SUNEDITOR.create(sunTextarea, {
+        height: '300',
+        buttonList: [
+          ['undo', 'redo'],
+          ['bold', 'underline', 'italic', 'strike'],
+          ['fontColor', 'hiliteColor'],
+          ['outdent', 'indent'],
+          ['align', 'horizontalRule', 'list', 'lineHeight'],
+          ['link', 'image'],
+          ['removeFormat'],
+          ['codeView'],
+        ],
+      });
+      sunEditor.setContents(initialContent || '');
+    }
+
+    function switchEditorMode(contentType, content) {
+      if (contentType === 'text/html') {
+        contentField.style.display = 'none';
+        contentField.removeAttribute('required');
+        if (editorContainer) {
+          editorContainer.style.display = '';
+        }
+        initSunEditor(content !== undefined ? content : contentField.value);
+      } else {
+        destroySunEditor();
+        if (editorContainer) {
+          editorContainer.style.display = 'none';
+          editorContainer.innerHTML = '';
+        }
+        contentField.style.display = '';
+        contentField.setAttribute('required', '');
+      }
+    }
+
+    function getContentValue() {
+      if (contentTypeField.value === 'text/html' && sunEditor) {
+        return sunEditor.getContents();
+      }
+      return contentField.value;
+    }
 
     function setFormState(mode, payload) {
       if (mode === 'edit' && payload) {
@@ -1232,17 +1304,23 @@
           submitButton.textContent = 'Save template';
         }
       }
+      switchEditorMode(contentTypeField.value, payload ? payload.content || '' : '');
     }
 
     async function handleSubmit(event) {
       event.preventDefault();
       const templateId = idField.value.trim();
+      const content = getContentValue();
+      if (!content || !content.trim()) {
+        alert('Content is required.');
+        return;
+      }
       const payload = {
         slug: slugField.value.trim(),
         name: nameField.value.trim(),
         description: descriptionField.value.trim() || null,
         content_type: contentTypeField.value,
-        content: contentField.value,
+        content,
       };
 
       const method = templateId ? 'PUT' : 'POST';
@@ -1269,6 +1347,10 @@
 
     form.addEventListener('submit', handleSubmit);
 
+    contentTypeField.addEventListener('change', () => {
+      switchEditorMode(contentTypeField.value, getContentValue());
+    });
+
     if (resetButton) {
       resetButton.addEventListener('click', () => {
         setFormState('create');
@@ -1278,6 +1360,8 @@
 
     if (!idField.value) {
       setFormState('create');
+    } else {
+      switchEditorMode(contentTypeField.value, contentField.value);
     }
   }
 
