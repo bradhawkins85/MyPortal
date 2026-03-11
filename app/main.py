@@ -13236,11 +13236,6 @@ async def admin_update_ticket_description(ticket_id: int, request: Request):
     await tickets_service.update_ticket_description(ticket_id, description_value)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
-    await tickets_service.emit_ticket_updated_event(
-        ticket_id,
-        actor_type="technician",
-        actor=current_user,
-    )
 
     message = quote("Ticket description updated.")
     destination = f"/admin/tickets/{ticket_id}?success={message}"
