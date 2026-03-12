@@ -4921,6 +4921,12 @@ async def shop_page(
         if not show_out_of_stock:
             products = [product for product in products if product.get("stock", 0) > 0]
 
+        products = [
+            product
+            for product in products
+            if not shop_service.is_price_below_dbp_threshold(product, is_vip=is_vip)
+        ]
+
         if is_vip:
             for product in products:
                 vip_price = product.get("vip_price")
@@ -5071,6 +5077,14 @@ async def add_to_cart(request: Request) -> RedirectResponse:
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
+    is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
+    if shop_service.is_price_below_dbp_threshold(product, is_vip=is_vip):
+        message = quote("Product is unavailable.")
+        return RedirectResponse(
+            url=f"{request.url_for('cart_page')}?cartError={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
     # Check if this is a subscription product that the user already owns
     subscription_category_id = product.get("subscription_category_id")
     if subscription_category_id is not None:
@@ -5130,7 +5144,6 @@ async def add_to_cart(request: Request) -> RedirectResponse:
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
     unit_price = shop_service.get_product_price(product, is_vip=is_vip)
     new_quantity = existing_quantity + requested_quantity
 
@@ -10366,6 +10379,14 @@ async def admin_shop_page(
     for restriction in restrictions:
         restrictions_map.setdefault(restriction["product_id"], []).append(restriction)
 
+    for product in products:
+        product["price_below_threshold"] = shop_service.is_price_below_dbp_threshold(
+            product, is_vip=False
+        )
+        product["vip_price_below_threshold"] = product.get(
+            "vip_price"
+        ) is not None and shop_service.is_price_below_dbp_threshold(product, is_vip=True)
+
     extra = {
         "title": "Shop admin",
         "categories": categories,
@@ -10376,10 +10397,6 @@ async def admin_shop_page(
         "subscription_categories": subscription_categories,
     }
     return await _render_template("admin/shop.html", request, current_user, extra=extra)
-
-
-@app.get("/admin/shop/categories", response_class=HTMLResponse)
-async def admin_shop_categories_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
