@@ -176,14 +176,10 @@
       descriptionTitle.textContent = 'Description';
       container.appendChild(descriptionTitle);
 
-      product.description.split(/\r?\n/).forEach((line) => {
-        if (!line) {
-          return;
-        }
-        const paragraph = document.createElement('p');
-        paragraph.textContent = line;
-        container.appendChild(paragraph);
-      });
+      const descriptionDiv = document.createElement('div');
+      descriptionDiv.className = 'modal__description';
+      descriptionDiv.innerHTML = product.description;
+      container.appendChild(descriptionDiv);
     }
   }
 
