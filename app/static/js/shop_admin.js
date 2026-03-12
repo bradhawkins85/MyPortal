@@ -316,14 +316,103 @@
     const importModal = document.getElementById('import-product-modal');
     const editModal = document.getElementById('product-edit-modal');
     const visibilityModal = document.getElementById('product-visibility-modal');
+    const descriptionEditorModal = document.getElementById('description-editor-modal');
     const editForm = document.getElementById('product-edit-form');
     const visibilityForm = document.getElementById('product-visibility-form');
-    const previewImage = document.getElementById('edit-product-preview');
+    const imageFilenameDisplay = document.getElementById('edit-product-image-filename');
     const editIdField = document.getElementById('edit-product-id');
     const featuresTable = document.getElementById('edit-product-features-table');
     const featuresTableBody = featuresTable ? featuresTable.querySelector('tbody') : null;
     const featuresDataInput = document.getElementById('edit-product-features-data');
     const addFeatureButton = document.getElementById('add-product-feature');
+    const expandDescriptionButton = document.getElementById('edit-description-expand');
+    const descriptionEditorField = document.getElementById('description-editor-field');
+    const descriptionEditorApply = document.getElementById('description-editor-apply');
+    const descriptionEditorCancel = document.getElementById('description-editor-cancel');
+    const descriptionEditorClose = document.getElementById('description-editor-close');
+
+    let descriptionSunEditor = null;
+
+    function getOrCreateDescriptionEditor() {
+      if (descriptionSunEditor) {
+        return descriptionSunEditor;
+      }
+      if (!descriptionEditorField || typeof SUNEDITOR === 'undefined') {
+        return null;
+      }
+      descriptionSunEditor = SUNEDITOR.create(descriptionEditorField, {
+        width: '100%',
+        height: '400',
+        buttonList: [
+          ['undo', 'redo'],
+          ['bold', 'underline', 'italic', 'strike'],
+          ['fontColor', 'hiliteColor'],
+          ['outdent', 'indent'],
+          ['align', 'horizontalRule', 'list', 'lineHeight'],
+          ['link'],
+          ['removeFormat'],
+          ['codeView'],
+        ],
+      });
+      return descriptionSunEditor;
+    }
+
+    function openDescriptionEditor() {
+      const descriptionTextarea = editForm ? editForm.querySelector('#edit-product-description') : null;
+      if (!descriptionEditorModal || !descriptionTextarea) {
+        return;
+      }
+      const currentValue = descriptionTextarea.value || '';
+      const editor = getOrCreateDescriptionEditor();
+      if (editor) {
+        editor.setContents(currentValue);
+      } else if (descriptionEditorField) {
+        descriptionEditorField.value = currentValue;
+      }
+      descriptionEditorModal.hidden = false;
+      descriptionEditorModal.classList.add('is-visible');
+    }
+
+    function applyDescriptionEditor() {
+      const descriptionTextarea = editForm ? editForm.querySelector('#edit-product-description') : null;
+      if (!descriptionTextarea) {
+        return;
+      }
+      if (descriptionSunEditor) {
+        descriptionTextarea.value = descriptionSunEditor.getContents();
+      } else if (descriptionEditorField) {
+        descriptionTextarea.value = descriptionEditorField.value;
+      }
+      closeDescriptionEditor();
+    }
+
+    function closeDescriptionEditor() {
+      if (!descriptionEditorModal) {
+        return;
+      }
+      descriptionEditorModal.classList.remove('is-visible');
+      descriptionEditorModal.hidden = true;
+    }
+
+    if (expandDescriptionButton) {
+      expandDescriptionButton.addEventListener('click', openDescriptionEditor);
+    }
+    if (descriptionEditorApply) {
+      descriptionEditorApply.addEventListener('click', applyDescriptionEditor);
+    }
+    if (descriptionEditorCancel) {
+      descriptionEditorCancel.addEventListener('click', closeDescriptionEditor);
+    }
+    if (descriptionEditorClose) {
+      descriptionEditorClose.addEventListener('click', closeDescriptionEditor);
+    }
+    if (descriptionEditorModal) {
+      descriptionEditorModal.addEventListener('click', (event) => {
+        if (event.target === descriptionEditorModal) {
+          closeDescriptionEditor();
+        }
+      });
+    }
 
     function dispatchFeatureTableUpdate() {
       if (!featuresTable) {
@@ -584,12 +673,13 @@
             updateRecommendationSelect(editUpsellSelect, categorySelect.value, selectedUpsell, id);
           };
         }
-        if (previewImage) {
+        if (imageFilenameDisplay) {
           if (product.image_url) {
-            previewImage.src = product.image_url;
-            previewImage.hidden = false;
+            const filename = product.image_url.split('/').pop();
+            imageFilenameDisplay.textContent = `Current image: ${filename}`;
+            imageFilenameDisplay.hidden = false;
           } else {
-            previewImage.hidden = true;
+            imageFilenameDisplay.hidden = true;
           }
         }
         renderFeatureRows(product.features || []);
