@@ -67,6 +67,35 @@ def is_price_below_dbp_threshold(
     return sale_price < threshold
 
 
+def calculate_profit(
+    product: Mapping[str, Any], *, is_vip: bool = False
+) -> Decimal | None:
+    """Return the profit for a product relative to DBP * 1.1 (the GST-inclusive cost).
+
+    DBP (``buy_price``) is an ex-GST price, so it is multiplied by 1.1 before
+    being subtracted from the sale price.  Returns ``None`` when no
+    ``buy_price`` is set or the value is invalid.
+    """
+    buy_price_raw = product.get("buy_price")
+    if buy_price_raw is None:
+        return None
+    try:
+        buy_price = Decimal(str(buy_price_raw))
+    except (InvalidOperation, ValueError):
+        return None
+    if is_vip:
+        vip_price_raw = product.get("vip_price")
+        if vip_price_raw is None:
+            return None
+        try:
+            sale_price = Decimal(str(vip_price_raw))
+        except (InvalidOperation, ValueError):
+            return None
+    else:
+        sale_price = get_product_price(product, is_vip=False)
+    return sale_price - buy_price * _DBP_MARGIN
+
+
 async def maybe_send_stock_notification_by_id(
     product_id: int,
     previous_stock: int | None,
