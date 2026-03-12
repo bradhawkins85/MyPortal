@@ -1505,8 +1505,12 @@
         }
         const moduleSelect = row.querySelector('[data-action-module]');
         const payloadFieldInput = row.querySelector('[data-action-payload]');
+        const orderInput = row.querySelector('[data-action-order]');
+        const noteInput = row.querySelector('[data-action-note]');
         const moduleValue = moduleSelect ? moduleSelect.value.trim() : '';
         const payloadText = payloadFieldInput ? payloadFieldInput.value.trim() : '';
+        const orderValue = orderInput ? parseInt(orderInput.value, 10) : index;
+        const noteValue = noteInput ? noteInput.value.trim() : '';
         if (!moduleValue) {
           errorMessage = 'Select a module for every trigger action.';
           return;
@@ -1524,7 +1528,11 @@
             return;
           }
         }
-        actions.push({ module: moduleValue, payload });
+        const actionEntry = { order: isNaN(orderValue) ? index : orderValue, module: moduleValue, payload };
+        if (noteValue) {
+          actionEntry.note = noteValue;
+        }
+        actions.push(actionEntry);
       });
 
       if (errorMessage) {
@@ -1566,6 +1574,25 @@
         const row = document.createElement('div');
         row.className = 'automation-action';
         row.setAttribute('data-action-row', 'true');
+
+        const orderWrapper = document.createElement('div');
+        orderWrapper.className = 'automation-action__field automation-action__field--order';
+        const orderLabel = document.createElement('label');
+        orderLabel.className = 'sr-only';
+        orderLabel.setAttribute('for', `automation-action-order-${rowId}`);
+        orderLabel.textContent = 'Action order';
+        const orderInput = document.createElement('input');
+        orderInput.type = 'number';
+        orderInput.min = '0';
+        orderInput.className = 'form-input';
+        orderInput.id = `automation-action-order-${rowId}`;
+        orderInput.placeholder = '0';
+        orderInput.setAttribute('data-action-order', 'true');
+        orderInput.value = action && action.order !== undefined ? String(action.order) : String(list.querySelectorAll('[data-action-row]').length);
+        orderInput.addEventListener('input', updateState);
+        orderWrapper.appendChild(orderLabel);
+        orderWrapper.appendChild(orderInput);
+        row.appendChild(orderWrapper);
 
         const moduleWrapper = document.createElement('div');
         moduleWrapper.className = 'automation-action__field';
@@ -1650,6 +1677,24 @@
         });
         row.appendChild(removeButton);
 
+        const noteWrapper = document.createElement('div');
+        noteWrapper.className = 'automation-action__note';
+        const noteLabel = document.createElement('label');
+        noteLabel.className = 'sr-only';
+        noteLabel.setAttribute('for', `automation-action-note-${rowId}`);
+        noteLabel.textContent = 'Action note';
+        const noteInput = document.createElement('input');
+        noteInput.type = 'text';
+        noteInput.className = 'form-input';
+        noteInput.id = `automation-action-note-${rowId}`;
+        noteInput.placeholder = 'Optional note describing what this action does';
+        noteInput.setAttribute('data-action-note', 'true');
+        noteInput.value = action && action.note ? String(action.note) : '';
+        noteInput.addEventListener('input', updateState);
+        noteWrapper.appendChild(noteLabel);
+        noteWrapper.appendChild(noteInput);
+        row.appendChild(noteWrapper);
+
         return row;
       };
 
@@ -1669,7 +1714,12 @@
       try {
         const parsed = JSON.parse(initialValue);
         if (parsed && Array.isArray(parsed.actions)) {
-          parsed.actions.forEach((action) => addRow(action));
+          const sorted = parsed.actions.slice().sort((a, b) => {
+            const oa = typeof a.order === 'number' ? a.order : 0;
+            const ob = typeof b.order === 'number' ? b.order : 0;
+            return oa - ob;
+          });
+          sorted.forEach((action) => addRow(action));
         }
       } catch (error) {
         addRow();
