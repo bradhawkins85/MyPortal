@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 
+{% block extra_head %}
+  {{ super() }}
+  <link rel="stylesheet" href="{{ static_url('/static/css/suneditor.min.css') }}" />
+{% endblock %}
+
 {% block header_title %}
   <div class="header-title-menu">
     <span class="header-title-menu__label">Shop admin</span>
@@ -308,12 +313,15 @@
       <div class="form-field">
         <label class="form-label" for="edit-product-image">Image</label>
         <input class="form-input" id="edit-product-image" name="image" type="file" accept="image/*" />
-        <img id="edit-product-preview" alt="Current product image" class="product-preview" hidden />
+        <p class="form-helper" id="edit-product-image-filename" hidden></p>
       </div>
       
       <!-- Row 3: Description -->
       <div class="form-field form-field--wide">
-        <label class="form-label" for="edit-product-description">Description</label>
+        <div class="form-label-row">
+          <label class="form-label" for="edit-product-description">Description</label>
+          <button type="button" class="button button--ghost button--small" id="edit-description-expand">Expand editor</button>
+        </div>
         <textarea class="form-input form-input--textarea" id="edit-product-description" name="description"></textarea>
       </div>
       
@@ -486,10 +494,27 @@
 
 <script type="application/json" id="admin-products-data">{{ products | tojson }}</script>
 <script type="application/json" id="admin-product-restrictions">{{ product_restrictions | tojson }}</script>
+
+<div class="modal" id="description-editor-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content modal__content--large" role="document">
+    <button type="button" class="modal__close" id="description-editor-close">
+      <span class="visually-hidden">Close description editor</span>
+      &times;
+    </button>
+    <h2 class="modal__title">Edit description</h2>
+    <textarea id="description-editor-field"></textarea>
+    <div class="form-actions">
+      <button type="button" class="button" id="description-editor-apply">Apply</button>
+      <button type="button" class="button button--ghost" id="description-editor-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
+  <script src="{{ static_url('/static/js/suneditor.min.js') }}"></script>
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/shop_admin.js') }}" defer></script>
 {% endblock %}
