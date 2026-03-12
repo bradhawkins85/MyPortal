@@ -61,6 +61,7 @@ async def test_create_automation_returns_inserted_record(monkeypatch):
         "name": "Escalate stale tickets",
         "description": "Auto escalate tickets older than 3 days",
         "kind": "scheduled",
+        "execution_order": 0,
         "cadence": "daily",
         "cron_expression": None,
         "scheduled_time": None,
@@ -83,6 +84,7 @@ async def test_create_automation_returns_inserted_record(monkeypatch):
         name="Escalate stale tickets",
         description="Auto escalate tickets older than 3 days",
         kind="scheduled",
+        execution_order=0,
         cadence="daily",
         cron_expression=None,
         scheduled_time=None,
@@ -100,6 +102,7 @@ async def test_create_automation_returns_inserted_record(monkeypatch):
     assert dummy_db.fetch_params == (99,)
     assert "status" in dummy_db.insert_sql
     assert "next_run_at" in dummy_db.insert_sql
+    assert "execution_order" in dummy_db.insert_sql
 
 
 @pytest.mark.anyio
@@ -111,6 +114,7 @@ async def test_create_automation_reconnects_when_pool_missing(monkeypatch):
         name="Reconnect automation",
         description=None,
         kind="event",
+        execution_order=0,
         cadence=None,
         cron_expression=None,
         scheduled_time=None,
@@ -136,6 +140,7 @@ async def test_create_automation_falls_back_when_fetch_missing(monkeypatch):
         name="Auto close",
         description=None,
         kind="event",
+        execution_order=0,
         cadence=None,
         cron_expression=None,
         scheduled_time=None,
@@ -214,6 +219,7 @@ async def test_list_event_automations_without_limit(monkeypatch):
             "name": "Ticket ntfy alert",
             "description": None,
             "kind": "event",
+            "execution_order": 0,
             "cadence": None,
             "cron_expression": None,
             "scheduled_time": None,
@@ -239,3 +245,16 @@ async def test_list_event_automations_without_limit(monkeypatch):
     assert dummy_db.fetch_all_params == ("tickets.created",)
     assert len(records) == 1
     assert records[0]["id"] == 301
+    assert records[0]["execution_order"] == 0
+
+
+@pytest.mark.anyio
+async def test_list_event_automations_orders_by_execution_order(monkeypatch):
+    dummy_db = _DummyAutomationDB(fetched_row=None, fetched_rows=[])
+    monkeypatch.setattr(automations, "db", dummy_db)
+
+    await automations.list_event_automations("tickets.updated")
+
+    sql = dummy_db.fetch_all_sql or ""
+    assert "execution_order" in sql.lower()
+    assert "ORDER BY" in sql.upper()

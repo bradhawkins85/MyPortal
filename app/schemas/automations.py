@@ -8,6 +8,7 @@ class AutomationBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     kind: str = Field(..., pattern=r"^(scheduled|event)$")
+    execution_order: int = Field(default=0, ge=0)
     cadence: Optional[str] = Field(default=None, max_length=64)
     cron_expression: Optional[str] = Field(default=None, max_length=255)
     scheduled_time: Optional[datetime] = None
@@ -27,6 +28,7 @@ class AutomationUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = None
     kind: Optional[str] = Field(default=None, pattern=r"^(scheduled|event)$")
+    execution_order: Optional[int] = Field(default=None, ge=0)
     cadence: Optional[str] = Field(default=None, max_length=64)
     cron_expression: Optional[str] = Field(default=None, max_length=255)
     scheduled_time: Optional[datetime] = None

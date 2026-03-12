@@ -46,6 +46,7 @@ async def create_automation(
         name=data["name"],
         description=data.get("description"),
         kind=data["kind"],
+        execution_order=data.get("execution_order", 0),
         cadence=data.get("cadence"),
         cron_expression=data.get("cron_expression"),
         scheduled_time=data.get("scheduled_time"),
