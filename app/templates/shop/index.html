@@ -46,19 +46,26 @@
 {% endif %}
 
 <div class="shop-layout">
-  {% macro render_category(category) -%}
-    <a
-      class="shop-categories__link {% if current_category and current_category == category.id %}is-active{% endif %}"
-      href="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}"
-      {% if current_category and current_category == category.id %}aria-current="page"{% endif %}
-    >
-      <span class="shop-categories__icon" aria-hidden="true"></span>
-      <span>{{ category.name }}</span>
-    </a>
-    {% for child in category.children %}
-      {{ render_category(child) }}
+  {#
+    Determine if we are in "sub-category mode":
+    - current_category is a top-level category that has children, OR
+    - current_category is a child of a top-level category
+    In sub-category mode, hide other parent categories and show only the
+    children of the active parent. Packages and All Products are always visible.
+  #}
+  {% set _nav_ns = namespace(active_parent=None) %}
+  {% if current_category is not none and current_category != 'packages' %}
+    {% for _cat in categories %}
+      {% if _cat.id == current_category and _cat.children %}
+        {% set _nav_ns.active_parent = _cat %}
+      {% endif %}
+      {% for _child in _cat.children %}
+        {% if _child.id == current_category %}
+          {% set _nav_ns.active_parent = _cat %}
+        {% endif %}
+      {% endfor %}
     {% endfor %}
-  {%- endmacro %}
+  {% endif %}
 
   <nav class="shop-categories" aria-label="Product categories">
     <a
@@ -77,9 +84,31 @@
       <span class="shop-categories__icon" aria-hidden="true"></span>
       <span>All products</span>
     </a>
-    {% for category in categories %}
-      {{ render_category(category) }}
-    {% endfor %}
+    {% if _nav_ns.active_parent %}
+      {# Sub-category mode: show only children of the active parent #}
+      {% for child in _nav_ns.active_parent.children %}
+        <a
+          class="shop-categories__link {% if current_category == child.id %}is-active{% endif %}"
+          href="{{ request.url_for('shop_page') }}{{ shop_query(child.id) }}"
+          {% if current_category == child.id %}aria-current="page"{% endif %}
+        >
+          <span class="shop-categories__icon" aria-hidden="true"></span>
+          <span>{{ child.name }}</span>
+        </a>
+      {% endfor %}
+    {% else %}
+      {# Normal mode: show all top-level parent categories #}
+      {% for category in categories %}
+        <a
+          class="shop-categories__link {% if current_category == category.id %}is-active{% endif %}"
+          href="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}"
+          {% if current_category == category.id %}aria-current="page"{% endif %}
+        >
+          <span class="shop-categories__icon" aria-hidden="true"></span>
+          <span>{{ category.name }}</span>
+        </a>
+      {% endfor %}
+    {% endif %}
   </nav>
 
   <section class="card card--panel shop-layout__content">
