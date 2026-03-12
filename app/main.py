@@ -10397,6 +10397,10 @@ async def admin_shop_page(
         "subscription_categories": subscription_categories,
     }
     return await _render_template("admin/shop.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/shop/categories", response_class=HTMLResponse)
+async def admin_shop_categories_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
