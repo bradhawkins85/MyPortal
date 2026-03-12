@@ -86,9 +86,6 @@
     <header class="card__header">
       <div>
         <h2 class="card__title">{{ 'Available packages' if show_packages else 'Available products' }}</h2>
-        <p class="card__subtitle">
-          {{ 'Choose a package to automatically add multiple products to your order.' if show_packages else 'Add items directly to your cart or review detailed specifications.' }}
-        </p>
       </div>
       <div class="card__controls shop-toolbar">
         <input
@@ -101,7 +98,7 @@
       </div>
     </header>
     <div class="table-wrapper">
-      <table class="table" id="shop-table" data-table>
+      <table class="table" id="shop-table" data-table data-table-paginate>
         <thead>
           <tr>
             <th scope="col" data-mobile-priority="supporting">Image</th>
