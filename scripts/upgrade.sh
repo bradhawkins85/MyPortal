@@ -380,8 +380,16 @@ FORCE_RESTART="$(read_env_var "FORCE_RESTART" "0")"
 
 reset_project_permissions "$SERVICE_USER"
 
+update_version_file() {
+  local version
+  version=$(git log -1 --format="%cd" --date=format:"%Y%m%d" HEAD)
+  printf '%s\n' "$version" >"${PROJECT_ROOT}/version.txt"
+  echo "Updated version.txt to ${version}."
+}
+
 if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
   echo "Repository updated to $POST_PULL_HEAD."
+  update_version_file
   if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
     mark_restart_required
   else
@@ -389,6 +397,7 @@ if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
   fi
 elif [[ "$FORCE_RESTART" == "1" ]]; then
   echo "No repository changes detected but FORCE_RESTART=1; flagging dependency install and service restart."
+  update_version_file
   if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
     mark_restart_required
   else
