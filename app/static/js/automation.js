@@ -1494,10 +1494,11 @@
       return select;
     };
 
-    const serializeActions = () => {
+    const serializeActions = (validateNotes = false) => {
       const rows = Array.from(list.querySelectorAll('[data-action-row]'));
       const actions = [];
       let errorMessage = '';
+      let firstErrorRow = null;
 
       rows.forEach((row, index) => {
         if (errorMessage) {
@@ -1513,6 +1514,7 @@
         const noteValue = noteInput ? noteInput.value.trim() : '';
         if (!moduleValue) {
           errorMessage = 'Select a module for every trigger action.';
+          firstErrorRow = row;
           return;
         }
         let payload = {};
@@ -1525,6 +1527,21 @@
             payload = parsed;
           } catch (error) {
             errorMessage = `Trigger action ${index + 1} payload must be valid JSON.`;
+            firstErrorRow = row;
+            return;
+          }
+        }
+        if (validateNotes) {
+          const isNew = row.dataset.actionLoaded !== 'true';
+          let isModified = false;
+          if (!isNew) {
+            const origModule = row.dataset.actionOriginalModule || '';
+            const origPayload = row.dataset.actionOriginalPayload || '';
+            isModified = moduleValue !== origModule || payloadText !== origPayload;
+          }
+          if ((isNew || isModified) && !noteValue) {
+            errorMessage = `Add a note for action ${index + 1}.`;
+            firstErrorRow = row;
             return;
           }
         }
@@ -1541,6 +1558,14 @@
         if (errorField) {
           errorField.textContent = errorMessage;
           errorField.hidden = false;
+        }
+        if (firstErrorRow) {
+          const body = firstErrorRow.querySelector('[data-action-body]');
+          const toggle = firstErrorRow.querySelector('[data-action-toggle]');
+          if (body && body.hidden) {
+            body.hidden = false;
+            if (toggle) toggle.setAttribute('aria-expanded', 'true');
+          }
         }
         return null;
       }
@@ -1563,7 +1588,7 @@
     };
 
     const updateState = () => {
-      serializeActions();
+      serializeActions(false);
     };
 
       let actionRowCounter = 0;
@@ -1571,16 +1596,76 @@
       const createActionRow = (action = null) => {
         actionRowCounter += 1;
         const rowId = actionRowCounter;
+        const isLoaded = action !== null;
+
         const row = document.createElement('div');
         row.className = 'automation-action';
         row.setAttribute('data-action-row', 'true');
+        row.dataset.actionLoaded = isLoaded ? 'true' : 'false';
+        if (isLoaded) {
+          row.dataset.actionOriginalModule = action.module || '';
+          try {
+            row.dataset.actionOriginalPayload = action.payload ? JSON.stringify(action.payload) : '';
+          } catch (e) {
+            row.dataset.actionOriginalPayload = '';
+          }
+        }
 
-        const orderWrapper = document.createElement('div');
-        orderWrapper.className = 'automation-action__field automation-action__field--order';
+        // ── Header (always visible) ──────────────────────────────
+        const header = document.createElement('div');
+        header.className = 'automation-action__header';
+
+        const noteWrapper = document.createElement('div');
+        noteWrapper.className = 'automation-action__header-note';
+        const noteLabel = document.createElement('label');
+        noteLabel.className = 'sr-only';
+        noteLabel.setAttribute('for', `automation-action-note-${rowId}`);
+        noteLabel.textContent = 'Action note';
+        const noteInput = document.createElement('input');
+        noteInput.type = 'text';
+        noteInput.className = 'form-input';
+        noteInput.id = `automation-action-note-${rowId}`;
+        noteInput.placeholder = 'Action note';
+        noteInput.setAttribute('data-action-note', 'true');
+        noteInput.value = action && action.note ? String(action.note) : '';
+        noteInput.addEventListener('input', updateState);
+        noteInput.addEventListener('click', (e) => e.stopPropagation());
+        noteWrapper.appendChild(noteLabel);
+        noteWrapper.appendChild(noteInput);
+        header.appendChild(noteWrapper);
+
+        const toggleButton = document.createElement('button');
+        toggleButton.type = 'button';
+        toggleButton.className = 'automation-action__toggle';
+        toggleButton.setAttribute('aria-expanded', 'false');
+        toggleButton.setAttribute('data-action-toggle', 'true');
+        toggleButton.setAttribute('aria-label', 'Expand action');
+        toggleButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>';
+        toggleButton.addEventListener('click', () => {
+          const expanded = toggleButton.getAttribute('aria-expanded') === 'true';
+          toggleButton.setAttribute('aria-expanded', String(!expanded));
+          body.hidden = expanded;
+        });
+        header.appendChild(toggleButton);
+        row.appendChild(header);
+
+        // ── Body (collapsed by default) ──────────────────────────
+        const body = document.createElement('div');
+        body.className = 'automation-action__body';
+        body.hidden = true;
+        body.setAttribute('data-action-body', 'true');
+
+        const columns = document.createElement('div');
+        columns.className = 'automation-action__columns';
+
+        // Left column: order, module, remove
+        const leftCol = document.createElement('div');
+        leftCol.className = 'automation-action__left';
+
         const orderLabel = document.createElement('label');
-        orderLabel.className = 'sr-only';
+        orderLabel.className = 'form-label';
         orderLabel.setAttribute('for', `automation-action-order-${rowId}`);
-        orderLabel.textContent = 'Action order';
+        orderLabel.textContent = 'Order';
         const orderInput = document.createElement('input');
         orderInput.type = 'number';
         orderInput.min = '0';
@@ -1590,23 +1675,38 @@
         orderInput.setAttribute('data-action-order', 'true');
         orderInput.value = action && action.order !== undefined ? String(action.order) : String(list.querySelectorAll('[data-action-row]').length);
         orderInput.addEventListener('input', updateState);
-        orderWrapper.appendChild(orderLabel);
-        orderWrapper.appendChild(orderInput);
-        row.appendChild(orderWrapper);
+        leftCol.appendChild(orderLabel);
+        leftCol.appendChild(orderInput);
 
-        const moduleWrapper = document.createElement('div');
-        moduleWrapper.className = 'automation-action__field';
+        const moduleLabel = document.createElement('label');
+        moduleLabel.className = 'form-label';
+        moduleLabel.setAttribute('for', `automation-action-module-${rowId}`);
+        moduleLabel.textContent = 'Module';
         let refreshQuickAddOptions = () => {};
         const moduleSelect = createModuleSelect(action && action.module ? action.module : '');
+        moduleSelect.id = `automation-action-module-${rowId}`;
         moduleSelect.addEventListener('change', () => {
           refreshQuickAddOptions();
           updateState();
         });
-        moduleWrapper.appendChild(moduleSelect);
-        row.appendChild(moduleWrapper);
+        leftCol.appendChild(moduleLabel);
+        leftCol.appendChild(moduleSelect);
 
-        const payloadWrapper = document.createElement('div');
-        payloadWrapper.className = 'automation-action__field';
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'button button--ghost automation-action__remove';
+        removeButton.textContent = 'Remove';
+        removeButton.addEventListener('click', () => {
+          row.remove();
+          updateState();
+        });
+        leftCol.appendChild(removeButton);
+        columns.appendChild(leftCol);
+
+        // Right column: template row + payload textarea
+        const rightCol = document.createElement('div');
+        rightCol.className = 'automation-action__right';
+
         const quickAddWrapper = document.createElement('div');
         quickAddWrapper.className = 'form-quick-add';
         quickAddWrapper.hidden = true;
@@ -1632,8 +1732,8 @@
         quickAddWrapper.appendChild(quickAddButton);
 
         const payloadInput = document.createElement('textarea');
-        payloadInput.className = 'form-input';
-        payloadInput.rows = 2;
+        payloadInput.className = 'form-input automation-action__payload';
+        payloadInput.rows = 4;
         payloadInput.placeholder = '{}';
         payloadInput.setAttribute('data-action-payload', 'true');
         if (action && action.payload) {
@@ -1663,37 +1763,12 @@
           populateActionQuickAdd(quickAddSelect, quickAddButton, quickAddWrapper, moduleSelect.value);
         };
         refreshQuickAddOptions();
-        payloadWrapper.appendChild(quickAddWrapper);
-        payloadWrapper.appendChild(payloadInput);
-        row.appendChild(payloadWrapper);
+        rightCol.appendChild(quickAddWrapper);
+        rightCol.appendChild(payloadInput);
+        columns.appendChild(rightCol);
 
-        const removeButton = document.createElement('button');
-        removeButton.type = 'button';
-        removeButton.className = 'button button--ghost automation-action__remove';
-        removeButton.textContent = 'Remove';
-        removeButton.addEventListener('click', () => {
-          row.remove();
-          updateState();
-        });
-        row.appendChild(removeButton);
-
-        const noteWrapper = document.createElement('div');
-        noteWrapper.className = 'automation-action__note';
-        const noteLabel = document.createElement('label');
-        noteLabel.className = 'sr-only';
-        noteLabel.setAttribute('for', `automation-action-note-${rowId}`);
-        noteLabel.textContent = 'Action note';
-        const noteInput = document.createElement('input');
-        noteInput.type = 'text';
-        noteInput.className = 'form-input';
-        noteInput.id = `automation-action-note-${rowId}`;
-        noteInput.placeholder = 'Optional note describing what this action does';
-        noteInput.setAttribute('data-action-note', 'true');
-        noteInput.value = action && action.note ? String(action.note) : '';
-        noteInput.addEventListener('input', updateState);
-        noteWrapper.appendChild(noteLabel);
-        noteWrapper.appendChild(noteInput);
-        row.appendChild(noteWrapper);
+        body.appendChild(columns);
+        row.appendChild(body);
 
         return row;
       };
@@ -1733,7 +1808,7 @@
     const form = list.closest('form');
     if (form) {
       form.addEventListener('submit', (event) => {
-        const result = serializeActions();
+        const result = serializeActions(true);
         if (result === null) {
           event.preventDefault();
         }
