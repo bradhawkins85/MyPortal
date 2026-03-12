@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
 from app.repositories import shop as shop_repo
@@ -39,6 +39,32 @@ def get_product_price(product: Mapping[str, Any], *, is_vip: bool = False) -> De
     if is_vip and product.get("vip_price") is not None:
         return Decimal(str(product["vip_price"]))
     return Decimal(str(product.get("price") or 0))
+
+
+_DBP_MARGIN = Decimal("1.1")
+
+
+def is_price_below_dbp_threshold(
+    product: Mapping[str, Any], *, is_vip: bool = False
+) -> bool:
+    """Return True if the effective sale price is below DBP * 1.1.
+
+    The effective sale price is determined by :func:`get_product_price` using
+    the given *is_vip* flag.  If the product has no ``buy_price`` (DBP) the
+    function always returns ``False`` — there is nothing to compare against.
+    """
+    buy_price_raw = product.get("buy_price")
+    if buy_price_raw is None:
+        return False
+    try:
+        buy_price = Decimal(str(buy_price_raw))
+    except (InvalidOperation, ValueError):
+        return False
+    if buy_price <= 0:
+        return False
+    threshold = buy_price * _DBP_MARGIN
+    sale_price = get_product_price(product, is_vip=is_vip)
+    return sale_price < threshold
 
 
 async def maybe_send_stock_notification_by_id(
