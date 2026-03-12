@@ -73,6 +73,11 @@
                 </select>
               </div>
               <div class="form-field">
+                <label class="form-label" for="automation-execution-order">Order</label>
+                <input id="automation-execution-order" name="executionOrder" type="number" min="0" class="form-input" value="{{ values.get('executionOrder', 0) }}" />
+                <p class="form-help">Lower numbers run first when multiple automations match the same event.</p>
+              </div>
+              <div class="form-field">
                 <label class="form-label" for="automation-trigger-select">Trigger event</label>
                 <select id="automation-trigger-select" class="form-input" data-trigger-select>
                   <option value="">Select a trigger</option>

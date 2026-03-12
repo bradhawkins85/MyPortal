@@ -67,7 +67,7 @@ def _prepare_for_storage(value: datetime | None) -> datetime | None:
 
 def _normalise_automation(row: dict[str, Any]) -> AutomationRecord:
     record = dict(row)
-    for key in ("id",):
+    for key in ("id", "execution_order"):
         if key in record and record[key] is not None:
             record[key] = int(record[key])
     for key in ("created_at", "updated_at", "next_run_at", "last_run_at", "scheduled_time"):
@@ -96,6 +96,7 @@ async def create_automation(
     name: str,
     description: str | None,
     kind: str,
+    execution_order: int = 0,
     cadence: str | None,
     cron_expression: str | None,
     scheduled_time: datetime | None,
@@ -114,6 +115,7 @@ async def create_automation(
             name,
             description,
             kind,
+            execution_order,
             cadence,
             cron_expression,
             trigger_event,
@@ -125,12 +127,13 @@ async def create_automation(
             scheduled_time,
             run_once
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             name,
             description,
             kind,
+            execution_order,
             cadence,
             cron_expression,
             trigger_event,
@@ -150,6 +153,7 @@ async def create_automation(
             "name": name,
             "description": description,
             "kind": kind,
+            "execution_order": execution_order,
             "cadence": cadence,
             "cron_expression": cron_expression,
             "trigger_event": trigger_event,
@@ -357,7 +361,7 @@ async def list_event_automations(
         WHERE status = 'active'
           AND kind = 'event'
           AND trigger_event = %s
-        ORDER BY id ASC
+        ORDER BY execution_order ASC, id ASC
     """
     params: list[Any] = [trigger_event]
     if limit is not None:
