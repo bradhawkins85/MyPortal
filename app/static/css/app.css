@@ -5468,6 +5468,15 @@ dialog.modal:not([open]) {
   font-size: 0.875rem;
 }
 
+.badge--success.stock-status {
+  background: transparent;
+  color: #22c55e;
+}
+
+.badge--warning.stock-status {
+  background: transparent;
+}
+
 .cart-quantity {
   display: inline-flex;
   align-items: center;
