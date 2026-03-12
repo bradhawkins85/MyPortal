@@ -2778,6 +2778,10 @@ button.header-title-menu__link {
   color: #bbf7d0;
 }
 
+.text-danger {
+  color: #fca5a5;
+}
+
 .stacked {
   display: flex;
   flex-direction: column;

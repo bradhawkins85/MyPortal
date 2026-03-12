@@ -145,10 +145,20 @@
                   <span class="text-muted">—</span>
                 {% endif %}
               </td>
-              <td data-label="Price" data-column="price" data-value="{{ product.price }}">${{ '%.2f'|format(product.price) }}</td>
+              <td data-label="Price" data-column="price" data-value="{{ product.price }}">
+                {% if product.price_below_threshold %}
+                  <span class="text-danger">${{ '%.2f'|format(product.price) }}</span>
+                {% else %}
+                  ${{ '%.2f'|format(product.price) }}
+                {% endif %}
+              </td>
               <td data-label="VIP" data-column="vip" data-value="{{ product.vip_price if product.vip_price is not none else '' }}">
                 {% if product.vip_price is not none %}
-                  ${{ '%.2f'|format(product.vip_price) }}
+                  {% if product.vip_price_below_threshold %}
+                    <span class="text-danger">${{ '%.2f'|format(product.vip_price) }}</span>
+                  {% else %}
+                    ${{ '%.2f'|format(product.vip_price) }}
+                  {% endif %}
                 {% else %}
                   <span class="text-muted">—</span>
                 {% endif %}
