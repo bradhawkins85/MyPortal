@@ -76,6 +76,7 @@
             <th scope="col" data-sort="string">Name</th>
             <th scope="col" data-sort="string">SKU</th>
             <th scope="col" data-sort="string">Vendor SKU</th>
+            <th scope="col" data-sort="number">DBP</th>
             <th scope="col" data-sort="number">Price</th>
             <th scope="col" data-sort="number">VIP</th>
             <th scope="col" data-sort="string">Category</th>
@@ -96,6 +97,13 @@
               <td data-label="Name">{{ product.name }}</td>
               <td data-label="SKU">{{ product.sku }}</td>
               <td data-label="Vendor SKU">{{ product.vendor_sku }}</td>
+              <td data-label="DBP" data-value="{{ product.buy_price if product.buy_price is not none else '' }}">
+                {% if product.buy_price is not none %}
+                  ${{ '%.2f'|format(product.buy_price) }}
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
               <td data-label="Price" data-value="{{ product.price }}">${{ '%.2f'|format(product.price) }}</td>
               <td data-label="VIP" data-value="{{ product.vip_price if product.vip_price is not none else '' }}">
                 {% if product.vip_price is not none %}
@@ -127,7 +135,7 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="9" class="table__empty">No products found.</td>
+              <td colspan="10" class="table__empty">No products found.</td>
             </tr>
           {% endfor %}
         </tbody>
