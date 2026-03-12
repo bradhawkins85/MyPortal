@@ -165,6 +165,42 @@ async def get_category_descendants(category_id: int) -> list[int]:
     return list(descendants)
 
 
+async def get_category_ids_with_available_products(
+    company_id: int | None = None,
+    include_out_of_stock: bool = False,
+) -> set[int]:
+    """Get IDs of categories that have at least one available product.
+
+    A product is considered available if it is not archived, is not excluded
+    for the given company, and (unless include_out_of_stock is True) has
+    stock > 0.
+    """
+    query_parts: list[str] = [
+        "SELECT DISTINCT p.category_id",
+        "FROM shop_products AS p",
+    ]
+    params: list[Any] = []
+
+    if company_id is not None:
+        query_parts.append(
+            "LEFT JOIN shop_product_exclusions AS e "
+            "ON e.product_id = p.id AND e.company_id = %s"
+        )
+        params.append(company_id)
+
+    conditions: list[str] = ["p.archived = 0", "p.category_id IS NOT NULL"]
+    if company_id is not None:
+        conditions.append("e.product_id IS NULL")
+    if not include_out_of_stock:
+        conditions.append("p.stock > 0")
+
+    query_parts.append("WHERE " + " AND ".join(conditions))
+
+    sql = " ".join(query_parts)
+    rows = await db.fetch_all(sql, tuple(params) if params else None)
+    return {int(row["category_id"]) for row in rows}
+
+
 async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
     query_parts: list[str] = [
         "SELECT",
