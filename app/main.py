@@ -10386,8 +10386,10 @@ async def admin_shop_page(
         product["vip_price_below_threshold"] = product.get(
             "vip_price"
         ) is not None and shop_service.is_price_below_dbp_threshold(product, is_vip=True)
-        product["profit"] = shop_service.calculate_profit(product, is_vip=False)
-        product["vip_profit"] = shop_service.calculate_profit(product, is_vip=True)
+        _profit = shop_service.calculate_profit(product, is_vip=False)
+        product["profit"] = float(_profit) if _profit is not None else None
+        _vip_profit = shop_service.calculate_profit(product, is_vip=True)
+        product["vip_profit"] = float(_vip_profit) if _vip_profit is not None else None
 
     extra = {
         "title": "Shop admin",
