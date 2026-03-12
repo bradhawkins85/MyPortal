@@ -206,6 +206,77 @@
     const showArchivedCheckbox = document.getElementById('show-archived');
     const productsTable = document.getElementById('admin-products-table');
 
+    // ── Column visibility ────────────────────────────────────────────────────
+    const COLUMNS_STORAGE_KEY = 'shop_admin_columns';
+    const COLUMN_KEYS = ['image', 'name', 'sku', 'vendor-sku', 'dbp', 'price', 'vip', 'category', 'stock'];
+
+    function loadColumnPrefs() {
+      try {
+        const raw = localStorage.getItem(COLUMNS_STORAGE_KEY);
+        if (raw) {
+          return JSON.parse(raw);
+        }
+      } catch (e) {
+        console.warn('shop_admin: could not load column preferences', e);
+      }
+      return {};
+    }
+
+    function saveColumnPrefs(prefs) {
+      try {
+        localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(prefs));
+      } catch (e) {
+        console.warn('shop_admin: could not save column preferences', e);
+      }
+    }
+
+    function applyColumnVisibility(columnKey, visible) {
+      if (!productsTable) {
+        return;
+      }
+      productsTable.querySelectorAll(`[data-column="${columnKey}"]`).forEach((cell) => {
+        cell.style.display = visible ? '' : 'none';
+      });
+    }
+
+    const columnsDropdown = document.getElementById('columns-dropdown');
+    const columnsToggle = document.getElementById('columns-toggle');
+    const columnsMenu = document.getElementById('columns-menu');
+
+    if (columnsToggle && columnsMenu && columnsDropdown) {
+      columnsToggle.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const isOpen = columnsMenu.classList.contains('dropdown__menu--open');
+        columnsMenu.classList.toggle('dropdown__menu--open', !isOpen);
+        columnsToggle.setAttribute('aria-expanded', String(!isOpen));
+      });
+
+      document.addEventListener('click', (event) => {
+        if (!columnsDropdown.contains(event.target)) {
+          columnsMenu.classList.remove('dropdown__menu--open');
+          columnsToggle.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+
+    const columnPrefs = loadColumnPrefs();
+
+    COLUMN_KEYS.forEach((key) => {
+      const visible = columnPrefs[key] !== false;
+      applyColumnVisibility(key, visible);
+      const checkbox = columnsMenu ? columnsMenu.querySelector(`[data-column-toggle="${key}"]`) : null;
+      if (checkbox) {
+        checkbox.checked = visible;
+        checkbox.addEventListener('change', () => {
+          const prefs = loadColumnPrefs();
+          prefs[key] = checkbox.checked;
+          saveColumnPrefs(prefs);
+          applyColumnVisibility(key, checkbox.checked);
+        });
+      }
+    });
+    // ── End column visibility ─────────────────────────────────────────────────
+
     function applyFilters() {
       if (!productsTable) {
         return;

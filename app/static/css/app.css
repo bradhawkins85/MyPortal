@@ -6865,6 +6865,14 @@ dialog.dialog::backdrop {
   outline: none;
 }
 
+.dropdown__item--checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+}
+
 .empty-message {
   text-align: center;
   color: rgba(148, 163, 184, 0.78);
