@@ -4845,6 +4845,12 @@ async def shop_page(
     is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
 
     categories_task = asyncio.create_task(shop_repo.list_categories())
+    available_category_ids_task = asyncio.create_task(
+        shop_repo.get_category_ids_with_available_products(
+            company_id=company_id,
+            include_out_of_stock=show_out_of_stock,
+        )
+    )
 
     products: list[dict[str, Any]]
     if show_packages:
@@ -4949,6 +4955,19 @@ async def shop_page(
         secrets.SystemRandom().shuffle(products)
 
     categories = await categories_task
+    available_category_ids = await available_category_ids_task
+
+    def _filter_categories(
+        cats: list[dict[str, Any]], available_ids: set[int]
+    ) -> list[dict[str, Any]]:
+        result = []
+        for cat in cats:
+            filtered_children = _filter_categories(cat.get("children", []), available_ids)
+            if cat["id"] in available_ids or filtered_children:
+                result.append({**cat, "children": filtered_children})
+        return result
+
+    categories = _filter_categories(categories, available_category_ids)
 
     # Get active subscription product IDs for the customer
     active_subscription_product_ids = await subscriptions_repo.get_active_subscription_product_ids(company_id)
