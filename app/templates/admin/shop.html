@@ -100,6 +100,12 @@
               <input type="checkbox" data-column-toggle="vip" checked /> VIP
             </label>
             <label class="dropdown__item dropdown__item--checkbox">
+              <input type="checkbox" data-column-toggle="profit" checked /> Profit
+            </label>
+            <label class="dropdown__item dropdown__item--checkbox">
+              <input type="checkbox" data-column-toggle="vip-profit" checked /> VIP Profit
+            </label>
+            <label class="dropdown__item dropdown__item--checkbox">
               <input type="checkbox" data-column-toggle="category" checked /> Category
             </label>
             <label class="dropdown__item dropdown__item--checkbox">
@@ -120,6 +126,8 @@
             <th scope="col" data-sort="number" data-column="dbp">DBP</th>
             <th scope="col" data-sort="number" data-column="price">Price</th>
             <th scope="col" data-sort="number" data-column="vip">VIP</th>
+            <th scope="col" data-sort="number" data-column="profit">Profit</th>
+            <th scope="col" data-sort="number" data-column="vip-profit">VIP Profit</th>
             <th scope="col" data-sort="string" data-column="category">Category</th>
             <th scope="col" data-sort="number" data-column="stock">Stock</th>
             <th scope="col" class="table__actions">Actions</th>
@@ -163,6 +171,28 @@
                   <span class="text-muted">—</span>
                 {% endif %}
               </td>
+              <td data-label="Profit" data-column="profit" data-value="{{ '%.4f'|format(product.profit) if product.profit is not none else '' }}">
+                {% if product.profit is not none %}
+                  {% if product.profit >= 0 %}
+                    <span class="text-success">${{ '%.2f'|format(product.profit) }}</span>
+                  {% else %}
+                    <span class="text-danger">-${{ '%.2f'|format(product.profit | abs) }}</span>
+                  {% endif %}
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="VIP Profit" data-column="vip-profit" data-value="{{ '%.4f'|format(product.vip_profit) if product.vip_profit is not none else '' }}">
+                {% if product.vip_profit is not none %}
+                  {% if product.vip_profit >= 0 %}
+                    <span class="text-success">${{ '%.2f'|format(product.vip_profit) }}</span>
+                  {% else %}
+                    <span class="text-danger">-${{ '%.2f'|format(product.vip_profit | abs) }}</span>
+                  {% endif %}
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
               <td data-label="Category" data-column="category">{{ product.category_name or '—' }}</td>
               <td data-label="Stock" data-column="stock" data-value="{{ product.stock }}">{{ product.stock }}</td>
               <td class="table__actions">
@@ -186,7 +216,7 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="10" class="table__empty">No products found.</td>
+              <td colspan="12" class="table__empty">No products found.</td>
             </tr>
           {% endfor %}
         </tbody>
