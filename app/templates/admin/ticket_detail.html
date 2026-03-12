@@ -608,7 +608,11 @@
                   {% endif %}
                 </div>
                 <div class="card__collapsible-meta">
-                  <div class="button-group">
+                  <div class="button-group" style="align-items: center;">
+                    {% set resolution_label = resolution_label_map.get(ticket.ai_resolution_state) %}
+                    {% if resolution_label %}
+                      <span class="badge {{ resolution_badge_map.get(ticket.ai_resolution_state, 'badge--muted') }}" style="align-self: center;">{{ resolution_label }}</span>
+                    {% endif %}
                     <button
                       type="button"
                       class="button button--ghost button--small"
@@ -651,14 +655,6 @@
                 ></p>
                 <div class="card__body">
                   {% if ai_status_lower == 'succeeded' and ticket.ai_summary %}
-                    {% set resolution_label = resolution_label_map.get(ticket.ai_resolution_state) %}
-                    {% if resolution_label %}
-                      <p>
-                        <span class="badge {{ resolution_badge_map.get(ticket.ai_resolution_state, 'badge--muted') }}">
-                          {{ resolution_label }}
-                        </span>
-                      </p>
-                    {% endif %}
                     {% set paragraphs = ticket.ai_summary.split('\n\n') %}
                     {% for paragraph in paragraphs %}
                       {% set safe_paragraph = (paragraph | e).replace('\n', '<br />') %}
