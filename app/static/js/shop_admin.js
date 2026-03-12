@@ -208,7 +208,7 @@
 
     // ── Column visibility ────────────────────────────────────────────────────
     const COLUMNS_STORAGE_KEY = 'shop_admin_columns';
-    const COLUMN_KEYS = ['image', 'name', 'sku', 'vendor-sku', 'dbp', 'price', 'vip', 'category', 'stock'];
+    const COLUMN_KEYS = ['image', 'name', 'sku', 'vendor-sku', 'dbp', 'price', 'vip', 'profit', 'vip-profit', 'category', 'stock'];
 
     function loadColumnPrefs() {
       try {
