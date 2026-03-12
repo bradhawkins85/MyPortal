@@ -13965,6 +13965,7 @@ def _automation_to_form_values(automation: Mapping[str, Any]) -> dict[str, Any]:
         "name": str(automation.get("name") or ""),
         "description": str(automation.get("description") or ""),
         "status": str(automation.get("status") or "inactive"),
+        "executionOrder": int(automation.get("execution_order") or 0),
         "cadence": str(automation.get("cadence") or ""),
         "cronExpression": str(automation.get("cron_expression") or ""),
         "runOnce": bool(automation.get("run_once", False)),
@@ -14011,6 +14012,11 @@ def _parse_automation_form_submission(
     description_value = _get_str_value("description").strip()
     status_raw = _get_str_value("status").strip().lower()
     status_value = "active" if status_raw == "active" else "inactive"
+    execution_order_raw = _get_str_value("executionOrder").strip()
+    try:
+        execution_order = max(0, int(execution_order_raw)) if execution_order_raw else 0
+    except (ValueError, TypeError):
+        execution_order = 0
     cadence_raw = _get_str_value("cadence").strip()
     cron_raw = _get_str_value("cronExpression").strip()
     run_once_raw = _get_str_value("runOnce").strip().lower()
@@ -14025,6 +14031,7 @@ def _parse_automation_form_submission(
         "name": name,
         "description": description_value,
         "status": status_value,
+        "executionOrder": execution_order,
         "cadence": cadence_raw,
         "cronExpression": cron_raw,
         "runOnce": run_once,
@@ -14136,6 +14143,7 @@ def _parse_automation_form_submission(
         "name": name,
         "description": description_value or None,
         "kind": kind_normalised,
+        "execution_order": execution_order,
         "cadence": cadence if kind_normalised == "scheduled" else None,
         "cron_expression": cron_expression if kind_normalised == "scheduled" else None,
         "scheduled_time": scheduled_time,

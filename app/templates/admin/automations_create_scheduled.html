@@ -74,6 +74,11 @@
                   </select>
                 </div>
                 <div class="form-field">
+                  <label class="form-label" for="automation-execution-order">Order</label>
+                  <input id="automation-execution-order" name="executionOrder" type="number" min="0" class="form-input" value="{{ values.get('executionOrder', 0) }}" />
+                  <p class="form-help">Lower numbers run first. Controls priority when multiple automations are due at the same time.</p>
+                </div>
+                <div class="form-field">
                   <label class="form-label" for="automation-cadence">Cadence</label>
                   <select id="automation-cadence" name="cadence" class="form-input" data-cadence-select>
                     <option value="" {% if not values.get('cadence') %}selected{% endif %}>Custom</option>

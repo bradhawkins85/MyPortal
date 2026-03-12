@@ -70,6 +70,7 @@
             <thead>
               <tr>
                 <th scope="col" data-sort="int">ID</th>
+                <th scope="col" data-sort="int">Order</th>
                 <th scope="col" data-sort="string">Name</th>
                 <th scope="col" data-sort="string">Kind</th>
                 <th scope="col" data-sort="string">Schedule</th>
@@ -85,6 +86,7 @@
                 {% for automation in automations %}
                   <tr>
                     <td data-label="ID">{{ automation.id }}</td>
+                    <td data-label="Order">{{ automation.execution_order if automation.execution_order is not none else 0 }}</td>
                     <td data-label="Name">{{ automation.name }}</td>
                     <td data-label="Kind">{{ automation.kind }}</td>
                     <td data-label="Schedule">
@@ -139,7 +141,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="9" class="table__empty">No automations configured.</td>
+                  <td colspan="10" class="table__empty">No automations configured.</td>
                 </tr>
               {% endif %}
             </tbody>
