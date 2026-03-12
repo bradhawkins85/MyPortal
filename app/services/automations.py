@@ -48,7 +48,7 @@ def _normalise_actions(actions: Any) -> list[dict[str, Any]]:
     normalised: list[dict[str, Any]] = []
     if not isinstance(actions, list):
         return normalised
-    for entry in actions:
+    for index, entry in enumerate(actions):
         if not isinstance(entry, Mapping):
             continue
         module = str(entry.get("module") or "").strip()
@@ -57,7 +57,17 @@ def _normalise_actions(actions: Any) -> list[dict[str, Any]]:
         payload = entry.get("payload")
         if not isinstance(payload, Mapping):
             payload = {}
-        normalised.append({"module": module, "payload": dict(payload)})
+        order_raw = entry.get("order")
+        try:
+            order = int(order_raw) if order_raw is not None else index
+        except (TypeError, ValueError):
+            order = index
+        note = str(entry.get("note") or "").strip()
+        action: dict[str, Any] = {"order": order, "module": module, "payload": dict(payload)}
+        if note:
+            action["note"] = note
+        normalised.append(action)
+    normalised.sort(key=lambda a: a["order"])
     return normalised
 
 
