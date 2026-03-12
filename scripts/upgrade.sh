@@ -382,7 +382,7 @@ reset_project_permissions "$SERVICE_USER"
 
 update_version_file() {
   local version
-  version=$(git log -1 --format="%cd" --date=format:"%Y%m%d" HEAD)
+  version=$(git log -1 --format="%cd" --date=format:"%Y%m%d%H%M%S" HEAD)
   printf '%s\n' "$version" >"${PROJECT_ROOT}/version.txt"
   echo "Updated version.txt to ${version}."
 }
