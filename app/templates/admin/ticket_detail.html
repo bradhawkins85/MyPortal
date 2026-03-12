@@ -846,7 +846,7 @@
                 <select id="ticket-reply-labour" name="labourTypeId" class="form-input">
                   <option value="">No labour type</option>
                   {% for labour_type in ticket_labour_types %}
-                    <option value="{{ labour_type.id }}">
+                    <option value="{{ labour_type.id }}"{% if labour_type.is_default %} selected{% endif %}>
                       {{ labour_type.name }}{% if labour_type.code %} ({{ labour_type.code }}){% endif %}
                     </option>
                   {% endfor %}
