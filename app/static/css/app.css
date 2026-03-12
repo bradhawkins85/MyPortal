@@ -432,6 +432,13 @@ html {
   color: #e2e8f0;
 }
 
+.form-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-tight);
+}
+
 .form-input-wrapper {
   position: relative;
 }
