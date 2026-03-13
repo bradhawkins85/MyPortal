@@ -211,6 +211,24 @@ html {
   border-radius: 0.75rem;
 }
 
+.menu__divider {
+  height: 1px;
+  margin: 0.25rem 0;
+  background: rgba(148, 163, 184, 0.35);
+}
+
+.menu__spacer {
+  height: 0.75rem;
+}
+
+.menu__heading {
+  padding: 0.25rem var(--space-compact-inline);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(226, 232, 240, 0.7);
+}
+
 
 .sidebar__footer {
   margin-top: auto;

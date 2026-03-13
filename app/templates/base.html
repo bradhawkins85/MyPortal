@@ -750,8 +750,14 @@
         const sidebarMenuRoot = document.querySelector('.layout__sidebar .menu');
         const hasAuthenticatedUser = {{ 'true' if has_authenticated_user else 'false' }};
         const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+        const SIDEBAR_DIVIDER_KEY_PREFIX = '__divider__:';
+        const SIDEBAR_SPACER_KEY_PREFIX = '__spacer__:';
 
         const createMenuKey = (menuItem) => {
+          const existing = menuItem.dataset.menuKey || '';
+          if (existing) {
+            return existing;
+          }
           const link = menuItem.querySelector(':scope > a[href]');
           if (!link) {
             return '';
@@ -764,38 +770,72 @@
           return label ? `label:${label}` : '';
         };
 
+        const buildCustomSeparator = (key) => {
+          if (!sidebarMenuRoot || typeof key !== 'string') {
+            return null;
+          }
+          let className = '';
+          let label = '';
+          if (key.startsWith(SIDEBAR_DIVIDER_KEY_PREFIX)) {
+            className = 'menu__divider menu__divider--custom';
+            label = 'Divider';
+          } else if (key.startsWith(SIDEBAR_SPACER_KEY_PREFIX)) {
+            className = 'menu__spacer menu__spacer--custom';
+            label = 'Spacer';
+          } else {
+            return null;
+          }
+          const separator = document.createElement('li');
+          separator.className = className;
+          separator.dataset.menuKey = key;
+          separator.dataset.menuLabel = label;
+          separator.setAttribute('role', 'presentation');
+          return separator;
+        };
+
         const listSidebarMenuItems = () => {
           if (!sidebarMenuRoot) {
             return [];
           }
           const rows = [];
-          sidebarMenuRoot.querySelectorAll(':scope > .menu__item').forEach((menuItem) => {
-            if (menuItem.classList.contains('menu__item--impersonation')) {
+          sidebarMenuRoot.querySelectorAll(':scope > li').forEach((menuItem) => {
+            if (menuItem.classList.contains('menu__item--impersonation') || menuItem.classList.contains('menu__heading')) {
               return;
             }
-            const key = menuItem.dataset.menuKey || createMenuKey(menuItem);
-            const label = (menuItem.querySelector('.menu__label')?.textContent || '').trim();
+            const key = createMenuKey(menuItem);
+            const label = (menuItem.dataset.menuLabel || menuItem.querySelector('.menu__label')?.textContent || '').trim();
             if (!key || !label) {
               return;
             }
             menuItem.dataset.menuKey = key;
+            menuItem.dataset.menuLabel = label;
             rows.push({ key, label, element: menuItem });
           });
           return rows;
         };
 
         const applySidebarPreferences = (preferences) => {
-          const rows = listSidebarMenuItems();
-          if (!rows.length) {
+          if (!sidebarMenuRoot) {
             return;
           }
           const order = Array.isArray(preferences?.order) ? preferences.order : [];
           const hidden = new Set(Array.isArray(preferences?.hidden) ? preferences.hidden : []);
+          const rows = listSidebarMenuItems();
           const byKey = new Map(rows.map((row) => [row.key, row]));
           const ordered = [];
 
           order.forEach((key) => {
-            const row = byKey.get(key);
+            let row = byKey.get(key);
+            if (!row) {
+              const separator = buildCustomSeparator(key);
+              if (separator) {
+                row = {
+                  key,
+                  label: separator.dataset.menuLabel || '',
+                  element: separator,
+                };
+              }
+            }
             if (row) {
               ordered.push(row);
               byKey.delete(key);
