@@ -546,6 +546,16 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         },
     },
     {
+        "slug": "m365-admin",
+        "name": "Microsoft 365 CSP / Lighthouse",
+        "description": "Configure Microsoft 365 CSP / Lighthouse partner credentials to enumerate and manage customer tenants.",
+        "icon": "☁️",
+        "settings": {
+            "client_id": str(os.getenv("M365_ADMIN_CLIENT_ID", "")),
+            "client_secret": str(os.getenv("M365_ADMIN_CLIENT_SECRET", "")),
+        },
+    },
+    {
         "slug": "create-ticket",
         "name": "Create Ticket",
         "description": "Create a new support ticket with customizable details.",
@@ -914,6 +924,23 @@ def _coerce_settings(
                 "authorization": authorization,
             }
         )
+    elif slug == "m365-admin":
+        overrides = payload or {}
+        client_secret_override = overrides.get("client_secret")
+        if client_secret_override is None:
+            client_secret = str(merged.get("client_secret") or "").strip()
+        else:
+            candidate = str(client_secret_override or "").strip()
+            if not candidate and existing_settings and existing_settings.get("client_secret"):
+                client_secret = str(existing_settings.get("client_secret") or "").strip()
+            else:
+                client_secret = candidate
+        merged.update(
+            {
+                "client_id": str(merged.get("client_id", "")).strip(),
+                "client_secret": client_secret,
+            }
+        )
     elif slug == "unifi-talk":
         overrides = payload or {}
         password_override = overrides.get("password")
@@ -951,6 +978,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "unifi-talk": ("password",),
         "plausible": ("api_key", "pepper"),
         "smtp2go": ("api_key", "webhook_secret"),
+        "m365-admin": ("client_secret",),
     }
     targets = fields_to_redact.get(slug)
     if not targets:
@@ -1038,6 +1066,7 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "call-recordings", # Call Recordings - configuration only, not an action module
     "unifi-talk",     # Unifi Talk - SFTP import module, not an action module
     "plausible",      # Plausible - email tracking config only
+    "m365-admin",     # M365 CSP/Lighthouse - configuration only, not an action module
 }
 
 
