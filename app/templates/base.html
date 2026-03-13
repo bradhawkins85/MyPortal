@@ -746,6 +746,117 @@
           mobileMedia.addEventListener('change', handleMediaChange);
           handleMediaChange();
         }
+
+        const sidebarMenuRoot = document.querySelector('.layout__sidebar .menu');
+        const hasAuthenticatedUser = {{ 'true' if has_authenticated_user else 'false' }};
+        const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+
+        const createMenuKey = (menuItem) => {
+          const link = menuItem.querySelector(':scope > a[href]');
+          if (!link) {
+            return '';
+          }
+          const href = link.getAttribute('href') || '';
+          if (href.startsWith('/')) {
+            return href;
+          }
+          const label = (menuItem.querySelector('.menu__label')?.textContent || '').trim().toLowerCase();
+          return label ? `label:${label}` : '';
+        };
+
+        const listSidebarMenuItems = () => {
+          if (!sidebarMenuRoot) {
+            return [];
+          }
+          const rows = [];
+          sidebarMenuRoot.querySelectorAll(':scope > .menu__item').forEach((menuItem) => {
+            if (menuItem.classList.contains('menu__item--impersonation')) {
+              return;
+            }
+            const key = menuItem.dataset.menuKey || createMenuKey(menuItem);
+            const label = (menuItem.querySelector('.menu__label')?.textContent || '').trim();
+            if (!key || !label) {
+              return;
+            }
+            menuItem.dataset.menuKey = key;
+            rows.push({ key, label, element: menuItem });
+          });
+          return rows;
+        };
+
+        const applySidebarPreferences = (preferences) => {
+          const rows = listSidebarMenuItems();
+          if (!rows.length) {
+            return;
+          }
+          const order = Array.isArray(preferences?.order) ? preferences.order : [];
+          const hidden = new Set(Array.isArray(preferences?.hidden) ? preferences.hidden : []);
+          const byKey = new Map(rows.map((row) => [row.key, row]));
+          const ordered = [];
+
+          order.forEach((key) => {
+            const row = byKey.get(key);
+            if (row) {
+              ordered.push(row);
+              byKey.delete(key);
+            }
+          });
+
+          byKey.forEach((row) => {
+            ordered.push(row);
+          });
+
+          ordered.forEach((row) => {
+            sidebarMenuRoot.appendChild(row.element);
+            const isCurrentPage = row.element.querySelector(':scope > a[aria-current="page"]');
+            row.element.hidden = hidden.has(row.key) && !isCurrentPage;
+          });
+        };
+
+        const requestSidebarPreferences = async (method = 'GET', payload = null) => {
+          if (!hasAuthenticatedUser) {
+            return { order: [], hidden: [] };
+          }
+          const headers = {};
+          if (csrfMeta?.content) {
+            headers['X-CSRF-Token'] = csrfMeta.content;
+          }
+          if (payload !== null) {
+            headers['Content-Type'] = 'application/json';
+          }
+          const response = await fetch('/api/users/me/sidebar-preferences', {
+            method,
+            credentials: 'same-origin',
+            headers,
+            body: payload !== null ? JSON.stringify(payload) : undefined,
+          });
+          if (!response.ok) {
+            throw new Error(`${response.status} ${response.statusText}`);
+          }
+          return await response.json();
+        };
+
+        window.MyPortalSidebarMenu = {
+          listItems: () => listSidebarMenuItems().map(({ key, label, element }) => ({
+            key,
+            label,
+            hidden: Boolean(element.hidden),
+          })),
+          apply: applySidebarPreferences,
+          save: async (preferences) => {
+            const saved = await requestSidebarPreferences('PUT', preferences);
+            applySidebarPreferences(saved);
+            return saved;
+          },
+        };
+
+        if (hasAuthenticatedUser && sidebarMenuRoot) {
+          requestSidebarPreferences()
+            .then((prefs) => applySidebarPreferences(prefs))
+            .catch(() => {
+              /* ignore preferences load failures */
+            });
+        }
         
         // Expandable menu functionality
         document.querySelectorAll('[data-menu-toggle]').forEach(toggle => {
