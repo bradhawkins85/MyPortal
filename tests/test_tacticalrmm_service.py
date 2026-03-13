@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 
 from app.services import tacticalrmm
@@ -247,7 +248,7 @@ def test_fetch_clients_handles_list_response(monkeypatch):
     monkeypatch.setattr(tacticalrmm, "_load_settings", fake_load_settings)
     
     # Run the test
-    import asyncio
+    # asyncio imported at module level
     clients = asyncio.run(tacticalrmm.fetch_clients())
     
     assert len(clients) == 2
@@ -290,7 +291,7 @@ def test_fetch_clients_handles_paginated_response(monkeypatch):
     monkeypatch.setattr(tacticalrmm, "_load_settings", fake_load_settings)
     
     # Run the test
-    import asyncio
+    # asyncio imported at module level
     clients = asyncio.run(tacticalrmm.fetch_clients())
     
     assert len(clients) == 2
@@ -323,7 +324,7 @@ def test_fetch_clients_handles_single_client_response(monkeypatch):
     monkeypatch.setattr(tacticalrmm, "_load_settings", fake_load_settings)
     
     # Run the test
-    import asyncio
+    # asyncio imported at module level
     clients = asyncio.run(tacticalrmm.fetch_clients())
     
     assert len(clients) == 1
@@ -350,7 +351,184 @@ def test_fetch_clients_handles_api_error(monkeypatch):
     monkeypatch.setattr(tacticalrmm, "_load_settings", fake_load_settings)
     
     # Run the test
-    import asyncio
+    # asyncio imported at module level
     clients = asyncio.run(tacticalrmm.fetch_clients())
     
     assert len(clients) == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests for _ram_gb_from_wmi_memory
+# ---------------------------------------------------------------------------
+
+def test_ram_gb_from_wmi_memory_two_dimms():
+    """Two 8 GB DIMMs (each 8 589 934 592 bytes) should give 16.0 GB."""
+    memory = [
+        [{"Capacity": "8589934592"}, {"SerialNumber": "AAAA"}],
+        [{"Capacity": "8589934592"}, {"SerialNumber": "BBBB"}],
+    ]
+    assert tacticalrmm._ram_gb_from_wmi_memory(memory) == pytest.approx(16.0)
+
+
+def test_ram_gb_from_wmi_memory_single_dimm():
+    """Single 16 GB DIMM."""
+    memory = [[{"Capacity": "17179869184"}]]
+    assert tacticalrmm._ram_gb_from_wmi_memory(memory) == pytest.approx(16.0)
+
+
+def test_ram_gb_from_wmi_memory_empty_list():
+    assert tacticalrmm._ram_gb_from_wmi_memory([]) is None
+
+
+def test_ram_gb_from_wmi_memory_none():
+    assert tacticalrmm._ram_gb_from_wmi_memory(None) is None
+
+
+def test_ram_gb_from_wmi_memory_missing_capacity():
+    """Modules without a Capacity key are silently skipped."""
+    memory = [[{"SerialNumber": "XXXX"}]]
+    assert tacticalrmm._ram_gb_from_wmi_memory(memory) is None
+
+
+# ---------------------------------------------------------------------------
+# Tests for _coerce_ram_gb boundary: exactly 1 GB (1024 MB)
+# ---------------------------------------------------------------------------
+
+def test_coerce_ram_gb_exactly_1024_mb():
+    """1024 MB should be treated as 1 GB (>= 1024 threshold)."""
+    assert tacticalrmm._coerce_ram_gb(1024) == pytest.approx(1.0)
+
+
+def test_coerce_ram_gb_2048_mb():
+    assert tacticalrmm._coerce_ram_gb(2048) == pytest.approx(2.0)
+
+
+def test_coerce_ram_gb_already_in_gb():
+    """Values under 1024 are treated as already in GB."""
+    assert tacticalrmm._coerce_ram_gb(16) == pytest.approx(16.0)
+
+
+# ---------------------------------------------------------------------------
+# Tests for extract_agent_details using wmi_detail memory
+# ---------------------------------------------------------------------------
+
+def test_extract_agent_details_ram_from_wmi_detail_memory():
+    """When total_ram is absent but wmi_detail.memory is present, RAM is extracted
+    from the per-module Capacity (bytes) values."""
+    agent = {
+        "hostname": "WMI-RAM-HOST",
+        "agent_id": "wmi001",
+        "operating_system": "Windows 10 Pro",
+        "wmi_detail": {
+            "memory": [
+                [{"Capacity": "8589934592"}],
+                [{"Capacity": "8589934592"}],
+            ]
+        },
+    }
+
+    details = tacticalrmm.extract_agent_details(agent)
+
+    assert details["ram_gb"] == pytest.approx(16.0)
+
+
+def test_extract_agent_details_total_ram_preferred_over_wmi_memory():
+    """total_ram (in MB) should take precedence over wmi_detail.memory."""
+    agent = {
+        "hostname": "PREFER-TOTAL-RAM",
+        "agent_id": "prefer001",
+        "operating_system": "Windows Server 2022",
+        "total_ram": 32768,  # 32 GB in MB
+        "wmi_detail": {
+            "memory": [
+                [{"Capacity": "8589934592"}],  # only 8 GB via wmi_detail
+            ]
+        },
+    }
+
+    details = tacticalrmm.extract_agent_details(agent)
+
+    assert details["ram_gb"] == pytest.approx(32.0)
+
+
+# ---------------------------------------------------------------------------
+# Tests for fetch_agents enrichment with per-agent detail endpoint
+# ---------------------------------------------------------------------------
+
+def test_fetch_agents_enriches_with_total_ram(monkeypatch):
+    """fetch_agents should call the per-agent detail endpoint for each agent
+    and merge total_ram into the result so that extract_agent_details can
+    produce the correct ram_gb value."""
+
+    list_response = [
+        {
+            "agent_id": "agent-001",
+            "hostname": "PC-ONE",
+            "monitoring_type": "workstation",
+            "operating_system": "Windows 10 Pro",
+            # total_ram intentionally absent – simulates real AgentTableSerializer
+        }
+    ]
+
+    detail_response = {
+        "agent_id": "agent-001",
+        "hostname": "PC-ONE",
+        "monitoring_type": "workstation",
+        "operating_system": "Windows 10 Pro",
+        "total_ram": 8192,  # 8 GB in MB – present in AgentSerializer detail
+    }
+
+    call_count = {"n": 0}
+
+    async def fake_call_endpoint(endpoint: str):
+        call_count["n"] += 1
+        if "agents/agent-001/" in endpoint:
+            return detail_response
+        return list_response
+
+    async def fake_load_settings():
+        return {"base_url": "https://rmm.example.com", "api_key": "key", "verify_ssl": True}
+
+    monkeypatch.setattr(tacticalrmm, "_call_endpoint", fake_call_endpoint)
+    monkeypatch.setattr(tacticalrmm, "_load_settings", fake_load_settings)
+
+    agents = asyncio.run(tacticalrmm.fetch_agents())
+
+    assert len(agents) == 1
+    assert agents[0].get("total_ram") == 8192
+    # Verify extract_agent_details can now produce the correct ram_gb
+    details = tacticalrmm.extract_agent_details(agents[0])
+    assert details["ram_gb"] == pytest.approx(8.0)
+    # One list call + one detail call
+    assert call_count["n"] == 2
+
+
+def test_fetch_agents_falls_back_gracefully_when_detail_fails(monkeypatch):
+    """If the per-agent detail endpoint fails, fetch_agents should still return
+    the list-endpoint data (without total_ram)."""
+
+    list_response = [
+        {
+            "agent_id": "agent-002",
+            "hostname": "PC-TWO",
+            "operating_system": "Windows 11",
+        }
+    ]
+
+    async def fake_call_endpoint(endpoint: str):
+        if "agents/agent-002/" in endpoint:
+            raise tacticalrmm.TacticalRMMAPIError("detail not found")
+        return list_response
+
+    async def fake_load_settings():
+        return {"base_url": "https://rmm.example.com", "api_key": "key", "verify_ssl": True}
+
+    monkeypatch.setattr(tacticalrmm, "_call_endpoint", fake_call_endpoint)
+    monkeypatch.setattr(tacticalrmm, "_load_settings", fake_load_settings)
+
+    agents = asyncio.run(tacticalrmm.fetch_agents())
+
+    assert len(agents) == 1
+    assert agents[0]["hostname"] == "PC-TWO"
+    # total_ram not available due to failed detail call
+    assert agents[0].get("total_ram") is None
