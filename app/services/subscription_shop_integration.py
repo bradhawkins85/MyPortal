@@ -72,7 +72,8 @@ async def create_subscriptions_from_order(
         # In a full implementation, we'd check cart_repo for coterm settings
         
         quantity = int(item.get("quantity", 1))
-        unit_price = shop_service.get_product_price(product)
+        is_vip = bool(int(item.get("is_vip") or 0) == 1)
+        unit_price = shop_service.get_product_price(product, is_vip=is_vip)
         
         # Determine term length based on commitment type
         commitment_type = product.get("commitment_type")
