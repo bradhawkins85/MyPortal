@@ -10,7 +10,7 @@ from app.repositories import sidebar_preferences as sidebar_preferences_repo
 from app.repositories import users as user_repo
 from app.schemas.users import UserCreate, UserResponse, UserUpdate
 
-router = APIRouter(prefix="/users", tags=["Users"])
+router = APIRouter(prefix="/api/users", tags=["Users"])
 
 
 @router.get("/me/sidebar-preferences", response_model=dict[str, list[str]])
