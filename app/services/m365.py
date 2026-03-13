@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import apps as apps_repo
 from app.repositories import licenses as license_repo
@@ -24,6 +25,7 @@ _GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
 _PROVISION_APP_ROLES: list[str] = [
     "df021288-bdef-4463-88db-98f22de89214",  # User.Read.All
     "7ab1d382-f21e-4acd-a863-ba3e13f7da61",  # Directory.Read.All
+    "18a4783c-866b-4cc7-a460-3d5e5662c884",  # Application.ReadWrite.OwnedBy (for self-renewal)
 ]
 
 # OAuth scopes requested during the admin-consent provisioning flow
@@ -101,6 +103,9 @@ async def upsert_credentials(
     tenant_id: str,
     client_id: str,
     client_secret: str,
+    app_object_id: str | None = None,
+    client_secret_key_id: str | None = None,
+    client_secret_expires_at: datetime | None = None,
 ) -> dict[str, Any]:
     await m365_repo.upsert_credentials(
         company_id=company_id,
@@ -110,6 +115,9 @@ async def upsert_credentials(
         refresh_token=None,
         access_token=None,
         token_expires_at=None,
+        app_object_id=app_object_id,
+        client_secret_key_id=client_secret_key_id,
+        client_secret_expires_at=client_secret_expires_at,
     )
     return await get_credentials(company_id)
 
@@ -203,7 +211,7 @@ async def _graph_post(
     headers = {"Authorization": f"Bearer {access_token}"}
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(url, headers=headers, json=payload)
-    if response.status_code not in (200, 201):
+    if response.status_code not in (200, 201, 204):
         log_error(
             "Microsoft Graph POST failed",
             url=url,
@@ -211,6 +219,8 @@ async def _graph_post(
             body=response.text,
         )
         raise M365Error(f"Microsoft Graph POST failed ({response.status_code})")
+    if response.status_code == 204:
+        return {}
     return response.json()
 
 
@@ -218,7 +228,7 @@ async def provision_app_registration(
     *,
     access_token: str,
     display_name: str = "MyPortal Integration",
-) -> tuple[str, str]:
+) -> dict[str, Any]:
     """Create a per-tenant app registration with required permissions.
 
     Uses a delegated *access_token* obtained via the admin-consent OAuth flow to:
@@ -226,11 +236,17 @@ async def provision_app_registration(
     2. Create the corresponding Service Principal (Enterprise App).
     3. Find the Microsoft Graph service principal in the tenant.
     4. Grant admin consent for each required application permission.
-    5. Generate and return a client secret for the new app.
+    5. Make the service principal an owner of the app registration so it can
+       renew its own client secret later (requires Application.ReadWrite.OwnedBy).
+    6. Generate and return a client secret for the new app.
 
-    Returns a ``(client_id, client_secret)`` tuple.  The client secret is
-    returned in plain text exactly once and must be stored immediately.
+    Returns a dict with ``client_id``, ``client_secret``, ``app_object_id``,
+    ``client_secret_key_id`` and ``client_secret_expires_at``.  The client
+    secret is returned in plain text exactly once and must be stored immediately.
     """
+    settings = get_settings()
+    secret_lifetime_days = settings.m365_client_secret_lifetime_days
+
     # 1. Create the app registration
     app_payload: dict[str, Any] = {
         "displayName": display_name,
@@ -292,28 +308,214 @@ async def provision_app_registration(
         sp_object_id=sp_object_id,
     )
 
-    # 5. Create a client secret; valid for approximately two years (730 days)
-    secret_expiry = (
-        (date.today() + timedelta(days=730)).isoformat() + "T00:00:00Z"
-    )
+    # 5. Add the service principal as an owner of the app registration so it
+    #    can call addPassword on itself (Application.ReadWrite.OwnedBy requires ownership).
+    try:
+        await _graph_post(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/owners/$ref",
+            {
+                "@odata.id": (
+                    f"https://graph.microsoft.com/v1.0/directoryObjects/{sp_object_id}"
+                )
+            },
+        )
+        log_info(
+            "Added service principal as owner of M365 app registration",
+            app_object_id=app_object_id,
+            sp_object_id=sp_object_id,
+        )
+    except M365Error as exc:
+        # Non-fatal: the app will still work but automatic secret renewal won't
+        # be available until this is resolved.
+        log_error(
+            "Failed to add SP as owner of M365 app registration; "
+            "automatic secret renewal will not be available",
+            app_object_id=app_object_id,
+            error=str(exc),
+        )
+
+    # 6. Create a client secret with a configurable lifetime (default: 730 days / 2 years)
+    secret_expiry_date = date.today() + timedelta(days=secret_lifetime_days)
+    secret_expiry_str = secret_expiry_date.isoformat() + "T00:00:00Z"
     secret_data = await _graph_post(
         access_token,
         f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/addPassword",
         {
             "passwordCredential": {
                 "displayName": "MyPortal",
-                "endDateTime": secret_expiry,
+                "endDateTime": secret_expiry_str,
             }
         },
     )
     client_secret: str = secret_data["secretText"]
+    client_secret_key_id: str | None = secret_data.get("keyId")
+    client_secret_expires_at = datetime(
+        secret_expiry_date.year,
+        secret_expiry_date.month,
+        secret_expiry_date.day,
+    )
     log_info(
         "Created client secret for provisioned M365 app",
         client_id=client_id,
+        expires_at=secret_expiry_str,
     )
 
-    return client_id, client_secret
+    return {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "app_object_id": app_object_id,
+        "client_secret_key_id": client_secret_key_id,
+        "client_secret_expires_at": client_secret_expires_at,
+    }
 
+
+
+
+async def renew_client_secret(company_id: int) -> None:
+    """Renew the Azure AD client secret for a provisioned M365 integration app.
+
+    Authenticates using the provisioned app's own credentials via the
+    ``client_credentials`` grant, then calls ``addPassword`` on the app
+    registration to create a new secret.  The old secret is revoked after the
+    new one has been safely persisted.
+
+    Requires the provisioned app to:
+    - Have ``Application.ReadWrite.OwnedBy`` application permission granted.
+    - Be registered as an owner of its own app registration.
+
+    Both of these are configured automatically by :func:`provision_app_registration`
+    for apps provisioned after this feature was introduced.
+
+    Raises :class:`M365Error` if the credentials are missing or the app object ID
+    has not been stored (apps provisioned before this feature require re-provisioning).
+    """
+    settings = get_settings()
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("No M365 credentials found for company")
+
+    app_object_id = creds.get("app_object_id")
+    if not app_object_id:
+        raise M365Error(
+            "App object ID not stored – re-provisioning is required to enable "
+            "automatic client secret renewal for this company"
+        )
+
+    # Get an access token using the provisioned app's own client credentials.
+    # refresh_token=None forces the client_credentials grant which returns a
+    # token with all granted application permissions including
+    # Application.ReadWrite.OwnedBy.
+    access_token, _, _ = await _exchange_token(
+        tenant_id=creds["tenant_id"],
+        client_id=creds["client_id"],
+        client_secret=creds.get("client_secret") or "",
+        refresh_token=None,
+    )
+
+    # Calculate new expiry
+    secret_lifetime_days = settings.m365_client_secret_lifetime_days
+    new_expiry_date = date.today() + timedelta(days=secret_lifetime_days)
+    new_expiry_str = new_expiry_date.isoformat() + "T00:00:00Z"
+
+    # Create new client secret via Graph API
+    secret_data = await _graph_post(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/addPassword",
+        {
+            "passwordCredential": {
+                "displayName": "MyPortal",
+                "endDateTime": new_expiry_str,
+            }
+        },
+    )
+    new_secret: str = secret_data["secretText"]
+    new_key_id: str | None = secret_data.get("keyId")
+    new_expires_at = datetime(
+        new_expiry_date.year, new_expiry_date.month, new_expiry_date.day
+    )
+
+    # Save old key ID before updating so we can revoke it afterwards
+    old_key_id: str | None = creds.get("client_secret_key_id")
+
+    # Persist new secret – do this BEFORE revoking old key so we never lose access
+    await m365_repo.update_client_secret(
+        company_id=company_id,
+        client_secret=_encrypt(new_secret),
+        key_id=new_key_id,
+        expires_at=new_expires_at,
+    )
+    log_info(
+        "Renewed M365 client secret",
+        company_id=company_id,
+        new_key_id=new_key_id,
+        expires_at=new_expiry_str,
+    )
+
+    # Revoke the old secret now that the new one is safely stored
+    if old_key_id:
+        try:
+            await _graph_post(
+                access_token,
+                f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/removePassword",
+                {"keyId": old_key_id},
+            )
+            log_info(
+                "Revoked old M365 client secret",
+                company_id=company_id,
+                old_key_id=old_key_id,
+            )
+        except M365Error as exc:
+            # Non-fatal: old secret will expire naturally; log for admin visibility
+            log_error(
+                "Failed to revoke old M365 client secret",
+                company_id=company_id,
+                old_key_id=old_key_id,
+                error=str(exc),
+            )
+
+
+async def renew_expiring_client_secrets() -> dict[str, Any]:
+    """Check all stored M365 credentials and renew any secrets expiring soon.
+
+    A secret is considered "expiring soon" if its ``client_secret_expires_at``
+    is within the configured renewal window
+    (``M365_CLIENT_SECRET_RENEWAL_DAYS``, default 14 days).
+
+    Returns a summary dict with ``renewed``, ``skipped``, and ``failed`` counts.
+    """
+    settings = get_settings()
+    renewal_days = settings.m365_client_secret_renewal_days
+    cutoff = datetime.utcnow() + timedelta(days=renewal_days)
+
+    expiring = await m365_repo.list_credentials_expiring_before(cutoff)
+
+    renewed = 0
+    skipped = 0
+    failed = 0
+
+    for cred in expiring:
+        company_id = int(cred["company_id"])
+        if not cred.get("app_object_id"):
+            log_error(
+                "Skipping M365 secret renewal – app_object_id not stored; "
+                "re-provisioning required",
+                company_id=company_id,
+            )
+            skipped += 1
+            continue
+        try:
+            await renew_client_secret(company_id)
+            renewed += 1
+        except M365Error as exc:
+            log_error(
+                "Failed to renew M365 client secret",
+                company_id=company_id,
+                error=str(exc),
+            )
+            failed += 1
+
+    return {"renewed": renewed, "skipped": skipped, "failed": failed}
 
 async def _sync_staff_assignments(
     *,

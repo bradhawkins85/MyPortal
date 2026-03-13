@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     m365_admin_client_secret: str | None = Field(
         default=None, validation_alias="M365_ADMIN_CLIENT_SECRET"
     )
+    m365_client_secret_lifetime_days: int = Field(
+        default=730, validation_alias="M365_CLIENT_SECRET_LIFETIME_DAYS", ge=1
+    )
+    m365_client_secret_renewal_days: int = Field(
+        default=14, validation_alias="M365_CLIENT_SECRET_RENEWAL_DAYS", ge=1
+    )
     default_timezone: str = Field(default="UTC", validation_alias="CRON_TIMEZONE")
     enable_csrf: bool = Field(default=True, validation_alias="ENABLE_CSRF")
     enable_auto_refresh: bool = Field(
