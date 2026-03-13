@@ -272,6 +272,11 @@ async def test_render_portal_ticket_detail_includes_replies(monkeypatch):
     monkeypatch.setattr(main.company_repo, "get_company_by_id", AsyncMock(return_value={"id": 22, "name": "Example"}))
     monkeypatch.setattr(main.user_repo, "get_user_by_id", AsyncMock(side_effect=fake_get_user_by_id))
 
+    from app.repositories import call_recordings as call_recordings_repo
+    monkeypatch.setattr(call_recordings_repo, "list_ticket_call_recordings", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "list_watchers", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "list_ticket_assets", AsyncMock(return_value=[]))
+
     captured: dict[str, Any] = {}
 
     async def fake_render_template(template_name, request_obj, user_obj, *, extra):
@@ -299,6 +304,7 @@ async def test_render_portal_ticket_detail_includes_replies(monkeypatch):
     assert extra["ticket_replies"] == [
         {
             "id": 101,
+            "type": "reply",
             "author": {"id": 9, "first_name": "Taylor", "last_name": "Agent", "email": "agent@example.com"},
             "author_label": "Taylor Agent",
             "created_iso": "2025-01-10T10:00:00+00:00",
@@ -308,6 +314,13 @@ async def test_render_portal_ticket_detail_includes_replies(monkeypatch):
             "is_internal": False,
             "labour_type_name": None,
             "labour_type_code": None,
+            "external_reference": None,
+            "email_tracking_id": None,
+            "email_sent_at": None,
+            "email_opened_at": None,
+            "email_open_count": 0,
+            "has_email_tracking": False,
+            "is_email_opened": False,
         }
     ]
 
