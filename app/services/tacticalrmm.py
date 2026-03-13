@@ -183,8 +183,28 @@ def _coerce_float(value: Any) -> float | None:
             return None
 
 
+def _join_list(value: Any, separator: str = ", ") -> str | None:
+    """Convert a list to a delimited string; pass through non-list values unchanged."""
+    if value is None:
+        return None
+    if isinstance(value, list):
+        parts = [str(item).strip() for item in value if item is not None and str(item).strip()]
+        return separator.join(parts) if parts else None
+    if isinstance(value, str):
+        return value.strip() or None
+    return str(value).strip() or None
+
+
 def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
-    hardware = agent.get("hardware") if isinstance(agent.get("hardware"), Mapping) else {}
+    # Support the TacticalRMM native ``wmi_detail`` sub-object as well as a
+    # generic ``hardware`` sub-object that third-party proxies may expose.
+    wmi_detail: Mapping[str, Any] = (
+        agent.get("wmi_detail") if isinstance(agent.get("wmi_detail"), Mapping) else {}
+    )
+    generic_hw: Mapping[str, Any] = (
+        agent.get("hardware") if isinstance(agent.get("hardware"), Mapping) else {}
+    )
+    hardware: Mapping[str, Any] = wmi_detail if wmi_detail else generic_hw
 
     def _lookup(source: Mapping[str, Any], *keys: str) -> Any:
         for key in keys:
@@ -203,6 +223,21 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
     )
     client_info = agent.get("client") if isinstance(agent.get("client"), Mapping) else {}
     site_info = agent.get("site") if isinstance(agent.get("site"), Mapping) else {}
+
+    # ``logged_username`` is the computed field name in AgentTableSerializer;
+    # ``logged_in_username`` is the underlying model field.  Either may carry
+    # the sentinel value "-" or the string "None" when no user is active.
+    raw_last_user = _lookup(
+        agent,
+        "logged_in_username",
+        "logged_username",
+        "logged_in_user",
+        "last_logged_in_user",
+        "current_user",
+    )
+    if raw_last_user in ("-", "None", "N/A"):
+        raw_last_user = None
+
     details = {
         "name": name or "Agent",
         "type": _clean_text(_lookup(agent, "monitoring_type", "agent_type", "type")),
@@ -212,16 +247,19 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "status": _clean_text(_lookup(agent, "status", "agent_status", "monitoring_status")),
         "os_name": _clean_text(_lookup(agent, "os", "operating_system", "os_name", "os_version")),
+        # cpu_model is a list in the real TacticalRMM API – join multiple CPUs
         "cpu_name": _clean_text(
-            _lookup(agent, "cpu_model", "processor")
-            or _lookup(hardware, "cpu_model", "cpu", "processor")
+            _join_list(_lookup(agent, "cpu_model", "processor"))
+            or _join_list(_lookup(hardware, "cpu_model", "cpu", "processor"))
         ),
         "ram_gb": _coerce_ram_gb(
-            _lookup(agent, "ram_gb", "ram", "total_ram")
+            _lookup(agent, "ram_gb", "total_ram", "ram")
             or _lookup(hardware, "ram", "total_ram", "memory")
         ),
+        # physical_disks is a list in the real TacticalRMM API – join entries
         "hdd_size": _clean_text(
             _lookup(agent, "total_disk", "hdd_size")
+            or _join_list(_lookup(agent, "physical_disks", "disks"), separator=" | ")
             or _lookup(hardware, "total_disk", "storage_total", "disk")
         ),
         "last_sync": _lookup(
@@ -239,9 +277,7 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
             _lookup(agent, "chassis", "form_factor")
             or _lookup(hardware, "chassis_type", "form_factor")
         ),
-        "last_user": _clean_text(
-            _lookup(agent, "logged_in_user", "last_logged_in_user", "current_user")
-        ),
+        "last_user": _clean_text(raw_last_user),
         "approx_age": _coerce_float(
             _lookup(hardware, "system_age_years", "age_years")
             or _lookup(agent, "system_age", "device_age")
