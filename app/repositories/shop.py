@@ -1041,7 +1041,7 @@ async def sync_pending_optional_accessories() -> int:
                 product_name      = VALUES(product_name),
                 category_name     = VALUES(category_name),
                 rrp               = VALUES(rrp),
-                image_url         = CASE WHEN image_url LIKE '/%' THEN image_url ELSE VALUES(image_url) END,
+                image_url         = CASE WHEN image_url LIKE '/%%' THEN image_url ELSE VALUES(image_url) END,
                 manufacturer      = VALUES(manufacturer),
                 referenced_by_skus = VALUES(referenced_by_skus)
             """,
