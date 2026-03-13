@@ -274,6 +274,79 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
     return products
 
 
+async def list_products_summary(filters: ProductFilters) -> list[dict[str, Any]]:
+    query_parts: list[str] = [
+        "SELECT",
+        "    p.id,",
+        "    p.name,",
+        "    p.sku,",
+        "    p.image_url,",
+        "    p.price,",
+        "    p.vip_price,",
+        "    p.stock,",
+        "    p.archived,",
+        "    p.category_id,",
+        "    c.name AS category_name",
+        "FROM shop_products AS p",
+        "LEFT JOIN shop_categories AS c ON c.id = p.category_id",
+    ]
+    params: list[Any] = []
+
+    if filters.company_id is not None:
+        query_parts.append(
+            "LEFT JOIN shop_product_exclusions AS e "
+            "ON e.product_id = p.id AND e.company_id = %s"
+        )
+        params.append(filters.company_id)
+
+    conditions: list[str] = []
+    if not filters.include_archived:
+        conditions.append("p.archived = 0")
+    if filters.company_id is not None:
+        conditions.append("e.product_id IS NULL")
+    if filters.category_id is not None:
+        conditions.append("p.category_id = %s")
+        params.append(filters.category_id)
+    elif filters.category_ids is not None and filters.category_ids:
+        placeholders = ", ".join(["%s"] * len(filters.category_ids))
+        conditions.append(f"p.category_id IN ({placeholders})")
+        params.extend(filters.category_ids)
+    if filters.search_term:
+        like = f"%{filters.search_term}%"
+        conditions.append(
+            "(p.name LIKE %s OR p.sku LIKE %s OR p.vendor_sku LIKE %s)"
+        )
+        params.extend([like, like, like])
+    if filters.in_stock_only:
+        conditions.append("p.stock > 0")
+
+    if conditions:
+        query_parts.append("WHERE " + " AND ".join(conditions))
+
+    sort_map = {
+        "name_asc": "p.name ASC",
+        "name_desc": "p.name DESC",
+        "price_asc": "p.price ASC, p.name ASC",
+        "price_desc": "p.price DESC, p.name ASC",
+        "stock_asc": "p.stock ASC, p.name ASC",
+        "stock_desc": "p.stock DESC, p.name ASC",
+        "created_desc": "p.created_at DESC, p.name ASC",
+    }
+    order_by = sort_map.get(filters.sort, sort_map["name_asc"])
+    query_parts.append(f"ORDER BY {order_by}")
+
+    if filters.limit is not None:
+        query_parts.append("LIMIT %s")
+        params.append(max(1, int(filters.limit)))
+        if filters.offset is not None:
+            query_parts.append("OFFSET %s")
+            params.append(max(0, int(filters.offset)))
+
+    sql = " ".join(query_parts)
+    rows = await db.fetch_all(sql, tuple(params) if params else None)
+    return [_normalise_product(row) for row in rows]
+
+
 async def count_products(filters: ProductFilters) -> int:
     query_parts: list[str] = [
         "SELECT COUNT(*) AS total_count",
