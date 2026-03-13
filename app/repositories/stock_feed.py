@@ -68,6 +68,12 @@ async def get_item_by_sku(sku: str) -> dict[str, Any] | None:
     return _normalise_row(row)
 
 
+async def list_all_items() -> list[dict[str, Any]]:
+    """Return all items currently in the stock feed."""
+    rows = await db.fetch_all("SELECT * FROM stock_feed ORDER BY sku")
+    return [_normalise_row(row) for row in rows]
+
+
 async def replace_feed(items: Sequence[Mapping[str, Any]]) -> None:
     """Replace the stock feed table contents with the provided items."""
 

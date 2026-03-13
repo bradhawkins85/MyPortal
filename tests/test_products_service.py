@@ -387,3 +387,170 @@ async def test_update_stock_feed_persists_opt_accessori(monkeypatch):
     assert count == 1
     items = mock_replace.await_args.args[0]
     assert items[0]["opt_accessori"] == "ACC1,ACC2"
+
+
+def _make_feed_item(sku: str, opt_accessori: str | None = None) -> dict:
+    return {
+        "sku": sku,
+        "product_name": f"Product {sku}",
+        "product_name2": None,
+        "rrp": None,
+        "category_name": None,
+        "on_hand_nsw": 0,
+        "on_hand_qld": 0,
+        "on_hand_vic": 0,
+        "on_hand_sa": 0,
+        "dbp": None,
+        "weight": None,
+        "length": None,
+        "width": None,
+        "height": None,
+        "pub_date": None,
+        "warranty_length": None,
+        "manufacturer": None,
+        "image_url": None,
+        "opt_accessori": opt_accessori,
+    }
+
+
+@pytest.mark.anyio("asyncio")
+async def test_update_products_from_feed_sets_cross_sells(monkeypatch):
+    """Cross-sell associations from opt_accessori are applied during update_products_from_feed."""
+    feed_items = [
+        _make_feed_item("MAIN1", opt_accessori="ACC1,ACC2"),
+        _make_feed_item("ACC1"),
+        _make_feed_item("ACC2"),
+    ]
+
+    monkeypatch.setattr(
+        products_service.stock_feed_repo,
+        "list_all_items",
+        AsyncMock(return_value=feed_items),
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_by_sku",
+        AsyncMock(return_value={"id": 1, "image_url": None}),
+    )
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_ids_by_skus",
+        AsyncMock(return_value=[2, 3]),
+    )
+    mock_replace = AsyncMock()
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "replace_product_recommendations",
+        mock_replace,
+    )
+    monkeypatch.setattr(
+        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+    )
+
+    await products_service.update_products_from_feed()
+
+    # Only MAIN1 has opt_accessori, so only its cross-sells should be set
+    mock_replace.assert_awaited_once_with(1, cross_sell_ids=[2, 3])
+    products_service.shop_repo.get_product_ids_by_skus.assert_awaited_once_with(
+        ["ACC1", "ACC2"]
+    )
+
+
+@pytest.mark.anyio("asyncio")
+async def test_update_products_from_feed_upserts_all_feed_items(monkeypatch):
+    """All items in the stock feed are upserted, not just those already in shop_products."""
+    feed_items = [
+        _make_feed_item("NEW-SKU"),
+        _make_feed_item("EXISTING-SKU"),
+    ]
+
+    monkeypatch.setattr(
+        products_service.stock_feed_repo,
+        "list_all_items",
+        AsyncMock(return_value=feed_items),
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_by_sku",
+        AsyncMock(return_value=None),
+    )
+    mock_upsert = AsyncMock()
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", mock_upsert)
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "replace_product_recommendations",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+    )
+
+    await products_service.update_products_from_feed()
+
+    # Both feed items should have been upserted (two-pass first loop)
+    assert mock_upsert.await_count == 2
+
+
+@pytest.mark.anyio("asyncio")
+async def test_update_products_from_feed_cross_sells_resolved_after_all_upserts(
+    monkeypatch,
+):
+    """Cross-sell target products are resolved after ALL feed items have been upserted.
+
+    This ensures a product referenced in opt_accessori is available in shop_products
+    even if it appears later in the feed than the product that references it.
+    """
+    # MAIN1 appears before ACC1 in the feed
+    feed_items = [
+        _make_feed_item("MAIN1", opt_accessori="ACC1"),
+        _make_feed_item("ACC1"),
+    ]
+
+    upsert_call_order: list[str] = []
+
+    async def fake_upsert(**kwargs):
+        upsert_call_order.append(kwargs["sku"])
+
+    ids_call_order: list[list[str]] = []
+
+    async def fake_get_ids(skus):
+        ids_call_order.append(list(skus))
+        return [99]
+
+    product_lookup: dict[str, dict] = {
+        "MAIN1": {"id": 1, "image_url": None},
+        "ACC1": {"id": 99, "image_url": None},
+    }
+
+    async def fake_get_by_sku(sku, **kwargs):
+        return product_lookup.get(sku)
+
+    monkeypatch.setattr(
+        products_service.stock_feed_repo,
+        "list_all_items",
+        AsyncMock(return_value=feed_items),
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo, "get_product_by_sku", fake_get_by_sku
+    )
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", fake_upsert)
+    monkeypatch.setattr(
+        products_service.shop_repo, "get_product_ids_by_skus", fake_get_ids
+    )
+    mock_replace = AsyncMock()
+    monkeypatch.setattr(
+        products_service.shop_repo, "replace_product_recommendations", mock_replace
+    )
+    monkeypatch.setattr(
+        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+    )
+
+    await products_service.update_products_from_feed()
+
+    # Both products should be upserted in the first pass
+    assert set(upsert_call_order) == {"MAIN1", "ACC1"}
+    # Cross-sell lookup for ACC1 happens only after both are upserted
+    assert ids_call_order == [["ACC1"]]
+    # Cross-sell is set for MAIN1 pointing to ACC1 (id=99)
+    mock_replace.assert_awaited_once_with(1, cross_sell_ids=[99])
