@@ -10492,16 +10492,26 @@ async def admin_shop_page(
 
 
 @app.get("/admin/shop/optional-accessories", response_class=HTMLResponse)
-async def admin_shop_optional_accessories_page(request: Request):
+async def admin_shop_optional_accessories_page(
+    request: Request, show: str = "pending"
+):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
 
-    accessories = await shop_repo.list_pending_optional_accessories()
+    if show not in ("pending", "dismissed"):
+        show = "pending"
+
+    show_dismissed = show == "dismissed"
+    if show_dismissed:
+        accessories = await shop_repo.list_dismissed_optional_accessories()
+    else:
+        accessories = await shop_repo.list_pending_optional_accessories()
 
     extra = {
         "title": "Optional accessories",
         "accessories": accessories,
+        "show_dismissed": show_dismissed,
     }
     return await _render_template(
         "admin/shop_optional_accessories.html", request, current_user, extra=extra
@@ -10567,7 +10577,7 @@ async def admin_import_optional_accessory(
 async def admin_dismiss_optional_accessory(
     request: Request, accessory_id: int
 ):
-    """Remove a pending optional accessory from the staging table without importing."""
+    """Soft-dismiss a pending optional accessory without importing."""
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
@@ -10575,6 +10585,56 @@ async def admin_dismiss_optional_accessory(
     await shop_repo.dismiss_pending_optional_accessory(accessory_id)
     return RedirectResponse(
         url="/admin/shop/optional-accessories",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post(
+    "/admin/shop/optional-accessories/bulk-dismiss",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Bulk dismiss pending optional accessories",
+    tags=["Shop"],
+)
+async def admin_bulk_dismiss_optional_accessories(request: Request):
+    """Soft-dismiss multiple pending optional accessories at once."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    raw_ids = form.getlist("accessory_ids")
+    ids: list[int] = []
+    for raw in raw_ids:
+        try:
+            ids.append(int(raw))
+        except (ValueError, TypeError):
+            pass
+
+    if ids:
+        await shop_repo.bulk_dismiss_pending_optional_accessories(ids)
+    return RedirectResponse(
+        url="/admin/shop/optional-accessories",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post(
+    "/admin/shop/optional-accessories/{accessory_id}/restore",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Restore a dismissed optional accessory",
+    tags=["Shop"],
+)
+async def admin_restore_optional_accessory(
+    request: Request, accessory_id: int
+):
+    """Restore a dismissed optional accessory back to pending."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    await shop_repo.restore_dismissed_optional_accessory(accessory_id)
+    return RedirectResponse(
+        url="/admin/shop/optional-accessories?show=dismissed",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
