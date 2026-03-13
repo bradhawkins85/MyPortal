@@ -1363,12 +1363,12 @@ async def get_product_ids_by_skus(skus: Sequence[str]) -> list[int]:
     if not skus:
         return []
     placeholders = ", ".join(["%s"] * len(skus))
-    rows = await db.fetch_all(
-        f"SELECT DISTINCT id FROM shop_products"
-        f" WHERE (sku IN ({placeholders}) OR vendor_sku IN ({placeholders}))"
-        f" AND archived = 0",
-        tuple(skus) * 2,
+    sql = (
+        "SELECT DISTINCT id FROM shop_products"
+        " WHERE (sku IN (" + placeholders + ") OR vendor_sku IN (" + placeholders + "))"
+        " AND archived = 0"
     )
+    rows = await db.fetch_all(sql, tuple(skus) * 2)
     return [_coerce_int(row["id"]) for row in rows if _coerce_int(row.get("id")) > 0]
 
 
