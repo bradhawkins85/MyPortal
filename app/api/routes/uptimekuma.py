@@ -29,8 +29,10 @@ async def receive_alert(
     request: Request,
     token: str | None = Query(default=None, description="Optional token fallback when Authorization header is unavailable."),
 ) -> UptimeKumaAlertIngestResponse:
+    secret_keys = {"token", "shared_secret", "sharedSecret", "secret"}
+
     def _extract_secret_from_payload(payload_data: dict[str, object]) -> str | None:
-        for key in ("token", "shared_secret", "sharedSecret", "secret"):
+        for key in secret_keys:
             value = payload_data.get(key)
             if value is None:
                 continue
@@ -38,6 +40,13 @@ async def receive_alert(
             if token_value:
                 return token_value
         return None
+
+    def _redact_payload_secrets(payload_data: dict[str, object]) -> dict[str, object]:
+        redacted_payload = dict(payload_data)
+        for key in secret_keys:
+            if key in redacted_payload:
+                redacted_payload[key] = "[REDACTED]"
+        return redacted_payload
 
     request_headers = dict(request.headers)
     source_url = str(request.url)
@@ -112,11 +121,12 @@ async def receive_alert(
     remote_addr = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent") or request.headers.get("User-Agent")
     normalised_payload = payload.model_dump(mode="json", by_alias=True)
+    safe_payload = _redact_payload_secrets(normalised_payload)
 
     try:
         record = await uptimekuma_service.ingest_alert(
             payload=payload,
-            raw_payload=normalised_payload,
+            raw_payload=safe_payload,
             provided_secret=provided_secret,
             remote_addr=remote_addr,
             user_agent=user_agent,
@@ -125,7 +135,7 @@ async def receive_alert(
         await webhook_monitor.log_incoming_webhook(
             name="Uptime Kuma Webhook - Authentication Failed",
             source_url=source_url,
-            payload=normalised_payload,
+            payload=safe_payload,
             headers=request_headers,
             response_status=status.HTTP_401_UNAUTHORIZED,
             response_body=str(exc),
@@ -136,7 +146,7 @@ async def receive_alert(
         await webhook_monitor.log_incoming_webhook(
             name="Uptime Kuma Webhook - Module Disabled",
             source_url=source_url,
-            payload=normalised_payload,
+            payload=safe_payload,
             headers=request_headers,
             response_status=status.HTTP_503_SERVICE_UNAVAILABLE,
             response_body=str(exc),
@@ -147,7 +157,7 @@ async def receive_alert(
         await webhook_monitor.log_incoming_webhook(
             name="Uptime Kuma Webhook - Invalid Payload",
             source_url=source_url,
-            payload=normalised_payload,
+            payload=safe_payload,
             headers=request_headers,
             response_status=status.HTTP_400_BAD_REQUEST,
             response_body=str(exc),
@@ -158,7 +168,7 @@ async def receive_alert(
         await webhook_monitor.log_incoming_webhook(
             name="Uptime Kuma Webhook - Error",
             source_url=source_url,
-            payload=normalised_payload,
+            payload=safe_payload,
             headers=request_headers,
             response_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             response_body=str(exc),
@@ -170,7 +180,7 @@ async def receive_alert(
     await webhook_monitor.log_incoming_webhook(
         name=f"Uptime Kuma Webhook - {monitor_name}",
         source_url=source_url,
-        payload=normalised_payload,
+        payload=safe_payload,
         headers=request_headers,
         response_status=status.HTTP_202_ACCEPTED,
         response_body="accepted",
