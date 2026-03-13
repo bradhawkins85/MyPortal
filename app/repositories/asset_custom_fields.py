@@ -79,6 +79,52 @@ async def delete_field_definition(definition_id: int) -> None:
     )
 
 
+async def get_all_asset_field_values(asset_ids: list[int]) -> dict[int, dict[int, Any]]:
+    """Get all custom field values for a list of assets.
+
+    Returns a nested dict keyed by asset_id then field_definition_id, with
+    the resolved display value as the leaf value.
+    """
+    if not asset_ids:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(asset_ids))
+    rows = await db.fetch_all(
+        f"""
+        SELECT
+            v.asset_id,
+            v.field_definition_id,
+            v.value_text,
+            v.value_date,
+            v.value_boolean,
+            d.field_type
+        FROM asset_custom_field_values v
+        JOIN asset_custom_field_definitions d ON v.field_definition_id = d.id
+        WHERE v.asset_id IN ({placeholders})
+        ORDER BY d.display_order ASC, d.id ASC
+        """,
+        tuple(asset_ids),
+    )
+
+    result: dict[int, dict[int, Any]] = {}
+    for row in rows or []:
+        aid = row.get("asset_id")
+        fid = row.get("field_definition_id")
+        field_type = row.get("field_type")
+        if field_type == "checkbox":
+            value = row.get("value_boolean")
+        elif field_type == "date":
+            raw = row.get("value_date")
+            value = raw.isoformat() if hasattr(raw, "isoformat") else raw
+        else:
+            # text, url, image — all stored in value_text
+            value = row.get("value_text")
+        if aid not in result:
+            result[aid] = {}
+        result[aid][fid] = value
+    return result
+
+
 async def get_asset_field_values(asset_id: int) -> list[dict[str, Any]]:
     """Get all custom field values for an asset."""
     rows = await db.fetch_all(
