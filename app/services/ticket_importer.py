@@ -247,7 +247,7 @@ def _build_timer_billable_map(ticket: dict[str, Any]) -> dict[str, bool]:
             continue
         billable = timer.get("billable")
         if billable is not None:
-            result[str(comment_id)] = bool(billable)
+            result[str(comment_id)] = _coerce_bool(billable)
     return result
 
 
