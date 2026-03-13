@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from loguru import logger
@@ -30,6 +30,21 @@ async def receive_alert(
     token: str | None = Query(default=None, description="Optional token fallback when Authorization header is unavailable."),
 ) -> UptimeKumaAlertIngestResponse:
     secret_keys = {"token", "shared_secret", "sharedSecret", "secret"}
+    def _redact_source_url(url: str) -> str:
+        parts = urlsplit(url)
+        if not parts.query:
+            return url
+
+        sensitive_query_keys = {"token", "secret", "shared_secret", "sharedSecret"}
+        redacted_pairs = []
+        for key, value in parse_qsl(parts.query, keep_blank_values=True):
+            if key in sensitive_query_keys:
+                redacted_pairs.append((key, "***REDACTED***"))
+            else:
+                redacted_pairs.append((key, value))
+
+        redacted_query = urlencode(redacted_pairs, doseq=True)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, redacted_query, parts.fragment))
 
     def _extract_secret_from_payload(payload_data: dict[str, object]) -> str | None:
         for key in secret_keys:
@@ -49,7 +64,7 @@ async def receive_alert(
         return redacted_payload
 
     request_headers = dict(request.headers)
-    source_url = str(request.url)
+    source_url = _redact_source_url(str(request.url))
     content_type = (request.headers.get("content-type") or "").lower()
     raw_payload: dict[str, object]
 
@@ -98,7 +113,8 @@ async def receive_alert(
     logger.debug(
         "Uptime Kuma webhook request received",
         method=request.method,
-        url=str(request.url),
+        url_path=request.url.path,
+        has_query_params=bool(request.url.query),
         content_type=content_type,
         user_agent=request.headers.get("user-agent"),
         remote_addr=request.client.host if request.client else None,
