@@ -920,6 +920,20 @@ def test_resolve_comment_billable_billable_false_not_shadowed_by_is_billable():
     assert ticket_importer._resolve_comment_billable(comment) is False
 
 
+def test_resolve_comment_billable_timer_overrides_comment():
+    """Labor log (timer) billable takes priority over the comment's own field."""
+    comment = {"id": 42, "billable": False}
+    timer_billable = {"42": True}
+    assert ticket_importer._resolve_comment_billable(comment, timer_billable) is True
+
+
+def test_resolve_comment_billable_timer_false_overrides_comment_true():
+    """Labor log (timer) billable=False overrides comment billable=True."""
+    comment = {"id": 5, "billable": True}
+    timer_billable = {"5": False}
+    assert ticket_importer._resolve_comment_billable(comment, timer_billable) is False
+
+
 def test_resolve_comment_billable_from_timer_map():
     """When comment has no billable field, the timer_billable map is used."""
     comment = {"id": 42, "body": "Fixed it"}
@@ -934,7 +948,7 @@ def test_resolve_comment_billable_timer_map_false():
 
 
 def test_resolve_comment_billable_no_timer_match():
-    """No match in timer map → defaults to False."""
+    """No match in timer map → falls back to comment fields then defaults to False."""
     comment = {"id": 99, "body": "Note"}
     timer_billable = {"1": True}
     assert ticket_importer._resolve_comment_billable(comment, timer_billable) is False
@@ -965,6 +979,45 @@ def test_build_timer_billable_map_skips_null_comment_id():
 def test_build_timer_billable_map_no_timers():
     assert ticket_importer._build_timer_billable_map({}) == {}
     assert ticket_importer._build_timer_billable_map({"ticket_timers": []}) == {}
+
+
+def test_build_timer_time_map_basic():
+    ticket = {
+        "ticket_timers": [
+            {"id": 1, "comment_id": 10, "billable": True, "billable_time": 60},
+            {"id": 2, "comment_id": 20, "billable": False, "billable_time": 30},
+        ]
+    }
+    result = ticket_importer._build_timer_time_map(ticket)
+    assert result == {"10": 60, "20": 30}
+
+
+def test_build_timer_time_map_skips_null_comment_id():
+    ticket = {
+        "ticket_timers": [
+            {"id": 1, "comment_id": None, "billable_time": 45},
+            {"id": 2, "comment_id": 7, "billable_time": 15},
+        ]
+    }
+    result = ticket_importer._build_timer_time_map(ticket)
+    assert result == {"7": 15}
+
+
+def test_build_timer_time_map_skips_missing_billable_time():
+    ticket = {
+        "ticket_timers": [
+            {"id": 1, "comment_id": 10, "billable": True},
+            {"id": 2, "comment_id": 20, "billable_time": 45},
+        ]
+    }
+    result = ticket_importer._build_timer_time_map(ticket)
+    assert result == {"20": 45}
+
+
+def test_build_timer_time_map_no_timers():
+    assert ticket_importer._build_timer_time_map({}) == {}
+    assert ticket_importer._build_timer_time_map({"ticket_timers": []}) == {}
+
 
 
 def test_extract_contact_info_from_contact_dict():
@@ -1256,9 +1309,14 @@ async def test_import_ticket_billable_from_ticket_timers(monkeypatch):
 
     assert billable_reply["is_billable"] is True
     assert "Billable: Yes" in billable_reply["body"]
+    # Time comes from billable_time on the labor log (ticket_timer)
+    assert billable_reply["minutes_spent"] == 60
+    assert "Time: 1h" in billable_reply["body"]
 
     assert non_billable_reply["is_billable"] is False
     assert "Billable: No" in non_billable_reply["body"]
+    assert non_billable_reply["minutes_spent"] == 30
+    assert "Time: 30m" in non_billable_reply["body"]
 
 
 @pytest.mark.anyio
