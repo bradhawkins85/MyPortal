@@ -313,6 +313,73 @@ def _prepare_status_filters(status: str | Sequence[str] | None) -> list[str]:
     return slugs
 
 
+def _build_user_ticket_filter_clauses(
+    *,
+    table_alias: str,
+    status: str | Sequence[str] | None,
+    company_ids: Sequence[int] | None,
+    search: str | None,
+) -> tuple[list[str], list[Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+
+    status_filters = _prepare_status_filters(status)
+    if status_filters:
+        if len(status_filters) == 1:
+            clauses.append(f"{table_alias}.status = %s")
+            params.append(status_filters[0])
+        else:
+            placeholders = ", ".join(["%s"] * len(status_filters))
+            clauses.append(f"{table_alias}.status IN ({placeholders})")
+            params.extend(status_filters)
+
+    company_filters = [int(cid) for cid in (company_ids or []) if int(cid) > 0]
+    if company_filters:
+        placeholders = ", ".join(["%s"] * len(company_filters))
+        clauses.append(f"{table_alias}.company_id IN ({placeholders})")
+        params.extend(company_filters)
+
+    search_term = (search or "").strip().lower()
+    if search_term:
+        like = f"%{search_term}%"
+        clauses.append(
+            f"(LOWER({table_alias}.subject) LIKE %s OR LOWER(COALESCE({table_alias}.description, '')) LIKE %s)"
+        )
+        params.extend([like, like])
+
+    return clauses, params
+
+
+def _build_user_ticket_union_query(
+    *,
+    user_id: int,
+    status: str | Sequence[str] | None,
+    company_ids: Sequence[int] | None,
+    search: str | None,
+) -> tuple[str, list[Any]]:
+    shared_clauses, shared_params = _build_user_ticket_filter_clauses(
+        table_alias="t",
+        status=status,
+        company_ids=company_ids,
+        search=search,
+    )
+
+    requester_clauses = ["t.requester_id = %s", *shared_clauses]
+    watched_clauses = [
+        "EXISTS (SELECT 1 FROM ticket_watchers AS tw WHERE tw.ticket_id = t.id AND tw.user_id = %s)",
+        *shared_clauses,
+    ]
+
+    requester_query = (
+        "SELECT t.id FROM tickets AS t WHERE " + " AND ".join(requester_clauses)
+    )
+    watched_query = "SELECT t.id FROM tickets AS t WHERE " + " AND ".join(watched_clauses)
+
+    union_query = f"({requester_query} UNION {watched_query})"
+    params: list[Any] = [user_id, *shared_params, user_id, *shared_params]
+    return union_query, params
+
+
 async def list_tickets_for_user(
     user_id: int,
     *,
@@ -327,46 +394,23 @@ async def list_tickets_for_user(
     if user_id <= 0:
         return []
 
-    company_filters = [int(cid) for cid in (company_ids or []) if int(cid) > 0]
+    id_union_query, params = _build_user_ticket_union_query(
+        user_id=user_id,
+        status=status,
+        company_ids=company_ids,
+        search=search,
+    )
 
-    query_parts = [
-        "SELECT DISTINCT t.* FROM tickets AS t",
-        "LEFT JOIN ticket_watchers AS tw ON tw.ticket_id = t.id AND tw.user_id = %s",
-    ]
-    params: list[Any] = [user_id]
-
-    conditions = ["(t.requester_id = %s OR tw.user_id = %s)"]
-    params.extend([user_id, user_id])
-
-    status_filters = _prepare_status_filters(status)
-    if status_filters:
-        if len(status_filters) == 1:
-            conditions.append("t.status = %s")
-            params.append(status_filters[0])
-        else:
-            placeholders = ", ".join(["%s"] * len(status_filters))
-            conditions.append(f"t.status IN ({placeholders})")
-            params.extend(status_filters)
-
-    if company_filters:
-        placeholders = ", ".join(["%s"] * len(company_filters))
-        conditions.append(f"t.company_id IN ({placeholders})")
-        params.extend(company_filters)
-
-    search_term = (search or "").strip().lower()
-    if search_term:
-        like = f"%{search_term}%"
-        conditions.append(
-            "(LOWER(t.subject) LIKE %s OR LOWER(COALESCE(t.description, '')) LIKE %s)"
-        )
-        params.extend([like, like])
-
-    query_parts.append("WHERE " + " AND ".join(conditions))
-    query_parts.append("ORDER BY t.updated_at DESC")
-    query_parts.append("LIMIT %s OFFSET %s")
+    query = f"""
+        SELECT t.*
+        FROM tickets AS t
+        INNER JOIN {id_union_query} AS scoped ON scoped.id = t.id
+        ORDER BY t.updated_at DESC, t.id DESC
+        LIMIT %s OFFSET %s
+    """
     params.extend([int(max(1, limit)), int(max(0, offset))])
 
-    rows = await db.fetch_all(" ".join(query_parts), tuple(params))
+    rows = await db.fetch_all(query, tuple(params))
     return [_normalise_ticket(row) for row in rows]
 
 
@@ -382,43 +426,17 @@ async def count_tickets_for_user(
     if user_id <= 0:
         return 0
 
-    company_filters = [int(cid) for cid in (company_ids or []) if int(cid) > 0]
+    id_union_query, params = _build_user_ticket_union_query(
+        user_id=user_id,
+        status=status,
+        company_ids=company_ids,
+        search=search,
+    )
 
-    query_parts = [
-        "SELECT COUNT(DISTINCT t.id) AS count FROM tickets AS t",
-        "LEFT JOIN ticket_watchers AS tw ON tw.ticket_id = t.id AND tw.user_id = %s",
-    ]
-    params: list[Any] = [user_id]
-
-    conditions = ["(t.requester_id = %s OR tw.user_id = %s)"]
-    params.extend([user_id, user_id])
-
-    status_filters = _prepare_status_filters(status)
-    if status_filters:
-        if len(status_filters) == 1:
-            conditions.append("t.status = %s")
-            params.append(status_filters[0])
-        else:
-            placeholders = ", ".join(["%s"] * len(status_filters))
-            conditions.append(f"t.status IN ({placeholders})")
-            params.extend(status_filters)
-
-    if company_filters:
-        placeholders = ", ".join(["%s"] * len(company_filters))
-        conditions.append(f"t.company_id IN ({placeholders})")
-        params.extend(company_filters)
-
-    search_term = (search or "").strip().lower()
-    if search_term:
-        like = f"%{search_term}%"
-        conditions.append(
-            "(LOWER(t.subject) LIKE %s OR LOWER(COALESCE(t.description, '')) LIKE %s)"
-        )
-        params.extend([like, like])
-
-    query_parts.append("WHERE " + " AND ".join(conditions))
-
-    row = await db.fetch_one(" ".join(query_parts), tuple(params))
+    row = await db.fetch_one(
+        f"SELECT COUNT(*) AS count FROM {id_union_query} AS scoped",
+        tuple(params),
+    )
     return int(row["count"]) if row else 0
 
 
