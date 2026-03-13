@@ -6,7 +6,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
-from app.security.rate_limiter import EndpointRateLimiter, EndpointRateLimiterMiddleware
+from app.security.rate_limiter import (
+    EndpointRateLimiter,
+    EndpointRateLimiterMiddleware,
+    RateLimiterMiddleware,
+    SimpleRateLimiter,
+)
 
 
 @pytest.fixture
@@ -160,3 +165,32 @@ def test_different_ips_have_separate_limits(test_app_with_endpoint_limits):
     # Same IP is blocked
     response = client.post("/auth/login")
     assert response.status_code == 429
+
+
+def test_general_rate_limiter_exempts_upload_paths():
+    """Uploads should be exempt from the general API rate limiter."""
+    app = FastAPI()
+
+    @app.get("/uploads/shop/item.png")
+    async def upload_asset():
+        return JSONResponse({"status": "ok"})
+
+    @app.get("/api/data")
+    async def get_data():
+        return JSONResponse({"status": "ok"})
+
+    app.add_middleware(
+        RateLimiterMiddleware,
+        rate_limiter=SimpleRateLimiter(limit=2, window_seconds=60),
+        exempt_paths=("/static", "/uploads"),
+    )
+
+    client = TestClient(app)
+
+    for _ in range(5):
+        response = client.get("/uploads/shop/item.png")
+        assert response.status_code == 200
+
+    assert client.get("/api/data").status_code == 200
+    assert client.get("/api/data").status_code == 200
+    assert client.get("/api/data").status_code == 429
