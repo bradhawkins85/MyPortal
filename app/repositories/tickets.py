@@ -73,6 +73,26 @@ def _append_ticket_search_filter(
     params.extend(like_params)
 
 
+def _build_ticket_search_clause(
+    *,
+    search: str | None,
+    column_prefix: str = "",
+    include_external_reference: bool = True,
+) -> tuple[str, list[Any]]:
+    where: list[str] = []
+    params: list[Any] = []
+    _append_ticket_search_filter(
+        where,
+        params,
+        search=search,
+        column_prefix=column_prefix,
+        include_external_reference=include_external_reference,
+    )
+    if not where:
+        return "1=1", []
+    return where[0], params
+
+
 def _deserialise_tags(value: Any) -> list[str]:
     if value is None or value == "":
         return []
@@ -399,20 +419,16 @@ async def list_tickets_for_user(
     if user_id <= 0:
         return []
 
-    status_csv, company_csv, search_mode, search_value = _prepare_user_ticket_scope_filters(
+    status_csv, company_csv, _, _ = _prepare_user_ticket_scope_filters(
         status=status,
         company_ids=company_ids,
         search=search,
     )
-
-    search_clause = "%s = ''"
-    search_params: list[Any] = ["" if not search_mode else "active"]
-    if search_mode == "fulltext" and search_value:
-        search_clause = "MATCH (t.subject, t.description) AGAINST (%s IN BOOLEAN MODE)"
-        search_params = [search_value]
-    elif search_mode == "like" and search_value:
-        search_clause = "(LOWER(t.subject) LIKE LOWER(%s) OR LOWER(COALESCE(t.description, '')) LIKE LOWER(%s))"
-        search_params = [search_value, search_value]
+    search_clause, search_params = _build_ticket_search_clause(
+        search=search,
+        column_prefix="t.",
+        include_external_reference=True,
+    )
 
     query = f"""
         SELECT t.*
@@ -464,20 +480,16 @@ async def count_tickets_for_user(
     if user_id <= 0:
         return 0
 
-    status_csv, company_csv, search_mode, search_value = _prepare_user_ticket_scope_filters(
+    status_csv, company_csv, _, _ = _prepare_user_ticket_scope_filters(
         status=status,
         company_ids=company_ids,
         search=search,
     )
-
-    search_clause = "%s = ''"
-    search_params: list[Any] = ["" if not search_mode else "active"]
-    if search_mode == "fulltext" and search_value:
-        search_clause = "MATCH (t.subject, t.description) AGAINST (%s IN BOOLEAN MODE)"
-        search_params = [search_value]
-    elif search_mode == "like" and search_value:
-        search_clause = "(LOWER(t.subject) LIKE LOWER(%s) OR LOWER(COALESCE(t.description, '')) LIKE LOWER(%s))"
-        search_params = [search_value, search_value]
+    search_clause, search_params = _build_ticket_search_clause(
+        search=search,
+        column_prefix="t.",
+        include_external_reference=True,
+    )
 
     query = f"""
         SELECT COUNT(*) AS count
