@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.dependencies.auth import require_super_admin, get_current_user, require_super_admin, require_helpdesk_technician
+from app.api.dependencies.auth import get_current_user, require_helpdesk_technician, require_super_admin
 from app.api.dependencies.database import require_database
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
@@ -197,8 +197,19 @@ async def list_company_members(
 async def list_company_assets(
     company_id: int,
     _: None = Depends(require_database),
-    __: dict = Depends(require_helpdesk_technician),
+    current_user: dict = Depends(require_helpdesk_technician),
 ):
+    if not current_user.get("is_super_admin"):
+        user_id = current_user.get("id")
+        try:
+            user_id_int = int(user_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
+
+        membership = await membership_repo.get_membership_by_company_user(company_id, user_id_int)
+        if not membership or membership.get("status") != "active":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
     company = await company_repo.get_company_by_id(company_id)
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
@@ -217,7 +228,6 @@ async def list_company_assets(
                 record[numeric_key] = None
         assets.append(record)
     return assets
-
 
 @router.get("/{company_id}/recurring-invoice-items", response_model=list[RecurringInvoiceItemResponse])
 async def list_company_recurring_invoice_items(
