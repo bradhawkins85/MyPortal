@@ -388,3 +388,35 @@ def test_receive_alert_redacts_token_query_param_in_logged_source_url(monkeypatc
     source_url = logged_calls[0]["source_url"]
     assert "token=%2A%2A%2AREDACTED%2A%2A%2A" in source_url
     assert "super-secret" not in source_url
+
+def test_receive_alert_debug_log_redacts_query_token(monkeypatch):
+    debug_calls = []
+
+    async def fake_ingest_alert(**kwargs):
+        return {"id": 101, "monitor_name": "My Monitor"}
+
+    async def fake_log_incoming_webhook(**kwargs):
+        return {}
+
+    def fake_debug(message, **kwargs):
+        debug_calls.append((message, kwargs))
+
+    monkeypatch.setattr(uptime_service, "ingest_alert", fake_ingest_alert)
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", fake_log_incoming_webhook)
+    monkeypatch.setattr("app.api.routes.uptimekuma.logger.debug", fake_debug)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/integration-modules/uptimekuma/alerts",
+            params={"token": "query-secret"},
+            json={"status": "up"},
+        )
+
+    assert response.status_code == 202
+    webhook_debug_calls = [call for call in debug_calls if call[0] == "Uptime Kuma webhook request received"]
+    assert len(webhook_debug_calls) == 1
+
+    _, log_kwargs = webhook_debug_calls[0]
+    assert log_kwargs["url_path"] == "/api/integration-modules/uptimekuma/alerts"
+    assert log_kwargs["has_query_params"] is True
+    assert "url" not in log_kwargs
