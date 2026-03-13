@@ -4,11 +4,54 @@ from dataclasses import dataclass
 from collections import defaultdict
 from datetime import date, datetime, timezone
 from decimal import Decimal
+import re
 from typing import Any, Iterable, Sequence
 
 import aiomysql
 
 from app.core.database import db
+
+
+_FULLTEXT_MIN_SEARCH_LENGTH = 3
+
+
+def _prepare_product_search_term(search: str | None) -> tuple[str | None, str | None]:
+    term = (search or "").strip()
+    if not term:
+        return None, None
+
+    if len(term) < _FULLTEXT_MIN_SEARCH_LENGTH:
+        return "like", f"%{term}%"
+
+    tokens = [segment.strip() for segment in re.split(r"\s+", term) if segment.strip()]
+    boolean_tokens: list[str] = []
+    for token in tokens:
+        cleaned = re.sub(r"[^0-9A-Za-z]", "", token)
+        if len(cleaned) < _FULLTEXT_MIN_SEARCH_LENGTH:
+            continue
+        boolean_tokens.append(f"+{cleaned}*")
+
+    if boolean_tokens:
+        return "fulltext", " ".join(boolean_tokens)
+    return "like", f"%{term}%"
+
+
+def _append_product_search_filter(conditions: list[str], params: list[Any], search: str | None) -> None:
+    mode, value = _prepare_product_search_term(search)
+    if not mode or value is None:
+        return
+
+    if mode == "fulltext":
+        conditions.append(
+            "MATCH (p.name, p.sku, p.vendor_sku) AGAINST (%s IN BOOLEAN MODE)"
+        )
+        params.append(value)
+        return
+
+    conditions.append(
+        "(p.name LIKE %s OR p.sku LIKE %s OR p.vendor_sku LIKE %s)"
+    )
+    params.extend([value, value, value])
 
 
 @dataclass(slots=True)
@@ -301,12 +344,7 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
         placeholders = ", ".join(["%s"] * len(filters.category_ids))
         conditions.append(f"p.category_id IN ({placeholders})")
         params.extend(filters.category_ids)
-    if filters.search_term:
-        like = f"%{filters.search_term}%"
-        conditions.append(
-            "(p.name LIKE %s OR p.sku LIKE %s OR p.vendor_sku LIKE %s)"
-        )
-        params.extend([like, like, like])
+    _append_product_search_filter(conditions, params, filters.search_term)
     if filters.in_stock_only:
         conditions.append("p.stock > 0")
 
@@ -380,12 +418,7 @@ async def list_products_summary(filters: ProductFilters) -> list[dict[str, Any]]
         placeholders = ", ".join(["%s"] * len(filters.category_ids))
         conditions.append(f"p.category_id IN ({placeholders})")
         params.extend(filters.category_ids)
-    if filters.search_term:
-        like = f"%{filters.search_term}%"
-        conditions.append(
-            "(p.name LIKE %s OR p.sku LIKE %s OR p.vendor_sku LIKE %s)"
-        )
-        params.extend([like, like, like])
+    _append_product_search_filter(conditions, params, filters.search_term)
     if filters.in_stock_only:
         conditions.append("p.stock > 0")
 
@@ -442,10 +475,7 @@ async def count_products(filters: ProductFilters) -> int:
         placeholders = ", ".join(["%s"] * len(filters.category_ids))
         conditions.append(f"p.category_id IN ({placeholders})")
         params.extend(filters.category_ids)
-    if filters.search_term:
-        like = f"%{filters.search_term}%"
-        conditions.append("(p.name LIKE %s OR p.sku LIKE %s OR p.vendor_sku LIKE %s)")
-        params.extend([like, like, like])
+    _append_product_search_filter(conditions, params, filters.search_term)
     if filters.in_stock_only:
         conditions.append("p.stock > 0")
 
