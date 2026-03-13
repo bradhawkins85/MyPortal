@@ -28,7 +28,6 @@ class IPWhitelistMiddleware(BaseHTTPMiddleware):
     The middleware supports:
     - Individual IPv4 and IPv6 addresses
     - CIDR ranges (e.g., 192.168.1.0/24, 2001:db8::/32)
-    - Proxy headers (X-Forwarded-For, CF-Connecting-IP)
     - Path-based exemptions (e.g., public endpoints)
     """
 
@@ -75,33 +74,21 @@ class IPWhitelistMiddleware(BaseHTTPMiddleware):
                     )
 
     def _get_client_ip(self, request: Request) -> str | None:
-        """Extract the client's IP address from the request.
-        
-        Checks proxy headers in priority order:
-        1. CF-Connecting-IP (Cloudflare)
-        2. X-Forwarded-For (standard proxy header)
-        3. Direct client IP from socket
-        
+        """Extract the client's IP address from the request socket.
+
+        The whitelist check must use the direct peer address. Proxy headers
+        (for example ``CF-Connecting-IP`` and ``X-Forwarded-For``) are not
+        trusted here because clients can spoof them when connecting directly.
+
         Args:
             request: The incoming request
-            
+
         Returns:
             The client's IP address as a string, or None if unavailable
         """
-        # Check Cloudflare header first
-        cf_ip = request.headers.get("cf-connecting-ip")
-        if cf_ip:
-            return cf_ip.strip()
-        
-        # Check X-Forwarded-For (use first IP in chain)
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        
-        # Fall back to direct client IP
         if request.client:
             return request.client.host
-        
+
         return None
 
     def _is_ip_allowed(self, client_ip_str: str) -> bool:
