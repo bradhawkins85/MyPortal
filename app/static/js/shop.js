@@ -132,6 +132,16 @@
     return row;
   }
 
+  function appendPlainTextWithLineBreaks(container, text) {
+    const lines = String(text).split(/\r?\n/);
+    lines.forEach((line, index) => {
+      if (index > 0) {
+        container.appendChild(document.createElement('br'));
+      }
+      container.appendChild(document.createTextNode(line));
+    });
+  }
+
 
   async function fetchProductDetails(productId) {
     const response = await fetch(`/api/shop/products/${productId}`, {
@@ -179,7 +189,7 @@
 
       const descriptionDiv = document.createElement('div');
       descriptionDiv.className = 'modal__description';
-      descriptionDiv.innerHTML = product.description;
+      appendPlainTextWithLineBreaks(descriptionDiv, product.description);
       container.appendChild(descriptionDiv);
     }
   }
