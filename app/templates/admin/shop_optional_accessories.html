@@ -42,6 +42,7 @@
         <table class="table" id="optional-accessories-table" data-table>
           <thead>
             <tr>
+              <th scope="col" class="table__col-image">Image</th>
               <th scope="col" data-sort="string">Name</th>
               <th scope="col" data-sort="string">SKU</th>
               <th scope="col" data-sort="string">Category</th>
@@ -54,19 +55,29 @@
           <tbody>
             {% for item in accessories %}
               <tr>
-                <td>
+                <td class="table__col-image">
                   {% if item.image_url %}
-                    <img
-                      src="{{ item.image_url }}"
-                      alt="{{ item.product_name }}"
-                      class="table__thumbnail"
-                      width="32"
-                      height="32"
-                      loading="lazy"
-                    />
+                    <button
+                      type="button"
+                      class="table__image-btn"
+                      data-image-preview="{{ item.image_url }}"
+                      data-image-label="{{ item.product_name or item.sku }}"
+                      aria-label="View larger image for {{ item.product_name or item.sku }}"
+                    >
+                      <img
+                        src="{{ item.image_url }}"
+                        alt="{{ item.product_name or item.sku }}"
+                        class="table__thumbnail--lg"
+                        width="56"
+                        height="56"
+                        loading="lazy"
+                      />
+                    </button>
+                  {% else %}
+                    <span class="table__no-image" aria-label="No image">—</span>
                   {% endif %}
-                  {{ item.product_name or item.sku }}
                 </td>
+                <td>{{ item.product_name or item.sku }}</td>
                 <td><code>{{ item.sku }}</code></td>
                 <td>{{ item.category_name or '—' }}</td>
                 <td data-sort-value="{{ item.rrp or 0 }}">
@@ -101,7 +112,7 @@
               </tr>
             {% else %}
               <tr>
-                <td colspan="7" class="table__empty">
+                <td colspan="8" class="table__empty">
                   No pending optional accessories found. Use "Sync from feed" to scan the stock feed for accessories that are not yet in your shop.
                 </td>
               </tr>
@@ -111,9 +122,57 @@
       </div>
     </section>
   </div>
+
+  <div class="modal" id="accessory-image-modal" hidden aria-modal="true" role="dialog" aria-labelledby="accessory-image-modal-title">
+    <div class="modal__content modal__content--image-preview">
+      <button type="button" class="modal__close" data-modal-close aria-label="Close">&times;</button>
+      <h2 class="modal__title" id="accessory-image-modal-title"></h2>
+      <div class="modal__body">
+        <img src="" alt="" class="modal__image" id="accessory-image-modal-img" />
+      </div>
+    </div>
+  </div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/shop_admin.js') }}" defer></script>
+  <script>
+    (function () {
+      const modal = document.getElementById('accessory-image-modal');
+      const modalTitle = document.getElementById('accessory-image-modal-title');
+      const modalImg = document.getElementById('accessory-image-modal-img');
+
+      function openImageModal(src, label) {
+        modalImg.src = src;
+        modalImg.alt = label;
+        modalTitle.textContent = label;
+        modal.hidden = false;
+      }
+
+      function closeImageModal() {
+        modal.hidden = true;
+        modalImg.src = '';
+      }
+
+      modal.addEventListener('click', function (event) {
+        if (event.target === modal || event.target.hasAttribute('data-modal-close')) {
+          closeImageModal();
+        }
+      });
+
+      document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && !modal.hidden) {
+          closeImageModal();
+        }
+      });
+
+      document.getElementById('optional-accessories-table').addEventListener('click', function (event) {
+        const btn = event.target.closest('[data-image-preview]');
+        if (btn) {
+          openImageModal(btn.dataset.imagePreview, btn.dataset.imageLabel || '');
+        }
+      });
+    })();
+  </script>
 {% endblock %}
