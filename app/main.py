@@ -4917,31 +4917,16 @@ async def shop_page(
         if category_id is not None:
             category_ids = await shop_repo.get_category_descendants(category_id)
 
-        offset = (page - 1) * page_size
-        
         filters = shop_repo.ProductFilters(
             include_archived=False,
             company_id=company_id,
             category_ids=category_ids,
             search_term=effective_search,
             in_stock_only=not show_out_of_stock,
-            limit=page_size,
-            offset=offset,
             sort="name_asc",
         )
 
-        count_filters = shop_repo.ProductFilters(
-            include_archived=False,
-            company_id=company_id,
-            category_ids=category_ids,
-            search_term=effective_search,
-            in_stock_only=not show_out_of_stock,
-            sort="name_asc",
-        )
-
-        products_task = asyncio.create_task(shop_repo.list_products_summary(filters))
-        total_count_task = asyncio.create_task(shop_repo.count_products(count_filters))
-        products, total_count = await asyncio.gather(products_task, total_count_task)
+        products = await shop_repo.list_products_summary(filters)
 
         products = [
             product
@@ -4965,6 +4950,9 @@ async def shop_page(
                 return False
 
         products = [product for product in products if _product_has_price(product)]
+        total_count = len(products)
+        offset = (page - 1) * page_size
+        products = products[offset: offset + page_size]
 
     products = cast(list[dict[str, Any]], _serialise_for_json(products))
 
