@@ -257,6 +257,25 @@
       handleCell.appendChild(handle);
       row.appendChild(handleCell);
 
+      const removeCell = document.createElement('td');
+      removeCell.className = 'table__actions';
+      const isDividerOrSpacer =
+        item.key.startsWith(SIDEBAR_DIVIDER_KEY_PREFIX) ||
+        item.key.startsWith(SIDEBAR_SPACER_KEY_PREFIX);
+      if (isDividerOrSpacer) {
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'button button--danger button--small';
+        removeButton.textContent = 'Remove';
+        removeButton.setAttribute('aria-label', `Remove ${item.label}`);
+        removeButton.addEventListener('click', () => {
+          sidebarState.splice(index, 1);
+          renderSidebarItems();
+        });
+        removeCell.appendChild(removeButton);
+      }
+      row.appendChild(removeCell);
+
       row.addEventListener('dragstart', (e) => {
         dragSourceIndex = index;
         e.dataTransfer.effectAllowed = 'move';
