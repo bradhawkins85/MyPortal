@@ -568,6 +568,11 @@ async def test_update_products_from_feed_uses_vendor_sku_for_cross_sells(monkeyp
         _make_feed_item("NHU-R5AC-LITE", opt_accessori="NHU-POE-24-12WG"),
         _make_feed_item("NHU-POE-24-12WG"),
     ]
+async def test_update_products_from_feed_does_not_download_images_for_new_products(
+    monkeypatch,
+):
+    """Images must not be downloaded for products that do not yet exist in the store."""
+    feed_item = {**_make_feed_item("NEW-SKU"), "image_url": "https://example.com/img.jpg"}
 
     monkeypatch.setattr(
         products_service.stock_feed_repo,
@@ -591,6 +596,72 @@ async def test_update_products_from_feed_uses_vendor_sku_for_cross_sells(monkeyp
         products_service.shop_repo,
         "replace_product_recommendations",
         mock_replace,
+        AsyncMock(return_value=[feed_item]),
+    )
+    # Product does not exist in the store
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_by_sku",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(products_service.shop_repo, "replace_product_recommendations", AsyncMock())
+    monkeypatch.setattr(
+        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+    )
+
+    mock_download = AsyncMock(return_value="/uploads/shop/some.jpg")
+    monkeypatch.setattr(products_service, "_download_product_image", mock_download)
+
+    await products_service.update_products_from_feed()
+
+    mock_download.assert_not_called()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_update_products_from_feed_downloads_image_for_existing_product_without_image(
+    monkeypatch,
+):
+    """Images should be downloaded for store products that do not yet have an image."""
+    feed_item = {**_make_feed_item("EXISTING-SKU"), "image_url": "https://example.com/img.jpg"}
+
+    monkeypatch.setattr(
+        products_service.stock_feed_repo,
+        "list_all_items",
+        AsyncMock(return_value=[feed_item]),
+    )
+    # Product exists in the store but has no image
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_by_sku",
+        AsyncMock(return_value={"id": 7, "image_url": None}),
+    )
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(products_service.shop_repo, "replace_product_recommendations", AsyncMock())
+    monkeypatch.setattr(
+        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+    )
+
+    mock_download = AsyncMock(return_value="/uploads/shop/downloaded.jpg")
+    monkeypatch.setattr(products_service, "_download_product_image", mock_download)
+
+    await products_service.update_products_from_feed()
+
+    mock_download.assert_awaited_once_with("https://example.com/img.jpg")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_process_feed_item_skips_image_download_for_new_product_when_disabled(
+    monkeypatch,
+):
+    """_process_feed_item with download_image_if_new=False must not download images for new products."""
+    item = {**_make_feed_item("NEW-SKU"), "image_url": "https://example.com/img.jpg"}
+
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_by_sku",
+        AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
         products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
@@ -603,3 +674,38 @@ async def test_update_products_from_feed_uses_vendor_sku_for_cross_sells(monkeyp
     products_service.shop_repo.get_product_ids_by_skus.assert_awaited_once_with(
         ["NHU-POE-24-12WG"]
     )
+    mock_download = AsyncMock(return_value="/uploads/shop/some.jpg")
+    monkeypatch.setattr(products_service, "_download_product_image", mock_download)
+
+    result = await products_service._process_feed_item(
+        item, None, download_image_if_new=False
+    )
+
+    assert result is True
+    mock_download.assert_not_called()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_process_feed_item_downloads_image_for_new_product_when_enabled(
+    monkeypatch,
+):
+    """_process_feed_item with download_image_if_new=True (default) downloads images for new products."""
+    item = {**_make_feed_item("NEW-SKU"), "image_url": "https://example.com/img.jpg"}
+
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_by_sku",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+    )
+
+    mock_download = AsyncMock(return_value="/uploads/shop/some.jpg")
+    monkeypatch.setattr(products_service, "_download_product_image", mock_download)
+
+    result = await products_service._process_feed_item(item, None)
+
+    assert result is True
+    mock_download.assert_awaited_once_with("https://example.com/img.jpg")

@@ -439,6 +439,7 @@ async def _process_feed_item(
     existing_product: Mapping[str, Any] | None,
     *,
     update_recommendations: bool = True,
+    download_image_if_new: bool = True,
 ) -> bool:
     code = str(item.get("sku") or "").strip()
     if not code:
@@ -517,7 +518,7 @@ async def _process_feed_item(
     image_url: str | None = None
     if existing_image_url:
         image_url = None
-    elif feed_image_url:
+    elif feed_image_url and (current_product is not None or download_image_if_new):
         image_url = await _download_product_image(feed_image_url)
 
     await shop_repo.upsert_product_from_feed(
@@ -626,7 +627,7 @@ async def update_products_from_feed() -> None:
         )
         try:
             if await _process_feed_item(
-                item, existing_product, update_recommendations=False
+                item, existing_product, update_recommendations=False, download_image_if_new=False
             ):
                 processed += 1
         except Exception as exc:  # pragma: no cover - defensive logging
