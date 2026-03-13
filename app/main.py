@@ -107,6 +107,7 @@ from app.repositories import assets as assets_repo
 from app.repositories import billing_contacts as billing_contacts_repo
 from app.repositories import business_continuity_plans as bc_plans_repo
 from app.repositories import companies as company_repo
+from app.repositories import csp as csp_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import change_log as change_log_repo
@@ -3062,6 +3063,9 @@ async def _render_companies_dashboard(
         "temporary_password": temporary_password,
         "invited_email": invited_email,
         "show_archived": include_archived,
+        "admin_credentials_configured": bool(
+            settings.m365_admin_client_id and settings.m365_admin_client_secret
+        ),
     }
 
     response = await _render_template("admin/companies.html", request, user, extra=extra)
@@ -3507,6 +3511,30 @@ async def _render_company_edit_page(
             else:
                 raise
 
+    # Fetch Microsoft 365 credentials for the company
+    m365_credential_view: dict[str, Any] | None = None
+    if is_super_admin:
+        try:
+            m365_creds = await m365_service.get_credentials(company_id)
+            if m365_creds:
+                expires = m365_creds.get("token_expires_at")
+                if isinstance(expires, datetime):
+                    expires_display = expires.replace(tzinfo=timezone.utc).isoformat()
+                elif expires:
+                    expires_display = str(expires)
+                else:
+                    expires_display = None
+                m365_credential_view = {
+                    "tenant_id": m365_creds.get("tenant_id"),
+                    "client_id": m365_creds.get("client_id"),
+                    "token_expires_at": expires_display,
+                }
+        except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
+            if "Database pool not initialised" in str(exc):
+                pass
+            else:
+                raise
+
     assign_form = {
         "company_id": assign_company_id,
         "user_id": assign_user_id,
@@ -3540,6 +3568,11 @@ async def _render_company_edit_page(
         "billing_contacts": billing_contacts,
         "company_staff": company_staff,
         "show_inactive_tasks": show_inactive_tasks,
+        "m365_credential": m365_credential_view,
+        "m365_has_credentials": m365_credential_view is not None,
+        "m365_admin_credentials_configured": bool(
+            settings.m365_admin_client_id and settings.m365_admin_client_secret
+        ),
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
@@ -4580,6 +4613,318 @@ async def m365_connect(request: Request):
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.get("/m365/provision")
+async def m365_provision(request: Request, tenant_id: str = Query(...)):
+    """Start the admin-consent OAuth flow to auto-provision an enterprise app."""
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin privileges required",
+        )
+    if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+        encoded = urlencode({"error": "Admin M365 credentials are not configured."})
+        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+    tenant_id = tenant_id.strip()
+    if not tenant_id:
+        encoded = urlencode({"error": "Tenant ID is required to auto-provision."})
+        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+    redirect_uri = str(request.url_for("m365_callback"))
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": company_id,
+            "user_id": user.get("id"),
+            "tenant_id": tenant_id,
+            "flow": "provision",
+        }
+    )
+    params = {
+        "client_id": settings.m365_admin_client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": m365_service.PROVISION_SCOPE,
+        "state": state,
+        "prompt": "admin_consent",
+    }
+    authorize_url = (
+        f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/admin/companies/{company_id}/m365-provision")
+async def admin_company_m365_provision(
+    company_id: int, request: Request, tenant_id: str = Query(...)
+):
+    """Start admin-consent OAuth flow to auto-provision an enterprise app for a company."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+        return _company_edit_redirect(
+            company_id=company_id,
+            error="Admin M365 credentials are not configured.",
+        )
+    tenant_id = tenant_id.strip()
+    if not tenant_id:
+        return _company_edit_redirect(
+            company_id=company_id,
+            error="Tenant ID is required to auto-provision.",
+        )
+    redirect_uri = str(request.url_for("m365_callback"))
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": company_id,
+            "user_id": current_user.get("id"),
+            "tenant_id": tenant_id,
+            "flow": "provision",
+            "return_to": "company_edit",
+        }
+    )
+    params = {
+        "client_id": settings.m365_admin_client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": m365_service.PROVISION_SCOPE,
+        "state": state,
+        "prompt": "admin_consent",
+    }
+    authorize_url = (
+        f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/m365/discover")
+async def m365_discover(request: Request):
+    """Sign in as Global Admin to discover the tenant ID automatically."""
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin privileges required",
+        )
+    if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+        encoded = urlencode({"error": "Admin M365 credentials are not configured."})
+        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+    redirect_uri = str(request.url_for("m365_callback"))
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": company_id,
+            "user_id": user.get("id"),
+            "flow": "discover",
+        }
+    )
+    params = {
+        "client_id": settings.m365_admin_client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": m365_service.DISCOVER_SCOPE,
+        "state": state,
+        "prompt": "select_account",
+    }
+    authorize_url = (
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/admin/companies/{company_id}/m365-discover")
+async def admin_company_m365_discover(company_id: int, request: Request):
+    """Sign in as Global Admin to discover the tenant ID for a company."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+        return _company_edit_redirect(
+            company_id=company_id,
+            error="Admin M365 credentials are not configured.",
+        )
+    redirect_uri = str(request.url_for("m365_callback"))
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": company_id,
+            "user_id": current_user.get("id"),
+            "flow": "discover",
+            "return_to": "company_edit",
+        }
+    )
+    params = {
+        "client_id": settings.m365_admin_client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": m365_service.DISCOVER_SCOPE,
+        "state": state,
+        "prompt": "select_account",
+    }
+    authorize_url = (
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/admin/csp/signin")
+async def admin_csp_signin(request: Request):
+    """Sign in as a CSP/Lighthouse account to enumerate managed customer tenants."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+        encoded = urlencode({"error": "Admin M365 credentials are not configured."})
+        return RedirectResponse(
+            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+        )
+    redirect_uri = str(request.url_for("m365_callback"))
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": 0,
+            "user_id": current_user.get("id"),
+            "flow": "csp_signin",
+        }
+    )
+    params = {
+        "client_id": settings.m365_admin_client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": m365_service.CSP_SCOPE,
+        "state": state,
+        "prompt": "select_account",
+    }
+    authorize_url = (
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/admin/csp/customers", response_class=HTMLResponse)
+async def admin_csp_customers_page(
+    request: Request,
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    """Show CSP customer tenants and allow mapping them to MyPortal companies."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    user_id = int(current_user.get("id", 0))
+    csp_session = await csp_repo.get_session(user_id)
+    customers: list[dict] = []
+    session_error: str | None = _sanitize_message(error)
+
+    if csp_session:
+        access_token = m365_service._decrypt(csp_session.get("access_token"))
+        if access_token:
+            try:
+                customers = await m365_service.list_csp_customers(access_token)
+            except m365_service.M365Error as exc:
+                session_error = f"Failed to load CSP customers: {exc}"
+
+    all_companies = await company_repo.list_companies()
+
+    # Build a quick lookup of csp_tenant_id → company for pre-populating dropdowns
+    mapped: dict[str, int] = {}
+    for company in all_companies:
+        csp_tid = company.get("csp_tenant_id")
+        if csp_tid:
+            mapped[str(csp_tid)] = int(company["id"])
+
+    session_data = await session_manager.load_session(request)
+    csrf_token = session_data.csrf_token if session_data else None
+
+    return await _render_template(
+        "admin/csp_customers.html",
+        request,
+        current_user,
+        extra={
+            "customers": customers,
+            "companies": all_companies,
+            "mapped": mapped,
+            "has_csp_session": csp_session is not None,
+            "error": session_error,
+            "success": _sanitize_message(success),
+            "csrf_token": csrf_token,
+            "admin_credentials_configured": bool(
+                settings.m365_admin_client_id and settings.m365_admin_client_secret
+            ),
+        },
+    )
+
+
+@app.post("/admin/csp/customers/map", response_class=HTMLResponse)
+async def admin_csp_map_tenant(request: Request):
+    """Save the mapping between a CSP customer tenant and a MyPortal company."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    tenant_id = str(form.get("tenant_id", "")).strip()
+    company_id_raw = str(form.get("company_id", "")).strip()
+
+    if not tenant_id:
+        encoded = urlencode({"error": "Tenant ID is required."})
+        return RedirectResponse(
+            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    company_id: int | None = None
+    if company_id_raw:
+        try:
+            company_id = int(company_id_raw)
+        except ValueError:
+            encoded = urlencode({"error": "Invalid company ID."})
+            return RedirectResponse(
+                url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            )
+
+    if company_id:
+        existing = await company_repo.get_company_by_id(company_id)
+        if not existing:
+            encoded = urlencode({"error": "Company not found."})
+            return RedirectResponse(
+                url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            )
+        await company_repo.set_company_csp_tenant_id(company_id, tenant_id)
+        log_info(
+            "CSP tenant mapped to company",
+            tenant_id=tenant_id,
+            company_id=company_id,
+            user_id=current_user.get("id"),
+        )
+        encoded = urlencode({"success": f"Tenant {tenant_id} mapped to company {existing.get('name', company_id)}."})
+    else:
+        # Clearing the mapping — find which company currently has this tenant mapped
+        current_mapped = await company_repo.get_company_by_csp_tenant_id(tenant_id)
+        if current_mapped:
+            await company_repo.set_company_csp_tenant_id(int(current_mapped["id"]), None)
+            log_info(
+                "CSP tenant mapping cleared",
+                tenant_id=tenant_id,
+                company_id=current_mapped["id"],
+                user_id=current_user.get("id"),
+            )
+        encoded = urlencode({"success": "CSP tenant mapping cleared."})
+
+    return RedirectResponse(
+        url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
 @app.get("/m365/callback", name="m365_callback")
 async def m365_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     if error:
@@ -4593,6 +4938,220 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     except BadSignature:
         return RedirectResponse(url="/m365?error=invalid+state", status_code=status.HTTP_303_SEE_OTHER)
     company_id = int(state_data.get("company_id", 0))
+    flow = state_data.get("flow", "connect")
+
+    if flow == "discover":
+        # ── Tenant-discovery flow ──────────────────────────────────────────
+        # Exchange the auth code to get a token, then extract the tid claim.
+        return_to_company_edit = state_data.get("return_to") == "company_edit"
+        redirect_uri = str(request.url_for("m365_callback"))
+
+        def _discover_error(msg: str) -> RedirectResponse:
+            if return_to_company_edit:
+                return _company_edit_redirect(company_id=company_id, error=msg)
+            encoded = urlencode({"error": msg})
+            return RedirectResponse(
+                url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            )
+
+        if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+            return _discover_error("Admin M365 credentials are not configured.")
+
+        token_endpoint = (
+            "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
+        )
+        token_data = {
+            "client_id": settings.m365_admin_client_id,
+            "client_secret": settings.m365_admin_client_secret,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "scope": m365_service.DISCOVER_SCOPE,
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            token_response = await client.post(token_endpoint, data=token_data)
+        if token_response.status_code != 200:
+            log_error(
+                "Microsoft 365 discover token exchange failed",
+                status=token_response.status_code,
+                body=token_response.text,
+            )
+            return _discover_error("Sign-in failed during tenant discovery.")
+
+        token_payload = token_response.json()
+        # Prefer id_token (contains tid reliably); fall back to access_token
+        id_token = token_payload.get("id_token") or token_payload.get("access_token", "")
+        if not id_token:
+            return _discover_error("No token received during tenant discovery.")
+
+        try:
+            discovered_tenant_id = m365_service.extract_tenant_id_from_token(id_token)
+        except m365_service.M365Error as exc:
+            log_error(
+                "Failed to extract tenant ID from token",
+                company_id=company_id,
+                error=str(exc),
+            )
+            return _discover_error(f"Could not determine Tenant ID: {exc}")
+
+        log_info(
+            "Tenant ID discovered via Global Admin sign-in",
+            company_id=company_id,
+            tenant_id=discovered_tenant_id,
+        )
+
+        # Redirect to the provision flow using the discovered tenant ID
+        if return_to_company_edit:
+            return RedirectResponse(
+                url=f"/admin/companies/{company_id}/m365-provision"
+                f"?{urlencode({'tenant_id': discovered_tenant_id})}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        return RedirectResponse(
+            url=f"/m365/provision?{urlencode({'tenant_id': discovered_tenant_id})}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    if flow == "csp_signin":
+        # ── CSP/Lighthouse sign-in flow ───────────────────────────────────
+        user_id = int(state_data.get("user_id", 0))
+        redirect_uri = str(request.url_for("m365_callback"))
+
+        def _csp_error(msg: str) -> RedirectResponse:
+            encoded = urlencode({"error": msg})
+            return RedirectResponse(
+                url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            )
+
+        if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+            return _csp_error("Admin M365 credentials are not configured.")
+
+        token_endpoint = (
+            "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
+        )
+        token_data = {
+            "client_id": settings.m365_admin_client_id,
+            "client_secret": settings.m365_admin_client_secret,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "scope": m365_service.CSP_SCOPE,
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            token_response = await client.post(token_endpoint, data=token_data)
+        if token_response.status_code != 200:
+            log_error(
+                "CSP sign-in token exchange failed",
+                status=token_response.status_code,
+                body=token_response.text,
+            )
+            return _csp_error("Sign-in failed. Please try again.")
+
+        token_payload = token_response.json()
+        access_token = token_payload.get("access_token", "")
+        refresh_token = token_payload.get("refresh_token")
+        expires_in = token_payload.get("expires_in")
+        expires_at = None
+        if isinstance(expires_in, (int, float)):
+            expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=float(expires_in))
+
+        if not access_token:
+            return _csp_error("No access token received during CSP sign-in.")
+
+        await csp_repo.upsert_session(
+            user_id=user_id,
+            access_token=encrypt_secret(access_token),
+            refresh_token=encrypt_secret(refresh_token) if refresh_token else None,
+            expires_at=expires_at,
+        )
+        log_info("CSP session stored for user", user_id=user_id)
+        return RedirectResponse(url="/admin/csp/customers", status_code=status.HTTP_303_SEE_OTHER)
+
+    if flow == "provision":
+        # ── Auto-provision flow ────────────────────────────────────────────
+        tenant_id = str(state_data.get("tenant_id", "")).strip()
+        return_to_company_edit = state_data.get("return_to") == "company_edit"
+        redirect_uri = str(request.url_for("m365_callback"))
+
+        def _provision_error(msg: str) -> RedirectResponse:
+            if return_to_company_edit:
+                return _company_edit_redirect(company_id=company_id, error=msg)
+            encoded = urlencode({"error": msg})
+            return RedirectResponse(
+                url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            )
+
+        if not tenant_id:
+            return _provision_error("Missing tenant ID in provision state.")
+        if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+            return _provision_error("Admin M365 credentials are not configured.")
+
+        token_endpoint = (
+            f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+        )
+        token_data = {
+            "client_id": settings.m365_admin_client_id,
+            "client_secret": settings.m365_admin_client_secret,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "scope": m365_service.PROVISION_SCOPE,
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            token_response = await client.post(token_endpoint, data=token_data)
+        if token_response.status_code != 200:
+            log_error(
+                "Microsoft 365 provision token exchange failed",
+                status=token_response.status_code,
+                body=token_response.text,
+            )
+            return _provision_error("Authorization failed during provision flow.")
+
+        access_token = token_response.json().get("access_token", "")
+        if not access_token:
+            return _provision_error("No access token received during provision.")
+
+        # Load company name for a descriptive app display name
+        company_record = await company_repo.get_company_by_id(company_id)
+        company_name = (company_record.get("name") or "").strip() if company_record else ""
+        display_name = f"MyPortal – {company_name}" if company_name else "MyPortal Integration"
+
+        try:
+            new_client_id, new_client_secret = (
+                await m365_service.provision_app_registration(
+                    access_token=access_token,
+                    display_name=display_name,
+                )
+            )
+        except m365_service.M365Error as exc:
+            log_error(
+                "M365 app provisioning failed",
+                company_id=company_id,
+                tenant_id=tenant_id,
+                error=str(exc),
+            )
+            return _provision_error(f"Provisioning failed: {exc}")
+
+        await m365_service.upsert_credentials(
+            company_id=company_id,
+            tenant_id=tenant_id,
+            client_id=new_client_id,
+            client_secret=new_client_secret,
+        )
+        log_info(
+            "M365 enterprise app provisioned and credentials stored",
+            company_id=company_id,
+            tenant_id=tenant_id,
+            client_id=new_client_id,
+        )
+        if return_to_company_edit:
+            return _company_edit_redirect(
+                company_id=company_id,
+                success="Microsoft 365 enterprise app provisioned successfully.",
+            )
+        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+
+    # ── Standard connect/token-refresh flow ────────────────────────────────
     credentials = await m365_service.get_credentials(company_id)
     if not credentials:
         return RedirectResponse(url="/m365?error=missing+credentials", status_code=status.HTTP_303_SEE_OTHER)
@@ -8389,6 +8948,83 @@ async def admin_update_company(company_id: int, request: Request):
     return _company_edit_redirect(
         company_id=company_id,
         success=f"Company {name} updated.",
+    )
+
+
+@app.post("/admin/companies/{company_id}/m365-credentials", response_class=HTMLResponse)
+async def admin_save_company_m365_credentials(company_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    existing_company = await company_repo.get_company_by_id(company_id)
+    if not existing_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    form = await request.form()
+    tenant_id = str(form.get("tenantId", "")).strip()
+    client_id = str(form.get("clientId", "")).strip()
+    client_secret = str(form.get("clientSecret", "")).strip()
+    if not tenant_id or not client_id:
+        return _company_edit_redirect(
+            company_id=company_id,
+            error="Tenant ID and Client ID are required.",
+        )
+    existing_creds = await m365_service.get_credentials(company_id)
+    if not client_secret and not existing_creds:
+        return _company_edit_redirect(
+            company_id=company_id,
+            error="Client secret is required when adding Microsoft 365 credentials for the first time.",
+        )
+    if client_secret:
+        await m365_service.upsert_credentials(
+            company_id=company_id,
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+    else:
+        existing_secret = existing_creds.get("client_secret")
+        if not existing_secret:
+            return _company_edit_redirect(
+                company_id=company_id,
+                error="Existing client secret is missing. Please provide a new client secret.",
+            )
+        await m365_repo.upsert_credentials(
+            company_id=company_id,
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=existing_secret,
+            refresh_token=existing_creds.get("refresh_token"),
+            access_token=existing_creds.get("access_token"),
+            token_expires_at=existing_creds.get("token_expires_at"),
+        )
+    log_info(
+        "Microsoft 365 credentials updated via admin company edit",
+        company_id=company_id,
+        user_id=current_user.get("id"),
+    )
+    return _company_edit_redirect(
+        company_id=company_id,
+        success="Microsoft 365 credentials saved.",
+    )
+
+
+@app.post("/admin/companies/{company_id}/m365-credentials/delete", response_class=HTMLResponse)
+async def admin_delete_company_m365_credentials(company_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    existing_company = await company_repo.get_company_by_id(company_id)
+    if not existing_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    await m365_service.delete_credentials(company_id)
+    log_info(
+        "Microsoft 365 credentials deleted via admin company edit",
+        company_id=company_id,
+        user_id=current_user.get("id"),
+    )
+    return _company_edit_redirect(
+        company_id=company_id,
+        success="Microsoft 365 credentials removed.",
     )
 
 

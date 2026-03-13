@@ -174,6 +174,120 @@
         </div>
       </details>
 
+      <details class="card card--panel card-collapsible admin-grid__full" data-m365-credentials-panel>
+        <summary class="card__header card__header--collapsible card__header--stacked">
+          <div>
+            <h2 class="card__title">Microsoft 365</h2>
+            <p class="card__subtitle">Link this company to a Microsoft 365 tenant for license synchronisation.</p>
+          </div>
+          <div class="card__collapsible-meta" aria-hidden="true">
+            <span class="card__toggle-icon"></span>
+          </div>
+        </summary>
+        <div class="card-collapsible__content">
+          {% if m365_credential %}
+          <dl class="definition-list">
+            <div class="definition-list__item">
+              <dt>Tenant ID</dt>
+              <dd>{{ m365_credential.tenant_id }}</dd>
+            </div>
+            <div class="definition-list__item">
+              <dt>Client ID</dt>
+              <dd>{{ m365_credential.client_id }}</dd>
+            </div>
+            <div class="definition-list__item">
+              <dt>Token expires</dt>
+              <dd>{{ m365_credential.token_expires_at or 'Not authorised yet' }}</dd>
+            </div>
+          </dl>
+          {% else %}
+          <p class="text-muted">No Microsoft 365 credentials linked to this company.</p>
+          {% endif %}
+          {% if company.csp_tenant_id %}
+          <dl class="definition-list" style="margin-top: 0.75rem;">
+            <div class="definition-list__item">
+              <dt>CSP tenant ID</dt>
+              <dd><code>{{ company.csp_tenant_id }}</code></dd>
+            </div>
+          </dl>
+          {% endif %}
+          <form action="/admin/companies/{{ company.id }}/m365-credentials" method="post" class="form" autocomplete="off">
+            {% include "partials/csrf.html" %}
+            <div class="form-field">
+              <label class="form-label" for="m365-tenant-id">Tenant ID</label>
+              <input
+                id="m365-tenant-id"
+                name="tenantId"
+                class="form-input"
+                value="{{ m365_credential.tenant_id if m365_credential else '' }}"
+                maxlength="255"
+                required
+              />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="m365-client-id">Client ID</label>
+              <input
+                id="m365-client-id"
+                name="clientId"
+                class="form-input"
+                value="{{ m365_credential.client_id if m365_credential else '' }}"
+                maxlength="255"
+                required
+              />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="m365-client-secret">Client secret</label>
+              <input
+                id="m365-client-secret"
+                name="clientSecret"
+                type="password"
+                class="form-input"
+                placeholder="{% if m365_credential %}Enter new secret to rotate{% else %}Required{% endif %}"
+                {% if not m365_credential %}required{% endif %}
+              />
+              <p class="form-help">Secrets are encrypted at rest. Leave blank to keep the existing secret.</p>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="button">Save credentials</button>
+            </div>
+          </form>
+          {% if m365_credential %}
+          <form action="/admin/companies/{{ company.id }}/m365-credentials/delete" method="post" class="form" style="margin-top: 1rem;">
+            {% include "partials/csrf.html" %}
+            <button
+              type="submit"
+              class="button button--ghost"
+              onclick="return confirm('Remove Microsoft 365 credentials for this company?');"
+            >Remove credentials</button>
+          </form>
+          {% endif %}
+          {% if m365_admin_credentials_configured %}
+          <hr class="divider" style="margin: 1.5rem 0;" />
+          <div>
+            <p class="form-help">Auto-provision creates a dedicated enterprise app registration in the tenant and configures the required permissions automatically.</p>
+            <div style="margin-top: 0.5rem;">
+              <a href="/admin/companies/{{ company.id }}/m365-discover" class="button button--ghost">Sign in as Global Admin</a>
+              <span class="form-help" style="display: block; margin-top: 0.25rem;">Discovers the Tenant ID automatically, then provisions the app in one step.</span>
+            </div>
+            <details style="margin-top: 1rem;">
+              <summary class="form-help" style="cursor: pointer;">Already know the Tenant ID? Enter it manually</summary>
+              <form method="get" action="/admin/companies/{{ company.id }}/m365-provision" class="form-field__group" style="margin-top: 0.5rem;">
+                <input
+                  type="text"
+                  name="tenant_id"
+                  class="form-input"
+                  placeholder="Tenant ID"
+                  value="{{ m365_credential.tenant_id if m365_credential else '' }}"
+                  required
+                />
+                <button type="submit" class="button button--ghost">Auto-provision</button>
+              </form>
+            </details>
+          </div>
+          {% endif %}
+        </div>
+      </details>
+
       <details class="card card--panel card-collapsible admin-grid__full" data-company-automations open>
         <summary class="card__header card__header--collapsible card__header--stacked">
           <div>
