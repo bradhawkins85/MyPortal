@@ -900,6 +900,73 @@ def test_build_comment_body_with_header_no_author_still_has_billable():
     assert "Customer text" in result
 
 
+def test_build_comment_body_with_header_explicit_is_billable_override():
+    """Passing is_billable=True overrides a comment with no billable field."""
+    comment = {"tech": "Tech"}
+    result = ticket_importer._build_comment_body_with_header(comment, "Work done", is_billable=True)
+    assert "Billable: Yes" in result
+
+
+def test_resolve_comment_billable_from_comment_field():
+    assert ticket_importer._resolve_comment_billable({"billable": True}) is True
+    assert ticket_importer._resolve_comment_billable({"billable": False}) is False
+    assert ticket_importer._resolve_comment_billable({"is_billable": True}) is True
+    assert ticket_importer._resolve_comment_billable({}) is False
+
+
+def test_resolve_comment_billable_billable_false_not_shadowed_by_is_billable():
+    """Explicit billable=False must not be overridden by is_billable=True."""
+    comment = {"billable": False, "is_billable": True}
+    assert ticket_importer._resolve_comment_billable(comment) is False
+
+
+def test_resolve_comment_billable_from_timer_map():
+    """When comment has no billable field, the timer_billable map is used."""
+    comment = {"id": 42, "body": "Fixed it"}
+    timer_billable = {"42": True}
+    assert ticket_importer._resolve_comment_billable(comment, timer_billable) is True
+
+
+def test_resolve_comment_billable_timer_map_false():
+    comment = {"id": 7, "body": "Reviewed"}
+    timer_billable = {"7": False}
+    assert ticket_importer._resolve_comment_billable(comment, timer_billable) is False
+
+
+def test_resolve_comment_billable_no_timer_match():
+    """No match in timer map → defaults to False."""
+    comment = {"id": 99, "body": "Note"}
+    timer_billable = {"1": True}
+    assert ticket_importer._resolve_comment_billable(comment, timer_billable) is False
+
+
+def test_build_timer_billable_map_basic():
+    ticket = {
+        "ticket_timers": [
+            {"id": 1, "comment_id": 10, "billable": True},
+            {"id": 2, "comment_id": 20, "billable": False},
+        ]
+    }
+    result = ticket_importer._build_timer_billable_map(ticket)
+    assert result == {"10": True, "20": False}
+
+
+def test_build_timer_billable_map_skips_null_comment_id():
+    ticket = {
+        "ticket_timers": [
+            {"id": 1, "comment_id": None, "billable": True},
+            {"id": 2, "comment_id": 5, "billable": True},
+        ]
+    }
+    result = ticket_importer._build_timer_billable_map(ticket)
+    assert result == {"5": True}
+
+
+def test_build_timer_billable_map_no_timers():
+    assert ticket_importer._build_timer_billable_map({}) == {}
+    assert ticket_importer._build_timer_billable_map({"ticket_timers": []}) == {}
+
+
 def test_extract_contact_info_from_contact_dict():
     ticket = {
         "contact": {
@@ -1097,6 +1164,101 @@ async def test_import_ticket_creates_metadata_note_with_billable_time(monkeypatc
     assert "Time: 45m" in comment_reply["body"]
     assert "Billable: Yes" in comment_reply["body"]
     assert "Rebooted the server" in comment_reply["body"]
+
+
+@pytest.mark.anyio
+async def test_import_ticket_billable_from_ticket_timers(monkeypatch):
+    """Billable flag sourced from ticket_timers when comments lack the field."""
+    async def fake_get_ticket(ticket_id, rate_limiter=None):
+        return {
+            "id": ticket_id,
+            "subject": "Network issue",
+            "priority": "Normal",
+            "status": "Open",
+            "comments": [
+                {
+                    "id": 55,
+                    "body": "Investigated the switch",
+                    "tech": "Carol",
+                    "user_email": "carol@company.com",
+                    "created_at": "2025-07-01T09:00:00Z",
+                    # No "billable" field — Syncro omits it from comments
+                },
+                {
+                    "id": 56,
+                    "body": "Replaced cable",
+                    "tech": "Carol",
+                    "user_email": "carol@company.com",
+                    "created_at": "2025-07-01T10:00:00Z",
+                    # No "billable" field
+                },
+            ],
+            "ticket_timers": [
+                # Comment 55 is billable, comment 56 is not
+                {"id": 1, "comment_id": 55, "billable": True, "billable_time": 60},
+                {"id": 2, "comment_id": 56, "billable": False, "billable_time": 30},
+            ],
+        }
+
+    async def fake_get_existing(_ref):
+        return None
+
+    async def fake_get_company(syncro_id):
+        return None
+
+    async def fake_get_company_by_name(_name):
+        return None
+
+    async def fake_create_ticket(**kwargs):
+        return {"id": kwargs.get("id") or 7000, **kwargs}
+
+    async def fake_update_ticket(ticket_id, **fields):
+        return {"id": ticket_id, **fields}
+
+    reply_calls = []
+
+    async def fake_list_replies(ticket_id, include_internal=True):  # noqa: ARG001
+        return []
+
+    async def fake_create_reply(**kwargs):
+        reply_calls.append(kwargs)
+        return {"id": len(reply_calls), **kwargs}
+
+    async def fake_list_watchers(ticket_id):  # noqa: ARG001
+        return []
+
+    async def fake_add_watcher(ticket_id, user_id):  # noqa: ARG001
+        pass
+
+    async def fake_get_user_by_email(email):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(syncro, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(company_repo, "get_company_by_syncro_id", fake_get_company)
+    monkeypatch.setattr(company_repo, "get_company_by_name", fake_get_company_by_name)
+    monkeypatch.setattr(tickets_repo, "get_ticket_by_external_reference", fake_get_existing)
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
+    monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(tickets_repo, "list_watchers", fake_list_watchers)
+    monkeypatch.setattr(tickets_repo, "add_watcher", fake_add_watcher)
+    monkeypatch.setattr(ticket_importer.user_repo, "get_user_by_email", fake_get_user_by_email)
+
+    summary = await ticket_importer.import_ticket_by_id(7000, rate_limiter=None)
+
+    assert summary.created == 1
+    # 2 comment replies (no metadata note — no contact/assets/custom fields)
+    assert len(reply_calls) == 2
+
+    billable_reply = next(r for r in reply_calls if r.get("external_reference") == "55")
+    non_billable_reply = next(r for r in reply_calls if r.get("external_reference") == "56")
+
+    assert billable_reply["is_billable"] is True
+    assert "Billable: Yes" in billable_reply["body"]
+
+    assert non_billable_reply["is_billable"] is False
+    assert "Billable: No" in non_billable_reply["body"]
 
 
 @pytest.mark.anyio
