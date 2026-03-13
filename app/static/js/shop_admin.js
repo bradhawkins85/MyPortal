@@ -298,6 +298,7 @@
 
     // ── Column visibility ────────────────────────────────────────────────────
     const COLUMNS_STORAGE_KEY = 'shop_admin_columns';
+    const FILTER_STATE_KEY = 'shop_admin_filter_state';
     const COLUMN_KEYS = ['image', 'name', 'sku', 'vendor-sku', 'dbp', 'price', 'vip', 'profit', 'vip-profit', 'category', 'stock'];
 
     function loadColumnPrefs() {
@@ -405,6 +406,31 @@
       });
     }
     applyFilters();
+
+    // Restore filter state saved before a save-product redirect
+    try {
+      const savedState = sessionStorage.getItem(FILTER_STATE_KEY);
+      if (savedState) {
+        const state = JSON.parse(savedState);
+        sessionStorage.removeItem(FILTER_STATE_KEY);
+        if (stockFilter && state.stock != null) {
+          stockFilter.value = state.stock;
+          stockFilter.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        if (categoryFilter && state.category != null) {
+          categoryFilter.value = state.category;
+          categoryFilter.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        const searchInput = document.querySelector('[data-table-filter="admin-products-table"]');
+        if (searchInput && state.search != null) {
+          searchInput.value = state.search;
+          searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        applyFilters();
+      }
+    } catch (e) {
+      // ignore sessionStorage errors
+    }
 
     const importModal = document.getElementById('import-product-modal');
     const editModal = document.getElementById('product-edit-modal');
@@ -844,6 +870,37 @@
     if (editForm) {
       editForm.addEventListener('submit', () => {
         refreshFeatureInput();
+        // Append current URL params to form action so the server can redirect back to the same filtered view
+        try {
+          const actionUrl = new URL(editForm.action, window.location.href);
+          const current = new URL(window.location.href);
+          ['showArchived', 'page', 'pageSize'].forEach((param) => {
+            const value = current.searchParams.get(param);
+            if (value !== null) {
+              actionUrl.searchParams.set(param, value);
+            }
+          });
+          editForm.action = actionUrl.toString();
+        } catch (e) {
+          // ignore URL manipulation errors
+        }
+        // Save client-side filter state for restoration after redirect
+        try {
+          const state = {};
+          if (stockFilter) {
+            state.stock = stockFilter.value;
+          }
+          if (categoryFilter) {
+            state.category = categoryFilter.value;
+          }
+          const searchInput = document.querySelector('[data-table-filter="admin-products-table"]');
+          if (searchInput) {
+            state.search = searchInput.value;
+          }
+          sessionStorage.setItem(FILTER_STATE_KEY, JSON.stringify(state));
+        } catch (e) {
+          // ignore sessionStorage errors
+        }
       });
     }
   });
