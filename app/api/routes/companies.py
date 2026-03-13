@@ -180,7 +180,19 @@ async def list_company_members(
     company = await company_repo.get_company_by_id(company_id)
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
-    
+
+    if not current_user.get("is_super_admin"):
+        try:
+            user_id = int(current_user.get("id"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
+
+        has_helpdesk_access = await membership_repo.user_has_permission(user_id, "helpdesk.technician")
+        membership = await membership_repo.get_membership_by_company_user(company_id, user_id)
+        is_company_member = bool(membership and membership.get("status") == "active")
+        if not has_helpdesk_access and not is_company_member:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
     # Get all memberships for this company
     memberships = await membership_repo.list_company_memberships(company_id)
     
