@@ -168,6 +168,39 @@
     </div>
   </section>
 
+
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Left menu customisation</h2>
+        <p class="card__subtitle">
+          Choose which sidebar links are visible and arrange their order.
+        </p>
+      </div>
+    </header>
+    <div class="card__body" data-sidebar-customisation>
+      <div class="alert alert--info" data-sidebar-success hidden role="status"></div>
+      <div class="alert alert--error" data-sidebar-error hidden role="alert"></div>
+      <div class="table-wrapper">
+        <table class="table" id="sidebar-menu-table">
+          <thead>
+            <tr>
+              <th scope="col">Visible</th>
+              <th scope="col">Menu item</th>
+              <th scope="col" class="table__actions">Order</th>
+            </tr>
+          </thead>
+          <tbody data-sidebar-items></tbody>
+        </table>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="button" data-sidebar-save>Save menu</button>
+        <button type="button" class="button button--ghost" data-sidebar-reset>Reset default</button>
+      </div>
+    </div>
+  </section>
+
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
       <div>

@@ -6,10 +6,31 @@ from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
 from app.repositories import company_memberships as membership_repo
 from app.repositories import roles as role_repo
+from app.repositories import sidebar_preferences as sidebar_preferences_repo
 from app.repositories import users as user_repo
 from app.schemas.users import UserCreate, UserResponse, UserUpdate
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+
+@router.get("/me/sidebar-preferences", response_model=dict[str, list[str]])
+async def get_my_sidebar_preferences(
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    return await sidebar_preferences_repo.get_user_sidebar_preferences(int(current_user["id"]))
+
+
+@router.put("/me/sidebar-preferences", response_model=dict[str, list[str]])
+async def update_my_sidebar_preferences(
+    payload: dict,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    return await sidebar_preferences_repo.upsert_user_sidebar_preferences(
+        int(current_user["id"]),
+        payload,
+    )
 
 
 @router.get("", response_model=list[UserResponse])
