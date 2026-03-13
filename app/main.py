@@ -5023,10 +5023,37 @@ async def shop_product_detail_api(request: Request, product_id: int):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
     is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
-    if is_vip and product.get("vip_price") is not None:
-        product["price"] = product["vip_price"]
+    product = _public_shop_product_payload(product, is_vip=is_vip)
 
     return JSONResponse(content=cast(dict[str, Any], _serialise_for_json(product)))
+
+
+def _public_shop_product_payload(product: Mapping[str, Any], *, is_vip: bool) -> dict[str, Any]:
+    payload = {
+        "id": product.get("id"),
+        "name": product.get("name"),
+        "sku": product.get("sku"),
+        "description": product.get("description"),
+        "image_url": product.get("image_url"),
+        "price": product.get("price"),
+        "vip_price": product.get("vip_price"),
+        "stock": product.get("stock"),
+        "stock_nsw": product.get("stock_nsw"),
+        "stock_qld": product.get("stock_qld"),
+        "stock_vic": product.get("stock_vic"),
+        "stock_sa": product.get("stock_sa"),
+        "category_id": product.get("category_id"),
+        "category_name": product.get("category_name"),
+        "features": product.get("features") or [],
+        "cross_sell_products": product.get("cross_sell_products") or [],
+        "cross_sell_product_ids": product.get("cross_sell_product_ids") or [],
+        "upsell_products": product.get("upsell_products") or [],
+        "upsell_product_ids": product.get("upsell_product_ids") or [],
+    }
+
+    if is_vip and payload.get("vip_price") is not None:
+        payload["price"] = payload["vip_price"]
+    return payload
 
 
 
