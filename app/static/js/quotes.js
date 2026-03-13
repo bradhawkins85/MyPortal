@@ -77,6 +77,13 @@
     return stock.toString();
   }
 
+  function appendCell(row, label, value) {
+    const cell = document.createElement('td');
+    cell.setAttribute('data-label', label);
+    cell.textContent = value;
+    row.appendChild(cell);
+  }
+
   async function loadQuoteDetails(quoteNumber, companyId) {
     const modal = document.getElementById('quote-details-modal');
     const modalTitle = document.getElementById('modal-quote-title');
@@ -108,26 +115,21 @@
       if (data.items && data.items.length > 0) {
         data.items.forEach((item) => {
           const row = document.createElement('tr');
-          
-          let rowHtml = `
-            <td data-label="Product">${item.productName || '—'}</td>
-            <td data-label="SKU">${item.sku || '—'}</td>
-            <td data-label="Quantity">${item.quantity}</td>
-            <td data-label="Price">${formatPrice(item.price)}</td>
-          `;
+
+          appendCell(row, 'Product', item.productName || '—');
+          appendCell(row, 'SKU', item.sku || '—');
+          appendCell(row, 'Quantity', String(item.quantity));
+          appendCell(row, 'Price', formatPrice(item.price));
 
           // Add stock columns for super admins
           if (isSuperAdmin) {
-            rowHtml += `
-              <td data-label="Stock (Total)">${formatStock(item.stock)}</td>
-              <td data-label="Stock NSW">${formatStock(item.stockNsw)}</td>
-              <td data-label="Stock QLD">${formatStock(item.stockQld)}</td>
-              <td data-label="Stock VIC">${formatStock(item.stockVic)}</td>
-              <td data-label="Stock SA">${formatStock(item.stockSa)}</td>
-            `;
+            appendCell(row, 'Stock (Total)', formatStock(item.stock));
+            appendCell(row, 'Stock NSW', formatStock(item.stockNsw));
+            appendCell(row, 'Stock QLD', formatStock(item.stockQld));
+            appendCell(row, 'Stock VIC', formatStock(item.stockVic));
+            appendCell(row, 'Stock SA', formatStock(item.stockSa));
           }
 
-          row.innerHTML = rowHtml;
           itemsContainer.appendChild(row);
         });
       } else {
