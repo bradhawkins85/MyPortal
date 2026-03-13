@@ -4697,6 +4697,80 @@ async def admin_company_m365_provision(
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.get("/m365/discover")
+async def m365_discover(request: Request):
+    """Sign in as Global Admin to discover the tenant ID automatically."""
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin privileges required",
+        )
+    if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+        encoded = urlencode({"error": "Admin M365 credentials are not configured."})
+        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+    redirect_uri = str(request.url_for("m365_callback"))
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": company_id,
+            "user_id": user.get("id"),
+            "flow": "discover",
+        }
+    )
+    params = {
+        "client_id": settings.m365_admin_client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": m365_service.DISCOVER_SCOPE,
+        "state": state,
+        "prompt": "select_account",
+    }
+    authorize_url = (
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/admin/companies/{company_id}/m365-discover")
+async def admin_company_m365_discover(company_id: int, request: Request):
+    """Sign in as Global Admin to discover the tenant ID for a company."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+        return _company_edit_redirect(
+            company_id=company_id,
+            error="Admin M365 credentials are not configured.",
+        )
+    redirect_uri = str(request.url_for("m365_callback"))
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": company_id,
+            "user_id": current_user.get("id"),
+            "flow": "discover",
+            "return_to": "company_edit",
+        }
+    )
+    params = {
+        "client_id": settings.m365_admin_client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": m365_service.DISCOVER_SCOPE,
+        "state": state,
+        "prompt": "select_account",
+    }
+    authorize_url = (
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.get("/m365/callback", name="m365_callback")
 async def m365_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     if error:
@@ -4711,6 +4785,78 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         return RedirectResponse(url="/m365?error=invalid+state", status_code=status.HTTP_303_SEE_OTHER)
     company_id = int(state_data.get("company_id", 0))
     flow = state_data.get("flow", "connect")
+
+    if flow == "discover":
+        # ── Tenant-discovery flow ──────────────────────────────────────────
+        # Exchange the auth code to get a token, then extract the tid claim.
+        return_to_company_edit = state_data.get("return_to") == "company_edit"
+        redirect_uri = str(request.url_for("m365_callback"))
+
+        def _discover_error(msg: str) -> RedirectResponse:
+            if return_to_company_edit:
+                return _company_edit_redirect(company_id=company_id, error=msg)
+            encoded = urlencode({"error": msg})
+            return RedirectResponse(
+                url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            )
+
+        if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+            return _discover_error("Admin M365 credentials are not configured.")
+
+        token_endpoint = (
+            "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
+        )
+        token_data = {
+            "client_id": settings.m365_admin_client_id,
+            "client_secret": settings.m365_admin_client_secret,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "scope": m365_service.DISCOVER_SCOPE,
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            token_response = await client.post(token_endpoint, data=token_data)
+        if token_response.status_code != 200:
+            log_error(
+                "Microsoft 365 discover token exchange failed",
+                status=token_response.status_code,
+                body=token_response.text,
+            )
+            return _discover_error("Sign-in failed during tenant discovery.")
+
+        token_payload = token_response.json()
+        # Prefer id_token (contains tid reliably); fall back to access_token
+        id_token = token_payload.get("id_token") or token_payload.get("access_token", "")
+        if not id_token:
+            return _discover_error("No token received during tenant discovery.")
+
+        try:
+            discovered_tenant_id = m365_service.extract_tenant_id_from_token(id_token)
+        except m365_service.M365Error as exc:
+            log_error(
+                "Failed to extract tenant ID from token",
+                company_id=company_id,
+                error=str(exc),
+            )
+            return _discover_error(f"Could not determine Tenant ID: {exc}")
+
+        log_info(
+            "Tenant ID discovered via Global Admin sign-in",
+            company_id=company_id,
+            tenant_id=discovered_tenant_id,
+        )
+
+        # Redirect to the provision flow using the discovered tenant ID
+        if return_to_company_edit:
+            return RedirectResponse(
+                url=f"/admin/companies/{company_id}/m365-provision"
+                f"?{urlencode({'tenant_id': discovered_tenant_id})}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        return RedirectResponse(
+            url=f"/m365/provision?{urlencode({'tenant_id': discovered_tenant_id})}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     if flow == "provision":
         # ── Auto-provision flow ────────────────────────────────────────────

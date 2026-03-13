@@ -206,3 +206,58 @@ async def test_provision_app_roles_constant():
     assert "df021288-bdef-4463-88db-98f22de89214" in m365_service._PROVISION_APP_ROLES
     # Directory.Read.All
     assert "7ab1d382-f21e-4acd-a863-ba3e13f7da61" in m365_service._PROVISION_APP_ROLES
+
+
+# ---------------------------------------------------------------------------
+# Tests for extract_tenant_id_from_token
+# ---------------------------------------------------------------------------
+
+def _make_jwt(payload: dict) -> str:
+    """Build a minimal JWT with the given payload (no real signature)."""
+    import base64, json
+    header = base64.urlsafe_b64encode(
+        json.dumps({"alg": "RS256", "typ": "JWT"}).encode()
+    ).rstrip(b"=").decode()
+    body = base64.urlsafe_b64encode(
+        json.dumps(payload).encode()
+    ).rstrip(b"=").decode()
+    return f"{header}.{body}.fakesig"
+
+
+def test_extract_tenant_id_success():
+    """extract_tenant_id_from_token returns the tid claim from a valid JWT."""
+    token = _make_jwt({"tid": "abc-def-1234", "sub": "user123"})
+    result = m365_service.extract_tenant_id_from_token(token)
+    assert result == "abc-def-1234"
+
+
+def test_extract_tenant_id_strips_whitespace():
+    """Whitespace around the tid value is stripped."""
+    token = _make_jwt({"tid": "  spaced-tenant  ", "sub": "user"})
+    result = m365_service.extract_tenant_id_from_token(token)
+    assert result == "spaced-tenant"
+
+
+def test_extract_tenant_id_missing_tid():
+    """Raises M365Error when the tid claim is absent."""
+    token = _make_jwt({"sub": "user123", "oid": "some-oid"})
+    with pytest.raises(m365_service.M365Error, match="tid"):
+        m365_service.extract_tenant_id_from_token(token)
+
+
+def test_extract_tenant_id_malformed_jwt():
+    """Raises M365Error for a string that is not a valid JWT."""
+    with pytest.raises(m365_service.M365Error, match="[Mm]alformed|segment|decode"):
+        m365_service.extract_tenant_id_from_token("not-a-jwt")
+
+
+def test_extract_tenant_id_invalid_base64():
+    """Raises M365Error when the payload segment is not valid base64."""
+    with pytest.raises(m365_service.M365Error):
+        m365_service.extract_tenant_id_from_token("header.!!!invalid!!!.sig")
+
+
+def test_discover_scope_constant():
+    """DISCOVER_SCOPE contains the expected OpenID scopes."""
+    assert "openid" in m365_service.DISCOVER_SCOPE
+    assert "profile" in m365_service.DISCOVER_SCOPE
