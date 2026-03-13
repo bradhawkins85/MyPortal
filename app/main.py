@@ -4797,6 +4797,8 @@ async def shop_page(
     category: str | None = Query(None),
     show_out_of_stock: bool = Query(False, alias="showOutOfStock"),
     q: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(24, alias="pageSize", ge=1, le=100),
     cart_error: str | None = None,
 ):
     (
@@ -4840,6 +4842,7 @@ async def shop_page(
     )
 
     products: list[dict[str, Any]]
+    total_count = 0
     if show_packages:
         packages = await shop_packages_service.load_company_packages(
             company_id=company_id,
@@ -4895,24 +4898,40 @@ async def shop_page(
             )
 
         products.sort(key=lambda entry: str(entry.get("name") or "").lower())
+        total_count = len(products)
+        offset = (page - 1) * page_size
+        products = products[offset: offset + page_size]
     else:
         # Get category IDs to filter by (including descendants)
         category_ids = None
         if category_id is not None:
             category_ids = await shop_repo.get_category_descendants(category_id)
+
+        offset = (page - 1) * page_size
         
         filters = shop_repo.ProductFilters(
             include_archived=False,
             company_id=company_id,
             category_ids=category_ids,
             search_term=effective_search,
+            in_stock_only=not show_out_of_stock,
+            limit=page_size,
+            offset=offset,
+            sort="name_asc",
+        )
+
+        count_filters = shop_repo.ProductFilters(
+            include_archived=False,
+            company_id=company_id,
+            category_ids=category_ids,
+            search_term=effective_search,
+            in_stock_only=not show_out_of_stock,
+            sort="name_asc",
         )
 
         products_task = asyncio.create_task(shop_repo.list_products(filters))
-        products = await products_task
-
-        if not show_out_of_stock:
-            products = [product for product in products if product.get("stock", 0) > 0]
+        total_count_task = asyncio.create_task(shop_repo.count_products(count_filters))
+        products, total_count = await asyncio.gather(products_task, total_count_task)
 
         products = [
             product
@@ -4970,6 +4989,10 @@ async def shop_page(
         "cart_error": cart_error,
         "low_stock_threshold": SHOP_LOW_STOCK_THRESHOLD,
         "active_subscription_product_ids": active_subscription_product_ids,
+        "total_count": total_count,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": max(1, math.ceil(total_count / page_size)) if page_size else 1,
     }
     return await _render_template("shop/index.html", request, user, extra=extra)
 
@@ -10363,22 +10386,35 @@ async def admin_remove_package_item(
 async def admin_shop_page(
     request: Request,
     show_archived: bool = Query(False, alias="showArchived"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, alias="pageSize", ge=1, le=200),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
     categories_task = asyncio.create_task(shop_repo.list_all_categories_flat())
-    products_task = asyncio.create_task(
-        shop_repo.list_products(
-            shop_repo.ProductFilters(include_archived=show_archived)
-        )
+    offset = (page - 1) * page_size
+    filters = shop_repo.ProductFilters(
+        include_archived=show_archived,
+        limit=page_size,
+        offset=offset,
+        sort="name_asc",
     )
+    products_task = asyncio.create_task(
+        shop_repo.list_products(filters)
+    )
+    total_count_task = asyncio.create_task(shop_repo.count_products(filters))
     restrictions_task = asyncio.create_task(shop_repo.list_product_restrictions())
     companies_task = asyncio.create_task(company_repo.list_companies())
     subscription_categories_task = asyncio.create_task(subscription_categories_repo.list_categories())
 
-    categories, products, restrictions, companies, subscription_categories = await asyncio.gather(
-        categories_task, products_task, restrictions_task, companies_task, subscription_categories_task
+    categories, products, total_count, restrictions, companies, subscription_categories = await asyncio.gather(
+        categories_task,
+        products_task,
+        total_count_task,
+        restrictions_task,
+        companies_task,
+        subscription_categories_task,
     )
 
     restrictions_map: dict[int, list[dict[str, Any]]] = {}
@@ -10405,6 +10441,10 @@ async def admin_shop_page(
         "all_companies": companies,
         "show_archived": show_archived,
         "subscription_categories": subscription_categories,
+        "total_count": total_count,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": max(1, math.ceil(total_count / page_size)) if page_size else 1,
     }
     return await _render_template("admin/shop.html", request, current_user, extra=extra)
 

@@ -18,6 +18,10 @@ class ProductFilters:
     category_id: int | None = None
     category_ids: list[int] | None = None
     search_term: str | None = None
+    in_stock_only: bool = False
+    limit: int | None = None
+    offset: int | None = None
+    sort: str = "name_asc"
 
 
 @dataclass(slots=True)
@@ -236,11 +240,31 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
             "(p.name LIKE %s OR p.sku LIKE %s OR p.vendor_sku LIKE %s)"
         )
         params.extend([like, like, like])
+    if filters.in_stock_only:
+        conditions.append("p.stock > 0")
 
     if conditions:
         query_parts.append("WHERE " + " AND ".join(conditions))
 
-    query_parts.append("ORDER BY p.name ASC")
+    sort_map = {
+        "name_asc": "p.name ASC",
+        "name_desc": "p.name DESC",
+        "price_asc": "p.price ASC, p.name ASC",
+        "price_desc": "p.price DESC, p.name ASC",
+        "stock_asc": "p.stock ASC, p.name ASC",
+        "stock_desc": "p.stock DESC, p.name ASC",
+        "created_desc": "p.created_at DESC, p.name ASC",
+    }
+    order_by = sort_map.get(filters.sort, sort_map["name_asc"])
+    query_parts.append(f"ORDER BY {order_by}")
+
+    if filters.limit is not None:
+        query_parts.append("LIMIT %s")
+        params.append(max(1, int(filters.limit)))
+        if filters.offset is not None:
+            query_parts.append("OFFSET %s")
+            params.append(max(0, int(filters.offset)))
+
     sql = " ".join(query_parts)
 
     rows = await db.fetch_all(sql, tuple(params) if params else None)
@@ -248,6 +272,48 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
     products = await _attach_features_to_products(products)
     await _populate_product_recommendations(products)
     return products
+
+
+async def count_products(filters: ProductFilters) -> int:
+    query_parts: list[str] = [
+        "SELECT COUNT(*) AS total_count",
+        "FROM shop_products AS p",
+    ]
+    params: list[Any] = []
+
+    if filters.company_id is not None:
+        query_parts.append(
+            "LEFT JOIN shop_product_exclusions AS e "
+            "ON e.product_id = p.id AND e.company_id = %s"
+        )
+        params.append(filters.company_id)
+
+    conditions: list[str] = []
+    if not filters.include_archived:
+        conditions.append("p.archived = 0")
+    if filters.company_id is not None:
+        conditions.append("e.product_id IS NULL")
+    if filters.category_id is not None:
+        conditions.append("p.category_id = %s")
+        params.append(filters.category_id)
+    elif filters.category_ids is not None and filters.category_ids:
+        placeholders = ", ".join(["%s"] * len(filters.category_ids))
+        conditions.append(f"p.category_id IN ({placeholders})")
+        params.extend(filters.category_ids)
+    if filters.search_term:
+        like = f"%{filters.search_term}%"
+        conditions.append("(p.name LIKE %s OR p.sku LIKE %s OR p.vendor_sku LIKE %s)")
+        params.extend([like, like, like])
+    if filters.in_stock_only:
+        conditions.append("p.stock > 0")
+
+    if conditions:
+        query_parts.append("WHERE " + " AND ".join(conditions))
+
+    row = await db.fetch_one(" ".join(query_parts), tuple(params) if params else None)
+    if not row:
+        return 0
+    return int(row.get("total_count") or 0)
 
 
 async def list_all_products(include_archived: bool = False) -> list[dict[str, Any]]:
