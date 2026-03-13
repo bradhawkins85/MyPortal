@@ -71,11 +71,9 @@
         {% for category in categories %}
           {% if category.children %}
             <option value="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}" {% if current_category == category.id %}selected{% endif %}>{{ category.name }}</option>
-            <optgroup label="{{ category.name }} subcategories">
-              {% for child in category.children %}
-                <option value="{{ request.url_for('shop_page') }}{{ shop_query(child.id) }}" {% if current_category == child.id %}selected{% endif %}>{{ child.name }}</option>
-              {% endfor %}
-            </optgroup>
+            {% for child in category.children %}
+              <option value="{{ request.url_for('shop_page') }}{{ shop_query(child.id) }}" {% if current_category == child.id %}selected{% endif %}>— {{ child.name }}</option>
+            {% endfor %}
           {% else %}
             <option value="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}" {% if current_category == category.id %}selected{% endif %}>{{ category.name }}</option>
           {% endif %}
