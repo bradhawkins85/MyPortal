@@ -982,6 +982,7 @@ def test_build_timer_billable_map_no_timers():
 
 
 def test_build_timer_time_map_basic():
+    # billable_time is in seconds: 60s = 1 min, 30s = 1 min (rounds up at >= 30s)
     ticket = {
         "ticket_timers": [
             {"id": 1, "comment_id": 10, "billable": True, "billable_time": 60},
@@ -989,10 +990,11 @@ def test_build_timer_time_map_basic():
         ]
     }
     result = ticket_importer._build_timer_time_map(ticket)
-    assert result == {"10": 60, "20": 30}
+    assert result == {"10": 1, "20": 1}
 
 
 def test_build_timer_time_map_skips_null_comment_id():
+    # 45s rounds up to 1 min; 15s rounds down to 0 (excluded)
     ticket = {
         "ticket_timers": [
             {"id": 1, "comment_id": None, "billable_time": 45},
@@ -1000,10 +1002,11 @@ def test_build_timer_time_map_skips_null_comment_id():
         ]
     }
     result = ticket_importer._build_timer_time_map(ticket)
-    assert result == {"7": 15}
+    assert result == {}
 
 
 def test_build_timer_time_map_skips_missing_billable_time():
+    # 45s rounds up to 1 min
     ticket = {
         "ticket_timers": [
             {"id": 1, "comment_id": 10, "billable": True},
@@ -1011,12 +1014,25 @@ def test_build_timer_time_map_skips_missing_billable_time():
         ]
     }
     result = ticket_importer._build_timer_time_map(ticket)
-    assert result == {"20": 45}
+    assert result == {"20": 1}
 
 
 def test_build_timer_time_map_no_timers():
     assert ticket_importer._build_timer_time_map({}) == {}
     assert ticket_importer._build_timer_time_map({"ticket_timers": []}) == {}
+
+
+def test_build_timer_time_map_seconds_to_minutes_conversion():
+    # 90s = 1m 30s -> 2 min (30s rounds up), 120s = 2m exactly, 29s -> 0 (excluded)
+    ticket = {
+        "ticket_timers": [
+            {"id": 1, "comment_id": 1, "billable_time": 90},
+            {"id": 2, "comment_id": 2, "billable_time": 120},
+            {"id": 3, "comment_id": 3, "billable_time": 29},
+        ]
+    }
+    result = ticket_importer._build_timer_time_map(ticket)
+    assert result == {"1": 2, "2": 2}
 
 
 
@@ -1309,14 +1325,15 @@ async def test_import_ticket_billable_from_ticket_timers(monkeypatch):
 
     assert billable_reply["is_billable"] is True
     assert "Billable: Yes" in billable_reply["body"]
-    # Time comes from billable_time on the labor log (ticket_timer)
-    assert billable_reply["minutes_spent"] == 60
-    assert "Time: 1h" in billable_reply["body"]
+    # Time comes from billable_time on the labor log (ticket_timer).
+    # billable_time is in seconds: 60s = 1 min, 30s = 1 min (rounds up at >= 30s).
+    assert billable_reply["minutes_spent"] == 1
+    assert "Time: 1m" in billable_reply["body"]
 
     assert non_billable_reply["is_billable"] is False
     assert "Billable: No" in non_billable_reply["body"]
-    assert non_billable_reply["minutes_spent"] == 30
-    assert "Time: 30m" in non_billable_reply["body"]
+    assert non_billable_reply["minutes_spent"] == 1
+    assert "Time: 1m" in non_billable_reply["body"]
 
 
 @pytest.mark.anyio
