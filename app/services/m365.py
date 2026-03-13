@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import base64
+import json
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -15,9 +17,60 @@ from app.security.encryption import decrypt_secret, encrypt_secret
 
 _GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 
+# Microsoft Graph's own well-known app ID (constant across all tenants)
+_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
+
+# Application-permission role IDs required for the provisioned integration app
+_PROVISION_APP_ROLES: list[str] = [
+    "df021288-bdef-4463-88db-98f22de89214",  # User.Read.All
+    "7ab1d382-f21e-4acd-a863-ba3e13f7da61",  # Directory.Read.All
+]
+
+# OAuth scopes requested during the admin-consent provisioning flow
+PROVISION_SCOPE = (
+    "Application.ReadWrite.All AppRoleAssignment.ReadWrite.All offline_access"
+)
+
+# Minimal scopes used for the tenant-discovery sign-in step
+DISCOVER_SCOPE = "openid profile"
+
+# Scopes for CSP/Lighthouse GDAP sign-in (needs Directory.Read.All for /contracts)
+CSP_SCOPE = "https://graph.microsoft.com/Directory.Read.All openid profile offline_access"
+
 
 class M365Error(RuntimeError):
     """Raised when Microsoft 365 operations fail."""
+
+
+def extract_tenant_id_from_token(token: str) -> str:
+    """Extract the Azure AD tenant ID (``tid`` claim) from a JWT token.
+
+    The ``tid`` claim is present in both ``id_token`` and ``access_token``
+    responses from Azure AD and uniquely identifies the tenant.
+
+    The JWT signature is **not** verified here — we trust that the token was
+    received directly from Microsoft's token endpoint over HTTPS.
+
+    Raises :class:`M365Error` if the token is malformed or does not contain a
+    ``tid`` claim.
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            raise M365Error("Malformed JWT: expected at least two segments")
+        # JWT uses base64url encoding without padding; restore padding before decoding
+        payload_b64 = parts[1]
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+    except M365Error:
+        raise
+    except Exception as exc:
+        raise M365Error(f"Failed to decode JWT payload: {exc}") from exc
+
+    tid = str(payload.get("tid") or "").strip()
+    if not tid:
+        raise M365Error("Tenant ID (tid) not found in token claims")
+    return tid
 
 
 def _decrypt(field: str | None) -> str | None:
@@ -142,6 +195,126 @@ async def _graph_get(access_token: str, url: str) -> dict[str, Any]:
     return response.json()
 
 
+async def _graph_post(
+    access_token: str,
+    url: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(url, headers=headers, json=payload)
+    if response.status_code not in (200, 201):
+        log_error(
+            "Microsoft Graph POST failed",
+            url=url,
+            status=response.status_code,
+            body=response.text,
+        )
+        raise M365Error(f"Microsoft Graph POST failed ({response.status_code})")
+    return response.json()
+
+
+async def provision_app_registration(
+    *,
+    access_token: str,
+    display_name: str = "MyPortal Integration",
+) -> tuple[str, str]:
+    """Create a per-tenant app registration with required permissions.
+
+    Uses a delegated *access_token* obtained via the admin-consent OAuth flow to:
+    1. Create an App Registration in the tenant.
+    2. Create the corresponding Service Principal (Enterprise App).
+    3. Find the Microsoft Graph service principal in the tenant.
+    4. Grant admin consent for each required application permission.
+    5. Generate and return a client secret for the new app.
+
+    Returns a ``(client_id, client_secret)`` tuple.  The client secret is
+    returned in plain text exactly once and must be stored immediately.
+    """
+    # 1. Create the app registration
+    app_payload: dict[str, Any] = {
+        "displayName": display_name,
+        "signInAudience": "AzureADMyOrg",
+        "requiredResourceAccess": [
+            {
+                "resourceAppId": _GRAPH_APP_ID,
+                "resourceAccess": [
+                    {"id": role_id, "type": "Role"}
+                    for role_id in _PROVISION_APP_ROLES
+                ],
+            }
+        ],
+    }
+    app_data = await _graph_post(
+        access_token,
+        "https://graph.microsoft.com/v1.0/applications",
+        app_payload,
+    )
+    app_object_id: str = app_data["id"]
+    client_id: str = app_data["appId"]
+    log_info("Provisioned M365 app registration", client_id=client_id)
+
+    # 2. Create a service principal (Enterprise App) for the registration
+    sp_data = await _graph_post(
+        access_token,
+        "https://graph.microsoft.com/v1.0/servicePrincipals",
+        {"appId": client_id},
+    )
+    sp_object_id: str = sp_data["id"]
+    log_info("Created M365 service principal", sp_object_id=sp_object_id)
+
+    # 3. Locate the Microsoft Graph service principal in this tenant
+    graph_sp_response = await _graph_get(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/servicePrincipals"
+        f"?$filter=appId eq '{_GRAPH_APP_ID}'&$select=id",
+    )
+    graph_sp_list = graph_sp_response.get("value", [])
+    if not graph_sp_list:
+        raise M365Error(
+            "Unable to locate Microsoft Graph service principal in the tenant"
+        )
+    graph_sp_id: str = graph_sp_list[0]["id"]
+
+    # 4. Grant admin consent for each required application permission
+    for role_id in _PROVISION_APP_ROLES:
+        await _graph_post(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+            {
+                "principalId": sp_object_id,
+                "resourceId": graph_sp_id,
+                "appRoleId": role_id,
+            },
+        )
+    log_info(
+        "Granted admin consent for provisioned M365 app",
+        sp_object_id=sp_object_id,
+    )
+
+    # 5. Create a client secret; valid for approximately two years (730 days)
+    secret_expiry = (
+        (date.today() + timedelta(days=730)).isoformat() + "T00:00:00Z"
+    )
+    secret_data = await _graph_post(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/addPassword",
+        {
+            "passwordCredential": {
+                "displayName": "MyPortal",
+                "endDateTime": secret_expiry,
+            }
+        },
+    )
+    client_secret: str = secret_data["secretText"]
+    log_info(
+        "Created client secret for provisioned M365 app",
+        client_id=client_id,
+    )
+
+    return client_id, client_secret
+
+
 async def _sync_staff_assignments(
     *,
     company_id: int,
@@ -240,4 +413,42 @@ async def sync_company_licenses(company_id: int) -> None:
                 sku_id=str(sku_id),
             )
     log_info("Microsoft 365 license synchronisation completed", company_id=company_id)
+
+
+async def list_csp_customers(access_token: str) -> list[dict[str, Any]]:
+    """Return the list of customer tenants managed by the signed-in CSP/Lighthouse account.
+
+    Calls ``GET /v1.0/contracts`` on Microsoft Graph, which requires the signed-in
+    user to be a member of a CSP partner tenant with GDAP relationships or legacy
+    delegated admin privileges.
+
+    Each returned dict contains:
+    - ``tenant_id``     – the customer's Azure AD tenant ID
+    - ``name``          – the customer's display name
+    - ``default_domain``– the customer's default domain name
+    - ``contract_type`` – the contract type string from Graph (e.g. ``"Contract"``)
+    """
+    url = (
+        "https://graph.microsoft.com/v1.0/contracts"
+        "?$select=customerId,displayName,defaultDomainName,contractType"
+    )
+    customers: list[dict[str, Any]] = []
+    while url:
+        data = await _graph_get(access_token, url)
+        for item in data.get("value", []):
+            tenant_id = str(item.get("customerId") or "").strip()
+            if not tenant_id:
+                continue
+            customers.append(
+                {
+                    "tenant_id": tenant_id,
+                    "name": str(item.get("displayName") or "").strip(),
+                    "default_domain": str(item.get("defaultDomainName") or "").strip(),
+                    "contract_type": str(item.get("contractType") or "").strip(),
+                }
+            )
+        url = data.get("@odata.nextLink")
+    customers.sort(key=lambda c: c["name"].lower())
+    return customers
+
 
