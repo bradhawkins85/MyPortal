@@ -11940,6 +11940,7 @@ async def _render_portal_ticket_detail(
                 "is_internal": bool(reply.get("is_internal")),
                 "labour_type_name": labour_type_name,
                 "labour_type_code": reply.get("labour_type_code"),
+                "external_reference": reply.get("external_reference"),
                 "email_tracking_id": email_tracking_id,
                 "email_sent_at": email_sent_at,
                 "email_opened_at": email_opened_at,
