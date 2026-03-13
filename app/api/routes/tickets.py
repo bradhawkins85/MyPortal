@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -97,6 +98,27 @@ async def _resolve_ticket_actor(
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
 
+def _encode_ticket_cursor(updated_at: datetime | None, ticket_id: int | None) -> str | None:
+    if updated_at is None or ticket_id is None:
+        return None
+    return f"{updated_at.astimezone(timezone.utc).isoformat()}|{int(ticket_id)}"
+
+
+def _decode_ticket_cursor(cursor: str | None) -> tuple[datetime | None, int | None]:
+    if not cursor:
+        return None, None
+    try:
+        updated_raw, id_raw = str(cursor).strip().rsplit("|", 1)
+        updated_at = datetime.fromisoformat(updated_raw.replace("Z", "+00:00"))
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=timezone.utc)
+        else:
+            updated_at = updated_at.astimezone(timezone.utc)
+        return updated_at, int(id_raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid cursor") from None
+
+
 async def _build_ticket_detail(ticket_id: int, current_user: dict) -> TicketDetail:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
@@ -168,12 +190,15 @@ async def list_tickets(
     company_id: int | None = Query(default=None),
     assigned_user_id: int | None = Query(default=None),
     search: str | None = Query(default=None, min_length=1),
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    cursor: str | None = Query(default=None),
     actor: dict = Depends(_resolve_ticket_actor),
 ) -> TicketListResponse:
     current_user: dict | None = actor.get("user")
     api_key_record = actor.get("api_key")
+
+    cursor_updated_at, cursor_id = _decode_ticket_cursor(cursor)
 
     has_helpdesk_access = bool(api_key_record)
     if current_user:
@@ -189,6 +214,8 @@ async def list_tickets(
             limit=limit,
             offset=offset,
             requester_id=None,
+            cursor_updated_at=cursor_updated_at,
+            cursor_id=cursor_id,
         )
         total = await tickets_repo.count_tickets(
             status=status_filter,
@@ -209,6 +236,8 @@ async def list_tickets(
             status=status_filter,
             limit=limit,
             offset=offset,
+            cursor_updated_at=cursor_updated_at,
+            cursor_id=cursor_id,
         )
         total = await tickets_repo.count_tickets_for_user(
             current_user_id,
@@ -217,9 +246,14 @@ async def list_tickets(
         )
     else:  # pragma: no cover - defensive guard
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    next_cursor = None
+    if len(tickets) == limit:
+        last = tickets[-1]
+        next_cursor = _encode_ticket_cursor(last.get("updated_at"), last.get("id"))
     return TicketListResponse(
         items=[TicketResponse(**ticket) for ticket in tickets],
         total=total,
+        next_cursor=next_cursor,
     )
 
 
