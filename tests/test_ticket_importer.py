@@ -5,6 +5,7 @@ import pytest
 
 from app.services import ticket_importer
 from app.services import syncro
+from app.repositories import assets as assets_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import companies as company_repo
 from app.services import tickets as tickets_service
@@ -1218,6 +1219,11 @@ async def test_import_ticket_creates_metadata_note_with_billable_time(monkeypatc
     monkeypatch.setattr(tickets_repo, "add_watcher", fake_add_watcher)
     monkeypatch.setattr(ticket_importer.user_repo, "get_user_by_email", fake_get_user_by_email)
 
+    async def fake_list_company_assets(_company_id):
+        return []
+
+    monkeypatch.setattr(assets_repo, "list_company_assets", fake_list_company_assets)
+
     summary = await ticket_importer.import_ticket_by_id(9000, rate_limiter=None)
 
     assert summary.created == 1
@@ -1407,3 +1413,219 @@ async def test_metadata_note_not_duplicated_on_reimport(monkeypatch):
     assert summary.updated == 1
     # No replies created — metadata note already exists and no new comments
     assert len(reply_calls) == 0
+
+
+@pytest.mark.anyio
+async def test_import_ticket_links_matching_asset(monkeypatch):
+    """When a Syncro ticket lists an asset whose name matches a MyPortal asset for the
+    same company, that asset should be linked to the ticket via replace_ticket_assets."""
+
+    async def fake_get_ticket(ticket_id, rate_limiter=None):
+        return {
+            "id": 300,
+            "subject": "Server issue",
+            "priority": "High",
+            "status": "Open",
+            "customer_id": "10",
+            "assets": [{"name": "Server-01", "asset_tag": "SRV-001"}],
+        }
+
+    async def fake_get_company(syncro_id):
+        return {"id": 5}
+
+    async def fake_get_company_by_name(_name):
+        return None
+
+    async def fake_get_existing(_ref):
+        return None
+
+    async def fake_create_ticket(**kwargs):
+        return {"id": 300, **kwargs}
+
+    async def fake_update_ticket(ticket_id, **fields):
+        return {"id": ticket_id, **fields}
+
+    async def fake_get_user_by_email(_email):
+        return None
+
+    async def fake_list_company_assets(company_id):
+        return [
+            {"id": 42, "company_id": 5, "name": "Server-01"},
+            {"id": 43, "company_id": 5, "name": "Workstation-02"},
+        ]
+
+    replace_calls = []
+
+    async def fake_replace_ticket_assets(ticket_id, asset_ids):
+        replace_calls.append((ticket_id, list(asset_ids)))
+        return []
+
+    async def fake_list_replies(ticket_id, include_internal=True):
+        return []
+
+    async def fake_create_reply(**kwargs):
+        return {"id": 1, **kwargs}
+
+    async def fake_list_watchers(ticket_id):
+        return []
+
+    async def fake_add_watcher(ticket_id, user_id):
+        pass
+
+    monkeypatch.setattr(syncro, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(company_repo, "get_company_by_syncro_id", fake_get_company)
+    monkeypatch.setattr(company_repo, "get_company_by_name", fake_get_company_by_name)
+    monkeypatch.setattr(tickets_repo, "get_ticket_by_external_reference", fake_get_existing)
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
+    monkeypatch.setattr(ticket_importer.user_repo, "get_user_by_email", fake_get_user_by_email)
+    monkeypatch.setattr(assets_repo, "list_company_assets", fake_list_company_assets)
+    monkeypatch.setattr(tickets_repo, "replace_ticket_assets", fake_replace_ticket_assets)
+    monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(tickets_repo, "list_watchers", fake_list_watchers)
+    monkeypatch.setattr(tickets_repo, "add_watcher", fake_add_watcher)
+
+    summary = await ticket_importer.import_ticket_by_id(300, rate_limiter=None)
+
+    assert summary.created == 1
+    assert len(replace_calls) == 1
+    ticket_id_linked, asset_ids_linked = replace_calls[0]
+    assert ticket_id_linked == 300
+    assert asset_ids_linked == [42]
+
+
+@pytest.mark.anyio
+async def test_import_ticket_no_asset_link_when_no_name_match(monkeypatch):
+    """When no Syncro asset name matches a MyPortal asset, replace_ticket_assets is not called."""
+
+    async def fake_get_ticket(ticket_id, rate_limiter=None):
+        return {
+            "id": 301,
+            "subject": "Unknown asset",
+            "priority": "Normal",
+            "status": "Open",
+            "customer_id": "10",
+            "assets": [{"name": "Unknown-Device-XYZ"}],
+        }
+
+    async def fake_get_company(syncro_id):
+        return {"id": 5}
+
+    async def fake_get_company_by_name(_name):
+        return None
+
+    async def fake_get_existing(_ref):
+        return None
+
+    async def fake_create_ticket(**kwargs):
+        return {"id": 301, **kwargs}
+
+    async def fake_update_ticket(ticket_id, **fields):
+        return {"id": ticket_id, **fields}
+
+    async def fake_get_user_by_email(_email):
+        return None
+
+    async def fake_list_company_assets(company_id):
+        return [
+            {"id": 42, "company_id": 5, "name": "Server-01"},
+        ]
+
+    replace_calls = []
+
+    async def fake_replace_ticket_assets(ticket_id, asset_ids):
+        replace_calls.append((ticket_id, list(asset_ids)))
+        return []
+
+    async def fake_list_replies(ticket_id, include_internal=True):
+        return []
+
+    async def fake_create_reply(**kwargs):
+        return {"id": 1, **kwargs}
+
+    async def fake_list_watchers(ticket_id):
+        return []
+
+    async def fake_add_watcher(ticket_id, user_id):
+        pass
+
+    monkeypatch.setattr(syncro, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(company_repo, "get_company_by_syncro_id", fake_get_company)
+    monkeypatch.setattr(company_repo, "get_company_by_name", fake_get_company_by_name)
+    monkeypatch.setattr(tickets_repo, "get_ticket_by_external_reference", fake_get_existing)
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
+    monkeypatch.setattr(ticket_importer.user_repo, "get_user_by_email", fake_get_user_by_email)
+    monkeypatch.setattr(assets_repo, "list_company_assets", fake_list_company_assets)
+    monkeypatch.setattr(tickets_repo, "replace_ticket_assets", fake_replace_ticket_assets)
+    monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(tickets_repo, "list_watchers", fake_list_watchers)
+    monkeypatch.setattr(tickets_repo, "add_watcher", fake_add_watcher)
+
+    summary = await ticket_importer.import_ticket_by_id(301, rate_limiter=None)
+
+    assert summary.created == 1
+    assert len(replace_calls) == 0
+
+
+@pytest.mark.anyio
+async def test_import_ticket_no_asset_link_when_ticket_has_no_assets(monkeypatch):
+    """When a Syncro ticket has no asset list, replace_ticket_assets is not called."""
+
+    async def fake_get_ticket(ticket_id, rate_limiter=None):
+        return {
+            "id": 302,
+            "subject": "Simple ticket",
+            "priority": "Normal",
+            "status": "Open",
+            "customer_id": "10",
+        }
+
+    async def fake_get_company(syncro_id):
+        return {"id": 5}
+
+    async def fake_get_company_by_name(_name):
+        return None
+
+    async def fake_get_existing(_ref):
+        return None
+
+    async def fake_create_ticket(**kwargs):
+        return {"id": 302, **kwargs}
+
+    async def fake_update_ticket(ticket_id, **fields):
+        return {"id": ticket_id, **fields}
+
+    async def fake_get_user_by_email(_email):
+        return None
+
+    list_assets_calls = []
+
+    async def fake_list_company_assets(company_id):
+        list_assets_calls.append(company_id)
+        return []
+
+    replace_calls = []
+
+    async def fake_replace_ticket_assets(ticket_id, asset_ids):
+        replace_calls.append((ticket_id, list(asset_ids)))
+        return []
+
+    monkeypatch.setattr(syncro, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(company_repo, "get_company_by_syncro_id", fake_get_company)
+    monkeypatch.setattr(company_repo, "get_company_by_name", fake_get_company_by_name)
+    monkeypatch.setattr(tickets_repo, "get_ticket_by_external_reference", fake_get_existing)
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
+    monkeypatch.setattr(ticket_importer.user_repo, "get_user_by_email", fake_get_user_by_email)
+    monkeypatch.setattr(assets_repo, "list_company_assets", fake_list_company_assets)
+    monkeypatch.setattr(tickets_repo, "replace_ticket_assets", fake_replace_ticket_assets)
+
+    summary = await ticket_importer.import_ticket_by_id(302, rate_limiter=None)
+
+    assert summary.created == 1
+    # No assets in the ticket -- list_company_assets should not even be called
+    assert len(list_assets_calls) == 0
+    assert len(replace_calls) == 0
