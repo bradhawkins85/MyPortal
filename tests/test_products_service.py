@@ -458,8 +458,8 @@ async def test_update_products_from_feed_sets_cross_sells(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
-async def test_update_products_from_feed_upserts_all_feed_items(monkeypatch):
-    """All items in the stock feed are upserted, not just those already in shop_products."""
+async def test_update_products_from_feed_upserts_only_existing_feed_items(monkeypatch):
+    """Only products that already exist in the store are upserted from the stock feed."""
     feed_items = [
         _make_feed_item("NEW-SKU"),
         _make_feed_item("EXISTING-SKU"),
@@ -470,11 +470,13 @@ async def test_update_products_from_feed_upserts_all_feed_items(monkeypatch):
         "list_all_items",
         AsyncMock(return_value=feed_items),
     )
-    monkeypatch.setattr(
-        products_service.shop_repo,
-        "get_product_by_sku",
-        AsyncMock(return_value=None),
-    )
+
+    async def fake_get_by_sku(sku, **kwargs):
+        if sku == "EXISTING-SKU":
+            return {"id": 1, "image_url": None}
+        return None
+
+    monkeypatch.setattr(products_service.shop_repo, "get_product_by_sku", fake_get_by_sku)
     mock_upsert = AsyncMock()
     monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", mock_upsert)
     monkeypatch.setattr(
@@ -488,55 +490,33 @@ async def test_update_products_from_feed_upserts_all_feed_items(monkeypatch):
 
     await products_service.update_products_from_feed()
 
-    # Both feed items should have been upserted (two-pass first loop)
-    assert mock_upsert.await_count == 2
+    assert mock_upsert.await_count == 1
 
 
 @pytest.mark.anyio("asyncio")
-async def test_update_products_from_feed_cross_sells_resolved_after_all_upserts(
+async def test_update_products_from_feed_cross_sells_resolved_for_existing_products_only(
     monkeypatch,
 ):
-    """Cross-sell target products are resolved after ALL feed items have been upserted.
-
-    This ensures a product referenced in opt_accessori is available in shop_products
-    even if it appears later in the feed than the product that references it.
-    """
-    # MAIN1 appears before ACC1 in the feed
+    """Cross-sells are only applied for products already present in the store."""
     feed_items = [
         _make_feed_item("MAIN1", opt_accessori="ACC1"),
         _make_feed_item("ACC1"),
     ]
 
-    upsert_call_order: list[str] = []
-
-    async def fake_upsert(**kwargs):
-        upsert_call_order.append(kwargs["sku"])
-
-    ids_call_order: list[list[str]] = []
-
-    async def fake_get_ids(skus):
-        ids_call_order.append(list(skus))
-        return [99]
-
-    product_lookup: dict[str, dict] = {
-        "MAIN1": {"id": 1, "image_url": None},
-        "ACC1": {"id": 99, "image_url": None},
-    }
-
     async def fake_get_by_sku(sku, **kwargs):
-        return product_lookup.get(sku)
+        if sku == "MAIN1":
+            return {"id": 1, "image_url": None}
+        return None
 
     monkeypatch.setattr(
         products_service.stock_feed_repo,
         "list_all_items",
         AsyncMock(return_value=feed_items),
     )
+    monkeypatch.setattr(products_service.shop_repo, "get_product_by_sku", fake_get_by_sku)
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
     monkeypatch.setattr(
-        products_service.shop_repo, "get_product_by_sku", fake_get_by_sku
-    )
-    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", fake_upsert)
-    monkeypatch.setattr(
-        products_service.shop_repo, "get_product_ids_by_skus", fake_get_ids
+        products_service.shop_repo, "get_product_ids_by_skus", AsyncMock(return_value=[99])
     )
     mock_replace = AsyncMock()
     monkeypatch.setattr(
@@ -548,26 +528,51 @@ async def test_update_products_from_feed_cross_sells_resolved_after_all_upserts(
 
     await products_service.update_products_from_feed()
 
-    # Both products should be upserted in the first pass
-    assert set(upsert_call_order) == {"MAIN1", "ACC1"}
-    # Cross-sell lookup for ACC1 happens only after both are upserted
-    assert ids_call_order == [["ACC1"]]
-    # Cross-sell is set for MAIN1 pointing to ACC1 (id=99)
     mock_replace.assert_awaited_once_with(1, cross_sell_ids=[99])
 
 
 @pytest.mark.anyio("asyncio")
 async def test_update_products_from_feed_uses_vendor_sku_for_cross_sells(monkeypatch):
-    """Cross-sells resolve even when the accessory product has a custom internal sku.
-
-    opt_accessori contains the vendor's StockCode.  When a store product was created
-    with a different internal sku but has vendor_sku equal to the StockCode, the
-    get_product_ids_by_skus query must still find it (via vendor_sku).
-    """
+    """Cross-sell targets are resolved by vendor_sku when internal sku differs."""
     feed_items = [
         _make_feed_item("NHU-R5AC-LITE", opt_accessori="NHU-POE-24-12WG"),
-        _make_feed_item("NHU-POE-24-12WG"),
     ]
+
+    monkeypatch.setattr(
+        products_service.stock_feed_repo,
+        "list_all_items",
+        AsyncMock(return_value=feed_items),
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_by_sku",
+        AsyncMock(return_value={"id": 10, "image_url": None}),
+    )
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_ids_by_skus",
+        AsyncMock(return_value=[55]),
+    )
+    mock_replace = AsyncMock()
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "replace_product_recommendations",
+        mock_replace,
+    )
+    monkeypatch.setattr(
+        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+    )
+
+    await products_service.update_products_from_feed()
+
+    mock_replace.assert_awaited_once_with(10, cross_sell_ids=[55])
+    products_service.shop_repo.get_product_ids_by_skus.assert_awaited_once_with(
+        ["NHU-POE-24-12WG"]
+    )
+
+
+@pytest.mark.anyio("asyncio")
 async def test_update_products_from_feed_does_not_download_images_for_new_products(
     monkeypatch,
 ):
@@ -577,28 +582,8 @@ async def test_update_products_from_feed_does_not_download_images_for_new_produc
     monkeypatch.setattr(
         products_service.stock_feed_repo,
         "list_all_items",
-        AsyncMock(return_value=feed_items),
-    )
-    # Simulate the accessory being found via vendor_sku lookup
-    monkeypatch.setattr(
-        products_service.shop_repo,
-        "get_product_ids_by_skus",
-        AsyncMock(return_value=[55]),
-    )
-    monkeypatch.setattr(
-        products_service.shop_repo,
-        "get_product_by_sku",
-        AsyncMock(return_value={"id": 10, "image_url": None}),
-    )
-    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
-    mock_replace = AsyncMock()
-    monkeypatch.setattr(
-        products_service.shop_repo,
-        "replace_product_recommendations",
-        mock_replace,
         AsyncMock(return_value=[feed_item]),
     )
-    # Product does not exist in the store
     monkeypatch.setattr(
         products_service.shop_repo,
         "get_product_by_sku",
@@ -630,7 +615,6 @@ async def test_update_products_from_feed_downloads_image_for_existing_product_wi
         "list_all_items",
         AsyncMock(return_value=[feed_item]),
     )
-    # Product exists in the store but has no image
     monkeypatch.setattr(
         products_service.shop_repo,
         "get_product_by_sku",
@@ -667,13 +651,6 @@ async def test_process_feed_item_skips_image_download_for_new_product_when_disab
         products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
     )
 
-    await products_service.update_products_from_feed()
-
-    # Cross-sell should be set using whatever ID get_product_ids_by_skus returned
-    mock_replace.assert_awaited_once_with(10, cross_sell_ids=[55])
-    products_service.shop_repo.get_product_ids_by_skus.assert_awaited_once_with(
-        ["NHU-POE-24-12WG"]
-    )
     mock_download = AsyncMock(return_value="/uploads/shop/some.jpg")
     monkeypatch.setattr(products_service, "_download_product_image", mock_download)
 
