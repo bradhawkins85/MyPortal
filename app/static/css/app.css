@@ -4442,6 +4442,23 @@ dialog.modal:not([open]) {
   gap: 1.25rem;
 }
 
+
+.profile-columns {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 1200px) {
+  .profile-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 960px) {
+  .profile-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
 .card__form {
   display: flex;
   flex-direction: column;
