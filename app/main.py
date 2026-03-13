@@ -2803,7 +2803,6 @@ def _sanitize_message(value: str | None) -> str | None:
 async def _validate_recommendation_product_ids(
     raw_ids: Sequence[int | str] | None,
     *,
-    category_id: int | None,
     field_label: str,
     disallow_product_id: int | None = None,
 ) -> list[int]:
@@ -2826,12 +2825,6 @@ async def _validate_recommendation_product_ids(
     if not unique_ids:
         return []
 
-    if category_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{field_label} products require selecting a category first",
-        )
-
     candidates = await shop_repo.list_products_by_ids(unique_ids, include_archived=False)
     found_ids = {int(candidate.get("id") or 0) for candidate in candidates}
     missing = [str(value) for value in unique_ids if value not in found_ids]
@@ -2848,12 +2841,6 @@ async def _validate_recommendation_product_ids(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"{field_label} products cannot include the item being edited",
-            )
-        candidate_category = candidate.get("category_id")
-        if candidate_category != category_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"{field_label} products must match the selected category",
             )
         if bool(candidate.get("archived")):
             raise HTTPException(
@@ -10919,12 +10906,10 @@ async def admin_create_shop_product(
 
     cross_sell_ids = await _validate_recommendation_product_ids(
         cross_sell_product_ids,
-        category_id=category_value,
         field_label="Cross-sell",
     )
     upsell_ids = await _validate_recommendation_product_ids(
         upsell_product_ids,
-        category_id=category_value,
         field_label="Up-sell",
     )
 
@@ -11207,7 +11192,6 @@ async def admin_update_shop_product(
 
     cross_sell_ids = await _validate_recommendation_product_ids(
         cross_sell_candidates,
-        category_id=category_value,
         field_label="Cross-sell",
         disallow_product_id=product_id,
     )
@@ -11218,7 +11202,6 @@ async def admin_update_shop_product(
 
     upsell_ids = await _validate_recommendation_product_ids(
         upsell_candidates,
-        category_id=category_value,
         field_label="Up-sell",
         disallow_product_id=product_id,
     )

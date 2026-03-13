@@ -79,34 +79,36 @@
           
           <!-- Row 4: Cross-sell and Up-sell products -->
           <div class="form-field form-field--wide">
-            <label class="form-label" for="product-cross-sell">Cross-sell products</label>
-            <select
-              class="form-input form-input--multiselect"
-              id="product-cross-sell"
-              name="cross_sell_product_ids"
-              multiple
-              size="6"
-              data-recommendation-select="cross"
-              disabled
-            >
-              <option value="" disabled selected>Select a category to choose products</option>
-            </select>
-            <p class="form-helper">Suggest complementary items from the same category.</p>
+            <label class="form-label">Cross-sell products</label>
+            <div class="form-quick-add">
+              <input
+                type="text"
+                class="form-input form-input--inline"
+                id="product-cross-sell-sku"
+                placeholder="Enter product SKU"
+                autocomplete="off"
+              />
+              <button type="button" class="button button--small button--secondary" data-sku-add="cross-sell" data-form="create">Add</button>
+            </div>
+            <p id="create-cross-sell-error" class="form-help form-help--error" hidden></p>
+            <ul class="tag-list" id="product-cross-sell-list" aria-label="Cross-sell products"></ul>
+            <p class="form-helper">Add SKUs for complementary products to suggest at checkout.</p>
           </div>
           <div class="form-field form-field--wide">
-            <label class="form-label" for="product-upsell">Up-sell products</label>
-            <select
-              class="form-input form-input--multiselect"
-              id="product-upsell"
-              name="upsell_product_ids"
-              multiple
-              size="6"
-              data-recommendation-select="upsell"
-              disabled
-            >
-              <option value="" disabled selected>Select a category to choose products</option>
-            </select>
-            <p class="form-helper">Highlight upgrade paths within the same category.</p>
+            <label class="form-label">Up-sell products</label>
+            <div class="form-quick-add">
+              <input
+                type="text"
+                class="form-input form-input--inline"
+                id="product-upsell-sku"
+                placeholder="Enter product SKU"
+                autocomplete="off"
+              />
+              <button type="button" class="button button--small button--secondary" data-sku-add="upsell" data-form="create">Add</button>
+            </div>
+            <p id="create-upsell-error" class="form-help form-help--error" hidden></p>
+            <ul class="tag-list" id="product-upsell-list" aria-label="Up-sell products"></ul>
+            <p class="form-helper">Add SKUs for upgrade options to suggest at checkout.</p>
           </div>
           
           <!-- Row 5: Subscription-related fields -->
