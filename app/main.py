@@ -4957,8 +4957,6 @@ async def shop_page(
         products = [product for product in products if _product_has_price(product)]
 
     products = cast(list[dict[str, Any]], _serialise_for_json(products))
-    if category_id is None:
-        secrets.SystemRandom().shuffle(products)
 
     categories = await categories_task
     available_category_ids = await available_category_ids_task
