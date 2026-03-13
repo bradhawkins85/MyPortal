@@ -389,17 +389,25 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
     assert created_call["description"] == "Customer message"
     # Verify the ticket ID was set to 5001 from the number
     assert created_call["id"] == 5001
-    assert len(reply_calls) == 2
-    assert reply_calls[0]["external_reference"] == "1"
-    assert reply_calls[0]["is_internal"] is False
-    assert reply_calls[0]["author_id"] == 21
+    # 1 metadata note + 2 comments
+    assert len(reply_calls) == 3
+    # First reply is the metadata note (contact info only — no assets/custom fields)
+    assert reply_calls[0]["external_reference"] == "syncro_metadata_5001"
+    assert reply_calls[0]["is_internal"] is True
+    assert reply_calls[0]["author_id"] is None
     assert reply_calls[0].get("minutes_spent") is None
     assert reply_calls[0].get("is_billable", False) is False
-    assert reply_calls[1]["external_reference"] == "2"
-    assert reply_calls[1]["is_internal"] is True
-    assert reply_calls[1]["author_id"] == 31
+    # Ticket comments follow the metadata note
+    assert reply_calls[1]["external_reference"] == "1"
+    assert reply_calls[1]["is_internal"] is False
+    assert reply_calls[1]["author_id"] == 21
     assert reply_calls[1].get("minutes_spent") is None
     assert reply_calls[1].get("is_billable", False) is False
+    assert reply_calls[2]["external_reference"] == "2"
+    assert reply_calls[2]["is_internal"] is True
+    assert reply_calls[2]["author_id"] == 31
+    assert reply_calls[2].get("minutes_spent") is None
+    assert reply_calls[2].get("is_billable", False) is False
     # The ticket ID should now be 5001, not 400
     assert added_watchers == [(5001, 31)]
 
@@ -828,3 +836,325 @@ async def test_import_from_request_records_webhook_failure(monkeypatch):
     assert recorded["failure"]["event_id"] == 91
     assert recorded["failure"]["status"] == "failed"
     assert recorded["failure"]["error_message"] == "boom"
+
+
+# ---------------------------------------------------------------------------
+# New tests for enhanced Syncro ticket import features
+# ---------------------------------------------------------------------------
+
+def test_extract_comment_author_name_from_tech():
+    comment = {"tech": "Alice Tech", "body": "Fixed the issue"}
+    assert ticket_importer._extract_comment_author_name(comment) == "Alice Tech"
+
+
+def test_extract_comment_author_name_ignores_customer_reply():
+    comment = {"tech": "customer-reply", "body": "Reply from customer"}
+    assert ticket_importer._extract_comment_author_name(comment) is None
+
+
+def test_extract_comment_author_name_from_nested_user():
+    comment = {"user": {"name": "Bob Technician"}, "body": "Done"}
+    assert ticket_importer._extract_comment_author_name(comment) == "Bob Technician"
+
+
+def test_extract_time_worked_minutes_hhmm():
+    comment = {"time_worked": "01:30"}
+    assert ticket_importer._extract_time_worked_minutes(comment) == 90
+
+
+def test_extract_time_worked_minutes_hhmmss():
+    comment = {"time_worked": "02:15:45"}
+    assert ticket_importer._extract_time_worked_minutes(comment) == 136  # 2*60+15+1 (round up)
+
+
+def test_extract_time_worked_minutes_from_cost_hours():
+    comment = {"time_cost_hours": 1.5}
+    assert ticket_importer._extract_time_worked_minutes(comment) == 90
+
+
+def test_extract_time_worked_minutes_none():
+    assert ticket_importer._extract_time_worked_minutes({}) is None
+
+
+def test_build_comment_body_with_header_includes_author_time_billable():
+    comment = {"tech": "Alice Tech", "time_worked": "00:30", "billable": True}
+    result = ticket_importer._build_comment_body_with_header(comment, "Hello World")
+    assert "Author: Alice Tech" in result
+    assert "Time: 30m" in result
+    assert "Billable: Yes" in result
+    assert "Hello World" in result
+    assert "---" in result
+
+
+def test_build_comment_body_with_header_not_billable():
+    comment = {"tech": "Bob", "billable": False}
+    result = ticket_importer._build_comment_body_with_header(comment, "Some body")
+    assert "Billable: No" in result
+
+
+def test_build_comment_body_with_header_no_author_still_has_billable():
+    comment = {"tech": "customer-reply"}
+    result = ticket_importer._build_comment_body_with_header(comment, "Customer text")
+    assert "Billable: No" in result
+    assert "Author:" not in result
+    assert "Customer text" in result
+
+
+def test_extract_contact_info_from_contact_dict():
+    ticket = {
+        "contact": {
+            "name": "Jane Doe",
+            "email": "jane@example.com",
+            "phone": "555-1234",
+            "mobile": "555-5678",
+            "address": "123 Main St",
+            "address_2": "Suite 100",
+        }
+    }
+    info = ticket_importer._extract_contact_info(ticket)
+    assert info["name"] == "Jane Doe"
+    assert info["email"] == "jane@example.com"
+    assert info["phone"] == "555-1234"
+    assert info["mobile"] == "555-5678"
+    assert info["address"] == "123 Main St"
+    assert info["address_2"] == "Suite 100"
+
+
+def test_extract_contact_info_empty_when_no_contact():
+    assert ticket_importer._extract_contact_info({}) == {}
+
+
+def test_extract_custom_fields_returns_label_value_pairs():
+    ticket = {
+        "custom_fields": [
+            {"name": "Site Location", "value": "Head Office"},
+            {"label": "Priority Override", "value": "Critical"},
+            {"name": "Empty Field", "value": ""},  # empty value should be skipped
+        ]
+    }
+    fields = ticket_importer._extract_custom_fields(ticket)
+    assert len(fields) == 2
+    assert fields[0] == {"label": "Site Location", "value": "Head Office"}
+    assert fields[1] == {"label": "Priority Override", "value": "Critical"}
+
+
+def test_extract_custom_fields_empty():
+    assert ticket_importer._extract_custom_fields({}) == []
+
+
+def test_extract_ticket_assets_returns_asset_list():
+    ticket = {
+        "assets": [
+            {"name": "Server01", "asset_tag": "SRV001", "serial_number": "XYZ123"},
+            {"name": "Laptop02", "asset_tag": None, "serial_number": "ABC456"},
+        ]
+    }
+    assets = ticket_importer._extract_ticket_assets(ticket)
+    assert len(assets) == 2
+    assert assets[0]["name"] == "Server01"
+    assert assets[0]["asset_tag"] == "SRV001"
+    assert assets[0]["serial_number"] == "XYZ123"
+    assert assets[1]["name"] == "Laptop02"
+    assert assets[1]["serial_number"] == "ABC456"
+
+
+def test_extract_ticket_assets_empty():
+    assert ticket_importer._extract_ticket_assets({}) == []
+
+
+def test_build_ticket_metadata_note_with_all_sections():
+    ticket = {
+        "contact": {"name": "John Smith", "email": "john@example.com", "phone": "555-0001"},
+        "assets": [{"name": "Laptop01", "asset_tag": "LT001", "serial_number": "SN999"}],
+        "custom_fields": [{"name": "Department", "value": "Finance"}],
+    }
+    note = ticket_importer._build_ticket_metadata_note(ticket)
+    assert note is not None
+    assert "=== Assigned Contact ===" in note
+    assert "Name: John Smith" in note
+    assert "Email: john@example.com" in note
+    assert "Phone: 555-0001" in note
+    assert "=== Associated Assets ===" in note
+    assert "Laptop01" in note
+    assert "Tag: LT001" in note
+    assert "S/N: SN999" in note
+    assert "=== Custom Fields ===" in note
+    assert "Department: Finance" in note
+
+
+def test_build_ticket_metadata_note_returns_none_when_empty():
+    assert ticket_importer._build_ticket_metadata_note({}) is None
+
+
+def test_build_ticket_metadata_note_only_contact():
+    ticket = {"contact": {"name": "Alice", "email": "alice@example.com"}}
+    note = ticket_importer._build_ticket_metadata_note(ticket)
+    assert note is not None
+    assert "=== Assigned Contact ===" in note
+    assert "=== Associated Assets ===" not in note
+    assert "=== Custom Fields ===" not in note
+
+
+@pytest.mark.anyio
+async def test_import_ticket_creates_metadata_note_with_billable_time(monkeypatch):
+    """Ticket with contact info and a billable comment with time creates metadata note."""
+    async def fake_get_ticket(ticket_id, rate_limiter=None):
+        return {
+            "id": ticket_id,
+            "subject": "Server Down",
+            "priority": "High",
+            "status": "Open",
+            "problem": "Server not responding",
+            "customer_id": "300",
+            "contact": {"name": "Jane Client", "email": "jane@client.com", "phone": "555-9999"},
+            "assets": [{"name": "ServerA", "asset_tag": "SRV-A"}],
+            "custom_fields": [{"name": "Location", "value": "Data Centre"}],
+            "comments": [
+                {
+                    "id": 10,
+                    "body": "Rebooted the server",
+                    "tech": "Bob Tech",
+                    "user_email": "bob@company.com",
+                    "time_worked": "00:45",
+                    "billable": True,
+                    "hidden": False,
+                    "created_at": "2025-06-01T10:00:00Z",
+                }
+            ],
+        }
+
+    async def fake_get_existing(_ref):
+        return None
+
+    async def fake_get_company(syncro_id):
+        return {"id": 5}
+
+    async def fake_get_company_by_name(_name):
+        return None
+
+    async def fake_create_ticket(**kwargs):
+        return {"id": kwargs.get("id") or 9000, **kwargs}
+
+    async def fake_update_ticket(ticket_id, **fields):
+        return {"id": ticket_id, **fields}
+
+    reply_calls = []
+
+    async def fake_list_replies(ticket_id, include_internal=True):  # noqa: ARG001
+        return []
+
+    async def fake_create_reply(**kwargs):
+        reply_calls.append(kwargs)
+        return {"id": len(reply_calls), **kwargs}
+
+    async def fake_list_watchers(ticket_id):  # noqa: ARG001
+        return []
+
+    async def fake_add_watcher(ticket_id, user_id):  # noqa: ARG001
+        pass
+
+    async def fake_get_user_by_email(email):
+        if email == "jane@client.com":
+            return {"id": 50}
+        return None
+
+    monkeypatch.setattr(syncro, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(company_repo, "get_company_by_syncro_id", fake_get_company)
+    monkeypatch.setattr(company_repo, "get_company_by_name", fake_get_company_by_name)
+    monkeypatch.setattr(tickets_repo, "get_ticket_by_external_reference", fake_get_existing)
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
+    monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(tickets_repo, "list_watchers", fake_list_watchers)
+    monkeypatch.setattr(tickets_repo, "add_watcher", fake_add_watcher)
+    monkeypatch.setattr(ticket_importer.user_repo, "get_user_by_email", fake_get_user_by_email)
+
+    summary = await ticket_importer.import_ticket_by_id(9000, rate_limiter=None)
+
+    assert summary.created == 1
+    # 2 replies: 1 metadata note + 1 comment
+    assert len(reply_calls) == 2
+
+    # First reply is the metadata note
+    meta = reply_calls[0]
+    assert meta["external_reference"] == "syncro_metadata_9000"
+    assert meta["is_internal"] is True
+    assert meta["author_id"] is None
+    assert "=== Assigned Contact ===" in meta["body"]
+    assert "Name: Jane Client" in meta["body"]
+    assert "=== Associated Assets ===" in meta["body"]
+    assert "ServerA" in meta["body"]
+    assert "=== Custom Fields ===" in meta["body"]
+    assert "Location: Data Centre" in meta["body"]
+
+    # Second reply is the comment with time, billable, and author
+    comment_reply = reply_calls[1]
+    assert comment_reply["external_reference"] == "10"
+    assert comment_reply["is_billable"] is True
+    assert comment_reply["minutes_spent"] == 45
+    assert "Author: Bob Tech" in comment_reply["body"]
+    assert "Time: 45m" in comment_reply["body"]
+    assert "Billable: Yes" in comment_reply["body"]
+    assert "Rebooted the server" in comment_reply["body"]
+
+
+@pytest.mark.anyio
+async def test_metadata_note_not_duplicated_on_reimport(monkeypatch):
+    """Re-importing a ticket should not create a second metadata note."""
+    async def fake_get_ticket(ticket_id, rate_limiter=None):
+        return {
+            "id": ticket_id,
+            "subject": "Duplicate check",
+            "priority": "Normal",
+            "status": "Open",
+            "contact": {"name": "Test User", "email": "test@example.com"},
+        }
+
+    async def fake_get_existing(_ref):
+        return {"id": 8888, "external_reference": "8888"}
+
+    async def fake_update_ticket(ticket_id, **fields):
+        return {"id": ticket_id, **fields}
+
+    reply_calls = []
+
+    async def fake_list_replies(ticket_id, include_internal=True):  # noqa: ARG001
+        # Simulate metadata note already exists
+        return [{"external_reference": "syncro_metadata_8888"}]
+
+    async def fake_create_reply(**kwargs):
+        reply_calls.append(kwargs)
+        return {"id": len(reply_calls), **kwargs}
+
+    async def fake_list_watchers(ticket_id):  # noqa: ARG001
+        return []
+
+    async def fake_add_watcher(ticket_id, user_id):  # noqa: ARG001
+        pass
+
+    async def fake_get_user_by_email(_email):
+        return None
+
+    async def fake_get_company(syncro_id):
+        return {"id": 1}
+
+    async def fake_get_company_by_name(_name):
+        return None
+
+    monkeypatch.setattr(syncro, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(company_repo, "get_company_by_syncro_id", fake_get_company)
+    monkeypatch.setattr(company_repo, "get_company_by_name", fake_get_company_by_name)
+    monkeypatch.setattr(tickets_repo, "get_ticket_by_external_reference", fake_get_existing)
+    monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
+    monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(tickets_repo, "list_watchers", fake_list_watchers)
+    monkeypatch.setattr(tickets_repo, "add_watcher", fake_add_watcher)
+    monkeypatch.setattr(ticket_importer.user_repo, "get_user_by_email", fake_get_user_by_email)
+
+    summary = await ticket_importer.import_ticket_by_id(8888, rate_limiter=None)
+
+    assert summary.updated == 1
+    # No replies created — metadata note already exists and no new comments
+    assert len(reply_calls) == 0

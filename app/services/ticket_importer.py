@@ -162,6 +162,191 @@ def _extract_comment_body(comment: dict[str, Any]) -> str | None:
     )
 
 
+def _extract_comment_author_name(comment: dict[str, Any]) -> str | None:
+    """Return the display name for the comment author."""
+    for key in ("tech_name", "techName", "author_name", "authorName", "user_name", "userName"):
+        name = _clean_text(comment.get(key))
+        if name:
+            return name
+    tech = _clean_text(comment.get("tech"))
+    if tech and tech.lower() != "customer-reply":
+        return tech
+    for key in ("user", "author", "created_by", "creator"):
+        nested = comment.get(key)
+        if isinstance(nested, dict):
+            name = _clean_text(
+                nested.get("name")
+                or nested.get("full_name")
+                or nested.get("display_name")
+            )
+            if name:
+                return name
+    return None
+
+
+def _extract_time_worked_minutes(comment: dict[str, Any]) -> int | None:
+    """Parse time_worked (HH:MM or HH:MM:SS) or time_cost_hours into whole minutes."""
+    time_worked = comment.get("time_worked") or comment.get("timeWorked")
+    if time_worked:
+        text = str(time_worked).strip()
+        match = re.match(r"^(\d+):(\d{2})(?::(\d{2}))?$", text)
+        if match:
+            hours = int(match.group(1))
+            minutes = int(match.group(2))
+            seconds = int(match.group(3) or 0)
+            total = hours * 60 + minutes + (1 if seconds >= 30 else 0)
+            if total > 0:
+                return total
+    for key in ("time_cost_hours", "timeCostHours", "hours_worked", "hoursWorked"):
+        value = comment.get(key)
+        if value is not None:
+            try:
+                total = round(float(value) * 60)
+                if total > 0:
+                    return total
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _build_comment_body_with_header(comment: dict[str, Any], body: str) -> str:
+    """Prepend author, time, and billable metadata to a comment body."""
+    header_parts: list[str] = []
+    author_name = _extract_comment_author_name(comment)
+    if author_name:
+        header_parts.append(f"Author: {author_name}")
+    minutes = _extract_time_worked_minutes(comment)
+    if minutes is not None:
+        hours, mins = divmod(minutes, 60)
+        if hours and mins:
+            time_str = f"{hours}h {mins}m"
+        elif hours:
+            time_str = f"{hours}h"
+        else:
+            time_str = f"{mins}m"
+        header_parts.append(f"Time: {time_str}")
+    billable = _coerce_bool(comment.get("billable") or comment.get("is_billable"))
+    header_parts.append(f"Billable: {'Yes' if billable else 'No'}")
+    if not header_parts:
+        return body
+    return "\n".join(header_parts) + "\n---\n" + body
+
+
+def _extract_contact_info(ticket: dict[str, Any]) -> dict[str, Any]:
+    """Extract contact details from a Syncro ticket."""
+    info: dict[str, Any] = {}
+    contact = ticket.get("contact")
+    if isinstance(contact, dict):
+        for field in ("name", "email", "phone", "mobile", "address", "address_2"):
+            value = _clean_text(contact.get(field))
+            if value:
+                info[field] = value
+    if "name" not in info:
+        for key in ("contact_name", "contactName", "requester_name"):
+            value = _clean_text(ticket.get(key))
+            if value:
+                info["name"] = value
+                break
+    if "phone" not in info:
+        for key in ("contact_phone", "contactPhone"):
+            value = _clean_text(ticket.get(key))
+            if value:
+                info["phone"] = value
+                break
+    return info
+
+
+def _extract_custom_fields(ticket: dict[str, Any]) -> list[dict[str, str]]:
+    """Extract custom fields from a Syncro ticket."""
+    for key in ("custom_fields", "customFields"):
+        fields = ticket.get(key)
+        if isinstance(fields, list):
+            result: list[dict[str, str]] = []
+            for field in fields:
+                if not isinstance(field, dict):
+                    continue
+                label = _clean_text(
+                    field.get("name") or field.get("label") or field.get("key")
+                )
+                value = _clean_text(field.get("value") or field.get("val"))
+                if label and value:
+                    result.append({"label": label, "value": value})
+            return result
+    return []
+
+
+def _extract_ticket_assets(ticket: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract asset records embedded in a Syncro ticket payload."""
+    for key in ("assets", "asset_list", "assetList"):
+        assets = ticket.get(key)
+        if isinstance(assets, list) and assets:
+            result: list[dict[str, Any]] = []
+            for asset in assets:
+                if not isinstance(asset, dict):
+                    continue
+                name = _clean_text(asset.get("name"))
+                asset_tag = _clean_text(
+                    asset.get("asset_tag") or asset.get("assetTag")
+                )
+                serial = _clean_text(
+                    asset.get("serial_number") or asset.get("serialNumber")
+                )
+                if name or asset_tag or serial:
+                    result.append(
+                        {"name": name, "asset_tag": asset_tag, "serial_number": serial}
+                    )
+            return result
+    return []
+
+
+def _build_ticket_metadata_note(ticket: dict[str, Any]) -> str | None:
+    """Build a formatted system note with contact info, assets, and custom fields."""
+    lines: list[str] = []
+
+    contact_info = _extract_contact_info(ticket)
+    if contact_info:
+        lines.append("=== Assigned Contact ===")
+        if contact_info.get("name"):
+            lines.append(f"Name: {contact_info['name']}")
+        if contact_info.get("email"):
+            lines.append(f"Email: {contact_info['email']}")
+        if contact_info.get("phone"):
+            lines.append(f"Phone: {contact_info['phone']}")
+        if contact_info.get("mobile"):
+            lines.append(f"Mobile: {contact_info['mobile']}")
+        addr = contact_info.get("address")
+        if addr:
+            if contact_info.get("address_2"):
+                addr = f"{addr}, {contact_info['address_2']}"
+            lines.append(f"Address: {addr}")
+
+    assets = _extract_ticket_assets(ticket)
+    if assets:
+        lines.append("")
+        lines.append("=== Associated Assets ===")
+        for asset in assets:
+            parts: list[str] = []
+            if asset.get("name"):
+                parts.append(asset["name"])
+            if asset.get("asset_tag"):
+                parts.append(f"Tag: {asset['asset_tag']}")
+            if asset.get("serial_number"):
+                parts.append(f"S/N: {asset['serial_number']}")
+            if parts:
+                lines.append(" | ".join(parts))
+
+    custom_fields = _extract_custom_fields(ticket)
+    if custom_fields:
+        lines.append("")
+        lines.append("=== Custom Fields ===")
+        for field in custom_fields:
+            lines.append(f"{field['label']}: {field['value']}")
+
+    if not lines:
+        return None
+    return "\n".join(lines)
+
+
 def _extract_comment_subject(comment: dict[str, Any]) -> str | None:
     for key in ("subject", "title", "summary"):
         candidate = _clean_text(comment.get(key))
@@ -484,11 +669,16 @@ async def _sync_ticket_replies(
             contact_email=contact_email,
             cache=author_cache,
         )
+        minutes_spent = _extract_time_worked_minutes(comment)
+        is_billable = _coerce_bool(comment.get("billable") or comment.get("is_billable"))
+        enhanced_body = _build_comment_body_with_header(comment, body)
         await tickets_repo.create_reply(
             ticket_id=ticket_id,
             author_id=author_id,
-            body=body,
+            body=enhanced_body,
             is_internal=is_internal,
+            is_billable=is_billable,
+            minutes_spent=minutes_spent,
             external_reference=external_ref,
             created_at=created_at,
         )
@@ -596,6 +786,50 @@ async def _resolve_company_id(ticket: dict[str, Any]) -> int | None:
     except (TypeError, ValueError):
         return None
     return None
+
+
+async def _upsert_ticket_metadata_note(
+    ticket_db_id: int,
+    ticket: dict[str, Any],
+    *,
+    created_at: Any = None,
+) -> None:
+    """Create or skip a system note containing contact info, assets, and custom fields."""
+    note_body = _build_ticket_metadata_note(ticket)
+    if not note_body:
+        return
+    metadata_ref = f"syncro_metadata_{ticket.get('id', ticket_db_id)}"
+    try:
+        existing = await tickets_repo.list_replies(ticket_db_id)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to fetch replies for metadata note check",
+            ticket_id=ticket_db_id,
+            error=str(exc),
+        )
+        return
+    known_refs = {
+        str(reply.get("external_reference"))
+        for reply in existing
+        if reply.get("external_reference") is not None
+    }
+    if metadata_ref in known_refs:
+        return
+    try:
+        await tickets_repo.create_reply(
+            ticket_id=ticket_db_id,
+            author_id=None,
+            body=note_body,
+            is_internal=True,
+            external_reference=metadata_ref,
+            created_at=created_at,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to create ticket metadata note",
+            ticket_id=ticket_db_id,
+            error=str(exc),
+        )
 
 
 async def _upsert_ticket(
@@ -724,6 +958,7 @@ async def _upsert_ticket(
 
     comments = _extract_comments(ticket)
     if ticket_db_id is not None:
+        await _upsert_ticket_metadata_note(ticket_db_id, ticket, created_at=created_at)
         await _sync_ticket_replies(
             ticket_db_id,
             comments,
@@ -1079,3 +1314,5 @@ async def import_from_request(
                 using_monitor=using_monitor,
             )
     return summary
+
+# TEST CHANGE
