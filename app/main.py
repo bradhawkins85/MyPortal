@@ -6597,9 +6597,34 @@ async def search_by_phone_number(request: Request):
         # No phone number provided, redirect to tickets page
         return RedirectResponse(url="/tickets", status_code=status.HTTP_303_SEE_OTHER)
     
+    # Search for tickets by requester's phone number within the authenticated user's scope
+    available_companies = await company_access.list_accessible_companies(user)
+    available_company_ids: list[int] = []
+    for entry in available_companies:
+        company_id = entry.get("company_id")
+        try:
+            available_company_ids.append(int(company_id))
+        except (TypeError, ValueError):
+            continue
+
+    active_company_id = getattr(request.state, "active_company_id", None)
+    active_company_ids: list[int] = []
+    if active_company_id is not None:
+        try:
+            active_company_ids = [int(active_company_id)]
+        except (TypeError, ValueError):
+            active_company_ids = []
+    if not active_company_ids:
+        active_company_ids = available_company_ids
+
     # Search for tickets by requester's phone number
     try:
-        tickets = await tickets_repo.list_tickets_by_requester_phone(phone_number, limit=_PHONE_SEARCH_LIMIT)
+        tickets = await tickets_repo.list_tickets_by_requester_phone(
+            phone_number,
+            limit=_PHONE_SEARCH_LIMIT,
+            user_id=user.get("id"),
+            company_ids=active_company_ids or None,
+        )
     except Exception as e:
         log_error(f"Error searching tickets by phone number: {e}", exc_info=True)
         # On error, redirect to tickets page with error message
@@ -12340,9 +12365,30 @@ async def _render_tickets_dashboard(
         phone_number_stripped = phone_number.strip()
         if phone_number_stripped:
             try:
+                company_memberships = await company_access.list_accessible_companies(user)
+                available_company_ids: list[int] = []
+                for entry in company_memberships:
+                    company_id = entry.get("company_id")
+                    try:
+                        available_company_ids.append(int(company_id))
+                    except (TypeError, ValueError):
+                        continue
+
+                active_company_id = getattr(request.state, "active_company_id", None)
+                active_company_ids: list[int] = []
+                if active_company_id is not None:
+                    try:
+                        active_company_ids = [int(active_company_id)]
+                    except (TypeError, ValueError):
+                        active_company_ids = []
+                if not active_company_ids:
+                    active_company_ids = available_company_ids
+
                 phone_tickets = await tickets_repo.list_tickets_by_requester_phone(
-                    phone_number_stripped, 
-                    limit=_PHONE_SEARCH_LIMIT
+                    phone_number_stripped,
+                    limit=_PHONE_SEARCH_LIMIT,
+                    user_id=user.get("id"),
+                    company_ids=active_company_ids or None,
                 )
                 # Get minimal dashboard state with only the phone search results
                 dashboard = await tickets_service.load_dashboard_state(

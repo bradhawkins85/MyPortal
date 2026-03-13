@@ -640,7 +640,13 @@ async def get_ticket_by_external_reference(external_reference: str) -> TicketRec
     return _normalise_ticket(row) if row else None
 
 
-async def list_tickets_by_requester_phone(phone_number: str, limit: int = 100) -> list[TicketRecord]:
+async def list_tickets_by_requester_phone(
+    phone_number: str,
+    limit: int = 100,
+    *,
+    user_id: int | None = None,
+    company_ids: Sequence[int] | None = None,
+) -> list[TicketRecord]:
     """
     Search for tickets by the requester's phone number.
     Searches both users.mobile_phone and staff.mobile_phone tables.
@@ -652,21 +658,41 @@ async def list_tickets_by_requester_phone(phone_number: str, limit: int = 100) -
     # Normalize phone number by removing common formatting characters
     normalized_phone = re.sub(r'[\s\-\(\)\+]', '', phone_number.strip())
     
-    rows = await db.fetch_all(
-        """
-        SELECT t.*
-        FROM tickets AS t
-        INNER JOIN users AS u ON u.id = t.requester_id
-        LEFT JOIN staff AS s ON s.email = u.email AND s.company_id = u.company_id
-        WHERE (
-            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(u.mobile_phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE %s
-            OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(s.mobile_phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE %s
+    where_clauses = [
+        "(" 
+        "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(u.mobile_phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE %s "
+        "OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(s.mobile_phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE %s"
+        ")"
+    ]
+    params: list[Any] = [f"%{normalized_phone}%", f"%{normalized_phone}%"]
+
+    if user_id is not None and int(user_id) > 0:
+        where_clauses.append(
+            "(t.requester_id = %s OR EXISTS ("
+            "SELECT 1 FROM ticket_watchers AS tw WHERE tw.ticket_id = t.id AND tw.user_id = %s"
+            "))"
         )
-        ORDER BY t.updated_at DESC
-        LIMIT %s
-        """,
-        (f"%{normalized_phone}%", f"%{normalized_phone}%", limit),
+        params.extend([int(user_id), int(user_id)])
+
+    company_filters = [int(cid) for cid in (company_ids or []) if int(cid) > 0]
+    if company_filters:
+        company_placeholders = ", ".join(["%s"] * len(company_filters))
+        where_clauses.append(f"t.company_id IN ({company_placeholders})")
+        params.extend(company_filters)
+
+    params.append(int(max(1, limit)))
+    query = "\n".join(
+        [
+            "SELECT t.*",
+            "FROM tickets AS t",
+            "INNER JOIN users AS u ON u.id = t.requester_id",
+            "LEFT JOIN staff AS s ON s.email = u.email AND s.company_id = u.company_id",
+            "WHERE " + " AND ".join(where_clauses),
+            "ORDER BY t.updated_at DESC",
+            "LIMIT %s",
+        ]
     )
+    rows = await db.fetch_all(query, tuple(params))
     return [_normalise_ticket(row) for row in rows]
 
 
