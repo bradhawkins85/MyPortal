@@ -38,6 +38,8 @@
         <p class="card__empty">No tickets have been recorded yet. Create a ticket to start a new conversation.</p>
       {% endif %}
     </div>
+    <div class="table-skeleton" data-ticket-table-skeleton hidden>Loading tickets…</div>
+    <div class="tickets-toolbar__actions"><button type="button" class="button button--ghost" data-ticket-load-more hidden>Load more</button></div>
   </section>
 
   <section class="card card--panel">
@@ -71,7 +73,7 @@
           name="q"
           value="{{ search_term or '' }}"
           aria-label="Filter tickets"
-          data-table-filter="tickets-table"
+          data-table-filter="tickets-table" data-ticket-search-debounce
         />
       </div>
     </header>
