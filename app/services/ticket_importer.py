@@ -209,7 +209,53 @@ def _extract_time_worked_minutes(comment: dict[str, Any]) -> int | None:
     return None
 
 
-def _build_comment_body_with_header(comment: dict[str, Any], body: str) -> str:
+def _resolve_comment_billable(
+    comment: dict[str, Any],
+    timer_billable: dict[str, bool] | None = None,
+) -> bool:
+    """Return whether a comment's time entry is billable.
+
+    Checks the comment's own fields first; falls back to the ticket_timers
+    mapping (keyed by comment ID) because Syncro stores the billable flag on
+    the timer rather than on the comment object.
+    """
+    for key in ("billable", "is_billable"):
+        val = comment.get(key)
+        if val is not None:
+            return _coerce_bool(val)
+    if timer_billable:
+        comment_id = comment.get("id")
+        if comment_id is not None:
+            timer_val = timer_billable.get(str(comment_id))
+            if timer_val is not None:
+                return timer_val
+    return False
+
+
+def _build_timer_billable_map(ticket: dict[str, Any]) -> dict[str, bool]:
+    """Build a {comment_id_str: billable} mapping from ticket_timers."""
+    timers = ticket.get("ticket_timers")
+    if not isinstance(timers, list):
+        return {}
+    result: dict[str, bool] = {}
+    for timer in timers:
+        if not isinstance(timer, dict):
+            continue
+        comment_id = timer.get("comment_id")
+        if comment_id is None:
+            continue
+        billable = timer.get("billable")
+        if billable is not None:
+            result[str(comment_id)] = bool(billable)
+    return result
+
+
+def _build_comment_body_with_header(
+    comment: dict[str, Any],
+    body: str,
+    *,
+    is_billable: bool | None = None,
+) -> str:
     """Prepend author, time, and billable metadata to a comment body."""
     header_parts: list[str] = []
     author_name = _extract_comment_author_name(comment)
@@ -225,8 +271,9 @@ def _build_comment_body_with_header(comment: dict[str, Any], body: str) -> str:
         else:
             time_str = f"{mins}m"
         header_parts.append(f"Time: {time_str}")
-    billable = _coerce_bool(comment.get("billable") or comment.get("is_billable"))
-    header_parts.append(f"Billable: {'Yes' if billable else 'No'}")
+    if is_billable is None:
+        is_billable = _resolve_comment_billable(comment)
+    header_parts.append(f"Billable: {'Yes' if is_billable else 'No'}")
     if not header_parts:
         return body
     return "\n".join(header_parts) + "\n---\n" + body
@@ -629,6 +676,7 @@ async def _sync_ticket_replies(
     *,
     requester_id: int | None,
     contact_email: str | None,
+    timer_billable: dict[str, bool] | None = None,
 ) -> None:
     if not comments:
         return
@@ -670,8 +718,8 @@ async def _sync_ticket_replies(
             cache=author_cache,
         )
         minutes_spent = _extract_time_worked_minutes(comment)
-        is_billable = _coerce_bool(comment.get("billable") or comment.get("is_billable"))
-        enhanced_body = _build_comment_body_with_header(comment, body)
+        is_billable = _resolve_comment_billable(comment, timer_billable)
+        enhanced_body = _build_comment_body_with_header(comment, body, is_billable=is_billable)
         await tickets_repo.create_reply(
             ticket_id=ticket_id,
             author_id=author_id,
@@ -957,6 +1005,7 @@ async def _upsert_ticket(
         outcome = "created"
 
     comments = _extract_comments(ticket)
+    timer_billable = _build_timer_billable_map(ticket)
     if ticket_db_id is not None:
         await _upsert_ticket_metadata_note(ticket_db_id, ticket, created_at=created_at)
         await _sync_ticket_replies(
@@ -964,6 +1013,7 @@ async def _upsert_ticket(
             comments,
             requester_id=requester_id,
             contact_email=contact_email,
+            timer_billable=timer_billable,
         )
         await _sync_ticket_watchers(ticket_db_id, comments, contact_email)
 
