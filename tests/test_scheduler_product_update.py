@@ -1,32 +1,32 @@
 """Tests for the 'update_products' scheduler command.
 
-The command must refresh the stock feed *before* running the product sync so
-that ``opt_accessori`` values are always up-to-date when cross-sell associations
-are resolved.
+The command must use the stock feed already cached by a prior ``update_stock_feed``
+run.  It must NOT download the XML feed itself.
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, call, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 
 @pytest.mark.asyncio
-async def test_update_products_refreshes_stock_feed_first():
-    """The update_products task calls update_stock_feed before update_products_from_feed."""
+async def test_update_products_does_not_download_feed():
+    """The update_products task only calls update_products_from_feed, not update_stock_feed."""
     task = {"id": 99, "command": "update_products"}
 
     from app.services.scheduler import SchedulerService
 
     scheduler = SchedulerService()
 
-    call_order: list[str] = []
+    stock_feed_called = False
 
     async def fake_update_stock_feed():
-        call_order.append("update_stock_feed")
+        nonlocal stock_feed_called
+        stock_feed_called = True
 
     async def fake_update_products_from_feed():
-        call_order.append("update_products_from_feed")
+        pass
 
     with patch(
         "app.services.scheduler.products_service.update_stock_feed",
@@ -44,15 +44,15 @@ async def test_update_products_refreshes_stock_feed_first():
 
         await scheduler._run_task(task)
 
-    assert call_order == ["update_stock_feed", "update_products_from_feed"], (
-        "update_stock_feed must be called before update_products_from_feed so that "
-        "opt_accessori values are populated before cross-sell resolution runs"
+    assert not stock_feed_called, (
+        "update_products must not download the XML feed; "
+        "it should use the feed already provided by update_stock_feed"
     )
 
 
 @pytest.mark.asyncio
-async def test_update_products_continues_when_stock_feed_refresh_fails():
-    """If update_stock_feed raises, update_products_from_feed still runs."""
+async def test_update_products_calls_update_products_from_feed():
+    """The update_products task calls update_products_from_feed to sync products."""
     task = {"id": 100, "command": "update_products"}
 
     from app.services.scheduler import SchedulerService
@@ -61,17 +61,11 @@ async def test_update_products_continues_when_stock_feed_refresh_fails():
 
     products_called = False
 
-    async def fake_update_stock_feed():
-        raise ValueError("STOCK_FEED_URL is not configured")
-
     async def fake_update_products_from_feed():
         nonlocal products_called
         products_called = True
 
     with patch(
-        "app.services.scheduler.products_service.update_stock_feed",
-        side_effect=fake_update_stock_feed,
-    ), patch(
         "app.services.scheduler.products_service.update_products_from_feed",
         side_effect=fake_update_products_from_feed,
     ), patch(
@@ -85,6 +79,5 @@ async def test_update_products_continues_when_stock_feed_refresh_fails():
         await scheduler._run_task(task)
 
     assert products_called, (
-        "update_products_from_feed must still run even when update_stock_feed fails, "
-        "so that products can be synced from the cached stock feed"
+        "update_products_from_feed must be called by the update_products task"
     )
