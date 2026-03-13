@@ -129,6 +129,20 @@
     const productsById = new Map(products.map((product) => [product.id, product]));
     const productsBySku = new Map(products.map((product) => [String(product.sku).toLowerCase(), product]));
 
+    async function fetchAdminProductDetails(productId) {
+      const response = await fetch(`/api/admin/shop/products/${productId}`, {
+        headers: {
+          Accept: 'application/json',
+        },
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        throw new Error(`Unable to load product details (${response.status})`);
+      }
+      return response.json();
+    }
+
+
     function createSkuListManager(listId, errorId, formName, fieldName) {
       const list = document.getElementById(listId);
       const errorEl = document.getElementById(errorId);
@@ -723,12 +737,20 @@
     }
 
     container.querySelectorAll('[data-product-edit]').forEach((button) => {
-      button.addEventListener('click', () => {
+      button.addEventListener('click', async () => {
         const id = Number(button.getAttribute('data-product-edit'));
-        const product = productsById.get(id);
-        if (!product || !editForm || !editIdField) {
+        if (!Number.isFinite(id) || id <= 0 || !editForm || !editIdField) {
           return;
         }
+
+        let product;
+        try {
+          product = await fetchAdminProductDetails(id);
+        } catch (error) {
+          console.error('Unable to load product details', error);
+          return;
+        }
+
         editIdField.value = String(id);
         editForm.action = `/shop/admin/product/${id}`;
         editForm.querySelector('#edit-product-name').value = product.name || '';

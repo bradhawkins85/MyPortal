@@ -4929,7 +4929,7 @@ async def shop_page(
             sort="name_asc",
         )
 
-        products_task = asyncio.create_task(shop_repo.list_products(filters))
+        products_task = asyncio.create_task(shop_repo.list_products_summary(filters))
         total_count_task = asyncio.create_task(shop_repo.count_products(count_filters))
         products, total_count = await asyncio.gather(products_task, total_count_task)
 
@@ -4995,6 +4995,45 @@ async def shop_page(
         "total_pages": max(1, math.ceil(total_count / page_size)) if page_size else 1,
     }
     return await _render_template("shop/index.html", request, user, extra=extra)
+
+
+@app.get("/api/shop/products/{product_id}", response_class=JSONResponse)
+async def shop_product_detail_api(request: Request, product_id: int):
+    (
+        _user,
+        _membership,
+        company,
+        company_id,
+        redirect,
+    ) = await _load_company_section_context(
+        request,
+        permission_field="can_access_shop",
+    )
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    product = await shop_repo.get_product_by_id(product_id, company_id=company_id)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
+    if is_vip and product.get("vip_price") is not None:
+        product["price"] = product["vip_price"]
+
+    return JSONResponse(content=cast(dict[str, Any], _serialise_for_json(product)))
+
+
+@app.get("/api/admin/shop/products/{product_id}", response_class=JSONResponse)
+async def admin_shop_product_detail_api(request: Request, product_id: int):
+    _current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    product = await shop_repo.get_product_by_id(product_id, include_archived=True)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    return JSONResponse(content=cast(dict[str, Any], _serialise_for_json(product)))
 
 
 @app.get(
@@ -10401,7 +10440,7 @@ async def admin_shop_page(
         sort="name_asc",
     )
     products_task = asyncio.create_task(
-        shop_repo.list_products(filters)
+        shop_repo.list_products_summary(filters)
     )
     total_count_task = asyncio.create_task(shop_repo.count_products(filters))
     restrictions_task = asyncio.create_task(shop_repo.list_product_restrictions())
@@ -10472,7 +10511,7 @@ async def admin_shop_product_create_page(request: Request):
 
     categories_task = asyncio.create_task(shop_repo.list_all_categories_flat())
     products_task = asyncio.create_task(
-        shop_repo.list_products(shop_repo.ProductFilters(include_archived=False))
+        shop_repo.list_products_summary(shop_repo.ProductFilters(include_archived=False))
     )
     restrictions_task = asyncio.create_task(shop_repo.list_product_restrictions())
     subscription_categories_task = asyncio.create_task(subscription_categories_repo.list_categories())
