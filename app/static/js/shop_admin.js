@@ -1,16 +1,4 @@
 (function () {
-  function parseJson(elementId, fallback) {
-    const element = document.getElementById(elementId);
-    if (!element) {
-      return fallback;
-    }
-    try {
-      return JSON.parse(element.textContent || 'null') ?? fallback;
-    } catch (error) {
-      console.error('Unable to parse JSON data for', elementId, error);
-      return fallback;
-    }
-  }
 
   function submitOnChange(container) {
     container.querySelectorAll('[data-submit-on-change]').forEach((input) => {
@@ -123,11 +111,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     const container = document.body;
     submitOnChange(container);
-
-    const products = parseJson('admin-products-data', []);
-    const restrictions = parseJson('admin-product-restrictions', {});
-    const productsById = new Map(products.map((product) => [product.id, product]));
-    const productsBySku = new Map(products.map((product) => [String(product.sku).toLowerCase(), product]));
+    const productLookupCache = new Map();
 
     async function fetchAdminProductDetails(productId) {
       const response = await fetch(`/api/admin/shop/products/${productId}`, {
@@ -142,8 +126,114 @@
       return response.json();
     }
 
+    async function fetchAdminProductSearch(query, limit = 10) {
+      const url = new URL('/api/admin/shop/products/search', window.location.origin);
+      url.searchParams.set('q', query);
+      url.searchParams.set('limit', String(limit));
+      const response = await fetch(url.toString(), {
+        headers: {
+          Accept: 'application/json',
+        },
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        throw new Error(`Unable to search products (${response.status})`);
+      }
+      return response.json();
+    }
 
-    function createSkuListManager(listId, errorId, formName, fieldName) {
+    async function fetchProductRestrictions(productId) {
+      const response = await fetch(`/api/admin/shop/products/${productId}/restrictions`, {
+        headers: {
+          Accept: 'application/json',
+        },
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        throw new Error(`Unable to load product restrictions (${response.status})`);
+      }
+      return response.json();
+    }
+
+    async function lookupProductBySku(sku) {
+      const cleaned = sku.trim();
+      if (!cleaned) {
+        return null;
+      }
+      const results = await fetchAdminProductSearch(cleaned, 10);
+      const target = cleaned.toLowerCase();
+      const exact = results.find((product) => String(product.sku || '').toLowerCase() === target);
+      return exact || null;
+    }
+
+    function setLoadingStatus(element, message) {
+      if (!element) {
+        return;
+      }
+      element.textContent = message || '';
+      element.hidden = !message;
+    }
+
+    function debounce(fn, delay) {
+      let timer = null;
+      return (...args) => {
+        if (timer) {
+          window.clearTimeout(timer);
+        }
+        timer = window.setTimeout(() => fn(...args), delay);
+      };
+    }
+
+    function initialiseSkuTypeahead() {
+      const datalist = document.getElementById('shop-product-sku-suggestions');
+      if (!datalist) {
+        return;
+      }
+      const inputs = Array.from(document.querySelectorAll('input[data-sku-lookup="true"]'));
+      if (!inputs.length) {
+        return;
+      }
+
+      let latestQuery = '';
+      const updateSuggestions = debounce(async (value) => {
+        const query = String(value || '').trim();
+        latestQuery = query;
+        if (query.length < 2) {
+          datalist.innerHTML = '';
+          return;
+        }
+        try {
+          const results = await fetchAdminProductSearch(query, 8);
+          if (latestQuery !== query) {
+            return;
+          }
+          datalist.innerHTML = '';
+          results.forEach((product) => {
+            const option = document.createElement('option');
+            option.value = product.sku || '';
+            option.label = `${product.name || ''} (${product.sku || ''})`;
+            datalist.appendChild(option);
+            productLookupCache.set(Number(product.id), product);
+          });
+        } catch (error) {
+          console.error('Unable to fetch SKU suggestions', error);
+        }
+      }, 200);
+
+      inputs.forEach((input) => {
+        input.setAttribute('list', 'shop-product-sku-suggestions');
+        input.addEventListener('input', () => {
+          updateSuggestions(input.value);
+        });
+        input.addEventListener('focus', () => {
+          if (String(input.value || '').trim().length >= 2) {
+            updateSuggestions(input.value);
+          }
+        });
+      });
+    }
+
+    function createSkuListManager(listId, errorId, fieldName) {
       const list = document.getElementById(listId);
       const errorEl = document.getElementById(errorId);
       if (!list) {
@@ -189,13 +279,20 @@
         list.appendChild(li);
       }
 
-      function addBySku(sku, excludeProductId) {
+      async function addBySku(sku, excludeProductId) {
         showError('');
-        const trimmed = sku.trim().toLowerCase();
+        const trimmed = sku.trim();
         if (!trimmed) {
           return false;
         }
-        const product = productsBySku.get(trimmed);
+        let product;
+        try {
+          product = await lookupProductBySku(trimmed);
+        } catch (error) {
+          console.error('Unable to search product by SKU', error);
+          showError('Unable to search products right now. Please try again.');
+          return false;
+        }
         if (!product) {
           showError(`No product found with SKU "${sku.trim()}"`);
           return false;
@@ -214,24 +311,38 @@
           return false;
         }
         selectedIds.add(numericId);
+        productLookupCache.set(numericId, product);
         renderItem(product);
         return true;
       }
 
-      function initFromIds(ids, excludeProductId) {
+      async function initFromIds(ids, excludeProductId) {
         list.innerHTML = '';
         selectedIds.clear();
         showError('');
-        (ids || []).forEach((id) => {
-          const product = productsById.get(Number(id));
+        const identifiers = Array.isArray(ids) ? ids : [];
+        for (const id of identifiers) {
+          const numericId = Number(id);
+          if (!Number.isFinite(numericId) || numericId <= 0) {
+            continue;
+          }
+          let product = productLookupCache.get(numericId);
+          if (!product) {
+            try {
+              product = await fetchAdminProductDetails(numericId);
+              productLookupCache.set(numericId, product);
+            } catch (error) {
+              console.error('Unable to hydrate related product', numericId, error);
+              continue;
+            }
+          }
           if (product && !product.archived) {
-            const numericId = Number(product.id);
             if (excludeProductId == null || numericId !== Number(excludeProductId)) {
               selectedIds.add(numericId);
               renderItem(product);
             }
           }
-        });
+        }
       }
 
       return { addBySku, initFromIds, showError };
@@ -241,18 +352,16 @@
     const createCrossManager = createSkuListManager(
       'product-cross-sell-list',
       'create-cross-sell-error',
-      'create',
       'cross_sell_product_ids',
     );
     const createUpsellManager = createSkuListManager(
       'product-upsell-list',
       'create-upsell-error',
-      'create',
       'upsell_product_ids',
     );
 
     document.querySelectorAll('[data-sku-add][data-form="create"]').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const type = btn.getAttribute('data-sku-add');
         const inputId = type === 'cross-sell' ? 'product-cross-sell-sku' : 'product-upsell-sku';
         const manager = type === 'cross-sell' ? createCrossManager : createUpsellManager;
@@ -260,7 +369,7 @@
         if (!input || !manager) {
           return;
         }
-        if (manager.addBySku(input.value, null)) {
+        if (await manager.addBySku(input.value, null)) {
           input.value = '';
         }
       });
@@ -284,6 +393,8 @@
         }
       });
     });
+
+    initialiseSkuTypeahead();
 
     // Initialize field visibility toggle for create form
     const createSubscriptionCategorySelect = document.getElementById('product-subscription-category');
@@ -438,7 +549,9 @@
     const descriptionEditorModal = document.getElementById('description-editor-modal');
     const editForm = document.getElementById('product-edit-form');
     const visibilityForm = document.getElementById('product-visibility-form');
+    const visibilityLoadingStatus = document.getElementById('product-visibility-loading-status');
     const imageFilenameDisplay = document.getElementById('edit-product-image-filename');
+    const editLoadingStatus = document.getElementById('edit-product-loading-status');
     const editIdField = document.getElementById('edit-product-id');
     const featuresTable = document.getElementById('edit-product-features-table');
     const featuresTableBody = featuresTable ? featuresTable.querySelector('tbody') : null;
@@ -711,18 +824,16 @@
     const editCrossManager = createSkuListManager(
       'edit-product-cross-sell-list',
       'edit-cross-sell-error',
-      'edit',
       'cross_sell_product_ids',
     );
     const editUpsellManager = createSkuListManager(
       'edit-product-upsell-list',
       'edit-upsell-error',
-      'edit',
       'upsell_product_ids',
     );
 
     document.querySelectorAll('[data-sku-add][data-form="edit"]').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const type = btn.getAttribute('data-sku-add');
         const inputId = type === 'cross-sell' ? 'edit-product-cross-sell-sku' : 'edit-product-upsell-sku';
         const manager = type === 'cross-sell' ? editCrossManager : editUpsellManager;
@@ -730,7 +841,7 @@
         if (!input || !manager) {
           return;
         }
-        if (manager.addBySku(input.value, currentEditProductId)) {
+        if (await manager.addBySku(input.value, currentEditProductId)) {
           input.value = '';
         }
       });
@@ -776,11 +887,16 @@
           return;
         }
 
+        setLoadingStatus(editLoadingStatus, 'Loading product details…');
+        openModal(editModal);
+
         let product;
         try {
           product = await fetchAdminProductDetails(id);
+          productLookupCache.set(id, product);
         } catch (error) {
           console.error('Unable to load product details', error);
+          setLoadingStatus(editLoadingStatus, 'Unable to load product details. Please try again.');
           return;
         }
 
@@ -824,10 +940,10 @@
           priceAnnualAnnual.value = product.price_annual_annual_payment != null ? product.price_annual_annual_payment : '';
         }
         if (editCrossManager) {
-          editCrossManager.initFromIds(product.cross_sell_product_ids || [], id);
+          await editCrossManager.initFromIds(product.cross_sell_product_ids || [], id);
         }
         if (editUpsellManager) {
-          editUpsellManager.initFromIds(product.upsell_product_ids || [], id);
+          await editUpsellManager.initFromIds(product.upsell_product_ids || [], id);
         }
         currentEditProductId = id;
         if (imageFilenameDisplay) {
@@ -840,24 +956,36 @@
           }
         }
         renderFeatureRows(product.features || []);
-        openModal(editModal);
+        setLoadingStatus(editLoadingStatus, "");
       });
     });
 
     container.querySelectorAll('[data-product-visibility]').forEach((button) => {
-      button.addEventListener('click', () => {
+      button.addEventListener('click', async () => {
         const id = Number(button.getAttribute('data-product-visibility'));
         const form = visibilityForm;
         if (!form) {
           return;
         }
         form.action = `/shop/admin/product/${id}/visibility`;
-        const selected = (restrictions[id] || []).map((entry) => Number(entry.company_id));
+        setLoadingStatus(visibilityLoadingStatus, 'Loading visibility restrictions…');
+        openModal(visibilityModal);
+
+        let restrictions = [];
+        try {
+          restrictions = await fetchProductRestrictions(id);
+        } catch (error) {
+          console.error('Unable to load product visibility restrictions', error);
+          setLoadingStatus(visibilityLoadingStatus, 'Unable to load restrictions. Please try again.');
+          return;
+        }
+
+        const selected = restrictions.map((entry) => Number(entry.company_id));
         form.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
           const value = Number(checkbox.value);
           checkbox.checked = selected.includes(value);
         });
-        openModal(visibilityModal);
+        setLoadingStatus(visibilityLoadingStatus, '');
       });
     });
 
