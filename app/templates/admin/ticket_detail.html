@@ -588,7 +588,7 @@
                     name="description"
                     class="form-input"
                     data-ticket-description-input
-                  >{{- description_html|replace('\r\n', '\n')|replace('\r', '\n') -}}</textarea>
+                  >{{- (description_html or '')|replace('\r\n', '\n')|replace('\r', '\n') -}}</textarea>
                   <p class="form-help">Share customer notes, troubleshooting steps, or context for technicians.</p>
                 </div>
                 <div class="form-actions">
