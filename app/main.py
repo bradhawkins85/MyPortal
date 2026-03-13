@@ -557,7 +557,7 @@ upload_paths = [
 for path in upload_paths:
     endpoint_limiter.add_limit(path, "POST", limit=10, window_seconds=3600, key_func=_user_upload_key)
 
-# API calls: 300 requests per minute per user (applied via general rate limiter)
+# API calls: 5000 requests per minute per user (applied via general rate limiter)
 
 app.add_middleware(
     EndpointRateLimiterMiddleware,
@@ -566,7 +566,7 @@ app.add_middleware(
 )
 
 general_rate_limiter = SimpleRateLimiter(
-    limit=300,
+    limit=5000,
     window_seconds=60,
     redis_client=_rate_limit_redis,
     namespace="rate-limit:general",
