@@ -10488,6 +10488,23 @@ async def admin_shop_page(
     return await _render_template("admin/shop.html", request, current_user, extra=extra)
 
 
+@app.get("/admin/shop/optional-accessories", response_class=HTMLResponse)
+async def admin_shop_optional_accessories_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    products = await shop_repo.list_optional_accessory_products()
+
+    extra = {
+        "title": "Optional accessories",
+        "products": products,
+    }
+    return await _render_template(
+        "admin/shop_optional_accessories.html", request, current_user, extra=extra
+    )
+
+
 @app.get("/admin/shop/categories", response_class=HTMLResponse)
 async def admin_shop_categories_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
