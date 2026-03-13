@@ -11393,7 +11393,23 @@ async def admin_update_shop_product(
         product_id=product_id,
         updated_by=current_user["id"] if current_user else None,
     )
-    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+    redirect_params: dict[str, str] = {}
+    try:
+        # request.query_params accesses scope["query_string"] which may be absent
+        # in synthetic test requests; guard with KeyError to stay safe in production
+        qp = request.query_params
+        if qp.get("showArchived"):
+            redirect_params["showArchived"] = "1"
+        page_str = qp.get("page", "")
+        if page_str.isdigit() and int(page_str) > 1:
+            redirect_params["page"] = page_str
+        page_size_str = qp.get("pageSize", "")
+        if page_size_str.isdigit() and int(page_size_str) > 0:
+            redirect_params["pageSize"] = page_size_str
+    except KeyError:
+        pass
+    redirect_url = f"/admin/shop?{urlencode(redirect_params)}" if redirect_params else "/admin/shop"
+    return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
 async def _handle_shop_product_archive(
