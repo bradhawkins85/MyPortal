@@ -174,6 +174,19 @@
       element.hidden = !message;
     }
 
+    function setFormLoadingState(form, isLoading) {
+      if (!form) {
+        return;
+      }
+      form.setAttribute('aria-busy', isLoading ? 'true' : 'false');
+      form.querySelectorAll('input, select, textarea, button').forEach((field) => {
+        if (field.hasAttribute('data-modal-close')) {
+          return;
+        }
+        field.disabled = Boolean(isLoading);
+      });
+    }
+
     function debounce(fn, delay) {
       let timer = null;
       return (...args) => {
@@ -888,6 +901,7 @@
         }
 
         setLoadingStatus(editLoadingStatus, 'Loading product details…');
+        setFormLoadingState(editForm, true);
         openModal(editModal);
 
         let product;
@@ -897,6 +911,7 @@
         } catch (error) {
           console.error('Unable to load product details', error);
           setLoadingStatus(editLoadingStatus, 'Unable to load product details. Please try again.');
+          setFormLoadingState(editForm, false);
           return;
         }
 
@@ -956,7 +971,8 @@
           }
         }
         renderFeatureRows(product.features || []);
-        setLoadingStatus(editLoadingStatus, "");
+        setLoadingStatus(editLoadingStatus, '');
+        setFormLoadingState(editForm, false);
       });
     });
 
@@ -969,6 +985,7 @@
         }
         form.action = `/shop/admin/product/${id}/visibility`;
         setLoadingStatus(visibilityLoadingStatus, 'Loading visibility restrictions…');
+        setFormLoadingState(form, true);
         openModal(visibilityModal);
 
         let restrictions = [];
@@ -977,6 +994,7 @@
         } catch (error) {
           console.error('Unable to load product visibility restrictions', error);
           setLoadingStatus(visibilityLoadingStatus, 'Unable to load restrictions. Please try again.');
+          setFormLoadingState(form, false);
           return;
         }
 
@@ -986,6 +1004,7 @@
           checkbox.checked = selected.includes(value);
         });
         setLoadingStatus(visibilityLoadingStatus, '');
+        setFormLoadingState(form, false);
       });
     });
 
