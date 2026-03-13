@@ -1,0 +1,3 @@
+ALTER TABLE shop_optional_accessories
+    ADD COLUMN IF NOT EXISTS dismissed TINYINT(1) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS dismissed_at DATETIME NULL;
