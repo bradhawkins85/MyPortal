@@ -396,15 +396,15 @@
       });
     }
 
-    function buildTacticalUrl(tacticalId) {
-      if (!tacticalBaseUrl || (typeof tacticalId !== 'string' && typeof tacticalId !== 'number')) {
+    function buildTacticalUrl(assetName) {
+      if (!tacticalBaseUrl || typeof assetName !== 'string') {
         return null;
       }
-      const trimmed = String(tacticalId).trim();
+      const trimmed = assetName.trim();
       if (!trimmed) {
         return null;
       }
-      return `${tacticalBaseUrl}/web/agents/${encodeURIComponent(trimmed)}`;
+      return `${tacticalBaseUrl}/?search=${encodeURIComponent(trimmed)}`;
     }
 
     function renderLinkedAssets() {
@@ -444,7 +444,7 @@
 
         const label = formatAssetLabel(record);
         const displayName = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : label;
-        const tacticalUrl = buildTacticalUrl(record.tactical_asset_id);
+        const tacticalUrl = buildTacticalUrl(displayName);
         const nameElement = tacticalUrl ? document.createElement('a') : document.createElement('span');
         nameElement.className = 'ticket-assets-linked__name';
         nameElement.textContent = displayName;
@@ -697,8 +697,9 @@
       if (!assetElement) {
         return;
       }
-      const tacticalId = assetElement.getAttribute('data-tactical-id');
-      const tacticalUrl = buildTacticalUrl(tacticalId);
+      const nameEl = assetElement.querySelector('[data-linked-asset-name]');
+      const assetName = nameEl ? nameEl.textContent.trim() : '';
+      const tacticalUrl = buildTacticalUrl(assetName);
       if (!tacticalUrl) {
         return;
       }

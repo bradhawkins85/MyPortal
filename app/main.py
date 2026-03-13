@@ -12607,9 +12607,9 @@ async def _render_ticket_detail(
     if tactical_module:
         tactical_settings = tactical_module.get("settings") or {}
         if isinstance(tactical_settings, Mapping):
-            base_url = str(tactical_settings.get("base_url") or "").strip()
-            if base_url:
-                tactical_base_url = base_url.rstrip("/")
+            base_rmm_url = str(tactical_settings.get("base_rmm_url") or "").strip()
+            if base_rmm_url:
+                tactical_base_url = base_rmm_url.rstrip("/")
 
     ordered_replies = list(reversed(replies))
     
