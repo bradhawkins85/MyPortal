@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 import pytest
 
@@ -149,3 +149,240 @@ async def test_update_stock_feed_requires_config(monkeypatch):
 
     with pytest.raises(ValueError):
         await products_service.update_stock_feed()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_parse_feed_item_includes_opt_accessori():
+    """OptAccessori in XML feed is parsed into the opt_accessori key."""
+    xml_payload = """
+        <rss>
+          <channel>
+            <item>
+              <StockCode>MAIN1</StockCode>
+              <ProductName>Main Product</ProductName>
+              <OptAccessori>ACC1, ACC2, ACC3</OptAccessori>
+            </item>
+          </channel>
+        </rss>
+    """
+    items = products_service._parse_stock_feed_xml(xml_payload)
+    assert len(items) == 1
+    assert items[0]["opt_accessori"] == "ACC1, ACC2, ACC3"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_parse_feed_item_opt_accessori_absent():
+    """When OptAccessori is absent from XML, opt_accessori key is None."""
+    xml_payload = """
+        <rss>
+          <channel>
+            <item>
+              <StockCode>MAIN1</StockCode>
+              <ProductName>Main Product</ProductName>
+            </item>
+          </channel>
+        </rss>
+    """
+    items = products_service._parse_stock_feed_xml(xml_payload)
+    assert len(items) == 1
+    assert items[0]["opt_accessori"] is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_process_feed_item_links_cross_sells_from_opt_accessori(monkeypatch):
+    """When opt_accessori is present, matching store products are linked as cross-sells."""
+    item = {
+        "sku": "MAIN1",
+        "product_name": "Main Product",
+        "product_name2": None,
+        "rrp": None,
+        "category_name": None,
+        "on_hand_nsw": 0,
+        "on_hand_qld": 0,
+        "on_hand_vic": 0,
+        "on_hand_sa": 0,
+        "dbp": None,
+        "weight": None,
+        "length": None,
+        "width": None,
+        "height": None,
+        "pub_date": None,
+        "warranty_length": None,
+        "manufacturer": None,
+        "image_url": None,
+        "opt_accessori": "ACC1, ACC2",
+    }
+
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_ids_by_skus",
+        AsyncMock(return_value=[10, 11]),
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_by_sku",
+        AsyncMock(return_value={"id": 5, "image_url": ""}),
+    )
+    mock_replace = AsyncMock()
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "replace_product_recommendations",
+        mock_replace,
+    )
+    monkeypatch.setattr(products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None))
+
+    result = await products_service._process_feed_item(item, None)
+
+    assert result is True
+    products_service.shop_repo.get_product_ids_by_skus.assert_awaited_once_with(
+        ["ACC1", "ACC2"]
+    )
+    mock_replace.assert_awaited_once_with(5, cross_sell_ids=[10, 11])
+
+
+@pytest.mark.anyio("asyncio")
+async def test_process_feed_item_skips_cross_sells_when_opt_accessori_absent(monkeypatch):
+    """When opt_accessori is absent, cross-sells are not updated."""
+    item = {
+        "sku": "MAIN1",
+        "product_name": "Main Product",
+        "product_name2": None,
+        "rrp": None,
+        "category_name": None,
+        "on_hand_nsw": 0,
+        "on_hand_qld": 0,
+        "on_hand_vic": 0,
+        "on_hand_sa": 0,
+        "dbp": None,
+        "weight": None,
+        "length": None,
+        "width": None,
+        "height": None,
+        "pub_date": None,
+        "warranty_length": None,
+        "manufacturer": None,
+        "image_url": None,
+        "opt_accessori": None,
+    }
+
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_by_sku",
+        AsyncMock(return_value={"id": 5, "image_url": ""}),
+    )
+    mock_get_ids = AsyncMock(return_value=[])
+    monkeypatch.setattr(products_service.shop_repo, "get_product_ids_by_skus", mock_get_ids)
+    mock_replace = AsyncMock()
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "replace_product_recommendations",
+        mock_replace,
+    )
+    monkeypatch.setattr(products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None))
+
+    result = await products_service._process_feed_item(item, None)
+
+    assert result is True
+    mock_get_ids.assert_not_called()
+    mock_replace.assert_not_called()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_process_feed_item_empty_opt_accessori_clears_cross_sells(monkeypatch):
+    """When opt_accessori is an empty string, cross-sells are cleared (set to empty list)."""
+    item = {
+        "sku": "MAIN1",
+        "product_name": "Main Product",
+        "product_name2": None,
+        "rrp": None,
+        "category_name": None,
+        "on_hand_nsw": 0,
+        "on_hand_qld": 0,
+        "on_hand_vic": 0,
+        "on_hand_sa": 0,
+        "dbp": None,
+        "weight": None,
+        "length": None,
+        "width": None,
+        "height": None,
+        "pub_date": None,
+        "warranty_length": None,
+        "manufacturer": None,
+        "image_url": None,
+        "opt_accessori": "",
+    }
+
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    mock_get_ids = AsyncMock(return_value=[])
+    monkeypatch.setattr(products_service.shop_repo, "get_product_ids_by_skus", mock_get_ids)
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_by_sku",
+        AsyncMock(return_value={"id": 5, "image_url": ""}),
+    )
+    mock_replace = AsyncMock()
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "replace_product_recommendations",
+        mock_replace,
+    )
+    monkeypatch.setattr(products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None))
+
+    result = await products_service._process_feed_item(item, None)
+
+    assert result is True
+    mock_replace.assert_awaited_once_with(5, cross_sell_ids=[])
+
+
+@pytest.mark.anyio("asyncio")
+async def test_update_stock_feed_persists_opt_accessori(monkeypatch):
+    """opt_accessori from XML is included in the items passed to replace_feed."""
+    xml_payload = """
+        <rss>
+          <channel>
+            <item>
+              <StockCode>ABC123</StockCode>
+              <ProductName>Widget</ProductName>
+              <OptAccessori>ACC1,ACC2</OptAccessori>
+            </item>
+          </channel>
+        </rss>
+    """
+
+    class DummyResponse:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class DummyClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "DummyClient":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:  # type: ignore[override]
+            return False
+
+        async def get(self, url: str, follow_redirects: bool = True) -> DummyResponse:
+            return DummyResponse(xml_payload)
+
+    monkeypatch.setattr(products_service.httpx, "AsyncClient", DummyClient)
+    monkeypatch.setattr(
+        products_service,
+        "get_settings",
+        lambda: SimpleNamespace(stock_feed_url="https://example.com/feed.xml"),
+    )
+
+    mock_replace = AsyncMock()
+    monkeypatch.setattr(products_service.stock_feed_repo, "replace_feed", mock_replace)
+
+    count = await products_service.update_stock_feed()
+
+    assert count == 1
+    items = mock_replace.await_args.args[0]
+    assert items[0]["opt_accessori"] == "ACC1,ACC2"
