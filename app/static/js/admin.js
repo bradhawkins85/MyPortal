@@ -1033,6 +1033,7 @@
       }
       const ticketId = numericId;
       const row = document.createElement('tr');
+      row.setAttribute('data-ticket-id', String(ticketId));
 
       if (canBulkDelete) {
         const selectCell = document.createElement('td');
@@ -1107,34 +1108,44 @@
       return row;
     }
 
-    function renderTable(items) {
+    function patchRows(items) {
       const tbody = table.tBodies[0] || table.createTBody();
-      const fragment = document.createDocumentFragment();
       const rows = Array.isArray(items) ? items : [];
-
+      const existing = new Map();
+      Array.from(tbody.querySelectorAll('tr[data-ticket-id]')).forEach((row) => {
+        const key = row.getAttribute('data-ticket-id');
+        if (key) existing.set(key, row);
+      });
+      const seen = new Set();
+      const fragment = document.createDocumentFragment();
       rows.forEach((ticket) => {
         const row = buildRow(ticket);
-        if (row) {
-          fragment.appendChild(row);
+        if (!row) return;
+        const key = row.getAttribute('data-ticket-id');
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        const prior = existing.get(key);
+        if (prior) {
+          prior.replaceWith(row);
         }
+        fragment.appendChild(row);
       });
-
-      if (!fragment.childNodes.length) {
-        const emptyRow = document.createElement('tr');
-        const headerCells = table.querySelectorAll('thead th');
-        const columnCount = headerCells.length || (canBulkDelete ? 9 : 8);
-        const emptyCell = document.createElement('td');
-        emptyCell.colSpan = columnCount || 8;
-        emptyCell.className = 'table__empty';
-        emptyCell.textContent = emptyMessage;
-        emptyRow.appendChild(emptyCell);
-        fragment.appendChild(emptyRow);
+      while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+      if (fragment.childNodes.length) {
+        tbody.appendChild(fragment);
+        return;
       }
+      const emptyRow = document.createElement('tr');
+      const emptyCell = document.createElement('td');
+      emptyCell.colSpan = table.querySelectorAll('thead th').length || 8;
+      emptyCell.className = 'table__empty';
+      emptyCell.textContent = emptyMessage;
+      emptyRow.appendChild(emptyCell);
+      tbody.appendChild(emptyRow);
+    }
 
-      while (tbody.firstChild) {
-        tbody.removeChild(tbody.firstChild);
-      }
-      tbody.appendChild(fragment);
+    function renderTable(items) {
+      patchRows(items);
     }
 
     state = {
@@ -1167,6 +1178,23 @@
 
     registerTableRefreshHandler('tickets', handler);
     registerTableRefreshHandler('tickets-table', handler);
+
+    const searchInput = document.querySelector('[data-ticket-dashboard-search]');
+    const table = document.getElementById('tickets-table');
+    if (searchInput instanceof HTMLInputElement && table instanceof HTMLTableElement) {
+      let timer = null;
+      searchInput.addEventListener('input', () => {
+        if (timer) window.clearTimeout(timer);
+        timer = window.setTimeout(() => {
+          const endpoint = table.getAttribute('data-table-refresh-url');
+          if (!endpoint) return;
+          const params = new URLSearchParams();
+          if (searchInput.value.trim()) params.set('search', searchInput.value.trim());
+          table.setAttribute('data-table-refresh-url', params.toString() ? `${endpoint.split('?')[0]}?${params.toString()}` : endpoint.split('?')[0]);
+          table.dispatchEvent(new CustomEvent('table:refresh-request'));
+        }, 300);
+      });
+    }
   }
 
   function parsePermissions(value) {
