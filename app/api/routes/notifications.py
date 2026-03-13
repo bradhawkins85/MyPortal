@@ -294,7 +294,7 @@ async def delete_notification(
     record = await notifications_repo.get_notification(notification_id)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
-    if record.get("user_id") not in (None, current_user.get("id")):
+    if record.get("user_id") != current_user.get("id"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted to delete this notification")
     await notifications_repo.delete_notification(notification_id)
 
