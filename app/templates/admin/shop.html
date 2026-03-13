@@ -308,6 +308,7 @@
       &times;
     </button>
     <h2 class="modal__title">Edit product</h2>
+    <p class="form-helper" id="edit-product-loading-status" hidden>Loading product details…</p>
     <form id="product-edit-form" method="post" enctype="multipart/form-data" class="form-grid">
       {% if csrf_token %}
       <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
@@ -375,6 +376,7 @@
             id="edit-product-cross-sell-sku"
             placeholder="Enter product SKU"
             autocomplete="off"
+            data-sku-lookup="true"
           />
           <button type="button" class="button button--small button--secondary" data-sku-add="cross-sell" data-form="edit">Add</button>
         </div>
@@ -391,6 +393,7 @@
             id="edit-product-upsell-sku"
             placeholder="Enter product SKU"
             autocomplete="off"
+            data-sku-lookup="true"
           />
           <button type="button" class="button button--small button--secondary" data-sku-add="upsell" data-form="edit">Add</button>
         </div>
@@ -518,6 +521,7 @@
       &times;
     </button>
     <h2 class="modal__title">Product visibility</h2>
+    <p class="form-helper" id="product-visibility-loading-status" hidden>Loading visibility restrictions…</p>
     <form id="product-visibility-form" method="post" class="form-grid">
       {% if csrf_token %}
       <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
@@ -538,8 +542,7 @@
   </div>
 </div>
 
-<script type="application/json" id="admin-products-data">{{ products | tojson }}</script>
-<script type="application/json" id="admin-product-restrictions">{{ product_restrictions | tojson }}</script>
+<datalist id="shop-product-sku-suggestions"></datalist>
 
 <div class="modal" id="description-editor-modal" role="dialog" aria-modal="true" hidden>
   <div class="modal__content modal__content--large" role="document">
