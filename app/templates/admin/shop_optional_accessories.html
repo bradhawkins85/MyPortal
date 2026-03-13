@@ -10,24 +10,39 @@
 {% endblock %}
 
 {% block content %}
+  {% set col_count = 9 if not show_dismissed else 8 %}
   <div class="admin-grid">
     <section class="card card--panel admin-grid__full" aria-labelledby="optional-accessories-heading">
       <header class="card__header card__header--stacked">
         <div>
-          <h2 class="card__title" id="optional-accessories-heading">Pending optional accessories</h2>
-          <p class="card__subtitle">
-            These items appear as optional accessories (cross-sells) in the stock feed for products already in your shop, but have not yet been imported. Import an item to add it to your shop, or dismiss it to remove it from this list.
-          </p>
+          {% if show_dismissed %}
+            <h2 class="card__title" id="optional-accessories-heading">Dismissed optional accessories</h2>
+            <p class="card__subtitle">
+              These items were previously dismissed. You can restore an item to move it back to the pending list.
+            </p>
+          {% else %}
+            <h2 class="card__title" id="optional-accessories-heading">Pending optional accessories</h2>
+            <p class="card__subtitle">
+              These items appear as optional accessories (cross-sells) in the stock feed for products already in your shop, but have not yet been imported. Import an item to add it to your shop, or dismiss it to remove it from this list.
+            </p>
+          {% endif %}
         </div>
         <div class="card__controls">
-          <form action="/admin/shop/optional-accessories/sync" method="post" class="inline-form">
-            {% if csrf_token %}
-            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-            {% endif %}
-            <button type="submit" class="button button--ghost button--small">
-              Sync from feed
-            </button>
-          </form>
+          {% if not show_dismissed %}
+            <form action="/admin/shop/optional-accessories/sync" method="post" class="inline-form">
+              {% if csrf_token %}
+              <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+              {% endif %}
+              <button type="submit" class="button button--ghost button--small">
+                Sync from feed
+              </button>
+            </form>
+          {% endif %}
+          {% if show_dismissed %}
+            <a href="/admin/shop/optional-accessories" class="button button--ghost button--small">View pending</a>
+          {% else %}
+            <a href="/admin/shop/optional-accessories?show=dismissed" class="button button--ghost button--small">View dismissed</a>
+          {% endif %}
           <input
             type="search"
             class="form-input card__control"
@@ -38,10 +53,34 @@
           <span class="badge badge--muted">{{ accessories | length }} item{{ 's' if accessories | length != 1 else '' }}</span>
         </div>
       </header>
+
+      {% if not show_dismissed %}
+      <form action="/admin/shop/optional-accessories/bulk-dismiss" method="post" id="bulk-dismiss-form">
+        {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <div class="card__toolbar">
+          <button
+            type="submit"
+            class="button button--ghost button--small"
+            id="bulk-dismiss-btn"
+            disabled
+            data-confirm="Dismiss selected accessories?"
+          >
+            Dismiss selected
+          </button>
+        </div>
+      {% endif %}
+
       <div class="table-wrapper">
         <table class="table" id="optional-accessories-table" data-table>
           <thead>
             <tr>
+              {% if not show_dismissed %}
+              <th scope="col" class="table__col-checkbox">
+                <input type="checkbox" id="select-all-accessories" aria-label="Select all" />
+              </th>
+              {% endif %}
               <th scope="col" class="table__col-image">Image</th>
               <th scope="col" data-sort="string">Name</th>
               <th scope="col" data-sort="string">SKU</th>
@@ -55,6 +94,18 @@
           <tbody>
             {% for item in accessories %}
               <tr>
+                {% if not show_dismissed %}
+                <td class="table__col-checkbox">
+                  <input
+                    type="checkbox"
+                    name="accessory_ids"
+                    value="{{ item.id }}"
+                    class="accessory-checkbox"
+                    aria-label="Select {{ item.product_name or item.sku }}"
+                    form="bulk-dismiss-form"
+                  />
+                </td>
+                {% endif %}
                 <td class="table__col-image">
                   {% if item.image_url %}
                     <button
@@ -96,30 +147,49 @@
                   {% endif %}
                 </td>
                 <td class="table__actions">
-                  <form action="/admin/shop/optional-accessories/{{ item.id }}/import" method="post" class="inline-form">
-                    {% if csrf_token %}
-                    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                    {% endif %}
-                    <button type="submit" class="button button--primary button--small">Import</button>
-                  </form>
-                  <form action="/admin/shop/optional-accessories/{{ item.id }}/dismiss" method="post" class="inline-form" data-confirm="Dismiss this accessory?">
-                    {% if csrf_token %}
-                    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                    {% endif %}
-                    <button type="submit" class="button button--ghost button--small">Dismiss</button>
-                  </form>
+                  {% if show_dismissed %}
+                    <form action="/admin/shop/optional-accessories/{{ item.id }}/restore" method="post" class="inline-form">
+                      {% if csrf_token %}
+                      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                      {% endif %}
+                      <button type="submit" class="button button--ghost button--small">Restore</button>
+                    </form>
+                  {% else %}
+                    <form action="/admin/shop/optional-accessories/{{ item.id }}/import" method="post" class="inline-form">
+                      {% if csrf_token %}
+                      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                      {% endif %}
+                      <button type="submit" class="button button--primary button--small">Import</button>
+                    </form>
+                    <form action="/admin/shop/optional-accessories/{{ item.id }}/dismiss" method="post" class="inline-form" data-confirm="Dismiss this accessory?">
+                      {% if csrf_token %}
+                      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                      {% endif %}
+                      <button type="submit" class="button button--ghost button--small">Dismiss</button>
+                    </form>
+                  {% endif %}
                 </td>
               </tr>
             {% else %}
               <tr>
-                <td colspan="8" class="table__empty">
+                {% if not show_dismissed %}
+                <td colspan="{{ col_count }}" class="table__empty">
                   No pending optional accessories found. Use "Sync from feed" to scan the stock feed for accessories that are not yet in your shop.
                 </td>
+                {% else %}
+                <td colspan="{{ col_count }}" class="table__empty">
+                  No dismissed optional accessories found.
+                </td>
+                {% endif %}
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
+
+      {% if not show_dismissed %}
+      </form>
+      {% endif %}
     </section>
   </div>
 
@@ -172,6 +242,37 @@
         if (btn) {
           openImageModal(btn.dataset.imagePreview, btn.dataset.imageLabel || '');
         }
+      });
+
+      // Bulk dismiss: enable/disable button based on checkbox selection
+      const selectAll = document.getElementById('select-all-accessories');
+      const bulkBtn = document.getElementById('bulk-dismiss-btn');
+
+      function updateBulkBtn() {
+        if (!bulkBtn) return;
+        const checked = document.querySelectorAll('.accessory-checkbox:checked');
+        bulkBtn.disabled = checked.length === 0;
+      }
+
+      if (selectAll) {
+        selectAll.addEventListener('change', function () {
+          document.querySelectorAll('.accessory-checkbox').forEach(function (cb) {
+            cb.checked = selectAll.checked;
+          });
+          updateBulkBtn();
+        });
+      }
+
+      document.querySelectorAll('.accessory-checkbox').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+          const all = document.querySelectorAll('.accessory-checkbox');
+          const checked = document.querySelectorAll('.accessory-checkbox:checked');
+          if (selectAll) {
+            selectAll.checked = all.length === checked.length;
+            selectAll.indeterminate = checked.length > 0 && checked.length < all.length;
+          }
+          updateBulkBtn();
+        });
       });
     })();
   </script>
