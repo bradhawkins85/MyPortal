@@ -220,3 +220,40 @@ async def test_quotes_permission_denied(monkeypatch, active_session):
             assert response.status_code == 403
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_get_quote_denies_removed_creator_without_membership(monkeypatch, active_session):
+    company = {"id": 7, "name": "Acme Corp"}
+    quote_summary = _make_summary(user_id=1)
+
+    async def fake_get_company_by_id(company_id):
+        return company if company_id == 7 else None
+
+    async def fake_get_user_company(user_id, company_id):
+        return None
+
+    async def fake_get_quote_summary(quote_number, company_id):
+        if quote_number == "QUO123456789012" and company_id == 7:
+            return quote_summary
+        return None
+
+    monkeypatch.setattr(company_repo, "get_company_by_id", fake_get_company_by_id)
+    monkeypatch.setattr(user_company_repo, "get_user_company", fake_get_user_company)
+    monkeypatch.setattr(shop_repo, "get_quote_summary", fake_get_quote_summary)
+
+    def override_database():
+        pass
+
+    def override_current_user():
+        return {"id": 1, "is_super_admin": False}
+
+    app.dependency_overrides[database_dependencies.require_database] = override_database
+    app.dependency_overrides[auth_dependencies.get_current_user] = override_current_user
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/quotes/QUO123456789012?companyId=7")
+            assert response.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
