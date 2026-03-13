@@ -3011,6 +3011,20 @@ button.header-title-menu__link {
   background: rgba(56, 189, 248, 0.45);
 }
 
+.shop-category-select-wrapper {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  max-width: 20rem;
+}
+
+.shop-category-select {
+  width: 100%;
+  padding: var(--space-compact) var(--space-gap-base);
+  font-weight: 500;
+  cursor: pointer;
+}
+
 
 .shop-toolbar {
   flex-wrap: wrap;
