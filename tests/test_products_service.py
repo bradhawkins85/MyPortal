@@ -447,6 +447,9 @@ async def test_update_products_from_feed_sets_cross_sells(monkeypatch):
     monkeypatch.setattr(
         products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
     )
+    monkeypatch.setattr(
+        products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
+    )
 
     await products_service.update_products_from_feed()
 
@@ -487,6 +490,9 @@ async def test_update_products_from_feed_upserts_only_existing_feed_items(monkey
     monkeypatch.setattr(
         products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
     )
+    monkeypatch.setattr(
+        products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
+    )
 
     await products_service.update_products_from_feed()
 
@@ -524,6 +530,9 @@ async def test_update_products_from_feed_cross_sells_resolved_for_existing_produ
     )
     monkeypatch.setattr(
         products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
     )
 
     await products_service.update_products_from_feed()
@@ -563,6 +572,9 @@ async def test_update_products_from_feed_uses_vendor_sku_for_cross_sells(monkeyp
     monkeypatch.setattr(
         products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
     )
+    monkeypatch.setattr(
+        products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
+    )
 
     await products_service.update_products_from_feed()
 
@@ -594,6 +606,9 @@ async def test_update_products_from_feed_does_not_download_images_for_new_produc
     monkeypatch.setattr(
         products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
     )
+    monkeypatch.setattr(
+        products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
+    )
 
     mock_download = AsyncMock(return_value="/uploads/shop/some.jpg")
     monkeypatch.setattr(products_service, "_download_product_image", mock_download)
@@ -624,6 +639,9 @@ async def test_update_products_from_feed_downloads_image_for_existing_product_wi
     monkeypatch.setattr(products_service.shop_repo, "replace_product_recommendations", AsyncMock())
     monkeypatch.setattr(
         products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
     )
 
     mock_download = AsyncMock(return_value="/uploads/shop/downloaded.jpg")

@@ -146,34 +146,30 @@ async def test_admin_optional_accessories_page_renders(monkeypatch):
         AsyncMock(return_value=(current_user, None)),
     )
 
-    products = [
+    accessories = [
         {
-            "id": 5,
-            "name": "USB-C Cable",
-            "sku": "USBC-001",
-            "vendor_sku": "V-USBC",
-            "image_url": None,
-            "price": 9.99,
-            "vip_price": None,
-            "stock": 3,
-            "archived": False,
-            "category_id": 2,
+            "id": 1,
+            "sku": "ACC-001",
+            "product_name": "USB-C Cable",
             "category_name": "Accessories",
-            "parent_product_names": "Laptop Pro",
-            "parent_product_ids": [1],
+            "rrp": 9.99,
+            "image_url": None,
+            "manufacturer": None,
+            "referenced_by_skus": "LAPTOP-001",
+            "discovered_at": None,
         }
     ]
     monkeypatch.setattr(
         main.shop_repo,
-        "list_optional_accessory_products",
-        AsyncMock(return_value=products),
+        "list_pending_optional_accessories",
+        AsyncMock(return_value=accessories),
     )
 
     async def fake_render(template, request, user, extra=None):
         assert template == "admin/shop_optional_accessories.html"
         assert extra is not None
         assert extra["title"] == "Optional accessories"
-        assert extra["products"] == products
+        assert extra["accessories"] == accessories
         return HTMLResponse(content="<html></html>")
 
     monkeypatch.setattr(main, "_render_template", fake_render)
@@ -198,7 +194,7 @@ async def test_admin_optional_accessories_page_redirects_non_admin(monkeypatch):
 
     list_mock = AsyncMock()
     monkeypatch.setattr(
-        main.shop_repo, "list_optional_accessory_products", list_mock
+        main.shop_repo, "list_pending_optional_accessories", list_mock
     )
 
     response = await main.admin_shop_optional_accessories_page(request)

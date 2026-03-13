@@ -10494,14 +10494,85 @@ async def admin_shop_optional_accessories_page(request: Request):
     if redirect:
         return redirect
 
-    products = await shop_repo.list_optional_accessory_products()
+    accessories = await shop_repo.list_pending_optional_accessories()
 
     extra = {
         "title": "Optional accessories",
-        "products": products,
+        "accessories": accessories,
     }
     return await _render_template(
         "admin/shop_optional_accessories.html", request, current_user, extra=extra
+    )
+
+
+@app.post(
+    "/admin/shop/optional-accessories/sync",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Sync pending optional accessories from the stock feed",
+    tags=["Shop"],
+)
+async def admin_sync_optional_accessories(request: Request):
+    """Re-scan the stock feed and refresh the pending optional accessories table."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    await shop_repo.sync_pending_optional_accessories()
+    return RedirectResponse(
+        url="/admin/shop/optional-accessories",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post(
+    "/admin/shop/optional-accessories/{accessory_id}/import",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Import a pending optional accessory into the shop",
+    tags=["Shop"],
+)
+async def admin_import_optional_accessory(
+    request: Request, accessory_id: int
+):
+    """Import a pending optional accessory from the staging table into shop_products."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    accessory = await shop_repo.get_pending_optional_accessory(accessory_id)
+    if not accessory:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pending optional accessory not found",
+        )
+
+    imported = await products_service.import_product_by_vendor_sku(accessory["sku"])
+    if imported:
+        await shop_repo.dismiss_pending_optional_accessory(accessory_id)
+
+    return RedirectResponse(
+        url="/admin/shop/optional-accessories",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post(
+    "/admin/shop/optional-accessories/{accessory_id}/dismiss",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Dismiss a pending optional accessory",
+    tags=["Shop"],
+)
+async def admin_dismiss_optional_accessory(
+    request: Request, accessory_id: int
+):
+    """Remove a pending optional accessory from the staging table without importing."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    await shop_repo.dismiss_pending_optional_accessory(accessory_id)
+    return RedirectResponse(
+        url="/admin/shop/optional-accessories",
+        status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
