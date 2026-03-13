@@ -47,6 +47,34 @@
     </div>
   </section>
 
+  {% if admin_credentials_configured and is_super_admin %}
+  <section class="panel">
+    <header class="panel__header">
+      <h3 class="panel__title">Auto-provision enterprise app</h3>
+    </header>
+    <div class="panel__body">
+      <p>Automatically create a dedicated enterprise app registration in the tenant with the required permissions. The portal admin credentials are used to perform the provisioning — no manual Azure portal steps required.</p>
+      <form method="get" action="/m365/provision" class="form-grid" style="margin-top: 1rem;">
+        <label class="form-field">
+          <span class="form-label">Tenant ID</span>
+          <input
+            type="text"
+            name="tenant_id"
+            class="input"
+            value="{{ credential.tenant_id if credential else '' }}"
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            required
+          />
+          <span class="form-help">The Azure AD tenant ID of the Microsoft 365 organisation to provision.</span>
+        </label>
+        <div class="form-actions">
+          <button type="submit" class="button">Auto-provision</button>
+        </div>
+      </form>
+    </div>
+  </section>
+  {% endif %}
+
   {% if is_super_admin %}
   <section class="panel">
     <header class="panel__header">
@@ -92,7 +120,7 @@
     </header>
     <div class="panel__body">
       <ol class="list list--ordered">
-        <li>Store a tenant ID, client ID, and client secret for the company.</li>
+        <li>Store a tenant ID, client ID, and client secret for the company (or use Auto-provision if available).</li>
         <li>Authorize the application using the "Authorize portal access" button to grant offline access.</li>
         <li>Trigger a sync from the Licenses tab to import subscribed SKUs and assigned users.</li>
       </ol>

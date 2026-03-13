@@ -3566,6 +3566,9 @@ async def _render_company_edit_page(
         "show_inactive_tasks": show_inactive_tasks,
         "m365_credential": m365_credential_view,
         "m365_has_credentials": m365_credential_view is not None,
+        "m365_admin_credentials_configured": bool(
+            settings.m365_admin_client_id and settings.m365_admin_client_secret
+        ),
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
@@ -4606,6 +4609,94 @@ async def m365_connect(request: Request):
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.get("/m365/provision")
+async def m365_provision(request: Request, tenant_id: str = Query(...)):
+    """Start the admin-consent OAuth flow to auto-provision an enterprise app."""
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin privileges required",
+        )
+    if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+        encoded = urlencode({"error": "Admin M365 credentials are not configured."})
+        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+    tenant_id = tenant_id.strip()
+    if not tenant_id:
+        encoded = urlencode({"error": "Tenant ID is required to auto-provision."})
+        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+    redirect_uri = str(request.url_for("m365_callback"))
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": company_id,
+            "user_id": user.get("id"),
+            "tenant_id": tenant_id,
+            "flow": "provision",
+        }
+    )
+    params = {
+        "client_id": settings.m365_admin_client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": m365_service.PROVISION_SCOPE,
+        "state": state,
+        "prompt": "admin_consent",
+    }
+    authorize_url = (
+        f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/admin/companies/{company_id}/m365-provision")
+async def admin_company_m365_provision(
+    company_id: int, request: Request, tenant_id: str = Query(...)
+):
+    """Start admin-consent OAuth flow to auto-provision an enterprise app for a company."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+        return _company_edit_redirect(
+            company_id=company_id,
+            error="Admin M365 credentials are not configured.",
+        )
+    tenant_id = tenant_id.strip()
+    if not tenant_id:
+        return _company_edit_redirect(
+            company_id=company_id,
+            error="Tenant ID is required to auto-provision.",
+        )
+    redirect_uri = str(request.url_for("m365_callback"))
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": company_id,
+            "user_id": current_user.get("id"),
+            "tenant_id": tenant_id,
+            "flow": "provision",
+            "return_to": "company_edit",
+        }
+    )
+    params = {
+        "client_id": settings.m365_admin_client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": m365_service.PROVISION_SCOPE,
+        "state": state,
+        "prompt": "admin_consent",
+    }
+    authorize_url = (
+        f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.get("/m365/callback", name="m365_callback")
 async def m365_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     if error:
@@ -4619,6 +4710,93 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     except BadSignature:
         return RedirectResponse(url="/m365?error=invalid+state", status_code=status.HTTP_303_SEE_OTHER)
     company_id = int(state_data.get("company_id", 0))
+    flow = state_data.get("flow", "connect")
+
+    if flow == "provision":
+        # ── Auto-provision flow ────────────────────────────────────────────
+        tenant_id = str(state_data.get("tenant_id", "")).strip()
+        return_to_company_edit = state_data.get("return_to") == "company_edit"
+        redirect_uri = str(request.url_for("m365_callback"))
+
+        def _provision_error(msg: str) -> RedirectResponse:
+            if return_to_company_edit:
+                return _company_edit_redirect(company_id=company_id, error=msg)
+            encoded = urlencode({"error": msg})
+            return RedirectResponse(
+                url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            )
+
+        if not tenant_id:
+            return _provision_error("Missing tenant ID in provision state.")
+        if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+            return _provision_error("Admin M365 credentials are not configured.")
+
+        token_endpoint = (
+            f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+        )
+        token_data = {
+            "client_id": settings.m365_admin_client_id,
+            "client_secret": settings.m365_admin_client_secret,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "scope": m365_service.PROVISION_SCOPE,
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            token_response = await client.post(token_endpoint, data=token_data)
+        if token_response.status_code != 200:
+            log_error(
+                "Microsoft 365 provision token exchange failed",
+                status=token_response.status_code,
+                body=token_response.text,
+            )
+            return _provision_error("Authorization failed during provision flow.")
+
+        access_token = token_response.json().get("access_token", "")
+        if not access_token:
+            return _provision_error("No access token received during provision.")
+
+        # Load company name for a descriptive app display name
+        company_record = await company_repo.get_company_by_id(company_id)
+        company_name = (company_record.get("name") or "").strip() if company_record else ""
+        display_name = f"MyPortal – {company_name}" if company_name else "MyPortal Integration"
+
+        try:
+            new_client_id, new_client_secret = (
+                await m365_service.provision_app_registration(
+                    access_token=access_token,
+                    display_name=display_name,
+                )
+            )
+        except m365_service.M365Error as exc:
+            log_error(
+                "M365 app provisioning failed",
+                company_id=company_id,
+                tenant_id=tenant_id,
+                error=str(exc),
+            )
+            return _provision_error(f"Provisioning failed: {exc}")
+
+        await m365_service.upsert_credentials(
+            company_id=company_id,
+            tenant_id=tenant_id,
+            client_id=new_client_id,
+            client_secret=new_client_secret,
+        )
+        log_info(
+            "M365 enterprise app provisioned and credentials stored",
+            company_id=company_id,
+            tenant_id=tenant_id,
+            client_id=new_client_id,
+        )
+        if return_to_company_edit:
+            return _company_edit_redirect(
+                company_id=company_id,
+                success="Microsoft 365 enterprise app provisioned successfully.",
+            )
+        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+
+    # ── Standard connect/token-refresh flow ────────────────────────────────
     credentials = await m365_service.get_credentials(company_id)
     if not credentials:
         return RedirectResponse(url="/m365?error=missing+credentials", status_code=status.HTTP_303_SEE_OTHER)

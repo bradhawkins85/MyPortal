@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -14,6 +14,20 @@ from app.security.encryption import decrypt_secret, encrypt_secret
 
 
 _GRAPH_SCOPE = "https://graph.microsoft.com/.default"
+
+# Microsoft Graph's own well-known app ID (constant across all tenants)
+_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
+
+# Application-permission role IDs required for the provisioned integration app
+_PROVISION_APP_ROLES: list[str] = [
+    "df021288-bdef-4463-88db-98f22de89214",  # User.Read.All
+    "7ab1d382-f21e-4acd-a863-ba3e13f7da61",  # Directory.Read.All
+]
+
+# OAuth scopes requested during the admin-consent provisioning flow
+PROVISION_SCOPE = (
+    "Application.ReadWrite.All AppRoleAssignment.ReadWrite.All offline_access"
+)
 
 
 class M365Error(RuntimeError):
@@ -140,6 +154,126 @@ async def _graph_get(access_token: str, url: str) -> dict[str, Any]:
         log_error("Microsoft Graph request failed", url=url, status=response.status_code, body=response.text)
         raise M365Error("Microsoft Graph request failed")
     return response.json()
+
+
+async def _graph_post(
+    access_token: str,
+    url: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(url, headers=headers, json=payload)
+    if response.status_code not in (200, 201):
+        log_error(
+            "Microsoft Graph POST failed",
+            url=url,
+            status=response.status_code,
+            body=response.text,
+        )
+        raise M365Error(f"Microsoft Graph POST failed ({response.status_code})")
+    return response.json()
+
+
+async def provision_app_registration(
+    *,
+    access_token: str,
+    display_name: str = "MyPortal Integration",
+) -> tuple[str, str]:
+    """Create a per-tenant app registration with required permissions.
+
+    Uses a delegated *access_token* obtained via the admin-consent OAuth flow to:
+    1. Create an App Registration in the tenant.
+    2. Create the corresponding Service Principal (Enterprise App).
+    3. Find the Microsoft Graph service principal in the tenant.
+    4. Grant admin consent for each required application permission.
+    5. Generate and return a client secret for the new app.
+
+    Returns a ``(client_id, client_secret)`` tuple.  The client secret is
+    returned in plain text exactly once and must be stored immediately.
+    """
+    # 1. Create the app registration
+    app_payload: dict[str, Any] = {
+        "displayName": display_name,
+        "signInAudience": "AzureADMyOrg",
+        "requiredResourceAccess": [
+            {
+                "resourceAppId": _GRAPH_APP_ID,
+                "resourceAccess": [
+                    {"id": role_id, "type": "Role"}
+                    for role_id in _PROVISION_APP_ROLES
+                ],
+            }
+        ],
+    }
+    app_data = await _graph_post(
+        access_token,
+        "https://graph.microsoft.com/v1.0/applications",
+        app_payload,
+    )
+    app_object_id: str = app_data["id"]
+    client_id: str = app_data["appId"]
+    log_info("Provisioned M365 app registration", client_id=client_id)
+
+    # 2. Create a service principal (Enterprise App) for the registration
+    sp_data = await _graph_post(
+        access_token,
+        "https://graph.microsoft.com/v1.0/servicePrincipals",
+        {"appId": client_id},
+    )
+    sp_object_id: str = sp_data["id"]
+    log_info("Created M365 service principal", sp_object_id=sp_object_id)
+
+    # 3. Locate the Microsoft Graph service principal in this tenant
+    graph_sp_response = await _graph_get(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/servicePrincipals"
+        f"?$filter=appId eq '{_GRAPH_APP_ID}'&$select=id",
+    )
+    graph_sp_list = graph_sp_response.get("value", [])
+    if not graph_sp_list:
+        raise M365Error(
+            "Unable to locate Microsoft Graph service principal in the tenant"
+        )
+    graph_sp_id: str = graph_sp_list[0]["id"]
+
+    # 4. Grant admin consent for each required application permission
+    for role_id in _PROVISION_APP_ROLES:
+        await _graph_post(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+            {
+                "principalId": sp_object_id,
+                "resourceId": graph_sp_id,
+                "appRoleId": role_id,
+            },
+        )
+    log_info(
+        "Granted admin consent for provisioned M365 app",
+        sp_object_id=sp_object_id,
+    )
+
+    # 5. Create a client secret; valid for approximately two years (730 days)
+    secret_expiry = (
+        (date.today() + timedelta(days=730)).isoformat() + "T00:00:00Z"
+    )
+    secret_data = await _graph_post(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/addPassword",
+        {
+            "passwordCredential": {
+                "displayName": "MyPortal",
+                "endDateTime": secret_expiry,
+            }
+        },
+    )
+    client_secret: str = secret_data["secretText"]
+    log_info(
+        "Created client secret for provisioned M365 app",
+        client_id=client_id,
+    )
+
+    return client_id, client_secret
 
 
 async def _sync_staff_assignments(

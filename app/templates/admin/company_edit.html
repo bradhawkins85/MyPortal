@@ -253,6 +253,23 @@
             >Remove credentials</button>
           </form>
           {% endif %}
+          {% if m365_admin_credentials_configured %}
+          <hr class="divider" style="margin: 1.5rem 0;" />
+          <div>
+            <p class="form-help">Auto-provision creates a dedicated enterprise app registration in the tenant and configures the required permissions automatically.</p>
+            <form method="get" action="/admin/companies/{{ company.id }}/m365-provision" class="form-field__group" style="margin-top: 0.5rem;">
+              <input
+                type="text"
+                name="tenant_id"
+                class="form-input"
+                placeholder="Tenant ID"
+                value="{{ m365_credential.tenant_id if m365_credential else '' }}"
+                required
+              />
+              <button type="submit" class="button button--ghost">Auto-provision</button>
+            </form>
+          </div>
+          {% endif %}
         </div>
       </details>
 
