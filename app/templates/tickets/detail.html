@@ -423,9 +423,11 @@
                                   ⏱️ {{ reply.minutes_spent }} minute{{ 's' if reply.minutes_spent != 1 else '' }}
                                 </span>
                               {% endif %}
-                              <span class="timeline__chip {{ 'timeline__chip--billable' if reply.is_billable else 'timeline__chip--nonbillable' }}">
-                                {{ 'Billable' if reply.is_billable else 'Non-billable' }}
-                              </span>
+                              {% if not reply.external_reference %}
+                                <span class="timeline__chip {{ 'timeline__chip--billable' if reply.is_billable else 'timeline__chip--nonbillable' }}">
+                                  {{ 'Billable' if reply.is_billable else 'Non-billable' }}
+                                </span>
+                              {% endif %}
                               {% if reply.labour_type_name %}
                                 <span class="timeline__chip timeline__chip--labour">{{ reply.labour_type_name }}</span>
                               {% endif %}
@@ -492,9 +494,11 @@
                                   ⏱️ {{ reply.minutes_spent }} minute{{ 's' if reply.minutes_spent != 1 else '' }}
                                 </span>
                               {% endif %}
-                              <span class="timeline__chip {{ 'timeline__chip--billable' if reply.is_billable else 'timeline__chip--nonbillable' }}">
-                                {{ 'Billable' if reply.is_billable else 'Non-billable' }}
-                              </span>
+                              {% if not reply.external_reference %}
+                                <span class="timeline__chip {{ 'timeline__chip--billable' if reply.is_billable else 'timeline__chip--nonbillable' }}">
+                                  {{ 'Billable' if reply.is_billable else 'Non-billable' }}
+                                </span>
+                              {% endif %}
                               {% if reply.labour_type_name %}
                                 <span class="timeline__chip timeline__chip--labour">{{ reply.labour_type_name }}</span>
                               {% endif %}
