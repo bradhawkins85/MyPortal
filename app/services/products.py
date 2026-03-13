@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import socket
+from ipaddress import ip_address
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -39,6 +41,37 @@ _IMAGE_CONTENT_TYPE_MAP = {
 
 _PRIVATE_UPLOADS_PATH.mkdir(parents=True, exist_ok=True)
 _SHOP_UPLOADS_PATH.mkdir(parents=True, exist_ok=True)
+
+
+def _is_public_image_host(hostname: str) -> bool:
+    """Return True when hostname resolves only to public, routable addresses."""
+
+    candidate = hostname.strip().lower()
+    if not candidate or candidate == "localhost":
+        return False
+
+    try:
+        ip = ip_address(candidate)
+    except ValueError:
+        ip = None
+
+    if ip is not None:
+        return ip.is_global
+
+    try:
+        address_info = socket.getaddrinfo(candidate, None)
+    except socket.gaierror:
+        return False
+
+    for entry in address_info:
+        resolved = entry[4][0]
+        try:
+            resolved_ip = ip_address(resolved)
+        except ValueError:
+            return False
+        if not resolved_ip.is_global:
+            return False
+    return True
 
 
 def _to_decimal(value: Any, *, default: Decimal | None = None) -> Decimal | None:
@@ -123,6 +156,9 @@ async def _download_product_image(image_url: str) -> str | None:
     parsed = urlparse(candidate)
     if parsed.scheme.lower() not in {"http", "https"}:
         log_error("Rejected non-HTTP product image URL from feed", url=candidate)
+        return None
+    if not parsed.hostname or not _is_public_image_host(parsed.hostname):
+        log_error("Rejected non-public product image URL from feed", url=candidate)
         return None
 
     try:
