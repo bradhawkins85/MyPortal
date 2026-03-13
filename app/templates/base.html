@@ -159,9 +159,7 @@
               <span class="menu__label">Knowledge base</span>
             </a>
           </li>
-          {% if has_company_section %}
-            <li class="menu__divider" role="presentation"></li>
-          {% endif %}
+          
           {% if can_access_tickets %}
             {% set show_admin_tickets = (is_helpdesk_technician | default(false)) or (is_super_admin | default(false)) %}
             {% if show_admin_tickets %}
@@ -301,7 +299,6 @@
             </li>
           {% endif %}
           {% if has_admin_access %}
-            <li class="menu__divider" role="presentation"></li>
             <li class="menu__heading" role="presentation">Administration</li>
             <li class="menu__item">
               <a href="/admin/profile" {% if current_path.startswith('/admin/profile') %}aria-current="page"{% endif %}>
