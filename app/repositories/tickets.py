@@ -379,28 +379,28 @@ async def list_tickets(
     where_clause = " WHERE " + " AND ".join(where) if where else ""
     if cursor_updated_at is not None and cursor_id is not None:
         params.append(limit)
-        rows = await db.fetch_all(
-            f"""
-            SELECT *
-            FROM tickets
-            {where_clause}
-            ORDER BY updated_at DESC, id DESC
-            LIMIT %s
-            """,
-            tuple(params),
+        query = "\n".join(
+            [
+                "SELECT *",
+                "FROM tickets",
+                where_clause,
+                "ORDER BY updated_at DESC, id DESC",
+                "LIMIT %s",
+            ]
         )
+        rows = await db.fetch_all(query, tuple(params))
     else:
         params.extend([limit, offset])
-        rows = await db.fetch_all(
-            f"""
-            SELECT *
-            FROM tickets
-            {where_clause}
-            ORDER BY updated_at DESC, id DESC
-            LIMIT %s OFFSET %s
-            """,
-            tuple(params),
+        query = "\n".join(
+            [
+                "SELECT *",
+                "FROM tickets",
+                where_clause,
+                "ORDER BY updated_at DESC, id DESC",
+                "LIMIT %s OFFSET %s",
+            ]
         )
+        rows = await db.fetch_all(query, tuple(params))
     log_debug("Tickets query returned", count=len(rows))
     return [_normalise_ticket(row) for row in rows]
 
@@ -490,50 +490,33 @@ async def list_tickets_for_user(
         column_prefix="t.",
     )
 
+    where_sql = " AND ".join(where_clauses)
+    query_lines = [
+        "SELECT t.*",
+        "FROM tickets AS t",
+        "INNER JOIN (",
+        "    SELECT t.id",
+        "    FROM tickets AS t",
+        "    WHERE t.requester_id = %s",
+        "    UNION",
+        "    SELECT t.id",
+        "    FROM tickets AS t",
+        "    WHERE EXISTS (",
+        "        SELECT 1",
+        "        FROM ticket_watchers AS tw",
+        "        WHERE tw.ticket_id = t.id AND tw.user_id = %s",
+        "    )",
+        ") AS scoped ON scoped.id = t.id",
+        "WHERE " + where_sql,
+        "ORDER BY t.updated_at DESC, t.id DESC",
+    ]
     if cursor_updated_at is not None and cursor_id is not None:
-        query = f"""
-            SELECT t.*
-            FROM tickets AS t
-            INNER JOIN (
-                SELECT t.id
-                FROM tickets AS t
-                WHERE t.requester_id = %s
-                UNION
-                SELECT t.id
-                FROM tickets AS t
-                WHERE EXISTS (
-                    SELECT 1
-                    FROM ticket_watchers AS tw
-                    WHERE tw.ticket_id = t.id AND tw.user_id = %s
-                )
-            ) AS scoped ON scoped.id = t.id
-            WHERE {' AND '.join(where_clauses)}
-            ORDER BY t.updated_at DESC, t.id DESC
-            LIMIT %s
-        """
+        query_lines.append("LIMIT %s")
         params.append(int(max(1, limit)))
     else:
-        query = f"""
-            SELECT t.*
-            FROM tickets AS t
-            INNER JOIN (
-                SELECT t.id
-                FROM tickets AS t
-                WHERE t.requester_id = %s
-                UNION
-                SELECT t.id
-                FROM tickets AS t
-                WHERE EXISTS (
-                    SELECT 1
-                    FROM ticket_watchers AS tw
-                    WHERE tw.ticket_id = t.id AND tw.user_id = %s
-                )
-            ) AS scoped ON scoped.id = t.id
-            WHERE {' AND '.join(where_clauses)}
-            ORDER BY t.updated_at DESC, t.id DESC
-            LIMIT %s OFFSET %s
-        """
+        query_lines.append("LIMIT %s OFFSET %s")
         params.extend([int(max(1, limit)), int(max(0, offset))])
+    query = "\n".join(query_lines)
 
     rows = await db.fetch_all(query, tuple(params))
     return [_normalise_ticket(row) for row in rows]
