@@ -292,6 +292,7 @@
     }
 
     const stockFilter = document.getElementById('stock-filter');
+    const categoryFilter = document.getElementById('category-filter');
     const showArchivedCheckbox = document.getElementById('show-archived');
     const productsTable = document.getElementById('admin-products-table');
 
@@ -372,18 +373,24 @@
       }
       const rows = productsTable.querySelectorAll('tbody tr');
       const stockValue = stockFilter ? stockFilter.value : '';
+      const categoryValue = categoryFilter ? categoryFilter.value : '';
       rows.forEach((row) => {
         const stock = Number(row.getAttribute('data-stock') || '0');
         const matchesStock =
           !stockValue ||
           (stockValue === 'in' && stock > 0) ||
           (stockValue === 'out' && stock === 0);
-        row.style.display = matchesStock ? '' : 'none';
+        const rowCategory = row.getAttribute('data-category') || '';
+        const matchesCategory = !categoryValue || rowCategory === categoryValue;
+        row.style.display = matchesStock && matchesCategory ? '' : 'none';
       });
     }
 
     if (stockFilter) {
       stockFilter.addEventListener('change', applyFilters);
+    }
+    if (categoryFilter) {
+      categoryFilter.addEventListener('change', applyFilters);
     }
     if (showArchivedCheckbox) {
       showArchivedCheckbox.addEventListener('change', () => {
