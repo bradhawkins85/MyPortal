@@ -593,7 +593,12 @@
             node.removeAttribute(attr.name);
             return;
           }
-          if ((attrName === 'href' || attrName === 'src') && attrValue.startsWith('javascript:')) {
+          if (
+            (attrName === 'href' || attrName === 'src') &&
+            (attrValue.startsWith('javascript:') ||
+              attrValue.startsWith('data:') ||
+              attrValue.startsWith('vbscript:'))
+          ) {
             node.removeAttribute(attr.name);
           }
         });
