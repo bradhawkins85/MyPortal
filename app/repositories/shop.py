@@ -21,7 +21,7 @@ def _prepare_product_search_term(search: str | None) -> tuple[str | None, str | 
         return None, None
 
     if len(term) < _FULLTEXT_MIN_SEARCH_LENGTH:
-        return "like", f"%{term}%"
+        return "prefix", f"{term}%"
 
     tokens = [segment.strip() for segment in re.split(r"\s+", term) if segment.strip()]
     boolean_tokens: list[str] = []
@@ -33,7 +33,7 @@ def _prepare_product_search_term(search: str | None) -> tuple[str | None, str | 
 
     if boolean_tokens:
         return "fulltext", " ".join(boolean_tokens)
-    return "like", f"%{term}%"
+    return "prefix", f"{term}%"
 
 
 def _append_product_search_filter(conditions: list[str], params: list[Any], search: str | None) -> None:
