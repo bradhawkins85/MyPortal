@@ -450,6 +450,9 @@ async def test_update_products_from_feed_sets_cross_sells(monkeypatch):
     monkeypatch.setattr(
         products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
     )
+    monkeypatch.setattr(
+        products_service.shop_repo, "list_pending_optional_accessories", AsyncMock(return_value=[])
+    )
 
     await products_service.update_products_from_feed()
 
@@ -493,6 +496,9 @@ async def test_update_products_from_feed_upserts_only_existing_feed_items(monkey
     monkeypatch.setattr(
         products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
     )
+    monkeypatch.setattr(
+        products_service.shop_repo, "list_pending_optional_accessories", AsyncMock(return_value=[])
+    )
 
     await products_service.update_products_from_feed()
 
@@ -533,6 +539,9 @@ async def test_update_products_from_feed_cross_sells_resolved_for_existing_produ
     )
     monkeypatch.setattr(
         products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo, "list_pending_optional_accessories", AsyncMock(return_value=[])
     )
 
     await products_service.update_products_from_feed()
@@ -575,6 +584,9 @@ async def test_update_products_from_feed_uses_vendor_sku_for_cross_sells(monkeyp
     monkeypatch.setattr(
         products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
     )
+    monkeypatch.setattr(
+        products_service.shop_repo, "list_pending_optional_accessories", AsyncMock(return_value=[])
+    )
 
     await products_service.update_products_from_feed()
 
@@ -609,6 +621,9 @@ async def test_update_products_from_feed_does_not_download_images_for_new_produc
     monkeypatch.setattr(
         products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
     )
+    monkeypatch.setattr(
+        products_service.shop_repo, "list_pending_optional_accessories", AsyncMock(return_value=[])
+    )
 
     mock_download = AsyncMock(return_value="/uploads/shop/some.jpg")
     monkeypatch.setattr(products_service, "_download_product_image", mock_download)
@@ -642,6 +657,9 @@ async def test_update_products_from_feed_downloads_image_for_existing_product_wi
     )
     monkeypatch.setattr(
         products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo, "list_pending_optional_accessories", AsyncMock(return_value=[])
     )
 
     mock_download = AsyncMock(return_value="/uploads/shop/downloaded.jpg")
@@ -704,3 +722,175 @@ async def test_process_feed_item_downloads_image_for_new_product_when_enabled(
 
     assert result is True
     mock_download.assert_awaited_once_with("https://example.com/img.jpg")
+
+
+# ---------------------------------------------------------------------------
+# _download_pending_accessory_images tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_download_pending_accessory_images_downloads_external_urls(monkeypatch):
+    """External image URLs in the pending accessories table should be downloaded."""
+    accessories = [
+        {
+            "id": 1,
+            "sku": "ACC-001",
+            "product_name": "Cable",
+            "image_url": "https://vendor.com/cable.jpg",
+        },
+    ]
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "list_pending_optional_accessories",
+        AsyncMock(return_value=accessories),
+    )
+    mock_update = AsyncMock()
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "update_pending_accessory_image_url",
+        mock_update,
+    )
+    mock_download = AsyncMock(return_value="/uploads/shop/cable.jpg")
+    monkeypatch.setattr(products_service, "_download_product_image", mock_download)
+
+    await products_service._download_pending_accessory_images()
+
+    mock_download.assert_awaited_once_with("https://vendor.com/cable.jpg")
+    mock_update.assert_awaited_once_with("ACC-001", "/uploads/shop/cable.jpg")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_download_pending_accessory_images_skips_local_paths(monkeypatch):
+    """Pending accessories whose image_url already points to a local path are skipped."""
+    accessories = [
+        {
+            "id": 2,
+            "sku": "ACC-002",
+            "product_name": "Adapter",
+            "image_url": "/uploads/shop/adapter.jpg",
+        },
+    ]
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "list_pending_optional_accessories",
+        AsyncMock(return_value=accessories),
+    )
+    mock_update = AsyncMock()
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "update_pending_accessory_image_url",
+        mock_update,
+    )
+    mock_download = AsyncMock(return_value="/uploads/shop/adapter.jpg")
+    monkeypatch.setattr(products_service, "_download_product_image", mock_download)
+
+    await products_service._download_pending_accessory_images()
+
+    mock_download.assert_not_called()
+    mock_update.assert_not_called()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_download_pending_accessory_images_skips_when_no_url(monkeypatch):
+    """Pending accessories with no image URL are silently skipped."""
+    accessories = [
+        {"id": 3, "sku": "ACC-003", "product_name": "Hub", "image_url": None},
+    ]
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "list_pending_optional_accessories",
+        AsyncMock(return_value=accessories),
+    )
+    mock_update = AsyncMock()
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "update_pending_accessory_image_url",
+        mock_update,
+    )
+    mock_download = AsyncMock()
+    monkeypatch.setattr(products_service, "_download_product_image", mock_download)
+
+    await products_service._download_pending_accessory_images()
+
+    mock_download.assert_not_called()
+    mock_update.assert_not_called()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_download_pending_accessory_images_skips_update_when_download_fails(monkeypatch):
+    """If the image download fails (returns None), the DB record is not updated."""
+    accessories = [
+        {
+            "id": 4,
+            "sku": "ACC-004",
+            "product_name": "Dongle",
+            "image_url": "https://vendor.com/dongle.jpg",
+        },
+    ]
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "list_pending_optional_accessories",
+        AsyncMock(return_value=accessories),
+    )
+    mock_update = AsyncMock()
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "update_pending_accessory_image_url",
+        mock_update,
+    )
+    monkeypatch.setattr(products_service, "_download_product_image", AsyncMock(return_value=None))
+
+    await products_service._download_pending_accessory_images()
+
+    mock_update.assert_not_called()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_update_products_from_feed_downloads_pending_accessory_images(monkeypatch):
+    """update_products_from_feed downloads images for pending accessories with external URLs."""
+    feed_item = _make_feed_item("EXISTING-SKU")
+    monkeypatch.setattr(
+        products_service.stock_feed_repo,
+        "list_all_items",
+        AsyncMock(return_value=[feed_item]),
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_by_sku",
+        AsyncMock(return_value={"id": 1, "image_url": None}),
+    )
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(products_service.shop_repo, "replace_product_recommendations", AsyncMock())
+    monkeypatch.setattr(
+        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=1)
+    )
+    pending = [
+        {
+            "id": 10,
+            "sku": "PENDING-ACC",
+            "product_name": "Pending Accessory",
+            "image_url": "https://vendor.com/pending.jpg",
+        }
+    ]
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "list_pending_optional_accessories",
+        AsyncMock(return_value=pending),
+    )
+    mock_update = AsyncMock()
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "update_pending_accessory_image_url",
+        mock_update,
+    )
+    mock_download = AsyncMock(return_value="/uploads/shop/pending.jpg")
+    monkeypatch.setattr(products_service, "_download_product_image", mock_download)
+
+    await products_service.update_products_from_feed()
+
+    mock_download.assert_awaited_once_with("https://vendor.com/pending.jpg")
+    mock_update.assert_awaited_once_with("PENDING-ACC", "/uploads/shop/pending.jpg")
