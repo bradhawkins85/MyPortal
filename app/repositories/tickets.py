@@ -11,6 +11,66 @@ from app.core.logging import log_debug, log_error, log_info
 TicketRecord = dict[str, Any]
 
 _UNSET = object()
+_FULLTEXT_MIN_SEARCH_LENGTH = 3
+
+
+def _prepare_ticket_search_term(search: str | None) -> tuple[str | None, str | None]:
+    term = (search or "").strip()
+    if not term:
+        return None, None
+
+    if len(term) < _FULLTEXT_MIN_SEARCH_LENGTH:
+        return "like", f"%{term}%"
+
+    tokens = [segment.strip() for segment in re.split(r"\s+", term) if segment.strip()]
+    boolean_tokens: list[str] = []
+    for token in tokens:
+        cleaned = re.sub(r"[^0-9A-Za-z]", "", token)
+        if len(cleaned) < _FULLTEXT_MIN_SEARCH_LENGTH:
+            continue
+        boolean_tokens.append(f"+{cleaned}*")
+
+    if boolean_tokens:
+        return "fulltext", " ".join(boolean_tokens)
+    return "like", f"%{term}%"
+
+
+def _append_ticket_search_filter(
+    where: list[str],
+    params: list[Any],
+    *,
+    search: str | None,
+    column_prefix: str = "",
+    include_external_reference: bool = True,
+) -> None:
+    mode, value = _prepare_ticket_search_term(search)
+    if not mode or value is None:
+        return
+
+    prefixed_subject = f"{column_prefix}subject"
+    prefixed_description = f"{column_prefix}description"
+    prefixed_external_reference = f"{column_prefix}external_reference"
+
+    if mode == "fulltext":
+        searchable_columns = [prefixed_subject, prefixed_description]
+        if include_external_reference:
+            searchable_columns.append(prefixed_external_reference)
+        where.append(
+            f"MATCH ({', '.join(searchable_columns)}) AGAINST (%s IN BOOLEAN MODE)"
+        )
+        params.append(value)
+        return
+
+    like_clause = [
+        f"LOWER({prefixed_subject}) LIKE LOWER(%s)",
+        f"LOWER(COALESCE({prefixed_description}, '')) LIKE LOWER(%s)",
+    ]
+    like_params: list[Any] = [value, value]
+    if include_external_reference:
+        like_clause.append(f"LOWER(COALESCE({prefixed_external_reference}, '')) LIKE LOWER(%s)")
+        like_params.append(value)
+    where.append(f"({' OR '.join(like_clause)})")
+    params.extend(like_params)
 
 
 def _deserialise_tags(value: Any) -> list[str]:
@@ -271,12 +331,7 @@ async def list_tickets(
     if requester_id is not None:
         where.append("requester_id = %s")
         params.append(requester_id)
-    if search:
-        wildcard = f"%{search.strip()}%"
-        where.append(
-            "(subject LIKE %s OR description LIKE %s OR external_reference LIKE %s)"
-        )
-        params.extend([wildcard, wildcard, wildcard])
+    _append_ticket_search_filter(where, params, search=search)
     where_clause = " WHERE " + " AND ".join(where) if where else ""
     params.extend([limit, offset])
     rows = await db.fetch_all(
@@ -318,17 +373,16 @@ def _prepare_user_ticket_scope_filters(
     status: str | Sequence[str] | None,
     company_ids: Sequence[int] | None,
     search: str | None,
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str | None, str | None]:
     status_filters = _prepare_status_filters(status)
     status_csv = ",".join(status_filters)
 
     company_filters = [str(int(cid)) for cid in (company_ids or []) if int(cid) > 0]
     company_csv = ",".join(company_filters)
 
-    search_term = (search or "").strip().lower()
-    search_like = f"%{search_term}%" if search_term else ""
+    search_mode, search_value = _prepare_ticket_search_term(search)
 
-    return status_csv, company_csv, search_like
+    return status_csv, company_csv, search_mode, search_value
 
 
 async def list_tickets_for_user(
@@ -345,13 +399,22 @@ async def list_tickets_for_user(
     if user_id <= 0:
         return []
 
-    status_csv, company_csv, search_like = _prepare_user_ticket_scope_filters(
+    status_csv, company_csv, search_mode, search_value = _prepare_user_ticket_scope_filters(
         status=status,
         company_ids=company_ids,
         search=search,
     )
 
-    query = """
+    search_clause = "%s = ''"
+    search_params: list[Any] = ["" if not search_mode else "active"]
+    if search_mode == "fulltext" and search_value:
+        search_clause = "MATCH (t.subject, t.description) AGAINST (%s IN BOOLEAN MODE)"
+        search_params = [search_value]
+    elif search_mode == "like" and search_value:
+        search_clause = "(LOWER(t.subject) LIKE LOWER(%s) OR LOWER(COALESCE(t.description, '')) LIKE LOWER(%s))"
+        search_params = [search_value, search_value]
+
+    query = f"""
         SELECT t.*
         FROM tickets AS t
         INNER JOIN (
@@ -369,11 +432,7 @@ async def list_tickets_for_user(
         ) AS scoped ON scoped.id = t.id
         WHERE (%s = '' OR FIND_IN_SET(LOWER(t.status), %s) > 0)
           AND (%s = '' OR FIND_IN_SET(CAST(t.company_id AS CHAR), %s) > 0)
-          AND (
-              %s = ''
-              OR LOWER(t.subject) LIKE %s
-              OR LOWER(COALESCE(t.description, '')) LIKE %s
-          )
+          AND ({search_clause})
         ORDER BY t.updated_at DESC, t.id DESC
         LIMIT %s OFFSET %s
     """
@@ -384,9 +443,7 @@ async def list_tickets_for_user(
         status_csv,
         company_csv,
         company_csv,
-        search_like,
-        search_like,
-        search_like,
+        *search_params,
         int(max(1, limit)),
         int(max(0, offset)),
     ]
@@ -407,13 +464,22 @@ async def count_tickets_for_user(
     if user_id <= 0:
         return 0
 
-    status_csv, company_csv, search_like = _prepare_user_ticket_scope_filters(
+    status_csv, company_csv, search_mode, search_value = _prepare_user_ticket_scope_filters(
         status=status,
         company_ids=company_ids,
         search=search,
     )
 
-    query = """
+    search_clause = "%s = ''"
+    search_params: list[Any] = ["" if not search_mode else "active"]
+    if search_mode == "fulltext" and search_value:
+        search_clause = "MATCH (t.subject, t.description) AGAINST (%s IN BOOLEAN MODE)"
+        search_params = [search_value]
+    elif search_mode == "like" and search_value:
+        search_clause = "(LOWER(t.subject) LIKE LOWER(%s) OR LOWER(COALESCE(t.description, '')) LIKE LOWER(%s))"
+        search_params = [search_value, search_value]
+
+    query = f"""
         SELECT COUNT(*) AS count
         FROM (
             SELECT t.id
@@ -431,11 +497,7 @@ async def count_tickets_for_user(
         INNER JOIN tickets AS t ON t.id = scoped.id
         WHERE (%s = '' OR FIND_IN_SET(LOWER(t.status), %s) > 0)
           AND (%s = '' OR FIND_IN_SET(CAST(t.company_id AS CHAR), %s) > 0)
-          AND (
-              %s = ''
-              OR LOWER(t.subject) LIKE %s
-              OR LOWER(COALESCE(t.description, '')) LIKE %s
-          )
+          AND ({search_clause})
     """
 
     params: list[Any] = [
@@ -445,9 +507,7 @@ async def count_tickets_for_user(
         status_csv,
         company_csv,
         company_csv,
-        search_like,
-        search_like,
-        search_like,
+        *search_params,
     ]
     row = await db.fetch_one(query, tuple(params))
     return int(row["count"]) if row else 0
@@ -480,12 +540,7 @@ async def count_tickets(
     if requester_id is not None:
         where.append("requester_id = %s")
         params.append(requester_id)
-    if search:
-        wildcard = f"%{search.strip()}%"
-        where.append(
-            "(subject LIKE %s OR description LIKE %s OR external_reference LIKE %s)"
-        )
-        params.extend([wildcard, wildcard, wildcard])
+    _append_ticket_search_filter(where, params, search=search)
     where_clause = " WHERE " + " AND ".join(where) if where else ""
     row = await db.fetch_one(
         f"SELECT COUNT(*) AS count FROM tickets{where_clause}",
