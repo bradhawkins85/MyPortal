@@ -313,6 +313,24 @@ def _prepare_status_filters(status: str | Sequence[str] | None) -> list[str]:
     return slugs
 
 
+def _prepare_user_ticket_scope_filters(
+    *,
+    status: str | Sequence[str] | None,
+    company_ids: Sequence[int] | None,
+    search: str | None,
+) -> tuple[str, str, str]:
+    status_filters = _prepare_status_filters(status)
+    status_csv = ",".join(status_filters)
+
+    company_filters = [str(int(cid)) for cid in (company_ids or []) if int(cid) > 0]
+    company_csv = ",".join(company_filters)
+
+    search_term = (search or "").strip().lower()
+    search_like = f"%{search_term}%" if search_term else ""
+
+    return status_csv, company_csv, search_like
+
+
 async def list_tickets_for_user(
     user_id: int,
     *,
@@ -327,46 +345,53 @@ async def list_tickets_for_user(
     if user_id <= 0:
         return []
 
-    company_filters = [int(cid) for cid in (company_ids or []) if int(cid) > 0]
+    status_csv, company_csv, search_like = _prepare_user_ticket_scope_filters(
+        status=status,
+        company_ids=company_ids,
+        search=search,
+    )
 
-    query_parts = [
-        "SELECT DISTINCT t.* FROM tickets AS t",
-        "LEFT JOIN ticket_watchers AS tw ON tw.ticket_id = t.id AND tw.user_id = %s",
+    query = """
+        SELECT t.*
+        FROM tickets AS t
+        INNER JOIN (
+            SELECT t.id
+            FROM tickets AS t
+            WHERE t.requester_id = %s
+            UNION
+            SELECT t.id
+            FROM tickets AS t
+            WHERE EXISTS (
+                SELECT 1
+                FROM ticket_watchers AS tw
+                WHERE tw.ticket_id = t.id AND tw.user_id = %s
+            )
+        ) AS scoped ON scoped.id = t.id
+        WHERE (%s = '' OR FIND_IN_SET(LOWER(t.status), %s) > 0)
+          AND (%s = '' OR FIND_IN_SET(CAST(t.company_id AS CHAR), %s) > 0)
+          AND (
+              %s = ''
+              OR LOWER(t.subject) LIKE %s
+              OR LOWER(COALESCE(t.description, '')) LIKE %s
+          )
+        ORDER BY t.updated_at DESC, t.id DESC
+        LIMIT %s OFFSET %s
+    """
+    params: list[Any] = [
+        user_id,
+        user_id,
+        status_csv,
+        status_csv,
+        company_csv,
+        company_csv,
+        search_like,
+        search_like,
+        search_like,
+        int(max(1, limit)),
+        int(max(0, offset)),
     ]
-    params: list[Any] = [user_id]
 
-    conditions = ["(t.requester_id = %s OR tw.user_id = %s)"]
-    params.extend([user_id, user_id])
-
-    status_filters = _prepare_status_filters(status)
-    if status_filters:
-        if len(status_filters) == 1:
-            conditions.append("t.status = %s")
-            params.append(status_filters[0])
-        else:
-            placeholders = ", ".join(["%s"] * len(status_filters))
-            conditions.append(f"t.status IN ({placeholders})")
-            params.extend(status_filters)
-
-    if company_filters:
-        placeholders = ", ".join(["%s"] * len(company_filters))
-        conditions.append(f"t.company_id IN ({placeholders})")
-        params.extend(company_filters)
-
-    search_term = (search or "").strip().lower()
-    if search_term:
-        like = f"%{search_term}%"
-        conditions.append(
-            "(LOWER(t.subject) LIKE %s OR LOWER(COALESCE(t.description, '')) LIKE %s)"
-        )
-        params.extend([like, like])
-
-    query_parts.append("WHERE " + " AND ".join(conditions))
-    query_parts.append("ORDER BY t.updated_at DESC")
-    query_parts.append("LIMIT %s OFFSET %s")
-    params.extend([int(max(1, limit)), int(max(0, offset))])
-
-    rows = await db.fetch_all(" ".join(query_parts), tuple(params))
+    rows = await db.fetch_all(query, tuple(params))
     return [_normalise_ticket(row) for row in rows]
 
 
@@ -382,44 +407,51 @@ async def count_tickets_for_user(
     if user_id <= 0:
         return 0
 
-    company_filters = [int(cid) for cid in (company_ids or []) if int(cid) > 0]
+    status_csv, company_csv, search_like = _prepare_user_ticket_scope_filters(
+        status=status,
+        company_ids=company_ids,
+        search=search,
+    )
 
-    query_parts = [
-        "SELECT COUNT(DISTINCT t.id) AS count FROM tickets AS t",
-        "LEFT JOIN ticket_watchers AS tw ON tw.ticket_id = t.id AND tw.user_id = %s",
+    query = """
+        SELECT COUNT(*) AS count
+        FROM (
+            SELECT t.id
+            FROM tickets AS t
+            WHERE t.requester_id = %s
+            UNION
+            SELECT t.id
+            FROM tickets AS t
+            WHERE EXISTS (
+                SELECT 1
+                FROM ticket_watchers AS tw
+                WHERE tw.ticket_id = t.id AND tw.user_id = %s
+            )
+        ) AS scoped
+        INNER JOIN tickets AS t ON t.id = scoped.id
+        WHERE (%s = '' OR FIND_IN_SET(LOWER(t.status), %s) > 0)
+          AND (%s = '' OR FIND_IN_SET(CAST(t.company_id AS CHAR), %s) > 0)
+          AND (
+              %s = ''
+              OR LOWER(t.subject) LIKE %s
+              OR LOWER(COALESCE(t.description, '')) LIKE %s
+          )
+    """
+
+    params: list[Any] = [
+        user_id,
+        user_id,
+        status_csv,
+        status_csv,
+        company_csv,
+        company_csv,
+        search_like,
+        search_like,
+        search_like,
     ]
-    params: list[Any] = [user_id]
-
-    conditions = ["(t.requester_id = %s OR tw.user_id = %s)"]
-    params.extend([user_id, user_id])
-
-    status_filters = _prepare_status_filters(status)
-    if status_filters:
-        if len(status_filters) == 1:
-            conditions.append("t.status = %s")
-            params.append(status_filters[0])
-        else:
-            placeholders = ", ".join(["%s"] * len(status_filters))
-            conditions.append(f"t.status IN ({placeholders})")
-            params.extend(status_filters)
-
-    if company_filters:
-        placeholders = ", ".join(["%s"] * len(company_filters))
-        conditions.append(f"t.company_id IN ({placeholders})")
-        params.extend(company_filters)
-
-    search_term = (search or "").strip().lower()
-    if search_term:
-        like = f"%{search_term}%"
-        conditions.append(
-            "(LOWER(t.subject) LIKE %s OR LOWER(COALESCE(t.description, '')) LIKE %s)"
-        )
-        params.extend([like, like])
-
-    query_parts.append("WHERE " + " AND ".join(conditions))
-
-    row = await db.fetch_one(" ".join(query_parts), tuple(params))
+    row = await db.fetch_one(query, tuple(params))
     return int(row["count"]) if row else 0
+
 
 
 async def count_tickets(
