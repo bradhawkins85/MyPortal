@@ -14,6 +14,52 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio("asyncio")
+async def test_get_product_ids_by_skus_matches_vendor_sku(monkeypatch):
+    """get_product_ids_by_skus resolves IDs via vendor_sku when sku does not match.
+
+    Products may be created with a custom internal sku but retain the vendor's
+    StockCode as vendor_sku.  opt_accessori references use the vendor's StockCode
+    so the lookup must check both columns.
+    """
+    captured: list[tuple] = []
+
+    async def fake_fetch_all(sql: str, params: tuple | None = None):
+        captured.append((sql, params))
+        # Simulate a product whose sku differs from the vendor SKU but whose
+        # vendor_sku matches the requested value.
+        return [{"id": 42}]
+
+    monkeypatch.setattr(shop_repo.db, "fetch_all", fake_fetch_all)
+
+    ids = await shop_repo.get_product_ids_by_skus(["NHU-POE-24-12WG"])
+
+    assert ids == [42]
+    assert len(captured) == 1
+    sql_used, params_used = captured[0]
+    # Both sku and vendor_sku must be in the WHERE clause
+    assert "vendor_sku" in sql_used.lower()
+    assert "sku" in sql_used.lower()
+    # The SKU should appear twice in the params (once for sku, once for vendor_sku)
+    assert params_used is not None
+    assert params_used.count("NHU-POE-24-12WG") == 2
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_product_ids_by_skus_deduplicates_when_both_columns_match(monkeypatch):
+    """When sku and vendor_sku both match, only one ID is returned (DISTINCT)."""
+
+    async def fake_fetch_all(sql: str, params: tuple | None = None):
+        # DB returns a single DISTINCT row even when both columns match
+        return [{"id": 7}]
+
+    monkeypatch.setattr(shop_repo.db, "fetch_all", fake_fetch_all)
+
+    ids = await shop_repo.get_product_ids_by_skus(["ABC123"])
+
+    assert ids == [7]
+
+
+@pytest.mark.anyio("asyncio")
 async def test_list_products_includes_recommendations(monkeypatch):
     async def fake_fetch_all(sql: str, params: tuple[Any, ...] | None = None):
         return [
