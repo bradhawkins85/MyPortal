@@ -544,3 +544,31 @@ async def test_delete_tickets_ignores_invalid_values(monkeypatch):
     assert deleted == 0
     assert dummy_db.fetch_sql is None
     assert dummy_db.execute_sql is None
+
+
+def test_prepare_ticket_search_term_uses_like_for_sqlite(monkeypatch):
+    class _SqliteDB:
+        @staticmethod
+        def is_sqlite() -> bool:
+            return True
+
+    monkeypatch.setattr(tickets, "db", _SqliteDB())
+
+    mode, value = tickets._prepare_ticket_search_term("wireless mouse")
+
+    assert mode == "like"
+    assert value == "%wireless mouse%"
+
+
+def test_prepare_ticket_search_term_uses_fulltext_for_mysql(monkeypatch):
+    class _MysqlDB:
+        @staticmethod
+        def is_sqlite() -> bool:
+            return False
+
+    monkeypatch.setattr(tickets, "db", _MysqlDB())
+
+    mode, value = tickets._prepare_ticket_search_term("wireless mouse")
+
+    assert mode == "fulltext"
+    assert value == "+wireless* +mouse*"
