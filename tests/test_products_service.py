@@ -894,3 +894,37 @@ async def test_update_products_from_feed_downloads_pending_accessory_images(monk
 
     mock_download.assert_awaited_once_with("https://vendor.com/pending.jpg")
     mock_update.assert_awaited_once_with("PENDING-ACC", "/uploads/shop/pending.jpg")
+
+
+def test_is_public_image_host_rejects_local_and_private_addresses(monkeypatch):
+    monkeypatch.setattr(
+        products_service.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(None, None, None, None, ("127.0.0.1", 0))],
+    )
+
+    assert products_service._is_public_image_host("localhost") is False
+    assert products_service._is_public_image_host("127.0.0.1") is False
+    assert products_service._is_public_image_host("internal.example") is False
+
+
+def test_is_public_image_host_accepts_public_dns_resolution(monkeypatch):
+    monkeypatch.setattr(
+        products_service.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(None, None, None, None, ("93.184.216.34", 0))],
+    )
+
+    assert products_service._is_public_image_host("example.com") is True
+
+
+@pytest.mark.anyio("asyncio")
+async def test_download_product_image_rejects_non_public_url(monkeypatch):
+    monkeypatch.setattr(products_service, "_is_public_image_host", lambda _host: False)
+    mock_client = AsyncMock()
+    monkeypatch.setattr(products_service.httpx, "AsyncClient", mock_client)
+
+    result = await products_service._download_product_image("http://127.0.0.1/internal.png")
+
+    assert result is None
+    mock_client.assert_not_called()
