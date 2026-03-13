@@ -318,7 +318,7 @@ def _build_user_ticket_filter_clauses(
     status: str | Sequence[str] | None,
     company_ids: Sequence[int] | None,
     search: str | None,
-) -> tuple[str, list[Any]]:
+) -> tuple[list[str], list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
 
@@ -346,8 +346,7 @@ def _build_user_ticket_filter_clauses(
         )
         params.extend([like, like])
 
-    where_clause = " AND ".join(clauses)
-    return where_clause, params
+    return clauses, params
 
 
 async def list_tickets_for_user(
@@ -364,39 +363,34 @@ async def list_tickets_for_user(
     if user_id <= 0:
         return []
 
-    shared_where_clause, shared_params = _build_user_ticket_filter_clauses(
+    shared_clauses, shared_params = _build_user_ticket_filter_clauses(
         status=status,
         company_ids=company_ids,
         search=search,
     )
-    shared_filter_sql = f" AND {shared_where_clause}" if shared_where_clause else ""
+    requester_conditions = ["t.requester_id = %s", *shared_clauses]
+    watched_conditions = [
+        "EXISTS (SELECT 1 FROM ticket_watchers AS tw WHERE tw.ticket_id = t.id AND tw.user_id = %s)",
+        *shared_clauses,
+    ]
 
-    query = (
-        """
+    query = """
         SELECT t.*
         FROM tickets AS t
         INNER JOIN (
             SELECT t.id
             FROM tickets AS t
-            WHERE t.requester_id = %s
-        """
-        + shared_filter_sql
-        + """
+            WHERE {requester_where}
             UNION
             SELECT t.id
             FROM tickets AS t
-            WHERE EXISTS (
-                SELECT 1
-                FROM ticket_watchers AS tw
-                WHERE tw.ticket_id = t.id AND tw.user_id = %s
-            )
-        """
-        + shared_filter_sql
-        + """
+            WHERE {watched_where}
         ) AS scoped ON scoped.id = t.id
         ORDER BY t.updated_at DESC, t.id DESC
         LIMIT %s OFFSET %s
-        """
+    """.format(
+        requester_where=" AND ".join(requester_conditions),
+        watched_where=" AND ".join(watched_conditions),
     )
 
     params: list[Any] = [
@@ -424,36 +418,31 @@ async def count_tickets_for_user(
     if user_id <= 0:
         return 0
 
-    shared_where_clause, shared_params = _build_user_ticket_filter_clauses(
+    shared_clauses, shared_params = _build_user_ticket_filter_clauses(
         status=status,
         company_ids=company_ids,
         search=search,
     )
-    shared_filter_sql = f" AND {shared_where_clause}" if shared_where_clause else ""
+    requester_conditions = ["t.requester_id = %s", *shared_clauses]
+    watched_conditions = [
+        "EXISTS (SELECT 1 FROM ticket_watchers AS tw WHERE tw.ticket_id = t.id AND tw.user_id = %s)",
+        *shared_clauses,
+    ]
 
-    query = (
-        """
+    query = """
         SELECT COUNT(*) AS count
         FROM (
             SELECT t.id
             FROM tickets AS t
-            WHERE t.requester_id = %s
-        """
-        + shared_filter_sql
-        + """
+            WHERE {requester_where}
             UNION
             SELECT t.id
             FROM tickets AS t
-            WHERE EXISTS (
-                SELECT 1
-                FROM ticket_watchers AS tw
-                WHERE tw.ticket_id = t.id AND tw.user_id = %s
-            )
-        """
-        + shared_filter_sql
-        + """
+            WHERE {watched_where}
         ) AS scoped
-        """
+    """.format(
+        requester_where=" AND ".join(requester_conditions),
+        watched_where=" AND ".join(watched_conditions),
     )
 
     params: list[Any] = [user_id, *shared_params, user_id, *shared_params]
