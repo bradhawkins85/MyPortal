@@ -1647,33 +1647,84 @@ async def replace_product_recommendations(
     *,
     cross_sell_ids: Iterable[int] | None = None,
     upsell_ids: Iterable[int] | None = None,
+    auto_linked: bool = False,
 ) -> None:
-    cross_ids = sorted({int(pid) for pid in (cross_sell_ids or []) if int(pid) > 0 and int(pid) != product_id})
-    upsell_ids_clean = sorted({int(pid) for pid in (upsell_ids or []) if int(pid) > 0 and int(pid) != product_id})
+    cross_ids = (
+        sorted({int(pid) for pid in cross_sell_ids if int(pid) > 0 and int(pid) != product_id})
+        if cross_sell_ids is not None
+        else None
+    )
+    upsell_ids_clean = (
+        sorted({int(pid) for pid in upsell_ids if int(pid) > 0 and int(pid) != product_id})
+        if upsell_ids is not None
+        else None
+    )
 
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
             await conn.begin()
             try:
-                await cursor.execute(
-                    "DELETE FROM shop_product_cross_sells WHERE product_id = %s",
-                    (product_id,),
-                )
-                if cross_ids:
-                    await cursor.executemany(
-                        "INSERT INTO shop_product_cross_sells (product_id, related_product_id) VALUES (%s, %s)",
-                        [(product_id, related_id) for related_id in cross_ids],
+                if auto_linked:
+                    # Only manage auto-linked rows so that manually-added accessories
+                    # added by admins are not removed during feed synchronisation.
+                    if cross_ids is not None:
+                        await cursor.execute(
+                            "DELETE FROM shop_product_cross_sells WHERE product_id = %s AND is_auto_linked = 1",
+                            (product_id,),
+                        )
+                        if cross_ids:
+                            await cursor.executemany(
+                                # ON DUPLICATE KEY UPDATE is a defensive no-op: if a
+                                # manually-added row (is_auto_linked=0) already exists
+                                # for this (product_id, related_product_id) pair it
+                                # will not be overwritten.
+                                "INSERT INTO shop_product_cross_sells"
+                                " (product_id, related_product_id, is_auto_linked)"
+                                " VALUES (%s, %s, 1)"
+                                " ON DUPLICATE KEY UPDATE is_auto_linked = is_auto_linked",
+                                [(product_id, related_id) for related_id in cross_ids],
+                            )
+                    if upsell_ids_clean is not None:
+                        await cursor.execute(
+                            "DELETE FROM shop_product_upsells WHERE product_id = %s AND is_auto_linked = 1",
+                            (product_id,),
+                        )
+                        if upsell_ids_clean:
+                            await cursor.executemany(
+                                # ON DUPLICATE KEY UPDATE is a defensive no-op: if a
+                                # manually-added row (is_auto_linked=0) already exists
+                                # for this (product_id, related_product_id) pair it
+                                # will not be overwritten.
+                                "INSERT INTO shop_product_upsells"
+                                " (product_id, related_product_id, is_auto_linked)"
+                                " VALUES (%s, %s, 1)"
+                                " ON DUPLICATE KEY UPDATE is_auto_linked = is_auto_linked",
+                                [(product_id, related_id) for related_id in upsell_ids_clean],
+                            )
+                else:
+                    # Admin-driven replacement: replace all recommendations for the
+                    # product regardless of how they were previously added.
+                    cross_ids_for_insert = cross_ids if cross_ids is not None else []
+                    await cursor.execute(
+                        "DELETE FROM shop_product_cross_sells WHERE product_id = %s",
+                        (product_id,),
                     )
+                    if cross_ids_for_insert:
+                        await cursor.executemany(
+                            "INSERT INTO shop_product_cross_sells (product_id, related_product_id) VALUES (%s, %s)",
+                            [(product_id, related_id) for related_id in cross_ids_for_insert],
+                        )
 
-                await cursor.execute(
-                    "DELETE FROM shop_product_upsells WHERE product_id = %s",
-                    (product_id,),
-                )
-                if upsell_ids_clean:
-                    await cursor.executemany(
-                        "INSERT INTO shop_product_upsells (product_id, related_product_id) VALUES (%s, %s)",
-                        [(product_id, related_id) for related_id in upsell_ids_clean],
+                    upsell_ids_for_insert = upsell_ids_clean if upsell_ids_clean is not None else []
+                    await cursor.execute(
+                        "DELETE FROM shop_product_upsells WHERE product_id = %s",
+                        (product_id,),
                     )
+                    if upsell_ids_for_insert:
+                        await cursor.executemany(
+                            "INSERT INTO shop_product_upsells (product_id, related_product_id) VALUES (%s, %s)",
+                            [(product_id, related_id) for related_id in upsell_ids_for_insert],
+                        )
             except Exception:
                 await conn.rollback()
                 raise
