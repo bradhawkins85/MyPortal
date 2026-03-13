@@ -1091,6 +1091,15 @@ def _serialise_mapping(record: Mapping[str, Any]) -> dict[str, Any]:
     return {key: _serialise_for_json(value) for key, value in record.items()}
 
 
+def _strip_internal_shop_product_fields(products: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Remove internal-only product fields before sending customer-facing JSON."""
+    hidden_fields = {"buy_price", "vendor_sku"}
+    return [
+        {key: value for key, value in product.items() if key not in hidden_fields}
+        for product in products
+    ]
+
+
 def _parse_input_date(value: str | None) -> date | None:
     if value is None:
         return None
@@ -4966,6 +4975,7 @@ async def shop_page(
 
         products = [product for product in products if _product_has_price(product)]
 
+    products = _strip_internal_shop_product_fields(products)
     products = cast(list[dict[str, Any]], _serialise_for_json(products))
 
     categories = await categories_task
