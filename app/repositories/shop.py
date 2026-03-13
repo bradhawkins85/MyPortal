@@ -837,6 +837,65 @@ async def list_product_restrictions() -> list[dict[str, Any]]:
     return restrictions
 
 
+async def list_optional_accessory_products() -> list[dict[str, Any]]:
+    """Return all non-archived products that are referenced as optional accessories.
+
+    A product is considered an optional accessory when it appears as
+    ``related_product_id`` in the ``shop_product_cross_sells`` table.  The
+    result includes the names and SKUs of the parent products that reference
+    each accessory.
+    """
+    rows = await db.fetch_all(
+        """
+        SELECT
+            p.id,
+            p.name,
+            p.sku,
+            p.vendor_sku,
+            p.image_url,
+            p.price,
+            p.vip_price,
+            p.stock,
+            p.archived,
+            p.category_id,
+            c.name AS category_name,
+            GROUP_CONCAT(parent.name ORDER BY parent.name SEPARATOR ', ') AS parent_product_names,
+            GROUP_CONCAT(parent.id ORDER BY parent.name SEPARATOR ',') AS parent_product_ids
+        FROM shop_product_cross_sells AS cs
+        INNER JOIN shop_products AS p ON p.id = cs.related_product_id AND p.archived = 0
+        INNER JOIN shop_products AS parent ON parent.id = cs.product_id
+        LEFT JOIN shop_categories AS c ON c.id = p.category_id
+        GROUP BY p.id, p.name, p.sku, p.vendor_sku, p.image_url, p.price,
+                 p.vip_price, p.stock, p.archived, p.category_id, c.name
+        ORDER BY p.name ASC
+        """
+    )
+    return [_normalise_optional_accessory_product(row) for row in rows]
+
+
+def _normalise_optional_accessory_product(row: dict[str, Any]) -> dict[str, Any]:
+    normalised = {
+        "id": _coerce_int(row.get("id")),
+        "name": row.get("name") or "",
+        "sku": row.get("sku") or "",
+        "vendor_sku": row.get("vendor_sku") or None,
+        "image_url": row.get("image_url") or None,
+        "price": _coerce_optional_decimal(row.get("price")),
+        "vip_price": _coerce_optional_decimal(row.get("vip_price")),
+        "stock": _coerce_int(row.get("stock")),
+        "archived": bool(row.get("archived")),
+        "category_id": _coerce_optional_int(row.get("category_id")),
+        "category_name": row.get("category_name") or None,
+        "parent_product_names": row.get("parent_product_names") or "",
+        "parent_product_ids": [
+            int(pid.strip())
+            for pid in str(row.get("parent_product_ids") or "").split(",")
+            if pid.strip().isdigit()
+        ],
+    }
+    return normalised
+
+
 async def get_category(category_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
         "SELECT id, name, parent_id, display_order FROM shop_categories WHERE id = %s",
