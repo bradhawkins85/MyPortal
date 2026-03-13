@@ -146,3 +146,66 @@ def test_list_company_members_returns_404_for_nonexistent_company(monkeypatch, a
         app.dependency_overrides.clear()
 
     assert response.status_code == 404
+
+
+
+def test_list_company_assets_denies_cross_tenant_access(monkeypatch, active_session):
+    async def fake_get_company(company_id):
+        return _make_company(id=company_id)
+
+    async def fake_has_permission(user_id, permission):
+        return True
+
+    async def fake_membership(company_id, user_id):
+        return None
+
+    monkeypatch.setattr(company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(membership_repo, "user_has_permission", fake_has_permission)
+    monkeypatch.setattr(membership_repo, "get_membership_by_company_user", fake_membership)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {"id": active_session.user_id, "email": "user@example.com", "is_super_admin": False}
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/companies/6/assets")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+
+
+def test_list_company_assets_allows_active_company_membership(monkeypatch, active_session):
+    async def fake_get_company(company_id):
+        return _make_company(id=company_id)
+
+    async def fake_has_permission(user_id, permission):
+        return True
+
+    async def fake_membership(company_id, user_id):
+        return {"company_id": company_id, "user_id": user_id, "status": "active"}
+
+    async def fake_list_assets(company_id):
+        return [{"id": 1, "company_id": company_id, "name": "Laptop", "asset_type": "hardware"}]
+
+    from app.repositories import assets as assets_repo
+
+    monkeypatch.setattr(company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(membership_repo, "user_has_permission", fake_has_permission)
+    monkeypatch.setattr(membership_repo, "get_membership_by_company_user", fake_membership)
+    monkeypatch.setattr(assets_repo, "list_company_assets", fake_list_assets)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {"id": active_session.user_id, "email": "user@example.com", "is_super_admin": False}
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/companies/5/assets")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] == 1
+    assert data[0]["company_id"] == 5
