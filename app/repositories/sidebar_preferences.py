@@ -5,6 +5,8 @@ from typing import Any
 
 from app.core.database import db
 
+PROTECTED_MENU_KEYS: set[str] = {"/admin/profile"}
+
 
 def _normalise_menu_key(value: Any) -> str:
     key = str(value or "").strip()
@@ -36,6 +38,8 @@ def _coerce_preferences(payload: Any) -> dict[str, list[str]]:
         if key and key not in seen_hidden:
             seen_hidden.add(key)
             hidden.append(key)
+
+    hidden = [key for key in hidden if key not in PROTECTED_MENU_KEYS]
 
     return {"order": order, "hidden": hidden}
 
