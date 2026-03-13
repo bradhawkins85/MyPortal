@@ -896,6 +896,166 @@ def _normalise_optional_accessory_product(row: dict[str, Any]) -> dict[str, Any]
     return normalised
 
 
+# ---------------------------------------------------------------------------
+# Pending optional accessories staging table
+# ---------------------------------------------------------------------------
+
+
+async def sync_pending_optional_accessories() -> int:
+    """Populate ``shop_optional_accessories`` with accessory SKUs that appear
+    in the stock-feed ``opt_accessori`` field of existing shop products but
+    are not yet present in ``shop_products``.
+
+    Only shop products that have a matching entry in the stock feed are
+    considered.  For each such product the ``opt_accessori`` field is split
+    on commas and each referenced SKU that is absent from ``shop_products``
+    is upserted into the staging table together with whatever metadata is
+    available in the stock feed.
+
+    Returns the number of rows inserted or updated.
+    """
+    # Fetch all stock-feed items that have opt_accessori populated
+    rows = await db.fetch_all(
+        """
+        SELECT
+            sf.sku AS parent_sku,
+            sf.opt_accessori,
+            sf2.sku AS acc_sku,
+            sf2.product_name AS acc_name,
+            sf2.category_name AS acc_category,
+            sf2.rrp AS acc_rrp,
+            sf2.image_url AS acc_image_url,
+            sf2.manufacturer AS acc_manufacturer
+        FROM stock_feed AS sf
+        INNER JOIN shop_products AS sp ON sp.sku = sf.sku AND sp.archived = 0
+        CROSS JOIN stock_feed AS sf2
+        WHERE sf.opt_accessori IS NOT NULL
+          AND FIND_IN_SET(sf2.sku, REPLACE(sf.opt_accessori, ' ', '')) > 0
+          AND NOT EXISTS (
+              SELECT 1 FROM shop_products WHERE sku = sf2.sku AND archived = 0
+          )
+        """
+    )
+
+    if not rows:
+        return 0
+
+    # Aggregate: for each accessory SKU collect all parent SKUs
+    acc_data: dict[str, dict[str, Any]] = {}
+    acc_parents: dict[str, list[str]] = defaultdict(list)
+
+    for row in rows:
+        acc_sku = str(row["acc_sku"]).strip()
+        parent_sku = str(row["parent_sku"]).strip()
+        if not acc_sku:
+            continue
+        if acc_sku not in acc_data:
+            acc_data[acc_sku] = {
+                "product_name": row.get("acc_name") or None,
+                "category_name": row.get("acc_category") or None,
+                "rrp": row.get("acc_rrp"),
+                "image_url": row.get("acc_image_url") or None,
+                "manufacturer": row.get("acc_manufacturer") or None,
+            }
+        acc_parents[acc_sku].append(parent_sku)
+
+    count = 0
+    for acc_sku, meta in acc_data.items():
+        referenced_by = ",".join(sorted(set(acc_parents[acc_sku])))
+        await db.execute(
+            """
+            INSERT INTO shop_optional_accessories
+                (sku, product_name, category_name, rrp, image_url, manufacturer,
+                 referenced_by_skus, discovered_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())
+            ON DUPLICATE KEY UPDATE
+                product_name      = VALUES(product_name),
+                category_name     = VALUES(category_name),
+                rrp               = VALUES(rrp),
+                image_url         = VALUES(image_url),
+                manufacturer      = VALUES(manufacturer),
+                referenced_by_skus = VALUES(referenced_by_skus)
+            """,
+            (
+                acc_sku,
+                meta["product_name"],
+                meta["category_name"],
+                meta["rrp"],
+                meta["image_url"],
+                meta["manufacturer"],
+                referenced_by,
+            ),
+        )
+        count += 1
+
+    # Remove entries that have since been imported into shop_products
+    await db.execute(
+        """
+        DELETE soa FROM shop_optional_accessories AS soa
+        INNER JOIN shop_products AS sp ON sp.sku = soa.sku AND sp.archived = 0
+        """
+    )
+
+    return count
+
+
+async def list_pending_optional_accessories() -> list[dict[str, Any]]:
+    """Return all rows from the ``shop_optional_accessories`` staging table."""
+    rows = await db.fetch_all(
+        """
+        SELECT id, sku, product_name, category_name, rrp, image_url,
+               manufacturer, referenced_by_skus, discovered_at
+        FROM shop_optional_accessories
+        ORDER BY product_name ASC, sku ASC
+        """
+    )
+    return [_normalise_pending_optional_accessory(row) for row in rows]
+
+
+async def get_pending_optional_accessory(
+    accessory_id: int,
+) -> dict[str, Any] | None:
+    """Return a single pending optional accessory row by id."""
+    row = await db.fetch_one(
+        """
+        SELECT id, sku, product_name, category_name, rrp, image_url,
+               manufacturer, referenced_by_skus, discovered_at
+        FROM shop_optional_accessories
+        WHERE id = %s
+        """,
+        (accessory_id,),
+    )
+    if not row:
+        return None
+    return _normalise_pending_optional_accessory(row)
+
+
+async def dismiss_pending_optional_accessory(accessory_id: int) -> bool:
+    """Remove a pending optional accessory from the staging table.
+
+    Returns ``True`` if a row was deleted.
+    """
+    result = await db.execute(
+        "DELETE FROM shop_optional_accessories WHERE id = %s",
+        (accessory_id,),
+    )
+    return bool(result)
+
+
+def _normalise_pending_optional_accessory(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": _coerce_int(row.get("id")),
+        "sku": row.get("sku") or "",
+        "product_name": row.get("product_name") or "",
+        "category_name": row.get("category_name") or None,
+        "rrp": _coerce_optional_decimal(row.get("rrp")),
+        "image_url": row.get("image_url") or None,
+        "manufacturer": row.get("manufacturer") or None,
+        "referenced_by_skus": row.get("referenced_by_skus") or "",
+        "discovered_at": row.get("discovered_at"),
+    }
+
+
 async def get_category(category_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
         "SELECT id, name, parent_id, display_order FROM shop_categories WHERE id = %s",
