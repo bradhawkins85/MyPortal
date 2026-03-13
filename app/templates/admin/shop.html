@@ -47,6 +47,20 @@
 {% endblock %}
 
 {% block content %}
+{% macro admin_shop_query(target_page=None) -%}
+  {%- set ns = namespace(params=[]) -%}
+  {%- if show_archived -%}
+    {%- set ns.params = ns.params + ['showArchived=1'] -%}
+  {%- endif -%}
+  {%- if page_size -%}
+    {%- set ns.params = ns.params + ['pageSize=' ~ page_size] -%}
+  {%- endif -%}
+  {%- if target_page is not none and target_page > 1 -%}
+    {%- set ns.params = ns.params + ['page=' ~ target_page] -%}
+  {%- endif -%}
+  {%- if ns.params -%}?{{ ns.params | join('&') }}{%- endif -%}
+{%- endmacro %}
+
 <div class="admin-grid">
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
@@ -227,6 +241,23 @@
         </tbody>
       </table>
     </div>
+    {% if total_count > 0 %}
+      <div class="table-pagination table-pagination--active">
+        <div class="table-pagination__group">
+          {% if page > 1 %}
+            <a class="button button--ghost table-pagination__button" href="{{ request.url_for('admin_shop_page') }}{{ admin_shop_query(page - 1) }}">Previous</a>
+          {% else %}
+            <button type="button" class="button button--ghost table-pagination__button" disabled>Previous</button>
+          {% endif %}
+          {% if page < total_pages %}
+            <a class="button button--ghost table-pagination__button" href="{{ request.url_for('admin_shop_page') }}{{ admin_shop_query(page + 1) }}">Next</a>
+          {% else %}
+            <button type="button" class="button button--ghost table-pagination__button" disabled>Next</button>
+          {% endif %}
+        </div>
+        <p class="table-pagination__status" aria-live="polite">Page {{ page }} of {{ total_pages }} · {{ total_count }} total</p>
+      </div>
+    {% endif %}
   </section>
 </div>
 
