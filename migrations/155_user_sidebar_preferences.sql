@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS user_sidebar_preferences (
+  user_id BIGINT NOT NULL,
+  preferences_json JSON NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id),
+  CONSTRAINT fk_user_sidebar_preferences_user
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
