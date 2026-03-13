@@ -1,17 +1,4 @@
 (function () {
-  function parseJson(elementId) {
-    const element = document.getElementById(elementId);
-    if (!element) {
-      return [];
-    }
-    try {
-      return JSON.parse(element.textContent || '[]');
-    } catch (error) {
-      console.error('Unable to parse JSON data for', elementId, error);
-      return [];
-    }
-  }
-
   function submitOnChange(container) {
     container.querySelectorAll('[data-submit-on-change]').forEach((input) => {
       input.addEventListener('change', () => {
@@ -145,6 +132,20 @@
     return row;
   }
 
+
+  async function fetchProductDetails(productId) {
+    const response = await fetch(`/api/shop/products/${productId}`, {
+      headers: {
+        Accept: 'application/json',
+      },
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(`Unable to load product details (${response.status})`);
+    }
+    return response.json();
+  }
+
   function renderProductDetails(product) {
     const container = document.getElementById('product-details-body');
     if (!container) {
@@ -188,8 +189,6 @@
     submitOnChange(container);
     bindStockLimitInputs(container);
 
-    const products = parseJson('shop-products-data');
-    const productsById = new Map(products.map((product) => [product.id, product]));
 
     const imageModal = document.getElementById('product-image-modal');
     const detailsModal = document.getElementById('product-details-modal');
@@ -209,10 +208,20 @@
     });
 
     container.querySelectorAll('[data-product-details]').forEach((button) => {
-      button.addEventListener('click', () => {
+      button.addEventListener('click', async () => {
         const id = Number(button.getAttribute('data-product-details'));
-        renderProductDetails(productsById.get(id));
+        renderProductDetails(null);
         openModal(detailsModal);
+        if (!Number.isFinite(id) || id <= 0) {
+          return;
+        }
+        try {
+          const product = await fetchProductDetails(id);
+          renderProductDetails(product);
+        } catch (error) {
+          console.error('Unable to load product details', error);
+          renderProductDetails(null);
+        }
       });
     });
   });
