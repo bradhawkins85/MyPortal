@@ -14175,7 +14175,17 @@ def _parse_automation_form_submission(
                     f"Trigger action {index} payload must be an object.",
                     status.HTTP_400_BAD_REQUEST,
                 )
-            normalised_actions.append({"module": module_value, "payload": payload_value})
+            action_entry: dict[str, Any] = {"module": module_value, "payload": payload_value}
+            raw_order = entry.get("order")
+            if raw_order is not None:
+                try:
+                    action_entry["order"] = int(raw_order)
+                except (TypeError, ValueError):
+                    pass
+            note_value = str(entry.get("note") or "").strip()
+            if note_value:
+                action_entry["note"] = note_value
+            normalised_actions.append(action_entry)
         updated_payload = dict(action_payload)
         updated_payload["actions"] = normalised_actions
         action_payload = updated_payload
