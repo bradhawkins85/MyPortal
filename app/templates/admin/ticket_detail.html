@@ -588,7 +588,7 @@
                     name="description"
                     class="form-input"
                     data-ticket-description-input
-                  >{{- (ticket.description or '')|replace('\r\n', '\n')|replace('\r', '\n') -}}</textarea>
+                  >{{- description_html|replace('\r\n', '\n')|replace('\r', '\n') -}}</textarea>
                   <p class="form-help">Share customer notes, troubleshooting steps, or context for technicians.</p>
                 </div>
                 <div class="form-actions">
@@ -1210,8 +1210,8 @@
       }
 
       document.addEventListener('ticket:description-updated', (event) => {
-        const raw = event && event.detail && typeof event.detail.raw === 'string' ? event.detail.raw : '';
-        descriptionEditor.setContents(raw);
+        const html = event && event.detail && typeof event.detail.html === 'string' ? event.detail.html : '';
+        descriptionEditor.setContents(html);
         syncDescriptionField();
       });
     });
