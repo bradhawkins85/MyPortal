@@ -30,6 +30,7 @@ async def create_field_definition(definition: FieldDefinitionCreate):
         name=definition.name,
         field_type=definition.field_type.value,
         display_order=definition.display_order,
+        display_name=definition.display_name or None,
     )
     return {"id": definition_id, "message": "Field definition created successfully"}
 
@@ -56,6 +57,7 @@ async def update_field_definition(definition_id: int, definition: FieldDefinitio
         name=definition.name,
         field_type=definition.field_type.value if definition.field_type else None,
         display_order=definition.display_order,
+        display_name=definition.display_name,
     )
     return {"message": "Field definition updated successfully"}
 

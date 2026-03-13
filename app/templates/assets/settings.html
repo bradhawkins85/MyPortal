@@ -36,6 +36,7 @@
           <thead>
             <tr>
               <th scope="col">Name</th>
+              <th scope="col">Display Name</th>
               <th scope="col">Type</th>
               <th scope="col">Display Order</th>
               <th scope="col" class="table__actions">Actions</th>
@@ -73,6 +74,18 @@
             class="input"
             required
             maxlength="255"
+          />
+        </div>
+        
+        <div class="form-group">
+          <label for="field-display-name" class="form-label">Display Name <span class="form-label__hint">(optional — shown in table column header)</span></label>
+          <input
+            type="text"
+            id="field-display-name"
+            name="display_name"
+            class="input"
+            maxlength="255"
+            placeholder="Leave blank to use Field Name"
           />
         </div>
         
