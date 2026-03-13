@@ -327,30 +327,36 @@
       
       <!-- Row 4: Cross-sell and Up-sell products -->
       <div class="form-field form-field--wide">
-        <label class="form-label" for="edit-product-cross-sell">Cross-sell products</label>
-        <select
-          class="form-input form-input--multiselect"
-          id="edit-product-cross-sell"
-          name="cross_sell_product_ids"
-          multiple
-          size="6"
-          data-recommendation-select="cross"
-        >
-        </select>
-        <p class="form-helper">Choose add-ons from the same category as this product.</p>
+        <label class="form-label">Cross-sell products</label>
+        <div class="form-quick-add">
+          <input
+            type="text"
+            class="form-input form-input--inline"
+            id="edit-product-cross-sell-sku"
+            placeholder="Enter product SKU"
+            autocomplete="off"
+          />
+          <button type="button" class="button button--small button--secondary" data-sku-add="cross-sell" data-form="edit">Add</button>
+        </div>
+        <p id="edit-cross-sell-error" class="form-help form-help--error" hidden></p>
+        <ul class="tag-list" id="edit-product-cross-sell-list" aria-label="Cross-sell products"></ul>
+        <p class="form-helper">Add SKUs for complementary products to suggest at checkout.</p>
       </div>
       <div class="form-field form-field--wide">
-        <label class="form-label" for="edit-product-upsell">Up-sell products</label>
-        <select
-          class="form-input form-input--multiselect"
-          id="edit-product-upsell"
-          name="upsell_product_ids"
-          multiple
-          size="6"
-          data-recommendation-select="upsell"
-        >
-        </select>
-        <p class="form-helper">Offer upgrade paths that remain in the same category.</p>
+        <label class="form-label">Up-sell products</label>
+        <div class="form-quick-add">
+          <input
+            type="text"
+            class="form-input form-input--inline"
+            id="edit-product-upsell-sku"
+            placeholder="Enter product SKU"
+            autocomplete="off"
+          />
+          <button type="button" class="button button--small button--secondary" data-sku-add="upsell" data-form="edit">Add</button>
+        </div>
+        <p id="edit-upsell-error" class="form-help form-help--error" hidden></p>
+        <ul class="tag-list" id="edit-product-upsell-list" aria-label="Up-sell products"></ul>
+        <p class="form-helper">Add SKUs for upgrade options to suggest at checkout.</p>
       </div>
       
       <!-- Row 5: Subscription-related fields -->
