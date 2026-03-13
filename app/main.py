@@ -1091,6 +1091,15 @@ def _serialise_mapping(record: Mapping[str, Any]) -> dict[str, Any]:
     return {key: _serialise_for_json(value) for key, value in record.items()}
 
 
+def _strip_internal_shop_product_fields(products: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Remove internal-only product fields before sending customer-facing JSON."""
+    hidden_fields = {"buy_price", "vendor_sku"}
+    return [
+        {key: value for key, value in product.items() if key not in hidden_fields}
+        for product in products
+    ]
+
+
 def _parse_input_date(value: str | None) -> date | None:
     if value is None:
         return None
@@ -4917,31 +4926,16 @@ async def shop_page(
         if category_id is not None:
             category_ids = await shop_repo.get_category_descendants(category_id)
 
-        offset = (page - 1) * page_size
-        
         filters = shop_repo.ProductFilters(
             include_archived=False,
             company_id=company_id,
             category_ids=category_ids,
             search_term=effective_search,
             in_stock_only=not show_out_of_stock,
-            limit=page_size,
-            offset=offset,
             sort="name_asc",
         )
 
-        count_filters = shop_repo.ProductFilters(
-            include_archived=False,
-            company_id=company_id,
-            category_ids=category_ids,
-            search_term=effective_search,
-            in_stock_only=not show_out_of_stock,
-            sort="name_asc",
-        )
-
-        products_task = asyncio.create_task(shop_repo.list_products_summary(filters))
-        total_count_task = asyncio.create_task(shop_repo.count_products(count_filters))
-        products, total_count = await asyncio.gather(products_task, total_count_task)
+        products = await shop_repo.list_products_summary(filters)
 
         products = [
             product
@@ -4965,7 +4959,11 @@ async def shop_page(
                 return False
 
         products = [product for product in products if _product_has_price(product)]
+        total_count = len(products)
+        offset = (page - 1) * page_size
+        products = products[offset: offset + page_size]
 
+    products = _strip_internal_shop_product_fields(products)
     products = cast(list[dict[str, Any]], _serialise_for_json(products))
 
     categories = await categories_task
@@ -5025,10 +5023,37 @@ async def shop_product_detail_api(request: Request, product_id: int):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
     is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
-    if is_vip and product.get("vip_price") is not None:
-        product["price"] = product["vip_price"]
+    product = _public_shop_product_payload(product, is_vip=is_vip)
 
     return JSONResponse(content=cast(dict[str, Any], _serialise_for_json(product)))
+
+
+def _public_shop_product_payload(product: Mapping[str, Any], *, is_vip: bool) -> dict[str, Any]:
+    payload = {
+        "id": product.get("id"),
+        "name": product.get("name"),
+        "sku": product.get("sku"),
+        "description": product.get("description"),
+        "image_url": product.get("image_url"),
+        "price": product.get("price"),
+        "vip_price": product.get("vip_price"),
+        "stock": product.get("stock"),
+        "stock_nsw": product.get("stock_nsw"),
+        "stock_qld": product.get("stock_qld"),
+        "stock_vic": product.get("stock_vic"),
+        "stock_sa": product.get("stock_sa"),
+        "category_id": product.get("category_id"),
+        "category_name": product.get("category_name"),
+        "features": product.get("features") or [],
+        "cross_sell_products": product.get("cross_sell_products") or [],
+        "cross_sell_product_ids": product.get("cross_sell_product_ids") or [],
+        "upsell_products": product.get("upsell_products") or [],
+        "upsell_product_ids": product.get("upsell_product_ids") or [],
+    }
+
+    if is_vip and payload.get("vip_price") is not None:
+        payload["price"] = payload["vip_price"]
+    return payload
 
 
 
@@ -6597,9 +6622,34 @@ async def search_by_phone_number(request: Request):
         # No phone number provided, redirect to tickets page
         return RedirectResponse(url="/tickets", status_code=status.HTTP_303_SEE_OTHER)
     
+    # Search for tickets by requester's phone number within the authenticated user's scope
+    available_companies = await company_access.list_accessible_companies(user)
+    available_company_ids: list[int] = []
+    for entry in available_companies:
+        company_id = entry.get("company_id")
+        try:
+            available_company_ids.append(int(company_id))
+        except (TypeError, ValueError):
+            continue
+
+    active_company_id = getattr(request.state, "active_company_id", None)
+    active_company_ids: list[int] = []
+    if active_company_id is not None:
+        try:
+            active_company_ids = [int(active_company_id)]
+        except (TypeError, ValueError):
+            active_company_ids = []
+    if not active_company_ids:
+        active_company_ids = available_company_ids
+
     # Search for tickets by requester's phone number
     try:
-        tickets = await tickets_repo.list_tickets_by_requester_phone(phone_number, limit=_PHONE_SEARCH_LIMIT)
+        tickets = await tickets_repo.list_tickets_by_requester_phone(
+            phone_number,
+            limit=_PHONE_SEARCH_LIMIT,
+            user_id=user.get("id"),
+            company_ids=active_company_ids or None,
+        )
     except Exception as e:
         log_error(f"Error searching tickets by phone number: {e}", exc_info=True)
         # On error, redirect to tickets page with error message
@@ -10693,13 +10743,9 @@ async def admin_shop_product_create_page(request: Request):
     )
     subscription_categories_task = asyncio.create_task(subscription_categories_repo.list_categories())
 
-    categories, products, restrictions, subscription_categories = await asyncio.gather(
-        categories_task, products_task, restrictions_task, subscription_categories_task
+    categories, products, subscription_categories = await asyncio.gather(
+        categories_task, products_task, subscription_categories_task
     )
-
-    restrictions_map: dict[int, list[dict[str, Any]]] = {}
-    for restriction in restrictions:
-        restrictions_map.setdefault(restriction["product_id"], []).append(restriction)
 
     extra = {
         "title": "Add product",
@@ -12340,9 +12386,30 @@ async def _render_tickets_dashboard(
         phone_number_stripped = phone_number.strip()
         if phone_number_stripped:
             try:
+                company_memberships = await company_access.list_accessible_companies(user)
+                available_company_ids: list[int] = []
+                for entry in company_memberships:
+                    company_id = entry.get("company_id")
+                    try:
+                        available_company_ids.append(int(company_id))
+                    except (TypeError, ValueError):
+                        continue
+
+                active_company_id = getattr(request.state, "active_company_id", None)
+                active_company_ids: list[int] = []
+                if active_company_id is not None:
+                    try:
+                        active_company_ids = [int(active_company_id)]
+                    except (TypeError, ValueError):
+                        active_company_ids = []
+                if not active_company_ids:
+                    active_company_ids = available_company_ids
+
                 phone_tickets = await tickets_repo.list_tickets_by_requester_phone(
-                    phone_number_stripped, 
-                    limit=_PHONE_SEARCH_LIMIT
+                    phone_number_stripped,
+                    limit=_PHONE_SEARCH_LIMIT,
+                    user_id=user.get("id"),
+                    company_ids=active_company_ids or None,
                 )
                 # Get minimal dashboard state with only the phone search results
                 dashboard = await tickets_service.load_dashboard_state(
@@ -12363,7 +12430,7 @@ async def _render_tickets_dashboard(
             except Exception as exc:
                 log_error(
                     "Error searching tickets by phone number",
-                    phone_number=phone_number_stripped,
+                    phone_number_provided=True,
                     error=str(exc),
                     exc_info=True
                 )

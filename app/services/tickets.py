@@ -1001,6 +1001,11 @@ async def _send_ticket_creation_email(
 
     ticket_number = str(enriched_ticket.get("ticket_number") or enriched_ticket.get("id") or "")
     subject_text = str(enriched_ticket.get("subject") or "")
+    notification_ticket = {
+        "id": enriched_ticket.get("id"),
+        "ticket_number": enriched_ticket.get("ticket_number"),
+        "subject": enriched_ticket.get("subject"),
+    }
 
     if requester_id is not None:
         # Use the notification service so user preferences are respected and an
@@ -1009,7 +1014,7 @@ async def _send_ticket_creation_email(
             await notifications_service.emit_notification(
                 event_type="tickets.created",
                 user_id=requester_id,
-                metadata={"ticket": dict(enriched_ticket)},
+                metadata={"ticket": notification_ticket},
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             log_error(

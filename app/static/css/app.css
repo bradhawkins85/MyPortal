@@ -211,6 +211,24 @@ html {
   border-radius: 0.75rem;
 }
 
+.menu__divider {
+  height: 1px;
+  margin: 0.25rem 0;
+  background: rgba(148, 163, 184, 0.35);
+}
+
+.menu__spacer {
+  height: 0.75rem;
+}
+
+.menu__heading {
+  padding: 0.25rem var(--space-compact-inline);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(226, 232, 240, 0.7);
+}
+
 
 .sidebar__footer {
   margin-top: auto;
@@ -2310,6 +2328,34 @@ button.header-title-menu__link {
 
 .table__actions {
   text-align: right;
+}
+
+.sidebar-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  cursor: grab;
+  touch-action: none;
+  color: rgba(249, 250, 251, 0.4);
+  padding: 0.25rem;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.sidebar-drag-handle:hover {
+  color: rgba(249, 250, 251, 0.8);
+}
+
+.sidebar-drag-handle:active {
+  cursor: grabbing;
+}
+
+.sidebar-row--dragging {
+  opacity: 0.4;
+}
+
+.sidebar-row--drag-over {
+  outline: 2px solid rgba(99, 102, 241, 0.7);
+  outline-offset: -2px;
 }
 
 .table__action-buttons {

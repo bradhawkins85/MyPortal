@@ -82,6 +82,24 @@ async def test_ingest_alert_rejects_missing_secret(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_ingest_alert_rejects_when_secret_not_configured(monkeypatch):
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        return {"enabled": True, "settings": {"shared_secret_hash": ""}}
+
+    monkeypatch.setattr(uptime_service.modules_service, "get_module", fake_get_module)
+
+    payload = UptimeKumaAlertPayload(status="up")
+
+    with pytest.raises(uptime_service.AuthenticationError):
+        await uptime_service.ingest_alert(
+            payload=payload,
+            raw_payload={},
+            provided_secret=None,
+            remote_addr=None,
+            user_agent=None,
+        )
+
+@pytest.mark.anyio("asyncio")
 async def test_ingest_alert_disabled_module(monkeypatch):
     async def fake_get_module(slug: str, *, redact: bool = True):
         return {"enabled": False, "settings": {}}
