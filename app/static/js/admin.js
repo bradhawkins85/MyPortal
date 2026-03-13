@@ -1302,11 +1302,14 @@
         }
         contentField.style.display = '';
         contentField.setAttribute('required', '');
+        if (content !== undefined) {
+          contentField.value = content;
+        }
       }
     }
 
     function getContentValue() {
-      if (contentTypeField.value === 'text/html' && sunEditor) {
+      if (sunEditor) {
         return sunEditor.getContents();
       }
       return contentField.value;
