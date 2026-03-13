@@ -350,11 +350,19 @@
                 </a>
               </li>
               <li class="menu__item">
-                <a href="/admin/companies" {% if current_path.startswith('/admin/companies') %}aria-current="page"{% endif %}>
+                <a href="/admin/companies" {% if current_path.startswith('/admin/companies') and not current_path.startswith('/admin/csp') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M4 3h16a1 1 0 0 1 1 1v17h-6v-6h-6v6H3V4a1 1 0 0 1 1-1zm7 17v-4h2v4h3v-6h2V5H6v9h2v6z"/></svg>
                   </span>
                   <span class="menu__label">Companies</span>
+                </a>
+              </li>
+              <li class="menu__item">
+                <a href="/admin/csp/customers" {% if current_path.startswith('/admin/csp') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
+                  </span>
+                  <span class="menu__label">CSP / Lighthouse</span>
                 </a>
               </li>
               <li class="menu__item">
