@@ -351,7 +351,7 @@
           }
         }
         touchDragSourceIndex = null;
-      });
+      }, { passive: false });
 
       sidebarItemsBody.appendChild(row);
     });
