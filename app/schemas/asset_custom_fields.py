@@ -19,6 +19,7 @@ class FieldType(str, Enum):
 class FieldDefinitionCreate(BaseModel):
     """Schema for creating a custom field definition."""
     name: str = Field(..., min_length=1, max_length=255)
+    display_name: str | None = Field(None, min_length=1, max_length=255)
     field_type: FieldType
     display_order: int = Field(default=0, ge=0)
 
@@ -26,6 +27,7 @@ class FieldDefinitionCreate(BaseModel):
 class FieldDefinitionUpdate(BaseModel):
     """Schema for updating a custom field definition."""
     name: str | None = Field(None, min_length=1, max_length=255)
+    display_name: str | None = Field(None, min_length=1, max_length=255)
     field_type: FieldType | None = None
     display_order: int | None = Field(None, ge=0)
 
@@ -34,6 +36,7 @@ class FieldDefinition(BaseModel):
     """Schema for a custom field definition."""
     id: int
     name: str
+    display_name: str | None = None
     field_type: FieldType
     display_order: int
     created_at: datetime

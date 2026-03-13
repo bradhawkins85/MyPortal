@@ -3991,7 +3991,7 @@ async def assets_page(request: Request):
     custom_columns = [
         {
             "key": f"cf_{field_def['id']}",
-            "label": field_def["name"],
+            "label": field_def["display_name"] or field_def["name"],
             "sort": "date" if field_def["field_type"] == "date" else (
                 "number" if field_def["field_type"] == "checkbox" else "string"
             ),
