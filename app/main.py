@@ -10703,13 +10703,9 @@ async def admin_shop_product_create_page(request: Request):
     )
     subscription_categories_task = asyncio.create_task(subscription_categories_repo.list_categories())
 
-    categories, products, restrictions, subscription_categories = await asyncio.gather(
-        categories_task, products_task, restrictions_task, subscription_categories_task
+    categories, products, subscription_categories = await asyncio.gather(
+        categories_task, products_task, subscription_categories_task
     )
-
-    restrictions_map: dict[int, list[dict[str, Any]]] = {}
-    for restriction in restrictions:
-        restrictions_map.setdefault(restriction["product_id"], []).append(restriction)
 
     extra = {
         "title": "Add product",
