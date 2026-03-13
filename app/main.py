@@ -12369,7 +12369,7 @@ async def _render_tickets_dashboard(
             except Exception as exc:
                 log_error(
                     "Error searching tickets by phone number",
-                    phone_number=phone_number_stripped,
+                    phone_number_provided=True,
                     error=str(exc),
                     exc_info=True
                 )
