@@ -290,8 +290,8 @@ async def test_process_feed_item_skips_cross_sells_when_opt_accessori_absent(mon
 
 
 @pytest.mark.anyio("asyncio")
-async def test_process_feed_item_empty_opt_accessori_clears_cross_sells(monkeypatch):
-    """When opt_accessori is an empty string, cross-sells are cleared (set to empty list)."""
+async def test_process_feed_item_empty_opt_accessori_preserves_cross_sells(monkeypatch):
+    """When opt_accessori is an empty string, existing cross-sells are left untouched."""
     item = {
         "sku": "MAIN1",
         "product_name": "Main Product",
@@ -333,7 +333,8 @@ async def test_process_feed_item_empty_opt_accessori_clears_cross_sells(monkeypa
     result = await products_service._process_feed_item(item, None)
 
     assert result is True
-    mock_replace.assert_awaited_once_with(5, cross_sell_ids=[])
+    mock_get_ids.assert_not_called()
+    mock_replace.assert_not_called()
 
 
 @pytest.mark.anyio("asyncio")
