@@ -1353,6 +1353,18 @@ async def replace_product_exclusions(
                 await conn.commit()
 
 
+async def get_product_ids_by_skus(skus: Sequence[str]) -> list[int]:
+    """Return the IDs of non-archived products whose SKU matches any of *skus*."""
+    if not skus:
+        return []
+    placeholders = ", ".join(["%s"] * len(skus))
+    rows = await db.fetch_all(
+        f"SELECT id FROM shop_products WHERE sku IN ({placeholders}) AND archived = 0",
+        tuple(skus),
+    )
+    return [_coerce_int(row["id"]) for row in rows if _coerce_int(row.get("id")) > 0]
+
+
 async def upsert_product_from_feed(
     *,
     name: str,
