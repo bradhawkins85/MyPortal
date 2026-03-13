@@ -256,7 +256,8 @@ def _build_timer_time_map(ticket: dict[str, Any]) -> dict[str, int]:
 
     Used as a fallback when a comment object does not carry its own time_worked
     field.  Syncro stores the billable (chargeable) duration on the labor log
-    (timer) entry; ``billable_time`` is treated as whole minutes.
+    (timer) entry as whole seconds; the value is converted to whole minutes
+    (seconds >= 30 round up to the next minute).
     """
     timers = ticket.get("ticket_timers")
     if not isinstance(timers, list):
@@ -271,7 +272,8 @@ def _build_timer_time_map(ticket: dict[str, Any]) -> dict[str, int]:
         billable_time = timer.get("billable_time")
         if billable_time is not None:
             try:
-                minutes = int(billable_time)
+                total_seconds = int(billable_time)
+                minutes = total_seconds // 60 + (1 if total_seconds % 60 >= 30 else 0)
                 if minutes > 0:
                     result[str(comment_id)] = minutes
             except (TypeError, ValueError):
