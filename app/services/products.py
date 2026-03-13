@@ -671,8 +671,12 @@ async def update_products_from_feed() -> None:
                 error=str(exc),
             )
 
+    # Refresh the staging table of accessories not yet in the shop.
+    pending_count = await shop_repo.sync_pending_optional_accessories()
+
     log_info(
         "Product feed synchronisation completed",
         processed=processed,
         updated=updated,
+        pending_optional_accessories=pending_count,
     )
