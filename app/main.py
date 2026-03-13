@@ -10432,6 +10432,7 @@ async def admin_shop_page(
     if redirect:
         return redirect
     categories_task = asyncio.create_task(shop_repo.list_all_categories_flat())
+    filter_categories_task = asyncio.create_task(shop_repo.list_categories_with_products())
     offset = (page - 1) * page_size
     filters = shop_repo.ProductFilters(
         include_archived=show_archived,
@@ -10447,8 +10448,9 @@ async def admin_shop_page(
     companies_task = asyncio.create_task(company_repo.list_companies())
     subscription_categories_task = asyncio.create_task(subscription_categories_repo.list_categories())
 
-    categories, products, total_count, restrictions, companies, subscription_categories = await asyncio.gather(
+    categories, filter_categories, products, total_count, restrictions, companies, subscription_categories = await asyncio.gather(
         categories_task,
+        filter_categories_task,
         products_task,
         total_count_task,
         restrictions_task,
@@ -10475,6 +10477,7 @@ async def admin_shop_page(
     extra = {
         "title": "Shop admin",
         "categories": categories,
+        "filter_categories": filter_categories,
         "products": products,
         "product_restrictions": restrictions_map,
         "all_companies": companies,

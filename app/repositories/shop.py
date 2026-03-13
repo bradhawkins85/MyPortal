@@ -67,6 +67,26 @@ async def list_categories() -> list[dict[str, Any]]:
     return parent_map.get(None, [])
 
 
+async def _fetch_all_categories_raw() -> list[dict[str, Any]]:
+    """Fetch all categories from the database as a flat list ordered by name."""
+    rows = await db.fetch_all(
+        """
+        SELECT id, name, parent_id, display_order 
+        FROM shop_categories 
+        ORDER BY name
+        """
+    )
+    return [
+        {
+            "id": int(row["id"]),
+            "name": row["name"],
+            "parent_id": _coerce_optional_int(row.get("parent_id")),
+            "display_order": _coerce_int(row.get("display_order"), default=0),
+        }
+        for row in rows
+    ]
+
+
 async def list_all_categories_flat() -> list[dict[str, Any]]:
     """List all categories in a flat structure for admin purposes.
     
@@ -75,22 +95,7 @@ async def list_all_categories_flat() -> list[dict[str, Any]]:
     sorted alphabetically and appear immediately after their parent. This handles
     all levels of nesting (grandchildren, great-grandchildren, etc.).
     """
-    rows = await db.fetch_all(
-        """
-        SELECT id, name, parent_id, display_order 
-        FROM shop_categories 
-        ORDER BY name
-        """
-    )
-    categories = [
-        {
-            "id": int(row["id"]), 
-            "name": row["name"],
-            "parent_id": _coerce_optional_int(row.get("parent_id")),
-            "display_order": _coerce_int(row.get("display_order"), default=0),
-        }
-        for row in rows
-    ]
+    categories = await _fetch_all_categories_raw()
     
     # Build parent-child map
     parent_map: dict[int | None, list[dict[str, Any]]] = {}
@@ -117,6 +122,68 @@ async def list_all_categories_flat() -> list[dict[str, Any]]:
         # Add all descendants of this parent
         add_category_and_descendants(parent["id"], result)
     
+    return result
+
+
+async def list_categories_with_products() -> list[dict[str, Any]]:
+    """List only categories that have at least one product in them.
+
+    Returns categories in the same flat structure as list_all_categories_flat(),
+    but limited to categories that contain at least one product (directly).
+    Parent categories are included when any of their descendants have products,
+    to preserve the hierarchical display.
+    """
+    all_categories = await _fetch_all_categories_raw()
+
+    # Find category IDs that have at least one product
+    product_rows = await db.fetch_all(
+        """
+        SELECT DISTINCT category_id FROM shop_products WHERE category_id IS NOT NULL
+        """
+    )
+    category_ids_with_products: set[int] = {int(row["category_id"]) for row in product_rows}
+
+    # Build parent-child map for all categories
+    parent_map: dict[int | None, list[dict[str, Any]]] = {}
+    for category in all_categories:
+        parent_id = category.get("parent_id")
+        parent_map.setdefault(parent_id, []).append(category)
+
+    # Determine which category IDs to include: those with products plus their ancestors
+    def get_ancestor_ids(cat: dict[str, Any], cat_by_id: dict[int, dict[str, Any]]) -> list[int]:
+        """Return ancestor IDs for a category (not including itself)."""
+        ancestors: list[int] = []
+        current = cat
+        while current.get("parent_id") is not None:
+            parent_id = current["parent_id"]
+            ancestors.append(parent_id)
+            current = cat_by_id.get(parent_id, {})
+        return ancestors
+
+    cat_by_id: dict[int, dict[str, Any]] = {c["id"]: c for c in all_categories}
+    included_ids: set[int] = set(category_ids_with_products)
+    for cat_id in category_ids_with_products:
+        cat = cat_by_id.get(cat_id)
+        if cat:
+            included_ids.update(get_ancestor_ids(cat, cat_by_id))
+
+    # Sort all groups alphabetically by name
+    for children_list in parent_map.values():
+        children_list.sort(key=lambda c: c["name"].lower())
+
+    # Recursively build flat list including only categories in included_ids
+    def add_category_and_descendants(cat_id: int, result: list[dict[str, Any]]) -> None:
+        for child in parent_map.get(cat_id, []):
+            if child["id"] in included_ids:
+                result.append(child)
+                add_category_and_descendants(child["id"], result)
+
+    result: list[dict[str, Any]] = []
+    for parent in parent_map.get(None, []):
+        if parent["id"] in included_ids:
+            result.append(parent)
+            add_category_and_descendants(parent["id"], result)
+
     return result
 
 
