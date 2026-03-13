@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.core.logging import log_error, log_info
+from app.repositories import asset_custom_fields as acf_repo
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
 from app.services import syncro, tacticalrmm
@@ -88,6 +89,91 @@ async def import_assets_for_company(
     return processed
 
 
+async def _sync_tactical_asset_custom_fields(
+    asset_id: int,
+    trmm_agent_id: str,
+    agent: Mapping[str, Any],
+) -> None:
+    """Sync TRMM custom field values into MyPortal asset custom fields.
+
+    Logic:
+    - Non-checkbox fields: import the TRMM custom field value directly.
+    - Checkbox fields:
+        - If a matching TRMM custom field (by name) has type "checkbox" ->
+          copy the boolean value.
+        - If a matching TRMM custom field has text type -> check the box when
+          the text value matches the field name exactly.
+        - If no matching TRMM custom field is found -> check installed
+          software; the box is checked when the field name matches an
+          installed software name (case-insensitive), and unchecked otherwise.
+    """
+    field_defs = await acf_repo.list_field_definitions()
+    if not field_defs:
+        return
+
+    trmm_fields = tacticalrmm.extract_trmm_custom_fields(agent)
+
+    # Build a case-insensitive lookup for TRMM custom fields.
+    trmm_fields_lower: dict[str, dict[str, Any]] = {
+        k.lower(): v for k, v in trmm_fields.items()
+    }
+
+    # Lazy-load installed software only when needed.
+    installed_software_lower: set[str] | None = None
+
+    for field_def in field_defs:
+        field_name: str = field_def["name"]
+        field_type: str = field_def["field_type"]
+        field_def_id: int = field_def["id"]
+
+        trmm_field = trmm_fields.get(field_name) or trmm_fields_lower.get(field_name.lower())
+
+        if field_type != "checkbox":
+            # Non-checkbox: import value directly from matching TRMM field.
+            if trmm_field is None:
+                continue
+            trmm_value = trmm_field.get("value")
+            if field_type == "date":
+                await acf_repo.set_asset_field_value(
+                    asset_id=asset_id,
+                    field_definition_id=field_def_id,
+                    value_date=_clean_string(trmm_value),
+                )
+            else:
+                await acf_repo.set_asset_field_value(
+                    asset_id=asset_id,
+                    field_definition_id=field_def_id,
+                    value_text=_clean_string(trmm_value),
+                )
+        else:
+            # Checkbox field: resolve to a boolean.
+            if trmm_field is not None:
+                trmm_type = trmm_field.get("type", "text")
+                trmm_value = trmm_field.get("value")
+                if trmm_type == "checkbox":
+                    bool_val = bool(trmm_value)
+                else:
+                    # Text field: check when the value matches the field name
+                    # exactly (the typical "software name" pattern).
+                    bool_val = (
+                        str(trmm_value).strip() == field_name
+                        if trmm_value is not None
+                        else False
+                    )
+            else:
+                # No matching TRMM custom field -> check installed software.
+                if installed_software_lower is None:
+                    sw_names = await tacticalrmm.fetch_agent_installed_software(trmm_agent_id)
+                    installed_software_lower = {s.lower() for s in sw_names}
+                bool_val = field_name.lower() in installed_software_lower
+
+            await acf_repo.set_asset_field_value(
+                asset_id=asset_id,
+                field_definition_id=field_def_id,
+                value_boolean=bool_val,
+            )
+
+
 async def import_tactical_assets_for_company(
     company_id: int,
     *,
@@ -121,7 +207,7 @@ async def import_tactical_assets_for_company(
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
-        await assets_repo.upsert_asset(
+        asset_id = await assets_repo.upsert_asset(
             company_id=company_id,
             name=name,
             type=_clean_string(details.get("type")),
@@ -142,6 +228,23 @@ async def import_tactical_assets_for_company(
             tactical_asset_id=tactical_id,
             match_name=True,
         )
+        if asset_id and tactical_id:
+            try:
+                await _sync_tactical_asset_custom_fields(asset_id, tactical_id, agent)
+            except (tacticalrmm.TacticalRMMAPIError, tacticalrmm.TacticalRMMConfigurationError, OSError) as exc:
+                log_error(
+                    "Failed to sync custom fields for Tactical RMM asset",
+                    asset_id=asset_id,
+                    tactical_asset_id=tactical_id,
+                    error=str(exc),
+                )
+            except Exception as exc:  # noqa: BLE001 – database/unexpected errors must not abort import
+                log_error(
+                    "Unexpected error syncing custom fields for Tactical RMM asset",
+                    asset_id=asset_id,
+                    tactical_asset_id=tactical_id,
+                    error=str(exc),
+                )
         processed += 1
 
     log_info(

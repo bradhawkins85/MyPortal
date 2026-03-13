@@ -437,6 +437,73 @@ async def fetch_agents(client_id: str | None = None) -> list[Mapping[str, Any]]:
     return collected
 
 
+def extract_trmm_custom_fields(agent: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Parse custom fields from a TRMM agent response into a name-keyed dict.
+
+    Each entry in the returned dict has:
+    - ``type``: the TRMM field type (e.g. "checkbox", "text", "number")
+    - ``value``: the resolved value (bool for checkbox, str for others)
+    """
+    raw = agent.get("custom_fields")
+    if not isinstance(raw, list):
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for field in raw:
+        if not isinstance(field, Mapping):
+            continue
+        name = _clean_text(field.get("name"))
+        if not name:
+            continue
+        field_type = _clean_text(field.get("type")) or "text"
+        if field_type == "checkbox":
+            value: Any = field.get("bool_value")
+            if value is None:
+                raw_bool = field.get("value")
+                if isinstance(raw_bool, bool):
+                    value = raw_bool
+                elif raw_bool is not None:
+                    value = str(raw_bool).lower() in ("true", "1", "yes")
+        else:
+            value = field.get("string_value")
+            if value is None:
+                value = field.get("value")
+        result[name] = {"type": field_type, "value": value}
+    return result
+
+
+async def fetch_agent_installed_software(agent_id: str) -> list[str]:
+    """Return a list of installed software names for a TRMM agent.
+
+    Calls the ``software/{agent_id}/`` endpoint.  Returns an empty list on
+    error so that callers can degrade gracefully.
+    """
+    try:
+        result = await _call_endpoint(f"software/{agent_id}/")
+    except (TacticalRMMAPIError, TacticalRMMConfigurationError) as exc:
+        log_error(
+            "Failed to fetch installed software from Tactical RMM",
+            agent_id=agent_id,
+            error=str(exc),
+        )
+        return []
+    names: list[str] = []
+    items: list[Any] = []
+    if isinstance(result, list):
+        items = result
+    elif isinstance(result, Mapping):
+        for key in ("results", "software", "items", "data"):
+            candidate = result.get(key)
+            if isinstance(candidate, list):
+                items = candidate
+                break
+    for item in items:
+        if isinstance(item, Mapping):
+            name = _clean_text(item.get("name"))
+            if name:
+                names.append(name)
+    return names
+
+
 async def fetch_clients() -> list[Mapping[str, Any]]:
     """
     Fetch all Tactical RMM clients from the /beta/v1/client/ endpoint.
