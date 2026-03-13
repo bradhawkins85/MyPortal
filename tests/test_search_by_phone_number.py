@@ -177,3 +177,29 @@ async def test_list_tickets_by_requester_phone_returns_multiple_tickets(monkeypa
     assert results[0]["subject"] == "Newer Ticket"
     assert results[1]["id"] == 1
     assert results[1]["subject"] == "Older Ticket"
+
+
+@pytest.mark.anyio
+async def test_list_tickets_by_requester_phone_applies_user_and_company_scope(monkeypatch):
+    dummy_db = _PhoneSearchDB([])
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    await tickets.list_tickets_by_requester_phone(
+        "+1 (555) 010-9999",
+        limit=25,
+        user_id=42,
+        company_ids=[7, 9],
+    )
+
+    assert "t.requester_id = %s OR EXISTS (" in dummy_db.fetch_sql
+    assert "FROM ticket_watchers AS tw" in dummy_db.fetch_sql
+    assert "t.company_id IN (%s, %s)" in dummy_db.fetch_sql
+    assert dummy_db.fetch_params == (
+        "%15550109999%",
+        "%15550109999%",
+        42,
+        42,
+        7,
+        9,
+        25,
+    )
