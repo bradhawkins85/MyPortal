@@ -578,6 +578,30 @@
 
     let descriptionSunEditor = null;
 
+    function sanitizeDescriptionHtml(value) {
+      const template = document.createElement('template');
+      template.innerHTML = value || '';
+      template.content
+        .querySelectorAll('script, iframe, object, embed, link, meta, base, form')
+        .forEach((node) => node.remove());
+
+      template.content.querySelectorAll('*').forEach((node) => {
+        Array.from(node.attributes).forEach((attr) => {
+          const attrName = attr.name.toLowerCase();
+          const attrValue = String(attr.value || '').trim().toLowerCase();
+          if (attrName.startsWith('on')) {
+            node.removeAttribute(attr.name);
+            return;
+          }
+          if ((attrName === 'href' || attrName === 'src') && attrValue.startsWith('javascript:')) {
+            node.removeAttribute(attr.name);
+          }
+        });
+      });
+
+      return template.innerHTML;
+    }
+
     function getOrCreateDescriptionEditor() {
       if (descriptionSunEditor) {
         return descriptionSunEditor;
@@ -610,7 +634,7 @@
       const currentValue = descriptionTextarea.value || '';
       const editor = getOrCreateDescriptionEditor();
       if (editor) {
-        editor.setContents(currentValue);
+        editor.setContents(sanitizeDescriptionHtml(currentValue));
       } else if (descriptionEditorField) {
         descriptionEditorField.value = currentValue;
       }
@@ -624,9 +648,9 @@
         return;
       }
       if (descriptionSunEditor) {
-        descriptionTextarea.value = descriptionSunEditor.getContents();
+        descriptionTextarea.value = sanitizeDescriptionHtml(descriptionSunEditor.getContents());
       } else if (descriptionEditorField) {
-        descriptionTextarea.value = descriptionEditorField.value;
+        descriptionTextarea.value = sanitizeDescriptionHtml(descriptionEditorField.value);
       }
       closeDescriptionEditor();
     }
