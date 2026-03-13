@@ -2,19 +2,12 @@
 
 {% block content %}
 <div
-  class="management"
+  class="management management--single"
   data-layout
   id="profile-root"
   data-user-id="{{ current_user.id }}"
   data-totp-devices='{{ profile_totp_devices | tojson | safe }}'
 >
-  <aside class="management__sidebar">
-    <h2 class="management__heading">Profile settings</h2>
-    <p class="management__intro">
-      Update your contact details and personalise your portal experience.
-    </p>
-  </aside>
-
   <section class="management__content">
     <header class="management__header">
       <div>
