@@ -127,74 +127,149 @@
     const products = parseJson('admin-products-data', []);
     const restrictions = parseJson('admin-product-restrictions', {});
     const productsById = new Map(products.map((product) => [product.id, product]));
+    const productsBySku = new Map(products.map((product) => [String(product.sku).toLowerCase(), product]));
 
-    const createCategorySelect = document.getElementById('product-category');
-    const createCrossSelect = document.getElementById('product-cross-sell');
-    const createUpsellSelect = document.getElementById('product-upsell');
-
-    function updateRecommendationSelect(select, categoryId, selectedIds, excludeProductId) {
-      if (!select) {
-        return;
-      }
-      const numericCategory = Number(categoryId || 0);
-      const selectedSet = new Set((selectedIds || []).map((id) => Number(id)));
-      select.innerHTML = '';
-
-      if (!Number.isFinite(numericCategory) || numericCategory <= 0) {
-        const option = document.createElement('option');
-        option.textContent = 'Select a category to choose products';
-        option.disabled = true;
-        option.selected = true;
-        select.appendChild(option);
-        select.disabled = true;
-        return;
+    function createSkuListManager(listId, errorId, formName, fieldName) {
+      const list = document.getElementById(listId);
+      const errorEl = document.getElementById(errorId);
+      if (!list) {
+        return null;
       }
 
-      const available = products
-        .filter((product) => {
-          if (Number(product.id) === Number(excludeProductId)) {
-            return false;
-          }
-          if (product.archived) {
-            return false;
-          }
-          return Number(product.category_id || 0) === numericCategory;
-        })
-        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      const selectedIds = new Set();
 
-      if (!available.length) {
-        const option = document.createElement('option');
-        option.textContent = 'No other products in this category';
-        option.disabled = true;
-        option.selected = true;
-        select.appendChild(option);
-        select.disabled = true;
-        return;
-      }
-
-      available.forEach((product) => {
-        const option = document.createElement('option');
-        option.value = String(product.id);
-        option.textContent = `${product.name} (${product.sku})`;
-        if (selectedSet.has(Number(product.id))) {
-          option.selected = true;
+      function showError(msg) {
+        if (errorEl) {
+          errorEl.textContent = msg;
+          errorEl.hidden = !msg;
         }
-        select.appendChild(option);
-      });
+      }
 
-      select.disabled = false;
+      function renderItem(product) {
+        const li = document.createElement('li');
+        li.className = 'tag';
+        li.dataset.productId = String(product.id);
+
+        const label = document.createElement('span');
+        label.textContent = `${product.name} (${product.sku})`;
+        li.appendChild(label);
+
+        // Hidden input so the product ID is submitted with the form
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = fieldName;
+        input.value = String(product.id);
+        li.appendChild(input);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'tag__remove';
+        removeBtn.setAttribute('aria-label', `Remove ${product.name}`);
+        removeBtn.textContent = '×';
+        removeBtn.addEventListener('click', () => {
+          selectedIds.delete(Number(product.id));
+          li.remove();
+        });
+        li.appendChild(removeBtn);
+
+        list.appendChild(li);
+      }
+
+      function addBySku(sku, excludeProductId) {
+        showError('');
+        const trimmed = sku.trim().toLowerCase();
+        if (!trimmed) {
+          return false;
+        }
+        const product = productsBySku.get(trimmed);
+        if (!product) {
+          showError(`No product found with SKU "${sku.trim()}"`);
+          return false;
+        }
+        if (product.archived) {
+          showError(`Product "${product.name}" is archived and cannot be added`);
+          return false;
+        }
+        if (excludeProductId != null && Number(product.id) === Number(excludeProductId)) {
+          showError('A product cannot be its own recommendation');
+          return false;
+        }
+        const numericId = Number(product.id);
+        if (selectedIds.has(numericId)) {
+          showError(`Product "${product.name}" is already in the list`);
+          return false;
+        }
+        selectedIds.add(numericId);
+        renderItem(product);
+        return true;
+      }
+
+      function initFromIds(ids, excludeProductId) {
+        list.innerHTML = '';
+        selectedIds.clear();
+        showError('');
+        (ids || []).forEach((id) => {
+          const product = productsById.get(Number(id));
+          if (product && !product.archived) {
+            const numericId = Number(product.id);
+            if (excludeProductId == null || numericId !== Number(excludeProductId)) {
+              selectedIds.add(numericId);
+              renderItem(product);
+            }
+          }
+        });
+      }
+
+      return { addBySku, initFromIds, showError };
     }
 
-    if (createCategorySelect) {
-      const refreshCreateSelects = () => {
-        updateRecommendationSelect(createCrossSelect, createCategorySelect.value, [], null);
-        updateRecommendationSelect(createUpsellSelect, createCategorySelect.value, [], null);
-      };
-      createCategorySelect.addEventListener('change', () => {
-        refreshCreateSelects();
+    // Create form SKU list managers
+    const createCrossManager = createSkuListManager(
+      'product-cross-sell-list',
+      'create-cross-sell-error',
+      'create',
+      'cross_sell_product_ids',
+    );
+    const createUpsellManager = createSkuListManager(
+      'product-upsell-list',
+      'create-upsell-error',
+      'create',
+      'upsell_product_ids',
+    );
+
+    document.querySelectorAll('[data-sku-add][data-form="create"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const type = btn.getAttribute('data-sku-add');
+        const inputId = type === 'cross-sell' ? 'product-cross-sell-sku' : 'product-upsell-sku';
+        const manager = type === 'cross-sell' ? createCrossManager : createUpsellManager;
+        const input = document.getElementById(inputId);
+        if (!input || !manager) {
+          return;
+        }
+        if (manager.addBySku(input.value, null)) {
+          input.value = '';
+        }
       });
-      refreshCreateSelects();
-    }
+    });
+
+    // Allow pressing Enter in the SKU input to add
+    ['product-cross-sell-sku', 'product-upsell-sku'].forEach((inputId) => {
+      const input = document.getElementById(inputId);
+      if (!input) {
+        return;
+      }
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          const addBtn = input.closest('.form-quick-add')
+            ? input.closest('.form-quick-add').querySelector('[data-sku-add]')
+            : null;
+          if (addBtn) {
+            addBtn.click();
+          }
+        }
+      });
+    });
 
     // Initialize field visibility toggle for create form
     const createSubscriptionCategorySelect = document.getElementById('product-subscription-category');
@@ -587,6 +662,55 @@
     bindModalDismissal(editModal);
     bindModalDismissal(visibilityModal);
 
+    // Edit form SKU list managers (modal)
+    let currentEditProductId = null;
+    const editCrossManager = createSkuListManager(
+      'edit-product-cross-sell-list',
+      'edit-cross-sell-error',
+      'edit',
+      'cross_sell_product_ids',
+    );
+    const editUpsellManager = createSkuListManager(
+      'edit-product-upsell-list',
+      'edit-upsell-error',
+      'edit',
+      'upsell_product_ids',
+    );
+
+    document.querySelectorAll('[data-sku-add][data-form="edit"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const type = btn.getAttribute('data-sku-add');
+        const inputId = type === 'cross-sell' ? 'edit-product-cross-sell-sku' : 'edit-product-upsell-sku';
+        const manager = type === 'cross-sell' ? editCrossManager : editUpsellManager;
+        const input = document.getElementById(inputId);
+        if (!input || !manager) {
+          return;
+        }
+        if (manager.addBySku(input.value, currentEditProductId)) {
+          input.value = '';
+        }
+      });
+    });
+
+    // Allow pressing Enter in the edit SKU inputs to add
+    ['edit-product-cross-sell-sku', 'edit-product-upsell-sku'].forEach((inputId) => {
+      const input = document.getElementById(inputId);
+      if (!input) {
+        return;
+      }
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          const addBtn = input.closest('.form-quick-add')
+            ? input.closest('.form-quick-add').querySelector('[data-sku-add]')
+            : null;
+          if (addBtn) {
+            addBtn.click();
+          }
+        }
+      });
+    });
+
     if (importModal) {
       const importSkuInput = importModal.querySelector('#import-vendor-sku');
       document.querySelectorAll('[data-import-product-modal-open]').forEach((button) => {
@@ -647,32 +771,13 @@
         if (priceAnnualAnnual) {
           priceAnnualAnnual.value = product.price_annual_annual_payment != null ? product.price_annual_annual_payment : '';
         }
-        const editCrossSelect = editForm.querySelector('#edit-product-cross-sell');
-        const editUpsellSelect = editForm.querySelector('#edit-product-upsell');
-        updateRecommendationSelect(
-          editCrossSelect,
-          categorySelect ? categorySelect.value : '',
-          product.cross_sell_product_ids || [],
-          id,
-        );
-        updateRecommendationSelect(
-          editUpsellSelect,
-          categorySelect ? categorySelect.value : '',
-          product.upsell_product_ids || [],
-          id,
-        );
-        if (categorySelect) {
-          categorySelect.onchange = () => {
-            const selectedCross = Array.from(
-              (editCrossSelect ? editCrossSelect.selectedOptions : []),
-            ).map((option) => Number(option.value));
-            const selectedUpsell = Array.from(
-              (editUpsellSelect ? editUpsellSelect.selectedOptions : []),
-            ).map((option) => Number(option.value));
-            updateRecommendationSelect(editCrossSelect, categorySelect.value, selectedCross, id);
-            updateRecommendationSelect(editUpsellSelect, categorySelect.value, selectedUpsell, id);
-          };
+        if (editCrossManager) {
+          editCrossManager.initFromIds(product.cross_sell_product_ids || [], id);
         }
+        if (editUpsellManager) {
+          editUpsellManager.initFromIds(product.upsell_product_ids || [], id);
+        }
+        currentEditProductId = id;
         if (imageFilenameDisplay) {
           if (product.image_url) {
             const filename = product.image_url.split('/').pop();
