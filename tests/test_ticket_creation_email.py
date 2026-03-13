@@ -58,7 +58,53 @@ async def test_send_creation_email_calls_notify_for_user_requester(monkeypatch):
 
     assert captured["event_type"] == "tickets.created"
     assert captured["user_id"] == 5
-    assert captured["metadata"]["ticket"] == enriched
+    assert captured["metadata"]["ticket"] == {
+        "id": 10,
+        "ticket_number": "100",
+        "subject": "Printer offline",
+    }
+
+
+@pytest.mark.anyio
+async def test_send_creation_email_notification_metadata_excludes_sensitive_ticket_fields(monkeypatch):
+    """Notification metadata includes only safe ticket summary fields."""
+    captured: dict[str, object] = {}
+
+    async def fake_emit_notification(*, event_type, user_id, metadata):
+        captured["event_type"] = event_type
+        captured["user_id"] = user_id
+        captured["metadata"] = metadata
+
+    monkeypatch.setattr(notifications_service, "emit_notification", fake_emit_notification)
+
+    enriched = {
+        "id": 10,
+        "ticket_number": "100",
+        "subject": "Printer offline",
+        "requester_id": 5,
+        "requester_email": "user@example.com",
+        "requester": {
+            "id": 5,
+            "email": "user@example.com",
+            "mobile_phone": "+15551234",
+            "is_super_admin": False,
+        },
+        "latest_reply": {
+            "id": 40,
+            "body_text": "Internal escalation details",
+            "is_internal": True,
+        },
+    }
+
+    await tickets_service._send_ticket_creation_email(enriched)
+
+    assert captured["event_type"] == "tickets.created"
+    assert captured["user_id"] == 5
+    assert captured["metadata"]["ticket"] == {
+        "id": 10,
+        "ticket_number": "100",
+        "subject": "Printer offline",
+    }
 
 
 @pytest.mark.anyio
