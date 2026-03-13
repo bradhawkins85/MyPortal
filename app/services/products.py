@@ -274,6 +274,10 @@ def _parse_feed_item(element: Element) -> dict[str, Any] | None:
     pub_date_raw = _get_feed_value(element, "pubDate", "pub_date")
     pub_date = _parse_stock_date(pub_date_raw)
 
+    opt_accessori = _optional_text(
+        _get_feed_value(element, "OptAccessori", "opt_accessori")
+    )
+
     return {
         "sku": sku_cleaned,
         "product_name": product_name,
@@ -301,6 +305,7 @@ def _parse_feed_item(element: Element) -> dict[str, Any] | None:
         "warranty_length": warranty_length,
         "manufacturer": manufacturer,
         "image_url": image_url,
+        "opt_accessori": opt_accessori,
     }
 
 
@@ -536,6 +541,23 @@ async def _process_feed_item(
         warranty_length=warranty_length,
         manufacturer=manufacturer,
     )
+
+    opt_accessori_raw = item.get("opt_accessori")
+    if opt_accessori_raw is not None:
+        accessory_skus = [
+            s.strip() for s in str(opt_accessori_raw).split(",") if s.strip()
+        ]
+        if accessory_skus:
+            cross_sell_ids = await shop_repo.get_product_ids_by_skus(accessory_skus)
+            product_after_upsert = await shop_repo.get_product_by_sku(
+                code, include_archived=True
+            )
+            if product_after_upsert and product_after_upsert.get("id"):
+                await shop_repo.replace_product_recommendations(
+                    int(product_after_upsert["id"]),
+                    cross_sell_ids=cross_sell_ids,
+                )
+
     return True
 
 
