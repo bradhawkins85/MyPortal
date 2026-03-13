@@ -2,121 +2,22 @@
 
 {% block content %}
 <div
-  class="admin-grid admin-grid--columns"
+  class="management"
+  data-layout
   id="profile-root"
   data-user-id="{{ current_user.id }}"
   data-totp-devices='{{ profile_totp_devices | tojson | safe }}'
 >
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Account security</h2>
-        <p class="card__subtitle">
-          Update your password and manage multi-factor authenticators. New passwords must contain at least 12 characters and differ from your current password.
-        </p>
-      </div>
-    </header>
-    <div class="card__body card__body--stacked">
-      <form class="form" id="password-form" autocomplete="off">
-        <fieldset class="form__fieldset">
-          <legend class="form__legend">Change password</legend>
-          <div class="alert alert--info" data-password-success hidden role="status"></div>
-          <div class="alert alert--error" data-password-error hidden role="alert"></div>
-          <div class="form-field">
-            <label class="form-label" for="current-password">Current password</label>
-            <input class="form-input" type="password" id="current-password" name="currentPassword" autocomplete="current-password" required />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="new-password">New password</label>
-            <input class="form-input" type="password" id="new-password" name="newPassword" autocomplete="new-password" minlength="12" required />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="confirm-password">Confirm new password</label>
-            <input class="form-input" type="password" id="confirm-password" name="confirmPassword" autocomplete="new-password" minlength="12" required />
-          </div>
-          <div class="form-actions">
-            <button type="submit" class="button">Update password</button>
-          </div>
-        </fieldset>
-      </form>
-      <section class="divider"></section>
-      <div data-totp>
-        <h3 class="card__subtitle">Authenticator apps</h3>
-        <p class="text-muted">
-          Register an authenticator to protect sign-ins. You can remove unused devices after confirming your new authenticator works.
-        </p>
-        <div class="table-toolbar">
-          <input type="search" class="form-input" placeholder="Filter authenticators" aria-label="Filter authenticators" data-table-filter="totp-table" />
-          <button type="button" class="button" data-totp-add>Set up new authenticator</button>
-        </div>
-        <div class="table-wrapper">
-          <table class="table" id="totp-table" data-table>
-            <thead>
-              <tr>
-                <th scope="col" data-sort="string">Name</th>
-                <th scope="col" class="table__actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody data-totp-body>
-              <tr class="table__empty" data-totp-empty>
-                <td colspan="2">No authenticators registered yet.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div data-totp-setup hidden>
-          <h4 class="card__subtitle">Scan the provisioning details</h4>
-          <p class="text-muted">
-            Open your authenticator app and add a new account. You can paste the setup link into compatible desktop authenticator applications or enter the secret manually.
-          </p>
-          <div class="form-grid">
-            <div class="form-field">
-              <label class="form-label" for="totp-secret">Secret</label>
-              <div class="inline-form inline-form--stacked">
-                <input class="form-input" id="totp-secret" name="totpSecret" readonly />
-                <button type="button" class="button button--ghost" data-copy-target="totp-secret">Copy</button>
-              </div>
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="totp-link">Setup link</label>
-              <div class="inline-form inline-form--stacked">
-                <input class="form-input" id="totp-link" name="totpLink" readonly />
-                <button type="button" class="button button--ghost" data-copy-target="totp-link">Copy</button>
-              </div>
-            </div>
-          </div>
-          <form class="form" id="totp-verify-form">
-            <div class="alert alert--info" data-totp-success hidden role="status"></div>
-            <div class="alert alert--error" data-totp-error hidden role="alert"></div>
-            <div class="form-field">
-              <label class="form-label" for="totp-name">Device name</label>
-              <input class="form-input" id="totp-name" name="totpName" maxlength="100" placeholder="e.g. Work phone" />
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="totp-code">Authenticator code</label>
-              <input class="form-input" id="totp-code" name="totpCode" inputmode="numeric" pattern="[0-9]*" required />
-            </div>
-            <div class="form-actions">
-              <button type="submit" class="button">Verify and enable</button>
-              <button type="button" class="button button--ghost" data-totp-cancel>Cancel</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  </section>
+  <aside class="management__sidebar">
+    <h2 class="management__heading">Profile settings</h2>
+    <p class="management__intro">
+      Update your contact details and personalise your portal experience.
+    </p>
 
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Notification contact</h2>
-        <p class="card__subtitle">
-          Provide a mobile number for SMS alerts. Numbers are stored in E.164 format for secure delivery.
-        </p>
-      </div>
-    </header>
-    <div class="card__body">
-      <form class="form" id="mobile-form">
+    <form class="form management__form" id="mobile-form">
+      <fieldset class="form__fieldset">
+        <legend class="form__legend">Notification contact</legend>
+        <p class="form-help">Provide a mobile number for SMS alerts. Numbers are stored in E.164 format for secure delivery.</p>
         <div class="alert alert--info" data-mobile-success hidden role="status"></div>
         <div class="alert alert--error" data-mobile-error hidden role="alert"></div>
         <div class="form-field">
@@ -133,21 +34,13 @@
         <div class="form-actions">
           <button type="submit" class="button">Save number</button>
         </div>
-      </form>
-    </div>
-  </section>
+      </fieldset>
+    </form>
 
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Booking link</h2>
-        <p class="card__subtitle">
-          Provide your booking link URL. This will be displayed to customers on tickets assigned to you.
-        </p>
-      </div>
-    </header>
-    <div class="card__body">
-      <form class="form" id="booking-link-form">
+    <form class="form management__form" id="booking-link-form">
+      <fieldset class="form__fieldset">
+        <legend class="form__legend">Booking link</legend>
+        <p class="form-help">Provide your booking link URL. This will be displayed to customers on tickets assigned to you.</p>
         <div class="alert alert--info" data-booking-success hidden role="status"></div>
         <div class="alert alert--error" data-booking-error hidden role="alert"></div>
         <div class="form-field">
@@ -164,151 +57,259 @@
         <div class="form-actions">
           <button type="submit" class="button">Save booking link</button>
         </div>
-      </form>
-    </div>
-  </section>
+      </fieldset>
+    </form>
+  </aside>
 
-
-
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
+  <section class="management__content">
+    <header class="management__header">
       <div>
-        <h2 class="card__title">Left menu customisation</h2>
-        <p class="card__subtitle">
-          Choose which sidebar links are visible and arrange their order.
-        </p>
+        <h1 class="management__title">My profile</h1>
+        <p class="management__subtitle">Manage your account security, sidebar preferences, and email signature.</p>
       </div>
     </header>
-    <div class="card__body" data-sidebar-customisation>
-      <div class="alert alert--info" data-sidebar-success hidden role="status"></div>
-      <div class="alert alert--error" data-sidebar-error hidden role="alert"></div>
-      <div class="table-wrapper">
-        <table class="table" id="sidebar-menu-table">
-          <thead>
-            <tr>
-              <th scope="col">Visible</th>
-              <th scope="col">Menu item</th>
-              <th scope="col" class="table__actions">Order</th>
-            </tr>
-          </thead>
-          <tbody data-sidebar-items></tbody>
-        </table>
-      </div>
-      <div class="form-actions">
-        <button type="button" class="button" data-sidebar-save>Save menu</button>
-        <button type="button" class="button button--ghost" data-sidebar-reset>Reset default</button>
-      </div>
-    </div>
-  </section>
 
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Email signature</h2>
-        <p class="card__subtitle">
-          Create your email signature for use in automated email notifications. This signature is accessible through automation events.
-        </p>
-      </div>
-    </header>
-    <div class="card__body">
-      <form class="form" id="email-signature-form">
-        <div class="alert alert--info" data-signature-success hidden role="status"></div>
-        <div class="alert alert--error" data-signature-error hidden role="alert"></div>
-        <div class="form-field">
-          <label class="form-label" for="email-signature-editor" id="email-signature-label">Email signature</label>
-          <div
-            class="rich-text-editor"
-            data-rich-text-editor
-            aria-labelledby="email-signature-label"
-          >
-            <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Formatting options">
-              <button
-                type="button"
-                class="rich-text-editor__button"
-                data-rich-text-button
-                data-command="bold"
-                aria-label="Bold"
-              >
-                <span aria-hidden="true">B</span>
-              </button>
-              <button
-                type="button"
-                class="rich-text-editor__button"
-                data-rich-text-button
-                data-command="italic"
-                aria-label="Italic"
-              >
-                <span aria-hidden="true">I</span>
-              </button>
-              <button
-                type="button"
-                class="rich-text-editor__button"
-                data-rich-text-button
-                data-command="underline"
-                aria-label="Underline"
-              >
-                <span aria-hidden="true">U</span>
-              </button>
-              <button
-                type="button"
-                class="rich-text-editor__button"
-                data-rich-text-button
-                data-command="insertUnorderedList"
-                aria-label="Bulleted list"
-              >
-                <span aria-hidden="true">•</span>
-              </button>
-              <button
-                type="button"
-                class="rich-text-editor__button"
-                data-rich-text-button
-                data-command="insertOrderedList"
-                aria-label="Numbered list"
-              >
-                <span aria-hidden="true">1.</span>
-              </button>
-              <button
-                type="button"
-                class="rich-text-editor__button"
-                data-rich-text-button
-                data-command="link"
-                aria-label="Insert link"
-              >
-                <span aria-hidden="true">🔗</span>
-              </button>
-              <button
-                type="button"
-                class="rich-text-editor__button"
-                data-rich-text-button
-                data-command="removeFormat"
-                aria-label="Clear formatting"
-              >
-                <span aria-hidden="true">✕</span>
-              </button>
+    <div class="management__body">
+      <section class="card card--panel">
+        <header class="card__header card__header--stacked">
+          <div>
+            <h2 class="card__title">Account security</h2>
+            <p class="card__subtitle">
+              Update your password and manage multi-factor authenticators. New passwords must contain at least 12 characters and differ from your current password.
+            </p>
+          </div>
+        </header>
+        <div class="card__body card__body--stacked">
+          <form class="form" id="password-form" autocomplete="off">
+            <fieldset class="form__fieldset">
+              <legend class="form__legend">Change password</legend>
+              <div class="alert alert--info" data-password-success hidden role="status"></div>
+              <div class="alert alert--error" data-password-error hidden role="alert"></div>
+              <div class="form-field">
+                <label class="form-label" for="current-password">Current password</label>
+                <input class="form-input" type="password" id="current-password" name="currentPassword" autocomplete="current-password" required />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="new-password">New password</label>
+                <input class="form-input" type="password" id="new-password" name="newPassword" autocomplete="new-password" minlength="12" required />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="confirm-password">Confirm new password</label>
+                <input class="form-input" type="password" id="confirm-password" name="confirmPassword" autocomplete="new-password" minlength="12" required />
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button">Update password</button>
+              </div>
+            </fieldset>
+          </form>
+          <section class="divider"></section>
+          <div data-totp>
+            <h3 class="card__subtitle">Authenticator apps</h3>
+            <p class="text-muted">
+              Register an authenticator to protect sign-ins. You can remove unused devices after confirming your new authenticator works.
+            </p>
+            <div class="table-toolbar">
+              <input type="search" class="form-input" placeholder="Filter authenticators" aria-label="Filter authenticators" data-table-filter="totp-table" />
+              <button type="button" class="button" data-totp-add>Set up new authenticator</button>
             </div>
-            <div class="rich-text-editor__body">
-              <div
-                class="rich-text-editor__surface"
-                data-rich-text-content
-                contenteditable="true"
-                role="textbox"
-                aria-labelledby="email-signature-label"
-                aria-multiline="true"
-                data-placeholder="Enter your email signature..."
-              ></div>
+            <div class="table-wrapper">
+              <table class="table" id="totp-table" data-table>
+                <thead>
+                  <tr>
+                    <th scope="col" data-sort="string">Name</th>
+                    <th scope="col" class="table__actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody data-totp-body>
+                  <tr class="table__empty" data-totp-empty>
+                    <td colspan="2">No authenticators registered yet.</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-            <textarea
-              id="email-signature-value"
-              name="emailSignature"
-              data-rich-text-value
-              hidden
-            >{{ current_user.email_signature|e or '' }}</textarea>
+            <div data-totp-setup hidden>
+              <h4 class="card__subtitle">Scan the provisioning details</h4>
+              <p class="text-muted">
+                Open your authenticator app and add a new account. You can paste the setup link into compatible desktop authenticator applications or enter the secret manually.
+              </p>
+              <div class="form-grid">
+                <div class="form-field">
+                  <label class="form-label" for="totp-secret">Secret</label>
+                  <div class="inline-form inline-form--stacked">
+                    <input class="form-input" id="totp-secret" name="totpSecret" readonly />
+                    <button type="button" class="button button--ghost" data-copy-target="totp-secret">Copy</button>
+                  </div>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="totp-link">Setup link</label>
+                  <div class="inline-form inline-form--stacked">
+                    <input class="form-input" id="totp-link" name="totpLink" readonly />
+                    <button type="button" class="button button--ghost" data-copy-target="totp-link">Copy</button>
+                  </div>
+                </div>
+              </div>
+              <form class="form" id="totp-verify-form">
+                <div class="alert alert--info" data-totp-success hidden role="status"></div>
+                <div class="alert alert--error" data-totp-error hidden role="alert"></div>
+                <div class="form-field">
+                  <label class="form-label" for="totp-name">Device name</label>
+                  <input class="form-input" id="totp-name" name="totpName" maxlength="100" placeholder="e.g. Work phone" />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="totp-code">Authenticator code</label>
+                  <input class="form-input" id="totp-code" name="totpCode" inputmode="numeric" pattern="[0-9]*" required />
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="button">Verify and enable</button>
+                  <button type="button" class="button button--ghost" data-totp-cancel>Cancel</button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
-        <div class="form-actions">
-          <button type="submit" class="button">Save signature</button>
+      </section>
+
+      <section class="card card--panel">
+        <header class="card__header card__header--stacked">
+          <div>
+            <h2 class="card__title">Left menu customisation</h2>
+            <p class="card__subtitle">
+              Choose which sidebar links are visible and arrange their order.
+            </p>
+          </div>
+        </header>
+        <div class="card__body" data-sidebar-customisation>
+          <div class="alert alert--info" data-sidebar-success hidden role="status"></div>
+          <div class="alert alert--error" data-sidebar-error hidden role="alert"></div>
+          <div class="table-wrapper">
+            <table class="table" id="sidebar-menu-table">
+              <thead>
+                <tr>
+                  <th scope="col">Visible</th>
+                  <th scope="col">Menu item</th>
+                  <th scope="col" class="table__actions">Order</th>
+                </tr>
+              </thead>
+              <tbody data-sidebar-items></tbody>
+            </table>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="button" data-sidebar-save>Save menu</button>
+            <button type="button" class="button button--ghost" data-sidebar-reset>Reset default</button>
+          </div>
         </div>
-      </form>
+      </section>
+
+      <section class="card card--panel">
+        <header class="card__header card__header--stacked">
+          <div>
+            <h2 class="card__title">Email signature</h2>
+            <p class="card__subtitle">
+              Create your email signature for use in automated email notifications. This signature is accessible through automation events.
+            </p>
+          </div>
+        </header>
+        <div class="card__body">
+          <form class="form" id="email-signature-form">
+            <div class="alert alert--info" data-signature-success hidden role="status"></div>
+            <div class="alert alert--error" data-signature-error hidden role="alert"></div>
+            <div class="form-field">
+              <label class="form-label" for="email-signature-editor" id="email-signature-label">Email signature</label>
+              <div
+                class="rich-text-editor"
+                data-rich-text-editor
+                aria-labelledby="email-signature-label"
+              >
+                <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Formatting options">
+                  <button
+                    type="button"
+                    class="rich-text-editor__button"
+                    data-rich-text-button
+                    data-command="bold"
+                    aria-label="Bold"
+                  >
+                    <span aria-hidden="true">B</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="rich-text-editor__button"
+                    data-rich-text-button
+                    data-command="italic"
+                    aria-label="Italic"
+                  >
+                    <span aria-hidden="true">I</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="rich-text-editor__button"
+                    data-rich-text-button
+                    data-command="underline"
+                    aria-label="Underline"
+                  >
+                    <span aria-hidden="true">U</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="rich-text-editor__button"
+                    data-rich-text-button
+                    data-command="insertUnorderedList"
+                    aria-label="Bulleted list"
+                  >
+                    <span aria-hidden="true">•</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="rich-text-editor__button"
+                    data-rich-text-button
+                    data-command="insertOrderedList"
+                    aria-label="Numbered list"
+                  >
+                    <span aria-hidden="true">1.</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="rich-text-editor__button"
+                    data-rich-text-button
+                    data-command="link"
+                    aria-label="Insert link"
+                  >
+                    <span aria-hidden="true">🔗</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="rich-text-editor__button"
+                    data-rich-text-button
+                    data-command="removeFormat"
+                    aria-label="Clear formatting"
+                  >
+                    <span aria-hidden="true">✕</span>
+                  </button>
+                </div>
+                <div class="rich-text-editor__body">
+                  <div
+                    class="rich-text-editor__surface"
+                    data-rich-text-content
+                    contenteditable="true"
+                    role="textbox"
+                    aria-labelledby="email-signature-label"
+                    aria-multiline="true"
+                    data-placeholder="Enter your email signature..."
+                  ></div>
+                </div>
+                <textarea
+                  id="email-signature-value"
+                  name="emailSignature"
+                  data-rich-text-value
+                  hidden
+                >{{ current_user.email_signature|e or '' }}</textarea>
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="button">Save signature</button>
+            </div>
+          </form>
+        </div>
+      </section>
     </div>
   </section>
 </div>
