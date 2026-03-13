@@ -203,6 +203,7 @@
   const SIDEBAR_SPACER_KEY_PREFIX = '__spacer__:';
   const SIDEBAR_PROTECTED_KEYS = new Set(['/admin/profile']);
   let dragSourceIndex = null;
+  let touchDragSourceIndex = null;
 
   function renderSidebarItems() {
     if (!sidebarItemsBody) {
@@ -293,6 +294,63 @@
         const insertAt = dragSourceIndex < index ? index - 1 : index;
         sidebarState.splice(insertAt, 0, moved);
         renderSidebarItems();
+      });
+
+      handle.addEventListener(
+        'touchstart',
+        (e) => {
+          e.preventDefault();
+          touchDragSourceIndex = index;
+          row.classList.add('sidebar-row--dragging');
+        },
+        { passive: false },
+      );
+
+      handle.addEventListener(
+        'touchmove',
+        (e) => {
+          e.preventDefault();
+          if (touchDragSourceIndex === null) {
+            return;
+          }
+          const touch = e.touches[0];
+          const target = document.elementFromPoint(touch.clientX, touch.clientY);
+          const targetRow = target ? target.closest('tr') : null;
+          sidebarItemsBody.querySelectorAll('tr').forEach((r) =>
+            r.classList.remove('sidebar-row--drag-over'),
+          );
+          if (targetRow && targetRow !== row && sidebarItemsBody.contains(targetRow)) {
+            targetRow.classList.add('sidebar-row--drag-over');
+          }
+        },
+        { passive: false },
+      );
+
+      handle.addEventListener('touchend', (e) => {
+        if (touchDragSourceIndex === null) {
+          return;
+        }
+        const touch = e.changedTouches[0];
+        const target = document.elementFromPoint(touch.clientX, touch.clientY);
+        const targetRow = target ? target.closest('tr') : null;
+        sidebarItemsBody.querySelectorAll('tr').forEach((r) => {
+          r.classList.remove('sidebar-row--dragging');
+          r.classList.remove('sidebar-row--drag-over');
+        });
+        if (targetRow && sidebarItemsBody.contains(targetRow)) {
+          const rows = Array.from(sidebarItemsBody.querySelectorAll('tr'));
+          const targetIndex = rows.indexOf(targetRow);
+          if (targetIndex !== -1 && targetIndex !== touchDragSourceIndex) {
+            const src = touchDragSourceIndex;
+            const moved = sidebarState.splice(src, 1)[0];
+            // Removing the source shifts all subsequent indices down by one,
+            // so when dragging downward the effective target index is one less.
+            const insertAt = src < targetIndex ? targetIndex - 1 : targetIndex;
+            sidebarState.splice(insertAt, 0, moved);
+            renderSidebarItems();
+          }
+        }
+        touchDragSourceIndex = null;
       });
 
       sidebarItemsBody.appendChild(row);
