@@ -5140,11 +5140,9 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         display_name = f"MyPortal – {company_name}" if company_name else "MyPortal Integration"
 
         try:
-            new_client_id, new_client_secret = (
-                await m365_service.provision_app_registration(
-                    access_token=access_token,
-                    display_name=display_name,
-                )
+            provision_result = await m365_service.provision_app_registration(
+                access_token=access_token,
+                display_name=display_name,
             )
         except m365_service.M365Error as exc:
             log_error(
@@ -5158,14 +5156,17 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         await m365_service.upsert_credentials(
             company_id=company_id,
             tenant_id=tenant_id,
-            client_id=new_client_id,
-            client_secret=new_client_secret,
+            client_id=provision_result["client_id"],
+            client_secret=provision_result["client_secret"],
+            app_object_id=provision_result.get("app_object_id"),
+            client_secret_key_id=provision_result.get("client_secret_key_id"),
+            client_secret_expires_at=provision_result.get("client_secret_expires_at"),
         )
         log_info(
             "M365 enterprise app provisioned and credentials stored",
             company_id=company_id,
             tenant_id=tenant_id,
-            client_id=new_client_id,
+            client_id=provision_result["client_id"],
         )
         if return_to_company_edit:
             return _company_edit_redirect(
