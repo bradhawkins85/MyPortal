@@ -6,6 +6,9 @@ from typing import Any
 from app.core.database import db
 
 
+_PROTECTED_HIDDEN_KEYS: frozenset[str] = frozenset({"/admin/profile"})
+
+
 def _normalise_menu_key(value: Any) -> str:
     key = str(value or "").strip()
     if not key:
@@ -33,7 +36,7 @@ def _coerce_preferences(payload: Any) -> dict[str, list[str]]:
 
     for entry in hidden_values:
         key = _normalise_menu_key(entry)
-        if key and key not in seen_hidden:
+        if key and key not in seen_hidden and key not in _PROTECTED_HIDDEN_KEYS:
             seen_hidden.add(key)
             hidden.append(key)
 

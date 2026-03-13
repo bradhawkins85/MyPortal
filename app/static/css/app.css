@@ -205,6 +205,21 @@ html {
   line-height: 1.6;
 }
 
+.menu__divider {
+  height: 1px;
+  background: rgba(148, 163, 184, 0.2);
+  margin: 0.25rem 0;
+}
+
+.menu__heading {
+  padding: 0.25rem var(--space-compact-inline) 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.6);
+}
+
 .menu__item--impersonation {
   padding: var(--space-gap-tight) var(--space-compact-inline);
   background: rgba(148, 163, 184, 0.08);
