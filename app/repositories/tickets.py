@@ -22,6 +22,10 @@ def _prepare_ticket_search_term(search: str | None) -> tuple[str | None, str | N
     if len(term) < _FULLTEXT_MIN_SEARCH_LENGTH:
         return "like", f"%{term}%"
 
+    is_sqlite_backend = bool(getattr(db, "is_sqlite", lambda: False)())
+    if is_sqlite_backend:
+        return "like", f"%{term}%"
+
     tokens = [segment.strip() for segment in re.split(r"\s+", term) if segment.strip()]
     boolean_tokens: list[str] = []
     for token in tokens:
