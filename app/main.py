@@ -3507,6 +3507,30 @@ async def _render_company_edit_page(
             else:
                 raise
 
+    # Fetch Microsoft 365 credentials for the company
+    m365_credential_view: dict[str, Any] | None = None
+    if is_super_admin:
+        try:
+            m365_creds = await m365_service.get_credentials(company_id)
+            if m365_creds:
+                expires = m365_creds.get("token_expires_at")
+                if isinstance(expires, datetime):
+                    expires_display = expires.replace(tzinfo=timezone.utc).isoformat()
+                elif expires:
+                    expires_display = str(expires)
+                else:
+                    expires_display = None
+                m365_credential_view = {
+                    "tenant_id": m365_creds.get("tenant_id"),
+                    "client_id": m365_creds.get("client_id"),
+                    "token_expires_at": expires_display,
+                }
+        except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
+            if "Database pool not initialised" in str(exc):
+                pass
+            else:
+                raise
+
     assign_form = {
         "company_id": assign_company_id,
         "user_id": assign_user_id,
@@ -3540,6 +3564,8 @@ async def _render_company_edit_page(
         "billing_contacts": billing_contacts,
         "company_staff": company_staff,
         "show_inactive_tasks": show_inactive_tasks,
+        "m365_credential": m365_credential_view,
+        "m365_has_credentials": m365_credential_view is not None,
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
@@ -8389,6 +8415,83 @@ async def admin_update_company(company_id: int, request: Request):
     return _company_edit_redirect(
         company_id=company_id,
         success=f"Company {name} updated.",
+    )
+
+
+@app.post("/admin/companies/{company_id}/m365-credentials", response_class=HTMLResponse)
+async def admin_save_company_m365_credentials(company_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    existing_company = await company_repo.get_company_by_id(company_id)
+    if not existing_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    form = await request.form()
+    tenant_id = str(form.get("tenantId", "")).strip()
+    client_id = str(form.get("clientId", "")).strip()
+    client_secret = str(form.get("clientSecret", "")).strip()
+    if not tenant_id or not client_id:
+        return _company_edit_redirect(
+            company_id=company_id,
+            error="Tenant ID and Client ID are required.",
+        )
+    existing_creds = await m365_service.get_credentials(company_id)
+    if not client_secret and not existing_creds:
+        return _company_edit_redirect(
+            company_id=company_id,
+            error="Client secret is required when adding Microsoft 365 credentials for the first time.",
+        )
+    if client_secret:
+        await m365_service.upsert_credentials(
+            company_id=company_id,
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+    else:
+        existing_secret = existing_creds.get("client_secret")
+        if not existing_secret:
+            return _company_edit_redirect(
+                company_id=company_id,
+                error="Existing client secret is missing. Please provide a new client secret.",
+            )
+        await m365_repo.upsert_credentials(
+            company_id=company_id,
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=existing_secret,
+            refresh_token=existing_creds.get("refresh_token"),
+            access_token=existing_creds.get("access_token"),
+            token_expires_at=existing_creds.get("token_expires_at"),
+        )
+    log_info(
+        "Microsoft 365 credentials updated via admin company edit",
+        company_id=company_id,
+        user_id=current_user.get("id"),
+    )
+    return _company_edit_redirect(
+        company_id=company_id,
+        success="Microsoft 365 credentials saved.",
+    )
+
+
+@app.post("/admin/companies/{company_id}/m365-credentials/delete", response_class=HTMLResponse)
+async def admin_delete_company_m365_credentials(company_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    existing_company = await company_repo.get_company_by_id(company_id)
+    if not existing_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    await m365_service.delete_credentials(company_id)
+    log_info(
+        "Microsoft 365 credentials deleted via admin company edit",
+        company_id=company_id,
+        user_id=current_user.get("id"),
+    )
+    return _company_edit_redirect(
+        company_id=company_id,
+        success="Microsoft 365 credentials removed.",
     )
 
 
