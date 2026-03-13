@@ -27,7 +27,7 @@
 {% endblock %}
 
 {% block content %}
-{% macro shop_query(category_id=None) -%}
+{% macro shop_query(category_id=None, target_page=None) -%}
   {%- set ns = namespace(params=[]) -%}
   {%- if category_id is not none -%}
     {%- set ns.params = ns.params + ['category=' ~ category_id] -%}
@@ -37,6 +37,12 @@
   {%- endif -%}
   {%- if show_out_of_stock -%}
     {%- set ns.params = ns.params + ['showOutOfStock=1'] -%}
+  {%- endif -%}
+  {%- if page_size -%}
+    {%- set ns.params = ns.params + ['pageSize=' ~ page_size] -%}
+  {%- endif -%}
+  {%- if target_page is not none and target_page > 1 -%}
+    {%- set ns.params = ns.params + ['page=' ~ target_page] -%}
   {%- endif -%}
   {%- if ns.params -%}?{{ ns.params | join('&') }}{%- endif -%}
 {%- endmacro %}
@@ -94,7 +100,7 @@
       </div>
     </header>
     <div class="table-wrapper">
-      <table class="table" id="shop-table" data-table data-table-paginate>
+      <table class="table" id="shop-table" data-table>
         <thead>
           <tr>
             <th scope="col" data-mobile-priority="supporting">Image</th>
@@ -226,26 +232,23 @@
         </tbody>
       </table>
     </div>
-    <div class="table-pagination" data-pagination="shop-table">
-      <div class="table-pagination__group">
-        <button
-          type="button"
-          class="button button--ghost table-pagination__button"
-          data-page-prev
-          disabled
-        >
-          Previous
-        </button>
-        <button
-          type="button"
-          class="button button--ghost table-pagination__button"
-          data-page-next
-        >
-          Next
-        </button>
+    {% if total_count > 0 %}
+      <div class="table-pagination table-pagination--active">
+        <div class="table-pagination__group">
+          {% if page > 1 %}
+            <a class="button button--ghost table-pagination__button" href="{{ request.url_for('shop_page') }}{{ shop_query(current_category, page - 1) }}">Previous</a>
+          {% else %}
+            <button type="button" class="button button--ghost table-pagination__button" disabled>Previous</button>
+          {% endif %}
+          {% if page < total_pages %}
+            <a class="button button--ghost table-pagination__button" href="{{ request.url_for('shop_page') }}{{ shop_query(current_category, page + 1) }}">Next</a>
+          {% else %}
+            <button type="button" class="button button--ghost table-pagination__button" disabled>Next</button>
+          {% endif %}
+        </div>
+        <p class="table-pagination__status" aria-live="polite">Page {{ page }} of {{ total_pages }} · {{ total_count }} total</p>
       </div>
-      <p class="table-pagination__status" data-page-info aria-live="polite"></p>
-    </div>
+    {% endif %}
   </section>
 </div>
 
