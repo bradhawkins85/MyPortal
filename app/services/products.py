@@ -615,9 +615,11 @@ async def update_products_from_feed() -> None:
     processed = 0
     updated = 0
 
-    # First pass: upsert all product data from the feed without setting cross-sell
-    # associations. This ensures every product referenced in opt_accessori exists
-    # in shop_products before we try to resolve their IDs in the second pass.
+    # First pass: upsert only products that already exist in the store.
+    #
+    # This prevents opt_accessori relationships from indirectly importing new
+    # products that merchandising has not chosen to stock. Cross-sell targets
+    # are resolved against existing shop products in the second pass.
     for item in feed_items:
         code = str(item.get("sku") or "").strip()
         if not code:
@@ -625,6 +627,8 @@ async def update_products_from_feed() -> None:
         existing_product = await shop_repo.get_product_by_sku(
             code, include_archived=True
         )
+        if not existing_product:
+            continue
         try:
             if await _process_feed_item(
                 item, existing_product, update_recommendations=False, download_image_if_new=False
@@ -637,8 +641,7 @@ async def update_products_from_feed() -> None:
                 error=str(exc),
             )
 
-    # Second pass: now that all products have been upserted, set cross-sell
-    # associations. All opt_accessori SKUs can now be resolved to product IDs.
+    # Second pass: set cross-sell associations for products that exist in-store.
     for item in feed_items:
         code = str(item.get("sku") or "").strip()
         if not code:
