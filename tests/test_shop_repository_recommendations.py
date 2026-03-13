@@ -133,3 +133,92 @@ async def test_list_products_by_ids_includes_recommendations(monkeypatch):
     product = products[0]
     assert product["cross_sell_product_ids"] == [1]
     assert product["upsell_product_ids"] == [3]
+
+
+def _make_fake_db_pool(executed: list[tuple]):
+    """Return a minimal fake DB pool that records SQL executions."""
+
+    class FakeCursor:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def execute(self, sql: str, params: tuple | None = None):
+            executed.append(("execute", sql, params))
+
+        async def executemany(self, sql: str, params_seq):
+            executed.append(("executemany", sql, list(params_seq)))
+
+    class FakeConn:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        def cursor(self, *args, **kwargs):
+            return FakeCursor()
+
+        async def begin(self):
+            pass
+
+        async def commit(self):
+            pass
+
+        async def rollback(self):
+            pass
+
+    class FakePool:
+        def acquire(self):
+            return FakeConn()
+
+    return FakePool()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_replace_product_recommendations_auto_linked_only_deletes_auto_rows(monkeypatch):
+    """When auto_linked=True, only rows with is_auto_linked=1 are deleted."""
+    executed: list[tuple] = []
+    monkeypatch.setattr(shop_repo, "db", _make_fake_db_pool(executed))
+
+    await shop_repo.replace_product_recommendations(
+        7,
+        cross_sell_ids=[10, 11],
+        auto_linked=True,
+    )
+
+    delete_stmts = [s for op, s, *_ in executed if op == "execute"]
+    # The DELETE must be scoped to is_auto_linked = 1 (not a blanket delete)
+    assert any("is_auto_linked" in s and "1" in s for s in delete_stmts), (
+        "Expected DELETE to filter by is_auto_linked = 1 but got: " + str(delete_stmts)
+    )
+    # No blanket DELETE without the is_auto_linked filter
+    assert not any(
+        "DELETE FROM shop_product_cross_sells WHERE product_id" in s
+        and "is_auto_linked" not in s
+        for s in delete_stmts
+    ), "Blanket DELETE on cross_sells must not run when auto_linked=True"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_replace_product_recommendations_auto_linked_skips_tables_when_ids_not_provided(
+    monkeypatch,
+):
+    """When auto_linked=True and IDs are None, the corresponding table is untouched."""
+    executed: list[tuple] = []
+    monkeypatch.setattr(shop_repo, "db", _make_fake_db_pool(executed))
+
+    # Only cross_sell_ids provided; upsell_ids not provided (None)
+    await shop_repo.replace_product_recommendations(
+        7,
+        cross_sell_ids=[10],
+        auto_linked=True,
+    )
+
+    touched_tables = [s for _, s, *_ in executed]
+    upsell_touched = any("upsell" in s for s in touched_tables)
+    assert not upsell_touched, (
+        "upsells table must not be touched when upsell_ids is not provided"
+    )
