@@ -579,13 +579,12 @@
     let descriptionSunEditor = null;
 
     function sanitizeDescriptionHtml(value) {
-      const template = document.createElement('template');
-      template.innerHTML = value || '';
-      template.content
+      const doc = new DOMParser().parseFromString(value || '', 'text/html');
+      doc.body
         .querySelectorAll('script, iframe, object, embed, link, meta, base, form')
         .forEach((node) => node.remove());
 
-      template.content.querySelectorAll('*').forEach((node) => {
+      doc.body.querySelectorAll('*').forEach((node) => {
         Array.from(node.attributes).forEach((attr) => {
           const attrName = attr.name.toLowerCase();
           const attrValue = String(attr.value || '').trim().toLowerCase();
@@ -604,7 +603,7 @@
         });
       });
 
-      return template.innerHTML;
+      return doc.body ? doc.body.innerHTML : '';
     }
 
     function getOrCreateDescriptionEditor() {
