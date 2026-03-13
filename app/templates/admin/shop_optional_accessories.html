@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block header_title %}
+  <div class="header__title-content">
+    <span class="header__title-text">Optional accessories</span>
+    <a class="button button--ghost button--small header__title-button" href="/admin/shop">
+      Back to shop
+    </a>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="admin-grid">
+    <section class="card card--panel admin-grid__full" aria-labelledby="optional-accessories-heading">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title" id="optional-accessories-heading">Optional accessories</h2>
+          <p class="card__subtitle">
+            Products listed here are referenced as optional accessories (cross-sell items) for at least one other product.
+          </p>
+        </div>
+        <div class="card__controls">
+          <input
+            type="search"
+            class="form-input card__control"
+            placeholder="Search accessories"
+            aria-label="Search accessories"
+            data-table-filter="optional-accessories-table"
+          />
+          <span class="badge badge--muted">{{ products | length }} product{{ 's' if products | length != 1 else '' }}</span>
+        </div>
+      </header>
+      <div class="table-wrapper">
+        <table class="table" id="optional-accessories-table" data-table>
+          <thead>
+            <tr>
+              <th scope="col" data-sort="string">Name</th>
+              <th scope="col" data-sort="string">SKU</th>
+              <th scope="col" data-sort="string">Category</th>
+              <th scope="col" data-sort="number">Price</th>
+              <th scope="col" data-sort="number">Stock</th>
+              <th scope="col" data-sort="string">Accessory for</th>
+              <th scope="col" class="table__actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for product in products %}
+              <tr>
+                <td>
+                  {% if product.image_url %}
+                    <img
+                      src="{{ product.image_url }}"
+                      alt="{{ product.name }}"
+                      class="table__thumbnail"
+                      width="32"
+                      height="32"
+                      loading="lazy"
+                    />
+                  {% endif %}
+                  {{ product.name }}
+                </td>
+                <td>
+                  <code>{{ product.sku }}</code>
+                  {% if product.vendor_sku and product.vendor_sku != product.sku %}
+                    <br /><span class="text-muted text-small">{{ product.vendor_sku }}</span>
+                  {% endif %}
+                </td>
+                <td>{{ product.category_name or '—' }}</td>
+                <td data-sort-value="{{ product.price or 0 }}">
+                  {% if product.price is not none %}
+                    ${{ '%.2f' | format(product.price) }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td data-sort-value="{{ product.stock }}">
+                  {% if product.stock > 0 %}
+                    <span class="badge badge--success">{{ product.stock }}</span>
+                  {% else %}
+                    <span class="badge badge--danger">Out of stock</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if product.parent_product_names %}
+                    <span class="text-small">{{ product.parent_product_names }}</span>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td class="table__actions">
+                  <a
+                    href="/admin/shop?search={{ product.sku | urlencode }}"
+                    class="button button--ghost button--small"
+                    aria-label="View {{ product.name }} in shop admin"
+                  >
+                    View
+                  </a>
+                </td>
+              </tr>
+            {% else %}
+              <tr>
+                <td colspan="7" class="table__empty">
+                  No optional accessories found. Optional accessories are set up automatically when products are imported from the stock feed.
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/shop_admin.js') }}" defer></script>
+{% endblock %}
