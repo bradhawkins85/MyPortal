@@ -34,9 +34,7 @@ async def _ensure_quote_access(user: dict, company_id: int, quote_summary: dict 
     
     Access is granted if:
     1. User is a super admin, OR
-    2. User has can_access_quotes permission for the company, OR
-    3. User is the creator of the quote (user_id matches), OR
-    4. User is assigned to the quote (assigned_user_id matches)
+    2. User has can_access_quotes permission for the company.
     """
     if user.get("is_super_admin"):
         return
@@ -44,11 +42,6 @@ async def _ensure_quote_access(user: dict, company_id: int, quote_summary: dict 
     user_id = user.get("id")
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-    
-    # Check if user is the creator or assigned user (if quote_summary provided)
-    if quote_summary:
-        if quote_summary.get("user_id") == user_id or quote_summary.get("assigned_user_id") == user_id:
-            return
     
     # Check company membership and permissions
     membership = await user_company_repo.get_user_company(int(user_id), company_id)
