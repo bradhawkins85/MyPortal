@@ -554,3 +554,52 @@ async def test_update_products_from_feed_cross_sells_resolved_after_all_upserts(
     assert ids_call_order == [["ACC1"]]
     # Cross-sell is set for MAIN1 pointing to ACC1 (id=99)
     mock_replace.assert_awaited_once_with(1, cross_sell_ids=[99])
+
+
+@pytest.mark.anyio("asyncio")
+async def test_update_products_from_feed_uses_vendor_sku_for_cross_sells(monkeypatch):
+    """Cross-sells resolve even when the accessory product has a custom internal sku.
+
+    opt_accessori contains the vendor's StockCode.  When a store product was created
+    with a different internal sku but has vendor_sku equal to the StockCode, the
+    get_product_ids_by_skus query must still find it (via vendor_sku).
+    """
+    feed_items = [
+        _make_feed_item("NHU-R5AC-LITE", opt_accessori="NHU-POE-24-12WG"),
+        _make_feed_item("NHU-POE-24-12WG"),
+    ]
+
+    monkeypatch.setattr(
+        products_service.stock_feed_repo,
+        "list_all_items",
+        AsyncMock(return_value=feed_items),
+    )
+    # Simulate the accessory being found via vendor_sku lookup
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_ids_by_skus",
+        AsyncMock(return_value=[55]),
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_by_sku",
+        AsyncMock(return_value={"id": 10, "image_url": None}),
+    )
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    mock_replace = AsyncMock()
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "replace_product_recommendations",
+        mock_replace,
+    )
+    monkeypatch.setattr(
+        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+    )
+
+    await products_service.update_products_from_feed()
+
+    # Cross-sell should be set using whatever ID get_product_ids_by_skus returned
+    mock_replace.assert_awaited_once_with(10, cross_sell_ids=[55])
+    products_service.shop_repo.get_product_ids_by_skus.assert_awaited_once_with(
+        ["NHU-POE-24-12WG"]
+    )

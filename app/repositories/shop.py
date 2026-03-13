@@ -1354,13 +1354,20 @@ async def replace_product_exclusions(
 
 
 async def get_product_ids_by_skus(skus: Sequence[str]) -> list[int]:
-    """Return the IDs of non-archived products whose SKU matches any of *skus*."""
+    """Return the IDs of non-archived products whose SKU or vendor SKU matches any of *skus*.
+
+    Both ``sku`` and ``vendor_sku`` are checked so that products created with a
+    custom internal SKU but whose vendor SKU matches the stock-feed StockCode
+    (as used in ``opt_accessori``) are still resolved correctly.
+    """
     if not skus:
         return []
     placeholders = ", ".join(["%s"] * len(skus))
     rows = await db.fetch_all(
-        f"SELECT id FROM shop_products WHERE sku IN ({placeholders}) AND archived = 0",
-        tuple(skus),
+        f"SELECT DISTINCT id FROM shop_products"
+        f" WHERE (sku IN ({placeholders}) OR vendor_sku IN ({placeholders}))"
+        f" AND archived = 0",
+        tuple(skus) * 2,
     )
     return [_coerce_int(row["id"]) for row in rows if _coerce_int(row.get("id")) > 0]
 
