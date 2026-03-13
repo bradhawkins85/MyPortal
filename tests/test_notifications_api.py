@@ -559,7 +559,7 @@ def test_delete_notification_returns_404_when_not_found(monkeypatch, active_sess
     assert response.status_code == 404
 
 
-def test_delete_notification_allows_broadcast_notification(monkeypatch, active_session):
+def test_delete_notification_denies_broadcast_notification(monkeypatch, active_session):
     calls = {"deleted": None}
 
     async def fake_get_notification(notification_id):
@@ -577,5 +577,5 @@ def test_delete_notification_allows_broadcast_notification(monkeypatch, active_s
             response = client.delete("/api/notifications/55", headers={"X-CSRF-Token": active_session.csrf_token})
     finally:
         app.dependency_overrides.clear()
-    assert response.status_code == 204
-    assert calls["deleted"] == 55
+    assert response.status_code == 403
+    assert calls["deleted"] is None
