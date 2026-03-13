@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import re
@@ -1680,6 +1681,7 @@ async def load_dashboard_state(
     search: str | None = None,
     requester_id: int | None = None,
     limit: int = 200,
+    include_reference_data: bool = True,
 ) -> TicketDashboardState:
     """Load ticket dashboard data used by the admin workspace."""
 
@@ -1714,28 +1716,78 @@ async def load_dashboard_state(
 
     available_statuses = sorted({*definition_slugs, *status_counts.keys()})
 
-    modules = await modules_service.list_modules()
-    companies = await company_repo.list_companies()
-    technicians = await membership_repo.list_users_with_permission(HELPDESK_PERMISSION_KEY)
+    modules: list[Mapping[str, Any]] = []
+    companies: list[Mapping[str, Any]] = []
+    technicians: list[Mapping[str, Any]] = []
+
+    if include_reference_data:
+        modules = await modules_service.list_modules()
+        companies = await company_repo.list_companies()
+        technicians = await membership_repo.list_users_with_permission(HELPDESK_PERMISSION_KEY)
 
     company_lookup: dict[int, dict[str, Any]] = {}
-    for company in companies:
-        identifier = company.get("id")
-        try:
-            numeric_id = int(identifier)
-        except (TypeError, ValueError):
-            continue
-        company_lookup[numeric_id] = company
+    if include_reference_data:
+        for company in companies:
+            identifier = company.get("id")
+            try:
+                numeric_id = int(identifier)
+            except (TypeError, ValueError):
+                continue
+            company_lookup[numeric_id] = dict(company)
+    else:
+        company_ids: set[int] = set()
+        for ticket in tickets:
+            identifier = ticket.get("company_id")
+            try:
+                company_ids.add(int(identifier))
+            except (TypeError, ValueError):
+                continue
+        if company_ids:
+            company_results = await asyncio.gather(
+                *(company_repo.get_company_by_id(company_id) for company_id in company_ids)
+            )
+            for record in company_results:
+                if not record:
+                    continue
+                identifier = record.get("id")
+                try:
+                    numeric_id = int(identifier)
+                except (TypeError, ValueError):
+                    continue
+                company_lookup[numeric_id] = record
 
-    users = await user_repo.list_users()
     user_lookup: dict[int, dict[str, Any]] = {}
-    for record in users:
-        identifier = record.get("id")
-        try:
-            numeric_id = int(identifier)
-        except (TypeError, ValueError):
-            continue
-        user_lookup[numeric_id] = record
+    if include_reference_data:
+        users = await user_repo.list_users()
+        for record in users:
+            identifier = record.get("id")
+            try:
+                numeric_id = int(identifier)
+            except (TypeError, ValueError):
+                continue
+            user_lookup[numeric_id] = record
+    else:
+        user_ids: set[int] = set()
+        for ticket in tickets:
+            for field_name in ("assigned_user_id", "requester_id"):
+                identifier = ticket.get(field_name)
+                try:
+                    user_ids.add(int(identifier))
+                except (TypeError, ValueError):
+                    continue
+        if user_ids:
+            user_results = await asyncio.gather(
+                *(user_repo.get_user_by_id(user_id) for user_id in user_ids)
+            )
+            for record in user_results:
+                if not record:
+                    continue
+                identifier = record.get("id")
+                try:
+                    numeric_id = int(identifier)
+                except (TypeError, ValueError):
+                    continue
+                user_lookup[numeric_id] = record
 
     return TicketDashboardState(
         tickets=tickets,

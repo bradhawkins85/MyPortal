@@ -203,6 +203,16 @@ xero_oauth_state_serializer = URLSafeSerializer(settings.secret_key, salt="xero-
 PWA_THEME_COLOR = "#0f172a"
 PWA_BACKGROUND_COLOR = "#0f172a"
 SHOP_LOW_STOCK_THRESHOLD = 5
+_TICKET_DASHBOARD_REFERENCE_TTL_SECONDS = 60
+_ticket_dashboard_reference_cache: dict[str, Any] = {
+    "expires_at": None,
+    "modules": [],
+    "companies": [],
+    "technicians": [],
+    "company_lookup": {},
+    "user_lookup": {},
+}
+_ticket_dashboard_reference_lock = asyncio.Lock()
 
 # Load app version for cache busting static files
 _APP_VERSION = ""
@@ -12251,6 +12261,54 @@ async def _render_portal_ticket_detail(
     return response
 
 
+async def _get_ticket_dashboard_reference_data() -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    expires_at = _ticket_dashboard_reference_cache.get("expires_at")
+    if isinstance(expires_at, datetime) and expires_at > now:
+        return {
+            "modules": list(_ticket_dashboard_reference_cache.get("modules") or []),
+            "companies": list(_ticket_dashboard_reference_cache.get("companies") or []),
+            "technicians": list(_ticket_dashboard_reference_cache.get("technicians") or []),
+            "company_lookup": dict(_ticket_dashboard_reference_cache.get("company_lookup") or {}),
+            "user_lookup": dict(_ticket_dashboard_reference_cache.get("user_lookup") or {}),
+        }
+
+    async with _ticket_dashboard_reference_lock:
+        expires_at = _ticket_dashboard_reference_cache.get("expires_at")
+        if isinstance(expires_at, datetime) and expires_at > datetime.now(timezone.utc):
+            return {
+                "modules": list(_ticket_dashboard_reference_cache.get("modules") or []),
+                "companies": list(_ticket_dashboard_reference_cache.get("companies") or []),
+                "technicians": list(_ticket_dashboard_reference_cache.get("technicians") or []),
+                "company_lookup": dict(_ticket_dashboard_reference_cache.get("company_lookup") or {}),
+                "user_lookup": dict(_ticket_dashboard_reference_cache.get("user_lookup") or {}),
+            }
+
+        dashboard = await tickets_service.load_dashboard_state(
+            status_filter=None,
+            module_filter=None,
+            limit=0,
+            include_reference_data=True,
+        )
+        _ticket_dashboard_reference_cache.update(
+            {
+                "expires_at": datetime.now(timezone.utc) + timedelta(seconds=_TICKET_DASHBOARD_REFERENCE_TTL_SECONDS),
+                "modules": list(dashboard.modules),
+                "companies": list(dashboard.companies),
+                "technicians": list(dashboard.technicians),
+                "company_lookup": dict(dashboard.company_lookup),
+                "user_lookup": dict(dashboard.user_lookup),
+            }
+        )
+        return {
+            "modules": list(dashboard.modules),
+            "companies": list(dashboard.companies),
+            "technicians": list(dashboard.technicians),
+            "company_lookup": dict(dashboard.company_lookup),
+            "user_lookup": dict(dashboard.user_lookup),
+        }
+
+
 async def _render_tickets_dashboard(
     request: Request,
     user: dict[str, Any],
@@ -12274,6 +12332,7 @@ async def _render_tickets_dashboard(
                     status_filter=None,
                     module_filter=None,
                     limit=0,  # Don't load default tickets, we'll use phone search results
+                    include_reference_data=False,
                 )
                 # Replace the tickets with phone search results
                 dashboard.tickets = phone_tickets
@@ -12297,6 +12356,7 @@ async def _render_tickets_dashboard(
                     status_filter=None,
                     module_filter=None,
                     limit=200,
+                    include_reference_data=False,
                 )
         else:
             # Empty phone number after stripping, load normal dashboard
@@ -12304,6 +12364,7 @@ async def _render_tickets_dashboard(
                 status_filter=None,
                 module_filter=None,
                 limit=200,
+                include_reference_data=False,
             )
     else:
         # Normal dashboard load without phone search
@@ -12311,7 +12372,9 @@ async def _render_tickets_dashboard(
             status_filter=None,
             module_filter=None,
             limit=200,
+            include_reference_data=False,
         )
+    reference_data = await _get_ticket_dashboard_reference_data()
     dashboard_endpoint = "/api/tickets/dashboard"
     status_definitions_payload = [
         {
@@ -12340,11 +12403,11 @@ async def _render_tickets_dashboard(
         "ticket_status_definitions": status_definitions_payload,
         "ticket_status_label_map": status_label_map,
         "ticket_public_status_map": public_status_map,
-        "ticket_modules": dashboard.modules,
-        "ticket_company_options": dashboard.companies,
-        "ticket_user_options": dashboard.technicians,
-        "ticket_company_lookup": dashboard.company_lookup,
-        "ticket_user_lookup": dashboard.user_lookup,
+        "ticket_modules": reference_data["modules"],
+        "ticket_company_options": reference_data["companies"],
+        "ticket_user_options": reference_data["technicians"],
+        "ticket_company_lookup": reference_data["company_lookup"],
+        "ticket_user_lookup": reference_data["user_lookup"],
         "ticket_labour_types": labour_types,
         "ticket_time_lookup": ticket_time_lookup,
         "can_bulk_delete_tickets": bool(user.get("is_super_admin")),

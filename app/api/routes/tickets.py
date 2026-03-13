@@ -240,6 +240,7 @@ async def get_ticket_dashboard(
         assigned_user_id=assigned_user_id,
         search=search,
         limit=limit,
+        include_reference_data=False,
     )
     rows: list[TicketDashboardRow] = []
     for ticket in state.tickets:
