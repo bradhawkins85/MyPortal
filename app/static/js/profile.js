@@ -194,10 +194,14 @@
   const sidebarItemsBody = root.querySelector('[data-sidebar-items]');
   const sidebarSaveButton = root.querySelector('[data-sidebar-save]');
   const sidebarResetButton = root.querySelector('[data-sidebar-reset]');
+  const sidebarAddDividerButton = root.querySelector('[data-sidebar-add-divider]');
+  const sidebarAddSpacerButton = root.querySelector('[data-sidebar-add-spacer]');
   const sidebarSuccess = root.querySelector('[data-sidebar-success]');
   const sidebarError = root.querySelector('[data-sidebar-error]');
   let sidebarState = [];
-
+  const SIDEBAR_DIVIDER_KEY_PREFIX = '__divider__:';
+  const SIDEBAR_SPACER_KEY_PREFIX = '__spacer__:';
+  const SIDEBAR_PROTECTED_KEYS = new Set(['/admin/profile']);
   function renderSidebarItems() {
     if (!sidebarItemsBody) {
       return;
@@ -207,14 +211,28 @@
       const row = document.createElement('tr');
 
       const visibleCell = document.createElement('td');
+      const isProtected = SIDEBAR_PROTECTED_KEYS.has(item.key);
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.checked = !item.hidden;
+      checkbox.disabled = isProtected;
       checkbox.setAttribute('aria-label', `Toggle ${item.label}`);
       checkbox.addEventListener('change', () => {
+        if (isProtected) {
+          item.hidden = false;
+          checkbox.checked = true;
+          return;
+        }
         item.hidden = !checkbox.checked;
       });
       visibleCell.appendChild(checkbox);
+      if (isProtected) {
+        const hint = document.createElement('span');
+        hint.className = 'text-muted';
+        hint.style.marginLeft = '0.4rem';
+        hint.textContent = 'Required';
+        visibleCell.appendChild(hint);
+      }
       row.appendChild(visibleCell);
 
       const labelCell = document.createElement('td');
@@ -260,7 +278,10 @@
   }
 
   if (sidebarSection && window.MyPortalSidebarMenu) {
-    sidebarState = window.MyPortalSidebarMenu.listItems().map((item) => ({ ...item }));
+    sidebarState = window.MyPortalSidebarMenu.listItems().map((item) => ({
+      ...item,
+      hidden: SIDEBAR_PROTECTED_KEYS.has(item.key) ? false : Boolean(item.hidden),
+    }));
     renderSidebarItems();
 
     if (sidebarSaveButton) {
@@ -268,7 +289,9 @@
         clearMessages([sidebarSuccess, sidebarError]);
         const payload = {
           order: sidebarState.map((item) => item.key),
-          hidden: sidebarState.filter((item) => item.hidden).map((item) => item.key),
+          hidden: sidebarState
+            .filter((item) => item.hidden && !SIDEBAR_PROTECTED_KEYS.has(item.key))
+            .map((item) => item.key),
         };
         try {
           await window.MyPortalSidebarMenu.save(payload);
@@ -276,6 +299,31 @@
         } catch (error) {
           showMessage(sidebarError, error.message || 'Unable to save left menu preferences.');
         }
+      });
+    }
+
+
+    if (sidebarAddDividerButton) {
+      sidebarAddDividerButton.addEventListener('click', () => {
+        clearMessages([sidebarSuccess, sidebarError]);
+        sidebarState.push({
+          key: `${SIDEBAR_DIVIDER_KEY_PREFIX}${Date.now()}`,
+          label: 'Divider',
+          hidden: false,
+        });
+        renderSidebarItems();
+      });
+    }
+
+    if (sidebarAddSpacerButton) {
+      sidebarAddSpacerButton.addEventListener('click', () => {
+        clearMessages([sidebarSuccess, sidebarError]);
+        sidebarState.push({
+          key: `${SIDEBAR_SPACER_KEY_PREFIX}${Date.now()}`,
+          label: 'Spacer',
+          hidden: false,
+        });
+        renderSidebarItems();
       });
     }
 
