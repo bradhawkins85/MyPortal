@@ -364,6 +364,30 @@ def test_receive_alert_csrf_exempt_with_query_token(monkeypatch):
     assert response.json()["status"] == "accepted"
 
 
+def test_receive_alert_redacts_token_query_param_in_logged_source_url(monkeypatch):
+    logged_calls = []
+
+    async def fake_ingest_alert(**_kwargs):
+        raise uptime_service.AuthenticationError("Invalid token")
+
+    async def fake_log_incoming_webhook(**kwargs):
+        logged_calls.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(uptime_service, "ingest_alert", fake_ingest_alert)
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", fake_log_incoming_webhook)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/integration-modules/uptimekuma/alerts?token=super-secret",
+            json={"status": "down"},
+        )
+
+    assert response.status_code == 401
+    assert len(logged_calls) == 1
+    source_url = logged_calls[0]["source_url"]
+    assert "token=%2A%2A%2AREDACTED%2A%2A%2A" in source_url
+    assert "super-secret" not in source_url
 
 def test_receive_alert_debug_log_redacts_query_token(monkeypatch):
     debug_calls = []
