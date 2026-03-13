@@ -965,6 +965,18 @@ def test_build_timer_billable_map_basic():
     assert result == {"10": True, "20": False}
 
 
+def test_build_timer_billable_map_coerces_string_values():
+    ticket = {
+        "ticket_timers": [
+            {"id": 1, "comment_id": 10, "billable": "false"},
+            {"id": 2, "comment_id": 20, "billable": "true"},
+            {"id": 3, "comment_id": 30, "billable": "0"},
+        ]
+    }
+    result = ticket_importer._build_timer_billable_map(ticket)
+    assert result == {"10": False, "20": True, "30": False}
+
+
 def test_build_timer_billable_map_skips_null_comment_id():
     ticket = {
         "ticket_timers": [
