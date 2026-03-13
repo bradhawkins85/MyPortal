@@ -323,15 +323,6 @@ class SchedulerService:
                         result = await company_id_lookup.refresh_all_missing_company_ids()
                         details = json.dumps(result, default=str) if result else None
                 elif command == "update_products":
-                    # Refresh the stock feed first so that opt_accessori and other
-                    # fields are current before we resolve cross-sell associations.
-                    try:
-                        await products_service.update_stock_feed()
-                    except Exception as feed_exc:
-                        log_error(
-                            "Failed to refresh stock feed before product update",
-                            error=str(feed_exc),
-                        )
                     await products_service.update_products_from_feed()
                 elif command == "update_stock_feed":
                     await products_service.update_stock_feed()
