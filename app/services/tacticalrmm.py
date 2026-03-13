@@ -151,7 +151,7 @@ def _coerce_ram_gb(value: Any) -> float | None:
         return None
     if isinstance(value, (int, float)):
         numeric = float(value)
-        if numeric > 1024:
+        if numeric >= 1024:
             numeric = numeric / 1024.0
         return round(numeric, 2)
     text = str(value).strip()
@@ -165,6 +165,38 @@ def _coerce_ram_gb(value: Any) -> float | None:
     if "mb" in lowered and "gb" not in lowered:
         number = number / 1024.0
     return round(number, 2)
+
+
+def _ram_gb_from_wmi_memory(memory: Any) -> float | None:
+    """Compute total RAM in GB by summing Capacity (bytes) from wmi_detail memory modules.
+
+    TacticalRMM stores per-module memory data as a list of lists of dicts, e.g.:
+    ``[[{"Capacity": "8589934592"}, ...], [{"Capacity": "8589934592"}, ...]]``
+    Each ``Capacity`` value is in bytes.
+
+    Returns the total installed RAM in GB rounded to 2 decimal places, or
+    ``None`` if the structure is absent, empty, or contains no valid Capacity
+    values.
+    """
+    if not isinstance(memory, list):
+        return None
+    total_bytes = 0
+    for module in memory:
+        if not isinstance(module, list):
+            continue
+        for entry in module:
+            if not isinstance(entry, dict):
+                continue
+            raw = entry.get("Capacity")
+            if raw is None:
+                continue
+            try:
+                total_bytes += int(raw)
+            except (TypeError, ValueError):
+                continue
+    if total_bytes <= 0:
+        return None
+    return round(total_bytes / (1024 ** 3), 2)
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -252,9 +284,12 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
             _join_list(_lookup(agent, "cpu_model", "processor"))
             or _join_list(_lookup(hardware, "cpu_model", "cpu", "processor"))
         ),
-        "ram_gb": _coerce_ram_gb(
-            _lookup(agent, "ram_gb", "total_ram", "ram")
-            or _lookup(hardware, "ram", "total_ram", "memory")
+        "ram_gb": (
+            _coerce_ram_gb(
+                _lookup(agent, "ram_gb", "total_ram", "ram")
+                or _lookup(hardware, "ram", "total_ram")
+            )
+            or _ram_gb_from_wmi_memory(_lookup(hardware, "memory"))
         ),
         # physical_disks is a list in the real TacticalRMM API – join entries
         "hdd_size": _clean_text(
@@ -309,6 +344,27 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
     return details
 
 
+async def _fetch_agent_detail(agent_id: str) -> Mapping[str, Any] | None:
+    """Fetch full agent details from the per-agent endpoint.
+
+    The list endpoint (``/agents/``) uses ``AgentTableSerializer`` which omits
+    ``total_ram``.  The detail endpoint (``/agents/{agent_id}/``) uses
+    ``AgentSerializer`` with ``exclude = ["id"]``, so it includes ``total_ram``
+    (stored in MB) and ``wmi_detail`` which ``extract_agent_details`` can use.
+    """
+    try:
+        result = await _call_endpoint(f"agents/{agent_id}/")
+        if isinstance(result, Mapping):
+            return result
+    except (TacticalRMMAPIError, TacticalRMMConfigurationError) as exc:
+        log_error(
+            "Failed to fetch Tactical RMM agent detail",
+            agent_id=agent_id,
+            error=str(exc),
+        )
+    return None
+
+
 async def fetch_agents(client_id: str | None = None) -> list[Mapping[str, Any]]:
     settings = await _load_settings()
     base_url = settings["base_url"]
@@ -344,6 +400,40 @@ async def fetch_agents(client_id: str | None = None) -> list[Mapping[str, Any]]:
                 collected.extend(page_items)
         if collected:
             break
+
+    # The list endpoint (AgentTableSerializer) omits ``total_ram`` and
+    # ``wmi_detail``.  Enrich each agent with its full detail record so that
+    # RAM data is available for extract_agent_details().
+    if collected:
+        agent_ids = [
+            str(a.get("agent_id") or a.get("id") or "").strip()
+            for a in collected
+        ]
+        details: list[Mapping[str, Any] | None] = list(
+            await asyncio.gather(
+                *[_fetch_agent_detail(aid) for aid in agent_ids if aid],
+                return_exceptions=True,
+            )
+        )
+        detail_map: dict[str, Mapping[str, Any]] = {}
+        for detail in details:
+            if not isinstance(detail, Mapping):
+                continue
+            did = str(detail.get("agent_id") or detail.get("id") or "").strip()
+            if did:
+                detail_map[did] = detail
+
+        enriched: list[Mapping[str, Any]] = []
+        for agent in collected:
+            aid = str(agent.get("agent_id") or agent.get("id") or "").strip()
+            if aid and aid in detail_map:
+                merged: dict[str, Any] = dict(agent)
+                merged.update(detail_map[aid])
+                enriched.append(merged)
+            else:
+                enriched.append(agent)
+        return enriched
+
     return collected
 
 
