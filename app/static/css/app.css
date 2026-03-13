@@ -2330,6 +2330,33 @@ button.header-title-menu__link {
   text-align: right;
 }
 
+.sidebar-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  cursor: grab;
+  color: rgba(249, 250, 251, 0.4);
+  padding: 0.25rem;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.sidebar-drag-handle:hover {
+  color: rgba(249, 250, 251, 0.8);
+}
+
+.sidebar-drag-handle:active {
+  cursor: grabbing;
+}
+
+.sidebar-row--dragging {
+  opacity: 0.4;
+}
+
+.sidebar-row--drag-over {
+  outline: 2px solid rgba(99, 102, 241, 0.7);
+  outline-offset: -2px;
+}
+
 .table__action-buttons {
   display: flex;
   justify-content: flex-end;
