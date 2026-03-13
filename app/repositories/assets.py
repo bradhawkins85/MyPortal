@@ -149,7 +149,7 @@ async def upsert_asset(
     syncro_asset_id: str | None = None,
     tactical_asset_id: str | None = None,
     match_name: bool = False,
-) -> None:
+) -> int:
     sync_id = str(syncro_asset_id) if syncro_asset_id else None
     tactical_id = str(tactical_asset_id) if tactical_asset_id else None
     ram_value = _coerce_float(ram_gb)
@@ -227,8 +227,9 @@ async def upsert_asset(
             """,
             params + (row["id"],),
         )
+        return int(row["id"])
     else:
-        await db.execute(
+        return await db.execute_returning_lastrowid(
             """
             INSERT INTO assets (
                 company_id,
