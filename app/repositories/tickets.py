@@ -73,6 +73,22 @@ def _append_ticket_search_filter(
     params.extend(like_params)
 
 
+def _append_ticket_cursor_filter(
+    where: list[str],
+    params: list[Any],
+    *,
+    cursor_updated_at: datetime | None,
+    cursor_id: int | None,
+    column_prefix: str = "",
+) -> None:
+    if cursor_updated_at is None or cursor_id is None:
+        return
+    updated_column = f"{column_prefix}updated_at"
+    id_column = f"{column_prefix}id"
+    where.append(f"({updated_column} < %s OR ({updated_column} = %s AND {id_column} < %s))")
+    params.extend([cursor_updated_at, cursor_updated_at, int(cursor_id)])
+
+
 def _build_ticket_search_clause(
     *,
     search: str | None,
@@ -320,9 +336,11 @@ async def list_tickets(
     company_id: int | None = None,
     assigned_user_id: int | None = None,
     search: str | None = None,
-    limit: int = 100,
+    limit: int = 50,
     offset: int = 0,
     requester_id: int | None = None,
+    cursor_updated_at: datetime | None = None,
+    cursor_id: int | None = None,
 ) -> list[TicketRecord]:
     log_debug(
         "Listing tickets",
@@ -352,18 +370,37 @@ async def list_tickets(
         where.append("requester_id = %s")
         params.append(requester_id)
     _append_ticket_search_filter(where, params, search=search)
-    where_clause = " WHERE " + " AND ".join(where) if where else ""
-    params.extend([limit, offset])
-    rows = await db.fetch_all(
-        f"""
-        SELECT *
-        FROM tickets
-        {where_clause}
-        ORDER BY updated_at DESC
-        LIMIT %s OFFSET %s
-        """,
-        tuple(params),
+    _append_ticket_cursor_filter(
+        where,
+        params,
+        cursor_updated_at=cursor_updated_at,
+        cursor_id=cursor_id,
     )
+    where_clause = " WHERE " + " AND ".join(where) if where else ""
+    if cursor_updated_at is not None and cursor_id is not None:
+        params.append(limit)
+        rows = await db.fetch_all(
+            f"""
+            SELECT *
+            FROM tickets
+            {where_clause}
+            ORDER BY updated_at DESC, id DESC
+            LIMIT %s
+            """,
+            tuple(params),
+        )
+    else:
+        params.extend([limit, offset])
+        rows = await db.fetch_all(
+            f"""
+            SELECT *
+            FROM tickets
+            {where_clause}
+            ORDER BY updated_at DESC, id DESC
+            LIMIT %s OFFSET %s
+            """,
+            tuple(params),
+        )
     log_debug("Tickets query returned", count=len(rows))
     return [_normalise_ticket(row) for row in rows]
 
@@ -413,56 +450,90 @@ async def list_tickets_for_user(
     status: str | Sequence[str] | None = None,
     limit: int = 25,
     offset: int = 0,
+    cursor_updated_at: datetime | None = None,
+    cursor_id: int | None = None,
 ) -> list[TicketRecord]:
     """Return recent tickets requested by or watched by the specified user."""
 
     if user_id <= 0:
         return []
 
-    status_csv, company_csv, _, _ = _prepare_user_ticket_scope_filters(
-        status=status,
-        company_ids=company_ids,
-        search=search,
-    )
+    status_filters = _prepare_status_filters(status)
+    company_filters = [int(cid) for cid in (company_ids or []) if int(cid) > 0]
     search_clause, search_params = _build_ticket_search_clause(
         search=search,
         column_prefix="t.",
         include_external_reference=True,
     )
 
-    query = f"""
-        SELECT t.*
-        FROM tickets AS t
-        INNER JOIN (
-            SELECT t.id
-            FROM tickets AS t
-            WHERE t.requester_id = %s
-            UNION
-            SELECT t.id
-            FROM tickets AS t
-            WHERE EXISTS (
-                SELECT 1
-                FROM ticket_watchers AS tw
-                WHERE tw.ticket_id = t.id AND tw.user_id = %s
-            )
-        ) AS scoped ON scoped.id = t.id
-        WHERE (%s = '' OR FIND_IN_SET(LOWER(t.status), %s) > 0)
-          AND (%s = '' OR FIND_IN_SET(CAST(t.company_id AS CHAR), %s) > 0)
-          AND ({search_clause})
-        ORDER BY t.updated_at DESC, t.id DESC
-        LIMIT %s OFFSET %s
-    """
+    where_clauses = [f"({search_clause})", "%s > 0"]
+    if status_filters:
+        status_placeholders = ", ".join(["%s"] * len(status_filters))
+        where_clauses.append(f"t.status IN ({status_placeholders})")
+    if company_filters:
+        company_placeholders = ", ".join(["%s"] * len(company_filters))
+        where_clauses.append(f"t.company_id IN ({company_placeholders})")
+
     params: list[Any] = [
         user_id,
         user_id,
-        status_csv,
-        status_csv,
-        company_csv,
-        company_csv,
         *search_params,
-        int(max(1, limit)),
-        int(max(0, offset)),
+        user_id,
+        *status_filters,
+        *company_filters,
     ]
+    _append_ticket_cursor_filter(
+        where_clauses,
+        params,
+        cursor_updated_at=cursor_updated_at,
+        cursor_id=cursor_id,
+        column_prefix="t.",
+    )
+
+    if cursor_updated_at is not None and cursor_id is not None:
+        query = f"""
+            SELECT t.*
+            FROM tickets AS t
+            INNER JOIN (
+                SELECT t.id
+                FROM tickets AS t
+                WHERE t.requester_id = %s
+                UNION
+                SELECT t.id
+                FROM tickets AS t
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM ticket_watchers AS tw
+                    WHERE tw.ticket_id = t.id AND tw.user_id = %s
+                )
+            ) AS scoped ON scoped.id = t.id
+            WHERE {' AND '.join(where_clauses)}
+            ORDER BY t.updated_at DESC, t.id DESC
+            LIMIT %s
+        """
+        params.append(int(max(1, limit)))
+    else:
+        query = f"""
+            SELECT t.*
+            FROM tickets AS t
+            INNER JOIN (
+                SELECT t.id
+                FROM tickets AS t
+                WHERE t.requester_id = %s
+                UNION
+                SELECT t.id
+                FROM tickets AS t
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM ticket_watchers AS tw
+                    WHERE tw.ticket_id = t.id AND tw.user_id = %s
+                )
+            ) AS scoped ON scoped.id = t.id
+            WHERE {' AND '.join(where_clauses)}
+            ORDER BY t.updated_at DESC, t.id DESC
+            LIMIT %s OFFSET %s
+        """
+        params.extend([int(max(1, limit)), int(max(0, offset))])
 
     rows = await db.fetch_all(query, tuple(params))
     return [_normalise_ticket(row) for row in rows]
@@ -480,16 +551,21 @@ async def count_tickets_for_user(
     if user_id <= 0:
         return 0
 
-    status_csv, company_csv, _, _ = _prepare_user_ticket_scope_filters(
-        status=status,
-        company_ids=company_ids,
-        search=search,
-    )
+    status_filters = _prepare_status_filters(status)
+    company_filters = [int(cid) for cid in (company_ids or []) if int(cid) > 0]
     search_clause, search_params = _build_ticket_search_clause(
         search=search,
         column_prefix="t.",
         include_external_reference=True,
     )
+
+    where_clauses = [f"({search_clause})", "%s > 0"]
+    if status_filters:
+        status_placeholders = ", ".join(["%s"] * len(status_filters))
+        where_clauses.append(f"t.status IN ({status_placeholders})")
+    if company_filters:
+        company_placeholders = ", ".join(["%s"] * len(company_filters))
+        where_clauses.append(f"t.company_id IN ({company_placeholders})")
 
     query = f"""
         SELECT COUNT(*) AS count
@@ -507,19 +583,16 @@ async def count_tickets_for_user(
             )
         ) AS scoped
         INNER JOIN tickets AS t ON t.id = scoped.id
-        WHERE (%s = '' OR FIND_IN_SET(LOWER(t.status), %s) > 0)
-          AND (%s = '' OR FIND_IN_SET(CAST(t.company_id AS CHAR), %s) > 0)
-          AND ({search_clause})
+        WHERE {' AND '.join(where_clauses)}
     """
 
     params: list[Any] = [
         user_id,
         user_id,
-        status_csv,
-        status_csv,
-        company_csv,
-        company_csv,
         *search_params,
+        user_id,
+        *status_filters,
+        *company_filters,
     ]
     row = await db.fetch_one(query, tuple(params))
     return int(row["count"]) if row else 0

@@ -125,6 +125,7 @@ class TicketDetail(TicketResponse):
 class TicketListResponse(BaseModel):
     items: list[TicketResponse]
     total: int
+    next_cursor: Optional[str] = None
 
 
 class TicketDashboardRow(BaseModel):
@@ -191,6 +192,7 @@ class TicketSearchFilters(BaseModel):
 class TicketDashboardResponse(BaseModel):
     items: list[TicketDashboardRow]
     total: int
+    next_cursor: Optional[str] = None
     status_counts: dict[str, int]
     filters: TicketSearchFilters
 
