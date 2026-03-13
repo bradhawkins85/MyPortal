@@ -89,7 +89,8 @@ async def receive_alert(
     logger.debug(
         "Uptime Kuma webhook request received",
         method=request.method,
-        url=str(request.url),
+        url_path=request.url.path,
+        has_query_params=bool(request.url.query),
         content_type=content_type,
         user_agent=request.headers.get("user-agent"),
         remote_addr=request.client.host if request.client else None,
