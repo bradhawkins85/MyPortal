@@ -411,7 +411,7 @@ async def list_products_summary(filters: ProductFilters) -> list[dict[str, Any]]
 
     sql = " ".join(query_parts)
     rows = await db.fetch_all(sql, tuple(params) if params else None)
-    return [_normalise_product(row) for row in rows]
+    return [_normalise_product_summary(row) for row in rows]
 
 
 async def count_products(filters: ProductFilters) -> int:
@@ -1784,6 +1784,21 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     normalised.setdefault("upsell_products", [])
     normalised.setdefault("upsell_product_ids", [])
     return normalised
+
+
+def _normalise_product_summary(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": _coerce_int(row.get("id")),
+        "name": row.get("name") or "",
+        "sku": row.get("sku") or "",
+        "image_url": row.get("image_url") or None,
+        "price": _coerce_optional_decimal(row.get("price")),
+        "vip_price": _coerce_optional_decimal(row.get("vip_price")),
+        "stock": _coerce_int(row.get("stock")),
+        "archived": bool(row.get("archived")),
+        "category_id": _coerce_optional_int(row.get("category_id")),
+        "category_name": row.get("category_name") or None,
+    }
 
 
 def _normalise_package(row: dict[str, Any]) -> dict[str, Any]:
