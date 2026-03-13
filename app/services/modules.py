@@ -488,6 +488,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "icon": "🛡️",
         "settings": {
             "base_url": "",
+            "base_rmm_url": "",
             "api_key": "",
             "verify_ssl": True,
         },
@@ -711,6 +712,7 @@ def _coerce_settings(
         merged.update(
             {
                 "base_url": str(merged.get("base_url", "")).strip().rstrip("/"),
+                "base_rmm_url": str(merged.get("base_rmm_url", "")).strip().rstrip("/"),
                 "api_key": api_key,
                 "verify_ssl": _ensure_bool(merged.get("verify_ssl"), True),
             }
