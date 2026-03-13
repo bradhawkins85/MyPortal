@@ -202,6 +202,8 @@
   const SIDEBAR_DIVIDER_KEY_PREFIX = '__divider__:';
   const SIDEBAR_SPACER_KEY_PREFIX = '__spacer__:';
   const SIDEBAR_PROTECTED_KEYS = new Set(['/admin/profile']);
+  let dragSourceIndex = null;
+
   function renderSidebarItems() {
     if (!sidebarItemsBody) {
       return;
@@ -209,6 +211,7 @@
     sidebarItemsBody.innerHTML = '';
     sidebarState.forEach((item, index) => {
       const row = document.createElement('tr');
+      row.draggable = true;
 
       const visibleCell = document.createElement('td');
       const isProtected = SIDEBAR_PROTECTED_KEYS.has(item.key);
@@ -239,40 +242,59 @@
       labelCell.textContent = item.label;
       row.appendChild(labelCell);
 
-      const actionsCell = document.createElement('td');
-      actionsCell.className = 'table__actions';
+      const handleCell = document.createElement('td');
+      handleCell.className = 'table__actions';
+      const handle = document.createElement('span');
+      handle.className = 'sidebar-drag-handle';
+      handle.setAttribute('aria-hidden', 'true');
+      handle.innerHTML =
+        '<svg viewBox="0 0 24 24" width="16" height="16" focusable="false" fill="currentColor">' +
+        '<circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>' +
+        '<circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>' +
+        '<circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/>' +
+        '</svg>';
+      handleCell.appendChild(handle);
+      row.appendChild(handleCell);
 
-      const upButton = document.createElement('button');
-      upButton.type = 'button';
-      upButton.className = 'button button--ghost button--small';
-      upButton.textContent = 'Up';
-      upButton.disabled = index === 0;
-      upButton.addEventListener('click', () => {
-        if (index < 1) {
+      row.addEventListener('dragstart', (e) => {
+        dragSourceIndex = index;
+        e.dataTransfer.effectAllowed = 'move';
+        // Defer opacity change so the drag ghost image is captured before the style is applied.
+        setTimeout(() => row.classList.add('sidebar-row--dragging'), 0);
+      });
+
+      row.addEventListener('dragend', () => {
+        dragSourceIndex = null;
+        sidebarItemsBody.querySelectorAll('tr').forEach((r) => {
+          r.classList.remove('sidebar-row--dragging');
+          r.classList.remove('sidebar-row--drag-over');
+        });
+      });
+
+      row.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (dragSourceIndex !== null && dragSourceIndex !== index) {
+          sidebarItemsBody.querySelectorAll('tr').forEach((r) =>
+            r.classList.remove('sidebar-row--drag-over'),
+          );
+          row.classList.add('sidebar-row--drag-over');
+        }
+      });
+
+      row.addEventListener('drop', (e) => {
+        e.preventDefault();
+        if (dragSourceIndex === null || dragSourceIndex === index) {
           return;
         }
-        const moved = sidebarState.splice(index, 1)[0];
-        sidebarState.splice(index - 1, 0, moved);
+        const moved = sidebarState.splice(dragSourceIndex, 1)[0];
+        // Removing the source shifts all subsequent indices down by one, so
+        // when dragging downward the effective target index is one less.
+        const insertAt = dragSourceIndex < index ? index - 1 : index;
+        sidebarState.splice(insertAt, 0, moved);
         renderSidebarItems();
       });
-      actionsCell.appendChild(upButton);
 
-      const downButton = document.createElement('button');
-      downButton.type = 'button';
-      downButton.className = 'button button--ghost button--small';
-      downButton.textContent = 'Down';
-      downButton.disabled = index === sidebarState.length - 1;
-      downButton.addEventListener('click', () => {
-        if (index >= sidebarState.length - 1) {
-          return;
-        }
-        const moved = sidebarState.splice(index, 1)[0];
-        sidebarState.splice(index + 1, 0, moved);
-        renderSidebarItems();
-      });
-      actionsCell.appendChild(downButton);
-
-      row.appendChild(actionsCell);
       sidebarItemsBody.appendChild(row);
     });
   }
