@@ -194,9 +194,16 @@
   const sidebarItemsBody = root.querySelector('[data-sidebar-items]');
   const sidebarSaveButton = root.querySelector('[data-sidebar-save]');
   const sidebarResetButton = root.querySelector('[data-sidebar-reset]');
+  const sidebarAddDividerButton = root.querySelector('[data-sidebar-add-divider]');
+  const sidebarAddSpacerButton = root.querySelector('[data-sidebar-add-spacer]');
   const sidebarSuccess = root.querySelector('[data-sidebar-success]');
   const sidebarError = root.querySelector('[data-sidebar-error]');
   let sidebarState = [];
+  const SIDEBAR_DIVIDER_KEY_PREFIX = '__divider__:';
+  const SIDEBAR_SPACER_KEY_PREFIX = '__spacer__:';
+  const SIDEBAR_PROTECTED_KEYS = new Set(['/admin/profile']);
+  let dragSourceIndex = null;
+  let touchDragSourceIndex = null;
 
   function renderSidebarItems() {
     if (!sidebarItemsBody) {
@@ -205,62 +212,175 @@
     sidebarItemsBody.innerHTML = '';
     sidebarState.forEach((item, index) => {
       const row = document.createElement('tr');
+      row.draggable = true;
 
       const visibleCell = document.createElement('td');
+      const isProtected = SIDEBAR_PROTECTED_KEYS.has(item.key);
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.checked = !item.hidden;
+      checkbox.disabled = isProtected;
       checkbox.setAttribute('aria-label', `Toggle ${item.label}`);
       checkbox.addEventListener('change', () => {
+        if (isProtected) {
+          item.hidden = false;
+          checkbox.checked = true;
+          return;
+        }
         item.hidden = !checkbox.checked;
       });
       visibleCell.appendChild(checkbox);
+      if (isProtected) {
+        const hint = document.createElement('span');
+        hint.className = 'text-muted';
+        hint.style.marginLeft = '0.4rem';
+        hint.textContent = 'Required';
+        visibleCell.appendChild(hint);
+      }
       row.appendChild(visibleCell);
 
       const labelCell = document.createElement('td');
       labelCell.textContent = item.label;
       row.appendChild(labelCell);
 
-      const actionsCell = document.createElement('td');
-      actionsCell.className = 'table__actions';
+      const handleCell = document.createElement('td');
+      handleCell.className = 'table__actions';
+      const handle = document.createElement('span');
+      handle.className = 'sidebar-drag-handle';
+      handle.setAttribute('aria-hidden', 'true');
+      handle.innerHTML =
+        '<svg viewBox="0 0 24 24" width="16" height="16" focusable="false" fill="currentColor">' +
+        '<circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>' +
+        '<circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>' +
+        '<circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/>' +
+        '</svg>';
+      handleCell.appendChild(handle);
+      row.appendChild(handleCell);
 
-      const upButton = document.createElement('button');
-      upButton.type = 'button';
-      upButton.className = 'button button--ghost button--small';
-      upButton.textContent = 'Up';
-      upButton.disabled = index === 0;
-      upButton.addEventListener('click', () => {
-        if (index < 1) {
+      const removeCell = document.createElement('td');
+      removeCell.className = 'table__actions';
+      const isDividerOrSpacer =
+        item.key.startsWith(SIDEBAR_DIVIDER_KEY_PREFIX) ||
+        item.key.startsWith(SIDEBAR_SPACER_KEY_PREFIX);
+      if (isDividerOrSpacer) {
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'button button--danger button--small';
+        removeButton.textContent = 'Remove';
+        removeButton.setAttribute('aria-label', `Remove ${item.label}`);
+        removeButton.addEventListener('click', () => {
+          sidebarState.splice(index, 1);
+          renderSidebarItems();
+        });
+        removeCell.appendChild(removeButton);
+      }
+      row.appendChild(removeCell);
+
+      row.addEventListener('dragstart', (e) => {
+        dragSourceIndex = index;
+        e.dataTransfer.effectAllowed = 'move';
+        // Defer opacity change so the drag ghost image is captured before the style is applied.
+        setTimeout(() => row.classList.add('sidebar-row--dragging'), 0);
+      });
+
+      row.addEventListener('dragend', () => {
+        dragSourceIndex = null;
+        sidebarItemsBody.querySelectorAll('tr').forEach((r) => {
+          r.classList.remove('sidebar-row--dragging');
+          r.classList.remove('sidebar-row--drag-over');
+        });
+      });
+
+      row.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (dragSourceIndex !== null && dragSourceIndex !== index) {
+          sidebarItemsBody.querySelectorAll('tr').forEach((r) =>
+            r.classList.remove('sidebar-row--drag-over'),
+          );
+          row.classList.add('sidebar-row--drag-over');
+        }
+      });
+
+      row.addEventListener('drop', (e) => {
+        e.preventDefault();
+        if (dragSourceIndex === null || dragSourceIndex === index) {
           return;
         }
-        const moved = sidebarState.splice(index, 1)[0];
-        sidebarState.splice(index - 1, 0, moved);
+        const moved = sidebarState.splice(dragSourceIndex, 1)[0];
+        // Removing the source shifts all subsequent indices down by one, so
+        // when dragging downward the effective target index is one less.
+        const insertAt = dragSourceIndex < index ? index - 1 : index;
+        sidebarState.splice(insertAt, 0, moved);
         renderSidebarItems();
       });
-      actionsCell.appendChild(upButton);
 
-      const downButton = document.createElement('button');
-      downButton.type = 'button';
-      downButton.className = 'button button--ghost button--small';
-      downButton.textContent = 'Down';
-      downButton.disabled = index === sidebarState.length - 1;
-      downButton.addEventListener('click', () => {
-        if (index >= sidebarState.length - 1) {
+      handle.addEventListener(
+        'touchstart',
+        (e) => {
+          e.preventDefault();
+          touchDragSourceIndex = index;
+          row.classList.add('sidebar-row--dragging');
+        },
+        { passive: false },
+      );
+
+      handle.addEventListener(
+        'touchmove',
+        (e) => {
+          e.preventDefault();
+          if (touchDragSourceIndex === null) {
+            return;
+          }
+          const touch = e.touches[0];
+          const target = document.elementFromPoint(touch.clientX, touch.clientY);
+          const targetRow = target ? target.closest('tr') : null;
+          sidebarItemsBody.querySelectorAll('tr').forEach((r) =>
+            r.classList.remove('sidebar-row--drag-over'),
+          );
+          if (targetRow && targetRow !== row && sidebarItemsBody.contains(targetRow)) {
+            targetRow.classList.add('sidebar-row--drag-over');
+          }
+        },
+        { passive: false },
+      );
+
+      handle.addEventListener('touchend', (e) => {
+        if (touchDragSourceIndex === null) {
           return;
         }
-        const moved = sidebarState.splice(index, 1)[0];
-        sidebarState.splice(index + 1, 0, moved);
-        renderSidebarItems();
-      });
-      actionsCell.appendChild(downButton);
+        const touch = e.changedTouches[0];
+        const target = document.elementFromPoint(touch.clientX, touch.clientY);
+        const targetRow = target ? target.closest('tr') : null;
+        sidebarItemsBody.querySelectorAll('tr').forEach((r) => {
+          r.classList.remove('sidebar-row--dragging');
+          r.classList.remove('sidebar-row--drag-over');
+        });
+        if (targetRow && sidebarItemsBody.contains(targetRow)) {
+          const rows = Array.from(sidebarItemsBody.querySelectorAll('tr'));
+          const targetIndex = rows.indexOf(targetRow);
+          if (targetIndex !== -1 && targetIndex !== touchDragSourceIndex) {
+            const src = touchDragSourceIndex;
+            const moved = sidebarState.splice(src, 1)[0];
+            // Removing the source shifts all subsequent indices down by one,
+            // so when dragging downward the effective target index is one less.
+            const insertAt = src < targetIndex ? targetIndex - 1 : targetIndex;
+            sidebarState.splice(insertAt, 0, moved);
+            renderSidebarItems();
+          }
+        }
+        touchDragSourceIndex = null;
+      }, { passive: false });
 
-      row.appendChild(actionsCell);
       sidebarItemsBody.appendChild(row);
     });
   }
 
   if (sidebarSection && window.MyPortalSidebarMenu) {
-    sidebarState = window.MyPortalSidebarMenu.listItems().map((item) => ({ ...item }));
+    sidebarState = window.MyPortalSidebarMenu.listItems().map((item) => ({
+      ...item,
+      hidden: SIDEBAR_PROTECTED_KEYS.has(item.key) ? false : Boolean(item.hidden),
+    }));
     renderSidebarItems();
 
     if (sidebarSaveButton) {
@@ -268,7 +388,9 @@
         clearMessages([sidebarSuccess, sidebarError]);
         const payload = {
           order: sidebarState.map((item) => item.key),
-          hidden: sidebarState.filter((item) => item.hidden).map((item) => item.key),
+          hidden: sidebarState
+            .filter((item) => item.hidden && !SIDEBAR_PROTECTED_KEYS.has(item.key))
+            .map((item) => item.key),
         };
         try {
           await window.MyPortalSidebarMenu.save(payload);
@@ -276,6 +398,31 @@
         } catch (error) {
           showMessage(sidebarError, error.message || 'Unable to save left menu preferences.');
         }
+      });
+    }
+
+
+    if (sidebarAddDividerButton) {
+      sidebarAddDividerButton.addEventListener('click', () => {
+        clearMessages([sidebarSuccess, sidebarError]);
+        sidebarState.push({
+          key: `${SIDEBAR_DIVIDER_KEY_PREFIX}${Date.now()}`,
+          label: 'Divider',
+          hidden: false,
+        });
+        renderSidebarItems();
+      });
+    }
+
+    if (sidebarAddSpacerButton) {
+      sidebarAddSpacerButton.addEventListener('click', () => {
+        clearMessages([sidebarSuccess, sidebarError]);
+        sidebarState.push({
+          key: `${SIDEBAR_SPACER_KEY_PREFIX}${Date.now()}`,
+          label: 'Spacer',
+          hidden: false,
+        });
+        renderSidebarItems();
       });
     }
 

@@ -64,7 +64,7 @@ def _hash_secret(secret: str) -> str:
 
 def _verify_secret(token: str | None, expected_hash: str) -> bool:
     if not expected_hash:
-        return True
+        return False
     if not token:
         return False
     candidate = _hash_secret(token.strip())
