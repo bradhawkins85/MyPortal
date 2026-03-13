@@ -5031,6 +5031,32 @@ async def shop_product_detail_api(request: Request, product_id: int):
     return JSONResponse(content=cast(dict[str, Any], _serialise_for_json(product)))
 
 
+
+
+@app.get("/api/admin/shop/products/search", response_class=JSONResponse)
+async def admin_shop_product_search_api(
+    request: Request,
+    q: str = Query("", min_length=1),
+    limit: int = Query(10, ge=1, le=25),
+):
+    _current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    results = await shop_repo.search_products_for_admin_lookup(q, limit=limit)
+    return JSONResponse(content=cast(list[dict[str, Any]], _serialise_for_json(results)))
+
+
+@app.get("/api/admin/shop/products/{product_id}/restrictions", response_class=JSONResponse)
+async def admin_shop_product_restrictions_api(request: Request, product_id: int):
+    _current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    restrictions = await shop_repo.list_product_restrictions_for_product(product_id)
+    return JSONResponse(content=cast(list[dict[str, Any]], _serialise_for_json(restrictions)))
+
+
 @app.get("/api/admin/shop/products/{product_id}", response_class=JSONResponse)
 async def admin_shop_product_detail_api(request: Request, product_id: int):
     _current_user, redirect = await _require_super_admin_page(request)
@@ -10452,23 +10478,17 @@ async def admin_shop_page(
         shop_repo.list_products_summary(filters)
     )
     total_count_task = asyncio.create_task(shop_repo.count_products(filters))
-    restrictions_task = asyncio.create_task(shop_repo.list_product_restrictions())
     companies_task = asyncio.create_task(company_repo.list_companies())
     subscription_categories_task = asyncio.create_task(subscription_categories_repo.list_categories())
 
-    categories, filter_categories, products, total_count, restrictions, companies, subscription_categories = await asyncio.gather(
+    categories, filter_categories, products, total_count, companies, subscription_categories = await asyncio.gather(
         categories_task,
         filter_categories_task,
         products_task,
         total_count_task,
-        restrictions_task,
         companies_task,
         subscription_categories_task,
     )
-
-    restrictions_map: dict[int, list[dict[str, Any]]] = {}
-    for restriction in restrictions:
-        restrictions_map.setdefault(restriction["product_id"], []).append(restriction)
 
     for product in products:
         product["price_below_threshold"] = shop_service.is_price_below_dbp_threshold(
@@ -10487,7 +10507,6 @@ async def admin_shop_page(
         "categories": categories,
         "filter_categories": filter_categories,
         "products": products,
-        "product_restrictions": restrictions_map,
         "all_companies": companies,
         "show_archived": show_archived,
         "subscription_categories": subscription_categories,
@@ -10672,7 +10691,6 @@ async def admin_shop_product_create_page(request: Request):
     products_task = asyncio.create_task(
         shop_repo.list_products_summary(shop_repo.ProductFilters(include_archived=False))
     )
-    restrictions_task = asyncio.create_task(shop_repo.list_product_restrictions())
     subscription_categories_task = asyncio.create_task(subscription_categories_repo.list_categories())
 
     categories, products, restrictions, subscription_categories = await asyncio.gather(
@@ -10687,7 +10705,6 @@ async def admin_shop_product_create_page(request: Request):
         "title": "Add product",
         "categories": categories,
         "products": products,
-        "product_restrictions": restrictions_map,
         "subscription_categories": subscription_categories,
     }
     return await _render_template(

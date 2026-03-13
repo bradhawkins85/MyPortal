@@ -936,6 +936,29 @@ async def list_product_restrictions() -> list[dict[str, Any]]:
     return restrictions
 
 
+async def list_product_restrictions_for_product(product_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT e.product_id, e.company_id, c.name AS company_name
+        FROM shop_product_exclusions AS e
+        INNER JOIN companies AS c ON c.id = e.company_id
+        WHERE e.product_id = %s
+        ORDER BY c.name
+        """,
+        (product_id,),
+    )
+    restrictions: list[dict[str, Any]] = []
+    for row in rows:
+        restrictions.append(
+            {
+                "product_id": int(row["product_id"]),
+                "company_id": int(row["company_id"]),
+                "company_name": row["company_name"],
+            }
+        )
+    return restrictions
+
+
 async def list_optional_accessory_products() -> list[dict[str, Any]]:
     """Return all non-archived products that are referenced as optional accessories.
 
@@ -1910,6 +1933,54 @@ async def replace_product_exclusions(
                 raise
             else:
                 await conn.commit()
+
+
+
+
+async def search_products_for_admin_lookup(term: str, *, limit: int = 10) -> list[dict[str, Any]]:
+    cleaned_term = term.strip()
+    if not cleaned_term or limit <= 0:
+        return []
+
+    like = f"%{cleaned_term}%"
+    rows = await db.fetch_all(
+        """
+        SELECT id, name, sku, archived
+        FROM shop_products
+        WHERE archived = 0
+          AND (sku LIKE %s OR name LIKE %s OR vendor_sku LIKE %s)
+        ORDER BY
+            CASE
+                WHEN sku = %s THEN 0
+                WHEN sku LIKE %s THEN 1
+                WHEN vendor_sku = %s THEN 2
+                WHEN vendor_sku LIKE %s THEN 3
+                ELSE 4
+            END,
+            name ASC
+        LIMIT %s
+        """,
+        (
+            like,
+            like,
+            like,
+            cleaned_term,
+            f"{cleaned_term}%",
+            cleaned_term,
+            f"{cleaned_term}%",
+            int(limit),
+        ),
+    )
+    return [
+        {
+            "id": _coerce_int(row.get("id"), default=0),
+            "name": row.get("name") or "",
+            "sku": row.get("sku") or "",
+            "archived": bool(row.get("archived")),
+        }
+        for row in rows
+        if _coerce_int(row.get("id"), default=0) > 0
+    ]
 
 
 async def get_product_ids_by_skus(skus: Sequence[str]) -> list[int]:
