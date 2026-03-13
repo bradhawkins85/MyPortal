@@ -285,10 +285,9 @@ def _build_comment_body_with_header(
     comment: dict[str, Any],
     body: str,
     *,
-    is_billable: bool | None = None,
     minutes: int | None = None,
 ) -> str:
-    """Prepend author, time, and billable metadata to a comment body."""
+    """Prepend author and time metadata to a comment body."""
     header_parts: list[str] = []
     author_name = _extract_comment_author_name(comment)
     if author_name:
@@ -304,9 +303,6 @@ def _build_comment_body_with_header(
         else:
             time_str = f"{mins}m"
         header_parts.append(f"Time: {time_str}")
-    if is_billable is None:
-        is_billable = _resolve_comment_billable(comment)
-    header_parts.append(f"Billable: {'Yes' if is_billable else 'No'}")
     if not header_parts:
         return body
     return "\n".join(header_parts) + "\n---\n" + body
@@ -756,7 +752,7 @@ async def _sync_ticket_replies(
             minutes_spent = timer_time.get(str(comment.get("id")))
         is_billable = _resolve_comment_billable(comment, timer_billable)
         enhanced_body = _build_comment_body_with_header(
-            comment, body, is_billable=is_billable, minutes=minutes_spent
+            comment, body, minutes=minutes_spent
         )
         await tickets_repo.create_reply(
             ticket_id=ticket_id,

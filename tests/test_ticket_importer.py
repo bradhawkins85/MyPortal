@@ -881,7 +881,7 @@ def test_build_comment_body_with_header_includes_author_time_billable():
     result = ticket_importer._build_comment_body_with_header(comment, "Hello World")
     assert "Author: Alice Tech" in result
     assert "Time: 30m" in result
-    assert "Billable: Yes" in result
+    assert "Billable:" not in result
     assert "Hello World" in result
     assert "---" in result
 
@@ -889,22 +889,22 @@ def test_build_comment_body_with_header_includes_author_time_billable():
 def test_build_comment_body_with_header_not_billable():
     comment = {"tech": "Bob", "billable": False}
     result = ticket_importer._build_comment_body_with_header(comment, "Some body")
-    assert "Billable: No" in result
+    assert "Billable:" not in result
 
 
-def test_build_comment_body_with_header_no_author_still_has_billable():
+def test_build_comment_body_with_header_no_author_no_time_returns_body():
     comment = {"tech": "customer-reply"}
     result = ticket_importer._build_comment_body_with_header(comment, "Customer text")
-    assert "Billable: No" in result
+    assert "Billable:" not in result
     assert "Author:" not in result
     assert "Customer text" in result
 
 
 def test_build_comment_body_with_header_explicit_is_billable_override():
-    """Passing is_billable=True overrides a comment with no billable field."""
+    """Billable flag is stored on the reply record but no longer shown in body."""
     comment = {"tech": "Tech"}
-    result = ticket_importer._build_comment_body_with_header(comment, "Work done", is_billable=True)
-    assert "Billable: Yes" in result
+    result = ticket_importer._build_comment_body_with_header(comment, "Work done", minutes=30)
+    assert "Billable:" not in result
 
 
 def test_resolve_comment_billable_from_comment_field():
@@ -1243,7 +1243,7 @@ async def test_import_ticket_creates_metadata_note_with_billable_time(monkeypatc
     assert comment_reply["minutes_spent"] == 45
     assert "Author: Bob Tech" in comment_reply["body"]
     assert "Time: 45m" in comment_reply["body"]
-    assert "Billable: Yes" in comment_reply["body"]
+    assert "Billable:" not in comment_reply["body"]
     assert "Rebooted the server" in comment_reply["body"]
 
 
@@ -1336,14 +1336,14 @@ async def test_import_ticket_billable_from_ticket_timers(monkeypatch):
     non_billable_reply = next(r for r in reply_calls if r.get("external_reference") == "56")
 
     assert billable_reply["is_billable"] is True
-    assert "Billable: Yes" in billable_reply["body"]
+    assert "Billable:" not in billable_reply["body"]
     # Time comes from billable_time on the labor log (ticket_timer).
     # billable_time is in seconds: 60s = 1 min, 30s = 1 min (rounds up at >= 30s).
     assert billable_reply["minutes_spent"] == 1
     assert "Time: 1m" in billable_reply["body"]
 
     assert non_billable_reply["is_billable"] is False
-    assert "Billable: No" in non_billable_reply["body"]
+    assert "Billable:" not in non_billable_reply["body"]
     assert non_billable_reply["minutes_spent"] == 1
     assert "Time: 1m" in non_billable_reply["body"]
 
