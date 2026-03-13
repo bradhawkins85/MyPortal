@@ -99,7 +99,15 @@ def test_list_company_members_returns_members_list(monkeypatch, active_session):
             },
         ]
 
+    async def fake_get_membership_by_company_user(company_id, user_id):
+        return {"user_id": user_id, "company_id": company_id, "status": "active"}
+
+    async def fake_user_has_permission(user_id, permission):
+        return False
+
     monkeypatch.setattr(company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(membership_repo, "get_membership_by_company_user", fake_get_membership_by_company_user)
+    monkeypatch.setattr(membership_repo, "user_has_permission", fake_user_has_permission)
     monkeypatch.setattr(membership_repo, "list_company_memberships", fake_list_company_memberships)
 
     app.dependency_overrides[database_dependencies.require_database] = lambda: None
@@ -148,6 +156,30 @@ def test_list_company_members_returns_404_for_nonexistent_company(monkeypatch, a
     assert response.status_code == 404
 
 
+def test_list_company_members_returns_403_without_access(monkeypatch, active_session):
+    async def fake_get_company(company_id):
+        return _make_company(id=company_id)
+
+    async def fake_get_membership_by_company_user(company_id, user_id):
+        return None
+
+    async def fake_user_has_permission(user_id, permission):
+        return False
+
+    monkeypatch.setattr(company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(membership_repo, "get_membership_by_company_user", fake_get_membership_by_company_user)
+    monkeypatch.setattr(membership_repo, "user_has_permission", fake_user_has_permission)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+        "is_super_admin": False,
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/companies/5/members")
 
 def test_list_company_assets_denies_cross_tenant_access(monkeypatch, active_session):
     async def fake_get_company(company_id):
