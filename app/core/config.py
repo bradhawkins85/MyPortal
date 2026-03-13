@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import AnyHttpUrl, AliasChoices, BaseModel, Field, field_validator
+from pydantic import AnyHttpUrl, AliasChoices, BaseModel, Field, TypeAdapter, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -189,6 +189,27 @@ class Settings(BaseSettings):
 
         if isinstance(value, str) and value.strip() == "":
             return None
+        return value
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def _validate_allowed_origins(cls, value: str) -> str:
+        """Validate comma-separated CORS origins and reject wildcard origins."""
+
+        if not value.strip():
+            return value
+
+        url_adapter = TypeAdapter(AnyHttpUrl)
+        origins = [origin.strip() for origin in value.split(",") if origin.strip()]
+
+        for origin in origins:
+            if origin == "*":
+                raise ValueError("ALLOWED_ORIGINS cannot include wildcard '*'.")
+            try:
+                url_adapter.validate_python(origin)
+            except ValidationError as exc:  # pragma: no cover - exercised in settings construction
+                raise ValueError(f"Invalid CORS origin in ALLOWED_ORIGINS: {origin}") from exc
+
         return value
 
     model_config = SettingsConfigDict(
