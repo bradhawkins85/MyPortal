@@ -1069,13 +1069,28 @@ async def sync_pending_optional_accessories() -> int:
 
 
 async def list_pending_optional_accessories() -> list[dict[str, Any]]:
-    """Return all rows from the ``shop_optional_accessories`` staging table."""
+    """Return non-dismissed rows from the ``shop_optional_accessories`` staging table."""
     rows = await db.fetch_all(
         """
         SELECT id, sku, product_name, category_name, rrp, image_url,
                manufacturer, referenced_by_skus, discovered_at
         FROM shop_optional_accessories
+        WHERE dismissed = 0
         ORDER BY product_name ASC, sku ASC
+        """
+    )
+    return [_normalise_pending_optional_accessory(row) for row in rows]
+
+
+async def list_dismissed_optional_accessories() -> list[dict[str, Any]]:
+    """Return dismissed rows from the ``shop_optional_accessories`` staging table."""
+    rows = await db.fetch_all(
+        """
+        SELECT id, sku, product_name, category_name, rrp, image_url,
+               manufacturer, referenced_by_skus, discovered_at, dismissed_at
+        FROM shop_optional_accessories
+        WHERE dismissed = 1
+        ORDER BY dismissed_at DESC, product_name ASC, sku ASC
         """
     )
     return [_normalise_pending_optional_accessory(row) for row in rows]
@@ -1090,7 +1105,7 @@ async def get_pending_optional_accessory(
         SELECT id, sku, product_name, category_name, rrp, image_url,
                manufacturer, referenced_by_skus, discovered_at
         FROM shop_optional_accessories
-        WHERE id = %s
+        WHERE id = %s AND dismissed = 0
         """,
         (accessory_id,),
     )
@@ -1100,12 +1115,39 @@ async def get_pending_optional_accessory(
 
 
 async def dismiss_pending_optional_accessory(accessory_id: int) -> bool:
-    """Remove a pending optional accessory from the staging table.
+    """Soft-dismiss a pending optional accessory (sets dismissed=1).
 
-    Returns ``True`` if a row was deleted.
+    Returns ``True`` if a row was updated.
     """
     result = await db.execute(
-        "DELETE FROM shop_optional_accessories WHERE id = %s",
+        "UPDATE shop_optional_accessories SET dismissed = 1, dismissed_at = UTC_TIMESTAMP() WHERE id = %s AND dismissed = 0",
+        (accessory_id,),
+    )
+    return bool(result)
+
+
+async def bulk_dismiss_pending_optional_accessories(ids: list[int]) -> int:
+    """Soft-dismiss multiple pending optional accessories by id.
+
+    Returns the number of rows updated.
+    """
+    if not ids:
+        return 0
+    placeholders = ",".join(["%s"] * len(ids))
+    result = await db.execute(
+        f"UPDATE shop_optional_accessories SET dismissed = 1, dismissed_at = UTC_TIMESTAMP() WHERE id IN ({placeholders}) AND dismissed = 0",
+        tuple(ids),
+    )
+    return int(result) if result else 0
+
+
+async def restore_dismissed_optional_accessory(accessory_id: int) -> bool:
+    """Restore a dismissed optional accessory back to pending (sets dismissed=0).
+
+    Returns ``True`` if a row was updated.
+    """
+    result = await db.execute(
+        "UPDATE shop_optional_accessories SET dismissed = 0, dismissed_at = NULL WHERE id = %s AND dismissed = 1",
         (accessory_id,),
     )
     return bool(result)
@@ -1130,6 +1172,7 @@ def _normalise_pending_optional_accessory(row: dict[str, Any]) -> dict[str, Any]
         "manufacturer": row.get("manufacturer") or None,
         "referenced_by_skus": row.get("referenced_by_skus") or "",
         "discovered_at": row.get("discovered_at"),
+        "dismissed_at": row.get("dismissed_at"),
     }
 
 
