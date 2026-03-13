@@ -1039,7 +1039,7 @@ async def sync_pending_optional_accessories() -> int:
                 product_name      = VALUES(product_name),
                 category_name     = VALUES(category_name),
                 rrp               = VALUES(rrp),
-                image_url         = VALUES(image_url),
+                image_url         = CASE WHEN image_url LIKE '/%' THEN image_url ELSE VALUES(image_url) END,
                 manufacturer      = VALUES(manufacturer),
                 referenced_by_skus = VALUES(referenced_by_skus)
             """,
@@ -1107,6 +1107,14 @@ async def dismiss_pending_optional_accessory(accessory_id: int) -> bool:
         (accessory_id,),
     )
     return bool(result)
+
+
+async def update_pending_accessory_image_url(sku: str, image_url: str) -> None:
+    """Persist a locally-downloaded image path for a pending optional accessory."""
+    await db.execute(
+        "UPDATE shop_optional_accessories SET image_url = %s WHERE sku = %s",
+        (image_url, sku),
+    )
 
 
 def _normalise_pending_optional_accessory(row: dict[str, Any]) -> dict[str, Any]:

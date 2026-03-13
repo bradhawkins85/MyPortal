@@ -610,6 +610,24 @@ async def import_product_by_vendor_sku(vendor_sku: str) -> bool:
     return processed
 
 
+async def _download_pending_accessory_images() -> None:
+    """Download images for pending optional accessories that still have external URLs.
+
+    Accessories synced from the stock feed initially store raw vendor URLs.  This
+    helper fetches any row whose ``image_url`` is still an external URL and
+    downloads it to the local uploads directory so it can be served by the
+    application without depending on the vendor's CDN.
+    """
+    accessories = await shop_repo.list_pending_optional_accessories()
+    for acc in accessories:
+        url = acc.get("image_url") or ""
+        if not url or url.startswith("/"):
+            continue  # already local or no URL to download
+        local = await _download_product_image(url)
+        if local:
+            await shop_repo.update_pending_accessory_image_url(acc["sku"], local)
+
+
 async def update_products_from_feed() -> None:
     feed_items = await stock_feed_repo.list_all_items()
     processed = 0
@@ -673,6 +691,9 @@ async def update_products_from_feed() -> None:
 
     # Refresh the staging table of accessories not yet in the shop.
     pending_count = await shop_repo.sync_pending_optional_accessories()
+
+    # Download images for any pending accessories that still have external URLs.
+    await _download_pending_accessory_images()
 
     log_info(
         "Product feed synchronisation completed",
