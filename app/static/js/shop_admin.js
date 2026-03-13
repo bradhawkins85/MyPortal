@@ -358,16 +358,13 @@
       }
       const rows = productsTable.querySelectorAll('tbody tr');
       const stockValue = stockFilter ? stockFilter.value : '';
-      const showArchived = showArchivedCheckbox ? showArchivedCheckbox.checked : false;
       rows.forEach((row) => {
         const stock = Number(row.getAttribute('data-stock') || '0');
-        const isArchived = row.getAttribute('data-archived') === 'true';
         const matchesStock =
           !stockValue ||
           (stockValue === 'in' && stock > 0) ||
           (stockValue === 'out' && stock === 0);
-        const matchesArchived = showArchived || !isArchived;
-        row.style.display = matchesStock && matchesArchived ? '' : 'none';
+        row.style.display = matchesStock ? '' : 'none';
       });
     }
 
@@ -382,8 +379,8 @@
         } else {
           url.searchParams.delete('showArchived');
         }
-        window.history.replaceState({}, '', url.toString());
-        applyFilters();
+        url.searchParams.delete('page');
+        window.location.href = url.toString();
       });
     }
     applyFilters();
