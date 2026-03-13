@@ -34,6 +34,9 @@ PROVISION_SCOPE = (
 # Minimal scopes used for the tenant-discovery sign-in step
 DISCOVER_SCOPE = "openid profile"
 
+# Scopes for CSP/Lighthouse GDAP sign-in (needs Directory.Read.All for /contracts)
+CSP_SCOPE = "https://graph.microsoft.com/Directory.Read.All openid profile offline_access"
+
 
 class M365Error(RuntimeError):
     """Raised when Microsoft 365 operations fail."""
@@ -410,4 +413,42 @@ async def sync_company_licenses(company_id: int) -> None:
                 sku_id=str(sku_id),
             )
     log_info("Microsoft 365 license synchronisation completed", company_id=company_id)
+
+
+async def list_csp_customers(access_token: str) -> list[dict[str, Any]]:
+    """Return the list of customer tenants managed by the signed-in CSP/Lighthouse account.
+
+    Calls ``GET /v1.0/contracts`` on Microsoft Graph, which requires the signed-in
+    user to be a member of a CSP partner tenant with GDAP relationships or legacy
+    delegated admin privileges.
+
+    Each returned dict contains:
+    - ``tenant_id``     – the customer's Azure AD tenant ID
+    - ``name``          – the customer's display name
+    - ``default_domain``– the customer's default domain name
+    - ``contract_type`` – the contract type string from Graph (e.g. ``"Contract"``)
+    """
+    url = (
+        "https://graph.microsoft.com/v1.0/contracts"
+        "?$select=customerId,displayName,defaultDomainName,contractType"
+    )
+    customers: list[dict[str, Any]] = []
+    while url:
+        data = await _graph_get(access_token, url)
+        for item in data.get("value", []):
+            tenant_id = str(item.get("customerId") or "").strip()
+            if not tenant_id:
+                continue
+            customers.append(
+                {
+                    "tenant_id": tenant_id,
+                    "name": str(item.get("displayName") or "").strip(),
+                    "default_domain": str(item.get("defaultDomainName") or "").strip(),
+                    "contract_type": str(item.get("contractType") or "").strip(),
+                }
+            )
+        url = data.get("@odata.nextLink")
+    customers.sort(key=lambda c: c["name"].lower())
+    return customers
+
 
