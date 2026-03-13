@@ -190,6 +190,106 @@
     });
   }
 
+  const sidebarSection = root.querySelector('[data-sidebar-customisation]');
+  const sidebarItemsBody = root.querySelector('[data-sidebar-items]');
+  const sidebarSaveButton = root.querySelector('[data-sidebar-save]');
+  const sidebarResetButton = root.querySelector('[data-sidebar-reset]');
+  const sidebarSuccess = root.querySelector('[data-sidebar-success]');
+  const sidebarError = root.querySelector('[data-sidebar-error]');
+  let sidebarState = [];
+
+  function renderSidebarItems() {
+    if (!sidebarItemsBody) {
+      return;
+    }
+    sidebarItemsBody.innerHTML = '';
+    sidebarState.forEach((item, index) => {
+      const row = document.createElement('tr');
+
+      const visibleCell = document.createElement('td');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = !item.hidden;
+      checkbox.setAttribute('aria-label', `Toggle ${item.label}`);
+      checkbox.addEventListener('change', () => {
+        item.hidden = !checkbox.checked;
+      });
+      visibleCell.appendChild(checkbox);
+      row.appendChild(visibleCell);
+
+      const labelCell = document.createElement('td');
+      labelCell.textContent = item.label;
+      row.appendChild(labelCell);
+
+      const actionsCell = document.createElement('td');
+      actionsCell.className = 'table__actions';
+
+      const upButton = document.createElement('button');
+      upButton.type = 'button';
+      upButton.className = 'button button--ghost button--small';
+      upButton.textContent = 'Up';
+      upButton.disabled = index === 0;
+      upButton.addEventListener('click', () => {
+        if (index < 1) {
+          return;
+        }
+        const moved = sidebarState.splice(index, 1)[0];
+        sidebarState.splice(index - 1, 0, moved);
+        renderSidebarItems();
+      });
+      actionsCell.appendChild(upButton);
+
+      const downButton = document.createElement('button');
+      downButton.type = 'button';
+      downButton.className = 'button button--ghost button--small';
+      downButton.textContent = 'Down';
+      downButton.disabled = index === sidebarState.length - 1;
+      downButton.addEventListener('click', () => {
+        if (index >= sidebarState.length - 1) {
+          return;
+        }
+        const moved = sidebarState.splice(index, 1)[0];
+        sidebarState.splice(index + 1, 0, moved);
+        renderSidebarItems();
+      });
+      actionsCell.appendChild(downButton);
+
+      row.appendChild(actionsCell);
+      sidebarItemsBody.appendChild(row);
+    });
+  }
+
+  if (sidebarSection && window.MyPortalSidebarMenu) {
+    sidebarState = window.MyPortalSidebarMenu.listItems().map((item) => ({ ...item }));
+    renderSidebarItems();
+
+    if (sidebarSaveButton) {
+      sidebarSaveButton.addEventListener('click', async () => {
+        clearMessages([sidebarSuccess, sidebarError]);
+        const payload = {
+          order: sidebarState.map((item) => item.key),
+          hidden: sidebarState.filter((item) => item.hidden).map((item) => item.key),
+        };
+        try {
+          await window.MyPortalSidebarMenu.save(payload);
+          showMessage(sidebarSuccess, 'Left menu preferences saved.');
+        } catch (error) {
+          showMessage(sidebarError, error.message || 'Unable to save left menu preferences.');
+        }
+      });
+    }
+
+    if (sidebarResetButton) {
+      sidebarResetButton.addEventListener('click', () => {
+        clearMessages([sidebarSuccess, sidebarError]);
+        sidebarState = window.MyPortalSidebarMenu
+          .listItems()
+          .map((item) => ({ ...item, hidden: false }));
+        renderSidebarItems();
+      });
+    }
+  }
+
   const totpTable = document.getElementById('totp-table');
   const totpBody = root.querySelector('[data-totp-body]');
   const totpEmptyRow = root.querySelector('[data-totp-empty]');
