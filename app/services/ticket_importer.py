@@ -9,6 +9,7 @@ import json
 from typing import Any
 
 from app.core.logging import log_error, log_info
+from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
@@ -373,6 +374,38 @@ def _extract_ticket_assets(ticket: dict[str, Any]) -> list[dict[str, Any]]:
                     )
             return result
     return []
+
+
+async def _link_syncro_ticket_assets(
+    ticket_db_id: int,
+    ticket: dict[str, Any],
+    company_id: int | None,
+) -> None:
+    """Match Syncro ticket assets to MyPortal assets by name and link them to the ticket."""
+    syncro_assets = _extract_ticket_assets(ticket)
+    if not syncro_assets or company_id is None:
+        return
+
+    company_assets = await assets_repo.list_company_assets(company_id)
+    if not company_assets:
+        return
+
+    asset_by_name: dict[str, int] = {
+        str(a.get("name") or "").strip().lower(): int(a["id"])
+        for a in company_assets
+        if a.get("id") and a.get("name")
+    }
+
+    matched_ids: list[int] = []
+    for syncro_asset in syncro_assets:
+        name = (syncro_asset.get("name") or "").strip().lower()
+        if name and name in asset_by_name:
+            asset_id = asset_by_name[name]
+            if asset_id not in matched_ids:
+                matched_ids.append(asset_id)
+
+    if matched_ids:
+        await tickets_repo.replace_ticket_assets(ticket_db_id, matched_ids)
 
 
 def _build_ticket_metadata_note(ticket: dict[str, Any]) -> str | None:
@@ -1043,6 +1076,7 @@ async def _upsert_ticket(
     timer_time = _build_timer_time_map(ticket)
     if ticket_db_id is not None:
         await _upsert_ticket_metadata_note(ticket_db_id, ticket, created_at=created_at)
+        await _link_syncro_ticket_assets(ticket_db_id, ticket, company_id)
         await _sync_ticket_replies(
             ticket_db_id,
             comments,
@@ -1401,4 +1435,4 @@ async def import_from_request(
             )
     return summary
 
-# TEST CHANGE
+# TEST CHANG
