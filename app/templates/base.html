@@ -836,6 +836,28 @@
           return await response.json();
         };
 
+        const SIDEBAR_PREFS_CACHE_KEY = 'myportal_sidebar_prefs';
+
+        const loadCachedSidebarPreferences = () => {
+          try {
+            const raw = localStorage.getItem(SIDEBAR_PREFS_CACHE_KEY);
+            if (raw) {
+              return JSON.parse(raw);
+            }
+          } catch (_) {
+            /* ignore parse errors */
+          }
+          return null;
+        };
+
+        const saveCachedSidebarPreferences = (prefs) => {
+          try {
+            localStorage.setItem(SIDEBAR_PREFS_CACHE_KEY, JSON.stringify(prefs));
+          } catch (_) {
+            /* ignore storage errors */
+          }
+        };
+
         window.MyPortalSidebarMenu = {
           listItems: () => listSidebarMenuItems().map(({ key, label, element }) => ({
             key,
@@ -845,14 +867,22 @@
           apply: applySidebarPreferences,
           save: async (preferences) => {
             const saved = await requestSidebarPreferences('PUT', preferences);
+            saveCachedSidebarPreferences(saved);
             applySidebarPreferences(saved);
             return saved;
           },
         };
 
         if (hasAuthenticatedUser && sidebarMenuRoot) {
+          const cached = loadCachedSidebarPreferences();
+          if (cached) {
+            applySidebarPreferences(cached);
+          }
           requestSidebarPreferences()
-            .then((prefs) => applySidebarPreferences(prefs))
+            .then((prefs) => {
+              saveCachedSidebarPreferences(prefs);
+              applySidebarPreferences(prefs);
+            })
             .catch(() => {
               /* ignore preferences load failures */
             });
