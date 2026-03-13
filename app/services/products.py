@@ -437,6 +437,8 @@ async def _get_or_create_category_hierarchy(category_path: str) -> int | None:
 async def _process_feed_item(
     item: Mapping[str, Any],
     existing_product: Mapping[str, Any] | None,
+    *,
+    update_recommendations: bool = True,
 ) -> bool:
     code = str(item.get("sku") or "").strip()
     if not code:
@@ -542,21 +544,22 @@ async def _process_feed_item(
         manufacturer=manufacturer,
     )
 
-    opt_accessori_raw = item.get("opt_accessori")
-    if opt_accessori_raw is not None:
-        accessory_skus = [
-            s.strip() for s in str(opt_accessori_raw).split(",") if s.strip()
-        ]
-        if accessory_skus:
-            cross_sell_ids = await shop_repo.get_product_ids_by_skus(accessory_skus)
-            product_after_upsert = await shop_repo.get_product_by_sku(
-                code, include_archived=True
-            )
-            if product_after_upsert and product_after_upsert.get("id"):
-                await shop_repo.replace_product_recommendations(
-                    int(product_after_upsert["id"]),
-                    cross_sell_ids=cross_sell_ids,
+    if update_recommendations:
+        opt_accessori_raw = item.get("opt_accessori")
+        if opt_accessori_raw is not None:
+            accessory_skus = [
+                s.strip() for s in str(opt_accessori_raw).split(",") if s.strip()
+            ]
+            if accessory_skus:
+                cross_sell_ids = await shop_repo.get_product_ids_by_skus(accessory_skus)
+                product_after_upsert = await shop_repo.get_product_by_sku(
+                    code, include_archived=True
                 )
+                if product_after_upsert and product_after_upsert.get("id"):
+                    await shop_repo.replace_product_recommendations(
+                        int(product_after_upsert["id"]),
+                        cross_sell_ids=cross_sell_ids,
+                    )
 
     return True
 
@@ -607,25 +610,60 @@ async def import_product_by_vendor_sku(vendor_sku: str) -> bool:
 
 
 async def update_products_from_feed() -> None:
-    products = await shop_repo.list_all_products(include_archived=True)
+    feed_items = await stock_feed_repo.list_all_items()
     processed = 0
     updated = 0
 
-    for product in products:
-        processed += 1
-        sku = str(product.get("vendor_sku") or product.get("sku") or "").strip()
-        if not sku:
+    # First pass: upsert all product data from the feed without setting cross-sell
+    # associations. This ensures every product referenced in opt_accessori exists
+    # in shop_products before we try to resolve their IDs in the second pass.
+    for item in feed_items:
+        code = str(item.get("sku") or "").strip()
+        if not code:
             continue
-        item = await stock_feed_repo.get_item_by_sku(sku)
-        if not item:
-            continue
+        existing_product = await shop_repo.get_product_by_sku(
+            code, include_archived=True
+        )
         try:
-            if await _process_feed_item(item, product):
-                updated += 1
+            if await _process_feed_item(
+                item, existing_product, update_recommendations=False
+            ):
+                processed += 1
         except Exception as exc:  # pragma: no cover - defensive logging
             log_error(
                 "Failed to process stock feed item",
-                sku=sku,
+                sku=code,
+                error=str(exc),
+            )
+
+    # Second pass: now that all products have been upserted, set cross-sell
+    # associations. All opt_accessori SKUs can now be resolved to product IDs.
+    for item in feed_items:
+        code = str(item.get("sku") or "").strip()
+        if not code:
+            continue
+        opt_accessori_raw = item.get("opt_accessori")
+        if opt_accessori_raw is None:
+            continue
+        accessory_skus = [
+            s.strip() for s in str(opt_accessori_raw).split(",") if s.strip()
+        ]
+        if not accessory_skus:
+            continue
+        product = await shop_repo.get_product_by_sku(code, include_archived=True)
+        if not product or not product.get("id"):
+            continue
+        try:
+            cross_sell_ids = await shop_repo.get_product_ids_by_skus(accessory_skus)
+            await shop_repo.replace_product_recommendations(
+                int(product["id"]),
+                cross_sell_ids=cross_sell_ids,
+            )
+            updated += 1
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to update cross-sell recommendations",
+                sku=code,
                 error=str(exc),
             )
 
