@@ -136,6 +136,7 @@ from app.repositories import webhook_events as webhook_events_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.repositories import issues as issues_repo
+from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.schemas.api_keys import ALLOWED_API_KEY_HTTP_METHODS
 from app.schemas.tickets import SyncroTicketImportRequest
 from app.security.cache_control import CacheControlMiddleware
@@ -3818,6 +3819,7 @@ async def assets_page(request: Request):
         return redirect
 
     rows = await asset_repo.list_company_assets(company_id)
+    field_definitions = await asset_custom_fields_repo.list_field_definitions()
 
     def _clean_text(value: Any) -> str | None:
         if value is None:
@@ -3941,6 +3943,31 @@ async def assets_page(request: Request):
 
         prepared.append(record)
 
+    # Batch-load all custom field values for the prepared assets
+    asset_ids = [r["id"] for r in prepared if r.get("id")]
+    cf_values_by_asset = await asset_custom_fields_repo.get_all_asset_field_values(asset_ids)
+
+    for record in prepared:
+        asset_id = record.get("id")
+        asset_cf = cf_values_by_asset.get(asset_id, {})
+        for field_def in field_definitions:
+            key = f"cf_{field_def['id']}"
+            record[key] = asset_cf.get(field_def["id"])
+
+    # Build custom field columns to append to the standard column list
+    custom_columns = [
+        {
+            "key": f"cf_{field_def['id']}",
+            "label": field_def["name"],
+            "sort": "date" if field_def["field_type"] == "date" else (
+                "number" if field_def["field_type"] == "checkbox" else "string"
+            ),
+            "field_type": field_def["field_type"],
+        }
+        for field_def in field_definitions
+    ]
+    all_columns = list(_ASSET_TABLE_COLUMNS) + custom_columns
+
     stats = {
         "total": len(prepared),
         "recent_sync": recent_sync,
@@ -3951,7 +3978,7 @@ async def assets_page(request: Request):
     extra = {
         "title": "Assets",
         "assets": prepared,
-        "columns": _ASSET_TABLE_COLUMNS,
+        "columns": all_columns,
         "company": company,
         "stats": stats,
         "has_assets": bool(prepared),

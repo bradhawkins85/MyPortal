@@ -149,6 +149,51 @@
                       <span class="text-muted">No warranty</span>
                     {% endif %}
                   </td>
+                {% elif column.field_type == 'checkbox' %}
+                  <td
+                    data-label="{{ column.label }}"
+                    data-column="{{ key }}"
+                    data-value="{{ '1' if value else '0' }}"
+                    {% if mobile_priority %}data-mobile-priority="{{ mobile_priority }}"{% endif %}
+                  >
+                    {% if value %}
+                      <span aria-label="Yes">✓</span>
+                    {% elif value is none %}
+                      <span class="text-muted">—</span>
+                    {% else %}
+                      <span aria-label="No" class="text-muted">✗</span>
+                    {% endif %}
+                  </td>
+                {% elif column.field_type == 'url' %}
+                  <td
+                    data-label="{{ column.label }}"
+                    data-column="{{ key }}"
+                    data-value="{{ value or '' }}"
+                    {% if mobile_priority %}data-mobile-priority="{{ mobile_priority }}"{% endif %}
+                  >
+                    {% if value and (value.startswith('http://') or value.startswith('https://')) %}
+                      <a href="{{ value }}" target="_blank" rel="noopener noreferrer">{{ value }}</a>
+                    {% elif value %}
+                      {{ value }}
+                    {% else %}
+                      <span class="text-muted">—</span>
+                    {% endif %}
+                  </td>
+                {% elif column.field_type == 'image' %}
+                  <td
+                    data-label="{{ column.label }}"
+                    data-column="{{ key }}"
+                    data-value="{{ value or '' }}"
+                    {% if mobile_priority %}data-mobile-priority="{{ mobile_priority }}"{% endif %}
+                  >
+                    {% if value and (value.startswith('http://') or value.startswith('https://')) %}
+                      <img src="{{ value }}" alt="{{ column.label }}" style="max-height: 2rem; max-width: 4rem; object-fit: contain;" loading="lazy" />
+                    {% elif value %}
+                      {{ value }}
+                    {% else %}
+                      <span class="text-muted">—</span>
+                    {% endif %}
+                  </td>
                 {% else %}
                   <td
                     data-label="{{ column.label }}"
