@@ -194,6 +194,7 @@
   const sidebarItemsBody = root.querySelector('[data-sidebar-items]');
   const sidebarSaveButton = root.querySelector('[data-sidebar-save]');
   const sidebarResetButton = root.querySelector('[data-sidebar-reset]');
+  const sidebarAddDividerButton = root.querySelector('[data-sidebar-add-divider]');
   const sidebarSuccess = root.querySelector('[data-sidebar-success]');
   const sidebarError = root.querySelector('[data-sidebar-error]');
   let sidebarState = [];
@@ -207,18 +208,32 @@
       const row = document.createElement('tr');
 
       const visibleCell = document.createElement('td');
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.checked = !item.hidden;
-      checkbox.setAttribute('aria-label', `Toggle ${item.label}`);
-      checkbox.addEventListener('change', () => {
-        item.hidden = !checkbox.checked;
-      });
-      visibleCell.appendChild(checkbox);
+
+      if (item.divider) {
+        visibleCell.setAttribute('aria-hidden', 'true');
+      } else {
+        const isProtected = item.key === '/admin/profile';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = !item.hidden;
+        checkbox.disabled = isProtected;
+        checkbox.setAttribute('aria-label', 'Toggle ' + item.label);
+        if (isProtected) {
+          checkbox.setAttribute('title', 'My Profile cannot be hidden');
+        }
+        checkbox.addEventListener('change', () => {
+          item.hidden = !checkbox.checked;
+        });
+        visibleCell.appendChild(checkbox);
+      }
       row.appendChild(visibleCell);
 
       const labelCell = document.createElement('td');
-      labelCell.textContent = item.label;
+      if (item.divider) {
+        labelCell.innerHTML = '<span style="color: var(--color-muted, #9ca3af); font-style: italic;">— Divider —</span>';
+      } else {
+        labelCell.textContent = item.label;
+      }
       row.appendChild(labelCell);
 
       const actionsCell = document.createElement('td');
@@ -254,6 +269,18 @@
       });
       actionsCell.appendChild(downButton);
 
+      if (item.divider) {
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'button button--ghost button--small';
+        removeButton.textContent = 'Remove';
+        removeButton.addEventListener('click', () => {
+          sidebarState.splice(index, 1);
+          renderSidebarItems();
+        });
+        actionsCell.appendChild(removeButton);
+      }
+
       row.appendChild(actionsCell);
       sidebarItemsBody.appendChild(row);
     });
@@ -263,12 +290,23 @@
     sidebarState = window.MyPortalSidebarMenu.listItems().map((item) => ({ ...item }));
     renderSidebarItems();
 
+    if (sidebarAddDividerButton) {
+      sidebarAddDividerButton.addEventListener('click', () => {
+        clearMessages([sidebarSuccess, sidebarError]);
+        const key = 'divider:' + Math.random().toString(36).slice(2, 9);
+        sidebarState.push({ key, label: null, divider: true, hidden: false });
+        renderSidebarItems();
+      });
+    }
+
     if (sidebarSaveButton) {
       sidebarSaveButton.addEventListener('click', async () => {
         clearMessages([sidebarSuccess, sidebarError]);
         const payload = {
           order: sidebarState.map((item) => item.key),
-          hidden: sidebarState.filter((item) => item.hidden).map((item) => item.key),
+          hidden: sidebarState
+            .filter((item) => !item.divider && item.hidden && item.key !== '/admin/profile')
+            .map((item) => item.key),
         };
         try {
           await window.MyPortalSidebarMenu.save(payload);
@@ -284,6 +322,7 @@
         clearMessages([sidebarSuccess, sidebarError]);
         sidebarState = window.MyPortalSidebarMenu
           .listItems()
+          .filter((item) => !item.divider)
           .map((item) => ({ ...item, hidden: false }));
         renderSidebarItems();
       });

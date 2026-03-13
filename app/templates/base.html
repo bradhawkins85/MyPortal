@@ -792,24 +792,41 @@
           const order = Array.isArray(preferences?.order) ? preferences.order : [];
           const hidden = new Set(Array.isArray(preferences?.hidden) ? preferences.hidden : []);
           const byKey = new Map(rows.map((row) => [row.key, row]));
-          const ordered = [];
+
+          // Remove previously inserted user dividers before re-applying
+          sidebarMenuRoot.querySelectorAll(':scope > .menu__divider--user').forEach((el) => el.remove());
+
+          const orderedEntries = [];
 
           order.forEach((key) => {
-            const row = byKey.get(key);
-            if (row) {
-              ordered.push(row);
-              byKey.delete(key);
+            if (key.startsWith('divider:')) {
+              orderedEntries.push({ isDivider: true, key });
+            } else {
+              const row = byKey.get(key);
+              if (row) {
+                orderedEntries.push({ isDivider: false, row });
+                byKey.delete(key);
+              }
             }
           });
 
           byKey.forEach((row) => {
-            ordered.push(row);
+            orderedEntries.push({ isDivider: false, row });
           });
 
-          ordered.forEach((row) => {
-            sidebarMenuRoot.appendChild(row.element);
-            const isCurrentPage = row.element.querySelector(':scope > a[aria-current="page"]');
-            row.element.hidden = hidden.has(row.key) && !isCurrentPage;
+          orderedEntries.forEach(({ isDivider, key, row }) => {
+            if (isDivider) {
+              const dividerEl = document.createElement('li');
+              dividerEl.className = 'menu__divider menu__divider--user';
+              dividerEl.setAttribute('role', 'presentation');
+              dividerEl.dataset.menuKey = key;
+              sidebarMenuRoot.appendChild(dividerEl);
+            } else {
+              sidebarMenuRoot.appendChild(row.element);
+              const isCurrentPage = row.element.querySelector(':scope > a[aria-current="page"]');
+              const isProtected = row.key === '/admin/profile';
+              row.element.hidden = hidden.has(row.key) && !isCurrentPage && !isProtected;
+            }
           });
         };
 
@@ -837,11 +854,28 @@
         };
 
         window.MyPortalSidebarMenu = {
-          listItems: () => listSidebarMenuItems().map(({ key, label, element }) => ({
-            key,
-            label,
-            hidden: Boolean(element.hidden),
-          })),
+          listItems: () => {
+            if (!sidebarMenuRoot) {
+              return [];
+            }
+            const itemsByElement = new Map(
+              listSidebarMenuItems().map((item) => [item.element, item])
+            );
+            const result = [];
+            sidebarMenuRoot.querySelectorAll(':scope > .menu__item, :scope > .menu__divider--user').forEach((el) => {
+              if (el.classList.contains('menu__divider--user')) {
+                const key = el.dataset.menuKey || 'divider:' + Math.random().toString(36).slice(2, 9);
+                el.dataset.menuKey = key;
+                result.push({ key, label: null, divider: true, hidden: false });
+              } else {
+                const item = itemsByElement.get(el);
+                if (item) {
+                  result.push({ key: item.key, label: item.label, divider: false, hidden: Boolean(el.hidden) });
+                }
+              }
+            });
+            return result;
+          },
           apply: applySidebarPreferences,
           save: async (preferences) => {
             const saved = await requestSidebarPreferences('PUT', preferences);
