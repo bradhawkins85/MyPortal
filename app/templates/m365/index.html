@@ -54,23 +54,30 @@
     </header>
     <div class="panel__body">
       <p>Automatically create a dedicated enterprise app registration in the tenant with the required permissions. The portal admin credentials are used to perform the provisioning — no manual Azure portal steps required.</p>
-      <form method="get" action="/m365/provision" class="form-grid" style="margin-top: 1rem;">
-        <label class="form-field">
-          <span class="form-label">Tenant ID</span>
-          <input
-            type="text"
-            name="tenant_id"
-            class="input"
-            value="{{ credential.tenant_id if credential else '' }}"
-            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-            required
-          />
-          <span class="form-help">The Azure AD tenant ID of the Microsoft 365 organisation to provision.</span>
-        </label>
-        <div class="form-actions">
-          <button type="submit" class="button">Auto-provision</button>
-        </div>
-      </form>
+      <div style="margin-top: 1rem;">
+        <a href="/m365/discover" class="button">Sign in as Global Admin</a>
+        <p class="form-help" style="margin-top: 0.5rem;">The Global Admin signs in to identify the tenant automatically, then grants consent for the required permissions.</p>
+      </div>
+      <details style="margin-top: 1.5rem;">
+        <summary class="form-help" style="cursor: pointer;">Already know the Tenant ID? Enter it manually</summary>
+        <form method="get" action="/m365/provision" class="form-grid" style="margin-top: 0.75rem;">
+          <label class="form-field">
+            <span class="form-label">Tenant ID</span>
+            <input
+              type="text"
+              name="tenant_id"
+              class="input"
+              value="{{ credential.tenant_id if credential else '' }}"
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              required
+            />
+            <span class="form-help">The Azure AD tenant ID of the Microsoft 365 organisation to provision.</span>
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="button button--ghost">Auto-provision with known ID</button>
+          </div>
+        </form>
+      </details>
     </div>
   </section>
   {% endif %}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -29,9 +31,43 @@ PROVISION_SCOPE = (
     "Application.ReadWrite.All AppRoleAssignment.ReadWrite.All offline_access"
 )
 
+# Minimal scopes used for the tenant-discovery sign-in step
+DISCOVER_SCOPE = "openid profile"
+
 
 class M365Error(RuntimeError):
     """Raised when Microsoft 365 operations fail."""
+
+
+def extract_tenant_id_from_token(token: str) -> str:
+    """Extract the Azure AD tenant ID (``tid`` claim) from a JWT token.
+
+    The ``tid`` claim is present in both ``id_token`` and ``access_token``
+    responses from Azure AD and uniquely identifies the tenant.
+
+    The JWT signature is **not** verified here — we trust that the token was
+    received directly from Microsoft's token endpoint over HTTPS.
+
+    Raises :class:`M365Error` if the token is malformed or does not contain a
+    ``tid`` claim.
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            raise M365Error("Malformed JWT: expected at least two segments")
+        # JWT uses base64url encoding without padding; restore padding before decoding
+        payload_b64 = parts[1]
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+    except M365Error:
+        raise
+    except Exception as exc:
+        raise M365Error(f"Failed to decode JWT payload: {exc}") from exc
+
+    tid = str(payload.get("tid") or "").strip()
+    if not tid:
+        raise M365Error("Tenant ID (tid) not found in token claims")
+    return tid
 
 
 def _decrypt(field: str | None) -> str | None:
