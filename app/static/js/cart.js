@@ -1,4 +1,46 @@
 (function () {
+  function debounce(fn, delay) {
+    let timerId;
+    return function (...args) {
+      clearTimeout(timerId);
+      timerId = setTimeout(() => fn.apply(this, args), delay);
+    };
+  }
+
+  function getCsrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta) return meta.getAttribute('content');
+    const input = document.querySelector('form[action="/cart/update"] input[name="_csrf"]');
+    return input ? input.value : null;
+  }
+
+  function autoSaveQuantity(input) {
+    const name = input.getAttribute('name');
+    if (!name || !name.startsWith('quantity_')) return;
+    if (!input.validity.valid) return;
+
+    const csrf = getCsrfToken();
+    const formData = new FormData();
+    if (csrf) formData.append('_csrf', csrf);
+    formData.append(name, input.value);
+
+    fetch('/cart/update', {
+      method: 'POST',
+      body: formData,
+      redirect: 'manual',
+    })
+      .then((response) => {
+        if (response.type === 'opaqueredirect' || response.ok) {
+          window.location.href = window.location.pathname + '?_=' + Date.now();
+        } else {
+          window.location.reload();
+        }
+      })
+      .catch(() => {
+        window.location.reload();
+      });
+  }
+
   function parseJson(elementId) {
     const element = document.getElementById(elementId);
     if (!element) {
@@ -71,6 +113,9 @@
         }
         input.reportValidity();
       });
+
+      const debouncedSave = debounce(() => autoSaveQuantity(input), 600);
+      input.addEventListener('change', debouncedSave);
     });
   }
 
