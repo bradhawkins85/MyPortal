@@ -364,6 +364,13 @@ def test_receive_alert_csrf_exempt_with_query_token(monkeypatch):
     assert response.json()["status"] == "accepted"
 
 
+def test_receive_alert_payload_secret_redacted_in_logs_and_raw_payload(monkeypatch):
+    logged_calls = []
+
+    async def fake_ingest_alert(**kwargs):
+        assert kwargs["provided_secret"] == "payload-secret"
+        assert kwargs["raw_payload"]["shared_secret"] == "[REDACTED]"
+        return {"id": 99, "monitor_name": "Body Auth Monitor"}
 def test_receive_alert_redacts_token_query_param_in_logged_source_url(monkeypatch):
     logged_calls = []
 
@@ -379,6 +386,13 @@ def test_receive_alert_redacts_token_query_param_in_logged_source_url(monkeypatc
 
     with TestClient(app) as client:
         response = client.post(
+            "/api/integration-modules/uptimekuma/alerts",
+            json={"status": "up", "shared_secret": "payload-secret"},
+        )
+
+    assert response.status_code == 202
+    assert len(logged_calls) == 1
+    assert logged_calls[0]["payload"]["shared_secret"] == "[REDACTED]"
             "/api/integration-modules/uptimekuma/alerts?token=super-secret",
             json={"status": "down"},
         )
