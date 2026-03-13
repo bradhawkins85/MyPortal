@@ -560,6 +560,7 @@ async def _process_feed_item(
                     await shop_repo.replace_product_recommendations(
                         int(product_after_upsert["id"]),
                         cross_sell_ids=cross_sell_ids,
+                        auto_linked=True,
                     )
 
     return True
@@ -662,6 +663,7 @@ async def update_products_from_feed() -> None:
             await shop_repo.replace_product_recommendations(
                 int(product["id"]),
                 cross_sell_ids=cross_sell_ids,
+                auto_linked=True,
             )
             updated += 1
         except Exception as exc:  # pragma: no cover - defensive logging

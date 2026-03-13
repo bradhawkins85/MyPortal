@@ -238,7 +238,7 @@ async def test_process_feed_item_links_cross_sells_from_opt_accessori(monkeypatc
     products_service.shop_repo.get_product_ids_by_skus.assert_awaited_once_with(
         ["ACC1", "ACC2"]
     )
-    mock_replace.assert_awaited_once_with(5, cross_sell_ids=[10, 11])
+    mock_replace.assert_awaited_once_with(5, cross_sell_ids=[10, 11], auto_linked=True)
 
 
 @pytest.mark.anyio("asyncio")
@@ -454,7 +454,7 @@ async def test_update_products_from_feed_sets_cross_sells(monkeypatch):
     await products_service.update_products_from_feed()
 
     # Only MAIN1 has opt_accessori, so only its cross-sells should be set
-    mock_replace.assert_awaited_once_with(1, cross_sell_ids=[2, 3])
+    mock_replace.assert_awaited_once_with(1, cross_sell_ids=[2, 3], auto_linked=True)
     products_service.shop_repo.get_product_ids_by_skus.assert_awaited_once_with(
         ["ACC1", "ACC2"]
     )
@@ -537,7 +537,7 @@ async def test_update_products_from_feed_cross_sells_resolved_for_existing_produ
 
     await products_service.update_products_from_feed()
 
-    mock_replace.assert_awaited_once_with(1, cross_sell_ids=[99])
+    mock_replace.assert_awaited_once_with(1, cross_sell_ids=[99], auto_linked=True)
 
 
 @pytest.mark.anyio("asyncio")
@@ -578,7 +578,7 @@ async def test_update_products_from_feed_uses_vendor_sku_for_cross_sells(monkeyp
 
     await products_service.update_products_from_feed()
 
-    mock_replace.assert_awaited_once_with(10, cross_sell_ids=[55])
+    mock_replace.assert_awaited_once_with(10, cross_sell_ids=[55], auto_linked=True)
     products_service.shop_repo.get_product_ids_by_skus.assert_awaited_once_with(
         ["NHU-POE-24-12WG"]
     )
