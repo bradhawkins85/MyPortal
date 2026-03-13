@@ -13,52 +13,6 @@
     <p class="management__intro">
       Update your contact details and personalise your portal experience.
     </p>
-
-    <form class="form management__form" id="mobile-form">
-      <fieldset class="form__fieldset">
-        <legend class="form__legend">Notification contact</legend>
-        <p class="form-help">Provide a mobile number for SMS alerts. Numbers are stored in E.164 format for secure delivery.</p>
-        <div class="alert alert--info" data-mobile-success hidden role="status"></div>
-        <div class="alert alert--error" data-mobile-error hidden role="alert"></div>
-        <div class="form-field">
-          <label class="form-label" for="mobile-number">Mobile number</label>
-          <input
-            class="form-input"
-            type="tel"
-            id="mobile-number"
-            name="mobileNumber"
-            value="{{ current_user.mobile_phone or '' }}"
-            placeholder="+441234567890"
-          />
-        </div>
-        <div class="form-actions">
-          <button type="submit" class="button">Save number</button>
-        </div>
-      </fieldset>
-    </form>
-
-    <form class="form management__form" id="booking-link-form">
-      <fieldset class="form__fieldset">
-        <legend class="form__legend">Booking link</legend>
-        <p class="form-help">Provide your booking link URL. This will be displayed to customers on tickets assigned to you.</p>
-        <div class="alert alert--info" data-booking-success hidden role="status"></div>
-        <div class="alert alert--error" data-booking-error hidden role="alert"></div>
-        <div class="form-field">
-          <label class="form-label" for="booking-link-url">Booking link URL</label>
-          <input
-            class="form-input"
-            type="url"
-            id="booking-link-url"
-            name="bookingLinkUrl"
-            value="{{ current_user.booking_link_url or '' }}"
-            placeholder="https://calendly.com/your-link"
-          />
-        </div>
-        <div class="form-actions">
-          <button type="submit" class="button">Save booking link</button>
-        </div>
-      </fieldset>
-    </form>
   </aside>
 
   <section class="management__content">
@@ -69,8 +23,186 @@
       </div>
     </header>
 
-    <div class="management__body">
-      <section class="card card--panel">
+    <div class="management__body management__body--columns profile-columns">
+      <div class="management__column profile-columns__column">
+        <section class="card card--panel">
+          <header class="card__header card__header--stacked">
+            <div>
+              <h2 class="card__title">Notification Contact</h2>
+              <p class="card__subtitle">Provide a mobile number for SMS alerts. Numbers are stored in E.164 format for secure delivery.</p>
+            </div>
+          </header>
+          <div class="card__body">
+            <form class="form management__form" id="mobile-form">
+              <fieldset class="form__fieldset">
+                <legend class="form__legend">Notification contact</legend>
+                <div class="alert alert--info" data-mobile-success hidden role="status"></div>
+                <div class="alert alert--error" data-mobile-error hidden role="alert"></div>
+                <div class="form-field">
+                  <label class="form-label" for="mobile-number">Mobile number</label>
+                  <input
+                    class="form-input"
+                    type="tel"
+                    id="mobile-number"
+                    name="mobileNumber"
+                    value="{{ current_user.mobile_phone or '' }}"
+                    placeholder="+441234567890"
+                  />
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="button">Save number</button>
+                </div>
+              </fieldset>
+            </form>
+          </div>
+        </section>
+
+        <section class="card card--panel">
+          <header class="card__header card__header--stacked">
+            <div>
+              <h2 class="card__title">Booking Link</h2>
+              <p class="card__subtitle">Provide your booking link URL. This will be displayed to customers on tickets assigned to you.</p>
+            </div>
+          </header>
+          <div class="card__body">
+            <form class="form management__form" id="booking-link-form">
+              <fieldset class="form__fieldset">
+                <legend class="form__legend">Booking link</legend>
+                <div class="alert alert--info" data-booking-success hidden role="status"></div>
+                <div class="alert alert--error" data-booking-error hidden role="alert"></div>
+                <div class="form-field">
+                  <label class="form-label" for="booking-link-url">Booking link URL</label>
+                  <input
+                    class="form-input"
+                    type="url"
+                    id="booking-link-url"
+                    name="bookingLinkUrl"
+                    value="{{ current_user.booking_link_url or '' }}"
+                    placeholder="https://calendly.com/your-link"
+                  />
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="button">Save booking link</button>
+                </div>
+              </fieldset>
+            </form>
+          </div>
+        </section>
+
+        <section class="card card--panel">
+          <header class="card__header card__header--stacked">
+            <div>
+              <h2 class="card__title">Email signature</h2>
+              <p class="card__subtitle">
+                Create your email signature for use in automated email notifications. This signature is accessible through automation events.
+              </p>
+            </div>
+          </header>
+          <div class="card__body">
+            <form class="form" id="email-signature-form">
+              <div class="alert alert--info" data-signature-success hidden role="status"></div>
+              <div class="alert alert--error" data-signature-error hidden role="alert"></div>
+              <div class="form-field">
+                <label class="form-label" for="email-signature-editor" id="email-signature-label">Email signature</label>
+                <div
+                  class="rich-text-editor"
+                  data-rich-text-editor
+                  aria-labelledby="email-signature-label"
+                >
+                  <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Formatting options">
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="bold"
+                      aria-label="Bold"
+                    >
+                      <span aria-hidden="true">B</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="italic"
+                      aria-label="Italic"
+                    >
+                      <span aria-hidden="true">I</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="underline"
+                      aria-label="Underline"
+                    >
+                      <span aria-hidden="true">U</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="insertUnorderedList"
+                      aria-label="Bulleted list"
+                    >
+                      <span aria-hidden="true">•</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="insertOrderedList"
+                      aria-label="Numbered list"
+                    >
+                      <span aria-hidden="true">1.</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="link"
+                      aria-label="Insert link"
+                    >
+                      <span aria-hidden="true">🔗</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="rich-text-editor__button"
+                      data-rich-text-button
+                      data-command="removeFormat"
+                      aria-label="Clear formatting"
+                    >
+                      <span aria-hidden="true">✕</span>
+                    </button>
+                  </div>
+                  <div class="rich-text-editor__body">
+                    <div
+                      class="rich-text-editor__surface"
+                      data-rich-text-content
+                      contenteditable="true"
+                      role="textbox"
+                      aria-labelledby="email-signature-label"
+                      aria-multiline="true"
+                      data-placeholder="Enter your email signature..."
+                    ></div>
+                  </div>
+                  <textarea
+                    id="email-signature-value"
+                    name="emailSignature"
+                    data-rich-text-value
+                    hidden
+                  >{{ current_user.email_signature|e or '' }}</textarea>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button">Save signature</button>
+              </div>
+            </form>
+          </div>
+        </section>
+      </div>
+
+      <div class="management__column profile-columns__column">
+        <section class="card card--panel">
         <header class="card__header card__header--stacked">
           <div>
             <h2 class="card__title">Account security</h2>
@@ -167,9 +299,11 @@
             </div>
           </div>
         </div>
-      </section>
+        </section>
+      </div>
 
-      <section class="card card--panel">
+      <div class="management__column profile-columns__column">
+        <section class="card card--panel">
         <header class="card__header card__header--stacked">
           <div>
             <h2 class="card__title">Left menu customisation</h2>
@@ -198,118 +332,8 @@
             <button type="button" class="button button--ghost" data-sidebar-reset>Reset default</button>
           </div>
         </div>
-      </section>
-
-      <section class="card card--panel">
-        <header class="card__header card__header--stacked">
-          <div>
-            <h2 class="card__title">Email signature</h2>
-            <p class="card__subtitle">
-              Create your email signature for use in automated email notifications. This signature is accessible through automation events.
-            </p>
-          </div>
-        </header>
-        <div class="card__body">
-          <form class="form" id="email-signature-form">
-            <div class="alert alert--info" data-signature-success hidden role="status"></div>
-            <div class="alert alert--error" data-signature-error hidden role="alert"></div>
-            <div class="form-field">
-              <label class="form-label" for="email-signature-editor" id="email-signature-label">Email signature</label>
-              <div
-                class="rich-text-editor"
-                data-rich-text-editor
-                aria-labelledby="email-signature-label"
-              >
-                <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Formatting options">
-                  <button
-                    type="button"
-                    class="rich-text-editor__button"
-                    data-rich-text-button
-                    data-command="bold"
-                    aria-label="Bold"
-                  >
-                    <span aria-hidden="true">B</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="rich-text-editor__button"
-                    data-rich-text-button
-                    data-command="italic"
-                    aria-label="Italic"
-                  >
-                    <span aria-hidden="true">I</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="rich-text-editor__button"
-                    data-rich-text-button
-                    data-command="underline"
-                    aria-label="Underline"
-                  >
-                    <span aria-hidden="true">U</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="rich-text-editor__button"
-                    data-rich-text-button
-                    data-command="insertUnorderedList"
-                    aria-label="Bulleted list"
-                  >
-                    <span aria-hidden="true">•</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="rich-text-editor__button"
-                    data-rich-text-button
-                    data-command="insertOrderedList"
-                    aria-label="Numbered list"
-                  >
-                    <span aria-hidden="true">1.</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="rich-text-editor__button"
-                    data-rich-text-button
-                    data-command="link"
-                    aria-label="Insert link"
-                  >
-                    <span aria-hidden="true">🔗</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="rich-text-editor__button"
-                    data-rich-text-button
-                    data-command="removeFormat"
-                    aria-label="Clear formatting"
-                  >
-                    <span aria-hidden="true">✕</span>
-                  </button>
-                </div>
-                <div class="rich-text-editor__body">
-                  <div
-                    class="rich-text-editor__surface"
-                    data-rich-text-content
-                    contenteditable="true"
-                    role="textbox"
-                    aria-labelledby="email-signature-label"
-                    aria-multiline="true"
-                    data-placeholder="Enter your email signature..."
-                  ></div>
-                </div>
-                <textarea
-                  id="email-signature-value"
-                  name="emailSignature"
-                  data-rich-text-value
-                  hidden
-                >{{ current_user.email_signature|e or '' }}</textarea>
-              </div>
-            </div>
-            <div class="form-actions">
-              <button type="submit" class="button">Save signature</button>
-            </div>
-          </form>
-        </div>
-      </section>
+        </section>
+      </div>
     </div>
   </section>
 </div>
