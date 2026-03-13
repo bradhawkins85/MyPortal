@@ -221,8 +221,8 @@
                         {% set tooltip_label = display_name ~ ' · ' ~ (meta_parts | join(' · ')) %}
                       {% endif %}
                       {% set tactical_link = None %}
-                      {% if tacticalrmm_base_url and asset.tactical_asset_id %}
-                        {% set tactical_link = tacticalrmm_base_url ~ '/web/agents/' ~ (asset.tactical_asset_id | urlencode) %}
+                      {% if tacticalrmm_base_url and asset.name and asset.name | trim %}
+                        {% set tactical_link = tacticalrmm_base_url ~ '/?search=' ~ (asset.name | trim | urlencode) %}
                       {% endif %}
                       <li
                         class="ticket-assets-linked__item"

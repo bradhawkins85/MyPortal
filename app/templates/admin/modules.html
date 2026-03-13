@@ -201,8 +201,12 @@
               </div>
             {% elif module.slug == 'tacticalrmm' %}
               <div class="form-field">
-                <label class="form-label" for="rmm-base-url">Base URL</label>
+                <label class="form-label" for="rmm-base-url">Base API URL</label>
                 <input id="rmm-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="https://rmm.example.com" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="rmm-base-rmm-url">Base RMM URL</label>
+                <input id="rmm-base-rmm-url" name="settings.base_rmm_url" class="form-input" value="{{ settings.base_rmm_url or '' }}" placeholder="https://rmm.example.com" />
               </div>
               <div class="form-field">
                 <label class="form-label" for="rmm-api-key">API key</label>
