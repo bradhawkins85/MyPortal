@@ -1,0 +1,1 @@
+ALTER TABLE stock_feed ADD COLUMN IF NOT EXISTS opt_accessori TEXT NULL;
