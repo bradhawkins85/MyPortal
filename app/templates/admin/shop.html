@@ -86,7 +86,7 @@
         </select>
         <select class="form-input card__control" id="category-filter">
           <option value="">All categories</option>
-          {% for category in categories %}
+          {% for category in filter_categories %}
             <option value="{{ category.id }}">{{ '— ' if category.parent_id else '' }}{{ category.name }}</option>
           {% endfor %}
         </select>
