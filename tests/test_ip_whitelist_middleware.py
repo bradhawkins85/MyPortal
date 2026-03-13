@@ -1,7 +1,6 @@
 """Tests for IP whitelisting middleware."""
 import pytest
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from app.security.ip_whitelist import IPWhitelistMiddleware
@@ -51,15 +50,9 @@ def test_ip_whitelist_allows_whitelisted_ip(test_app):
         whitelist=["192.168.1.100"],
         protected_paths=["/admin"],
     )
-    
-    client = TestClient(test_app)
-    
-    # TestClient uses testclient as the client host by default
-    # We need to test with headers to simulate different IPs
-    response = client.get(
-        "/admin/users",
-        headers={"X-Forwarded-For": "192.168.1.100"}
-    )
+
+    client = TestClient(test_app, client=("192.168.1.100", 50000))
+    response = client.get("/admin/users")
     assert response.status_code == 200
 
 
@@ -71,14 +64,9 @@ def test_ip_whitelist_blocks_non_whitelisted_ip(test_app):
         whitelist=["192.168.1.100"],
         protected_paths=["/admin"],
     )
-    
-    client = TestClient(test_app)
-    
-    # Request from non-whitelisted IP
-    response = client.get(
-        "/admin/users",
-        headers={"X-Forwarded-For": "10.0.0.50"}
-    )
+
+    client = TestClient(test_app, client=("10.0.0.50", 50000))
+    response = client.get("/admin/users")
     assert response.status_code == 403
     assert "not authorized" in response.json()["detail"].lower()
 
@@ -92,20 +80,15 @@ def test_ip_whitelist_allows_cidr_range(test_app):
         protected_paths=["/admin"],
     )
     
-    client = TestClient(test_app)
-    
+    client = TestClient(test_app, client=("192.168.1.150", 50000))
+
     # IP in range should be allowed
-    response = client.get(
-        "/admin/users",
-        headers={"X-Forwarded-For": "192.168.1.150"}
-    )
+    response = client.get("/admin/users")
     assert response.status_code == 200
     
     # IP outside range should be blocked
-    response = client.get(
-        "/admin/users",
-        headers={"X-Forwarded-For": "192.168.2.150"}
-    )
+    blocked_client = TestClient(test_app, client=("192.168.2.150", 50000))
+    response = blocked_client.get("/admin/users")
     assert response.status_code == 403
 
 
@@ -119,20 +102,14 @@ def test_ip_whitelist_exempt_paths(test_app):
         exempt_paths=["/public"],
     )
     
-    client = TestClient(test_app)
-    
+    client = TestClient(test_app, client=("10.0.0.50", 50000))
+
     # Public path should be accessible from any IP
-    response = client.get(
-        "/public",
-        headers={"X-Forwarded-For": "10.0.0.50"}
-    )
+    response = client.get("/public")
     assert response.status_code == 200
     
     # Protected path should be blocked
-    response = client.get(
-        "/admin/users",
-        headers={"X-Forwarded-For": "10.0.0.50"}
-    )
+    response = client.get("/admin/users")
     assert response.status_code == 403
 
 
@@ -148,33 +125,28 @@ def test_ip_whitelist_empty_whitelist_allows_all(test_app):
     client = TestClient(test_app)
     
     # Should allow any IP when whitelist is empty
-    response = client.get(
-        "/admin/users",
-        headers={"X-Forwarded-For": "10.0.0.50"}
-    )
+    response = client.get("/admin/users")
     assert response.status_code == 200
 
 
-def test_ip_whitelist_cloudflare_header(test_app):
-    """Test that CF-Connecting-IP header is respected."""
+def test_ip_whitelist_ignores_spoofed_proxy_headers(test_app):
+    """Test that proxy headers do not bypass whitelist checks."""
     test_app.add_middleware(
         IPWhitelistMiddleware,
         enabled=True,
         whitelist=["192.168.1.100"],
         protected_paths=["/admin"],
     )
-    
-    client = TestClient(test_app)
-    
-    # CF-Connecting-IP should take precedence over X-Forwarded-For
+
+    client = TestClient(test_app, client=("10.0.0.50", 50000))
     response = client.get(
         "/admin/users",
         headers={
             "CF-Connecting-IP": "192.168.1.100",
-            "X-Forwarded-For": "10.0.0.50"
-        }
+            "X-Forwarded-For": "192.168.1.100",
+        },
     )
-    assert response.status_code == 200
+    assert response.status_code == 403
 
 
 def test_ip_whitelist_ipv6_support(test_app):
@@ -186,20 +158,15 @@ def test_ip_whitelist_ipv6_support(test_app):
         protected_paths=["/admin"],
     )
     
-    client = TestClient(test_app)
-    
+    client = TestClient(test_app, client=("2001:db8::1", 50000))
+
     # IPv6 address in range should be allowed
-    response = client.get(
-        "/admin/users",
-        headers={"X-Forwarded-For": "2001:db8::1"}
-    )
+    response = client.get("/admin/users")
     assert response.status_code == 200
     
     # IPv6 address outside range should be blocked
-    response = client.get(
-        "/admin/users",
-        headers={"X-Forwarded-For": "2001:db9::1"}
-    )
+    blocked_client = TestClient(test_app, client=("2001:db9::1", 50000))
+    response = blocked_client.get("/admin/users")
     assert response.status_code == 403
 
 
@@ -212,21 +179,15 @@ def test_ip_whitelist_multiple_ips(test_app):
         protected_paths=["/admin"],
     )
     
-    client = TestClient(test_app)
-    
     # Each whitelisted IP/range should work
     for ip in ["192.168.1.100", "10.5.10.20", "172.16.0.1"]:
-        response = client.get(
-            "/admin/users",
-            headers={"X-Forwarded-For": ip}
-        )
+        client = TestClient(test_app, client=(ip, 50000))
+        response = client.get("/admin/users")
         assert response.status_code == 200, f"IP {ip} should be allowed"
-    
+
     # Non-whitelisted IP should be blocked
-    response = client.get(
-        "/admin/users",
-        headers={"X-Forwarded-For": "192.168.2.100"}
-    )
+    blocked_client = TestClient(test_app, client=("192.168.2.100", 50000))
+    response = blocked_client.get("/admin/users")
     assert response.status_code == 403
 
 
@@ -239,13 +200,10 @@ def test_ip_whitelist_invalid_ip_format(test_app):
         protected_paths=["/admin"],
     )
     
-    client = TestClient(test_app)
-    
+    client = TestClient(test_app, client=("not-an-ip", 50000))
+
     # Invalid IP format should be rejected
-    response = client.get(
-        "/admin/users",
-        headers={"X-Forwarded-For": "not-an-ip"}
-    )
+    response = client.get("/admin/users")
     assert response.status_code == 403
 
 
@@ -258,18 +216,12 @@ def test_ip_whitelist_protected_paths_only(test_app):
         protected_paths=["/admin"],  # Only protect /admin
     )
     
-    client = TestClient(test_app)
-    
+    client = TestClient(test_app, client=("10.0.0.50", 50000))
+
     # Non-protected path should be accessible from any IP
-    response = client.get(
-        "/api/data",
-        headers={"X-Forwarded-For": "10.0.0.50"}
-    )
+    response = client.get("/api/data")
     assert response.status_code == 200
     
     # Protected path should be blocked
-    response = client.get(
-        "/admin/users",
-        headers={"X-Forwarded-For": "10.0.0.50"}
-    )
+    response = client.get("/admin/users")
     assert response.status_code == 403
