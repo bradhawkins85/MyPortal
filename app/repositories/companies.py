@@ -215,6 +215,26 @@ async def unarchive_company(company_id: int) -> dict[str, Any]:
     return updated
 
 
+async def set_company_csp_tenant_id(company_id: int, csp_tenant_id: str | None) -> None:
+    """Set or clear the CSP tenant ID for a company."""
+    await db.execute(
+        "UPDATE companies SET csp_tenant_id = %s WHERE id = %s",
+        (csp_tenant_id, company_id),
+    )
+
+
+async def get_company_by_csp_tenant_id(csp_tenant_id: str) -> Optional[dict[str, Any]]:
+    row = await db.fetch_one(
+        "SELECT * FROM companies WHERE csp_tenant_id = %s LIMIT 1",
+        (csp_tenant_id,),
+    )
+    if not row:
+        return None
+    company = _normalise_company(row)
+    company["email_domains"] = await get_email_domains_for_company(company["id"])
+    return company
+
+
 async def replace_company_email_domains(company_id: int, domains: Iterable[str]) -> None:
     normalised = normalise_email_domains(domains)
     await db.execute(
