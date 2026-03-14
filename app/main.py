@@ -16290,6 +16290,89 @@ async def admin_push_companies_to_tactical_rmm(request: Request):
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.post("/admin/modules/tacticalrmm/pull-companies", response_class=HTMLResponse)
+async def admin_pull_companies_from_tactical_rmm(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    try:
+        await modules_service.ensure_tacticalrmm_ready()
+    except ValueError as exc:
+        log_error("Unable to pull Tactical RMM companies", error=str(exc))
+        return await _render_modules_dashboard(
+            request,
+            current_user,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to pull Tactical RMM companies", error=str(exc))
+        return await _render_modules_dashboard(
+            request,
+            current_user,
+            error_message="Unable to pull companies from Tactical RMM. Please verify the module configuration.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    task_id = uuid4().hex
+
+    async def _on_success(summary: Mapping[str, Any]) -> None:
+        fetched = int(summary.get("fetched") or 0)
+        created = int(summary.get("created") or 0)
+        updated = int(summary.get("updated") or 0)
+        skipped = int(summary.get("skipped") or 0)
+        errors = summary.get("errors") or []
+        error_count = len(errors)
+
+        log_info(
+            "Tactical RMM company pull completed",
+            task_id=task_id,
+            fetched=fetched,
+            created=created,
+            updated=updated,
+            skipped=skipped,
+            errors=error_count,
+        )
+
+        if error_count:
+            example = errors[0]
+            detail = example.get("error") or "Unknown error"
+            log_error(
+                "Tactical RMM pull encountered errors",
+                task_id=task_id,
+                error_count=error_count,
+                example=detail,
+            )
+
+    async def _on_error(exc: Exception) -> None:
+        log_error(
+            "Tactical RMM company pull failed",
+            task_id=task_id,
+            error=str(exc),
+        )
+
+    background_tasks.queue_background_task(
+        lambda: modules_service.pull_companies_from_tacticalrmm(),
+        task_id=task_id,
+        description="tacticalrmm-company-pull",
+        on_complete=_on_success,
+        on_error=_on_error,
+    )
+
+    log_info(
+        "Queued Tactical RMM company pull",
+        task_id=task_id,
+        user_id=current_user.get("id"),
+        request_path=str(request.url),
+    )
+
+    success_message = f"Tactical RMM company pull queued. Task ID: {task_id[:8]}"
+    query = f"success={quote(success_message)}"
+    redirect_url = f"/admin/modules?{query}" if query else "/admin/modules"
+
+    return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+
 @app.post("/admin/modules/{slug}/test", response_class=HTMLResponse)
 async def admin_test_module(slug: str, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
