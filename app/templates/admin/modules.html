@@ -8,6 +8,12 @@
           <h1 class="management__title">Integration modules</h1>
           <p class="management__subtitle">Synchronise credentials and delivery endpoints for Syncro, Ollama, SMTP, TacticalRMM, ntfy, Apprise, Uptime Kuma, ChatGPT, and SMS Gateway.</p>
         </div>
+        <div class="management__actions">
+          <label class="form-checkbox" for="show-disabled-modules">
+            <input type="checkbox" id="show-disabled-modules" />
+            Show disabled modules
+          </label>
+        </div>
       </header>
 
       <section class="card card--panel">
@@ -26,7 +32,7 @@
               {% for module in modules %}
                 {% set is_internal = module.slug in internal_slugs %}
                 {% if not is_internal %}
-                <tr>
+                <tr data-enabled="{{ 'true' if module.enabled else 'false' }}"{% if not module.enabled %} hidden{% endif %}>
                   <td data-label="Module">
                     <span aria-hidden="true">{{ module.icon or '🔌' }}</span>
                     <strong>{{ module.name }}</strong>
@@ -543,4 +549,16 @@
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
+  <script>
+    (function () {
+      var checkbox = document.getElementById('show-disabled-modules');
+      if (!checkbox) return;
+      checkbox.addEventListener('change', function () {
+        var rows = document.querySelectorAll('#modules-table tbody tr[data-enabled="false"]');
+        rows.forEach(function (row) {
+          row.hidden = !checkbox.checked;
+        });
+      });
+    })();
+  </script>
 {% endblock %}
