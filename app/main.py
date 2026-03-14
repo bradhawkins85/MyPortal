@@ -154,7 +154,7 @@ from app.security.request_logger import RequestLoggingMiddleware
 from app.security.security_headers import SecurityHeadersMiddleware
 from app.security.session import SessionData, session_manager
 from app.api.dependencies.auth import get_current_session
-from app.services.scheduler import scheduler_service
+from app.services.scheduler import scheduler_service, COMMANDS_BY_MODULE
 from app.security.api_keys import mask_api_key
 from app.services import audit as audit_service
 from app.services import background as background_tasks
@@ -3435,6 +3435,17 @@ async def _render_company_edit_page(
     automation_company_options: list[dict[str, str]] = []
 
     if is_super_admin:
+        # Build the set of commands that belong to disabled modules so they can be excluded.
+        try:
+            all_modules = await modules_service.list_modules()
+            disabled_module_slugs = {m["slug"] for m in all_modules if not m.get("enabled")}
+        except Exception:  # pragma: no cover - defensive fallback
+            disabled_module_slugs = set()
+        disabled_commands: set[str] = set()
+        for mod_slug, cmds in COMMANDS_BY_MODULE.items():
+            if mod_slug in disabled_module_slugs:
+                disabled_commands.update(cmds)
+
         automation_command_options = [
             {"value": "sync_staff", "label": "Sync staff directory"},
             {"value": "sync_o365", "label": "Sync Microsoft 365 licenses"},
@@ -3449,6 +3460,7 @@ async def _render_company_edit_page(
             {"value": "queue_transcriptions", "label": "Queue transcriptions"},
             {"value": "process_transcription", "label": "Process transcription"},
         ]
+        automation_command_options = [o for o in automation_command_options if o["value"] not in disabled_commands]
         default_command_values = {option["value"] for option in automation_command_options}
 
         try:
@@ -3477,7 +3489,7 @@ async def _render_company_edit_page(
             company_automation_tasks.append(serialised_task)
 
         for command in sorted(existing_commands):
-            if command and command not in default_command_values:
+            if command and command not in default_command_values and command not in disabled_commands:
                 automation_command_options.append({"value": command, "label": command})
 
         automation_company_options = [
@@ -10412,6 +10424,17 @@ async def admin_automation(request: Request, show_inactive: bool = Query(default
         prepared_tasks.append(serialised_task)
         if company_id is None or company_name.lower() == "all companies":
             global_tasks.append(serialised_task)
+    # Build the set of commands that belong to disabled modules so they can be excluded.
+    try:
+        all_modules = await modules_service.list_modules()
+        disabled_module_slugs = {m["slug"] for m in all_modules if not m.get("enabled")}
+    except Exception:  # pragma: no cover - defensive fallback
+        disabled_module_slugs = set()
+    disabled_commands_global: set[str] = set()
+    for mod_slug, cmds in COMMANDS_BY_MODULE.items():
+        if mod_slug in disabled_module_slugs:
+            disabled_commands_global.update(cmds)
+
     command_options = [
         {"value": "sync_staff", "label": "Sync staff directory"},
         {"value": "sync_o365", "label": "Sync Microsoft 365 licenses"},
@@ -10426,9 +10449,10 @@ async def admin_automation(request: Request, show_inactive: bool = Query(default
         {"value": "queue_transcriptions", "label": "Queue transcriptions"},
         {"value": "process_transcription", "label": "Process transcription"},
     ]
+    command_options = [o for o in command_options if o["value"] not in disabled_commands_global]
     existing_commands = {task.get("command") for task in tasks if task.get("command")}
     for command in sorted(existing_commands):
-        if command and command not in {option["value"] for option in command_options}:
+        if command and command not in {option["value"] for option in command_options} and command not in disabled_commands_global:
             command_options.append({"value": str(command), "label": str(command)})
     company_options = [
         {"value": "", "label": "All companies"},
