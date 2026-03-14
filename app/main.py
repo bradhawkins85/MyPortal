@@ -273,6 +273,19 @@ def _build_xero_redirect_uri() -> str:
     return "/xero/callback"
 
 
+def _build_m365_redirect_uri(request: Request) -> str:
+    """Build M365 OAuth redirect URI using PORTAL_URL setting.
+
+    This ensures the redirect_uri uses HTTPS when the app is behind a
+    reverse proxy, preventing Microsoft from rejecting the redirect_uri.
+    Falls back to the request-derived URL when PORTAL_URL is not set.
+    """
+    if settings.portal_url:
+        base = str(settings.portal_url).rstrip("/")
+        return f"{base}/m365/callback"
+    return str(request.url_for("m365_callback"))
+
+
 def _serialise_for_json(value: Any) -> Any:
     """Convert mappings and sequences to JSON-safe primitives for templates."""
 
@@ -4616,7 +4629,7 @@ async def m365_connect(request: Request):
     credentials = await m365_service.get_credentials(company_id)
     if not credentials:
         return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
-    redirect_uri = str(request.url_for("m365_callback"))
+    redirect_uri = _build_m365_redirect_uri(request)
     state = oauth_state_serializer.dumps({
         "company_id": company_id,
         "user_id": user.get("id"),
@@ -4656,7 +4669,7 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
     if not tenant_id:
         encoded = urlencode({"error": "Tenant ID is required to auto-provision."})
         return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
-    redirect_uri = str(request.url_for("m365_callback"))
+    redirect_uri = _build_m365_redirect_uri(request)
     state = oauth_state_serializer.dumps(
         {
             "company_id": company_id,
@@ -4701,7 +4714,7 @@ async def admin_company_m365_provision(
             company_id=company_id,
             error="Tenant ID is required to auto-provision.",
         )
-    redirect_uri = str(request.url_for("m365_callback"))
+    redirect_uri = _build_m365_redirect_uri(request)
     state = oauth_state_serializer.dumps(
         {
             "company_id": company_id,
@@ -4772,7 +4785,7 @@ async def m365_discover(request: Request):
     if not m365_admin_client_id or not m365_admin_client_secret:
         encoded = urlencode({"error": "Admin M365 credentials are not configured."})
         return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
-    redirect_uri = str(request.url_for("m365_callback"))
+    redirect_uri = _build_m365_redirect_uri(request)
     state = oauth_state_serializer.dumps(
         {
             "company_id": company_id,
@@ -4808,7 +4821,7 @@ async def admin_company_m365_discover(company_id: int, request: Request):
             company_id=company_id,
             error="Admin M365 credentials are not configured.",
         )
-    redirect_uri = str(request.url_for("m365_callback"))
+    redirect_uri = _build_m365_redirect_uri(request)
     state = oauth_state_serializer.dumps(
         {
             "company_id": company_id,
@@ -4845,7 +4858,7 @@ async def admin_csp_signin(request: Request):
         return RedirectResponse(
             url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
         )
-    redirect_uri = str(request.url_for("m365_callback"))
+    redirect_uri = _build_m365_redirect_uri(request)
     state = oauth_state_serializer.dumps(
         {
             "company_id": 0,
@@ -4887,7 +4900,7 @@ async def admin_csp_provision(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    redirect_uri = str(request.url_for("m365_callback"))
+    redirect_uri = _build_m365_redirect_uri(request)
 
     # Prefer existing admin credentials, then an explicitly configured
     # bootstrap client, and finally fall back to PKCE with the well-known
@@ -5070,7 +5083,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # ── Tenant-discovery flow ──────────────────────────────────────────
         # Exchange the auth code to get a token, then extract the tid claim.
         return_to_company_edit = state_data.get("return_to") == "company_edit"
-        redirect_uri = str(request.url_for("m365_callback"))
+        redirect_uri = _build_m365_redirect_uri(request)
 
         def _discover_error(msg: str) -> RedirectResponse:
             if return_to_company_edit:
@@ -5142,7 +5155,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     if flow == "csp_signin":
         # ── CSP/Lighthouse sign-in flow ───────────────────────────────────
         user_id = int(state_data.get("user_id", 0))
-        redirect_uri = str(request.url_for("m365_callback"))
+        redirect_uri = _build_m365_redirect_uri(request)
 
         def _csp_error(msg: str) -> RedirectResponse:
             encoded = urlencode({"error": msg})
@@ -5201,7 +5214,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # so their token has Application.ReadWrite.All + AppRoleAssignment.ReadWrite.All
         # in their own partner tenant.  We use it to create a dedicated app
         # registration that will serve as the M365 admin OAuth client.
-        redirect_uri = str(request.url_for("m365_callback"))
+        redirect_uri = _build_m365_redirect_uri(request)
 
         def _csp_provision_error(msg: str) -> RedirectResponse:
             encoded = urlencode({"error": msg})
@@ -5312,7 +5325,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # ── Auto-provision flow ────────────────────────────────────────────
         tenant_id = str(state_data.get("tenant_id", "")).strip()
         return_to_company_edit = state_data.get("return_to") == "company_edit"
-        redirect_uri = str(request.url_for("m365_callback"))
+        redirect_uri = _build_m365_redirect_uri(request)
 
         def _provision_error(msg: str) -> RedirectResponse:
             if return_to_company_edit:
@@ -5399,7 +5412,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     if not credentials:
         return RedirectResponse(url="/m365?error=missing+credentials", status_code=status.HTTP_303_SEE_OTHER)
     token_endpoint = f"https://login.microsoftonline.com/{credentials['tenant_id']}/oauth2/v2.0/token"
-    redirect_uri = str(request.url_for("m365_callback"))
+    redirect_uri = _build_m365_redirect_uri(request)
     data = {
         "client_id": credentials["client_id"],
         "client_secret": credentials.get("client_secret") or "",
