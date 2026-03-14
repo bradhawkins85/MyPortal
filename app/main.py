@@ -4901,11 +4901,13 @@ async def admin_csp_provision(request: Request):
     elif bootstrap_client_id:
         oauth_client_id = bootstrap_client_id
     else:
-        # No credentials configured – use PKCE with the Azure CLI public
-        # client.  The code_verifier is stored in the signed state so the
-        # callback can exchange the auth code without a client secret.
+        # No credentials configured – use PKCE with a public client.  The
+        # code_verifier is stored in the signed state so the callback can
+        # exchange the auth code without a client secret.
+        # Use M365_PKCE_CLIENT_ID if configured; otherwise fall back to the
+        # Azure CLI public client (which may be blocked in some tenants).
         code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        oauth_client_id = m365_service._AZURE_CLI_CLIENT_ID
+        oauth_client_id = m365_service.get_pkce_client_id()
 
     state_payload: dict = {
         "company_id": 0,
@@ -5218,7 +5220,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         )
         if code_verifier:
             token_data: dict = {
-                "client_id": m365_service._AZURE_CLI_CLIENT_ID,
+                "client_id": m365_service.get_pkce_client_id(),
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,

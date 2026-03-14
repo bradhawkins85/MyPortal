@@ -56,12 +56,30 @@ _CSP_ADMIN_APP_ROLES: list[str] = [
 # Delegated scope ID for Directory.Read.All (for CSP sign-in by partner admins)
 _DIRECTORY_READ_ALL_SCOPE_ID = "06da0dbc-49e2-44d2-8312-53f166ab848a"
 
-# Well-known Microsoft public client used for PKCE-based bootstrap provisioning.
-# This is the Azure CLI application, registered by Microsoft and trusted across
-# all Azure AD tenants.  Public clients do not require a client secret, which
-# lets admins trigger the provisioning flow without pre-creating an app
-# registration.
+# Well-known Microsoft public client used as a fallback for PKCE-based bootstrap
+# provisioning when no custom PKCE client is configured.  This is the Azure CLI
+# application registered by Microsoft.  Note: some Azure AD tenants restrict
+# external applications via Conditional Access or app-approval policies, which
+# can prevent this client from being used.  Set M365_PKCE_CLIENT_ID to a public
+# client app registration in your own tenant to avoid this issue.
 _AZURE_CLI_CLIENT_ID = "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
+
+
+def get_pkce_client_id() -> str:
+    """Return the PKCE public-client app ID to use for the bootstrap provisioning flow.
+
+    Prefers the operator-configured ``M365_PKCE_CLIENT_ID`` setting (a public
+    client app registration created in the partner tenant).  Falls back to the
+    well-known Azure CLI client ID when no custom value is configured.
+
+    Some Azure AD tenants block external applications (e.g. via Conditional
+    Access or tenant app-approval policies), which causes the Azure CLI fallback
+    to fail with ``AADSTS700016``.  In those cases, create a new app registration
+    in your Azure AD tenant, enable *Allow public client flows*, and set
+    ``M365_PKCE_CLIENT_ID`` to its Application (client) ID.
+    """
+    configured = str(get_settings().m365_pkce_client_id or "").strip()
+    return configured if configured else _AZURE_CLI_CLIENT_ID
 
 
 class M365Error(RuntimeError):
