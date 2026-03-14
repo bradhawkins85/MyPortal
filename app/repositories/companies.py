@@ -145,15 +145,17 @@ async def create_company(**data: Any) -> dict[str, Any]:
     email_domains = normalise_email_domains(email_domains)
     columns = ", ".join(data.keys())
     placeholders = ", ".join(["%s"] * len(data))
-    await db.execute(
+    company_id = await db.execute_returning_lastrowid(
         f"INSERT INTO companies ({columns}) VALUES ({placeholders})",
         tuple(data.values()),
     )
+    if not company_id:
+        raise RuntimeError("Failed to create company")
     row = await db.fetch_one(
-        "SELECT * FROM companies WHERE id = LAST_INSERT_ID()"
+        "SELECT * FROM companies WHERE id = %s", (company_id,)
     )
     if not row:
-        raise RuntimeError("Failed to create company")
+        raise RuntimeError("Failed to retrieve created company")
     company = _normalise_company(row)
     log_info("Company created successfully", company_id=company["id"], name=company.get("name"))
     if email_domains:
