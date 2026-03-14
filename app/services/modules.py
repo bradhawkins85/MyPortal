@@ -553,6 +553,10 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "settings": {
             "client_id": str(os.getenv("M365_ADMIN_CLIENT_ID", "")),
             "client_secret": str(os.getenv("M365_ADMIN_CLIENT_SECRET", "")),
+            "tenant_id": "",
+            "app_object_id": "",
+            "client_secret_key_id": "",
+            "client_secret_expires_at": "",
         },
     },
     {
@@ -935,10 +939,23 @@ def _coerce_settings(
                 client_secret = str(existing_settings.get("client_secret") or "").strip()
             else:
                 client_secret = candidate
+        # Preserve app_object_id, client_secret_key_id, client_secret_expires_at
+        # and tenant_id when not explicitly overridden so auto-provisioned values
+        # are not wiped by an unrelated settings save.
+        def _preserve_field(name: str) -> str:
+            override_val = overrides.get(name)
+            if override_val is not None:
+                return str(override_val).strip()
+            return str(merged.get(name) or "").strip()
+
         merged.update(
             {
                 "client_id": str(merged.get("client_id", "")).strip(),
                 "client_secret": client_secret,
+                "tenant_id": _preserve_field("tenant_id"),
+                "app_object_id": _preserve_field("app_object_id"),
+                "client_secret_key_id": _preserve_field("client_secret_key_id"),
+                "client_secret_expires_at": _preserve_field("client_secret_expires_at"),
             }
         )
     elif slug == "unifi-talk":
