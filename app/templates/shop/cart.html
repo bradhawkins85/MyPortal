@@ -129,8 +129,8 @@
             </div>
           </dl>
         </div>
+      {% set payment_methods = payment_method.split(',') %}
         <div class="form-actions">
-          {% set payment_methods = payment_method.split(',') %}
           {% if 'stripe' in payment_methods %}
             <button type="button" class="button" disabled title="Stripe payments are not yet configured">Pay with Stripe (coming soon)</button>
           {% endif %}
@@ -139,9 +139,8 @@
           {% endif %}
         </div>
       </div>
-      {% set payment_methods = payment_method.split(',') %}
       {% if 'invoice_prepay' in payment_methods and 'invoice_postpay' in payment_methods %}
-        <p class="form-help">An Invoice Prepay and Invoice Postpay will be emailed to you for payment.</p>
+        <p class="form-help">An Invoice Prepay and an Invoice Postpay will be emailed to you for payment.</p>
       {% elif 'invoice_prepay' in payment_methods %}
         <p class="form-help">An Invoice Prepay will be emailed to you for payment.</p>
       {% elif 'invoice_postpay' in payment_methods %}
