@@ -673,3 +673,53 @@ def test_generate_pkce_pair_produces_unique_pairs():
 def test_azure_cli_client_id_constant():
     """_AZURE_CLI_CLIENT_ID is the well-known Azure CLI public client."""
     assert m365_service._AZURE_CLI_CLIENT_ID == "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
+
+
+# ---------------------------------------------------------------------------
+# Tests: get_pkce_client_id
+# ---------------------------------------------------------------------------
+
+def test_get_pkce_client_id_falls_back_to_azure_cli_when_not_configured():
+    """get_pkce_client_id returns the Azure CLI client ID when M365_PKCE_CLIENT_ID is unset."""
+    mock_settings = MagicMock()
+    mock_settings.m365_pkce_client_id = None
+
+    with patch("app.services.m365.get_settings", return_value=mock_settings):
+        result = m365_service.get_pkce_client_id()
+
+    assert result == m365_service._AZURE_CLI_CLIENT_ID
+
+
+def test_get_pkce_client_id_falls_back_to_azure_cli_when_empty():
+    """get_pkce_client_id returns the Azure CLI client ID when M365_PKCE_CLIENT_ID is blank."""
+    mock_settings = MagicMock()
+    mock_settings.m365_pkce_client_id = "   "
+
+    with patch("app.services.m365.get_settings", return_value=mock_settings):
+        result = m365_service.get_pkce_client_id()
+
+    assert result == m365_service._AZURE_CLI_CLIENT_ID
+
+
+def test_get_pkce_client_id_returns_configured_value():
+    """get_pkce_client_id returns the operator-configured M365_PKCE_CLIENT_ID when set."""
+    custom_id = "my-custom-pkce-app-client-id"
+    mock_settings = MagicMock()
+    mock_settings.m365_pkce_client_id = custom_id
+
+    with patch("app.services.m365.get_settings", return_value=mock_settings):
+        result = m365_service.get_pkce_client_id()
+
+    assert result == custom_id
+
+
+def test_get_pkce_client_id_strips_whitespace():
+    """get_pkce_client_id strips surrounding whitespace from the configured value."""
+    custom_id = "  my-custom-pkce-app-client-id  "
+    mock_settings = MagicMock()
+    mock_settings.m365_pkce_client_id = custom_id
+
+    with patch("app.services.m365.get_settings", return_value=mock_settings):
+        result = m365_service.get_pkce_client_id()
+
+    assert result == "my-custom-pkce-app-client-id"
