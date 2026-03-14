@@ -4879,34 +4879,44 @@ async def admin_csp_provision(request: Request):
     After consent, the callback creates a dedicated app registration in the
     partner tenant and stores the resulting credentials in the ``m365-admin``
     integration module so that subsequent CSP sign-in can use them.
+
+    When no bootstrap credentials are configured the flow uses PKCE with the
+    well-known Azure CLI public client so that the admin can log in without
+    needing to pre-create an Azure app registration.
     """
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
     redirect_uri = str(request.url_for("m365_callback"))
-    state = oauth_state_serializer.dumps(
-        {
-            "company_id": 0,
-            "user_id": current_user.get("id"),
-            "flow": "csp_admin_provision",
-        }
-    )
-    # Use the existing admin credentials' client_id if available, otherwise
-    # we need a bootstrap client_id.  When auto-provisioning for the first time
-    # there are no admin credentials yet, so we fall back to a special
-    # "bootstrap" OAuth app configured via M365_BOOTSTRAP_CLIENT_ID.
-    bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
+
+    # Prefer existing admin credentials, then an explicitly configured
+    # bootstrap client, and finally fall back to PKCE with the well-known
+    # Azure CLI public client so no manual credential setup is required.
     existing_client_id, _ = await _get_m365_admin_credentials()
-    oauth_client_id = existing_client_id or bootstrap_client_id
-    if not oauth_client_id:
-        encoded = urlencode(
-            {"error": "A client ID is required to initiate provisioning. "
-                      "Set M365_BOOTSTRAP_CLIENT_ID or configure a client ID in the M365 Admin module."}
-        )
-        return RedirectResponse(
-            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-        )
-    params = {
+    bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
+
+    code_verifier: str | None = None
+    if existing_client_id:
+        oauth_client_id = existing_client_id
+    elif bootstrap_client_id:
+        oauth_client_id = bootstrap_client_id
+    else:
+        # No credentials configured – use PKCE with the Azure CLI public
+        # client.  The code_verifier is stored in the signed state so the
+        # callback can exchange the auth code without a client secret.
+        code_verifier, code_challenge = m365_service.generate_pkce_pair()
+        oauth_client_id = m365_service._AZURE_CLI_CLIENT_ID
+
+    state_payload: dict = {
+        "company_id": 0,
+        "user_id": current_user.get("id"),
+        "flow": "csp_admin_provision",
+    }
+    if code_verifier:
+        state_payload["code_verifier"] = code_verifier
+
+    state = oauth_state_serializer.dumps(state_payload)
+    params: dict = {
         "client_id": oauth_client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
@@ -4915,6 +4925,10 @@ async def admin_csp_provision(request: Request):
         "state": state,
         "prompt": "select_account",
     }
+    if code_verifier:
+        params["code_challenge"] = code_challenge
+        params["code_challenge_method"] = "S256"
+
     authorize_url = (
         "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
         f"?{urlencode(params)}"
@@ -5193,35 +5207,46 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
             )
 
-        # Determine which client_id was used during the OAuth redirect so we
-        # can complete the authorization_code exchange.
-        bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
-        existing_client_id, existing_client_secret = await _get_m365_admin_credentials()
-        oauth_client_id = existing_client_id or bootstrap_client_id
-        # For the bootstrap case we need a secret to exchange the code.
-        # If we have an existing secret, use it; otherwise the caller must
-        # supply M365_BOOTSTRAP_CLIENT_SECRET (treated as the exchange secret).
-        bootstrap_client_secret = str(settings.m365_bootstrap_client_secret or "").strip()
-        oauth_client_secret = existing_client_secret or bootstrap_client_secret
-
-        if not oauth_client_id or not oauth_client_secret:
-            return _csp_provision_error(
-                "No client credentials available to complete provisioning. "
-                "Configure M365_BOOTSTRAP_CLIENT_ID / M365_BOOTSTRAP_CLIENT_SECRET or "
-                "enter credentials in the M365 Admin module."
-            )
-
+        # Determine the token exchange method.  When the flow was initiated
+        # using PKCE (state contains a code_verifier), the exchange is done
+        # with the public Azure CLI client – no client secret is required.
+        # Otherwise fall back to the traditional secret-based exchange using
+        # existing admin credentials or the M365_BOOTSTRAP_* env vars.
+        code_verifier: str | None = state_data.get("code_verifier")
         token_endpoint = (
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         )
-        token_data = {
-            "client_id": oauth_client_id,
-            "client_secret": oauth_client_secret,
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": redirect_uri,
-            "scope": m365_service.PROVISION_SCOPE,
-        }
+        if code_verifier:
+            token_data: dict = {
+                "client_id": m365_service._AZURE_CLI_CLIENT_ID,
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": redirect_uri,
+                "code_verifier": code_verifier,
+                "scope": m365_service.PROVISION_SCOPE,
+            }
+        else:
+            bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
+            existing_client_id, existing_client_secret = await _get_m365_admin_credentials()
+            oauth_client_id = existing_client_id or bootstrap_client_id
+            bootstrap_client_secret = str(settings.m365_bootstrap_client_secret or "").strip()
+            oauth_client_secret = existing_client_secret or bootstrap_client_secret
+
+            if not oauth_client_id or not oauth_client_secret:
+                return _csp_provision_error(
+                    "No client credentials available to complete provisioning. "
+                    "Configure M365_BOOTSTRAP_CLIENT_ID / M365_BOOTSTRAP_CLIENT_SECRET or "
+                    "enter credentials in the M365 Admin module."
+                )
+
+            token_data = {
+                "client_id": oauth_client_id,
+                "client_secret": oauth_client_secret,
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": redirect_uri,
+                "scope": m365_service.PROVISION_SCOPE,
+            }
         async with httpx.AsyncClient(timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
         if token_response.status_code != 200:
