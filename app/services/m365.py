@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import secrets
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -54,9 +56,29 @@ _CSP_ADMIN_APP_ROLES: list[str] = [
 # Delegated scope ID for Directory.Read.All (for CSP sign-in by partner admins)
 _DIRECTORY_READ_ALL_SCOPE_ID = "06da0dbc-49e2-44d2-8312-53f166ab848a"
 
+# Well-known Microsoft public client used for PKCE-based bootstrap provisioning.
+# This is the Azure CLI application, registered by Microsoft and trusted across
+# all Azure AD tenants.  Public clients do not require a client secret, which
+# lets admins trigger the provisioning flow without pre-creating an app
+# registration.
+_AZURE_CLI_CLIENT_ID = "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
+
 
 class M365Error(RuntimeError):
     """Raised when Microsoft 365 operations fail."""
+
+
+def generate_pkce_pair() -> tuple[str, str]:
+    """Generate a PKCE ``code_verifier`` / ``code_challenge`` pair.
+
+    Returns a tuple of ``(code_verifier, code_challenge)`` where the challenge
+    is the URL-safe base64-encoded SHA-256 hash of the verifier (S256 method).
+    The verifier is a 32-byte cryptographically random string.
+    """
+    code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+    digest = hashlib.sha256(code_verifier.encode()).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    return code_verifier, code_challenge
 
 
 def extract_tenant_id_from_token(token: str) -> str:

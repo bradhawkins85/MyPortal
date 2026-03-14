@@ -635,3 +635,41 @@ def test_csp_admin_app_roles_contains_app_readwrite_ownedby():
 def test_directory_read_all_scope_id_is_correct():
     """_DIRECTORY_READ_ALL_SCOPE_ID matches the known delegated scope for Directory.Read.All."""
     assert m365_service._DIRECTORY_READ_ALL_SCOPE_ID == "06da0dbc-49e2-44d2-8312-53f166ab848a"
+
+
+# ---------------------------------------------------------------------------
+# Tests: generate_pkce_pair
+# ---------------------------------------------------------------------------
+
+def test_generate_pkce_pair_returns_two_strings():
+    """generate_pkce_pair returns a tuple of two non-empty strings."""
+    code_verifier, code_challenge = m365_service.generate_pkce_pair()
+    assert isinstance(code_verifier, str) and len(code_verifier) > 0
+    assert isinstance(code_challenge, str) and len(code_challenge) > 0
+
+
+def test_generate_pkce_pair_challenge_is_sha256_of_verifier():
+    """generate_pkce_pair challenge is the S256 (SHA-256) hash of the verifier."""
+    import base64
+    import hashlib
+
+    code_verifier, code_challenge = m365_service.generate_pkce_pair()
+    expected = (
+        base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest())
+        .rstrip(b"=")
+        .decode()
+    )
+    assert code_challenge == expected
+
+
+def test_generate_pkce_pair_produces_unique_pairs():
+    """generate_pkce_pair returns a different pair on each call."""
+    pair1 = m365_service.generate_pkce_pair()
+    pair2 = m365_service.generate_pkce_pair()
+    assert pair1[0] != pair2[0]
+    assert pair1[1] != pair2[1]
+
+
+def test_azure_cli_client_id_constant():
+    """_AZURE_CLI_CLIENT_ID is the well-known Azure CLI public client."""
+    assert m365_service._AZURE_CLI_CLIENT_ID == "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
