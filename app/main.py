@@ -3347,7 +3347,7 @@ async def _render_company_edit_page(
         "email_domains": _string_value("email_domains", default_email_domains),
         "is_vip": _bool_value("is_vip", bool(company_record.get("is_vip"))),
         "payment_method": _string_value(
-            "payment_method", (company_record.get("payment_method") or "invoice").strip()
+            "payment_method", (company_record.get("payment_method") or "invoice_prepay").strip()
         ),
     }
 
@@ -6559,7 +6559,7 @@ async def view_cart(
         "cart_items_payload": cart_items_payload,
         "cart_recommendations": recommendations,
         "low_stock_threshold": SHOP_LOW_STOCK_THRESHOLD,
-        "payment_method": (company.get("payment_method") or "invoice") if company else "invoice",
+        "payment_method": (company.get("payment_method") or "invoice_prepay") if company else "invoice_prepay",
     }
     response = await _render_template("shop/cart.html", request, user, extra=extra)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
@@ -9147,8 +9147,17 @@ async def admin_update_company(company_id: int, request: Request):
     tactical_client_raw = str(form.get("tacticalClientId", "")).strip()
     xero_id_raw = str(form.get("xeroId", "")).strip()
     is_vip = _parse_bool(form.get("isVip"))
-    payment_method_raw = str(form.get("paymentMethod", "invoice")).strip().lower()
-    payment_method = payment_method_raw if payment_method_raw in {"invoice", "stripe"} else "invoice"
+    invoice_prepay_enabled = bool(form.get("invoicePrepay"))
+    invoice_postpay_enabled = bool(form.get("invoicePostpay"))
+    stripe_enabled = bool(form.get("stripeEnabled"))
+    _selected_methods = [
+        m for m, enabled in [
+            ("invoice_prepay", invoice_prepay_enabled),
+            ("invoice_postpay", invoice_postpay_enabled),
+            ("stripe", stripe_enabled),
+        ] if enabled
+    ]
+    payment_method = ",".join(_selected_methods) if _selected_methods else "invoice_prepay"
     raw_email_domains = form.get("emailDomains")
     email_domains_text = str(raw_email_domains) if raw_email_domains is not None else ""
     form_values = {
