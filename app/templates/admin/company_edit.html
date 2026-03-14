@@ -118,16 +118,37 @@
             </label>
           </div>
           <div class="form-field">
-            <label class="form-label" for="edit-company-payment-method">Payment method</label>
-            <select
-              id="edit-company-payment-method"
-              name="paymentMethod"
-              class="form-input"
-            >
-              <option value="invoice" {% if form_data.payment_method == 'invoice' %}selected{% endif %}>Invoice</option>
-              <option value="stripe" {% if form_data.payment_method == 'stripe' %}selected{% endif %}>Stripe</option>
-            </select>
-            <p class="form-help">Invoice sends an email invoice for manual payment. Stripe will take payment immediately (coming soon).</p>
+            <label class="form-label">Payment method</label>
+            <div class="form-checkbox-group">
+              <label class="form-checkbox__label">
+                <input
+                  type="checkbox"
+                  name="invoicePrepay"
+                  value="1"
+                  {% if 'invoice_prepay' in form_data.payment_method %}checked{% endif %}
+                />
+                <span>Invoice Prepay</span>
+              </label>
+              <label class="form-checkbox__label">
+                <input
+                  type="checkbox"
+                  name="invoicePostpay"
+                  value="1"
+                  {% if 'invoice_postpay' in form_data.payment_method %}checked{% endif %}
+                />
+                <span>Invoice Postpay</span>
+              </label>
+              <label class="form-checkbox__label">
+                <input
+                  type="checkbox"
+                  name="stripeEnabled"
+                  value="1"
+                  {% if 'stripe' in form_data.payment_method %}checked{% endif %}
+                />
+                <span>Stripe (coming soon)</span>
+              </label>
+            </div>
+            <p class="form-help">Select at least one payment method. Invoice Prepay sends an invoice before service is rendered. Invoice Postpay sends an invoice after the billing period. Stripe will take payment immediately (coming soon).</p>
           </div>
           <div class="form-actions">
             <button type="submit" class="button">Save changes</button>
