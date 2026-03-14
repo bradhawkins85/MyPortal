@@ -948,7 +948,7 @@
                 required
                 placeholder="Monthly managed services for {company_name}"
               ></textarea>
-              <p class="form-help">Supports variable substitution using {variable_name} syntax.</p>
+              <p class="form-help">Supports variable substitution using {variable_name} syntax. Supports all the same variables as the quantity expression.</p>
             </div>
             <div class="form-field">
               <label class="form-label" for="recurring-item-qty">Quantity expression</label>
@@ -960,7 +960,11 @@
                 required
                 placeholder="1"
               />
-              <p class="form-help">Static number (e.g., "5") or variable (e.g., "{active_agents}").</p>
+              <p class="form-help">
+                Static number (e.g., "5") or variable using {variable_name} syntax.
+                Standard variables: {active_agents} (assets synced in last 30 days), {active_workstations}, {active_servers}, {active_users}, {total_assets} (same as active_agents), {company_name}.
+                Asset custom field checkbox counts: {cf_total_FIELDNAME} (all assets with field set) or {cf_active_FIELDNAME} (only assets synced within 30 days with field set), where FIELDNAME is the custom field name with hyphens replaced by underscores (e.g., field "threatlocker-installed" → {cf_active_threatlocker_installed}).
+              </p>
             </div>
             <div class="form-field">
               <label class="form-label" for="recurring-item-price">Price override (optional)</label>

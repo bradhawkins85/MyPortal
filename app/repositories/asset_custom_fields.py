@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from app.core.database import db
@@ -212,6 +213,7 @@ async def count_assets_by_custom_field(
     company_id: int | None,
     field_name: str,
     field_value: bool = True,
+    since: datetime | None = None,
 ) -> int:
     """Count assets for a company where a specific checkbox custom field is set to a value.
     
@@ -219,6 +221,7 @@ async def count_assets_by_custom_field(
         company_id: Company ID to filter by (None for all companies)
         field_name: Name of the custom field to filter by
         field_value: Value to match (True for checked, False for unchecked)
+        since: When provided, only count assets that have synced on or after this datetime
     
     Returns:
         Count of matching assets
@@ -232,11 +235,15 @@ async def count_assets_by_custom_field(
           AND d.field_type = 'checkbox'
           AND v.value_boolean = %s
     """
-    params = [field_name, field_value]
+    params: list[Any] = [field_name, field_value]
     
     if company_id is not None:
         query += " AND a.company_id = %s"
         params.append(company_id)
+
+    if since is not None:
+        query += " AND a.last_sync IS NOT NULL AND a.last_sync >= %s"
+        params.append(since.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"))
     
     row = await db.fetch_one(query, tuple(params))
     if not row:
