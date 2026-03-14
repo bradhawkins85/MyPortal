@@ -723,7 +723,8 @@ async def build_invoice_context(company_id: int) -> dict[str, Any]:
 
     # Add custom field checkbox counts for all defined checkbox fields.
     # Variables are exposed as {cf_total_FIELDNAME} and {cf_active_FIELDNAME}
-    # where hyphens in the field name are replaced with underscores.
+    # where spaces, hyphens and any other non-alphanumeric characters in the
+    # field name are replaced with underscores.
     field_definitions = await asset_custom_fields_repo.list_field_definitions()
     for field_def in field_definitions:
         if field_def.get("field_type") != "checkbox":
@@ -731,7 +732,7 @@ async def build_invoice_context(company_id: int) -> dict[str, Any]:
         raw_name: str = str(field_def.get("name") or "")
         if not raw_name:
             continue
-        safe_name = raw_name.replace("-", "_")
+        safe_name = re.sub(r"[^a-zA-Z0-9]+", "_", raw_name).strip("_")
         total_count = await asset_custom_fields_repo.count_assets_by_custom_field(
             company_id=company_id,
             field_name=raw_name,

@@ -152,13 +152,22 @@ def test_build_invoice_context_includes_custom_field_counts(monkeypatch):
         return [
             {"id": 1, "name": "bitdefender", "field_type": "checkbox"},
             {"id": 2, "name": "threatlocker-installed", "field_type": "checkbox"},
-            {"id": 3, "name": "os_version", "field_type": "text"},  # Non-checkbox, should be skipped
+            {"id": 3, "name": "Bit Defender EDR", "field_type": "checkbox"},  # spaces in name
+            {"id": 4, "name": "os_version", "field_type": "text"},  # Non-checkbox, should be skipped
         ]
 
     async def fake_count_assets_by_custom_field(company_id, field_name, field_value=True, since=None):
         # Return different counts based on whether this is a total or active query
-        counts_total = {"bitdefender": 20, "threatlocker-installed": 12}
-        counts_active = {"bitdefender": 15, "threatlocker-installed": 8}
+        counts_total = {
+            "bitdefender": 20,
+            "threatlocker-installed": 12,
+            "Bit Defender EDR": 7,
+        }
+        counts_active = {
+            "bitdefender": 15,
+            "threatlocker-installed": 8,
+            "Bit Defender EDR": 5,
+        }
         if since is not None:
             return counts_active.get(field_name, 0)
         return counts_total.get(field_name, 0)
@@ -186,6 +195,10 @@ def test_build_invoice_context_includes_custom_field_counts(monkeypatch):
     # Checkbox custom field active counts (synced within 30 days)
     assert result["cf_active_bitdefender"] == 15
     assert result["cf_active_threatlocker_installed"] == 8
+
+    # Field name with spaces: "Bit Defender EDR" → Bit_Defender_EDR
+    assert result["cf_total_Bit_Defender_EDR"] == 7
+    assert result["cf_active_Bit_Defender_EDR"] == 5
 
     # Non-checkbox fields should NOT be included
     assert "cf_total_os_version" not in result
