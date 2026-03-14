@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     m365_admin_client_secret: str | None = Field(
         default=None, validation_alias="M365_ADMIN_CLIENT_SECRET"
     )
+    m365_bootstrap_client_id: str | None = Field(
+        default=None, validation_alias="M365_BOOTSTRAP_CLIENT_ID"
+    )
+    m365_bootstrap_client_secret: str | None = Field(
+        default=None, validation_alias="M365_BOOTSTRAP_CLIENT_SECRET"
+    )
     m365_client_secret_lifetime_days: int = Field(
         default=730, validation_alias="M365_CLIENT_SECRET_LIFETIME_DAYS", ge=1
     )
