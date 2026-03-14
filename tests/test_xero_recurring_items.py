@@ -117,9 +117,13 @@ def test_build_invoice_context(monkeypatch):
     async def fake_get_company(company_id):
         return {"id": company_id, "name": "Test Company"}
 
+    async def fake_list_field_definitions():
+        return []
+
     monkeypatch.setattr(xero.assets_repo, "count_active_assets", fake_count_active_assets)
     monkeypatch.setattr(xero.assets_repo, "count_active_assets_by_type", fake_count_by_type)
     monkeypatch.setattr(xero.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(xero.asset_custom_fields_repo, "list_field_definitions", fake_list_field_definitions)
 
     result = asyncio.run(xero.build_invoice_context(company_id=1))
 
@@ -130,6 +134,112 @@ def test_build_invoice_context(monkeypatch):
     assert result["active_servers"] == 5
     assert result["active_users"] == 5
     assert result["total_assets"] == 25
+
+
+def test_build_invoice_context_includes_custom_field_counts(monkeypatch):
+    """Test that build_invoice_context includes custom field checkbox counts."""
+
+    async def fake_count_active_assets(*, company_id=None, since=None):
+        return 10
+
+    async def fake_count_by_type(*, company_id=None, since=None, device_type=None):
+        return 0
+
+    async def fake_get_company(company_id):
+        return {"id": company_id, "name": "Test Company"}
+
+    async def fake_list_field_definitions():
+        return [
+            {"id": 1, "name": "bitdefender", "field_type": "checkbox"},
+            {"id": 2, "name": "threatlocker-installed", "field_type": "checkbox"},
+            {"id": 3, "name": "os_version", "field_type": "text"},  # Non-checkbox, should be skipped
+        ]
+
+    async def fake_count_assets_by_custom_field(company_id, field_name, field_value=True, since=None):
+        # Return different counts based on whether this is a total or active query
+        counts_total = {"bitdefender": 20, "threatlocker-installed": 12}
+        counts_active = {"bitdefender": 15, "threatlocker-installed": 8}
+        if since is not None:
+            return counts_active.get(field_name, 0)
+        return counts_total.get(field_name, 0)
+
+    monkeypatch.setattr(xero.assets_repo, "count_active_assets", fake_count_active_assets)
+    monkeypatch.setattr(xero.assets_repo, "count_active_assets_by_type", fake_count_by_type)
+    monkeypatch.setattr(xero.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(xero.asset_custom_fields_repo, "list_field_definitions", fake_list_field_definitions)
+    monkeypatch.setattr(
+        xero.asset_custom_fields_repo,
+        "count_assets_by_custom_field",
+        fake_count_assets_by_custom_field,
+    )
+
+    result = asyncio.run(xero.build_invoice_context(company_id=1))
+
+    # Standard fields still present
+    assert result["active_agents"] == 10
+    assert result["company_name"] == "Test Company"
+
+    # Checkbox custom field total counts
+    assert result["cf_total_bitdefender"] == 20
+    assert result["cf_total_threatlocker_installed"] == 12  # hyphens replaced with underscores
+
+    # Checkbox custom field active counts (synced within 30 days)
+    assert result["cf_active_bitdefender"] == 15
+    assert result["cf_active_threatlocker_installed"] == 8
+
+    # Non-checkbox fields should NOT be included
+    assert "cf_total_os_version" not in result
+    assert "cf_active_os_version" not in result
+
+
+def test_build_recurring_invoice_items_with_custom_field_variable(monkeypatch):
+    """Test that recurring invoice items can use custom field count variables."""
+
+    async def fake_list_items(company_id):
+        return [
+            {
+                "id": 1,
+                "company_id": company_id,
+                "product_code": "BITDEFENDER",
+                "description_template": "Bitdefender for {company_name} ({cf_active_bitdefender} active seats)",
+                "qty_expression": "{cf_active_bitdefender}",
+                "price_override": 5.00,
+                "active": True,
+            },
+            {
+                "id": 2,
+                "company_id": company_id,
+                "product_code": "THREATLOCKER",
+                "description_template": "ThreatLocker total installs",
+                "qty_expression": "{cf_total_threatlocker_installed}",
+                "price_override": 3.00,
+                "active": True,
+            },
+        ]
+
+    monkeypatch.setattr(xero.recurring_items_repo, "list_company_recurring_invoice_items", fake_list_items)
+
+    context = {
+        "company_name": "Acme Corp",
+        "cf_active_bitdefender": 18,
+        "cf_total_threatlocker_installed": 25,
+    }
+    result = asyncio.run(
+        xero.build_recurring_invoice_items(
+            company_id=1,
+            tax_type="OUTPUT2",
+            context=context,
+        )
+    )
+
+    assert len(result) == 2
+
+    bd_item = next(item for item in result if item["ItemCode"] == "BITDEFENDER")
+    assert bd_item["Quantity"] == 18.0
+    assert bd_item["Description"] == "Bitdefender for Acme Corp (18 active seats)"
+
+    tl_item = next(item for item in result if item["ItemCode"] == "THREATLOCKER")
+    assert tl_item["Quantity"] == 25.0
 
 
 @pytest.mark.asyncio
