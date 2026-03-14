@@ -130,9 +130,16 @@
           </dl>
         </div>
         <div class="form-actions">
-          <button type="submit" class="button">Place order</button>
+          {% if payment_method == 'stripe' %}
+            <button type="button" class="button" disabled title="Stripe payments are not yet configured">Pay with Stripe (coming soon)</button>
+          {% else %}
+            <button type="submit" class="button">Place order</button>
+          {% endif %}
         </div>
       </div>
+      {% if payment_method != 'stripe' %}
+        <p class="form-help">An invoice will be emailed to you for payment.</p>
+      {% endif %}
     </form>
 
     {% if can_access_quotes %}
