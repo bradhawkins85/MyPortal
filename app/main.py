@@ -3333,6 +3333,9 @@ async def _render_company_edit_page(
         "xero_id": _string_value("xero_id", (company_record.get("xero_id") or "").strip()),
         "email_domains": _string_value("email_domains", default_email_domains),
         "is_vip": _bool_value("is_vip", bool(company_record.get("is_vip"))),
+        "payment_method": _string_value(
+            "payment_method", (company_record.get("payment_method") or "invoice").strip()
+        ),
     }
 
     form_email_text = form_data.get("email_domains", "")
@@ -6515,6 +6518,7 @@ async def view_cart(
         "cart_items_payload": cart_items_payload,
         "cart_recommendations": recommendations,
         "low_stock_threshold": SHOP_LOW_STOCK_THRESHOLD,
+        "payment_method": (company.get("payment_method") or "invoice") if company else "invoice",
     }
     response = await _render_template("shop/cart.html", request, user, extra=extra)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
@@ -9102,6 +9106,8 @@ async def admin_update_company(company_id: int, request: Request):
     tactical_client_raw = str(form.get("tacticalClientId", "")).strip()
     xero_id_raw = str(form.get("xeroId", "")).strip()
     is_vip = _parse_bool(form.get("isVip"))
+    payment_method_raw = str(form.get("paymentMethod", "invoice")).strip().lower()
+    payment_method = payment_method_raw if payment_method_raw in {"invoice", "stripe"} else "invoice"
     raw_email_domains = form.get("emailDomains")
     email_domains_text = str(raw_email_domains) if raw_email_domains is not None else ""
     form_values = {
@@ -9111,6 +9117,7 @@ async def admin_update_company(company_id: int, request: Request):
         "xero_id": xero_id_raw,
         "email_domains": email_domains_text,
         "is_vip": is_vip,
+        "payment_method": payment_method,
     }
     existing = await company_repo.get_company_by_id(company_id)
     if not existing:
@@ -9145,6 +9152,7 @@ async def admin_update_company(company_id: int, request: Request):
         "tacticalrmm_client_id": tactical_client_id,
         "xero_id": xero_id,
         "email_domains": email_domains,
+        "payment_method": payment_method,
     }
     try:
         await company_repo.update_company(company_id, **updates)
