@@ -39,6 +39,7 @@
       const row = document.createElement('tr');
       row.innerHTML = `
         <td data-label="Name">${escapeHtml(field.name)}</td>
+        <td data-label="Display Name">${field.display_name ? escapeHtml(field.display_name) : '<span style="color: var(--color-text-muted, #888);">—</span>'}</td>
         <td data-label="Type">${formatFieldType(field.field_type)}</td>
         <td data-label="Display Order">${field.display_order}</td>
         <td class="table__actions">
@@ -109,6 +110,7 @@
       
       const field = await response.json();
       document.getElementById('field-name').value = field.name;
+      document.getElementById('field-display-name').value = field.display_name || '';
       document.getElementById('field-type').value = field.field_type;
       document.getElementById('field-order').value = field.display_order;
     } catch (error) {
@@ -132,8 +134,10 @@
     e.preventDefault();
     
     const formData = new FormData(form);
+    const displayNameRaw = formData.get('display_name');
     const data = {
       name: formData.get('name'),
+      display_name: displayNameRaw && displayNameRaw.trim() ? displayNameRaw.trim() : null,
       field_type: formData.get('field_type'),
       display_order: parseInt(formData.get('display_order'), 10) || 0
     };
