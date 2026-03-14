@@ -150,3 +150,70 @@ def test_admin_csp_provision_uses_portal_url_for_redirect_uri(monkeypatch):
     assert parsed.netloc == "login.microsoftonline.com"
     redirect_uri = _extract_redirect_uri(location)
     assert redirect_uri == f"{TEST_PORTAL_URL}/m365/callback"
+
+
+def _extract_prompt(location: str) -> str:
+    query_params = parse_qs(urlparse(location).query)
+    assert "prompt" in query_params
+    return query_params["prompt"][0]
+
+
+def test_m365_provision_uses_consent_prompt(monkeypatch):
+    """m365_provision uses prompt=consent (not admin_consent) in the authorize URL."""
+    monkeypatch.setattr(main_module.settings, "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
+
+    async def fake_load_license_context(request, **kwargs):
+        user = {"id": 1, "is_super_admin": True, "company_id": 1}
+        return user, None, None, 1, None
+
+    async def fake_get_m365_admin_credentials():
+        return (TEST_CLIENT_ID, TEST_CLIENT_SECRET)
+
+    monkeypatch.setattr(main_module, "_load_license_context", fake_load_license_context)
+    monkeypatch.setattr(main_module, "_get_m365_admin_credentials", fake_get_m365_admin_credentials)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/m365/provision",
+            params={"tenant_id": "test-tenant-id"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    parsed = urlparse(location)
+    assert parsed.netloc == "login.microsoftonline.com"
+    prompt = _extract_prompt(location)
+    assert prompt == "consent", f"Expected prompt=consent, got prompt={prompt!r}"
+
+
+def test_admin_company_m365_provision_uses_consent_prompt(monkeypatch):
+    """admin_company_m365_provision uses prompt=consent (not admin_consent) in the authorize URL."""
+    monkeypatch.setattr(main_module.settings, "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
+
+    async def fake_load_session(request, *, allow_inactive: bool = False):
+        return _make_session()
+
+    async def fake_get_user_by_id(user_id: int):
+        return {"id": 1, "is_super_admin": True}
+
+    async def fake_get_m365_admin_credentials():
+        return (TEST_CLIENT_ID, TEST_CLIENT_SECRET)
+
+    monkeypatch.setattr(main_module.session_manager, "load_session", fake_load_session)
+    monkeypatch.setattr(main_module.user_repo, "get_user_by_id", fake_get_user_by_id)
+    monkeypatch.setattr(main_module, "_get_m365_admin_credentials", fake_get_m365_admin_credentials)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/admin/companies/42/m365-provision",
+            params={"tenant_id": "test-tenant-id"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    parsed = urlparse(location)
+    assert parsed.netloc == "login.microsoftonline.com"
+    prompt = _extract_prompt(location)
+    assert prompt == "consent", f"Expected prompt=consent, got prompt={prompt!r}"

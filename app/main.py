@@ -4685,7 +4685,7 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
         "response_mode": "query",
         "scope": m365_service.PROVISION_SCOPE,
         "state": state,
-        "prompt": "admin_consent",
+        "prompt": "consent",
     }
     authorize_url = (
         f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
@@ -4731,7 +4731,7 @@ async def admin_company_m365_provision(
         "response_mode": "query",
         "scope": m365_service.PROVISION_SCOPE,
         "state": state,
-        "prompt": "admin_consent",
+        "prompt": "consent",
     }
     authorize_url = (
         f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
